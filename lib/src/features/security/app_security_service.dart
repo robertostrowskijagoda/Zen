@@ -24,6 +24,14 @@ final Provider<bool> appPasswordRequiredProvider = Provider<bool>(
 /// Shortest app password accepted.
 const int kMinAppPasswordLength = 8;
 
+/// Why biometric unlock is weaker than the password (shown wherever it can
+/// be turned on).
+const String kBiometricRiskText =
+    'Odcisk palca albo twarz da się wymusić — ktoś może przyłożyć Twój palec, '
+    'gdy śpisz, albo skierować telefon na Twoją twarz — a Zen otworzy też '
+    'każdy odcisk zapisany w tym telefonie, także cudzy. Jeśli chronisz się '
+    'przed kimś bliskim albo przed przeszukaniem, zostań przy samym haśle.';
+
 List buildAppSecurityProviderOverrides({required AppSecurityService service}) {
   return [appSecurityServiceProvider.overrideWithValue(service)];
 }
