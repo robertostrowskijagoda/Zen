@@ -89,6 +89,20 @@
 - **Strona zaproszeń** `robertostrowskijagoda.github.io/Zen/#KOD` otwiera
   Zen albo pokazuje pobieranie; zbiórka: **buycoffee.to/zen**; w „O
   aplikacji” kilka słów od autora.
+- **Hasło przy pierwszym uruchomieniu:** po ustawieniu hasła ekran nie
+  znikał (krok uprawnień przejmował jego nawigację), więc wyglądało, że
+  hasła nie da się ustawić. Naprawione, z testem.
+- **Biometria uczciwie:** pytanie przy pierwszym haśle mówi, że odcisk
+  i twarz da się wymusić i że Zen otworzy każdy odcisk zapisany
+  w telefonie; domyślny przycisk to „Tylko hasło”. Na Windows Zen nie
+  pyta (Windows Hello to zwykle PIN); w Ustawieniach to „Odblokowanie
+  Windows Hello” z ostrzeżeniem. Przycisk biometrii na ekranie blokady
+  jest tylko wtedy, gdy ją włączono.
+- **Ikony:** Tablica znów jako gazeta, Portfel jako znak dolara; piramida
+  wszędzie tym samym rysunkiem (pasek, nagłówki, filtry grafu).
+- **Licencja:** PolyForm Strict 1.0.0 z dodatkowymi zezwoleniami — tylko
+  użycie niekomercyjne, autor i zbiórka muszą zostać, pull requesty mile
+  widziane, forki i przerobione wersje zakazane.
 - Pakiet Dart nazywa się `zen`, wersja **1.10.0 (10)**.
 
 
