@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/app_data_reset.dart';
@@ -89,7 +90,10 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
           // §14.1: an app password is required by default. Its own Navigator
           // (the gate sits above the root one) so the setup questions can
           // open dialogs; it brings its own Overlay for the text fields.
+          // Keyed: the next step's Navigator must not take over this one's
+          // state (it would keep showing this screen).
           return Navigator(
+            key: const ValueKey<String>('gate-password-setup'),
             onGenerateRoute: (RouteSettings settings) =>
                 MaterialPageRoute<void>(
                   settings: settings,
@@ -104,6 +108,7 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
           if (permissionsStep) {
             // Its own Navigator, like the password step above.
             return Navigator(
+              key: const ValueKey<String>('gate-permissions'),
               onGenerateRoute: (RouteSettings route) => MaterialPageRoute<void>(
                 settings: route,
                 builder: (BuildContext context) =>
@@ -537,7 +542,10 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
     // Ask about biometric unlock once, before the password is saved: as soon
     // as it is, the gate swaps this screen for the app. It is off until the
     // person says yes.
+    // Not on Windows: there Windows Hello is usually just the PIN, and it
+    // does not keep the key in hardware (settings explain it).
     final bool wantsBiometrics =
+        defaultTargetPlatform != TargetPlatform.windows &&
         (await security.biometricUnlockStatus()).deviceSupported &&
         mounted &&
         await _askBiometrics();
@@ -574,21 +582,23 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
           key: const Key('app-password-biometric-question'),
           icon: Icon(Icons.fingerprint_rounded, color: zen.accent, size: 32),
           title: const Text('Odblokowywać odciskiem lub twarzą?'),
-          content: const Text(
-            'Zamiast wpisywać hasło za każdym razem, możesz odblokowywać Zen '
-            'biometrią tego telefonu. Hasło i tak zostaje — przyda się po '
-            'restarcie. Możesz to później zmienić w Ustawieniach.',
+          content: const SingleChildScrollView(
+            child: Text(
+              'Wygodniej, ale słabiej niż hasło. $kBiometricRiskText\n\n'
+              'Hasło i tak zostaje (przyda się po restarcie), a zmienić to '
+              'możesz w Ustawieniach.',
+            ),
           ),
           actions: <Widget>[
             TextButton(
-              key: const Key('app-password-biometric-no'),
-              onPressed: () => Navigator.of(dialog).pop(false),
-              child: const Text('Nie teraz'),
-            ),
-            FilledButton(
               key: const Key('app-password-biometric-yes'),
               onPressed: () => Navigator.of(dialog).pop(true),
-              child: const Text('Włącz biometrię'),
+              child: const Text('Włącz mimo to'),
+            ),
+            FilledButton(
+              key: const Key('app-password-biometric-no'),
+              onPressed: () => Navigator.of(dialog).pop(false),
+              child: const Text('Tylko hasło'),
             ),
           ],
         );

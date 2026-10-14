@@ -577,14 +577,14 @@ class _BiometricUnlockTileState extends State<_BiometricUnlockTile> {
       subtitle = 'Niedostępne na tym urządzeniu — tylko hasło.';
     } else if (!status.hardwareEnforced) {
       subtitle =
-          'Klucz: $protection. Windows Hello pyta aplikacja, nie sam '
-          'TPM: gdy to jest włączone, program uruchomiony na Twoim koncie '
-          'Windows mógłby odczytać klucz. Włączaj tylko na zaufanym '
-          'komputerze.';
+          'Klucz: $protection. Windows Hello to zwykle PIN tego komputera '
+          'i pyta o niego aplikacja, nie sam TPM: gdy to jest włączone, '
+          'program uruchomiony na Twoim koncie Windows mógłby odczytać '
+          'klucz. Włączaj tylko na zaufanym komputerze.';
     } else {
       subtitle =
           'Klucz: $protection. Sprzęt wydaje go dopiero po '
-          'odcisku palca lub twarzy.';
+          'odcisku palca lub twarzy. $kBiometricRiskText';
     }
     return SwitchListTile.adaptive(
       key: const Key('settings-biometric-unlock-switch'),
@@ -594,7 +594,11 @@ class _BiometricUnlockTileState extends State<_BiometricUnlockTile> {
         size: 40,
       ),
       value: on,
-      title: const Text('Odblokowanie biometrią'),
+      title: Text(
+        defaultTargetPlatform == TargetPlatform.windows
+            ? 'Odblokowanie Windows Hello'
+            : 'Odblokowanie biometrią',
+      ),
       subtitle: Text(
         subtitle,
         style: TextStyle(
