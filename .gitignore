@@ -1,0 +1,45 @@
+# Editors and OS
+.DS_Store
+.idea/
+*.iml
+*.ipr
+*.iws
+.history
+*.swp
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+**/doc/api/
+**/ios/Flutter/.last_build_id
+app.*.symbols
+app.*.map.json
+migrate_working_dir/
+
+# Android build output and caches
+/android/.kotlin/
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Go bridge: built from native/yggdrasil_bridge by every Android, Windows
+# and iOS build (with a hash stamp next to each library)
+/android/app/src/main/jniLibs/
+/native/yggdrasil_bridge/bin/
+
+# Logs
+*.log
+
+# Local working files (never part of the app)
+/scratch/
+
+# Release signing secrets: android/key.properties, the keystore it names,
+# and the network-update key (tool/zen_release.dart keygen)
+key.properties
+*.jks
+*.keystore
+maintainer.key

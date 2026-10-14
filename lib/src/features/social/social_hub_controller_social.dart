@@ -1,0 +1,1887 @@
+part of 'social_hub_controller.dart';
+
+mixin _SocialHubSocialMixin on _SocialHubControllerBase {
+  Future<void> _dismissForegroundNotifications(
+    String peerAddress, {
+    Set<ZenSignalType>? types,
+  }) async {
+    final Set<ZenSignalType> resolvedTypes =
+        types ??
+        const <ZenSignalType>{
+          ZenSignalType.friendRequest,
+          ZenSignalType.friendAccept,
+          ZenSignalType.friendReject,
+          ZenSignalType.friendCancel,
+          ZenSignalType.friendRemove,
+        };
+    for (final ZenSignalType type in resolvedTypes) {
+      await _notificationCenter.dismiss('foreground-${type.name}-$peerAddress');
+    }
+  }
+
+  /// Invites [peerAddress]. Their name is not chosen here: it comes from
+  /// their profile with their answer ([knownName]: the name they use where
+  /// they were met, shown until then). [nickname] is an optional note shown
+  /// under it, only on this account.
+  Future<void> sendFriendRequest({
+    required String peerAddress,
+    String knownName = '',
+    String nickname = '',
+    String? senderDisplayName,
+    String? message,
+  }) async {
+    final String normalizedAddress = PeerShareCodec.normalizeAddress(
+      peerAddress,
+    );
+    if (normalizedAddress.isEmpty) {
+      return;
+    }
+    final FriendProfile? current = state.friendByAddress(normalizedAddress);
+    if (current?.status == FriendRelationshipStatus.accepted ||
+        current?.status == FriendRelationshipStatus.blocked) {
+      return;
+    }
+
+    await _sendFriendLifecycleSignal(
+      peerAddress: normalizedAddress,
+      payload: <String, dynamic>{
+        'type': 'friend_request',
+        if (senderDisplayName != null && senderDisplayName.trim().isNotEmpty)
+          'senderName': senderDisplayName.trim(),
+        if (message != null && message.trim().isNotEmpty)
+          'message': message.trim(),
+      },
+    );
+
+    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
+      state.friends,
+    );
+    final FriendProfile updated = _friendReducer
+        .applyOutgoingRequest(
+          address: normalizedAddress,
+          knownName: knownName,
+          nickname: nickname,
+          requestMessage: message?.trim(),
+          current: current,
+        )
+        .copyWith(
+          lastMessagePreview: 'Zaproszenie oczekuje na odpowiedź.',
+          lastActivityLabel: 'Teraz',
+        );
+    _putFriend(
+      friends,
+      _withAppRetentionDefaults(updated, _appSettings),
+      nicknameChanged: sanitizeFriendNickname(nickname).isNotEmpty,
+    );
+    state = state.copyWith(friends: friends);
+    await _persistState();
+  }
+
+  Future<void> configureConversationRetention({
+    required String peerAddress,
+    required int inboxLimitMb,
+    required int autoCleanupDays,
+  }) async {
+    if (inboxLimitMb < 0) {
+      throw const FormatException('Limit danych nie może być ujemny.');
+    }
+    if (autoCleanupDays < 0) {
+      throw const FormatException(
+        'Liczba dni auto-czyszczenia nie może być ujemna.',
+      );
+    }
+    final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
+    final FriendProfile? current = state.friendByAddress(canonical);
+    if (current == null) {
+      throw const FormatException('Nie znaleziono tej rozmowy.');
+    }
+
+    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
+      state.friends,
+    );
+    _putFriend(
+      friends,
+      current.copyWith(
+        inboxLimitMb: inboxLimitMb,
+        autoCleanupDays: autoCleanupDays,
+      ),
+    );
+    state = state.copyWith(friends: friends);
+    await _applyConversationRetention(
+      peerAddress: canonical,
+      nowMillis: DateTime.now().millisecondsSinceEpoch,
+    );
+    await _persistState();
+  }
+
+  /// Accepts the invitation from [peerAddress]; they keep the name from
+  /// their profile.
+  Future<void> acceptFriendRequest({
+    required String peerAddress,
+    String? senderDisplayName,
+  }) async {
+    peerAddress = PeerShareCodec.normalizeAddress(peerAddress);
+    final FriendProfile? current = state.friendByAddress(peerAddress);
+    if (current == null ||
+        current.status != FriendRelationshipStatus.pendingIncoming) {
+      return;
+    }
+
+    await _sendFriendLifecycleSignal(
+      peerAddress: peerAddress,
+      payload: <String, dynamic>{
+        'type': 'friend_accept',
+        if (senderDisplayName != null && senderDisplayName.trim().isNotEmpty)
+          'senderName': senderDisplayName.trim(),
+      },
+    );
+
+    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
+      state.friends,
+    );
+    final FriendProfile updated = _friendReducer
+        .applyAccepted(current: current)
+        .copyWith(
+          isOnline: true,
+          lastPresenceAtMillis: DateTime.now().millisecondsSinceEpoch,
+          lastMessagePreview: 'Połączenie gotowe. Możesz pisać od razu.',
+          lastActivityLabel: 'Teraz',
+        );
+    _putFriend(friends, _withAppRetentionDefaults(updated, _appSettings));
+    final List<InboxEntry> nextInbox = _removeEntriesForPeer(
+      state.inbox,
+      peerAddress,
+      types: const <InboxEntryType>{InboxEntryType.friendRequest},
+    );
+    final List<InboxEntry> nextAlerts = _removeEntriesForPeer(
+      state.backgroundAlerts,
+      peerAddress,
+      types: const <InboxEntryType>{InboxEntryType.friendRequest},
+    );
+    await _dismissRemovedAlerts(state.backgroundAlerts, nextAlerts);
+    await _dismissForegroundNotifications(
+      peerAddress,
+      types: const <ZenSignalType>{ZenSignalType.friendRequest},
+    );
+    state = state.copyWith(
+      friends: friends,
+      inbox: nextInbox,
+      backgroundAlerts: nextAlerts,
+    );
+    await _appendSystemMessage(
+      peerAddress: peerAddress,
+      text: 'Połączenie z ${updated.displayLabel} jest gotowe.',
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+    );
+    await _persistState();
+    // A new friend should see who they are talking to.
+    unawaitedLogged(
+      _sendOwnProfileTo(peerAddress),
+      context: 'Sending the profile to a new friend failed',
+    );
+  }
+
+  Future<void> rejectFriendRequest({required String peerAddress}) async {
+    final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
+    final FriendProfile? current = state.friendByAddress(canonical);
+    if (current == null ||
+        current.status != FriendRelationshipStatus.pendingIncoming) {
+      return;
+    }
+
+    await _sendFriendLifecycleSignal(
+      peerAddress: canonical,
+      payload: const <String, dynamic>{'type': 'friend_reject'},
+    );
+
+    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
+      state.friends,
+    );
+    _removeFriend(friends, canonical);
+    final List<InboxEntry> nextInbox = _removeEntriesForPeer(
+      state.inbox,
+      canonical,
+      types: const <InboxEntryType>{InboxEntryType.friendRequest},
+    );
+    final List<InboxEntry> nextAlerts = _removeEntriesForPeer(
+      state.backgroundAlerts,
+      canonical,
+      types: const <InboxEntryType>{InboxEntryType.friendRequest},
+    );
+    await _dismissRemovedAlerts(state.backgroundAlerts, nextAlerts);
+    await _dismissForegroundNotifications(
+      canonical,
+      types: const <ZenSignalType>{ZenSignalType.friendRequest},
+    );
+    state = state.copyWith(
+      friends: friends,
+      inbox: nextInbox,
+      backgroundAlerts: nextAlerts,
+    );
+    await _persistState();
+  }
+
+  Future<void> cancelOutgoingRequest({required String peerAddress}) async {
+    final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
+    final FriendProfile? current = state.friendByAddress(canonical);
+    if (current == null ||
+        current.status != FriendRelationshipStatus.pendingOutgoing) {
+      return;
+    }
+
+    await _sendFriendLifecycleSignal(
+      peerAddress: canonical,
+      payload: const <String, dynamic>{'type': 'friend_cancel'},
+    );
+    await _cancelQueuedTraffic(canonical, keep: 'friend_cancel');
+
+    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
+      state.friends,
+    );
+    _removeFriend(friends, canonical);
+    await _dismissForegroundNotifications(canonical);
+    state = state.copyWith(
+      friends: friends,
+      activeCall:
+          _currentCallMatches(call: state.activeCall, peerAddress: canonical)
+          ? null
+          : state.activeCall,
+    );
+    await _persistState();
+  }
+
+  Future<void> removeFriend({required String peerAddress}) async {
+    final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
+    final FriendProfile? current = state.friendByAddress(canonical);
+    if (current == null || current.status == FriendRelationshipStatus.none) {
+      return;
+    }
+
+    await _sendFriendLifecycleSignal(
+      peerAddress: canonical,
+      payload: const <String, dynamic>{'type': 'friend_remove'},
+    );
+    await _cancelQueuedTraffic(canonical, keep: 'friend_remove');
+    // The account's other devices remove them too (§6).
+    ref.read(accountDirectoryHolderProvider).friendRemoved?.call(canonical);
+
+    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
+      state.friends,
+    );
+    _removeFriend(friends, canonical);
+    final List<InboxEntry> nextInbox = _removeEntriesForPeer(
+      state.inbox,
+      canonical,
+    );
+    final List<InboxEntry> nextAlerts = _removeEntriesForPeer(
+      state.backgroundAlerts,
+      canonical,
+    );
+    await _dismissRemovedAlerts(state.backgroundAlerts, nextAlerts);
+    await _dismissForegroundNotifications(canonical);
+
+    await _messageTimelineStore.save(canonical, const <ChatMessage>[]);
+    _bumpTimelineRevision();
+
+    state = state.copyWith(
+      friends: friends,
+      inbox: nextInbox,
+      backgroundAlerts: nextAlerts,
+      activeCall:
+          _currentCallMatches(call: state.activeCall, peerAddress: canonical)
+          ? null
+          : state.activeCall,
+    );
+    await _persistState();
+  }
+
+  /// Sets what this user calls [peerAddress] (shown under their own name);
+  /// '' removes it. Their name itself comes from their profile.
+  Future<void> setFriendNickname({
+    required String peerAddress,
+    required String nickname,
+  }) async {
+    final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
+    final FriendProfile? current = state.friendByAddress(canonical);
+    if (current == null) {
+      throw const FormatException('Znajomy nie został znaleziony.');
+    }
+    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
+      state.friends,
+    );
+    _putFriend(
+      friends,
+      current.copyWith(nickname: sanitizeFriendNickname(nickname)),
+      nicknameChanged: true,
+    );
+    // The account's other devices take it from the contacts backup (§6).
+    state = state.copyWith(friends: friends);
+    await _persistState();
+  }
+
+  Future<void> blockFriend({required String peerAddress, String? note}) async {
+    final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
+    if (canonical.isEmpty) {
+      return;
+    }
+    final FriendProfile current =
+        state.friendByAddress(canonical) ?? FriendProfile(address: canonical);
+    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
+      state.friends,
+    );
+    _putFriend(
+      friends,
+      _friendReducer
+          .applyBlocked(
+            current: current,
+            note: note?.trim().isNotEmpty == true ? note!.trim() : null,
+          )
+          .copyWith(isOnline: false, lastPresenceAtMillis: 0, unreadCount: 0),
+    );
+
+    final List<InboxEntry> nextInbox = _removeEntriesForPeer(
+      state.inbox,
+      canonical,
+    );
+    final List<InboxEntry> nextAlerts = _removeEntriesForPeer(
+      state.backgroundAlerts,
+      canonical,
+    );
+    await _dismissRemovedAlerts(state.backgroundAlerts, nextAlerts);
+    await _dismissForegroundNotifications(canonical);
+    await _cancelQueuedTraffic(canonical);
+
+    final List<QueuedSignal> queue = await _queueStore.load();
+    final List<QueuedSignal> nextQueue = queue
+        .where(
+          (QueuedSignal entry) =>
+              !PeerShareCodec.addressesEqual(entry.signal.sender, canonical),
+        )
+        .toList(growable: false);
+    if (queue.length != nextQueue.length) {
+      await _queueStore.save(nextQueue);
+    }
+
+    state = state.copyWith(
+      friends: friends,
+      inbox: nextInbox,
+      backgroundAlerts: nextAlerts,
+      pendingSignalCount: nextQueue.length,
+      activeCall:
+          _currentCallMatches(call: state.activeCall, peerAddress: canonical)
+          ? null
+          : state.activeCall,
+    );
+    await _persistState();
+  }
+
+  Future<void> unblockFriend({required String peerAddress}) async {
+    final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
+    final FriendProfile? current = state.friendByAddress(canonical);
+    if (current == null || current.status != FriendRelationshipStatus.blocked) {
+      return;
+    }
+
+    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
+      state.friends,
+    );
+    _putFriend(
+      friends,
+      _friendReducer
+          .applyRemoved(current: current)
+          .copyWith(isOnline: false, lastPresenceAtMillis: 0, unreadCount: 0),
+    );
+    state = state.copyWith(friends: friends);
+    await _persistState();
+  }
+
+  Future<void> sendCallInvite({
+    required String peerAddress,
+    required CallInviteKind kind,
+  }) async {
+    final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
+    final FriendProfile? friend = state.friendByAddress(canonical);
+    if (!isRoutablePeerAddress(canonical) ||
+        friend?.status != FriendRelationshipStatus.accepted) {
+      return;
+    }
+    if (state.activeCall != null) {
+      throw const FormatException(
+        'Zakończenie aktualnej rozmowy jest wymagane przed nowym połączeniem.',
+      );
+    }
+    final int timestamp = DateTime.now().millisecondsSinceEpoch;
+    final CallSession session = CallSession(
+      id: 'call-$timestamp-$peerAddress',
+      peerAddress: peerAddress,
+      displayName: friend!.displayLabel,
+      kind: kind,
+      status: CallSessionStatus.ringing,
+      startedAtMillis: timestamp,
+      isSpeakerOn: kind == CallInviteKind.video,
+      isCameraEnabled: kind == CallInviteKind.video,
+    );
+    state = state.copyWith(activeCall: session);
+    _armCallRingingTimeout(session);
+    await _persistState();
+    bool inviteSent = false;
+    try {
+      await _sendCallSignal(
+        remoteAddress: peerAddress,
+        type: 'call_invite',
+        session: session,
+      );
+      inviteSent = true;
+      _armCallReRing(session);
+      await _callMedia.startOutgoing(
+        callId: session.id,
+        remoteAddress: peerAddress,
+        kind: kind,
+      );
+    } catch (error, stackTrace) {
+      logZenError('Starting outgoing call failed', error, stackTrace);
+      _cancelCallRingingTimeout();
+      if (inviteSent) {
+        await _sendCallSignalQuietly(
+          remoteAddress: peerAddress,
+          type: 'hangup',
+          session: session,
+        );
+      }
+      await _closeCallMediaSession();
+      if (_currentCallMatches(
+        call: state.activeCall,
+        peerAddress: peerAddress,
+        callId: session.id,
+      )) {
+        state = state.copyWith(activeCall: null);
+        await _persistState();
+      }
+      rethrow;
+    }
+    await _appendSystemMessage(
+      peerAddress: peerAddress,
+      text: 'Wysłano zaproszenie do rozmowy ${_callKindLabel(kind.name)}.',
+      timestamp: timestamp,
+    );
+  }
+
+  Future<void> acceptIncomingCall({required String peerAddress}) {
+    return _enqueueStateWork(
+      () => _acceptIncomingCall(peerAddress: peerAddress),
+    );
+  }
+
+  Future<void> _acceptIncomingCall({required String peerAddress}) async {
+    final CallSession? session = state.activeCall;
+    if (!_currentCallMatches(call: session, peerAddress: peerAddress) ||
+        session == null ||
+        (session.status != CallSessionStatus.ringing &&
+            session.status != CallSessionStatus.connecting)) {
+      return;
+    }
+    if (session.isGroup) {
+      if (session.status == CallSessionStatus.ringing) {
+        await _acceptGroupRing(session);
+      }
+      return;
+    }
+    _cancelCallRingingTimeout();
+    if (session.status == CallSessionStatus.connecting &&
+        !_pendingIncomingCallAccept) {
+      // Handshake already running; a second accept would re-request the SDP
+      // offer and stall the call for seconds.
+      return;
+    }
+    final ZenSignal? offer = _pendingIncomingCallOffer;
+    final CallInviteKind nextKind =
+        offer != null && _currentCallMatchesSignal(session, offer)
+        ? _callKind(offer.content)
+        : session.kind;
+    state = state.copyWith(
+      activeCall: session.copyWith(
+        kind: nextKind,
+        status: CallSessionStatus.connecting,
+        isIncoming: false,
+        isSpeakerOn: session.isSpeakerOn || nextKind == CallInviteKind.video,
+        isCameraEnabled: nextKind == CallInviteKind.video,
+      ),
+      backgroundAlerts: _removeCallAlertsForPeer(
+        state.backgroundAlerts,
+        session.peerAddress,
+      ),
+      inbox: _removeCallAlertsForPeer(state.inbox, session.peerAddress),
+    );
+    final Future<void> housekeeping = Future.wait<void>(<Future<void>>[
+      _dismissCallNotificationsFor(session),
+      _persistState(),
+    ]);
+    if (offer == null ||
+        !_currentCallMatchesSignal(state.activeCall, offer) ||
+        offer.sessionDescription == null) {
+      _pendingIncomingCallAccept = true;
+      // The SDP offer can be missing after a background/foreground handoff
+      // or an app restart (it lives only in memory). Ask the caller to send
+      // it again and arm a timeout so we fail cleanly instead of hanging on
+      // "Łączenie…" forever.
+      unawaited(housekeeping);
+      await _requestCallOfferResend(state.activeCall!);
+      _armPendingOfferTimeout(state.activeCall!);
+      return;
+    }
+    // Media in parallel with notification/snapshot IO so getUserMedia is not
+    // blocked on disk and the call screen does not sit on "Łączenie…".
+    await _acceptIncomingCallWithOffer(
+      session: state.activeCall!,
+      offer: offer,
+    );
+    unawaited(housekeeping);
+  }
+
+  Future<void> _requestCallOfferResend(CallSession session) async {
+    final String targetAddress =
+        session.isGroup && session.participantAddresses.isNotEmpty
+        ? session.participantAddresses.first
+        : session.peerAddress;
+    if (!isRoutablePeerAddress(targetAddress)) {
+      return;
+    }
+    try {
+      await ref
+          .read(signalTransportProvider)
+          .send(
+            remoteAddress: targetAddress,
+            payload: <String, dynamic>{
+              'type': 'call_offer_request',
+              'callId': session.id,
+              'kind': session.kind.name,
+              if (session.isGroup && session.groupId != null)
+                'groupId': session.groupId,
+            },
+          );
+    } catch (error, stackTrace) {
+      logZenError('Requesting call offer resend failed', error, stackTrace);
+    }
+  }
+
+  @override
+  void _armCallRingingTimeout(CallSession session) {
+    if (_armedRingingCallId == session.id && _callRingingTimeoutTimer != null) {
+      // Re-arming on every follow-up signal of the same call would push the
+      // deadline forever, and a call nobody answers would ring for good.
+      return;
+    }
+    _callRingingTimeoutTimer?.cancel();
+    _callRingingTimeoutTimer = null;
+    _armedRingingCallId = null;
+    final Duration timeout = ref.read(callRingingWaitTimeoutProvider);
+    if (timeout <= Duration.zero) {
+      // Zero disables the deadline entirely.
+      return;
+    }
+    _armedRingingCallId = session.id;
+    _callRingingTimeoutTimer = Timer(timeout, () {
+      unawaited(_expireRingingCall(session.id));
+    });
+  }
+
+  /// Keeps the ringing deadline in sync with whatever call is on screen.
+  ///
+  /// Incoming sessions are created straight from the signal reducer and never
+  /// go through [sendCallInvite], so without this an unanswered incoming call
+  /// would ring until the app is restarted.
+  @override
+  void _syncCallRingingTimeout() {
+    final CallSession? session = state.activeCall;
+    if (session == null || session.status != CallSessionStatus.ringing) {
+      _cancelCallRingingTimeout();
+      return;
+    }
+    _armCallRingingTimeout(session);
+  }
+
+  void _cancelCallRingingTimeout() {
+    _callRingingTimeoutTimer?.cancel();
+    _callRingingTimeoutTimer = null;
+    _armedRingingCallId = null;
+    _stopCallReRing();
+  }
+
+  /// Periodically re-sends the invite while an outgoing call keeps ringing.
+  ///
+  /// The invite goes out as one datagram with no ACK; a single lost frame used
+  /// to leave the callee silent for the whole ringing window. Repeats are
+  /// safe: the callee deduplicates them by callId and just rings again. The
+  /// ringing timeout armed next to this timer is the hard stop.
+  void _armCallReRing(CallSession session) {
+    _stopCallReRing();
+    final Duration interval = ref.read(callReRingIntervalProvider);
+    if (interval <= Duration.zero) {
+      // Zero disables re-ringing entirely.
+      return;
+    }
+    _callReRingTimer = Timer.periodic(interval, (_) {
+      unawaited(_reRingCallInvite(session.id));
+    });
+  }
+
+  Future<void> _reRingCallInvite(String callId) async {
+    if (!ref.mounted) {
+      return;
+    }
+    final CallSession? session = state.activeCall;
+    if (session == null ||
+        session.id != callId ||
+        session.isIncoming ||
+        session.status != CallSessionStatus.ringing) {
+      _stopCallReRing();
+      return;
+    }
+    try {
+      await _sendCallSignal(
+        remoteAddress: session.peerAddress,
+        type: 'call_invite',
+        session: session,
+      );
+    } catch (error, stackTrace) {
+      // A failed turn must not break the loop — the next tick retries, and the
+      // ringing timeout ends the call if the peer stays unreachable.
+      logZenError('Re-sending the call invite failed', error, stackTrace);
+    }
+  }
+
+  Future<void> _expireRingingCall(String callId) async {
+    if (!ref.mounted) {
+      return;
+    }
+    final CallSession? session = state.activeCall;
+    if (session == null ||
+        session.id != callId ||
+        session.status != CallSessionStatus.ringing) {
+      return;
+    }
+    if (session.isGroup) {
+      _cancelCallRingingTimeout();
+      await _expireGroupRing(session);
+      return;
+    }
+    _pendingIncomingCallAccept = false;
+    _pendingIncomingCallOffer = null;
+    _cancelCallRingingTimeout();
+    _pendingOfferTimeoutTimer?.cancel();
+    _pendingOfferTimeoutTimer = null;
+    _rememberTornDownCall(session.id);
+    await _sendCallSignalQuietly(
+      remoteAddress: session.peerAddress,
+      type: session.isIncoming ? 'call_decline' : 'hangup',
+      session: session,
+    );
+    await _closeCallMediaSession();
+    if (_currentCallMatches(
+      call: state.activeCall,
+      peerAddress: session.peerAddress,
+      callId: callId,
+    )) {
+      state = state.copyWith(
+        activeCall: null,
+        backgroundAlerts: _removeCallAlertsForPeer(
+          state.backgroundAlerts,
+          session.peerAddress,
+        ),
+        inbox: _removeCallAlertsForPeer(state.inbox, session.peerAddress),
+      );
+      await _persistState();
+    }
+    // Only this call's own notification: clearing everything here used to
+    // wipe unrelated message notifications whenever a call rang out.
+    await _dismissCallNotificationsFor(session);
+    if (session.isIncoming && !_isUiFocused()) {
+      // The ringing deadline expired with no answer: leave a missed-call
+      // notification behind, or the call is invisible once the ring stops.
+      // Only while the app is off screen - on screen the conversation's own
+      // system message already says it, and a shade entry on top of an open
+      // app is pure noise.
+      await _systemNotifications.show(
+        _missedCallSystemNotification(
+          session: session,
+          createdAtMillis: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
+    }
+    await _appendSystemMessage(
+      peerAddress: session.peerAddress,
+      text: session.isIncoming
+          ? 'Nieodebrane połączenie ${session.kindLabel}.'
+          : 'Brak odpowiedzi na połączenie ${session.kindLabel}.',
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+    );
+    await _persistState();
+  }
+
+  void _armPendingOfferTimeout(CallSession session) {
+    _pendingOfferTimeoutTimer?.cancel();
+    _callOfferResendTimer?.cancel();
+    _callOfferResendTimer = null;
+    final Duration timeout = ref.read(callOfferWaitTimeoutProvider);
+    if (timeout <= Duration.zero) {
+      return;
+    }
+    // The resend request is a single unacknowledged datagram, and it goes out
+    // exactly when the runtime node is being handed back from the background
+    // service — the most likely moment for it to be dropped. Answering a call
+    // the app was not running for then hangs on "Łączenie…" until the wait
+    // expires, so keep asking until the offer lands.
+    final Duration retryInterval = ref.read(callOfferResendIntervalProvider);
+    if (retryInterval > Duration.zero) {
+      _callOfferResendTimer = Timer.periodic(retryInterval, (_) {
+        final CallSession? current = state.activeCall;
+        if (!ref.mounted ||
+            !_pendingIncomingCallAccept ||
+            current == null ||
+            current.id != session.id) {
+          _callOfferResendTimer?.cancel();
+          _callOfferResendTimer = null;
+          return;
+        }
+        unawaited(_requestCallOfferResend(current));
+      });
+    }
+    _pendingOfferTimeoutTimer = Timer(timeout, () {
+      unawaited(_expirePendingOfferWait(session.id));
+    });
+  }
+
+  Future<void> _expirePendingOfferWait(String callId) async {
+    if (!ref.mounted || !_pendingIncomingCallAccept) {
+      return;
+    }
+    final CallSession? session = state.activeCall;
+    if (session == null ||
+        session.id != callId ||
+        (session.status != CallSessionStatus.ringing &&
+            session.status != CallSessionStatus.connecting)) {
+      return;
+    }
+    _pendingIncomingCallAccept = false;
+    _pendingIncomingCallOffer = null;
+    _cancelCallRingingTimeout();
+    await _sendCallSignalQuietly(
+      remoteAddress: session.peerAddress,
+      type: 'hangup',
+      session: session,
+    );
+    await _closeCallMediaSession();
+    if (_currentCallMatches(
+      call: state.activeCall,
+      peerAddress: session.peerAddress,
+      callId: callId,
+    )) {
+      state = state.copyWith(activeCall: null);
+      await _persistState();
+    }
+    await _appendSystemMessage(
+      peerAddress: session.peerAddress,
+      text:
+          'Nie udało się zestawić rozmowy ${session.kindLabel} — druga strona nie odpowiada.',
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+    );
+    await _persistState();
+  }
+
+  Future<void> declineIncomingCall({required String peerAddress}) {
+    return _enqueueStateWork(
+      () => _declineIncomingCall(peerAddress: peerAddress),
+    );
+  }
+
+  Future<void> _declineIncomingCall({required String peerAddress}) async {
+    final CallSession? session = state.activeCall;
+    if (!_currentCallMatches(call: session, peerAddress: peerAddress) ||
+        session == null ||
+        session.status != CallSessionStatus.ringing) {
+      return;
+    }
+    if (session.isGroup) {
+      await _declineGroupRing(session);
+      return;
+    }
+    _cancelCallRingingTimeout();
+    _pendingIncomingCallAccept = false;
+    _pendingIncomingCallOffer = null;
+    // Both sides can hang up at once; claiming the id here keeps the peer's
+    // crossing teardown from adding a second line to the conversation.
+    _rememberTornDownCall(session.id);
+    await _sendCallSignalQuietly(
+      // The session's own address, not the caller's argument: that one comes
+      // from a route key or a screen and only has to compare equal.
+      remoteAddress: session.peerAddress,
+      type: 'call_decline',
+      session: session,
+    );
+    await _closeCallMediaSession();
+    state = state.copyWith(
+      activeCall: null,
+      backgroundAlerts: _removeCallAlertsForPeer(
+        state.backgroundAlerts,
+        session.peerAddress,
+      ),
+      inbox: _removeCallAlertsForPeer(state.inbox, session.peerAddress),
+    );
+    // Only this call's notifications; other chats' ones stay put.
+    await _dismissCallNotificationsFor(session);
+    if (session.isGroup && session.groupId != null) {
+      final int timestamp = DateTime.now().millisecondsSinceEpoch;
+      await _messageTimelineStore.append(
+        'group:${session.groupId}',
+        ChatMessage(
+          id: 'grp-sys-$timestamp',
+          sender: 'system',
+          text: 'Odrzucono połączenie grupowe (${session.kindLabel}).',
+          sentAtMillis: timestamp,
+          direction: ChatMessageDirection.incoming,
+          deliveryState: ChatMessageDeliveryState.delivered,
+        ),
+      );
+      _bumpTimelineRevision();
+    } else {
+      await _appendSystemMessage(
+        peerAddress: peerAddress,
+        text: 'Odrzucono rozmowę ${session.kindLabel}.',
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+      );
+    }
+    await _persistState();
+  }
+
+  Future<void> endActiveCall({required String peerAddress}) {
+    return _enqueueStateWork(() => _endActiveCall(peerAddress: peerAddress));
+  }
+
+  Future<void> _endActiveCall({required String peerAddress}) async {
+    final CallSession? session = state.activeCall;
+    if (!_currentCallMatches(call: session, peerAddress: peerAddress) ||
+        session == null) {
+      return;
+    }
+    if (session.isGroup) {
+      if (session.status == CallSessionStatus.ringing && session.isIncoming) {
+        await _declineGroupRing(session);
+      } else {
+        await _leaveGroupCall(session);
+      }
+      return;
+    }
+    _cancelCallRingingTimeout();
+    _pendingIncomingCallAccept = false;
+    _pendingIncomingCallOffer = null;
+    _rememberTornDownCall(session.id);
+    if (session.isGroup) {
+      for (final String participant in session.participantAddresses) {
+        await _sendCallSignalQuietly(
+          remoteAddress: participant,
+          type: 'hangup',
+          session: session,
+        );
+      }
+    } else {
+      await _sendCallSignalQuietly(
+        remoteAddress: session.peerAddress,
+        type: 'hangup',
+        session: session,
+      );
+    }
+    await _closeCallMediaSession();
+    state = state.copyWith(
+      activeCall: null,
+      backgroundAlerts: _removeCallAlertsForPeer(
+        state.backgroundAlerts,
+        session.peerAddress,
+      ),
+      inbox: _removeCallAlertsForPeer(state.inbox, session.peerAddress),
+    );
+    // Only this call's notifications; other chats' ones stay put.
+    await _dismissCallNotificationsFor(session);
+    if (session.isGroup && session.groupId != null) {
+      await _messageTimelineStore.append(
+        'group:${session.groupId}',
+        ChatMessage(
+          id: 'grp-sys-${DateTime.now().millisecondsSinceEpoch}',
+          sender: 'system',
+          text: 'Zakończono połączenie grupowe (${session.kindLabel}).',
+          sentAtMillis: DateTime.now().millisecondsSinceEpoch,
+          direction: ChatMessageDirection.incoming,
+          deliveryState: ChatMessageDeliveryState.delivered,
+        ),
+      );
+      _bumpTimelineRevision();
+    } else {
+      await _appendSystemMessage(
+        peerAddress: peerAddress,
+        text: 'Zakończono rozmowę ${session.kindLabel}.',
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+      );
+    }
+    await _persistState();
+  }
+
+  Future<void> toggleActiveCallMute() async {
+    if (state.activeCall?.isGroup ?? false) {
+      return _toggleGroupCall(GroupCallToggle.mute);
+    }
+    final CallSession? session = state.activeCall;
+    if (session == null || session.status != CallSessionStatus.active) {
+      return;
+    }
+    final bool nextMuted = !session.isMuted;
+    if (session.isGroup) {
+      await _groupMedia.setMuted(nextMuted);
+    } else {
+      await _callMedia.setMuted(nextMuted);
+    }
+    state = state.copyWith(activeCall: session.copyWith(isMuted: nextMuted));
+    await _persistState();
+  }
+
+  Future<void> toggleActiveCallSpeaker() async {
+    if (state.activeCall?.isGroup ?? false) {
+      return _toggleGroupCall(GroupCallToggle.speaker);
+    }
+    final CallSession? session = state.activeCall;
+    if (session == null || session.status != CallSessionStatus.active) {
+      return;
+    }
+    final bool nextSpeakerOn = !session.isSpeakerOn;
+    if (session.isGroup) {
+      await _groupMedia.setSpeakerOn(nextSpeakerOn);
+    } else {
+      await _callMedia.setSpeakerOn(nextSpeakerOn);
+    }
+    state = state.copyWith(
+      activeCall: session.copyWith(isSpeakerOn: nextSpeakerOn),
+    );
+    await _persistState();
+  }
+
+  Future<void> toggleActiveCallCamera() async {
+    if (state.activeCall?.isGroup ?? false) {
+      return _toggleGroupCall(GroupCallToggle.camera);
+    }
+    final CallSession? session = state.activeCall;
+    if (session == null || session.status != CallSessionStatus.active) {
+      return;
+    }
+    final bool nextCameraEnabled = !session.isCameraEnabled;
+    await _callMedia.setCameraEnabled(nextCameraEnabled);
+    state = state.copyWith(
+      activeCall: session.copyWith(
+        kind: nextCameraEnabled && session.kind == CallInviteKind.audio
+            ? CallInviteKind.video
+            : session.kind,
+        isCameraEnabled: nextCameraEnabled,
+      ),
+    );
+    await _persistState();
+  }
+
+  Future<void> _acceptIncomingCallWithOffer({
+    required CallSession session,
+    required ZenSignal offer,
+  }) async {
+    final Map<String, dynamic>? description = offer.sessionDescription;
+    if (description == null) {
+      throw const FormatException(
+        'Brakuje opisu sesji dla przychodzącej rozmowy.',
+      );
+    }
+    _pendingOfferTimeoutTimer?.cancel();
+    _pendingOfferTimeoutTimer = null;
+    _pendingIncomingCallAccept = false;
+    _pendingIncomingCallOffer = null;
+    final String targetAddress =
+        session.isGroup && session.participantAddresses.isNotEmpty
+        ? session.participantAddresses.first
+        : session.peerAddress;
+    try {
+      await _callMedia.acceptIncoming(
+        callId: session.id,
+        remoteAddress: targetAddress,
+        kind: _callKind(offer.content),
+        remoteDescription: description,
+      );
+      if (session.isGroup && session.groupId != null) {
+        await _messageTimelineStore.append(
+          'group:${session.groupId}',
+          ChatMessage(
+            id: 'grp-sys-${DateTime.now().millisecondsSinceEpoch}',
+            sender: 'system',
+            text:
+                'Dołączono do połączenia grupowego (${_callKindLabel(offer.content)}).',
+            sentAtMillis: DateTime.now().millisecondsSinceEpoch,
+            direction: ChatMessageDirection.incoming,
+            deliveryState: ChatMessageDeliveryState.delivered,
+          ),
+        );
+        _bumpTimelineRevision();
+      } else {
+        await _appendSystemMessage(
+          peerAddress: session.peerAddress,
+          text: 'Odebrano rozmowę ${_callKindLabel(offer.content)}.',
+          timestamp: DateTime.now().millisecondsSinceEpoch,
+        );
+      }
+    } catch (error, stackTrace) {
+      logZenError('Accepting incoming call failed', error, stackTrace);
+      // Notify the caller so it does not stay stuck in the ringing state.
+      await _sendCallSignalQuietly(
+        remoteAddress: targetAddress,
+        type: 'hangup',
+        session: session,
+      );
+      await _closeCallMediaSession();
+      if (_currentCallMatches(
+        call: state.activeCall,
+        peerAddress: session.peerAddress,
+        callId: session.id,
+      )) {
+        state = state.copyWith(activeCall: null);
+        await _persistState();
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> _handleCallOfferRequest(ZenSignal signal) async {
+    final CallSession? session = state.activeCall;
+    if (!_currentCallMatchesSignal(session, signal) ||
+        session == null ||
+        session.isIncoming) {
+      return;
+    }
+    try {
+      await _callMedia.resendLocalOffer(signal.callId?.trim() ?? session.id);
+    } catch (error, stackTrace) {
+      logZenError('Resending call offer failed', error, stackTrace);
+    }
+  }
+
+  @override
+  Future<void> _handleIncomingCallOffer({
+    required ZenSignal signal,
+    required int timestamp,
+  }) async {
+    final String? callId = signal.callId?.trim();
+    final Map<String, dynamic>? description = signal.sessionDescription;
+    if (callId == null || callId.isEmpty || description == null) {
+      return;
+    }
+    final CallSession? currentCall = state.activeCall;
+    if (_isSimultaneousCallGlare(currentCall, signal)) {
+      if (_shouldPreferLocalOutgoingCall(currentCall!, callId)) {
+        return;
+      }
+      await _closeCallMediaSession();
+      _pendingIncomingCallAccept = true;
+    } else if (currentCall != null &&
+        currentCall.status == CallSessionStatus.active &&
+        !_currentCallMatchesSignal(currentCall, signal) &&
+        isRoutablePeerAddress(signal.sender)) {
+      await _sendCallSignal(
+        remoteAddress: signal.sender,
+        type: 'busy',
+        session: CallSession(
+          id: callId,
+          peerAddress: signal.sender,
+          displayName:
+              state.friends[signal.sender]?.displayLabel ?? _labelFor(signal),
+          kind: _callKind(signal.content),
+          status: CallSessionStatus.ringing,
+          startedAtMillis: timestamp,
+          isIncoming: true,
+        ),
+      );
+      return;
+    } else if (currentCall != null &&
+        currentCall.status != CallSessionStatus.active &&
+        !_currentCallMatchesSignal(currentCall, signal)) {
+      await _closeCallMediaSession();
+    }
+    final CallSession? nextCurrentCall = state.activeCall;
+    if (_currentCallMatches(
+          call: nextCurrentCall,
+          peerAddress: signal.sender,
+          callId: callId,
+        ) &&
+        nextCurrentCall?.status == CallSessionStatus.active) {
+      await _callMedia.handleRemoteOffer(
+        kind: _callKind(signal.content),
+        remoteDescription: description,
+      );
+      state = state.copyWith(
+        activeCall: nextCurrentCall!.copyWith(kind: _callKind(signal.content)),
+      );
+      await _persistState();
+      return;
+    }
+
+    _pendingIncomingCallOffer = signal;
+    CallSession? nextSession = nextCurrentCall;
+    if (!_currentCallMatches(
+      call: nextSession,
+      peerAddress: signal.sender,
+      callId: callId,
+    )) {
+      nextSession = CallSession(
+        id: callId,
+        peerAddress: signal.sender,
+        displayName:
+            state.friends[signal.sender]?.displayLabel ?? _labelFor(signal),
+        kind: _callKind(signal.content),
+        status: CallSessionStatus.ringing,
+        startedAtMillis: timestamp,
+        isIncoming: true,
+        isSpeakerOn: _callKind(signal.content) == CallInviteKind.video,
+        isCameraEnabled: false,
+      );
+      state = state.copyWith(activeCall: nextSession);
+      await _persistState();
+    }
+    if (nextSession != null && isRoutablePeerAddress(signal.sender)) {
+      await _sendCallSignal(
+        remoteAddress: signal.sender,
+        type: 'ringing',
+        session: nextSession,
+      );
+    }
+    if (_pendingIncomingCallAccept &&
+        nextSession != null &&
+        _currentCallMatchesSignal(nextSession, signal)) {
+      // The unqueued one: this already runs inside the queue.
+      await _acceptIncomingCall(peerAddress: signal.sender);
+    }
+  }
+
+  @override
+  Future<void> _handleIncomingCallAnswer(ZenSignal signal) async {
+    final CallSession? session = state.activeCall;
+    if (!_currentCallMatchesSignal(session, signal)) {
+      return;
+    }
+    final Map<String, dynamic>? description = signal.sessionDescription;
+    if (description == null) {
+      return;
+    }
+    _stopCallReRing();
+    await _callMedia.applyRemoteAnswer(description);
+    final CallInviteKind kind = _callKind(signal.content);
+    if (session != null) {
+      state = state.copyWith(
+        activeCall: session.copyWith(
+          kind: kind,
+          status: CallSessionStatus.connecting,
+        ),
+      );
+      await _persistState();
+    }
+  }
+
+  @override
+  Future<void> _closeCallMediaSession() async {
+    _pendingOfferTimeoutTimer?.cancel();
+    _pendingOfferTimeoutTimer = null;
+    _pendingIncomingCallOffer = null;
+    _pendingIncomingCallAccept = false;
+    await _callMedia.close();
+  }
+
+  @override
+  void _handleCallMediaStatusChanged(
+    String callId,
+    CallMediaSessionLifecycle status,
+  ) {
+    // The WebRTC callbacks are detached on dispose, but one can already be in
+    // flight when that happens.
+    if (!ref.mounted) {
+      return;
+    }
+    final CallSession? session = state.activeCall;
+    if (session == null || session.id != callId) {
+      return;
+    }
+    switch (status) {
+      case CallMediaSessionLifecycle.connecting:
+        if (session.status != CallSessionStatus.connecting) {
+          state = state.copyWith(
+            activeCall: session.copyWith(status: CallSessionStatus.connecting),
+          );
+          unawaited(_persistState());
+        }
+        return;
+      case CallMediaSessionLifecycle.active:
+        // Connected: the ringing deadline no longer applies, and the ringing
+        // notification the call was answered from has to go with it.
+        _cancelCallRingingTimeout();
+        _stopCallReRing();
+        unawaitedLogged(
+          _dismissCallNotification(session.peerAddress),
+          context: 'Dismissing the connected call notification failed',
+        );
+        state = state.copyWith(
+          activeCall: session.copyWith(
+            status: CallSessionStatus.active,
+            kind: _callMedia.activeKind ?? session.kind,
+            isCameraEnabled: _callMedia.hasLocalVideo,
+          ),
+        );
+        unawaited(_persistState());
+        return;
+      case CallMediaSessionLifecycle.ended:
+        _pendingIncomingCallOffer = null;
+        _pendingIncomingCallAccept = false;
+        _cancelCallRingingTimeout();
+        state = state.copyWith(
+          activeCall: null,
+          backgroundAlerts: _removeCallAlertsForPeer(
+            state.backgroundAlerts,
+            session.peerAddress,
+          ),
+          inbox: _removeCallAlertsForPeer(state.inbox, session.peerAddress),
+        );
+        unawaited(_persistState());
+        return;
+    }
+  }
+
+  @override
+  void _handleCallMediaError(String? callId, Object error) {
+    // Through the log helpers: no logcat output in release builds.
+    logZenWarning('Call media error ($callId): $error');
+    if (!ref.mounted) {
+      return;
+    }
+    final CallSession? session = state.activeCall;
+    if (session == null || (callId != null && session.id != callId)) {
+      return;
+    }
+    _pendingIncomingCallOffer = null;
+    _pendingIncomingCallAccept = false;
+    _pendingOfferTimeoutTimer?.cancel();
+    _pendingOfferTimeoutTimer = null;
+    _cancelCallRingingTimeout();
+    // Tell the peer so it does not stay stuck in the ringing state.
+    unawaited(
+      _sendCallSignalQuietly(
+        remoteAddress: session.peerAddress,
+        type: 'hangup',
+        session: session,
+      ),
+    );
+    state = state.copyWith(
+      activeCall: null,
+      backgroundAlerts: _removeCallAlertsForPeer(
+        state.backgroundAlerts,
+        session.peerAddress,
+      ),
+      inbox: _removeCallAlertsForPeer(state.inbox, session.peerAddress),
+    );
+    _bumpTimelineRevision();
+    unawaited(_persistState());
+  }
+
+  Future<ConversationHistoryPreview> previewConversationHistory({
+    required String peerAddress,
+  }) async {
+    final List<ChatMessage> messages = await _messageTimelineStore.load(
+      peerAddress,
+    );
+    final int attachmentBytes = messages.fold<int>(
+      0,
+      (int total, ChatMessage message) =>
+          total + (message.attachmentSizeBytes ?? 0),
+    );
+    return ConversationHistoryPreview(
+      messageCount: messages.length,
+      attachmentBytes: attachmentBytes,
+    );
+  }
+
+  Future<void> clearConversationHistory({required String peerAddress}) async {
+    final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
+    final List<ChatMessage> messages = await _messageTimelineStore.load(
+      canonical,
+    );
+    if (messages.isEmpty) {
+      return;
+    }
+
+    await _messageTimelineStore.save(canonical, const <ChatMessage>[]);
+    for (final ChatMessage message in messages) {
+      await _deleteManagedAttachmentIfPresent(message);
+      await _transferStore.deleteIncoming(canonical, message.id);
+      await _transferStore.deleteOutgoing(canonical, message.id);
+    }
+    _bumpTimelineRevision();
+
+    final FriendProfile? current = state.friendByAddress(canonical);
+    if (current == null) {
+      return;
+    }
+
+    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
+      state.friends,
+    );
+    _putFriend(
+      friends,
+      current.copyWith(
+        lastMessagePreview: '',
+        lastActivityLabel: '',
+        unreadCount: 0,
+      ),
+    );
+    state = state.copyWith(friends: friends);
+    await _persistState();
+  }
+
+  Future<void> markConversationRead(String peerAddress) async {
+    final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
+    final FriendProfile? friend = state.friendByAddress(canonical);
+    if (friend == null) {
+      return;
+    }
+
+    if (friend.unreadCount > 0) {
+      final Map<String, FriendProfile> friends =
+          Map<String, FriendProfile>.from(state.friends);
+      _putFriend(friends, friend.copyWith(unreadCount: 0));
+      state = state.copyWith(friends: friends);
+      await _persistState();
+    }
+    await _sendReadReceiptIfNeeded(canonical);
+  }
+
+  Future<void> updatePeerPresence({
+    required String peerAddress,
+    required bool isForeground,
+    int? observedAtMillis,
+  }) {
+    return _enqueueStateWork(
+      () => _updatePeerPresence(
+        peerAddress: peerAddress,
+        isForeground: isForeground,
+        observedAtMillis: observedAtMillis,
+      ),
+    );
+  }
+
+  Future<void> _updatePeerPresence({
+    required String peerAddress,
+    required bool isForeground,
+    int? observedAtMillis,
+  }) async {
+    // A pong is the most reliable "this peer is up right now" we get.
+    unawaitedLogged(
+      syncGroupInvitesToPeer(peerAddress),
+      context: 'Syncing group invites on presence failed',
+    );
+    final FriendProfile? friend = state.friendByAddress(peerAddress);
+    if (friend == null) {
+      return;
+    }
+    final int timestamp =
+        observedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
+    final String label = isForeground ? 'Teraz' : 'W tle';
+    _presenceSeenAt[PeerShareCodec.normalizeAddress(friend.address)] =
+        timestamp;
+    // Most pongs change nothing visible: the friend was online and still
+    // is. Those stay in memory; the state (and every screen watching it)
+    // changes only when something shows, or the stored time is old.
+    final bool visible = !friend.isOnline || friend.lastActivityLabel != label;
+    final bool stale =
+        timestamp - friend.lastPresenceAtMillis >
+        kPresenceStoreEvery.inMilliseconds;
+    if (!visible && !stale) {
+      return;
+    }
+    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
+      state.friends,
+    );
+    _putFriend(
+      friends,
+      friend.copyWith(
+        isOnline: true,
+        lastPresenceAtMillis: timestamp,
+        lastActivityLabel: label,
+      ),
+    );
+    state = state.copyWith(friends: friends);
+    _persistSoon();
+  }
+
+  Future<void> decayPresence({required Duration offlineAfter, int? nowMillis}) {
+    return _enqueueStateWork(
+      () => _decayPresence(offlineAfter: offlineAfter, nowMillis: nowMillis),
+    );
+  }
+
+  Future<void> _decayPresence({
+    required Duration offlineAfter,
+    int? nowMillis,
+  }) async {
+    if (offlineAfter <= Duration.zero) {
+      return;
+    }
+    final int timestamp = nowMillis ?? DateTime.now().millisecondsSinceEpoch;
+    bool changed = false;
+    final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
+      state.friends,
+    );
+    for (final MapEntry<String, FriendProfile> entry in friends.entries) {
+      final FriendProfile friend = entry.value;
+      final int seen = max(
+        friend.lastPresenceAtMillis,
+        _presenceSeenAt[PeerShareCodec.normalizeAddress(friend.address)] ?? 0,
+      );
+      if (!friend.isOnline ||
+          seen <= 0 ||
+          timestamp - seen < offlineAfter.inMilliseconds) {
+        continue;
+      }
+      friends[entry.key] = friend.copyWith(
+        isOnline: false,
+        lastPresenceAtMillis: seen,
+        lastActivityLabel: _presenceLastSeenLabel(
+          nowMillis: timestamp,
+          lastSeenAtMillis: seen,
+        ),
+      );
+      changed = true;
+    }
+    if (!changed) {
+      return;
+    }
+    state = state.copyWith(friends: friends);
+    // Going offline is rare and shows, so it is saved now.
+    await _persistState();
+  }
+
+  /// The group chat is on screen: its messages count as read and stay quiet.
+  Future<void> enterGroupConversation(String groupId) async {
+    _openGroupId = groupId;
+    await markGroupRead(groupId);
+  }
+
+  void leaveGroupConversation(String groupId) {
+    if (_openGroupId == groupId) {
+      _openGroupId = null;
+    }
+  }
+
+  Future<void> markGroupRead(String groupId) async {
+    final GroupProfile? group = state.groups[groupId];
+    if (group == null || group.unreadCount == 0) {
+      return;
+    }
+    final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
+      state.groups,
+    );
+    groups[groupId] = group.copyWith(unreadCount: 0);
+    state = state.copyWith(groups: groups);
+    await _persistState();
+  }
+
+  Future<void> enterConversation(String peerAddress) async {
+    _openConversationAddress = peerAddress;
+    await markConversationRead(peerAddress);
+  }
+
+  void leaveConversation(String peerAddress) {
+    if (_openConversationAddress == peerAddress) {
+      _openConversationAddress = null;
+    }
+  }
+
+  Future<GroupProfile> createGroup({
+    required String name,
+    required String description,
+    required List<String> memberAddresses,
+    String avatarPreset = 'group_default',
+  }) async {
+    final int now = DateTime.now().millisecondsSinceEpoch;
+    final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
+    final List<String> invitees = normalizedGroupMembers(memberAddresses)
+        .where(
+          (String member) =>
+              localAddr.isEmpty ||
+              !PeerShareCodec.addressesEqual(member, localAddr),
+        )
+        .toList(growable: false);
+    if (name.trim().isEmpty) {
+      throw const FormatException('Nadaj grupie nazwę.');
+    }
+    if (invitees.isEmpty) {
+      throw const FormatException('Wybierz co najmniej jedną osobę.');
+    }
+    final String groupId = 'group-$now-${invitees.length}';
+    final GroupProfile group = GroupProfile(
+      id: groupId,
+      name: name.trim(),
+      description: description.trim(),
+      avatarPreset: avatarPreset,
+      createdById: 'self',
+      createdAtMillis: now,
+      memberAddresses: List<String>.unmodifiable(
+        normalizedGroupMembers(<String>[
+          if (localAddr.isNotEmpty) localAddr,
+          ...invitees,
+        ]),
+      ),
+      lastActivityLabel: 'Teraz',
+      lastMessagePreview: 'Utworzono grupę.',
+      // Everyone stays on this list until their device confirms the invite;
+      // see [syncGroupInvitesToPeer].
+      pendingInviteAddresses: invitees,
+      pendingInviteIds: <String, String>{
+        for (final String member in invitees) member: _newInviteId(),
+      },
+    );
+
+    final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
+      state.groups,
+    );
+    groups[groupId] = group;
+    state = state.copyWith(groups: groups);
+    await _persistState();
+
+    for (final String member in invitees) {
+      unawaitedLogged(
+        _sendFriendLifecycleSignal(
+          peerAddress: member,
+          payload: _groupInvitePayload(
+            group,
+            inviteId: group.pendingInviteIds[member],
+          ),
+        ),
+        context: 'broadcast group invite to $member',
+      );
+    }
+    return group;
+  }
+
+  Future<void> addMemberToGroup({
+    required String groupId,
+    required String memberAddress,
+  }) async {
+    final GroupProfile? current = state.groups[groupId];
+    final String member = PeerShareCodec.normalizeAddress(memberAddress);
+    if (current == null ||
+        current.isInvitePending ||
+        member.isEmpty ||
+        groupHasMember(current, member)) {
+      return;
+    }
+    final GroupProfile updated = current.copyWith(
+      memberAddresses: normalizedGroupMembers(<String>[
+        ...current.memberAddresses,
+        member,
+      ]),
+      pendingInviteAddresses: normalizedGroupMembers(<String>[
+        ...current.pendingInviteAddresses,
+        member,
+      ]),
+      pendingInviteIds: <String, String>{
+        ...current.pendingInviteIds,
+        member: _newInviteId(),
+      },
+      lastActivityLabel: 'Teraz',
+    );
+    final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
+      state.groups,
+    );
+    groups[groupId] = updated;
+    state = state.copyWith(groups: groups);
+    await _persistState();
+
+    final Map<String, dynamic> sync = _groupInvitePayload(updated);
+    final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
+    // The newcomer gets the invite; everyone already in the group gets the
+    // same payload as a member-list update (they merge it without any inbox
+    // entry). Without that, the others dropped the newcomer's messages as
+    // coming from a stranger.
+    for (final String recipient in updated.memberAddresses) {
+      if (localAddr.isNotEmpty &&
+          PeerShareCodec.addressesEqual(recipient, localAddr)) {
+        continue;
+      }
+      // Only the newcomer gets a real invitation (with its id).
+      final bool isNewcomer = PeerShareCodec.addressesEqual(recipient, member);
+      unawaitedLogged(
+        _sendFriendLifecycleSignal(
+          peerAddress: recipient,
+          payload: isNewcomer
+              ? _groupInvitePayload(
+                  updated,
+                  inviteId: updated.pendingInviteIds[member],
+                )
+              : sync,
+        ),
+        context: 'sync group membership to $recipient',
+      );
+    }
+  }
+
+  Future<void> acceptGroupInvite({
+    required String groupId,
+    required String groupName,
+    String? senderAddress,
+    List<String>? memberAddresses,
+    String? inboxEntryId,
+  }) async {
+    SocialHubState next = _withoutRejectedGroup(state, groupId);
+    final GroupProfile? existing = next.groups[groupId];
+    final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
+      next.groups,
+    );
+    if (existing == null) {
+      final String localAddr = ref
+          .read(runtimeNodeSnapshotProvider)
+          .localAddress;
+      groups[groupId] = GroupProfile(
+        id: groupId,
+        name: groupName,
+        createdById: senderAddress ?? 'unknown',
+        createdAtMillis: DateTime.now().millisecondsSinceEpoch,
+        memberAddresses: normalizedGroupMembers(<String>[
+          if (senderAddress != null && senderAddress.isNotEmpty) senderAddress,
+          if (localAddr.isNotEmpty) localAddr,
+          ...?memberAddresses,
+        ]),
+        lastActivityLabel: 'Teraz',
+        lastMessagePreview: 'Dołączono do grupy.',
+      );
+    } else if (existing.isInvitePending) {
+      groups[groupId] = existing.copyWith(
+        isInvitePending: false,
+        lastMessagePreview: 'Dołączono do grupy.',
+        lastActivityLabel: 'Teraz',
+      );
+    }
+    bool isInviteFor(InboxEntry entry) =>
+        entry.id == inboxEntryId ||
+        (entry.type == InboxEntryType.groupInvite &&
+            (entry.routeKey?.contains(groupId) ?? false));
+    final List<InboxEntry> staleAlerts = next.backgroundAlerts
+        .where(isInviteFor)
+        .toList(growable: false);
+    next = next.copyWith(
+      groups: groups,
+      inbox: next.inbox
+          .where((InboxEntry e) => !isInviteFor(e))
+          .toList(growable: false),
+      backgroundAlerts: next.backgroundAlerts
+          .where((InboxEntry e) => !isInviteFor(e))
+          .toList(growable: false),
+    );
+    state = next;
+    for (final InboxEntry alert in staleAlerts) {
+      await _systemNotifications.dismiss(alert.id);
+    }
+    if (inboxEntryId != null) {
+      await _systemNotifications.dismiss(inboxEntryId);
+    }
+    await _persistState();
+    final String? inviter = senderAddress ?? existing?.createdById;
+    if (inviter != null && isRoutablePeerAddress(inviter)) {
+      _replyToGroupSignal(
+        peerAddress: inviter,
+        type: 'group_invite_ack',
+        groupId: groupId,
+      );
+    }
+  }
+
+  Future<void> rejectGroupInvite({
+    required String groupId,
+    required String inboxEntryId,
+    String? senderAddress,
+  }) async {
+    final GroupProfile? group = state.groups[groupId];
+    await leaveGroup(groupId: groupId);
+    // The inviter normally is a member and already got the leave from
+    // `leaveGroup`; only a group we never had locally needs this one.
+    final bool inviterAlreadyTold =
+        group != null &&
+        senderAddress != null &&
+        groupHasMember(group, senderAddress);
+    if (senderAddress != null &&
+        senderAddress.isNotEmpty &&
+        !inviterAlreadyTold) {
+      unawaitedLogged(
+        _sendFriendLifecycleSignal(
+          peerAddress: senderAddress,
+          payload: <String, dynamic>{'type': 'group_leave', 'groupId': groupId},
+        ),
+        context: 'send group leave to $senderAddress',
+      );
+    }
+    final List<InboxEntry> nextInbox = state.inbox
+        .where(
+          (InboxEntry e) =>
+              e.id != inboxEntryId &&
+              !(e.type == InboxEntryType.groupInvite &&
+                  (e.routeKey?.contains(groupId) ?? false)),
+        )
+        .toList();
+    final List<InboxEntry> nextAlerts = state.backgroundAlerts
+        .where(
+          (InboxEntry e) =>
+              e.id != inboxEntryId &&
+              !(e.type == InboxEntryType.groupInvite &&
+                  (e.routeKey?.contains(groupId) ?? false)),
+        )
+        .toList();
+    for (final InboxEntry alert in state.backgroundAlerts) {
+      if (alert.id == inboxEntryId ||
+          (alert.type == InboxEntryType.groupInvite &&
+              (alert.routeKey?.contains(groupId) ?? false))) {
+        await _systemNotifications.dismiss(alert.id);
+      }
+    }
+    await _systemNotifications.dismiss(inboxEntryId);
+    final List<QueuedSignal> queue = await _queueStore.load();
+    final List<QueuedSignal> nextQueue = queue
+        .where(
+          (QueuedSignal q) =>
+              !(q.signal.type == ZenSignalType.groupInvite &&
+                  q.signal.groupId == groupId),
+        )
+        .toList();
+    if (queue.length != nextQueue.length) {
+      await _queueStore.save(nextQueue);
+    }
+    state = state.copyWith(
+      inbox: nextInbox,
+      backgroundAlerts: nextAlerts,
+      pendingSignalCount: nextQueue.length,
+    );
+    await _persistState();
+  }
+
+  Future<void> leaveGroup({required String groupId}) async {
+    await _dropGroupCallsFor(groupId);
+    final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
+      state.groups,
+    );
+    final GroupProfile? removed = groups.remove(groupId);
+    if (removed != null) {
+      // The account's other devices leave it too (§6).
+      ref.read(accountDirectoryHolderProvider).groupLeft?.call(groupId);
+    }
+    state = _withRejectedGroup(
+      state,
+      groupId,
+      inviteIds: removed?.receivedInviteIds ?? const <String>[],
+    ).copyWith(groups: groups);
+    await _persistState();
+    if (removed == null) {
+      return;
+    }
+    final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
+    for (final String member in removed.memberAddresses) {
+      if (localAddr.isNotEmpty &&
+          PeerShareCodec.addressesEqual(member, localAddr)) {
+        continue;
+      }
+      unawaitedLogged(
+        _sendFriendLifecycleSignal(
+          peerAddress: member,
+          payload: <String, dynamic>{'type': 'group_leave', 'groupId': groupId},
+        ),
+        context: 'broadcast group leave to $member',
+      );
+    }
+  }
+
+  Future<void> sendGroupMessage({
+    required String groupId,
+    required String text,
+  }) async {
+    final GroupProfile? group = state.groups[groupId];
+    if (group == null || text.trim().isEmpty) {
+      return;
+    }
+    if (group.isInvitePending) {
+      throw StateError('Najpierw dołącz do grupy.');
+    }
+    final String trimmed = text.trim();
+    final int timestamp = DateTime.now().millisecondsSinceEpoch;
+    final String messageId = 'grp-msg-$timestamp-$groupId';
+
+    await _messageTimelineStore.append(
+      'group:$groupId',
+      ChatMessage(
+        id: messageId,
+        sender: 'self',
+        text: trimmed,
+        sentAtMillis: timestamp,
+        direction: ChatMessageDirection.outgoing,
+        deliveryState: ChatMessageDeliveryState.delivered,
+      ),
+    );
+    _bumpTimelineRevision();
+
+    final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
+      state.groups,
+    );
+    groups[groupId] = group.copyWith(
+      lastMessagePreview: trimmed,
+      lastActivityLabel: 'Teraz',
+    );
+    state = state.copyWith(groups: groups);
+    await _persistState();
+
+    final String senderDisplayName = ref
+        .read(userProfileControllerProvider)
+        .displayName;
+    final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
+    final int seconds = state.disappearSecondsFor('group:$groupId');
+    final int? ttl = seconds > 0 ? seconds : null;
+    for (final String member in normalizedGroupMembers(group.memberAddresses)) {
+      if (localAddr.isNotEmpty &&
+          PeerShareCodec.addressesEqual(member, localAddr)) {
+        continue;
+      }
+      // Goes through the reliable transport (acked, retried, relayed to
+      // offline members); receivers drop repeat copies by message id.
+      unawaitedLogged(
+        _sendFriendLifecycleSignal(
+          peerAddress: member,
+          payload: <String, dynamic>{
+            'type': 'group_message',
+            'groupId': groupId,
+            'groupName': group.name,
+            'msgId': messageId,
+            'text': trimmed,
+            'senderName': senderDisplayName,
+            'timestamp': timestamp,
+            'ttl': ?ttl,
+          },
+        ),
+        context: 'send group message to $member',
+      );
+    }
+  }
+
+  Future<void> _dismissRemovedAlerts(
+    List<InboxEntry> current,
+    List<InboxEntry> next,
+  ) async {
+    final Set<String> keptIds = next
+        .map((InboxEntry entry) => entry.id)
+        .toSet();
+    for (final InboxEntry entry in current) {
+      if (!keptIds.contains(entry.id)) {
+        await _notificationCenter.dismiss(entry.id);
+      }
+    }
+  }
+}

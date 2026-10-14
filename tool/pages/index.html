@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>Zen — zaproszenie</title>
+<style>
+  :root {
+    --bg: #f6f4fb; --card: #ffffff; --text: #17151f; --muted: #5d5970;
+    --accent: #7c4dff; --accent2: #c026d3; --line: #e4e0ef;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0a10; --card: #16141f; --text: #f3f1fa; --muted: #a6a1ba;
+      --accent: #9d7bff; --accent2: #e15ee8; --line: #2a2738;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  main {
+    width: 100%; max-width: 440px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 28px; padding: 28px 22px;
+    text-align: center;
+  }
+  .logo {
+    width: 64px; height: 64px; margin: 0 auto 12px; border-radius: 20px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff; font-weight: 800; font-size: 32px; line-height: 64px;
+  }
+  h1 { font-size: 22px; margin: 4px 0 6px; }
+  p { color: var(--muted); margin: 6px 0 14px; }
+  .code {
+    font: 600 19px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace;
+    letter-spacing: 1px; background: var(--bg); border: 1px dashed var(--line);
+    border-radius: 14px; padding: 12px 8px; margin: 8px 0 16px;
+    word-break: break-all;
+  }
+  a.btn, button.btn {
+    display: block; width: 100%; padding: 14px 16px; margin: 10px 0 0;
+    border-radius: 16px; border: 0; font: 700 16px/1.2 inherit;
+    text-decoration: none; cursor: pointer;
+  }
+  .primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; }
+  .secondary { background: var(--bg); color: var(--text); border: 1px solid var(--line) !important; }
+  .small { font-size: 13.5px; color: var(--muted); margin-top: 18px; }
+  .small a { color: var(--accent); }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <div class="logo">Z</div>
+  <h1 id="title">Zen</h1>
+  <p id="lead">Sieć ludzi, którzy się znają — bez serwerów, reklam i algorytmu.</p>
+  <div id="code" class="code hidden"></div>
+  <p id="noapp" class="hidden">Wygląda na to, że nie masz jeszcze Zen. Zainstaluj go
+    (przyciski niżej), a potem wróć tutaj i stuknij „Otwórz w Zen” — albo
+    w Zen: <b>Zaproś → Mam czyjś kod</b> i wpisz kod z ramki.</p>
+  <a id="open" class="btn primary" href="#">Otwórz w Zen</a>
+  <button id="copy" class="btn secondary hidden" type="button">Skopiuj kod</button>
+  <a id="android" class="btn secondary" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen.apk">⬇ Pobierz na Androida</a>
+  <a id="windows" class="btn secondary" href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip">⬇ Pobierz na Windows</a>
+  <p id="ios" class="small hidden">iPhone: Zen instaluje się przez SideStore —
+    <a href="https://github.com/robertostrowskijagoda/Zen#iphone">instrukcja</a>.</p>
+  <p class="small">Jak zainstalować i jak sprawdzić, że to nie wirus:
+    <a href="https://github.com/robertostrowskijagoda/Zen">strona projektu na GitHubie</a>.</p>
+  <p class="small">Zen jest darmowy i bez reklam —
+    <a href="https://buycoffee.to/zen">💜 wesprzyj go</a>.</p>
+</main>
+<script>
+(function () {
+  "use strict";
+  var page = location.origin + location.pathname;
+  var ua = navigator.userAgent || "";
+  var android = /Android/i.test(ua);
+  var ios = /iPhone|iPad|iPod/i.test(ua) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var raw = decodeURIComponent((location.hash || "").replace(/^#/, ""));
+  // Only an invitation code (Crockford base32, dashes optional) is taken.
+  var code = raw.toUpperCase().replace(/[^0-9A-Z]/g, "");
+  if (!/^[0-9A-HJKMNP-TV-Z]{25}$/.test(code)) { code = ""; }
+  var noApp = /(^|[?&])noapp=1(&|$)/.test(location.search);
+  var $ = function (id) { return document.getElementById(id); };
+
+  var target = code ? "c/" + code : "inbox";
+  var openUrl;
+  if (android) {
+    var fallback = page + "?noapp=1" + (code ? "#" + code : "");
+    openUrl = "intent://" + target + "#Intent;scheme=zen;package=com.roj.zen;" +
+      "S.browser_fallback_url=" + encodeURIComponent(fallback) + ";end";
+  } else {
+    openUrl = "zen://" + target;
+  }
+  $("open").href = openUrl;
+
+  if (code) {
+    $("title").textContent = "Zaproszenie do Zen";
+    $("lead").textContent = "Ktoś, kto Cię zna, chce Cię dodać do znajomych w Zen.";
+    $("code").textContent = code.match(/.{1,5}/g).join("-");
+    $("code").classList.remove("hidden");
+    $("copy").classList.remove("hidden");
+    $("copy").addEventListener("click", function () {
+      var text = $("code").textContent;
+      var done = function () { $("copy").textContent = "Skopiowano ✓"; };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () {});
+      }
+    });
+  }
+  if (noApp) { $("noapp").classList.remove("hidden"); }
+  if (ios) {
+    $("ios").classList.remove("hidden");
+    $("android").classList.add("hidden");
+    $("windows").classList.add("hidden");
+  } else if (android) {
+    $("windows").classList.add("hidden");
+  }
+  // Straight into the app when it is there (Android: otherwise back here
+  // with "noapp", where the downloads are).
+  if (android && !noApp) {
+    setTimeout(function () { location.href = openUrl; }, 150);
+  }
+})();
+</script>
+</body>
+</html>

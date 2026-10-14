@@ -1,0 +1,2119 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:flutter/foundation.dart';
+import 'package:zen/src/core/ledger/blob_store.dart';
+import 'package:zen/src/core/ledger/hlc.dart';
+import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/core/ledger/ledger_author.dart';
+import 'package:zen/src/core/ledger/ledger_codec.dart';
+import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/core/ledger/ledger_replicator.dart';
+import 'package:zen/src/core/ledger/ledger_store.dart';
+import 'package:zen/src/core/ledger/log_entry.dart';
+import 'package:zen/src/core/ledger/space_policy.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
+import 'package:zen/src/features/ledger/bridge_book.dart';
+import 'package:zen/src/features/ledger/ledger_identity_store.dart';
+import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
+
+/// Introduces this device's account to a friend: `{type, cert}`.
+const String kLedgerHelloType = 'lg_hello';
+
+/// Gives a friend the audience keys their level allows: `{type, items}`.
+const String kLedgerKeysType = 'lg_keys';
+
+/// Passes on known mesh bridges: `{type, items: [announcement…]}`.
+const String kLedgerBridgesType = 'lg_bridges';
+
+/// Asks a friend to check from outside that this computer can be reached
+/// at `uri` (before announcing it as a bridge): `{type, id, uri}`.
+const String kLedgerReachType = 'lg_reach';
+
+/// The friend's answer: `{type, id, ok}`.
+const String kLedgerReachOkType = 'lg_reach_ok';
+
+/// Checks for others a friend may ask for per minute.
+const int kReachChecksPerMinute = 4;
+
+/// What friends said about this computer's address.
+enum ReachResult {
+  /// At least one friend connected and got the mesh greeting.
+  reachable,
+
+  /// Friends tried and could not connect.
+  unreachable,
+
+  /// Nobody answered (no friend online right now).
+  noAnswer,
+}
+
+/// Where a device of an account can be reached (several devices, §6): an
+/// entry of this kind in the account's `acts` space, `{address, name}`.
+const String kDeviceRecordKind = 'device';
+
+/// The sealed backup of friends and groups in the account's `private`
+/// space (only its own devices can open it; friends keep a copy).
+const String kContactsKind = 'contacts';
+
+/// A friend removed or a group left on one device (so the others follow):
+/// sealed `{a}` or `{g}` in the private space.
+const String kContactRemovedKind = 'contact_removed';
+
+/// A message sent from one device, for the account's other devices:
+/// sealed `{peer, m, f?}` in the `own` space.
+const String kChatCopyKind = 'chat';
+
+/// The whole chat history of one device for a newly linked device: sealed
+/// `{f}` (an encrypted file) in the `own` space.
+const String kChatHistoryKind = 'chat_history';
+
+/// Own devices share their audience keys and friend levels:
+/// `{type, own, levels}`.
+const String kLedgerSiblingType = 'lg_sibling';
+
+/// One device of an account, as this node knows it.
+@immutable
+final class AccountDevice {
+  const AccountDevice({
+    required this.account,
+    required this.device,
+    required this.name,
+    this.address,
+    this.isThis = false,
+    this.issued = 0,
+  });
+
+  final String account;
+
+  /// Device key (id).
+  final String device;
+  final String name;
+
+  /// Mesh address, once known.
+  final String? address;
+
+  /// This very device.
+  final bool isThis;
+
+  /// When the account certified it.
+  final int issued;
+}
+
+final class _DeviceRef {
+  _DeviceRef(this.account, this.device, this.name, this.at);
+
+  final String account;
+  final String device;
+  final String name;
+
+  /// HLC millis of the record it came from (0: learnt from a hello).
+  int at;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'a': account,
+    'd': device,
+    'n': name,
+    't': at,
+  };
+}
+
+/// Spaces of a friend's account this device keeps and follows. `private`
+/// is sealed for the account's own devices: friends only keep a copy, so a
+/// new or recovered device gets its friends and groups back.
+const List<String> kFollowedFriendSpaces = <String>[
+  'feed',
+  'acts',
+  'profile',
+  'private',
+];
+
+/// Spaces anyone may read (followers who are not friends).
+const List<String> kPublicSpaceKinds = <String>['feed', 'profile'];
+
+/// Frames a stranger (not a friend) may send per minute before the rest
+/// is dropped. Counted per /64 network: a mesh node may send from any
+/// address inside its own /64.
+const int kStrangerFramesPerMinute = 30;
+
+/// Frames all strangers together may send per minute.
+const int kStrangerFramesPerMinuteTotal = 1200;
+
+/// The ledger engine wired into the app: identity, storage on disk,
+/// replication over the app's signal transport with friends.
+///
+/// Friends are identified by their mesh address (as today); the first time
+/// two friends talk, they exchange `lg_hello` with their device certificate,
+/// which tells each side the other's account key and so which spaces to
+/// follow.
+final class LedgerNode {
+  LedgerNode({
+    required this.transport,
+    required this.disk,
+    required this.friendAddresses,
+    this.deviceName = 'Urządzenie',
+    HlcClock? clock,
+    this.helloInterval = const Duration(minutes: 10),
+    BridgeBook? bridges,
+    this.onBridgesChosen,
+    this.bridgeConnections = 5,
+    bool Function()? autoDownloadMedia,
+    this.syncInterval = const Duration(minutes: 10),
+    bool startSuspended = false,
+    this.createIdentity = true,
+    BridgeProbe? reachProbe,
+    this.localAddress,
+    this.greetAlso,
+  }) : _clock = clock ?? HlcClock(),
+       _reachProbe = reachProbe ?? yggBridgeProbe,
+       bridges = bridges ?? BridgeBook(),
+       autoDownloadMedia = autoDownloadMedia ?? _always,
+       _suspended = startSuspended {
+    if (startSuspended) {
+      _resumed = Completer<void>();
+    }
+  }
+
+  /// How often friends are greeted again (catching up both ways, retrying
+  /// unfinished photos and videos), even when nothing else happens.
+  final Duration syncInterval;
+
+  /// False for a second copy of the node (the Android background service):
+  /// it must use the identity the app created, never make its own.
+  final bool createIdentity;
+
+  /// While suspended another process owns the ledger on disk (the Android
+  /// background service while the app is not on screen): this node neither
+  /// reads frames nor writes. [resume] catches up with what was written.
+  bool _suspended;
+  Completer<void>? _resumed;
+  bool _loaded = false;
+  Timer? _syncTimer;
+
+  bool get isSuspended => _suspended;
+
+  /// Whether the ledger was read from disk (it may be suspended since).
+  bool get isLoaded => _loaded;
+
+  /// Set once [suspend] or [resume] is called by whoever hands the disk
+  /// over (the Android background bridge).
+  bool _ownershipManaged = false;
+
+  /// Safety net for a node started suspended that nobody ever resumed (the
+  /// bridge failed early): take the disk after all.
+  Future<void> resumeIfUnmanaged() async {
+    if (!_ownershipManaged && _suspended && !_loaded) {
+      logZenWarning('Dziennik nie dostał zgody na start; startuję sam.');
+      await resume();
+    }
+  }
+
+  static bool _always() => true;
+
+  /// Whether photos and videos of friends' posts download on their own
+  /// (the "pobieranie mediów" setting; on by default).
+  final bool Function() autoDownloadMedia;
+
+  /// Chunks a stranger may ask for in one message (media are encrypted, so
+  /// serving them is harmless, but not unlimited).
+  static const int strangerChunksPerRequest = 4;
+
+  static const String _peersKey = 'ledger/peers';
+  static const String _followingKey = 'ledger/following';
+  static const String _keyringKey = 'ledger/audience';
+  static const String _levelsKey = 'ledger/levels';
+
+  /// Audience keys: ours (every generation) and those friends gave us.
+  final AudienceKeyring keyring = AudienceKeyring();
+
+  /// Private level of each friend (normalised address); default "Znajomy".
+  final Map<String, FriendLevel> _levels = <String, FriendLevel>{};
+
+  /// Decrypted bodies of sealed entries, by entry id.
+  final Map<String, Map<String, dynamic>> _opened =
+      <String, Map<String, dynamic>>{};
+  final StreamController<void> _openedChanges =
+      StreamController<void>.broadcast();
+  StreamSubscription<LogEntry>? _added;
+  final StreamController<String> _blobDone =
+      StreamController<String>.broadcast();
+
+  /// Ids of media that finished downloading.
+  Stream<String> get mediaCompleted => _blobDone.stream;
+  static const String _bridgesKey = 'ledger/bridges';
+  static const String _bridgeKeyKey = 'ledger/bridge_key';
+
+  /// Mesh entry points learnt from friends (and this device's own).
+  final BridgeBook bridges;
+
+  /// Receives the bridges to connect to whenever the choice changes (the
+  /// runtime adds them as mesh peers).
+  final void Function(List<String> uris)? onBridgesChosen;
+  final int bridgeConnections;
+
+  /// This device's own mesh address ('' while unknown).
+  final String Function()? localAddress;
+
+  /// Other addresses to greet now and then (group members who are not
+  /// friends): their answer tells which account they belong to, so their
+  /// other devices are recognised too.
+  final Iterable<String> Function()? greetAlso;
+
+  /// Devices of accounts that are neither ours nor friends' (group
+  /// members), learnt from proven hellos. Kept in memory only.
+  final Map<String, _DeviceRef> _strangerDevices = <String, _DeviceRef>{};
+  static const int _maxStrangerDevices = 2000;
+
+  final StreamController<LogEntry> _ownEntries =
+      StreamController<LogEntry>.broadcast();
+  final Set<String> _ownApplied = <String>{};
+  static const String _ownAppliedKey = 'ledger/own_applied';
+
+  /// Entries another device of this account wrote for the others (chat
+  /// copies, history, removed contacts), once readable.
+  Stream<LogEntry> get ownEntries => _ownEntries.stream;
+
+  String get _ownAddress =>
+      PeerShareCodec.normalizeAddress(localAddress?.call() ?? '');
+
+  /// Other devices: this account's own and friends' other devices, by
+  /// normalised mesh address.
+  final Map<String, _DeviceRef> _devices = <String, _DeviceRef>{};
+
+  /// Addresses to greet even though nobody vouched for them yet: the
+  /// device this one was linked from, or the friends who helped recover
+  /// the account. They answer with their certificate.
+  final Set<String> _deviceSeeds = <String>{};
+  static const String _devicesKey = 'ledger/devices';
+  final StreamController<void> _devicesChanged =
+      StreamController<void>.broadcast();
+  final StreamController<void> _contactsChanged =
+      StreamController<void>.broadcast();
+  StreamSubscription<void>? _storeChanged;
+
+  /// Fires when the known devices (own or friends') change.
+  Stream<void> get devicesChanged => _devicesChanged.stream;
+
+  /// Fires when another own device saved a newer backup of friends and
+  /// groups (read it with [latestContacts]).
+  Stream<void> get contactsChanged => _contactsChanged.stream;
+
+  final StreamController<String> _peerGreeted =
+      StreamController<String>.broadcast();
+
+  /// A friend (or own device) proved who it is just now: a good moment to
+  /// tell it news (a new version of the app, §14.2).
+  Stream<String> get peerGreeted => _peerGreeted.stream;
+
+  /// Whether [address] is a friend's device (or one of this account's).
+  bool isFriendAddress(String address) => _isFriend(address);
+
+  /// How a friend's address is checked when they ask (§5.1).
+  final BridgeProbe _reachProbe;
+  final Map<String, _ReachWait> _reachWaits = <String, _ReachWait>{};
+  final List<int> _reachAnsweredAt = <int>[];
+  List<String> _chosenBridges = const <String>[];
+
+  final SignalTransport transport;
+  final LedgerDisk disk;
+
+  /// Current accepted friends, by mesh address.
+  final Iterable<String> Function() friendAddresses;
+  final String deviceName;
+  final Duration helloInterval;
+  final HlcClock _clock;
+
+  late final LedgerStore store = LedgerStore(clock: _clock);
+  late final BlobStore blobs = BlobStore(backend: DiskBlobChunkBackend(disk));
+  late final LedgerArchive archive = LedgerArchive(disk: disk);
+  late final LedgerReplicator replicator = LedgerReplicator(
+    store: store,
+    blobs: blobs,
+    send: _send,
+    peers: () => _knownFriends(),
+    acceptsFrom: (String peer, String space) => _isFriend(peer)
+        ? replicator.subscriptions.contains(space)
+        : _followedSpaces(peer).contains(space) ||
+              // Own entries are signed by own devices: whoever brings them
+              // back (a seed while recovering) cannot have forged them.
+              (_isSeed(peer) && _ownSpaces.contains(space)),
+    // Chat copies never leave this account's own devices.
+    servesTo: (String peer, String space) =>
+        !space.startsWith('own/') || _isSibling(peer),
+  );
+  late final LedgerIdentity identity;
+  late final LedgerAuthor author;
+
+  /// Normalised friend address → account key, learnt from hellos.
+  final Map<String, String> _accounts = <String, String>{};
+  final Map<String, int> _helloSentAt = <String, int>{};
+
+  /// Followed addresses (not friends) → account key ('' until known).
+  final Map<String, String> _followed = <String, String>{};
+
+  /// /64 network -> (minute, frames) for strangers.
+  final Map<String, (int, int)> _strangerBudget = <String, (int, int)>{};
+  static const int _maxStrangerNetworks = 5000;
+  (int, int) _strangerTotal = (0, 0);
+  StreamSubscription<SignalTransportFrame>? _frames;
+  Future<void>? _started;
+  bool _stopped = false;
+  bool _ready = false;
+
+  /// True once the identity is loaded and the archive is open.
+  bool get isReady => _ready;
+
+  String get account => identity.account;
+
+  /// Friends whose accounts are known: normalised address → account key.
+  Map<String, String> get friendAccounts =>
+      Map<String, String>.unmodifiable(_accounts);
+
+  /// Followed accounts whose key is known: normalised address → account.
+  Map<String, String> get followedAccounts =>
+      Map<String, String>.unmodifiable(<String, String>{
+        for (final MapEntry<String, String> e in _followed.entries)
+          if (e.value.isNotEmpty) e.key: e.value,
+      });
+
+  /// Addresses followed (with or without a known account yet).
+  Iterable<String> get followedAddresses => _followed.keys;
+
+  /// Account key of friend [address], once known.
+  String? accountOf(String address) =>
+      _accounts[PeerShareCodec.normalizeAddress(address)];
+
+  /// Account key of [address] if it is a friend or a followed account.
+  String? knownAccountOf(String address) {
+    final String normalized = PeerShareCodec.normalizeAddress(address);
+    final String? followed = _followed[normalized];
+    return _accounts[normalized] ??
+        (followed == null || followed.isEmpty ? null : followed);
+  }
+
+  /// Fires when sealed entries became readable (keys arrived).
+  Stream<void> get openedChanges => _openedChanges.stream;
+
+  /// What [entry] says: its body, or the decrypted one for a sealed entry
+  /// (`null` when this device has no key for it).
+  Map<String, dynamic>? bodyOf(LogEntry entry) =>
+      isSealed(entry.body) ? _opened[entry.id] : entry.body;
+
+  /// This account's private level for friend [address].
+  FriendLevel levelOf(String address) {
+    final String normalized = PeerShareCodec.normalizeAddress(address);
+    final FriendLevel? direct = _levels[normalized];
+    if (direct != null) {
+      return direct;
+    }
+    // A friend's other device gets what the friend gets.
+    final String? acc = _liveDevice(normalized)?.account;
+    if (acc != null) {
+      for (final MapEntry<String, String> e in _accounts.entries) {
+        if (e.value == acc && _levels.containsKey(e.key)) {
+          return _levels[e.key]!;
+        }
+      }
+    }
+    return FriendLevel.friend;
+  }
+
+  /// Changes a friend's level. Going down rotates the keys of the audiences
+  /// they lose, so they cannot read anything written from now on.
+  Future<void> setLevel(String address, FriendLevel level) async {
+    await start();
+    final String normalized = PeerShareCodec.normalizeAddress(address);
+    final FriendLevel old = levelOf(normalized);
+    if (old == level) {
+      return;
+    }
+    _levels[normalized] = level;
+    await _saveLevels();
+    final Set<Audience> lost = audiencesFor(
+      old,
+    ).difference(audiencesFor(level));
+    if (lost.isNotEmpty) {
+      for (final Audience a in lost) {
+        keyring.rotate(a, _clock.wallMillis());
+      }
+      await _saveKeyring();
+      _sendKeysToAll();
+    } else {
+      _sendKeys(normalized);
+    }
+  }
+
+  /// Encrypts [body] for [audience] (returned unchanged for public).
+  Future<Map<String, dynamic>> seal(
+    Audience audience,
+    Map<String, dynamic> body,
+  ) async {
+    await start();
+    if (audience == Audience.public) {
+      return body;
+    }
+    return sealBody(body, keyring.current(audience), account: account);
+  }
+
+  Future<void> start() => _started ??= _start();
+
+  Future<void> _start() async {
+    // Started suspended: the disk belongs to someone else until [resume].
+    // (No await otherwise: an extra async step changes nothing but timing.)
+    final Completer<void>? gate = _resumed;
+    if (gate != null) {
+      await gate.future;
+    }
+    if (!createIdentity && !await LedgerIdentity.exists(disk)) {
+      throw StateError('Brak tożsamości dziennika na tym urządzeniu.');
+    }
+    identity = await LedgerIdentity.loadOrCreate(disk, deviceName: deviceName);
+    author = LedgerAuthor(
+      deviceKey: identity.deviceKey,
+      certificate: identity.certificate,
+      store: store,
+      writer: identity.writer,
+    );
+    await store.directory.addCertificate(identity.certificate);
+    await archive.open(store, blobs);
+    await _loadPeers();
+    await _loadFollowing();
+    await _loadKeys();
+    await _loadBridges();
+    await _loadDevices();
+    await _loadOwnApplied();
+    await identity.rememberSelfKey(disk);
+    for (final String kind in kAccountSpaceKinds) {
+      replicator.subscribe(accountSpace(kind, account));
+    }
+    for (final String friendAccount in _accounts.values) {
+      _followAccount(friendAccount);
+    }
+    for (final String followed in _followed.values) {
+      if (followed.isNotEmpty) {
+        _subscribePublic(followed);
+      }
+    }
+    replicator.onBlobComplete = (String id) {
+      if (!_blobDone.isClosed) {
+        _blobDone.add(id);
+      }
+    };
+    _added = store.added.listen((LogEntry e) {
+      if (isSealed(e.body)) {
+        unawaitedLogged(
+          _open(<LogEntry>[e]),
+          context: 'Odszyfrowanie wpisu nie udało się',
+        );
+      }
+      if (e.account != account && autoDownloadMedia()) {
+        _fetchMediaOf(e);
+      }
+      if (e.account == account &&
+          e.device != identity.deviceKey.id &&
+          e.space == accountSpace('own', account)) {
+        // Files another own device sent: always fetched, from the others.
+        _fetchMediaOf(e);
+      }
+      if (e.kind == kDeviceRecordKind) {
+        unawaitedLogged(
+          _onDeviceRecord(e),
+          context: 'Odczyt urządzenia konta nie udał się',
+        );
+      }
+    });
+    _storeChanged = store.changed.listen((_) => _pruneRevoked());
+    for (final String space in store.spaces.toList()) {
+      if (space.startsWith('acts/')) {
+        for (final LogEntry e in store.entries(space)) {
+          if (e.kind == kDeviceRecordKind) {
+            await _onDeviceRecord(e, quiet: true);
+          }
+        }
+      }
+    }
+    await _open(_sealedEntries());
+    _loaded = true;
+    _ready = true;
+    if (_suspended) {
+      // Handed over while loading: stay quiet until [resume].
+      await archive.pause();
+      return;
+    }
+    _listen();
+    _startSyncTimer();
+    // Connect to the bridges known from before right away.
+    _publishChoice();
+    await greetFriends();
+    await _publishOwnDevice();
+  }
+
+  void _listen() {
+    _frames = transport.frames.listen(
+      (SignalTransportFrame frame) => unawaitedLogged(
+        _onFrame(frame),
+        context: 'Obsługa wiadomości dziennika nie udała się',
+      ),
+    );
+  }
+
+  void _startSyncTimer() {
+    _syncTimer?.cancel();
+    if (syncInterval <= Duration.zero) {
+      return;
+    }
+    _syncTimer = Timer.periodic(syncInterval, (_) {
+      if (!_suspended && !_stopped) {
+        unawaitedLogged(
+          greetFriends(),
+          context: 'Okresowa synchronizacja dziennika nie udała się',
+        );
+        unawaitedLogged(
+          maintainBridges(),
+          context: 'Sprawdzenie mostów nie udało się',
+        );
+      }
+    });
+  }
+
+  /// Hands the ledger on disk to another process: stops listening, saves
+  /// everything and stops writing until [resume].
+  Future<void> suspend() async {
+    _ownershipManaged = true;
+    if (_suspended || _stopped) {
+      return;
+    }
+    _suspended = true;
+    _resumed = Completer<void>();
+    _syncTimer?.cancel();
+    await _frames?.cancel();
+    _frames = null;
+    if (_loaded) {
+      await archive.pause();
+    }
+  }
+
+  /// Takes the ledger back: reads what the other process wrote meanwhile
+  /// (new posts, files, likes), then carries on.
+  Future<void> resume() async {
+    _ownershipManaged = true;
+    if (!_suspended || _stopped) {
+      return;
+    }
+    _suspended = false;
+    final Completer<void>? gate = _resumed;
+    _resumed = null;
+    if (!_loaded) {
+      // Never loaded: [start] goes on from where it waited.
+      gate?.complete();
+      return;
+    }
+    try {
+      await archive.catchUp();
+    } finally {
+      gate?.complete();
+    }
+    _listen();
+    _startSyncTimer();
+    await greetFriends();
+  }
+
+  /// Sends a hello to every friend (again at most every [helloInterval]).
+  Future<void> greetFriends() async {
+    if (_suspended) {
+      return;
+    }
+    for (final String friend in friendAddresses()) {
+      _hello(friend);
+    }
+    for (final String device in <String>{
+      ..._liveDeviceAddresses(),
+      ..._deviceSeeds,
+      ...?greetAlso?.call().map(PeerShareCodec.normalizeAddress),
+    }) {
+      if (device != _ownAddress) {
+        _hello(device);
+      }
+    }
+    _resumeMedia();
+    replicator.retryBlobs();
+    // A followed account answers a hello with its own, which starts a sync.
+    // (Forced: the answer never answers back, so this cannot loop.)
+    for (final String address in _followed.keys) {
+      if (!_isFriend(address)) {
+        _hello(address, force: true);
+      }
+    }
+  }
+
+  /// Follows the public posts and profile of [address] — anyone, no
+  /// consent needed (§12). Friends are followed anyway.
+  Future<void> follow(String address) async {
+    await start();
+    final String normalized = PeerShareCodec.normalizeAddress(address);
+    if (_isFriend(normalized) || _followed.containsKey(normalized)) {
+      return;
+    }
+    _followed[normalized] = '';
+    await _saveFollowing();
+    _hello(normalized, force: true);
+  }
+
+  Future<void> unfollow(String address) async {
+    await start();
+    final String normalized = PeerShareCodec.normalizeAddress(address);
+    final String? acc = _followed.remove(normalized);
+    if (acc == null) {
+      return;
+    }
+    if (acc.isNotEmpty &&
+        !_accounts.containsValue(acc) &&
+        !_followed.containsValue(acc)) {
+      for (final String kind in kPublicSpaceKinds) {
+        replicator.unsubscribe(accountSpace(kind, acc));
+      }
+    }
+    await _saveFollowing();
+  }
+
+  bool isFollowing(String address) =>
+      _followed.containsKey(PeerShareCodec.normalizeAddress(address));
+
+  /// Call when the friend list changed (someone added or removed).
+  Future<void> onFriendsChanged() async {
+    if (_started == null) {
+      return;
+    }
+    await _started;
+    final Set<String> friends = friendAddresses()
+        .map(PeerShareCodec.normalizeAddress)
+        .toSet();
+    final List<String> gone = _accounts.keys
+        .where((String a) => !friends.contains(a))
+        .toList();
+    final Set<Audience> lost = <Audience>{};
+    for (final String address in gone) {
+      lost.addAll(audiencesFor(levelOf(address)));
+      _levels.remove(address);
+      final String? acc = _accounts.remove(address);
+      if (acc != null && !_accounts.containsValue(acc)) {
+        for (final String kind in kFollowedFriendSpaces) {
+          replicator.unsubscribe(accountSpace(kind, acc));
+        }
+      }
+    }
+    if (gone.isNotEmpty) {
+      await _savePeers();
+      await _saveLevels();
+      // A removed friend keeps what they could read, nothing new.
+      for (final Audience a in lost) {
+        keyring.rotate(a, _clock.wallMillis());
+      }
+      await _saveKeyring();
+      _sendKeysToAll();
+    }
+    await greetFriends();
+  }
+
+  /// Writes an entry into one of this account's spaces.
+  Future<LogEntry> publish(
+    String kind,
+    Map<String, dynamic> body, {
+    String spaceKind = 'feed',
+    List<String> blobs = const <String>[],
+  }) async {
+    await start();
+    // Suspended: the other process owns the disk; wait for it back.
+    final Completer<void>? gate = _resumed;
+    if (gate != null) {
+      await gate.future;
+    }
+    return author.append(
+      accountSpace(spaceKind, account),
+      kind,
+      body,
+      blobs: blobs,
+    );
+  }
+
+  /// Entries of [spaceKind] of [ofAccount] (default: this account).
+  List<LogEntry> entriesOf({String spaceKind = 'feed', String? ofAccount}) =>
+      store.entries(accountSpace(spaceKind, ofAccount ?? account));
+
+  bool _isFriend(String address) {
+    final String normalized = PeerShareCodec.normalizeAddress(address);
+    return _liveDevice(normalized) != null ||
+        friendAddresses().any(
+          (String f) => PeerShareCodec.normalizeAddress(f) == normalized,
+        );
+  }
+
+  /// Friends whose account is known, and every live device of this account
+  /// and of friends.
+  Iterable<String> _knownFriends() => <String>{
+    ...friendAddresses()
+        .where(
+          (String f) =>
+              _accounts.containsKey(PeerShareCodec.normalizeAddress(f)),
+        )
+        .map(PeerShareCodec.normalizeAddress),
+    ..._liveDeviceAddresses(),
+  };
+
+  // ---- several devices per account (§6) ----
+
+  _DeviceRef? _liveDevice(String normalized) {
+    final _DeviceRef? ref = _devices[normalized];
+    if (ref == null ||
+        store.directory.isRevoked(ref.account, ref.device) ||
+        (ref.account != account && !_accounts.containsValue(ref.account))) {
+      return null;
+    }
+    return ref;
+  }
+
+  Iterable<String> _liveDeviceAddresses() => _devices.keys.where(
+    (String a) => _liveDevice(a) != null && a != _ownAddress,
+  );
+
+  bool _isSeed(String address) =>
+      _deviceSeeds.contains(PeerShareCodec.normalizeAddress(address));
+
+  Set<String> get _ownSpaces => <String>{
+    for (final String kind in kAccountSpaceKinds) accountSpace(kind, account),
+  };
+
+  bool _isSibling(String address) =>
+      _liveDevice(PeerShareCodec.normalizeAddress(address))?.account == account;
+
+  /// Account of [address]: a friend, a friend's other device, or another
+  /// device of this account.
+  String? accountOfAddress(String address) {
+    final String normalized = PeerShareCodec.normalizeAddress(address);
+    return _accounts[normalized] ?? _liveDevice(normalized)?.account;
+  }
+
+  /// Every known mesh address of [acc]: its devices and the address it was
+  /// added by (never this device's own).
+  List<String> addressesOfAccount(String acc) {
+    final Set<String> out = <String>{
+      for (final MapEntry<String, String> e in _accounts.entries)
+        if (e.value == acc) e.key,
+      for (final String a in _liveDeviceAddresses())
+        if (_devices[a]!.account == acc) a,
+    }..remove(_ownAddress);
+    return out.toList();
+  }
+
+  /// This account's other devices that can be reached.
+  List<String> get siblingAddresses => addressesOfAccount(account);
+
+  /// [accountOfAddress], or the account of a group member's device learnt
+  /// from its hello.
+  String? accountOfAnyAddress(String address) {
+    final String normalized = PeerShareCodec.normalizeAddress(address);
+    final _DeviceRef? s = _strangerDevices[normalized];
+    return accountOfAddress(normalized) ??
+        (s == null || store.directory.isRevoked(s.account, s.device)
+            ? null
+            : s.account);
+  }
+
+  /// Every known address of [acc], group members' devices included.
+  List<String> anyAddressesOf(String acc) => <String>{
+    ...addressesOfAccount(acc),
+    for (final MapEntry<String, _DeviceRef> e in _strangerDevices.entries)
+      if (e.value.account == acc &&
+          !store.directory.isRevoked(e.value.account, e.value.device))
+        e.key,
+  }.toList();
+
+  // ---- what own devices share (chats, removed contacts) ----
+
+  /// Seals [plain] for this account's devices and writes it ([spaceKind]
+  /// `own`: never leaves them; `private`: friends keep a copy).
+  Future<LogEntry?> publishForOwnDevices(
+    String kind,
+    Map<String, dynamic> plain, {
+    String spaceKind = 'own',
+    List<String> blobs = const <String>[],
+  }) async {
+    await start();
+    final Uint8List? key = identity.selfKey;
+    if (key == null || _suspended) {
+      return null;
+    }
+    final LogEntry e = await publish(
+      kind,
+      await sealForSelf(plain, key, account: account),
+      spaceKind: spaceKind,
+      blobs: blobs,
+    );
+    _opened[e.id] = plain;
+    _ownApplied.add(e.id);
+    return e;
+  }
+
+  /// Readable entries other own devices wrote for this one that were not
+  /// handled yet (see [markOwnApplied]).
+  List<LogEntry> pendingOwnEntries() => <LogEntry>[
+    for (final String kind in <String>['own', 'private'])
+      for (final LogEntry e in store.entries(accountSpace(kind, account)))
+        if (_isOwnShare(e) && !_ownApplied.contains(e.id)) e,
+  ];
+
+  bool _isOwnShare(LogEntry e) =>
+      e.account == account &&
+      e.device != identity.deviceKey.id &&
+      _opened.containsKey(e.id) &&
+      (e.space == accountSpace('own', account) ||
+          e.kind == kContactRemovedKind);
+
+  bool isOwnApplied(String id) => _ownApplied.contains(id);
+
+  /// [id] was handled: not offered again after a restart.
+  Future<void> markOwnApplied(String id) async {
+    if (_ownApplied.add(id)) {
+      await disk.write(
+        _ownAppliedKey,
+        Uint8List.fromList(utf8.encode(jsonEncode(_ownApplied.toList()))),
+      );
+    }
+  }
+
+  Future<void> _loadOwnApplied() async {
+    final Uint8List? raw = await disk.read(_ownAppliedKey);
+    if (raw == null) {
+      return;
+    }
+    try {
+      final Object? json = jsonDecode(utf8.decode(raw));
+      if (json is List) {
+        _ownApplied.addAll(json.whereType<String>());
+      }
+    } on FormatException {
+      // Starts over: applying twice is harmless.
+    }
+  }
+
+  /// When [address] (a friend) or [group] was last removed on any device
+  /// of this account (HLC millis), from the sealed tombstones.
+  Map<String, int> contactRemovals() {
+    final Map<String, int> out = <String, int>{};
+    for (final LogEntry e in store.entries(accountSpace('private', account))) {
+      if (e.kind != kContactRemovedKind) {
+        continue;
+      }
+      final Map<String, dynamic>? body = _opened[e.id];
+      final Object? a = body?['a'];
+      final Object? g = body?['g'];
+      final String? k = a is String
+          ? PeerShareCodec.normalizeAddress(a)
+          : (g is String ? 'group:$g' : null);
+      if (k != null) {
+        if ((out[k] ?? 0) < e.hlc.millis) {
+          out[k] = e.hlc.millis;
+        }
+      }
+    }
+    return out;
+  }
+
+  /// HLC millis of the newest friends-and-groups backup (0: none).
+  int get latestContactsMillis {
+    int newest = 0;
+    for (final LogEntry e in store.entries(accountSpace('private', account))) {
+      if (e.kind == kContactsKind &&
+          _opened.containsKey(e.id) &&
+          e.hlc.millis > newest) {
+        newest = e.hlc.millis;
+      }
+    }
+    return newest;
+  }
+
+  /// Fetches files of [ids] from this account's other devices.
+  void fetchFromOwnDevices(Iterable<String> ids) {
+    final List<String> sources = siblingAddresses;
+    if (sources.isEmpty) {
+      return;
+    }
+    for (final String id in ids) {
+      replicator.fetchBlob(id, sources);
+    }
+  }
+
+  /// Waits until blob [id] is here (fetching it from own devices), up to
+  /// [timeout]. Returns whether it is.
+  Future<bool> waitForBlob(
+    String id, {
+    Duration timeout = const Duration(minutes: 30),
+  }) async {
+    if (blobs.isComplete(id)) {
+      return true;
+    }
+    final Future<String> done = mediaCompleted.firstWhere(
+      (String got) => got == id,
+    );
+    fetchFromOwnDevices(<String>[id]);
+    try {
+      await done.timeout(timeout);
+      return true;
+    } on Object {
+      return blobs.isComplete(id);
+    }
+  }
+
+  /// This account's devices (this one first), as certified and not cut
+  /// off.
+  List<AccountDevice> get ownDevices {
+    final List<AccountDevice> out = <AccountDevice>[];
+    for (final DeviceCertificate cert in store.directory.devicesOf(account)) {
+      if (store.directory.isRevoked(account, cert.device)) {
+        continue;
+      }
+      final bool isThis = cert.device == identity.deviceKey.id;
+      String? address = isThis ? _ownAddress : null;
+      String name = cert.name;
+      for (final MapEntry<String, _DeviceRef> e in _devices.entries) {
+        if (e.value.device == cert.device) {
+          address ??= e.key;
+          if (e.value.name.isNotEmpty) {
+            name = e.value.name;
+          }
+        }
+      }
+      out.add(
+        AccountDevice(
+          account: account,
+          device: cert.device,
+          name: name,
+          address: address == null || address.isEmpty ? null : address,
+          isThis: isThis,
+          issued: cert.issued,
+        ),
+      );
+    }
+    out.sort(
+      (AccountDevice a, AccountDevice b) =>
+          a.isThis ? -1 : (b.isThis ? 1 : a.issued.compareTo(b.issued)),
+    );
+    return out;
+  }
+
+  /// Greets [addresses] until they answer with a certificate (the device
+  /// this one was linked from; friends who helped recover the account).
+  Future<void> rememberDeviceAddresses(Iterable<String> addresses) async {
+    await start();
+    bool changed = false;
+    for (final String a in addresses) {
+      final String n = PeerShareCodec.normalizeAddress(a);
+      if (n.isNotEmpty && n != _ownAddress && _deviceSeeds.add(n)) {
+        changed = true;
+        _hello(n, force: true);
+      }
+    }
+    if (changed) {
+      await _saveDevices();
+    }
+  }
+
+  /// Records [address] as a device of [cert]'s account when that account is
+  /// this one or a friend's. Returns whether it is (now) known.
+  Future<bool> _learnDevice(String address, DeviceCertificate cert) async {
+    final String n = PeerShareCodec.normalizeAddress(address);
+    if (n.isEmpty ||
+        n == _ownAddress ||
+        cert.device == identity.deviceKey.id ||
+        store.directory.isRevoked(cert.account, cert.device) ||
+        (cert.account != account && !_accounts.containsValue(cert.account))) {
+      return false;
+    }
+    final _DeviceRef? had = _devices[n];
+    if (had != null &&
+        had.account == cert.account &&
+        had.device == cert.device) {
+      return true;
+    }
+    _devices[n] = _DeviceRef(cert.account, cert.device, cert.name, 0);
+    _deviceSeeds.remove(n);
+    await _saveDevices();
+    _emitDevices();
+    return true;
+  }
+
+  Future<void> _onDeviceRecord(LogEntry e, {bool quiet = false}) async {
+    if (e.kind != kDeviceRecordKind ||
+        e.space != accountSpace('acts', e.account) ||
+        e.device == identity.deviceKey.id ||
+        store.directory.isRevoked(e.account, e.device) ||
+        (e.account != account && !_accounts.containsValue(e.account))) {
+      return;
+    }
+    final Object? raw = e.body['address'];
+    if (raw is! String || !isRoutablePeerAddress(raw)) {
+      return;
+    }
+    final String n = PeerShareCodec.normalizeAddress(raw);
+    if (n == _ownAddress) {
+      return;
+    }
+    // Only the newest record of a device counts (it may have moved).
+    for (final _DeviceRef r in _devices.values) {
+      if (r.device == e.device && r.at > e.hlc.millis) {
+        return;
+      }
+    }
+    final _DeviceRef? had = _devices[n];
+    if (had != null && had.device == e.device && had.at >= e.hlc.millis) {
+      return;
+    }
+    _devices.removeWhere(
+      (String a, _DeviceRef r) => r.device == e.device && a != n,
+    );
+    final Object? name = e.body['name'];
+    _devices[n] = _DeviceRef(
+      e.account,
+      e.device,
+      name is String ? name : '',
+      e.hlc.millis,
+    );
+    await _saveDevices();
+    _emitDevices();
+    if (!quiet) {
+      _hello(n, force: true);
+    }
+  }
+
+  /// Says (in this account's `acts`) at which address this device is,
+  /// when that changed.
+  Future<void> publishOwnDevice() async {
+    await start();
+    await _publishOwnDevice();
+  }
+
+  Future<void> _publishOwnDevice() async {
+    final String address = _ownAddress;
+    if (address.isEmpty || _suspended || _stopped) {
+      return;
+    }
+    LogEntry? last;
+    for (final LogEntry e in store.entries(accountSpace('acts', account))) {
+      if (e.kind == kDeviceRecordKind &&
+          e.device == identity.deviceKey.id &&
+          (last == null || e.hlc > last.hlc)) {
+        last = e;
+      }
+    }
+    if (last != null &&
+        last.body['address'] == address &&
+        last.body['name'] == deviceName) {
+      return;
+    }
+    // Not [publish]: this also runs while starting.
+    await author.append(
+      accountSpace('acts', account),
+      kDeviceRecordKind,
+      <String, dynamic>{'address': address, 'name': deviceName},
+    );
+  }
+
+  /// Cuts [device] of this account off (a lost or stolen phone): what it
+  /// wrote so far stays, anything later is refused everywhere, and it
+  /// no longer gets messages. Needs the account key ([LedgerIdentity.unlock]
+  /// with the account password first, if one is set).
+  Future<void> unlinkDevice(String device) async {
+    await start();
+    final LedgerKeyPair? key = identity.accountKey;
+    if (key == null) {
+      throw StateError('Najpierw odblokuj konto hasłem konta.');
+    }
+    if (device == identity.deviceKey.id) {
+      throw StateError('Tego urządzenia nie można odłączyć z niego samego.');
+    }
+    final DeviceRevocation revocation = await DeviceRevocation.issue(
+      account: key,
+      device: device,
+      cutoffs: store.headsOfDevice(account: account, device: device),
+      issued: _clock.wallMillis(),
+    );
+    final List<String> itsAddresses = <String>[
+      for (final MapEntry<String, _DeviceRef> e in _devices.entries)
+        if (e.value.device == device) e.key,
+    ];
+    await replicator.publishRevocation(revocation);
+    _devices.removeWhere((_, _DeviceRef r) => r.device == device);
+    await _saveDevices();
+    _emitDevices();
+    // Friends who never heard of this device still get the news through
+    // everyone else; the device itself is told too, so it stops.
+    for (final String a in itsAddresses) {
+      _send(a, <String, dynamic>{
+        'type': LedgerMessages.revoke,
+        'items': <Map<String, dynamic>>[revocation.toJson()],
+      });
+    }
+  }
+
+  /// Whether this device was cut off by another device of the account.
+  bool get isRevoked =>
+      store.directory.isRevoked(account, identity.deviceKey.id);
+
+  void _pruneRevoked() {
+    final int before = _devices.length;
+    _devices.removeWhere(
+      (_, _DeviceRef r) => store.directory.isRevoked(r.account, r.device),
+    );
+    if (_devices.length != before) {
+      unawaitedLogged(_saveDevices(), context: 'Zapis urządzeń konta');
+      _emitDevices();
+    }
+  }
+
+  void _emitDevices() {
+    if (!_devicesChanged.isClosed) {
+      _devicesChanged.add(null);
+    }
+  }
+
+  Future<void> _saveDevices() => disk.write(
+    _devicesKey,
+    Uint8List.fromList(
+      utf8.encode(
+        jsonEncode(<String, dynamic>{
+          'devices': <String, dynamic>{
+            for (final MapEntry<String, _DeviceRef> e in _devices.entries)
+              e.key: e.value.toJson(),
+          },
+          'seeds': _deviceSeeds.toList(),
+        }),
+      ),
+    ),
+  );
+
+  Future<void> _loadDevices() async {
+    final Uint8List? raw = await disk.read(_devicesKey);
+    if (raw == null) {
+      return;
+    }
+    try {
+      final Object? json = jsonDecode(utf8.decode(raw));
+      if (json is! Map) {
+        return;
+      }
+      final Object? devices = json['devices'];
+      if (devices is Map) {
+        devices.forEach((Object? k, Object? v) {
+          if (k is String && v is Map) {
+            final Object? a = v['a'];
+            final Object? d = v['d'];
+            final Object? n = v['n'];
+            final Object? t = v['t'];
+            if (a is String && d is String) {
+              _devices[k] = _DeviceRef(
+                a,
+                d,
+                n is String ? n : '',
+                t is int ? t : 0,
+              );
+            }
+          }
+        });
+      }
+      final Object? seeds = json['seeds'];
+      if (seeds is List) {
+        _deviceSeeds.addAll(seeds.whereType<String>());
+      }
+    } on FormatException {
+      logZenWarning('Lista urządzeń konta jest uszkodzona; zaczynam od zera.');
+    }
+  }
+
+  /// The newest backup of friends and groups any device of this account
+  /// saved, or `null`.
+  Map<String, dynamic>? latestContacts() {
+    LogEntry? newest;
+    for (final LogEntry e in store.entries(accountSpace('private', account))) {
+      if (e.kind == kContactsKind &&
+          _opened.containsKey(e.id) &&
+          (newest == null || e.hlc > newest.hlc)) {
+        newest = e;
+      }
+    }
+    return newest == null ? null : _opened[newest.id];
+  }
+
+  /// Saves [snapshot] (friends and groups) sealed for this account's own
+  /// devices, unless it equals the newest one. Returns whether it did.
+  Future<bool> publishContacts(Map<String, dynamic> snapshot) async {
+    await start();
+    final Uint8List? key = identity.selfKey;
+    if (key == null || _suspended) {
+      return false;
+    }
+    final Map<String, dynamic>? latest = latestContacts();
+    if (latest != null && jsonEncode(latest) == jsonEncode(snapshot)) {
+      return false;
+    }
+    final LogEntry e = await publish(
+      kContactsKind,
+      await sealForSelf(snapshot, key, account: account),
+      spaceKind: 'private',
+    );
+    _opened[e.id] = snapshot;
+    return true;
+  }
+
+  void _sendSiblingSync(String to) {
+    if (!_isSibling(to)) {
+      return;
+    }
+    _send(to, <String, dynamic>{
+      'type': kLedgerSiblingType,
+      'own': keyring.toJson()['own'],
+      'levels': <String, String>{
+        for (final MapEntry<String, FriendLevel> e in _levels.entries)
+          e.key: e.value.name,
+      },
+    });
+  }
+
+  Future<void> _onSiblingSync(String from, Map<String, dynamic> m) async {
+    if (!_isSibling(from)) {
+      return;
+    }
+    final int added = keyring.mergeOwn(m['own']);
+    bool levels = false;
+    final Object? theirs = m['levels'];
+    if (theirs is Map) {
+      theirs.forEach((Object? k, Object? v) {
+        final FriendLevel? level = friendLevelByName(v);
+        if (k is String && level != null && !_levels.containsKey(k)) {
+          _levels[k] = level;
+          levels = true;
+        }
+      });
+    }
+    if (added > 0) {
+      await _saveKeyring();
+      await _open(_sealedEntries(ofAccount: account));
+      // Friends may read what the other device wrote with these.
+      _sendKeysToAll();
+    }
+    if (levels) {
+      await _saveLevels();
+    }
+  }
+
+  void _send(String peer, Map<String, dynamic> message) {
+    if (_stopped) {
+      return;
+    }
+    unawaitedLogged(
+      transport.send(remoteAddress: peer, payload: message),
+      context: 'Wysłanie wiadomości dziennika nie udało się',
+    );
+  }
+
+  void _hello(String friend, {bool force = false, bool reply = false}) {
+    final String normalized = PeerShareCodec.normalizeAddress(friend);
+    final int now = _clock.wallMillis();
+    final int? last = _helloSentAt[normalized];
+    // Never more than one unforced hello a second, whatever the interval:
+    // any frame from a friend triggers one, so a zero interval would make
+    // two friends greet each other forever.
+    final int gap = helloInterval.inMilliseconds < 1000
+        ? 1000
+        : helloInterval.inMilliseconds;
+    if (!force && last != null && now - last < gap) {
+      return;
+    }
+    _helloSentAt[normalized] = now;
+    final String me = _ownAddress;
+    unawaitedLogged(() async {
+      // Proves the device key holder is at this address (the certificate
+      // alone is public and could be shown by anyone).
+      final Uint8List proof = await identity.deviceKey.sign(_proofBytes(me));
+      _send(friend, <String, dynamic>{
+        'type': kLedgerHelloType,
+        'cert': identity.certificate.toJson(),
+        'p': <String, dynamic>{'f': me, 's': b64(proof)},
+        if (reply) 'r': 1,
+      });
+    }(), context: 'Powitanie dziennika nie wyszło');
+  }
+
+  static Uint8List _proofBytes(String from) =>
+      Uint8List.fromList(utf8.encode('zen.hello.v1|$from'));
+
+  /// Whether a hello really comes from the device in [cert]: signed by its
+  /// device key for the address it came from.
+  Future<bool> _proven(
+    SignalTransportFrame frame,
+    DeviceCertificate cert,
+  ) async {
+    final Object? p = frame.payload['p'];
+    if (p is! Map) {
+      return false;
+    }
+    final Object? f = p['f'];
+    final Object? s = p['s'];
+    if (f is! String ||
+        s is! String ||
+        f.isEmpty ||
+        PeerShareCodec.normalizeAddress(f) !=
+            PeerShareCodec.normalizeAddress(frame.from)) {
+      return false;
+    }
+    return verifyLedgerSignature(
+      publicKey: cert.device,
+      message: _proofBytes(f),
+      signature: s,
+    );
+  }
+
+  void _subscribePublic(String acc) {
+    for (final String kind in kPublicSpaceKinds) {
+      replicator.subscribe(accountSpace(kind, acc));
+    }
+  }
+
+  Set<String> _followedSpaces(String peer) {
+    final String? acc = _followed[PeerShareCodec.normalizeAddress(peer)];
+    if (acc == null || acc.isEmpty) {
+      return const <String>{};
+    }
+    return <String>{
+      for (final String kind in kPublicSpaceKinds) accountSpace(kind, acc),
+    };
+  }
+
+  Set<String> get _ownPublicSpaces => <String>{
+    for (final String kind in kPublicSpaceKinds) accountSpace(kind, account),
+  };
+
+  bool _strangerAllowed(String address) {
+    final int minute = _clock.wallMillis() ~/ 60000;
+    final int total = _strangerTotal.$1 == minute ? _strangerTotal.$2 : 0;
+    if (total >= kStrangerFramesPerMinuteTotal) {
+      return false;
+    }
+    final String network = _network64(address);
+    final (int, int)? had = _strangerBudget[network];
+    final int used = had == null || had.$1 != minute ? 0 : had.$2;
+    if (used >= kStrangerFramesPerMinute) {
+      return false;
+    }
+    if (had == null && _strangerBudget.length >= _maxStrangerNetworks) {
+      // Forget earlier minutes. Never everything at once: that would hand
+      // every flooding address a fresh budget.
+      _strangerBudget.removeWhere(
+        (String _, (int, int) budget) => budget.$1 != minute,
+      );
+      if (_strangerBudget.length >= _maxStrangerNetworks) {
+        return false;
+      }
+    }
+    _strangerBudget[network] = (minute, used + 1);
+    _strangerTotal = (minute, total + 1);
+    return true;
+  }
+
+  /// The /64 network of a mesh address (the address itself if unparsable).
+  static String _network64(String address) {
+    try {
+      return Uri.parseIPv6Address(
+        PeerShareCodec.normalizeAddress(address),
+      ).take(8).map((int b) => b.toRadixString(16).padLeft(2, '0')).join();
+    } on FormatException {
+      return address;
+    }
+  }
+
+  /// Checks a certificate a stranger sent. Anyone can mint accounts, so
+  /// only certificates of accounts this device has a reason to know (its
+  /// own, friends', followed ones) go into the directory; the rest are only
+  /// verified, never stored.
+  Future<bool> _checkStrangerCertificate(DeviceCertificate cert) async {
+    if (cert.account == account ||
+        _accounts.containsValue(cert.account) ||
+        _followed.containsValue(cert.account)) {
+      return store.directory.addCertificate(cert);
+    }
+    return store.directory.knowsCertificate(cert) || await cert.verify();
+  }
+
+  /// A stranger (not a friend) may: say hello, and read this account's
+  /// public spaces. A followed account may also send its public entries.
+  Future<void> _onStrangerFrame(SignalTransportFrame frame) async {
+    final String from = PeerShareCodec.normalizeAddress(frame.from);
+    final Object? type = frame.payload['type'];
+    if (type != kLedgerHelloType && !isLedgerMessage(frame.payload)) {
+      return;
+    }
+    if (!_strangerAllowed(from)) {
+      return;
+    }
+    if (type == kLedgerHelloType) {
+      final DeviceCertificate? cert = DeviceCertificate.fromJson(
+        frame.payload['cert'],
+      );
+      if (cert == null || !await _checkStrangerCertificate(cert)) {
+        return;
+      }
+      final bool proven = await _proven(frame, cert);
+      // Another device of a friend or of this account (its certificate,
+      // signed by the account key, and the device key's proof for this
+      // address): from now on a friend.
+      if (proven && await _learnDevice(from, cert)) {
+        await _onHello(from, frame);
+        if (frame.payload['r'] != 1) {
+          _hello(from, force: true, reply: true);
+        }
+        return;
+      }
+      if (proven &&
+          !store.directory.isRevoked(cert.account, cert.device) &&
+          cert.account != account) {
+        // Someone else (a group member): remember whose device it is.
+        if (_strangerDevices.length >= _maxStrangerDevices) {
+          _strangerDevices.remove(_strangerDevices.keys.first);
+        }
+        _strangerDevices[from] = _DeviceRef(
+          cert.account,
+          cert.device,
+          cert.name,
+          0,
+        );
+      }
+      if (_isSeed(from)) {
+        // Not vouched for (yet): it may hold our own entries (a friend
+        // keeping our backup while we recover). Ask for those only.
+        replicator.syncWith(from, only: _ownSpaces);
+      }
+      final String? known = _followed[from];
+      if (known != null) {
+        if (known != cert.account) {
+          _followed[from] = cert.account;
+          _subscribePublic(cert.account);
+          await _saveFollowing();
+        }
+        replicator.syncWith(from, only: _followedSpaces(from));
+      }
+      // Someone following us: answer (once, never to an answer) so they
+      // learn our account.
+      if (frame.payload['r'] != 1) {
+        _hello(from, force: true, reply: true);
+      }
+      return;
+    }
+    final Set<String> readable = <String>{
+      ..._ownPublicSpaces,
+      ..._followedSpaces(from),
+      // A seed may hand our own entries back; nothing private is served.
+      if (_isSeed(from) && type == LedgerMessages.heads) ..._ownSpaces,
+    };
+    if (type == LedgerMessages.heads) {
+      final Object? spaces = frame.payload['spaces'];
+      if (spaces is! Map) {
+        return;
+      }
+      await replicator.handle(from, <String, dynamic>{
+        'type': LedgerMessages.heads,
+        'spaces': <String, dynamic>{
+          for (final MapEntry<dynamic, dynamic> e in spaces.entries)
+            if (readable.contains(e.key)) e.key as String: e.value,
+        },
+      });
+      return;
+    }
+    if (type == LedgerMessages.want) {
+      if (readable.contains(frame.payload['space'])) {
+        await replicator.handle(from, frame.payload);
+      }
+      return;
+    }
+    if (type == LedgerMessages.entries &&
+        (_followedSpaces(from).isNotEmpty || _isSeed(from))) {
+      await replicator.handle(from, frame.payload);
+      return;
+    }
+    if (type == LedgerMessages.blobWant) {
+      final Object? chunks = frame.payload['chunks'];
+      await replicator.handle(from, <String, dynamic>{
+        ...frame.payload,
+        'chunks': chunks is List
+            ? chunks.take(strangerChunksPerRequest).toList()
+            : const <Object?>[],
+      });
+      return;
+    }
+    // Answers to what we asked a followed account for (only wanted blobs
+    // are taken).
+    if ((type == LedgerMessages.blobManifest ||
+            type == LedgerMessages.blobChunk) &&
+        _followedSpaces(from).isNotEmpty) {
+      await replicator.handle(from, frame.payload);
+    }
+  }
+
+  /// Downloads the media of [e] now (when automatic download is off),
+  /// including files its later edits put in.
+  void downloadMedia(LogEntry e) {
+    _fetchMediaOf(e);
+    for (final LogEntry edit in store.entries(e.space)) {
+      if (edit.kind == 'post_edit' &&
+          edit.account == e.account &&
+          bodyOf(edit)?['post'] == e.id) {
+        _fetchMediaOf(edit);
+      }
+    }
+  }
+
+  /// Photos and videos of what we hold that are still missing (the author
+  /// was offline, the app was closed mid-download): asked for again from
+  /// the author and every friend — whoever has them now.
+  void _resumeMedia() {
+    bool? auto;
+    for (final String space in replicator.subscriptions.toList()) {
+      for (final LogEntry e in store.entries(space)) {
+        if (e.account == account) {
+          continue;
+        }
+        final List<String> ids = _mediaIdsOf(e);
+        if (!ids.any(
+          (String id) => !blobs.isComplete(id) && !blobs.refused.contains(id),
+        )) {
+          continue;
+        }
+        // The setting is read only when something is actually missing.
+        if (!(auto ??= autoDownloadMedia())) {
+          return;
+        }
+        _fetchMediaOf(e);
+      }
+    }
+  }
+
+  /// Blob ids of [e]: its own, or those of the post a reshare carries.
+  static List<String> _mediaIdsOf(LogEntry e) {
+    final Object? inner = e.body['entry'];
+    final Object? blobs = inner is Map ? inner['blobs'] : null;
+    return <String>[
+      ...e.blobs,
+      if (blobs is List)
+        for (final Object? b in blobs.take(16))
+          if (b is String) b,
+    ];
+  }
+
+  /// Starts downloading the media of [e] from whoever can have them: the
+  /// writer's addresses first, then all friends.
+  void _fetchMediaOf(LogEntry e) {
+    final List<String> ids = _mediaIdsOf(e);
+    if (ids.isEmpty) {
+      return;
+    }
+    final List<String> sources = <String>[
+      for (final MapEntry<String, String> m in <MapEntry<String, String>>[
+        ..._accounts.entries,
+        ..._followed.entries,
+      ])
+        if (m.value == e.account) m.key,
+      ..._knownFriends(),
+    ];
+    for (final String id in ids) {
+      replicator.fetchBlob(id, sources.toSet().toList());
+    }
+  }
+
+  void _followAccount(String friendAccount) {
+    for (final String kind in kFollowedFriendSpaces) {
+      replicator.subscribe(accountSpace(kind, friendAccount));
+    }
+  }
+
+  Future<void> _onFrame(SignalTransportFrame frame) async {
+    if (!_isFriend(frame.from)) {
+      await _onStrangerFrame(frame);
+      return;
+    }
+    // Any sign of life from a friend (a chat message, a call…) is a chance
+    // to catch up: the hello (at most every [helloInterval]) makes them
+    // sync with us.
+    _hello(frame.from);
+    final Object? type = frame.payload['type'];
+    if (type != kLedgerHelloType &&
+        type != kLedgerBridgesType &&
+        type != kLedgerReachType &&
+        type != kLedgerReachOkType &&
+        type != kLedgerSiblingType &&
+        type != kLedgerKeysType &&
+        !isLedgerMessage(frame.payload)) {
+      return;
+    }
+    if (type == kLedgerKeysType) {
+      await _onKeys(frame.from, frame.payload['items']);
+      return;
+    }
+    if (type == kLedgerHelloType) {
+      await _onHello(frame.from, frame);
+      return;
+    }
+    if (type == kLedgerBridgesType) {
+      await _onBridges(frame.payload['items']);
+      return;
+    }
+    if (type == kLedgerReachType) {
+      await _onReachRequest(frame.from, frame.payload);
+      return;
+    }
+    if (type == kLedgerSiblingType) {
+      await _onSiblingSync(frame.from, frame.payload);
+      return;
+    }
+    if (type == kLedgerReachOkType) {
+      _onReachAnswer(frame.from, frame.payload);
+      return;
+    }
+    await replicator.handle(frame.from, frame.payload);
+  }
+
+  Future<void> _onHello(String from, SignalTransportFrame frame) async {
+    final DeviceCertificate? cert = DeviceCertificate.fromJson(
+      frame.payload['cert'],
+    );
+    if (cert == null || !await store.directory.addCertificate(cert)) {
+      return;
+    }
+    // Which account an address belongs to is only taken from a proven
+    // hello (where this device does not know its own address yet — tests
+    // without a mesh — the certificate alone).
+    if (_ownAddress.isNotEmpty && !await _proven(frame, cert)) {
+      return;
+    }
+    final String normalized = PeerShareCodec.normalizeAddress(from);
+    final _DeviceRef? device = _liveDevice(normalized);
+    if (device != null) {
+      // Another device of a friend, or of this account: its account is
+      // what its certificate says, nothing to remember per address.
+      if (device.account != cert.account) {
+        return;
+      }
+    } else {
+      final bool isNew = _accounts[normalized] != cert.account;
+      _accounts[normalized] = cert.account;
+      if (isNew) {
+        await _savePeers();
+        // Make sure they learn about us too, then catch up both ways.
+        _hello(from, force: true);
+      }
+    }
+    if (cert.account != account) {
+      _followAccount(cert.account);
+    }
+    replicator.syncWith(from);
+    // They may hold photos or videos we could not get yet.
+    replicator.offerSource(normalized);
+    if (!_peerGreeted.isClosed) {
+      _peerGreeted.add(normalized);
+    }
+    _shareBridges(from);
+    _sendKeys(from);
+    _sendSiblingSync(from);
+  }
+
+  void _sendKeys(String friend) {
+    if (!_isFriend(friend) || _isSibling(friend)) {
+      return;
+    }
+    final List<AudienceKey> keys = keyring.entitled(levelOf(friend));
+    if (keys.isEmpty) {
+      return;
+    }
+    _send(friend, <String, dynamic>{
+      'type': kLedgerKeysType,
+      'items': <Map<String, dynamic>>[
+        for (final AudienceKey k in keys) k.toJson(),
+      ],
+    });
+  }
+
+  void _sendKeysToAll() {
+    for (final String friend in _knownFriends()) {
+      _sendKeys(friend);
+    }
+  }
+
+  Future<void> _onKeys(String from, Object? items) async {
+    final String? acc = accountOfAddress(from);
+    if (acc == null || acc == account) {
+      return;
+    }
+    if (keyring.acceptFrom(acc, items) > 0) {
+      await _saveKeyring();
+      await _open(_sealedEntries(ofAccount: acc));
+    }
+  }
+
+  Iterable<LogEntry> _sealedEntries({String? ofAccount}) sync* {
+    for (final String space in store.spaces.toList()) {
+      for (final LogEntry e in store.entries(space)) {
+        if ((ofAccount == null || e.account == ofAccount) &&
+            isSealed(e.body) &&
+            !_opened.containsKey(e.id)) {
+          yield e;
+        }
+      }
+    }
+  }
+
+  Future<void> _open(Iterable<LogEntry> entries) async {
+    bool any = false;
+    for (final LogEntry e in entries.toList()) {
+      if (_opened.containsKey(e.id)) {
+        continue;
+      }
+      final Uint8List? selfKey = identity.selfKey;
+      final Map<String, dynamic>? plain = e.body['kid'] == kSelfKeyId
+          ? (e.account == account && selfKey != null
+                ? await openForSelf(e.body, selfKey, account: account)
+                : null)
+          : await openBody(e.body, keyring, account: e.account, self: account);
+      if (plain != null) {
+        _opened[e.id] = plain;
+        any = true;
+        if (e.kind == kContactsKind &&
+            e.device != identity.deviceKey.id &&
+            !_contactsChanged.isClosed) {
+          _contactsChanged.add(null);
+        }
+        if (_isOwnShare(e) &&
+            !_ownApplied.contains(e.id) &&
+            !_ownEntries.isClosed) {
+          _ownEntries.add(e);
+        }
+      }
+    }
+    if (any && !_openedChanges.isClosed) {
+      _openedChanges.add(null);
+    }
+  }
+
+  Future<void> _loadKeys() async {
+    final Uint8List? raw = await disk.read(_keyringKey);
+    if (raw != null) {
+      try {
+        keyring.restore(jsonDecode(utf8.decode(raw)));
+      } on FormatException {
+        logZenWarning('Klucze odbiorców są uszkodzone.');
+      }
+    }
+    if (keyring.ensureOwn(_clock.wallMillis())) {
+      await _saveKeyring();
+    }
+    final Uint8List? levels = await disk.read(_levelsKey);
+    if (levels != null) {
+      try {
+        final Object? json = jsonDecode(utf8.decode(levels));
+        if (json is Map) {
+          json.forEach((Object? k, Object? v) {
+            final FriendLevel? level = friendLevelByName(v);
+            if (k is String && level != null) {
+              _levels[k] = level;
+            }
+          });
+        }
+      } on FormatException {
+        logZenWarning('Poziomy znajomych są uszkodzone.');
+      }
+    }
+  }
+
+  Future<void> _saveKeyring() => disk.write(
+    _keyringKey,
+    Uint8List.fromList(utf8.encode(jsonEncode(keyring.toJson()))),
+  );
+
+  Future<void> _saveLevels() => disk.write(
+    _levelsKey,
+    Uint8List.fromList(
+      utf8.encode(
+        jsonEncode(<String, String>{
+          for (final MapEntry<String, FriendLevel> e in _levels.entries)
+            e.key: e.value.name,
+        }),
+      ),
+    ),
+  );
+
+  void _shareBridges(String friend) {
+    final List<Map<String, dynamic>> items = bridges.sample(50);
+    if (items.isNotEmpty) {
+      _send(friend, <String, dynamic>{
+        'type': kLedgerBridgesType,
+        'items': items,
+      });
+    }
+  }
+
+  Future<void> _onBridges(Object? items) async {
+    if (items is! List) {
+      return;
+    }
+    final int added = await bridges.addAll(items);
+    final int probed = await bridges.probeSome();
+    if (added > 0 || probed > 0) {
+      await _saveBridges();
+      _publishChoice();
+    }
+  }
+
+  /// Re-checks known bridges now and then (dead ones go, slow ones drop
+  /// down the list) and reconnects if the best choice changed.
+  Future<void> maintainBridges() async {
+    if (_suspended || _stopped) {
+      return;
+    }
+    if (await bridges.probeSome() > 0) {
+      await _saveBridges();
+    }
+    _publishChoice();
+  }
+
+  void _publishChoice() {
+    final List<String> choice = bridges.choose(bridgeConnections);
+    if (choice.isEmpty || listEquals(choice, _chosenBridges)) {
+      return;
+    }
+    _chosenBridges = choice;
+    onBridgesChosen?.call(choice);
+  }
+
+  /// Announces this device as a mesh entry point at [uri] (a desktop that
+  /// accepts incoming connections). Mandatory for every device that can:
+  /// without bridges the network depends on a few public nodes.
+  Future<BridgeAnnouncement> announceBridge(
+    String uri, {
+    Duration validity = const Duration(days: 6),
+    int powBits = kBridgePowBits,
+  }) async {
+    await start();
+    final LedgerKeyPair key = await _bridgeKey();
+    final BridgeAnnouncement announcement = await BridgeAnnouncement.create(
+      uri: uri,
+      bridgeKey: key,
+      expires: _clock.wallMillis() + validity.inMilliseconds,
+      powBits: powBits,
+    );
+    bridges.addOwn(announcement);
+    await _saveBridges();
+    for (final String friend in _knownFriends()) {
+      _shareBridges(friend);
+    }
+    return announcement;
+  }
+
+  /// Stops announcing this device as a bridge (it cannot be reached any
+  /// more). Friends drop it once their checks fail.
+  Future<void> withdrawBridge() async {
+    if (bridges.removeOwn()) {
+      await _saveBridges();
+    }
+  }
+
+  /// This device's current bridge announcement, if any.
+  BridgeAnnouncement? get ownBridge => bridges.own?.announcement;
+
+  /// Asks up to [askAtMost] friends to connect to [uri] from where they
+  /// are and say whether this computer answered as a mesh node.
+  Future<ReachResult> checkReachable(
+    String uri, {
+    Duration timeout = const Duration(seconds: 20),
+    int askAtMost = 5,
+  }) async {
+    await start();
+    final List<String> friends = _knownFriends().toList()..shuffle();
+    if (friends.isEmpty || _suspended) {
+      return ReachResult.noAnswer;
+    }
+    final String id = _randomId();
+    final _ReachWait wait = _ReachWait(friends.take(askAtMost).toSet());
+    _reachWaits[id] = wait;
+    for (final String friend in wait.asked) {
+      _send(friend, <String, dynamic>{
+        'type': kLedgerReachType,
+        'id': id,
+        'uri': uri,
+      });
+    }
+    try {
+      return await wait.done.future.timeout(
+        timeout,
+        onTimeout: () =>
+            wait.noes > 0 ? ReachResult.unreachable : ReachResult.noAnswer,
+      );
+    } finally {
+      _reachWaits.remove(id);
+    }
+  }
+
+  Future<void> _onReachRequest(String from, Map<String, dynamic> m) async {
+    final Object? id = m['id'];
+    final Object? uri = m['uri'];
+    if (id is! String || id.length > 64 || uri is! String || uri.length > 300) {
+      return;
+    }
+    final int now = _clock.wallMillis();
+    _reachAnsweredAt.removeWhere((int t) => now - t > 60000);
+    if (_reachAnsweredAt.length >= kReachChecksPerMinute) {
+      return; // nobody gets to use us as a port scanner
+    }
+    _reachAnsweredAt.add(now);
+    // The probe itself refuses anything but a public address.
+    final int? latency = await _reachProbe(uri);
+    _send(from, <String, dynamic>{
+      'type': kLedgerReachOkType,
+      'id': id,
+      'ok': latency != null,
+    });
+  }
+
+  void _onReachAnswer(String from, Map<String, dynamic> m) {
+    final _ReachWait? wait = _reachWaits[m['id']];
+    final String normalized = PeerShareCodec.normalizeAddress(from);
+    if (wait == null ||
+        !wait.asked.any(
+          (String a) => PeerShareCodec.normalizeAddress(a) == normalized,
+        ) ||
+        !wait.answered.add(normalized) ||
+        wait.done.isCompleted) {
+      return;
+    }
+    if (m['ok'] == true) {
+      wait.done.complete(ReachResult.reachable);
+      return;
+    }
+    wait.noes++;
+    if (wait.answered.length >= wait.asked.length) {
+      wait.done.complete(ReachResult.unreachable);
+    }
+  }
+
+  static String _randomId() {
+    final Random r = Random.secure();
+    return List<String>.generate(
+      16,
+      (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
+  }
+
+  /// A separate key just for the bridge, so an announcement never reveals
+  /// whose computer it is.
+  Future<LedgerKeyPair> _bridgeKey() async {
+    final Uint8List? raw = await disk.read(_bridgeKeyKey);
+    if (raw != null && raw.length == 32) {
+      return LedgerKeyPair.fromSeed(raw);
+    }
+    final LedgerKeyPair key = await LedgerKeyPair.generate();
+    await disk.write(_bridgeKeyKey, key.seed);
+    return key;
+  }
+
+  Future<void> _loadBridges() async {
+    final Uint8List? raw = await disk.read(_bridgesKey);
+    if (raw == null) {
+      return;
+    }
+    try {
+      bridges.restore(jsonDecode(utf8.decode(raw)));
+    } on FormatException {
+      logZenWarning('Książka mostów jest uszkodzona; zaczynam od zera.');
+    }
+  }
+
+  Future<void> _saveBridges() => disk.write(
+    _bridgesKey,
+    Uint8List.fromList(utf8.encode(jsonEncode(bridges.toJson()))),
+  );
+
+  Future<void> _loadPeers() async {
+    final Uint8List? raw = await disk.read(_peersKey);
+    if (raw == null) {
+      return;
+    }
+    try {
+      final Object? json = jsonDecode(utf8.decode(raw));
+      if (json is Map) {
+        json.forEach((Object? k, Object? v) {
+          if (k is String && v is String) {
+            _accounts[k] = v;
+          }
+        });
+      }
+    } on FormatException {
+      logZenWarning('Lista kont znajomych w dzienniku jest uszkodzona.');
+    }
+  }
+
+  Future<void> _loadFollowing() async {
+    final Uint8List? raw = await disk.read(_followingKey);
+    if (raw == null) {
+      return;
+    }
+    try {
+      final Object? json = jsonDecode(utf8.decode(raw));
+      if (json is Map) {
+        json.forEach((Object? k, Object? v) {
+          if (k is String && v is String) {
+            _followed[k] = v;
+          }
+        });
+      }
+    } on FormatException {
+      logZenWarning('Lista obserwowanych jest uszkodzona.');
+    }
+  }
+
+  Future<void> _saveFollowing() => disk.write(
+    _followingKey,
+    Uint8List.fromList(utf8.encode(jsonEncode(_followed))),
+  );
+
+  Future<void> _savePeers() => disk.write(
+    _peersKey,
+    Uint8List.fromList(utf8.encode(jsonEncode(_accounts))),
+  );
+
+  Future<void> stop() async {
+    _stopped = true;
+    _syncTimer?.cancel();
+    await _storeChanged?.cancel();
+    await _devicesChanged.close();
+    await _contactsChanged.close();
+    await _peerGreeted.close();
+    await _ownEntries.close();
+    await _frames?.cancel();
+    await _added?.cancel();
+    await _openedChanges.close();
+    await _blobDone.close();
+    if (_started != null) {
+      if (_loaded) {
+        await archive.close();
+      }
+      await replicator.dispose();
+    }
+  }
+}
+
+final class _ReachWait {
+  _ReachWait(this.asked);
+
+  final Set<String> asked;
+  final Set<String> answered = <String>{};
+  final Completer<ReachResult> done = Completer<ReachResult>();
+  int noes = 0;
+}

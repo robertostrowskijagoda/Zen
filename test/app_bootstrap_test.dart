@@ -1,0 +1,110 @@
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/app/app_bootstrap.dart';
+import 'package:zen/src/app/persistent_stores.dart';
+import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/domain/signals/signal_queue_store.dart';
+import 'package:zen/src/features/chat/attachment_transfer_store.dart';
+import 'package:zen/src/features/chat/message_timeline_store.dart';
+import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/social_snapshot_store.dart';
+
+void main() {
+  test(
+    'initSettings loads persisted settings from the injected store',
+    () async {
+      final Directory supportDirectory = await Directory.systemTemp.createTemp(
+        'zen-bootstrap-settings-',
+      );
+      addTearDown(() => supportDirectory.delete(recursive: true));
+      final MemoryAppSettingsStore store = MemoryAppSettingsStore(
+        const AppSettings(notificationDelaySeconds: 9, encryptionEnabled: true),
+      );
+
+      final ZenBootstrapper bootstrapper = ZenBootstrapper(
+        supportDirectoryLoader: () async => supportDirectory,
+        appSettingsStoreBuilder: (_) => store,
+      );
+
+      final ZenBootstrapSettingsState state = await bootstrapper.initSettings();
+
+      expect(state.supportDirectory.path, supportDirectory.path);
+      expect(state.appSettingsStore, same(store));
+      expect(state.settings.notificationDelaySeconds, 9);
+      expect(state.settings.encryptionEnabled, isTrue);
+    },
+  );
+
+  test('initRuntime derives wait timeout from app settings', () async {
+    final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
+    addTearDown(runtime.dispose);
+    final ZenBootstrapper bootstrapper = ZenBootstrapper(
+      runtimeBuilder: ({required RuntimeSignalBootstrapConfig config}) {
+        expect(config.waitTimeout, const Duration(seconds: 9));
+        return runtime;
+      },
+    );
+
+    final ZenBootstrapRuntimeState state = await bootstrapper.initRuntime(
+      settings: const AppSettings(notificationDelaySeconds: 9),
+    );
+
+    expect(state.runtime, same(runtime));
+    expect(state.runtimeConfig.waitTimeout, const Duration(seconds: 9));
+  });
+
+  test('bootstrap retries a critical step once before succeeding', () async {
+    int prepareCalls = 0;
+    final AppSettings settings = const AppSettings(
+      notificationDelaySeconds: 8,
+      encryptionEnabled: true,
+    );
+    final MemoryAppSettingsStore store = MemoryAppSettingsStore(settings);
+    final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
+    addTearDown(runtime.dispose);
+
+    final ZenBootstrapper bootstrapper = ZenBootstrapper(
+      prepareForegroundLaunch: () async {
+        prepareCalls += 1;
+        if (prepareCalls == 1) {
+          throw StateError('bootstrap race');
+        }
+      },
+      supportDirectoryLoader: () async => Directory.systemTemp,
+      appSecurityServiceBuilder: MemoryAppSecurityService.new,
+      appSettingsStoreBuilder: (_) => store,
+      persistentStoresBuilder:
+          (
+            Directory _, {
+            AppSettingsStore? appSettingsStore,
+            BinaryPayloadProtector? dataProtector,
+          }) {
+            expect(appSettingsStore, same(store));
+            expect(dataProtector, isNotNull);
+            return ZenPersistentStores(
+              signalQueueStore: MemorySignalQueueStore(),
+              socialSnapshotStore: MemorySocialSnapshotStore(),
+              messageTimelineStore: MemoryMessageTimelineStore(),
+              attachmentTransferStore: MemoryAttachmentTransferStore(),
+              appSettingsStore: appSettingsStore!,
+            );
+          },
+      runtimeBuilder: ({required RuntimeSignalBootstrapConfig config}) {
+        expect(config.waitTimeout, settings.signalWaitTimeout);
+        return runtime;
+      },
+    );
+
+    final ZenBootstrapResult result = await bootstrapper.bootstrap();
+
+    expect(prepareCalls, 2);
+    expect(result.initialSettings.notificationDelaySeconds, 8);
+    expect(result.runtimeConfig.waitTimeout, settings.signalWaitTimeout);
+    expect(result.appSecurityService.isReady, isTrue);
+    expect(result.stores.appSettingsStore, same(store));
+  });
+}

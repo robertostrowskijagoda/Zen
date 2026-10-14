@@ -1,0 +1,227 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Runtime request is triggered by QR scanner / WebRTC capture flows. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Runtime request is triggered by voice recorder and WebRTC media capture. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- The always-on service keeps the mesh node (messages, calls, alarms)
+         alive. Android 14+ runs it as specialUse, which has no daily limit
+         (Android 15 stops dataSync services after 6 h in 24 h). dataSync
+         stays for Android 10-13, where the plugin cannot pass specialUse,
+         and for a service restarted with the types an older version saved. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <!-- Screen sharing in calls (Android 14+ needs this service type). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- The mesh node only stays reachable while the foreground service lives.
+         Without the exemption aggressive OEM battery managers kill it (and the
+         plugin cannot restart it from the background on Android 12+). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Network updates (§14.2): hand a downloaded version to the system
+         installer; the person always confirms. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- "Podaj dalej": a local-only hotspot to pass the app on without
+         internet. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <!-- People nearby (§15): Bluetooth LE, never used to find where you are. -->
+    <uses-feature
+        android:name="android.hardware.bluetooth_le"
+        android:required="false" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Hotspot (until Android 12) and the alarm's location (§16.3). -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+    <!-- No backups and no device-to-device copies: keys, messages and the
+         mesh identity must not leave the phone that made them (a new phone
+         is set up through the app's own account recovery). -->
+    <application
+        android:label="Zen"
+        android:name=".ZenApplication"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        tools:replace="android:allowBackup,android:fullBackupContent,android:dataExtractionRules">
+        <meta-data
+            android:name="com.roj.zen.service.NOTIFICATION_ICON"
+            android:resource="@drawable/tiny_notification" />
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <!-- Links are handled by the app (app_links), not by Flutter's
+                 own routing: it would try to open "/…" as a page. -->
+            <meta-data
+              android:name="flutter_deeplinking_enabled"
+              android:value="false"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="zen"/>
+            </intent-filter>
+            <!-- Invitation links (the QR codes:
+                 robertostrowskijagoda.github.io/Zen/#CODE, and the project
+                 page github.com/…/Zen#CODE). Not verified (no own domain),
+                 so Android opens them in Zen only after the person allows it
+                 under "Open by default"; until then the browser shows the
+                 invitation page, which opens Zen itself. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="https"
+                    android:host="robertostrowskijagoda.github.io"/>
+                <data android:pathPrefix="/Zen"/>
+                <data android:pathPrefix="/zen"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="https"
+                    android:host="github.com"/>
+                <data android:path="/robertostrowskijagoda/Zen"/>
+                <data android:path="/robertostrowskijagoda/zen"/>
+            </intent-filter>
+        </activity>
+        <!-- Only ever started by the app itself (explicit intents and the
+             incoming-call notification's full-screen intent), so other apps
+             cannot open it with a forged caller or route. -->
+        <activity
+            android:name=".IncomingCallActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:noHistory="false"
+            android:showOnLockScreen="true"
+            android:showWhenLocked="true"
+            android:taskAffinity="com.roj.zen.incoming_call"
+            android:theme="@style/IncomingCallTheme"
+            android:turnScreenOn="true"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode">
+            <intent-filter>
+                <action android:name="com.roj.zen.INCOMING_CALL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+        <receiver
+            android:name=".IncomingCallActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.roj.zen.ACCEPT_INCOMING_CALL" />
+                <action android:name="com.roj.zen.DECLINE_INCOMING_CALL" />
+            </intent-filter>
+        </receiver>
+        <!-- specialUse: the always-on node (Android 14+); dataSync: the same
+             on Android 10-13; microphone/camera/mediaProjection: only while
+             a call (or screen sharing) runs. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="specialUse|dataSync|microphone|camera|mediaProjection"
+            android:stopWithTask="false"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Peer-to-peer messenger node. Zen has no server and uses no push service: this service keeps end-to-end encrypted connections to the contacts the user added, so that messages, calls and emergency alarms from them reach the phone while the app is closed. It runs with a visible ongoing notification." />
+        </service>
+        <!-- "Podaj dalej": hands a copy of the app's installer (cache/shared_apk
+             only) to the system share sheet, e.g. Quick Share or Bluetooth. -->
+        <provider
+            android:name=".ZenFileProvider"
+            android:authorities="${applicationId}.zenshare"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/zen_share_paths" />
+        </provider>
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Root / hooking tools the integrity check looks for
+             (ZenSecurityBridge.integrity); invisible without this on
+             Android 11+. -->
+        <package android:name="com.topjohnwu.magisk" />
+        <package android:name="eu.chainfire.supersu" />
+        <package android:name="com.noshufou.android.su" />
+        <package android:name="com.koushikdutta.superuser" />
+        <package android:name="com.thirdparty.superuser" />
+        <package android:name="com.kingroot.kinguser" />
+        <package android:name="de.robv.android.xposed.installer" />
+        <package android:name="org.lsposed.manager" />
+        <package android:name="io.github.lsposed.manager" />
+    </queries>
+</manifest>

@@ -1,0 +1,78 @@
+name: zen
+description: "Zen: a network of people who know each other, with no servers, ads or algorithm."
+publish_to: 'none'
+
+# The same number is in lib/src/app/app_version.dart (a test checks it).
+version: 1.10.0+10
+
+environment:
+  sdk: ^3.11.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  ffi: ^2.1.4
+  file_picker: ^10.3.3
+  flutter_riverpod: ^3.3.1
+  crypto: ^3.0.6
+  mime: ^2.0.0
+  video_player: ^2.10.0
+  video_player_win: ^3.2.2
+  path_provider: ^2.1.5
+  qr_flutter: ^4.1.0
+  qr_code_dart_scan: ^0.11.5
+  record: ^6.2.0
+  zstandard: ^1.5.0
+  flutter_local_notifications: ^21.0.0
+  flutter_foreground_task: ^9.2.1
+  cryptography: ^2.9.0
+  flutter_secure_storage: ^10.0.0
+  local_auth: ^2.3.0
+  system_tray: ^2.0.3
+  window_manager: ^0.5.1
+  flutter_webrtc: ^1.4.1
+  app_links: ^6.0.0
+  image_picker: ^1.2.3
+  image: ^4.8.0
+  geolocator: ^14.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+# system_tray 2.0.3 pins uuid ^3 while geolocator_android needs uuid >= 4;
+# system_tray only calls `const Uuid().v1()`, which uuid 4 keeps unchanged.
+dependency_overrides:
+  uuid: ^4.5.1
+
+flutter:
+  uses-material-design: true
+
+  fonts:
+    - family: Fredoka
+      fonts:
+        - asset: assets/fonts/Fredoka-Variable.ttf
+    - family: Hanken Grotesk
+      fonts:
+        - asset: assets/fonts/HankenGrotesk-Variable.ttf
+    - family: JetBrains Mono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Variable.ttf
+    - family: Space Mono
+      fonts:
+        - asset: assets/fonts/SpaceMono-Regular.ttf
+        - asset: assets/fonts/SpaceMono-Bold.ttf
+          weight: 700
+    - family: DM Sans
+      fonts:
+        - asset: assets/fonts/DMSans-Variable.ttf
+
+  assets:
+    - assets/branding/
+    # Licenses of the Go bridge's modules (tool/go_licenses.dart) and fonts.
+    - assets/licenses/go/
+    - assets/licenses/fonts/
