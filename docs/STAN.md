@@ -59,7 +59,7 @@ Zmiany ostatniej rundy: `CHANGELOG.md`, 1.10.0.
 | **Nazwa znajomego z jego profilu, nieedytowalna; lokalny pseudonim pod nią** | dwie osoby mogą mieć tę samą nazwę — odróżnia je pseudonim i zdjęcie |
 | Kod zaproszenia bez mostów (8.10.2026) | nowa osoba startuje z publicznych węzłów |
 | Pakiet Androida `com.roj.zen` (był `com.HuraganKodu.zen`) | to nowa aplikacja: stara instalacja zostaje obok z danymi; konto przenosi się podłączeniem urządzenia (§6.5), potem starą można odinstalować |
-| Licencja: wolno budować z niezmienionego kodu (także dla innych) i rozpowszechniać kopie, których SHA-256 zgadza się z opublikowanym; własnej kompilacji nie wolno publikować jako „Zen”; forki zakazane | ciągłość projektu zależy od autora (§6 pkt 4) |
+| Licencja (14.10.2026): PolyForm Strict 1.0.0 z dodatkowymi zezwoleniami — tylko użycie niekomercyjne; wolno czytać kod, wysyłać pull requesty, budować dla siebie i przekazywać niezmienione wydania (ta sama suma SHA-256); autor i zbiórka muszą zostać; forki i zmienione wersje zakazane | ciągłość projektu zależy od autora (§6 pkt 4); firmy nie mogą używać Zen bez zgody autora |
 | Biometria domyślnie wyłączona; blokada domyślnie po 5 min w tle | — |
 | Asystent AI usunięty (V1.9) | — |
 | Piramida bez partii (14.10.2026) | polityka to głosowania i delegowanie, bez list wyborczych |

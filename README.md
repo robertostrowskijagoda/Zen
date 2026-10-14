@@ -214,11 +214,16 @@ Jeżeli masz dla mnie pracę, daj znać — znajdziesz mnie między innymi na Li
 
 ## Licencja
 
-Kod jest **jawny**: można go czytać, analizować (także pod kątem bezpieczeństwa),
-budować, zgłaszać błędy i wysyłać pull requesty, a aplikację wolno rozpowszechniać
-za darmo. **Nie wolno** publikować przerobionych wersji, usuwać ani podmieniać zbiórki,
-dodawać własnych zbiórek czy reklam ani sprzedawać aplikacji.
-Szczegóły: [LICENSE](LICENSE).
+Zen jest na licencji [PolyForm Strict 1.0.0](https://polyformproject.org/licenses/strict/1.0.0)
+z dodatkowymi zezwoleniami autora — szczegóły w [LICENSE](LICENSE). W skrócie:
+
+- **wolno:** czytać i analizować kod (także pod kątem bezpieczeństwa), zgłaszać
+  błędy i wysyłać pull requesty, budować Zen dla siebie i przekazywać innym
+  niezmienione oficjalne wydania (ta sama suma SHA-256) — za darmo;
+- **nie wolno:** używać Zen komercyjnie, publikować przerobionych wersji ani
+  forków, usuwać autora ani zbiórki, dodawać reklam czy własnych zbiórek,
+  sprzedawać aplikacji;
+- prawa autorskie zostają przy autorze; zgodę na wyjątki daje tylko on.
 
 Zgłoszenia błędów i propozycje: [Issues](https://github.com/robertostrowskijagoda/Zen/issues).
 
