@@ -48,8 +48,8 @@ const List<_ShellTab> _shellTabs = <_ShellTab>[
   _ShellTab(
     id: 'feed',
     label: 'Tablica',
-    icon: Icons.dynamic_feed_outlined,
-    selectedIcon: Icons.dynamic_feed_rounded,
+    icon: Icons.newspaper_outlined,
+    selectedIcon: Icons.newspaper_rounded,
   ),
   _ShellTab(
     id: 'meet',
@@ -72,16 +72,16 @@ const List<_ShellTab> _shellTabs = <_ShellTab>[
   _ShellTab(
     id: 'pyramid',
     label: 'Piramida',
-    icon: Icons.change_history_rounded,
-    selectedIcon: Icons.change_history_rounded,
+    icon: kPyramidIcon,
+    selectedIcon: kPyramidIcon,
     glyph: _pyramidGlyph,
   ),
   // The points wallet, right before Bluetooth (§18).
   _ShellTab(
     id: 'wallet',
     label: 'Portfel',
-    icon: Icons.account_balance_wallet_outlined,
-    selectedIcon: Icons.account_balance_wallet_rounded,
+    icon: Icons.attach_money_rounded,
+    selectedIcon: Icons.attach_money_rounded,
   ),
   // Bluetooth "people nearby" sits right before the invite QR (§12).
   _ShellTab(

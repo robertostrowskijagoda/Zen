@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 
 /// Building blocks of the app's look: feature tiles, section headers, hero
@@ -53,7 +54,7 @@ class ZenIconBadge extends StatelessWidget {
         ),
         border: Border.all(color: t.withValues(alpha: 0.28)),
       ),
-      child: Icon(icon, color: t, size: size * 0.5),
+      child: ZenIcon(icon, color: t, size: size * 0.5),
     );
   }
 }
@@ -377,7 +378,7 @@ class ZenHero extends StatelessWidget {
               ),
               if (icon != null) ...<Widget>[
                 const SizedBox(width: 12),
-                Icon(icon, color: t, size: 30),
+                ZenIcon(icon!, color: t, size: 30),
               ],
             ],
           ),
@@ -438,7 +439,7 @@ class ZenEmpty extends StatelessWidget {
                 ],
               ),
             ),
-            child: Icon(icon, size: 38, color: t),
+            child: ZenIcon(icon, size: 38, color: t),
           ),
           const SizedBox(height: 16),
           Text(
@@ -499,7 +500,7 @@ class ZenInfo extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(icon, color: t, size: 20),
+          ZenIcon(icon, color: t, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -562,8 +563,8 @@ class ZenPill extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           if (icon != null) ...<Widget>[
-            Icon(
-              icon,
+            ZenIcon(
+              icon!,
               size: 13,
               color: filled ? ZenColors.foregroundFor(t) : t,
             ),

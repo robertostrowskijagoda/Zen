@@ -646,7 +646,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
             ? const Center(
                 child: SingleChildScrollView(
                   child: ZenEmpty(
-                    icon: Icons.dynamic_feed_rounded,
+                    icon: Icons.newspaper_rounded,
                     title: 'Tablica jest wyłączona.',
                   ),
                 ),
@@ -743,7 +743,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                   if (posts.isEmpty)
                     const ZenEmpty(
                       key: Key('feed-end'),
-                      icon: Icons.dynamic_feed_rounded,
+                      icon: Icons.newspaper_rounded,
                       title: 'Nic tu jeszcze nie ma od znajomych.',
                       text:
                           'Gdy znajomi coś opublikują, zobaczysz to tutaj — '

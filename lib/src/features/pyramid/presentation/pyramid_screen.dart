@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
@@ -555,7 +556,7 @@ class _JoinViewState extends ConsumerState<_JoinView> {
                       decoration: const InputDecoration(
                         labelText: 'Nazwa piramidy / ruchu',
                         hintText: 'np. Sąsiedzi z Mokotowa',
-                        prefixIcon: Icon(Icons.account_tree_rounded),
+                        prefixIcon: ZenIcon(kPyramidIcon),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -727,7 +728,7 @@ class _JoinViewState extends ConsumerState<_JoinView> {
       children: <Widget>[
         ZenHero(
           title: 'Piramida ludzi, którzy się znają',
-          icon: Icons.account_tree_rounded,
+          icon: kPyramidIcon,
           tone: tone,
           text:
               'Komórki po trzy osoby, każdy przyjęty osobiście przez znajomego. '

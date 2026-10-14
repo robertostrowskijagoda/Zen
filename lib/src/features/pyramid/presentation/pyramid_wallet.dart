@@ -986,11 +986,7 @@ class PyramidWallet extends StatelessWidget {
               children: <Widget>[
                 Row(
                   children: <Widget>[
-                    Icon(
-                      Icons.account_balance_wallet_rounded,
-                      color: tone,
-                      size: 22,
-                    ),
+                    Icon(Icons.attach_money_rounded, color: tone, size: 22),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -1204,7 +1200,7 @@ class PyramidWallet extends StatelessWidget {
                   _row(
                     zen: zen,
                     leading: ZenIconBadge(
-                      icon: Icons.account_balance_wallet_outlined,
+                      icon: Icons.attach_money_rounded,
                       tone: zen.textMuted,
                       size: 36,
                     ),

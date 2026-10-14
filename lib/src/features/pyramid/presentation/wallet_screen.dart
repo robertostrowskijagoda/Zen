@@ -49,7 +49,7 @@ class _EmptyWallet extends StatelessWidget {
       children: <Widget>[
         Center(
           child: ZenIconBadge(
-            icon: Icons.account_balance_wallet_rounded,
+            icon: Icons.attach_money_rounded,
             tone: zen.accent,
             size: 64,
           ),
