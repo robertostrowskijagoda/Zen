@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
@@ -648,7 +649,7 @@ class _EconomyNote extends StatelessWidget {
       children: <Widget>[
         ZenInfo(
           key: const Key('intro-pyramid-note'),
-          icon: Icons.change_history_rounded,
+          icon: kPyramidIcon,
           tone: zenTone(zen, 2),
           title: 'Jesteście w jednej piramidzie',
           text:

@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
@@ -31,7 +32,7 @@ enum _GraphFilter {
   all('Wszyscy', Icons.hub_rounded),
   friends('Znajomi', Icons.people_alt_rounded),
   far('Znajomi znajomych', Icons.person_search_rounded),
-  pyramid('Z mojej piramidy', Icons.change_history_rounded),
+  pyramid('Z mojej piramidy', kPyramidIcon),
   status('Ze statusem', Icons.bolt_rounded),
   nearby('W pobliżu', Icons.bluetooth_searching_rounded);
 
@@ -763,7 +764,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                     ChoiceChip(
                       key: Key('graph-filter-${f.name}'),
                       showCheckmark: false,
-                      avatar: Icon(f.icon, size: 18),
+                      avatar: ZenIcon(f.icon, size: 18),
                       label: Text(f.label),
                       selected: _filter == f,
                       onSelected: (_) => setState(() => _filter = f),

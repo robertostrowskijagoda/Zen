@@ -1,5 +1,31 @@
 import 'package:flutter/material.dart';
 
+/// The Material icon that stands for the pyramid anywhere an [IconData] is
+/// taken ([ZenIcon] draws it as [PyramidGlyph]).
+const IconData kPyramidIcon = Icons.change_history_rounded;
+
+/// An [Icon], except that [kPyramidIcon] is drawn as the pyramid glyph, so
+/// the pyramid looks the same in the rail, headers, badges and chips.
+class ZenIcon extends StatelessWidget {
+  const ZenIcon(this.icon, {this.color, this.size, super.key});
+
+  final IconData icon;
+  final Color? color;
+  final double? size;
+
+  @override
+  Widget build(BuildContext context) {
+    if (icon != kPyramidIcon) {
+      return Icon(icon, color: color, size: size);
+    }
+    final IconThemeData theme = IconTheme.of(context);
+    return PyramidGlyph(
+      color: color ?? theme.color ?? const Color(0xFF888888),
+      size: size ?? theme.size ?? 24,
+    );
+  }
+}
+
 /// The pyramid: three people (circles on the corners) joined into one cell
 /// (the triangle's sides) — the 2-of-3 cell everything in it is built from.
 /// [filled] draws the circles solid (the selected state of a tab).
