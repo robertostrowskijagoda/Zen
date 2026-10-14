@@ -1,0 +1,128 @@
+# A version tag (v1.10.0, …) builds the release files: Zen.apk (signed with
+# the release key from the repository secrets), Zen-Windows.zip,
+# LICENSES-GO.txt and SHA256SUMS, and attaches them to a draft release of
+# that tag (the iOS workflow adds Zen-unsigned.ipa). Publish the draft by
+# hand after checking it (docs/WYDANIA.md, section 3).
+#
+# Secrets for signing the APK (without them the APK is not built):
+#   ANDROID_KEYSTORE_BASE64  the .jks file, base64
+#   ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: '3.47.1'
+
+jobs:
+  build:
+    name: Android and Windows
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache-dependency-path: native/yggdrasil_bridge/go.sum
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Packages
+        run: flutter pub get
+
+      - name: Release key
+        id: key
+        shell: pwsh
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if (-not $env:KEYSTORE) {
+            Write-Output "::warning::No release key in the secrets: Zen.apk is not built."
+            "ready=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          $jks = Join-Path $env:RUNNER_TEMP 'zen-release.jks'
+          [IO.File]::WriteAllBytes($jks, [Convert]::FromBase64String($env:KEYSTORE))
+          @(
+            "storeFile=$($jks -replace '\\', '/')"
+            "storePassword=$env:STORE_PASSWORD"
+            "keyAlias=$env:KEY_ALIAS"
+            "keyPassword=$env:KEY_PASSWORD"
+          ) | Set-Content -Encoding ascii android/key.properties
+          "ready=true" >> $env:GITHUB_OUTPUT
+
+      - name: Android (the Go bridge builds itself)
+        if: steps.key.outputs.ready == 'true'
+        run: flutter build apk --release
+
+      - name: Windows (the Go bridge builds itself)
+        run: flutter build windows --release
+
+      - name: Release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          if (Test-Path build/app/outputs/flutter-apk/app-release.apk) {
+            Copy-Item build/app/outputs/flutter-apk/app-release.apk dist/Zen.apk
+          }
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dist/Zen-Windows.zip
+          Copy-Item native/yggdrasil_bridge/LICENSES-GO.txt dist/
+          Push-Location dist
+          Get-ChildItem -File | Sort-Object Name | ForEach-Object {
+            "$((Get-FileHash -Algorithm SHA256 $_.Name).Hash.ToLower())  $($_.Name)"
+          } | Set-Content -Encoding ascii SHA256SUMS
+          Get-Content SHA256SUMS
+          Pop-Location
+
+      - name: Forget the release key
+        if: always()
+        shell: pwsh
+        run: |
+          Remove-Item -Force -ErrorAction SilentlyContinue android/key.properties
+          Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $env:RUNNER_TEMP 'zen-release.jks')
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: zen-release
+          path: dist/
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:TAG --draft --title $env:TAG `
+              --notes "Wersja robocza. Opis: CHANGELOG.md, odcisk certyfikatu i sumy SHA-256." `
+              --repo $env:GITHUB_REPOSITORY
+          }
+          gh release upload $env:TAG (Get-ChildItem dist -File).FullName --clobber --repo $env:GITHUB_REPOSITORY

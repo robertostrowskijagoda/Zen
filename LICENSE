@@ -1,0 +1,108 @@
+Zen Source-Available License 1.0
+Licencja Zen (kod dostępny) 1.0
+
+Copyright (c) 2026 Robert Ostrowski-Jagoda. Wszelkie prawa zastrzeżone. All rights reserved.
+
+--------------------------------------------------------------------------
+WERSJA POLSKA (wiążąca)
+--------------------------------------------------------------------------
+
+1. DEFINICJE
+   "Oprogramowanie" oznacza aplikację Zen: kod źródłowy, zasoby, dokumentację
+   i pliki wydań opublikowane przez autora w oficjalnym repozytorium.
+   "Autor" oznacza Roberta Ostrowskiego-Jagodę, posiadacza praw autorskich.
+   "Ty" oznacza osobę lub podmiot korzystający z Oprogramowania.
+
+2. CO WOLNO (licencja niewyłączna, bezpłatna, na czas nieoznaczony)
+   a) Pobierać, czytać i analizować kod źródłowy w dowolnym celu, w tym
+      badać jego bezpieczeństwo i publikować wyniki takich analiz (z
+      cytatami kodu w zakresie niezbędnym do ich przedstawienia).
+   b) Budować Oprogramowanie z niezmienionego kodu źródłowego — dla siebie
+      i dla innych osób (np. zbudować i dać znajomemu), bezpłatnie.
+   c) Uruchamiać i używać Oprogramowania bezpłatnie.
+   d) Rozpowszechniać bezpłatnie kopie Oprogramowania z dowolnego źródła
+      (w tym "z ręki do ręki", przez lustra, repozytoria aplikacji,
+      nośniki), jeżeli suma kontrolna SHA-256 pliku zgadza się z sumą
+      opublikowaną przez Autora dla danej wersji — czyli jest to
+      niezmieniony plik oficjalnego wydania. Kopię zbudowaną samodzielnie
+      (pkt b) można przekazać innym osobom bezpośrednio, ale nie wolno jej
+      publikować jako "Zen" ani podawać za oficjalne wydanie.
+   e) Zgłaszać błędy oraz proponować zmiany przez pull requesty do
+      oficjalnego repozytorium (przekazując Autorowi niewyłączne,
+      nieodpłatne prawo do ich wykorzystania w Oprogramowaniu).
+
+3. CZEGO NIE WOLNO (bez uprzedniej pisemnej zgody Autora)
+   a) Modyfikować, przerabiać, tłumaczyć ani tworzyć utworów zależnych
+      Oprogramowania i rozpowszechniać ich; dotyczy to także forków
+      publikowanych jako osobna, działająca aplikacja. (Dozwolone są
+      lokalne zmiany oraz fork w serwisie GitHub wyłącznie w celu
+      przygotowania pull requesta do oficjalnego repozytorium.)
+   b) Usuwać, ukrywać, podmieniać ani przekierowywać informacji o zbiórce
+      Autora, odnośników do niej, danych płatniczych ani informacji o
+      autorstwie i prawach autorskich.
+   c) Dodawać własnych zbiórek, próśb o wpłaty, reklam, treści sponsorowanych,
+      modułów analitycznych ani mechanizmów płatności do Oprogramowania lub
+      jego kopii rozpowszechnianych innym.
+   d) Sprzedawać Oprogramowania, pobierać opłat za jego udostępnianie ani
+      oferować go jako części płatnego produktu lub usługi bez zgody
+      Autora. (Samo używanie aplikacji, także w pracy, jest dozwolone.)
+   e) Usuwać lub obchodzić zabezpieczeń, podszywać się pod oficjalne wydania
+      ani rozpowszechniać przerobionych wersji jako "Zen".
+   f) Używać nazwy "Zen", logo ani znaków Autora w sposób sugerujący
+      poparcie Autora dla wersji innej niż oficjalna.
+
+4. ZASTRZEŻENIE DLA AUTORA
+   Autorowi przysługują wszystkie prawa, których niniejsza licencja wyraźnie
+   nie przyznaje. Autor może wydawać Oprogramowanie równolegle na innych
+   warunkach.
+
+5. WYGAŚNIĘCIE
+   Naruszenie którejkolwiek zasady z pkt 3 powoduje automatyczne i
+   natychmiastowe wygaśnięcie udzielonych Ci praw.
+
+6. BRAK GWARANCJI
+   OPROGRAMOWANIE DOSTARCZANE JEST "TAK JAK JEST", BEZ JAKIEJKOLWIEK
+   GWARANCJI. W NAJSZERSZYM DOPUSZCZALNYM PRAWEM ZAKRESIE AUTOR NIE PONOSI
+   ODPOWIEDZIALNOŚCI ZA JAKIEKOLWIEK SZKODY WYNIKAJĄCE Z UŻYCIA
+   OPROGRAMOWANIA.
+
+7. PRAWO WŁAŚCIWE
+   Licencja podlega prawu polskiemu, w szczególności ustawie o prawie
+   autorskim i prawach pokrewnych.
+
+Uwaga: to licencja "kod dostępny" (source-available), a nie licencja open
+source w rozumieniu Open Source Initiative — zabrania modyfikacji.
+
+--------------------------------------------------------------------------
+ENGLISH VERSION (for convenience; the Polish version prevails)
+--------------------------------------------------------------------------
+
+This is a source-available, no-derivatives license (not an OSI open
+source license).
+
+You MAY: view, study and analyse the source, including security research
+and publishing its results; build it from the unmodified source for
+yourself and for other people (e.g. build it and hand it to a friend), for
+free; run and use it for free; redistribute for free, from any source
+(hand-to-hand, mirrors, app repositories, media), any copy whose SHA-256
+checksum matches the one the Author published for that version (i.e. an
+unmodified official release file) — a self-built copy may be handed to
+others directly but must not be published as "Zen" or presented as an
+official release; report bugs; and submit pull requests to the official
+repository (granting the Author a non-exclusive, royalty-free right to use
+them).
+
+You MAY NOT, without the Author's prior written permission: modify the
+Software or create and distribute derivative works (local changes, and a
+GitHub fork, solely to prepare a pull request are allowed); remove, hide,
+replace or redirect the Author's fundraising links/details or the
+authorship/copyright notices; add your own fundraising, donation prompts,
+ads or analytics; sell the Software, charge for it or offer it as part of a
+paid product or service (simply using the app, including at work, is
+allowed); remove or bypass security measures or distribute modified builds
+as "Zen"; or use the "Zen" name/logo to imply the Author endorses a
+non-official build.
+
+The Author reserves all rights not expressly granted. Rights end
+automatically on any breach. The Software is provided "AS IS", without
+warranty of any kind. Polish law governs this license.

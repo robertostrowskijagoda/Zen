@@ -1,0 +1,1402 @@
+part of 'app_shell_screen.dart';
+
+/// Carries the enclosing panel's accent hue down the tree, so nested
+/// decorations (section headings, hairlines) match the panel they sit in
+/// instead of always falling back to the primary accent.
+class _PanelTone extends InheritedWidget {
+  const _PanelTone({required this.tone, required super.child});
+
+  final Color tone;
+
+  static Color of(BuildContext context, Color fallback) {
+    return context.dependOnInheritedWidgetOfExactType<_PanelTone>()?.tone ??
+        fallback;
+  }
+
+  @override
+  bool updateShouldNotify(_PanelTone oldWidget) => oldWidget.tone != tone;
+}
+
+class _Panel extends StatelessWidget {
+  const _Panel({
+    super.key,
+    required this.child,
+    this.onTap,
+    // ignore: unused_element_parameter
+    this.glow = false,
+    // ignore: unused_element_parameter
+    this.borderColor,
+    this.accentTone,
+  });
+
+  final Widget child;
+  final VoidCallback? onTap;
+
+  /// Lifts the panel a little (raised fill and a soft accent glow) —
+  /// reserved for the single most important surface on a page.
+  final bool glow;
+
+  /// Overrides the default soft outline (e.g. an accent tint for cards
+  /// that need attention).
+  final Color? borderColor;
+
+  /// Hue this panel is tinted with - a faint wash in the corner and the
+  /// outline derive from it. Defaults to a neutral card.
+  final Color? accentTone;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final Color tone = accentTone ?? zen.accent;
+    final BorderRadius radius = BorderRadius.circular(22);
+    final Color base = glow ? zen.surfaceRaised : zen.surface;
+    final Widget content = _PanelTone(
+      tone: tone,
+      child: Padding(padding: const EdgeInsets.all(16), child: child),
+    );
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        gradient: LinearGradient(
+          colors: <Color>[
+            Color.alphaBlend(
+              tone.withValues(alpha: accentTone == null ? 0.03 : 0.08),
+              base,
+            ),
+            base,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          stops: const <double>[0, 0.7],
+        ),
+        border: Border.all(
+          color:
+              borderColor ??
+              (accentTone == null
+                  ? zen.outlineSoft
+                  : tone.withValues(alpha: 0.26)),
+        ),
+        boxShadow: glow
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: tone.withValues(alpha: 0.14),
+                  blurRadius: 24,
+                  spreadRadius: -6,
+                  offset: const Offset(0, 8),
+                ),
+              ]
+            : null,
+      ),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: Material(
+          type: MaterialType.transparency,
+          child: onTap == null
+              ? content
+              : InkWell(
+                  onTap: onTap,
+                  splashColor: tone.withValues(alpha: 0.08),
+                  highlightColor: tone.withValues(alpha: 0.04),
+                  child: content,
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The head of a panel: a tinted icon badge, a title and a line or two of
+/// explanation, with an optional status pill under the title.
+class _PanelHeader extends StatelessWidget {
+  const _PanelHeader({
+    required this.icon,
+    required this.title,
+    this.caption,
+    this.tone,
+    this.pill,
+    // ignore: unused_element_parameter
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? caption;
+  final Color? tone;
+  final Widget? pill;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final Color t = tone ?? _PanelTone.of(context, zen.accent);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        ZenIconBadge(icon: icon, tone: t, size: 42),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: zen.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                  ),
+                ),
+              ),
+              if (pill != null) ...<Widget>[const SizedBox(height: 6), pill!],
+              if (caption != null && caption!.trim().isNotEmpty) ...<Widget>[
+                const SizedBox(height: 6),
+                Text(
+                  caption!,
+                  style: TextStyle(
+                    color: zen.textSecondary,
+                    fontSize: 13.5,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (trailing != null) ...<Widget>[const SizedBox(width: 4), trailing!],
+      ],
+    );
+  }
+}
+
+class _SectionIntro extends StatelessWidget {
+  const _SectionIntro({required this.title, this.caption = ''});
+
+  final String title;
+  final String caption;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final Color tone = _PanelTone.of(context, zen.textMuted);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        ZenLabel(title, color: tone),
+        if (caption.trim().isNotEmpty) ...<Widget>[
+          const SizedBox(height: 6),
+          Text(
+            caption,
+            style: TextStyle(
+              color: zen.textSecondary,
+              height: 1.4,
+              fontSize: 13.5,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.label, required this.tone});
+
+  final String label;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    return ZenPill(text: label, tone: tone);
+  }
+}
+
+class _MetricTile extends StatelessWidget {
+  const _MetricTile({
+    required this.label,
+    required this.value,
+    this.toneIndex = 0,
+  });
+
+  final String label;
+  final String value;
+
+  /// Which tone of the palette this tile wears, so a row of metrics reads
+  /// as a set of distinct values.
+  final int toneIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final Color tone = zenTone(zen, toneIndex);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(tone.withValues(alpha: 0.08), zen.surface),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: tone.withValues(alpha: 0.22)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                value,
+                maxLines: 1,
+                style: zen.display(
+                  color: tone,
+                  size: 22,
+                  weight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: zen.textSecondary,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RuntimeErrorNotice extends StatelessWidget {
+  const _RuntimeErrorNotice({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return ZenInfo(
+      text: message,
+      title: 'Coś poszło nie tak',
+      icon: Icons.error_outline_rounded,
+      tone: zen.danger,
+    );
+  }
+}
+
+class _ServiceActions extends ConsumerWidget {
+  const _ServiceActions({required this.state});
+
+  final AppShellState state;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AppShellController controller = ref.read(
+      appShellControllerProvider.notifier,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _ServiceButton(
+          key: const Key('service-reset-button'),
+          icon: Icons.restart_alt_rounded,
+          title: 'Resetuj sieć',
+          onPressed: controller.resetService,
+        ),
+        const SizedBox(height: 8),
+        _ServiceButton(
+          key: const Key('service-toggle-button'),
+          icon: state.serviceRunning
+              ? Icons.stop_circle_outlined
+              : Icons.play_circle_outline_rounded,
+          title: state.toggleLabel,
+          onPressed: controller.toggleService,
+          isDestructive: state.serviceRunning,
+        ),
+      ],
+    );
+  }
+}
+
+class _ServiceButton extends StatelessWidget {
+  const _ServiceButton({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.onPressed,
+    this.isDestructive = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final VoidCallback onPressed;
+  final bool isDestructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final Color tone = isDestructive ? zen.danger : zen.accent;
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: tone,
+        backgroundColor: tone.withValues(alpha: 0.06),
+        side: BorderSide(color: tone.withValues(alpha: 0.4)),
+        minimumSize: const Size.fromHeight(48),
+      ),
+      icon: Icon(icon, size: 20),
+      label: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+    );
+  }
+}
+
+/// The unread count of a chat: a small accent capsule.
+class _UnreadBadge extends StatelessWidget {
+  const _UnreadBadge(this.count, {super.key});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return Container(
+      constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+      padding: const EdgeInsets.symmetric(horizontal: 7),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: <Color>[zen.accent, zen.accentSecondary],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: zen.accent.withValues(alpha: 0.35),
+            blurRadius: 10,
+            spreadRadius: -3,
+          ),
+        ],
+      ),
+      child: Text(
+        count > 99 ? '99+' : '$count',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: zen.onAccent,
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          height: 1.1,
+        ),
+      ),
+    );
+  }
+}
+
+/// A row of a chat list: avatar, name and time on top, last message and the
+/// unread count below.
+class _ChatRow extends StatelessWidget {
+  const _ChatRow({
+    required this.avatar,
+    required this.name,
+    required this.preview,
+    required this.highlight,
+    this.nameBadge,
+    this.meta,
+    this.unreadBadge,
+    this.nickname = '',
+  });
+
+  final Widget avatar;
+  final String name;
+
+  /// What the user calls them, a small line under [name] ('' for none).
+  final String nickname;
+  final Widget preview;
+  final bool highlight;
+  final Widget? nameBadge;
+  final String? meta;
+  final Widget? unreadBadge;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return Row(
+      children: <Widget>[
+        avatar,
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Row(
+                      children: <Widget>[
+                        Flexible(
+                          child: Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: zen.textPrimary,
+                              fontSize: 15.5,
+                              fontWeight: highlight
+                                  ? FontWeight.w800
+                                  : FontWeight.w700,
+                              height: 1.2,
+                            ),
+                          ),
+                        ),
+                        if (nameBadge != null) ...<Widget>[
+                          const SizedBox(width: 6),
+                          nameBadge!,
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (meta != null) ...<Widget>[
+                    const SizedBox(width: 8),
+                    Text(
+                      meta!,
+                      maxLines: 1,
+                      style: TextStyle(
+                        color: highlight ? zen.accent : zen.textMuted,
+                        fontSize: 12,
+                        fontWeight: highlight
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              if (nickname.isNotEmpty)
+                Text(
+                  nickname,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: zen.textMuted,
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                    height: 1.3,
+                  ),
+                ),
+              const SizedBox(height: 4),
+              Row(
+                children: <Widget>[
+                  Expanded(child: preview),
+                  if (unreadBadge != null) ...<Widget>[
+                    const SizedBox(width: 8),
+                    unreadBadge!,
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ConversationCard extends ConsumerStatefulWidget {
+  const _ConversationCard({required this.conversation});
+
+  final ConversationPreview conversation;
+
+  @override
+  ConsumerState<_ConversationCard> createState() => _ConversationCardState();
+}
+
+class _ConversationCardState extends ConsumerState<_ConversationCard> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final ConversationPreview conversation = widget.conversation;
+    final bool hasUnread =
+        conversation.status == FriendRelationshipStatus.accepted &&
+        conversation.unreadCount > 0;
+    final bool pending =
+        conversation.status == FriendRelationshipStatus.pendingOutgoing;
+    final BorderRadius radius = BorderRadius.circular(20);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          key: Key('conversation-card-${conversation.address}'),
+          borderRadius: radius,
+          onTap: () {
+            _openConversationScreen(
+              context,
+              peerAddress: conversation.address,
+              title: conversation.name,
+            );
+          },
+          onHover: (bool hovering) => setState(() => _isHovered = hovering),
+          onLongPress: () {
+            _showConversationActionSheet(context, ref, conversation);
+          },
+          onSecondaryTap: () {
+            _showConversationActionSheet(context, ref, conversation);
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: radius,
+              color: _isHovered
+                  ? zen.surface
+                  : (hasUnread
+                        ? zen.accent.withValues(alpha: 0.06)
+                        : Colors.transparent),
+              border: Border.all(
+                color: _isHovered ? zen.outlineSoft : Colors.transparent,
+              ),
+            ),
+            child: _ChatRow(
+              highlight: hasUnread,
+              avatar: ZenBlobAvatar(
+                name: conversation.name,
+                size: 50,
+                online: conversation.isOnline && !pending,
+                image: peerAvatarImage(conversation.avatarPath),
+              ),
+              name: conversation.name,
+              nickname: conversation.nickname,
+              nameBadge: pending
+                  ? _StatusPill(label: 'Oczekuje', tone: zen.warning)
+                  : null,
+              meta: conversation.timeLabel,
+              preview: conversation.isTyping
+                  ? Row(
+                      children: <Widget>[
+                        Text(
+                          'Pisze...',
+                          style: TextStyle(
+                            color: zen.accent,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        ZenAnimatedDots(color: zen.accent, size: 3),
+                      ],
+                    )
+                  : Text(
+                      conversation.lastMessage,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: hasUnread ? zen.textPrimary : zen.textSecondary,
+                        fontSize: 13.5,
+                        fontWeight: hasUnread
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                        fontStyle: pending
+                            ? FontStyle.italic
+                            : FontStyle.normal,
+                      ),
+                    ),
+              unreadBadge: hasUnread
+                  ? _UnreadBadge(
+                      conversation.unreadCount,
+                      key: Key('conversation-unread-${conversation.address}'),
+                    )
+                  : null,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The grab handle on top of a bottom sheet.
+class _SheetHandle extends StatelessWidget {
+  const _SheetHandle();
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return Center(
+      child: Container(
+        width: 40,
+        height: 4,
+        decoration: BoxDecoration(
+          color: zen.outlineStrong,
+          borderRadius: BorderRadius.circular(2),
+        ),
+      ),
+    );
+  }
+}
+
+/// One action of a bottom sheet: a tinted icon badge and a label.
+class _SheetAction extends StatelessWidget {
+  const _SheetAction({
+    required this.icon,
+    required this.label,
+    required this.tone,
+    required this.onTap,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color tone;
+  final VoidCallback onTap;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return ListTile(
+      leading: ZenIconBadge(icon: icon, tone: tone, size: 38),
+      title: Text(
+        label,
+        style: TextStyle(
+          color: danger ? tone : zen.textPrimary,
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      onTap: onTap,
+    );
+  }
+}
+
+RoundedRectangleBorder _sheetShape() => const RoundedRectangleBorder(
+  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+);
+
+void _showConversationActionSheet(
+  BuildContext context,
+  WidgetRef ref,
+  ConversationPreview conversation,
+) {
+  final ZenColors zen = ZenColors.of(context);
+  final bool pending =
+      conversation.status == FriendRelationshipStatus.pendingOutgoing;
+  final bool online = conversation.isOnline && !pending;
+
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: zen.surfaceRaised,
+    shape: _sheetShape(),
+    isScrollControlled: true,
+    builder: (BuildContext sheetContext) {
+      return SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              const _SheetHandle(),
+              const SizedBox(height: 18),
+              Row(
+                children: <Widget>[
+                  ZenBlobAvatar(
+                    name: conversation.name,
+                    size: 52,
+                    online: online,
+                    image: peerAvatarImage(conversation.avatarPath),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          conversation.name,
+                          style: zen.display(
+                            color: zen.textPrimary,
+                            size: 20,
+                            weight: FontWeight.w600,
+                            height: 1.15,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 6),
+                        ZenPill(
+                          text: pending
+                              ? 'Zaproszenie wysłane'
+                              : (conversation.isOnline
+                                    ? 'Dostępny'
+                                    : 'Offline'),
+                          tone: pending
+                              ? zen.warning
+                              : (conversation.isOnline
+                                    ? zen.success
+                                    : zen.textMuted),
+                          icon: pending ? Icons.schedule_rounded : Icons.circle,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Divider(height: 1, color: zen.outlineSoft),
+              const SizedBox(height: 8),
+              if (pending) ...<Widget>[
+                _SheetAction(
+                  icon: Icons.cancel_outlined,
+                  label: 'Anuluj zaproszenie',
+                  tone: zen.danger,
+                  danger: true,
+                  onTap: () async {
+                    Navigator.of(sheetContext).pop();
+                    await ref
+                        .read(socialHubControllerProvider.notifier)
+                        .cancelOutgoingRequest(
+                          peerAddress: conversation.address,
+                        );
+                  },
+                ),
+                _SheetAction(
+                  icon: Icons.block_rounded,
+                  label: 'Zablokuj użytkownika',
+                  tone: zen.danger,
+                  danger: true,
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _confirmAndBlockFriend(context, ref, conversation);
+                  },
+                ),
+              ] else ...<Widget>[
+                _SheetAction(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  label: 'Otwórz rozmowę',
+                  tone: zen.accent,
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _openConversationScreen(
+                      context,
+                      peerAddress: conversation.address,
+                      title: conversation.name,
+                    );
+                  },
+                ),
+                _SheetAction(
+                  icon: Icons.edit_outlined,
+                  label: 'Pseudonim',
+                  tone: zenTone(zen, 2),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _promptFriendNickname(context, ref, conversation);
+                  },
+                ),
+                _SheetAction(
+                  icon: Icons.cleaning_services_outlined,
+                  label: 'Wyczyść historię',
+                  tone: zen.warning,
+                  danger: true,
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _confirmAndClearHistory(context, ref, conversation);
+                  },
+                ),
+                _SheetAction(
+                  icon: Icons.person_remove_outlined,
+                  label: 'Usuń znajomego',
+                  tone: zen.danger,
+                  danger: true,
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _confirmAndRemoveFriend(context, ref, conversation);
+                  },
+                ),
+                _SheetAction(
+                  icon: Icons.block_rounded,
+                  label: 'Zablokuj użytkownika',
+                  tone: zen.danger,
+                  danger: true,
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _confirmAndBlockFriend(context, ref, conversation);
+                  },
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
+Future<void> _confirmAndRemoveFriend(
+  BuildContext context,
+  WidgetRef ref,
+  ConversationPreview conversation,
+) async {
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext dialogContext) {
+      final ZenColors zen = ZenColors.of(dialogContext);
+      return AlertDialog(
+        icon: Icon(Icons.person_remove_outlined, color: zen.danger, size: 30),
+        title: const Text('Usunąć znajomego?'),
+        content: Text(
+          'Czy na pewno chcesz usunąć ${conversation.name} z listy kontaktów?',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Anuluj'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: zen.danger,
+              foregroundColor: ZenColors.foregroundFor(zen.danger),
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Usuń'),
+          ),
+        ],
+      );
+    },
+  );
+
+  if (confirmed == true) {
+    await ref
+        .read(socialHubControllerProvider.notifier)
+        .removeFriend(peerAddress: conversation.address);
+  }
+}
+
+Future<void> _confirmAndBlockFriend(
+  BuildContext context,
+  WidgetRef ref,
+  ConversationPreview conversation,
+) async {
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext dialogContext) {
+      final ZenColors zen = ZenColors.of(dialogContext);
+      return AlertDialog(
+        icon: Icon(Icons.block_rounded, color: zen.danger, size: 30),
+        title: const Text('Zablokować użytkownika?'),
+        content: Text(
+          'Czy na pewno chcesz zablokować ${conversation.name}? Nie będziesz otrzymywać wiadomości ani połączeń od tego kontaktu.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Anuluj'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: zen.danger,
+              foregroundColor: ZenColors.foregroundFor(zen.danger),
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Zablokuj'),
+          ),
+        ],
+      );
+    },
+  );
+
+  if (confirmed == true) {
+    await ref
+        .read(socialHubControllerProvider.notifier)
+        .blockFriend(peerAddress: conversation.address);
+  }
+}
+
+Future<void> _confirmAndClearHistory(
+  BuildContext context,
+  WidgetRef ref,
+  ConversationPreview conversation,
+) async {
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext dialogContext) {
+      final ZenColors zen = ZenColors.of(dialogContext);
+      return AlertDialog(
+        icon: Icon(
+          Icons.cleaning_services_outlined,
+          color: zen.warning,
+          size: 30,
+        ),
+        title: const Text('Wyczyścić historię?'),
+        content: Text(
+          'Czy na pewno chcesz usunąć całą historię rozmowy z ${conversation.name}? Tej operacji nie można cofnąć.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Anuluj'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: zen.warning,
+              foregroundColor: ZenColors.foregroundFor(zen.warning),
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Wyczyść'),
+          ),
+        ],
+      );
+    },
+  );
+
+  if (confirmed == true) {
+    await ref
+        .read(socialHubControllerProvider.notifier)
+        .clearConversationHistory(peerAddress: conversation.address);
+  }
+}
+
+Future<void> _promptFriendNickname(
+  BuildContext context,
+  WidgetRef ref,
+  ConversationPreview conversation,
+) async {
+  final FriendProfile? friend = ref
+      .read(socialHubControllerProvider)
+      .friendByAddress(conversation.address);
+  if (friend == null) {
+    return;
+  }
+  final String? nickname = await promptForFriendNickname(
+    context: context,
+    friend: friend.copyWith(displayName: conversation.name),
+  );
+  if (nickname == null || !context.mounted) {
+    return;
+  }
+  try {
+    await ref
+        .read(socialHubControllerProvider.notifier)
+        .setFriendNickname(
+          peerAddress: conversation.address,
+          nickname: nickname,
+        );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            nickname.isEmpty ? 'Usunięto pseudonim' : 'Zapisano pseudonim',
+          ),
+        ),
+      );
+    }
+  } catch (error) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nie udało się zapisać pseudonimu: $error')),
+      );
+    }
+  }
+}
+
+(String groupId, String groupName) _resolveGroupInvite(
+  InboxEntry item,
+  Map<String, GroupProfile> groups,
+) {
+  if (item.routeKey != null) {
+    final Uri? uri = Uri.tryParse(item.routeKey!);
+    if (uri != null &&
+        uri.scheme == 'zen' &&
+        uri.host == 'group' &&
+        uri.pathSegments.isNotEmpty) {
+      final String id = uri.pathSegments.first;
+      final String name =
+          uri.queryParameters['title']?.trim().isNotEmpty == true
+          ? uri.queryParameters['title']!.trim()
+          : (groups[id]?.name ?? 'Grupa');
+      return (id, name);
+    }
+  }
+  String name = item.title;
+  const String prefix = 'Zaproszenie do grupy: ';
+  if (name.startsWith(prefix)) {
+    name = name.substring(prefix.length).trim();
+  }
+  for (final GroupProfile group in groups.values) {
+    if (name.isNotEmpty && group.name == name) {
+      return (group.id, group.name);
+    }
+    if (item.peerAddress != null &&
+        PeerShareCodec.addressesEqual(group.createdById, item.peerAddress!)) {
+      return (group.id, group.name);
+    }
+  }
+  final String fallbackId = 'grp-${item.peerAddress ?? item.id}';
+  final String fallbackName = name.isNotEmpty ? name : 'Grupa';
+  return (fallbackId, fallbackName);
+}
+
+class _InboxCard extends ConsumerWidget {
+  const _InboxCard({required this.item});
+
+  final InboxEntry item;
+
+  /// Joins the group from its invitation. The user stays where they are: the
+  /// group simply shows up in their list, no screen is pushed on them.
+  Future<void> _joinGroup(
+    BuildContext context,
+    WidgetRef ref,
+    String groupId,
+    String groupName,
+  ) async {
+    final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(
+      context,
+    );
+    try {
+      await ref
+          .read(socialHubControllerProvider.notifier)
+          .acceptGroupInvite(
+            groupId: groupId,
+            groupName: groupName,
+            senderAddress: item.peerAddress,
+            inboxEntryId: item.id,
+          );
+      messenger?.showSnackBar(
+        SnackBar(content: Text('Dołączono do grupy „$groupName”.')),
+      );
+    } catch (error) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text('Nie udało się dołączyć: $error')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ZenColors zen = ZenColors.of(context);
+    final RuntimeRouteIntent? launchIntent = runtimeRouteIntentFromRouteKey(
+      id: item.id,
+      routeKey: item.routeKey,
+    );
+    final String? peerAddress = item.peerAddress;
+    final bool canRespondToRequest =
+        item.type == InboxEntryType.friendRequest && peerAddress != null;
+    final bool isGroupInvite = item.type == InboxEntryType.groupInvite;
+    final Color tone = _inboxTone(zen, item.type);
+    return _Panel(
+      key: Key('inbox-card-${item.id}'),
+      accentTone: tone,
+      // An invitation is answered with its buttons; the card itself leads
+      // nowhere until the user has joined.
+      onTap: canRespondToRequest || isGroupInvite
+          ? null
+          : () {
+              if (item.routeKey != null) {
+                ref
+                    .read(socialHubControllerProvider.notifier)
+                    .requestLaunchFromRouteKey(item.routeKey);
+              }
+            },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              ZenIconBadge(icon: _inboxIcon(item.type), tone: tone, size: 42),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: zen.textPrimary,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          height: 1.25,
+                        ),
+                      ),
+                    ),
+                    if (item.body.trim().isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 4),
+                      Text(
+                        item.body,
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: zen.textSecondary,
+                          fontSize: 13.5,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: 32,
+                height: 32,
+                child: IconButton(
+                  key: Key('inbox-dismiss-${item.id}'),
+                  tooltip: 'Usuń powiadomienie',
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  color: zen.textMuted,
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () {
+                    ref
+                        .read(socialHubControllerProvider.notifier)
+                        .dismissInboxEntry(item.id);
+                  },
+                ),
+              ),
+            ],
+          ),
+          if (canRespondToRequest) ...<Widget>[
+            const SizedBox(height: 14),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: OutlinedButton(
+                    key: Key('inbox-reject-$peerAddress'),
+                    onPressed: () async {
+                      try {
+                        await ref
+                            .read(socialHubControllerProvider.notifier)
+                            .rejectFriendRequest(peerAddress: peerAddress);
+                      } catch (error) {
+                        if (!context.mounted) {
+                          return;
+                        }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Nie udało się odrzucić: $error'),
+                          ),
+                        );
+                      }
+                    },
+                    child: const Text(
+                      'Odrzuć',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton(
+                    key: Key('inbox-accept-$peerAddress'),
+                    onPressed: () async {
+                      try {
+                        // They keep the name from their profile.
+                        await ref
+                            .read(socialHubControllerProvider.notifier)
+                            .acceptFriendRequest(
+                              peerAddress: peerAddress,
+                              senderDisplayName: _localSenderDisplayName(ref),
+                            );
+                      } catch (error) {
+                        if (!context.mounted) {
+                          return;
+                        }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Nie udało się zaakceptować: $error'),
+                          ),
+                        );
+                      }
+                    },
+                    child: const Text(
+                      'Akceptuj',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ] else if (isGroupInvite) ...<Widget>[
+            const SizedBox(height: 14),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: OutlinedButton(
+                    key: Key('inbox-reject-${item.id}'),
+                    onPressed: () async {
+                      final (String groupId, _) = _resolveGroupInvite(
+                        item,
+                        ref.read(socialHubControllerProvider).groups,
+                      );
+                      await ref
+                          .read(socialHubControllerProvider.notifier)
+                          .rejectGroupInvite(
+                            groupId: groupId,
+                            inboxEntryId: item.id,
+                            senderAddress: item.peerAddress,
+                          );
+                    },
+                    child: const Text(
+                      'Odrzuć',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton(
+                    key: Key('inbox-accept-${item.id}'),
+                    onPressed: () {
+                      final (
+                        String groupId,
+                        String groupName,
+                      ) = _resolveGroupInvite(
+                        item,
+                        ref.read(socialHubControllerProvider).groups,
+                      );
+                      unawaited(_joinGroup(context, ref, groupId, groupName));
+                    },
+                    child: const Text(
+                      'Dołącz',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ] else if (launchIntent != null) ...<Widget>[
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.only(left: 54),
+              child: Row(
+                children: <Widget>[
+                  Flexible(
+                    child: Text(
+                      launchIntent.actionLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: tone,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.arrow_forward_rounded, size: 16, color: tone),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+ConversationPreview _conversationFromFriend(
+  FriendProfile friend, [
+  PeerPublicProfile? peer,
+]) {
+  final String peerName = peer?.name.trim() ?? '';
+  final String preview = switch (friend.status) {
+    FriendRelationshipStatus.pendingOutgoing =>
+      friend.requestMessage?.trim().isNotEmpty == true
+          ? friend.requestMessage!.trim()
+          : 'Zaproszenie oczekuje na akceptacje.',
+    FriendRelationshipStatus.pendingIncoming =>
+      friend.requestMessage?.trim().isNotEmpty == true
+          ? friend.requestMessage!.trim()
+          : 'Oczekujące zaproszenie.',
+    FriendRelationshipStatus.accepted =>
+      friend.lastMessagePreview.isEmpty
+          ? 'Brak wiadomości.'
+          : friend.lastMessagePreview,
+    FriendRelationshipStatus.blocked => 'Kontakt zablokowany.',
+    FriendRelationshipStatus.none => 'Brak relacji.',
+  };
+  return ConversationPreview(
+    address: friend.address,
+    // Their own name (the newest profile wins); the nickname goes under it.
+    name: peerName.isEmpty ? friend.displayLabel : peerName,
+    nickname: friend.nickname.trim(),
+    avatarPath: peer?.avatarPath,
+    status: friend.status,
+    lastMessage: preview,
+    timeLabel: friend.lastActivityLabel.isEmpty
+        ? 'Teraz'
+        : friend.lastActivityLabel,
+    unreadCount: friend.unreadCount,
+    isOnline: friend.isOnline,
+    isTyping: friend.isTyping,
+  );
+}
+
+Color _shellStatusAccent(ZenColors zen, AppShellState state) {
+  if (state.health == ServiceHealth.failed ||
+      state.health == ServiceHealth.stopped) {
+    return zen.danger;
+  }
+  if (state.isConnected) {
+    return zen.accent;
+  }
+  return zen.accentSecondary;
+}
+
+IconData _inboxIcon(InboxEntryType type) {
+  return switch (type) {
+    InboxEntryType.friendAccepted => Icons.check_circle_outline_rounded,
+    InboxEntryType.friendRequest => Icons.person_add_alt_1_rounded,
+    InboxEntryType.friendRemoved => Icons.person_remove_alt_1_rounded,
+    InboxEntryType.transferCancelled => Icons.file_present_rounded,
+    InboxEntryType.message => Icons.chat_bubble_outline_rounded,
+    InboxEntryType.callInvite => Icons.call_outlined,
+    InboxEntryType.friendRejected => Icons.person_off_outlined,
+    InboxEntryType.friendCancelled => Icons.event_busy_outlined,
+    InboxEntryType.groupInvite => Icons.group_add_outlined,
+  };
+}
+
+Color _inboxTone(ZenColors zen, InboxEntryType type) {
+  return switch (type) {
+    InboxEntryType.friendAccepted => zen.accent,
+    InboxEntryType.friendRequest => zen.accentSecondary,
+    InboxEntryType.friendRemoved => zen.warning,
+    InboxEntryType.transferCancelled => zen.warning,
+    InboxEntryType.message => zen.textPrimary,
+    InboxEntryType.callInvite => zen.accent,
+    InboxEntryType.friendRejected => zen.warning,
+    InboxEntryType.friendCancelled => zen.textMuted,
+    InboxEntryType.groupInvite => zen.accent,
+  };
+}
+
+String? _localSenderDisplayName(WidgetRef ref) {
+  final String localAddress = ref.read(appShellControllerProvider).localAddress;
+  final String profileName = ref
+      .read(userProfileControllerProvider)
+      .displayName;
+  return PeerShareCodec.buildLocalProfile(
+        address: localAddress,
+        displayName: profileName,
+      )?.displayName ??
+      (profileName.trim().isNotEmpty ? profileName.trim() : null);
+}

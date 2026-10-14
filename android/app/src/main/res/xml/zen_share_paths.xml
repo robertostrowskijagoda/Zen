@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What ZenFileProvider may hand out: only the installer copy that
+     "Podaj dalej" puts in the cache for the share sheet. -->
+<paths>
+    <cache-path
+        name="shared_apk"
+        path="shared_apk/" />
+</paths>

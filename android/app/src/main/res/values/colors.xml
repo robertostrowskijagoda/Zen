@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="incoming_call_scrim">#FF111111</color>
+    <color name="incoming_call_card">#FF1C1C1C</color>
+    <color name="incoming_call_outline">#FF444444</color>
+    <color name="incoming_call_outline_strong">#FF666666</color>
+    <color name="incoming_call_text">#FFF5F5F5</color>
+    <color name="incoming_call_text_secondary">#FFA3A3A3</color>
+    <color name="incoming_call_accent">#FFF7F7F7</color>
+    <color name="incoming_call_on_accent">#FF1C1C1C</color>
+    <color name="incoming_call_avatar">#29333333</color>
+</resources>

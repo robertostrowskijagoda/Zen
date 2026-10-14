@@ -1,0 +1,1 @@
+enum CallInviteKind { audio, video }

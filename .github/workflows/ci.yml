@@ -1,0 +1,67 @@
+# Every push to main and every pull request: format, analysis and all tests
+# of the app, and the Go bridge's own tests. Runs on Windows, like the
+# maintainer's machine (docs/TESTOWANIE.md).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: '3.47.1'
+
+jobs:
+  app:
+    name: Analyze and test
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Packages
+        run: flutter pub get
+
+      - name: Format
+        run: dart format --output=none --set-exit-if-changed lib test tool
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+  go:
+    name: Go bridge
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: native/yggdrasil_bridge
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache-dependency-path: native/yggdrasil_bridge/go.sum
+
+      - name: Vet and test
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          go vet .
+          go test -count=1 .

@@ -1,0 +1,903 @@
+part of 'conversation_screen.dart';
+
+enum _CaptureOption { photo, video, gallery, audio }
+
+enum _ConversationMenuAction {
+  acceptRequest,
+  rejectRequest,
+  cancelRequest,
+  setNickname,
+  retentionSettings,
+  disappearingMessages,
+  blockFriend,
+  removeFriend,
+  unblockFriend,
+  clearHistory,
+  reportPerson,
+}
+
+String _conversationSubtitle({
+  required FriendProfile? friend,
+  required String peerAddress,
+}) {
+  return _conversationRelationshipStatusLabel(friend) ?? '';
+}
+
+String? _conversationRelationshipStatusLabel(FriendProfile? friend) {
+  return switch (friend?.status) {
+    FriendRelationshipStatus.pendingIncoming => 'Zaproszenie oczekuje',
+    FriendRelationshipStatus.pendingOutgoing => 'Czekasz na akceptację',
+    FriendRelationshipStatus.blocked => 'Relacja zablokowana',
+    FriendRelationshipStatus.none => null,
+    // No relationship at all (a chat opened from a link, for one): say so,
+    // so nothing on screen passes them off as someone the user knows.
+    null => 'Nieznajomy',
+    FriendRelationshipStatus.accepted =>
+      friend?.isOnline == true ? 'Aktywny teraz' : 'Offline',
+  };
+}
+
+bool _isSameDay(int aMillis, int bMillis) {
+  final DateTime a = DateTime.fromMillisecondsSinceEpoch(aMillis);
+  final DateTime b = DateTime.fromMillisecondsSinceEpoch(bMillis);
+  return a.year == b.year && a.month == b.month && a.day == b.day;
+}
+
+/// Date separator between message days: a small centred pill ("Dziś",
+/// "Wczoraj", "12.03.2025").
+class _DaySeparator extends StatelessWidget {
+  const _DaySeparator({super.key, required this.millis});
+
+  final int millis;
+
+  String _label() {
+    final DateTime date = DateTime.fromMillisecondsSinceEpoch(millis);
+    final DateTime now = DateTime.now();
+    final DateTime today = DateTime(now.year, now.month, now.day);
+    final DateTime day = DateTime(date.year, date.month, date.day);
+    final int diff = today.difference(day).inDays;
+    if (diff == 0) {
+      return 'Dziś';
+    }
+    if (diff == 1) {
+      return 'Wczoraj';
+    }
+    final String d = date.day.toString().padLeft(2, '0');
+    final String m = date.month.toString().padLeft(2, '0');
+    return '$d.$m.${date.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 8, 0, 14),
+      child: Center(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: zen.surfaceRaised.withValues(alpha: 0.85),
+            borderRadius: ZenRadii.pill,
+            border: Border.all(color: zen.outlineSoft),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Text(
+              _label(),
+              style: TextStyle(
+                color: zen.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TypingBubble extends StatelessWidget {
+  const _TypingBubble({super.key, required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: zen.surfaceRaised,
+          borderRadius: ZenRadii.drop,
+          border: Border.all(color: zen.outlineSoft),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Flexible(
+                child: Text(
+                  '$name pisze',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: zen.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ZenAnimatedDots(color: zen.accent, size: 4),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
+  required FriendProfile? friend,
+  required bool hasMessages,
+  required int messageCount,
+  int disappearSeconds = 0,
+}) {
+  final List<PopupMenuEntry<_ConversationMenuAction>> items =
+      <PopupMenuEntry<_ConversationMenuAction>>[];
+  final String? statusLabel = _conversationRelationshipStatusLabel(friend);
+  if (statusLabel != null) {
+    items.add(
+      PopupMenuItem<_ConversationMenuAction>(
+        enabled: false,
+        child: Text('Status: $statusLabel'),
+      ),
+    );
+  }
+  if (friend?.status == FriendRelationshipStatus.accepted) {
+    items.add(
+      PopupMenuItem<_ConversationMenuAction>(
+        enabled: false,
+        child: Text(
+          'Retencja: ${_cleanupSummary(friend!)} • Limit: ${_storageLimitSummary(friend)}',
+        ),
+      ),
+    );
+  }
+  if (messageCount > 0) {
+    items.add(
+      PopupMenuItem<_ConversationMenuAction>(
+        enabled: false,
+        child: Text('Wpisy w rozmowie: $messageCount'),
+      ),
+    );
+  }
+  if (items.isNotEmpty) {
+    items.add(const PopupMenuDivider());
+  }
+  switch (friend?.status) {
+    case FriendRelationshipStatus.pendingIncoming:
+      items.addAll(<PopupMenuEntry<_ConversationMenuAction>>[
+        const PopupMenuItem<_ConversationMenuAction>(
+          value: _ConversationMenuAction.acceptRequest,
+          child: Text('Akceptuj'),
+        ),
+        const PopupMenuItem<_ConversationMenuAction>(
+          value: _ConversationMenuAction.rejectRequest,
+          child: Text('Odrzuc'),
+        ),
+      ]);
+      break;
+    case FriendRelationshipStatus.pendingOutgoing:
+      items.add(
+        const PopupMenuItem<_ConversationMenuAction>(
+          value: _ConversationMenuAction.cancelRequest,
+          child: Text('Anuluj zaproszenie'),
+        ),
+      );
+      break;
+    case FriendRelationshipStatus.accepted:
+      items.addAll(<PopupMenuEntry<_ConversationMenuAction>>[
+        const PopupMenuItem<_ConversationMenuAction>(
+          value: _ConversationMenuAction.setNickname,
+          child: Text('Pseudonim'),
+        ),
+        const PopupMenuItem<_ConversationMenuAction>(
+          value: _ConversationMenuAction.retentionSettings,
+          child: Text('Retencja rozmowy'),
+        ),
+        PopupMenuItem<_ConversationMenuAction>(
+          key: const Key('conversation-disappearing-menu'),
+          value: _ConversationMenuAction.disappearingMessages,
+          child: Text(
+            'Znikające wiadomości: ${disappearLabel(disappearSeconds)}',
+          ),
+        ),
+        const PopupMenuItem<_ConversationMenuAction>(
+          value: _ConversationMenuAction.blockFriend,
+          child: Text('Zablokuj'),
+        ),
+        const PopupMenuItem<_ConversationMenuAction>(
+          value: _ConversationMenuAction.removeFriend,
+          child: Text('Usuń znajomego'),
+        ),
+      ]);
+      break;
+    case FriendRelationshipStatus.blocked:
+      items.add(
+        const PopupMenuItem<_ConversationMenuAction>(
+          value: _ConversationMenuAction.unblockFriend,
+          child: Text('Odblokuj'),
+        ),
+      );
+      break;
+    case FriendRelationshipStatus.none:
+    case null:
+      break;
+  }
+  if (hasMessages) {
+    if (items.isNotEmpty) {
+      items.add(const PopupMenuDivider());
+    }
+    items.add(
+      const PopupMenuItem<_ConversationMenuAction>(
+        value: _ConversationMenuAction.clearHistory,
+        child: Text('Wyczyść historię'),
+      ),
+    );
+  }
+  // §21.4: last, so the everyday actions keep their places.
+  if (items.isNotEmpty) {
+    items.add(const PopupMenuDivider());
+  }
+  items.add(
+    const PopupMenuItem<_ConversationMenuAction>(
+      key: Key('conversation-menu-report'),
+      value: _ConversationMenuAction.reportPerson,
+      child: Text('Zgłoś osobę'),
+    ),
+  );
+  if (items.isEmpty) {
+    items.add(
+      const PopupMenuItem<_ConversationMenuAction>(
+        enabled: false,
+        child: Text('Brak akcji'),
+      ),
+    );
+  }
+  return items;
+}
+
+class _MessageBubble extends StatelessWidget {
+  const _MessageBubble({
+    required this.message,
+    this.entranceDelay,
+    this.onReport,
+  });
+
+  final ChatMessage message;
+
+  /// "Zgłoś" in the long-press menu of a message we received (§21.4).
+  final VoidCallback? onReport;
+
+  /// When non-null the bubble plays its fade-slide entrance with this
+  /// stagger delay; null renders statically (scroll rebuilds, stream updates).
+  final Duration? entranceDelay;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    if (message.isSystem) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: zen.accentTertiary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: zen.accentTertiary.withValues(alpha: 0.22),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Text(
+                message.text,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: zen.textSecondary,
+                  fontSize: 13,
+                  height: 1.35,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final bool outgoing = message.isOutgoing;
+    final bool isPureGif =
+        message.type == ChatMessageType.image &&
+        (message.gifUrl?.isNotEmpty ?? false);
+    // Text bubbles we send get the accent gradient; media we send sit on an
+    // accent-tinted surface so their own colours stay readable.
+    final bool isTextMessage = message.type == ChatMessageType.text;
+    final bool onGradient = outgoing && isTextMessage && !isPureGif;
+    final Color metaColor = onGradient
+        ? zen.onAccent.withValues(alpha: 0.72)
+        : zen.textMuted;
+
+    final Widget body = switch (message.type) {
+      ChatMessageType.image when message.hasAttachment =>
+        _ImageAttachmentContent(message: message),
+      ChatMessageType.image => _AttachmentStubContent(message: message),
+      ChatMessageType.voice => _VoiceAttachmentContent(message: message),
+      ChatMessageType.file => _FileAttachmentContent(message: message),
+      ChatMessageType.video => _VideoAttachmentContent(message: message),
+      _ => CopyableText(
+        message.text,
+        style: TextStyle(
+          color: onGradient ? zen.onAccent : zen.textPrimary,
+          fontSize: 15,
+          height: 1.4,
+          fontWeight: FontWeight.w500,
+        ),
+        onReport: outgoing ? null : onReport,
+      ),
+    };
+
+    final BoxDecoration decoration;
+    if (isPureGif) {
+      decoration = BoxDecoration(
+        color: zen.surfaceRaised,
+        borderRadius: BorderRadius.circular(20),
+      );
+    } else if (onGradient) {
+      decoration = BoxDecoration(
+        gradient: LinearGradient(
+          colors: <Color>[
+            zen.accent,
+            Color.lerp(zen.accent, zen.accentSecondary, 0.35)!,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: ZenRadii.dropEnd,
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: zen.accent.withValues(alpha: 0.18),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      );
+    } else if (outgoing) {
+      decoration = BoxDecoration(
+        color: Color.alphaBlend(
+          zen.accent.withValues(alpha: 0.14),
+          zen.surfaceRaised,
+        ),
+        borderRadius: ZenRadii.dropEnd,
+        border: Border.all(color: zen.accent.withValues(alpha: 0.28)),
+      );
+    } else {
+      decoration = BoxDecoration(
+        color: zen.surfaceRaised,
+        borderRadius: ZenRadii.drop,
+        border: Border.all(color: zen.outlineSoft),
+      );
+    }
+
+    final Widget bubble = Align(
+      alignment: outgoing ? Alignment.centerRight : Alignment.centerLeft,
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final double maxWidth = constraints.maxWidth.isFinite
+              ? (constraints.maxWidth * 0.82).clamp(160.0, 440.0)
+              : 440.0;
+          return ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: maxWidth),
+            child: DecoratedBox(
+              decoration: decoration,
+              child: Padding(
+                padding: isPureGif
+                    ? const EdgeInsets.all(4)
+                    : const EdgeInsets.fromLTRB(14, 9, 12, 7),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: <Widget>[
+                    body,
+                    const SizedBox(height: 3),
+                    Padding(
+                      padding: isPureGif
+                          ? const EdgeInsets.fromLTRB(0, 0, 6, 2)
+                          : EdgeInsets.zero,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Text(
+                            _timeLabel(message.sentAtMillis),
+                            style: TextStyle(
+                              color: metaColor,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          if (message.deliveryState !=
+                              ChatMessageDeliveryState.none) ...<Widget>[
+                            const SizedBox(width: 4),
+                            Icon(
+                              _deliveryIcon(message.deliveryState),
+                              size: 14,
+                              color: _deliveryColor(
+                                zen,
+                                message,
+                                message.deliveryState,
+                                onGradient: onGradient,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    final Duration? entranceDelay = this.entranceDelay;
+    if (entranceDelay == null) {
+      return bubble;
+    }
+    return ZenFadeSlide(
+      duration: const Duration(milliseconds: 300),
+      delay: entranceDelay,
+      offset: Offset(outgoing ? 10 : -10, 6),
+      child: bubble,
+    );
+  }
+
+  String _timeLabel(int millis) {
+    final DateTime timestamp = DateTime.fromMillisecondsSinceEpoch(millis);
+    final String hours = timestamp.hour.toString().padLeft(2, '0');
+    final String minutes = timestamp.minute.toString().padLeft(2, '0');
+    return '$hours:$minutes';
+  }
+
+  IconData _deliveryIcon(ChatMessageDeliveryState state) {
+    return switch (state) {
+      ChatMessageDeliveryState.none => Icons.fiber_manual_record_rounded,
+      ChatMessageDeliveryState.sending => Icons.schedule_rounded,
+      ChatMessageDeliveryState.sent => Icons.done_rounded,
+      ChatMessageDeliveryState.delivered => Icons.done_all_rounded,
+      ChatMessageDeliveryState.failed => Icons.error_outline_rounded,
+    };
+  }
+
+  Color _deliveryColor(
+    ZenColors zen,
+    ChatMessage message,
+    ChatMessageDeliveryState state, {
+    bool onGradient = false,
+  }) {
+    if (onGradient) {
+      if (state == ChatMessageDeliveryState.failed) {
+        return zen.onAccent;
+      }
+      return message.isRead
+          ? zen.onAccent
+          : zen.onAccent.withValues(alpha: 0.72);
+    }
+    if (state == ChatMessageDeliveryState.failed) {
+      return zen.warning;
+    }
+    if (message.isOutgoing && message.isRead) {
+      return zen.accent;
+    }
+    return message.isOutgoing ? zen.textSecondary : zen.textMuted;
+  }
+}
+
+/// Longest side, in pixels, a chat image is decoded at. A bubble is at most
+/// a phone's width; this stays sharp on dense screens.
+const int _kChatImageDecodeMaxPx = 1440;
+
+/// [image] decoded to fit within [_kChatImageDecodeMaxPx] on both sides,
+/// keeping its aspect ratio and never scaling a small image up.
+ImageProvider<Object> _chatImageProvider(ImageProvider<Object> image) {
+  return ResizeImage(
+    image,
+    width: _kChatImageDecodeMaxPx,
+    height: _kChatImageDecodeMaxPx,
+    policy: ResizeImagePolicy.fit,
+  );
+}
+
+class _ImageAttachmentContent extends StatelessWidget {
+  const _ImageAttachmentContent({required this.message});
+
+  final ChatMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final bool isGifFile =
+        (message.mimeType?.toLowerCase() == 'image/gif') ||
+        (message.fileName?.toLowerCase().endsWith('.gif') ?? false);
+    final Widget image =
+        message.gifUrl != null && isAllowedRemoteMediaUrl(message.gifUrl)
+        ? ZenAnimatedImage(
+            url: message.gifUrl,
+            width: double.infinity,
+            height: 220,
+            errorBuilder: _buildImageError,
+          )
+        : isGifFile && message.attachmentBytes != null
+        ? ZenAnimatedImage(
+            bytes: message.attachmentBytes,
+            width: double.infinity,
+            height: 220,
+            errorBuilder: _buildImageError,
+          )
+        : isGifFile && message.attachmentPath != null
+        ? ZenAnimatedImage(
+            file: File(message.attachmentPath!),
+            width: double.infinity,
+            height: 220,
+            errorBuilder: _buildImageError,
+          )
+        // Decoded no larger than the bubble can show: a peer's image may
+        // declare any dimensions, and decoding a huge one at full size could
+        // exhaust memory (one 20000 px square is 1.6 GB of pixels).
+        : message.attachmentBytes != null
+        ? Image(
+            image: _chatImageProvider(MemoryImage(message.attachmentBytes!)),
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: 220,
+            errorBuilder: _buildImageError,
+          )
+        : message.attachmentPath != null
+        ? Image(
+            // An encrypted file is decrypted in memory only.
+            image: _chatImageProvider(mediaFileImage(message.attachmentPath!)),
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: 220,
+            errorBuilder: _buildImageError,
+          )
+        : _buildImageError(context, StateError('missing attachment'), null);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        ClipRRect(borderRadius: BorderRadius.circular(16), child: image),
+        if (message.fileName != null) ...<Widget>[
+          const SizedBox(height: 8),
+          Text(
+            message.fileName!,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: zen.textPrimary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+        if (message.attachmentSizeBytes != null) ...<Widget>[
+          const SizedBox(height: 2),
+          Text(
+            formatAttachmentSize(message.attachmentSizeBytes!),
+            style: TextStyle(color: zen.textMuted, fontSize: 12),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildImageError(
+    BuildContext context,
+    Object error,
+    StackTrace? stackTrace,
+  ) {
+    final ZenColors zen = ZenColors.of(context);
+    return SizedBox(
+      height: 160,
+      child: Center(
+        child: Icon(
+          Icons.broken_image_outlined,
+          color: zen.textMuted,
+          size: 40,
+        ),
+      ),
+    );
+  }
+}
+
+class _FileAttachmentContent extends StatelessWidget {
+  const _FileAttachmentContent({required this.message});
+
+  final ChatMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: zen.accent.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: zen.accent.withValues(alpha: 0.24)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(11),
+            child: Icon(Icons.insert_drive_file_outlined, color: zen.accent),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                message.fileName ?? message.text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: zen.textPrimary,
+                  fontWeight: FontWeight.w700,
+                  height: 1.3,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                message.attachmentSizeBytes == null
+                    ? 'Nieznany rozmiar'
+                    : formatAttachmentSize(message.attachmentSizeBytes!),
+                style: TextStyle(color: zen.textMuted, fontSize: 12),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: message.hasAttachment
+                    ? () => _saveAttachmentCopy(context, message)
+                    : null,
+                icon: const Icon(Icons.download_rounded),
+                label: Text(
+                  message.hasAttachment ? 'Zapisz kopie' : 'Transfer w toku',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AttachmentStubContent extends StatelessWidget {
+  const _AttachmentStubContent({required this.message});
+
+  final ChatMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final IconData icon = switch (message.type) {
+      ChatMessageType.image => Icons.image_outlined,
+      ChatMessageType.voice => Icons.mic_none_rounded,
+      ChatMessageType.video => Icons.videocam_outlined,
+      _ => Icons.insert_drive_file_outlined,
+    };
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: zen.accent.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: zen.accent.withValues(alpha: 0.24)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(11),
+            child: Icon(icon, color: zen.accent),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                message.fileName ?? message.text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: zen.textPrimary,
+                  fontWeight: FontWeight.w700,
+                  height: 1.3,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                message.attachmentSizeBytes == null
+                    ? 'Transfer w toku'
+                    : formatAttachmentSize(message.attachmentSizeBytes!),
+                style: TextStyle(color: zen.textMuted, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+Future<void> _showNicknameDialog({
+  required BuildContext context,
+  required SocialHubController controller,
+  required FriendProfile friend,
+}) async {
+  final String? nickname = await promptForFriendNickname(
+    context: context,
+    friend: friend,
+  );
+  if (nickname == null || !context.mounted) {
+    return;
+  }
+  try {
+    await controller.setFriendNickname(
+      peerAddress: friend.address,
+      nickname: nickname,
+    );
+  } catch (error) {
+    if (!context.mounted) {
+      return;
+    }
+    _showActionError(context, 'Nie udało się zapisać pseudonimu: $error');
+  }
+}
+
+Future<void> _showRetentionSettingsDialog({
+  required BuildContext context,
+  required SocialHubController controller,
+  required FriendProfile friend,
+}) async {
+  String cleanupDraft = '${friend.autoCleanupDays}';
+  String limitDraft = '${friend.inboxLimitMb}';
+  final _RetentionSettingsDraft?
+  draft = await showDialog<_RetentionSettingsDraft>(
+    context: context,
+    builder: (BuildContext context) {
+      final ZenColors zen = ZenColors.of(context);
+      return AlertDialog(
+        title: const Text('Retencja rozmowy'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                '0 = nigdy nie czyść i bez limitu danych. Te ustawienia działają tylko dla tej rozmowy.',
+                style: TextStyle(color: zen.textSecondary, height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                key: const Key('retention-cleanup-field'),
+                initialValue: cleanupDraft,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Auto-czyszczenie (dni)',
+                ),
+                onChanged: (String value) {
+                  cleanupDraft = value;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const Key('retention-limit-field'),
+                initialValue: limitDraft,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Limit danych rozmowy (MB)',
+                ),
+                onChanged: (String value) {
+                  limitDraft = value;
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Anuluj'),
+          ),
+          FilledButton(
+            key: const Key('retention-settings-save'),
+            onPressed: () {
+              Navigator.of(context).pop(
+                _RetentionSettingsDraft(
+                  autoCleanupDaysText: cleanupDraft,
+                  inboxLimitMbText: limitDraft,
+                ),
+              );
+            },
+            child: const Text('Zapisz'),
+          ),
+        ],
+      );
+    },
+  );
+  if (draft == null || !context.mounted) {
+    return;
+  }
+  final int? cleanupDays = int.tryParse(draft.autoCleanupDaysText.trim());
+  final int? inboxLimitMb = int.tryParse(draft.inboxLimitMbText.trim());
+  if (cleanupDays == null || cleanupDays < 0) {
+    _showActionError(context, 'Podaj poprawną liczbę dni (0 lub więcej).');
+    return;
+  }
+  if (inboxLimitMb == null || inboxLimitMb < 0) {
+    _showActionError(
+      context,
+      'Podaj poprawny limit danych w MB (0 lub więcej).',
+    );
+    return;
+  }
+  try {
+    await controller.configureConversationRetention(
+      peerAddress: friend.address,
+      autoCleanupDays: cleanupDays,
+      inboxLimitMb: inboxLimitMb,
+    );
+  } on FormatException catch (error) {
+    if (!context.mounted) {
+      return;
+    }
+    _showActionError(context, error.message);
+  } catch (error) {
+    if (!context.mounted) {
+      return;
+    }
+    _showActionError(context, 'Nie udało się zapisać retencji: $error');
+  }
+}
+
+String _cleanupSummary(FriendProfile friend) {
+  return friend.autoCleanupDays <= 0
+      ? '0 dni'
+      : '${friend.autoCleanupDays} dni';
+}
+
+String _storageLimitSummary(FriendProfile friend) {
+  return friend.inboxLimitMb <= 0 ? '0 MB' : '${friend.inboxLimitMb} MB';
+}
+
+final class _RetentionSettingsDraft {
+  const _RetentionSettingsDraft({
+    required this.autoCleanupDaysText,
+    required this.inboxLimitMbText,
+  });
+
+  final String autoCleanupDaysText;
+  final String inboxLimitMbText;
+}
+
+void _showActionError(BuildContext context, String message) {
+  if (!context.mounted) {
+    return;
+  }
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+}

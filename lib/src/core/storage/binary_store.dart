@@ -1,0 +1,686 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
+import 'package:zstandard/zstandard.dart';
+
+const int kZenBinaryCompressionLevel = 4;
+
+abstract interface class BinaryPayloadProtector {
+  Future<Uint8List> seal(Uint8List payload);
+
+  Future<Uint8List> unseal(Uint8List payload);
+
+  bool isSealed(Uint8List payload);
+}
+
+/// A [BinaryPayloadProtector] that also binds what it seals to the key it
+/// is stored under ([storageKey], authenticated but not stored): a file
+/// copied over another key's file no longer opens.
+abstract interface class KeyedBinaryPayloadProtector
+    implements BinaryPayloadProtector {
+  Future<Uint8List> sealFor(String storageKey, Uint8List payload);
+
+  Future<Uint8List> unsealFor(String storageKey, Uint8List payload);
+}
+
+/// A stored payload in a format this version does not open (plaintext, or
+/// sealed without its storage key). [FileBinaryStore] reads such a file as
+/// missing.
+final class UnsupportedStoredPayloadException implements Exception {
+  const UnsupportedStoredPayloadException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => 'UnsupportedStoredPayloadException: $message';
+}
+
+/// Gives the key that hides file names (derived from the data key), or
+/// `null` while there is none (the app is locked).
+abstract interface class BinaryStoreNameKeySource {
+  Future<Uint8List?> fileNameKey();
+}
+
+/// Keys whose readable file name would tell who the user talks to (a
+/// friend's address is part of the key). In a store whose protector is a
+/// [BinaryStoreNameKeySource] their files are named by a keyed hash
+/// (HMAC-SHA256 with a key derived from the data key) in
+/// [kHiddenNamesFolder]. `transfers/` is not here: the attachment store
+/// lists its folders
+/// (resuming uploads, per-friend limits, the stale sweep), so it names its
+/// keys with [FileBinaryStore.nameSegmentFor] instead.
+const Set<String> kZenHiddenNamePrefixes = <String>{'threads/', 'relay/mail/'};
+
+/// The folder of the files whose names are hidden.
+const String kHiddenNamesFolder = 'hidden';
+
+abstract interface class BinaryCompressor {
+  Future<Uint8List?> compress(Uint8List payload, int level);
+
+  Future<Uint8List?> decompress(Uint8List payload);
+}
+
+final class ZstdBinaryCompressor implements BinaryCompressor {
+  ZstdBinaryCompressor({Zstandard? zstandard})
+    : _zstandard = zstandard ?? Zstandard();
+
+  final Zstandard _zstandard;
+
+  @override
+  Future<Uint8List?> compress(Uint8List payload, int level) {
+    return _zstandard.compress(payload, level);
+  }
+
+  @override
+  Future<Uint8List?> decompress(Uint8List payload) {
+    return _zstandard.decompress(payload);
+  }
+}
+
+final class BinaryCodec {
+  BinaryCodec({
+    BinaryCompressor? compressor,
+    this.maxPayloadBytes = defaultMaxPayloadBytes,
+  }) : assert(maxPayloadBytes > 0),
+       _compressor = compressor ?? ZstdBinaryCompressor();
+
+  static const int currentVersion = 2;
+  static const int defaultMaxPayloadBytes = 20 * 1024 * 1024;
+  static const int maxEnvelopeOverheadBytes = 64 * 1024;
+  static const int _headerLength = 48;
+  static const int _checksumLength = 32;
+  static const int _checksumOffset = 16;
+  static const List<int> _magic = <int>[0x5A, 0x45, 0x4E, 0x31];
+
+  final BinaryCompressor _compressor;
+  final int maxPayloadBytes;
+
+  int get maxEnvelopeBytes => maxPayloadBytes + maxEnvelopeOverheadBytes;
+
+  Future<Uint8List> encode(Uint8List payload) async {
+    _validatePayloadLength(
+      payload.length,
+      message: 'Binary payload exceeds the configured limit.',
+    );
+    final Uint8List? compressed = await _compressor.compress(
+      payload,
+      kZenBinaryCompressionLevel,
+    );
+    final bool isCompressed =
+        compressed != null &&
+        compressed.isNotEmpty &&
+        compressed.length < payload.length;
+    final Uint8List body = isCompressed ? compressed : payload;
+    if (body.length > maxEnvelopeBytes) {
+      throw const FormatException(
+        'Binary envelope exceeds the configured limit.',
+      );
+    }
+
+    final ByteData header = ByteData(_headerLength)
+      ..setUint8(0, _magic[0])
+      ..setUint8(1, _magic[1])
+      ..setUint8(2, _magic[2])
+      ..setUint8(3, _magic[3])
+      ..setUint8(4, currentVersion)
+      ..setUint8(5, isCompressed ? 1 : 0)
+      ..setUint8(6, kZenBinaryCompressionLevel)
+      ..setUint8(7, _headerLength)
+      ..setUint32(8, payload.length, Endian.little)
+      ..setUint32(12, body.length, Endian.little);
+
+    final List<int> checksum = sha256.convert(payload).bytes;
+    for (int index = 0; index < checksum.length; index += 1) {
+      header.setUint8(_checksumOffset + index, checksum[index]);
+    }
+
+    final Uint8List envelope = Uint8List(_headerLength + body.length);
+    envelope.setRange(0, _headerLength, header.buffer.asUint8List());
+    envelope.setRange(_headerLength, envelope.length, body);
+    return envelope;
+  }
+
+  /// The payload of [envelope]; a [FormatException] for anything but a
+  /// well-formed envelope of [currentVersion].
+  Future<Uint8List> decode(Uint8List envelope) async {
+    if (envelope.length < _headerLength) {
+      throw const FormatException('Binary envelope is too short.');
+    }
+    _validateMagic(envelope);
+    final int version = envelope[4];
+    if (version != currentVersion) {
+      throw FormatException('Unsupported binary envelope version: $version.');
+    }
+    final ByteData header = ByteData.sublistView(envelope, 0, _headerLength);
+    final int headerLength = header.getUint8(7);
+    if (headerLength != _headerLength) {
+      throw const FormatException('Binary envelope header length mismatch.');
+    }
+    final int compressionFlag = header.getUint8(5);
+    if (compressionFlag > 1) {
+      throw const FormatException(
+        'Binary envelope has an invalid compression flag.',
+      );
+    }
+    final bool isCompressed = compressionFlag == 1;
+    if (isCompressed && header.getUint8(6) == 0) {
+      throw const FormatException(
+        'Binary envelope is missing compression metadata.',
+      );
+    }
+    final int originalLength = header.getUint32(8, Endian.little);
+    final int storedLength = header.getUint32(12, Endian.little);
+    _validatePayloadLength(
+      originalLength,
+      message: 'Binary envelope exceeds the configured limit.',
+    );
+    if (storedLength > maxEnvelopeBytes) {
+      throw const FormatException(
+        'Binary envelope exceeds the configured limit.',
+      );
+    }
+    final Uint8List body = envelope.sublist(_headerLength);
+    if (body.length != storedLength) {
+      throw const FormatException('Binary envelope length mismatch.');
+    }
+
+    final Uint8List payload;
+    if (!isCompressed) {
+      if (body.length != originalLength) {
+        throw const FormatException('Binary envelope payload mismatch.');
+      }
+      payload = body;
+    } else {
+      final Uint8List? decoded = await _compressor.decompress(body);
+      if (decoded == null || decoded.length != originalLength) {
+        throw const FormatException('Could not decompress binary envelope.');
+      }
+      payload = decoded;
+    }
+
+    final Uint8List expectedChecksum = Uint8List.sublistView(
+      envelope,
+      _checksumOffset,
+      _checksumOffset + _checksumLength,
+    );
+    final List<int> actualChecksum = sha256.convert(payload).bytes;
+    if (!_constantTimeEquals(expectedChecksum, actualChecksum)) {
+      throw const FormatException('Binary envelope checksum mismatch.');
+    }
+    return payload;
+  }
+
+  void _validateMagic(Uint8List envelope) {
+    for (int index = 0; index < _magic.length; index += 1) {
+      if (envelope[index] != _magic[index]) {
+        throw const FormatException('Binary envelope has an invalid header.');
+      }
+    }
+  }
+
+  void _validatePayloadLength(int length, {required String message}) {
+    if (length < 0 || length > maxPayloadBytes) {
+      throw FormatException(message);
+    }
+  }
+
+  bool _constantTimeEquals(List<int> left, List<int> right) {
+    if (left.length != right.length) {
+      return false;
+    }
+    int diff = 0;
+    for (int index = 0; index < left.length; index += 1) {
+      diff |= left[index] ^ right[index];
+    }
+    return diff == 0;
+  }
+}
+
+final class FileBinaryStore {
+  FileBinaryStore(
+    Directory rootDirectory, {
+    BinaryCodec? codec,
+    BinaryPayloadProtector? protector,
+    int? maxFileBytes,
+    Set<String> hiddenNamePrefixes = kZenHiddenNamePrefixes,
+  }) : this._(
+         rootDirectory,
+         codec ?? BinaryCodec(),
+         protector,
+         maxFileBytes,
+         hiddenNamePrefixes,
+       );
+
+  FileBinaryStore._(
+    this.rootDirectory,
+    BinaryCodec codec,
+    BinaryPayloadProtector? protector,
+    int? maxFileBytes,
+    this._hiddenNamePrefixes,
+  ) : _codec = codec,
+      _protector = protector,
+      _names = _nameKeySourceOf(protector),
+      _maxFileBytes =
+          maxFileBytes ?? codec.maxEnvelopeBytes + _sealedPayloadHeadroomBytes;
+
+  static const int _sealedPayloadHeadroomBytes = 64 * 1024;
+  static final RegExp _windowsDrivePrefix = RegExp(r'^[A-Za-z]:');
+  static final RegExp _controlCharacters = RegExp(r'[\x00-\x1F]');
+  static final RegExp _plainSafeSegment = RegExp(r'^[A-Za-z0-9._-]+$');
+  static const Set<String> _reservedWindowsNames = <String>{
+    'CON',
+    'PRN',
+    'AUX',
+    'NUL',
+    'COM1',
+    'COM2',
+    'COM3',
+    'COM4',
+    'COM5',
+    'COM6',
+    'COM7',
+    'COM8',
+    'COM9',
+    'LPT1',
+    'LPT2',
+    'LPT3',
+    'LPT4',
+    'LPT5',
+    'LPT6',
+    'LPT7',
+    'LPT8',
+    'LPT9',
+  };
+
+  final Directory rootDirectory;
+  final BinaryCodec _codec;
+  final BinaryPayloadProtector? _protector;
+  final BinaryStoreNameKeySource? _names;
+  final Set<String> _hiddenNamePrefixes;
+  final int _maxFileBytes;
+
+  final Map<String, Future<void>> _writeLocks = <String, Future<void>>{};
+
+  static BinaryStoreNameKeySource? _nameKeySourceOf(Object? protector) =>
+      protector is BinaryStoreNameKeySource ? protector : null;
+
+  Future<File> write(String key, Uint8List payload) async {
+    final _StorePlace place = await _placeOf(key);
+    return _locked(place.canonicalKey, () => _writeLocked(place, payload));
+  }
+
+  Future<T> _locked<T>(String lockKey, Future<T> Function() action) async {
+    while (_writeLocks.containsKey(lockKey)) {
+      try {
+        await _writeLocks[lockKey];
+      } catch (_) {}
+    }
+    final Completer<void> completer = Completer<void>();
+    _writeLocks[lockKey] = completer.future;
+    try {
+      return await action();
+    } finally {
+      _writeLocks.remove(lockKey);
+      completer.complete();
+    }
+  }
+
+  Future<File> _writeLocked(_StorePlace place, Uint8List payload) async {
+    final File file = place.file;
+    await file.parent.create(recursive: true);
+    final Uint8List encoded = await _codec.encode(payload);
+    final Uint8List sealed = await _seal(place.canonicalKey, encoded);
+    if (sealed.length > _maxFileBytes) {
+      throw const FormatException(
+        'Stored binary payload exceeds the configured limit.',
+      );
+    }
+    // Written to the side and moved into place, with the previous copy kept
+    // as a backup. Writing over the live file means a process killed mid-write
+    // (Android does that whenever it feels like it) leaves a truncated file
+    // that cannot be read back — and a snapshot that cannot be read back is
+    // how a friend list disappears.
+    final File temporary = File(
+      '${file.path}.${DateTime.now().microsecondsSinceEpoch}.$pid.tmp',
+    );
+    await temporary.writeAsBytes(sealed, flush: true);
+    final File backup = File('${file.path}.bak');
+    if (await file.exists()) {
+      bool backedUp = false;
+      for (int attempt = 0; attempt < 3; attempt++) {
+        try {
+          if (await backup.exists()) {
+            await backup.delete();
+          }
+          await file.rename(backup.path);
+          backedUp = true;
+          break;
+        } catch (_) {
+          if (attempt < 2) {
+            await Future<void>.delayed(
+              Duration(milliseconds: 20 * (attempt + 1)),
+            );
+          }
+        }
+      }
+      if (!backedUp) {
+        // Best effort copy to backup if rename failed
+        try {
+          await file.copy(backup.path);
+        } catch (_) {}
+        try {
+          await file.delete();
+        } catch (_) {}
+      }
+    }
+    bool renamed = false;
+    for (int attempt = 0; attempt < 5; attempt++) {
+      try {
+        await temporary.rename(file.path);
+        renamed = true;
+        break;
+      } catch (_) {
+        if (attempt < 4) {
+          await Future<void>.delayed(
+            Duration(milliseconds: 25 * (attempt + 1)),
+          );
+        }
+      }
+    }
+    if (!renamed) {
+      // Fallback on Windows when rename encounters transient locks (errno 5)
+      try {
+        await temporary.copy(file.path);
+        renamed = true;
+      } catch (_) {
+        try {
+          await file.writeAsBytes(sealed, flush: true);
+          renamed = true;
+        } catch (_) {}
+      }
+      try {
+        if (await temporary.exists()) {
+          await temporary.delete();
+        }
+      } catch (_) {}
+      if (!renamed) {
+        await file.writeAsBytes(sealed, flush: true);
+      }
+    }
+    return file;
+  }
+
+  Future<Uint8List?> read(String key) async {
+    final _StorePlace place = await _placeOf(key);
+    final File file = place.file;
+    try {
+      final Uint8List? primary = await _readFile(file, place.canonicalKey);
+      if (primary != null) {
+        return primary;
+      }
+    } catch (error) {
+      // Fall through to the backup: an unreadable primary is exactly what the
+      // backup is for, and reporting "nothing stored" would let the caller
+      // start empty and then save that over everything.
+      if (!await File('${file.path}.bak').exists()) {
+        rethrow;
+      }
+    }
+    return _readFile(File('${file.path}.bak'), place.canonicalKey);
+  }
+
+  Future<Uint8List?> _readFile(File file, String storageKey) async {
+    if (!await file.exists()) {
+      return null;
+    }
+    final int fileLength = await file.length();
+    if (fileLength > _maxFileBytes) {
+      throw const FormatException(
+        'Stored binary payload exceeds the configured limit.',
+      );
+    }
+    final Uint8List bytesOnDisk = Uint8List.fromList(await file.readAsBytes());
+    final Uint8List encoded;
+    try {
+      encoded = await _unseal(storageKey, bytesOnDisk);
+    } on UnsupportedStoredPayloadException {
+      // Plaintext or another seal: never trusted, read as missing.
+      return null;
+    }
+    return _codec.decode(encoded);
+  }
+
+  Future<Uint8List> _seal(String storageKey, Uint8List encoded) async {
+    final BinaryPayloadProtector? protector = _protector;
+    if (protector == null) {
+      return encoded;
+    }
+    if (protector is KeyedBinaryPayloadProtector) {
+      return protector.sealFor(storageKey, encoded);
+    }
+    return protector.seal(encoded);
+  }
+
+  Future<Uint8List> _unseal(String storageKey, Uint8List bytes) async {
+    final BinaryPayloadProtector? protector = _protector;
+    if (protector == null) {
+      return bytes;
+    }
+    if (protector is KeyedBinaryPayloadProtector) {
+      return protector.unsealFor(storageKey, bytes);
+    }
+    return protector.unseal(bytes);
+  }
+
+  Future<void> delete(String key) async {
+    final _StorePlace place = await _placeOf(key);
+    await _deleteWithExtras(place.file);
+  }
+
+  Future<void> _deleteWithExtras(File file) async {
+    if (await file.exists()) {
+      await file.delete();
+    }
+    for (final String suffix in const <String>['.bak', '.tmp']) {
+      final File extra = File('${file.path}$suffix');
+      if (await extra.exists()) {
+        await extra.delete();
+      }
+    }
+  }
+
+  // ---- Hidden file names -------------------------------------------------
+
+  /// [value] as one key segment that does not show it: a keyed hash (with
+  /// the same name key as [kZenHiddenNamePrefixes]) when this store hides
+  /// names, otherwise its base64url form. For keys found by listing their
+  /// folder, which a hidden name would break. Throws while the store is
+  /// locked.
+  Future<String> nameSegmentFor(String value) async {
+    final BinaryStoreNameKeySource? names = _names;
+    if (names == null) {
+      return base64Url.encode(utf8.encode(value)).replaceAll('=', '');
+    }
+    final Uint8List? nameKey = await names.fileNameKey();
+    if (nameKey == null) {
+      throw StateError(
+        'Encrypted storage is locked: its file names are hidden as well.',
+      );
+    }
+    return Hmac(
+      sha256,
+      nameKey,
+    ).convert(utf8.encode('segment|$value')).toString().substring(0, 32);
+  }
+
+  /// [key] as callers mean it (`/`-separated, no empty or padded parts),
+  /// folded to lower case on Windows like its file path. What a sealed
+  /// payload is bound to, and what a hidden name is computed from.
+  static String _canonicalKey(String key) {
+    final String logical = key
+        .trim()
+        .replaceAll('\\', '/')
+        .split('/')
+        .map((String segment) => segment.trim())
+        .where((String segment) => segment.isNotEmpty)
+        .join('/');
+    return Platform.isWindows ? logical.toLowerCase() : logical;
+  }
+
+  String? _hiddenPrefixOf(String canonicalKey) {
+    if (_names == null) {
+      return null;
+    }
+    for (final String prefix in _hiddenNamePrefixes) {
+      final String folded = Platform.isWindows ? prefix.toLowerCase() : prefix;
+      if (canonicalKey.length > folded.length &&
+          canonicalKey.startsWith(folded)) {
+        return folded;
+      }
+    }
+    return null;
+  }
+
+  /// Where [key] is stored: its readable path, or for a hidden key its
+  /// hashed name.
+  Future<_StorePlace> _placeOf(String key) async {
+    // Validates the key (traversal, control characters) in every case.
+    final File readable = _fileFor(key);
+    final String canonical = _canonicalKey(key);
+    final String? prefix = _hiddenPrefixOf(canonical);
+    final BinaryStoreNameKeySource? names = _names;
+    if (prefix == null || names == null) {
+      return _StorePlace(canonicalKey: canonical, file: readable);
+    }
+    final Uint8List? nameKey = await names.fileNameKey();
+    if (nameKey == null) {
+      throw StateError(
+        'Encrypted storage is locked: its file names are hidden as well.',
+      );
+    }
+    final String name = Hmac(
+      sha256,
+      nameKey,
+    ).convert(utf8.encode(canonical)).toString().substring(0, 40);
+    final String separator = Platform.pathSeparator;
+    final String rootPath = _normalizedFileSystemPath(
+      rootDirectory.absolute.path,
+    );
+    final File hidden = File(
+      _normalizedFileSystemPath(
+        '$rootPath$separator$kHiddenNamesFolder$separator$name.zenbin',
+      ),
+    );
+    return _StorePlace(canonicalKey: canonical, file: hidden);
+  }
+
+  File _fileFor(String key) {
+    final List<String> segments = _sanitizeKeySegments(key);
+    final String rootPath = _normalizedFileSystemPath(
+      rootDirectory.absolute.path,
+    );
+    final String relativePath = segments.join(Platform.pathSeparator);
+    final String candidatePath = _normalizedFileSystemPath(
+      '$rootPath${Platform.pathSeparator}$relativePath.zenbin',
+    );
+    final String allowedPrefix = '$rootPath${Platform.pathSeparator}';
+    if (!candidatePath.startsWith(allowedPrefix)) {
+      throw const FormatException(
+        'Binary store key resolves outside of the base directory.',
+      );
+    }
+    return File(candidatePath);
+  }
+
+  List<String> _sanitizeKeySegments(String key) {
+    final String normalized = key.trim().replaceAll('\\', '/');
+    if (normalized.isEmpty) {
+      throw const FormatException('Binary store key cannot be empty.');
+    }
+    if (normalized.startsWith('/') ||
+        normalized.startsWith('//') ||
+        normalized.startsWith('~/') ||
+        normalized.startsWith('~\\') ||
+        _windowsDrivePrefix.hasMatch(normalized)) {
+      throw const FormatException('Binary store keys must stay relative.');
+    }
+    if (_controlCharacters.hasMatch(normalized)) {
+      throw const FormatException(
+        'Binary store key contains unsupported control characters.',
+      );
+    }
+    if (normalized.contains('..')) {
+      throw const FormatException(
+        'Binary store key contains path traversal syntax.',
+      );
+    }
+    final List<String> rawSegments = normalized
+        .split('/')
+        .where((String segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    if (rawSegments.isEmpty) {
+      throw const FormatException('Binary store key cannot be empty.');
+    }
+    return rawSegments.map(_sanitizeKeySegment).toList(growable: false);
+  }
+
+  String _sanitizeKeySegment(String segment) {
+    final String trimmed = segment.trim();
+    if (trimmed.isEmpty || trimmed == '.' || trimmed == '..') {
+      throw const FormatException(
+        'Binary store key contains an unsafe segment.',
+      );
+    }
+    if (_controlCharacters.hasMatch(trimmed)) {
+      throw const FormatException(
+        'Binary store key contains unsupported control characters.',
+      );
+    }
+    if (_isPlainSafeSegment(trimmed)) {
+      return trimmed;
+    }
+    // Percent-encode logical segments so peer addresses and message ids remain
+    // stable without letting path syntax leak into the filesystem layout.
+    return Uri.encodeComponent(trimmed);
+  }
+
+  bool _isPlainSafeSegment(String segment) {
+    if (!_plainSafeSegment.hasMatch(segment)) {
+      return false;
+    }
+    if (segment.endsWith('.') || segment.endsWith(' ')) {
+      return false;
+    }
+    if (Platform.isWindows &&
+        _reservedWindowsNames.contains(segment.toUpperCase())) {
+      return false;
+    }
+    return true;
+  }
+
+  String _normalizedFileSystemPath(String path) {
+    final String separator = Platform.pathSeparator;
+    final String normalized = path
+        .replaceAll('/', separator)
+        .replaceAll('\\', separator);
+    final String absolute = File(
+      normalized,
+    ).absolute.path.replaceAll('/', separator).replaceAll('\\', separator);
+    return Platform.isWindows ? absolute.toLowerCase() : absolute;
+  }
+}
+
+/// Where one key lives on disk.
+final class _StorePlace {
+  const _StorePlace({required this.canonicalKey, required this.file});
+
+  /// The key (see `FileBinaryStore._canonicalKey`): what writes of one key
+  /// wait on, and what its sealed payload is bound to.
+  final String canonicalKey;
+
+  /// The file the key is written to and read from.
+  final File file;
+}
