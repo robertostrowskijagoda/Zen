@@ -9,7 +9,9 @@ w `PROJEKT_APLIKACJI.md`; otwarte problemy dystrybucji: `STAN.md` §9.
   GitHub Pages to strona zaproszeń (`tool/pages/index.html`, workflow
   `pages.yml`) — otwiera Zen z kodem z QR albo pokazuje pobieranie.
 - **Pakiet Androida:** `com.roj.zen` (był `com.HuraganKodu.zen`).
-- **Licencja:** `LICENSE` (Zen Source-Available License 1.0).
+- **Licencja:** `LICENSE` — PolyForm Strict 1.0.0 z dodatkowymi zezwoleniami
+  (czytanie, pull requesty, budowanie dla siebie, przekazywanie niezmienionych
+  wydań; bez użycia komercyjnego i bez forków).
 
 ## 1. Repozytorium
 
