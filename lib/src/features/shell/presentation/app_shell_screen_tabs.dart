@@ -260,12 +260,11 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
     'graph' => const GraphScreen(),
     'nearby' => const NearbyScreen(),
     'about' => const AboutScreen(),
-    // Adults only (§26.1, §27): the age gate asks first.
-    'dating' => const AgeGate(child: SecureScreen(child: DatingScreen())),
+    'dating' => const SecureScreen(child: DatingScreen()),
     'neighbors' => const NeighborsScreen(),
     'alarm' => const AlarmScreen(),
-    'pyramid' => const AgeGate(child: PyramidScreen()),
-    'wallet' => const AgeGate(child: WalletScreen()),
+    'pyramid' => const PyramidScreen(),
+    'wallet' => const WalletScreen(),
     'invite' => const _MyCodeScreen(),
     _ => const ProfileScreen(),
   };

@@ -39,7 +39,6 @@ final class FileAppSettingsStore implements AppSettingsStore {
   Future<void> save(AppSettings settings) async {
     await store.write(
       storageKey,
-      // `v` since 1.11 (STAN §7); files without it are version 1 too.
       Uint8List.fromList(
         utf8.encode(jsonEncode(withFormatVersion(settings.toJson()))),
       ),

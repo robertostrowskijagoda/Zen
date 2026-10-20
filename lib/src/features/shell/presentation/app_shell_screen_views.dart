@@ -716,7 +716,7 @@ class _SettingsScreen extends ConsumerWidget {
                     subtitle: ref.watch(accountSecureReminderProvider)
                         ? t(
                             'Zabezpiecz konto na wypadek zgubionego telefonu: '
-                            'krąg odzyskiwania albo kopia na papierze',
+                            'krąg odzyskiwania albo kopia zapasowa klucza',
                           )
                         : t('Hasło konta, krąg odzyskiwania, nowe urządzenie'),
                     onTap: () => unawaited(AccountRecoveryScreen.open(context)),
@@ -943,6 +943,7 @@ class _SettingsScreen extends ConsumerWidget {
                   pageTitle: t('Sieć i usługa'),
                   pageChildren: const <Widget>[
                     _LiveTechInfoSection(),
+                    _LanDiscoverySection(),
                     _BridgeHostSection(),
                   ],
                 ),
@@ -1266,6 +1267,87 @@ class _LiveTechInfoSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return _TechInfoSection(state: ref.watch(appShellControllerProvider));
+  }
+}
+
+/// "Szukaj znajomych w tej samej sieci Wi-Fi" (§5.1 item 6): the account's
+/// own devices on one network connect directly. Off by default on phones.
+class _LanDiscoverySection extends ConsumerWidget {
+  const _LanDiscoverySection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final bool phone = Platform.isAndroid || Platform.isIOS;
+    final bool enabled = ref.watch(
+      appSettingsControllerProvider.select(
+        (AppSettings s) => s.lanDiscoveryOn(phone: phone),
+      ),
+    );
+    final ZenColors zen = ZenColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: _Panel(
+        child: SwitchListTile.adaptive(
+          key: const Key('settings-lan-discovery-switch'),
+          contentPadding: EdgeInsets.zero,
+          value: enabled,
+          onChanged: (bool value) => unawaited(
+            ref
+                .read(appSettingsControllerProvider.notifier)
+                .setLanDiscovery(value),
+          ),
+          title: Text(
+            t('Szukaj znajomych w tej samej sieci Wi-Fi'),
+            style: TextStyle(
+              color: zen.textPrimary,
+              fontSize: 15.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          subtitle: Text(
+            t(
+              'Twoje urządzenia w tej samej sieci łączą się ze sobą '
+              'bezpośrednio, także bez internetu. Inni w tej sieci mogą '
+              'zobaczyć adres Zen tego urządzenia, ale nie połączą się z nim.',
+            ),
+            style: TextStyle(
+              color: zen.textSecondary,
+              fontSize: 13.5,
+              height: 1.4,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Which Yggdrasil and Go the bridge was built with (§5.2).
+class _BridgeBuildInfoLine extends ConsumerWidget {
+  const _BridgeBuildInfoLine();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final RuntimeBridgeBuildInfo? info = ref.watch(
+      runtimeBridgeBuildInfoProvider,
+    );
+    if (info == null) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Text(
+        t('Yggdrasil {yggdrasil} · {go}', <String, Object?>{
+          'yggdrasil': info.yggdrasil,
+          'go': info.go,
+        }),
+        key: const Key('settings-bridge-build-info'),
+        style: TextStyle(
+          color: ZenColors.of(context).textSecondary,
+          fontSize: 12.5,
+        ),
+      ),
+    );
   }
 }
 
@@ -2088,6 +2170,7 @@ class _TechInfoSection extends StatelessWidget {
                 );
               },
             ),
+            const _BridgeBuildInfoLine(),
             if (state.errorMessage != null) ...<Widget>[
               const SizedBox(height: 12),
               _RuntimeErrorNotice(message: state.errorMessage!),
