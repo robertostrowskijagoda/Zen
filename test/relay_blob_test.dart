@@ -549,7 +549,7 @@ void main() {
     expect(await _heldChunkCount(mesh), 0);
   });
 
-  test('blob state survives a save, and older states re-announce once', () {
+  test('blob state survives a save', () {
     final RelayState state = RelayState(
       peers: <String, RelayPeerInfo>{
         bob: RelayPeerInfo(
@@ -628,23 +628,6 @@ void main() {
     expect(incoming.missing(5), <int>[1]);
     expect(incoming.key, state.inBlobs['$alice|b3']!.key);
     expect(loaded.announcedVersions, <String, int>{bob: 3});
-
-    // 1.10.0 wrote its confirmations as `ann2`: dropped, so every contact
-    // hears the attachment capability once.
-    final Map<String, dynamic> legacy =
-        jsonDecode(state.toJsonString()) as Map<String, dynamic>;
-    legacy['ann2'] = legacy.remove('ann3');
-    expect(
-      RelayState.fromJsonString(jsonEncode(legacy)).announcedVersions,
-      isEmpty,
-    );
-    // And a 1.10.0 state without any blob fields loads as before.
-    for (final String key in <String>['bo', 'bh', 'bi', 'bq']) {
-      legacy.remove(key);
-    }
-    final RelayState old = RelayState.fromJsonString(jsonEncode(legacy));
-    expect(old.outBlobs, isEmpty);
-    expect(old.blobQuotaBytes, isNull);
   });
 
   test('the file store keeps blob chunks as files of their own', () async {

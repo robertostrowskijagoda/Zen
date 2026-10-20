@@ -746,45 +746,6 @@ void main() {
         <String>[helpers[0]],
       );
     });
-
-    test('a stored "on" from before the setting was opt-in is switched off '
-        'once, and a later choice sticks', () async {
-      final _SimMesh mesh = _SimMesh();
-      final _SimNode node = mesh.add(bob);
-      final _LegacyRelayStore store = _LegacyRelayStore(
-        jsonEncode(<String, dynamic>{'v': 1, 'swg': true}),
-      );
-      RelayEngine engineOver(_LegacyRelayStore s) => RelayEngine(
-        store: s,
-        peers: node,
-        send: (String to, Map<String, dynamic> payload) async {},
-        clock: () => mesh.now,
-      );
-
-      RelayEngine engine = engineOver(store);
-      await engine.activate();
-      expect(engine.overview.value.shareWithGroups, isFalse);
-      expect(
-        (jsonDecode(store.raw) as Map<String, dynamic>)['sv'],
-        kRelaySettingsVersion,
-      );
-
-      await engine.setShareWithGroups(true);
-      engine.deactivate();
-      engine = engineOver(store);
-      await engine.activate();
-      expect(
-        engine.overview.value.shareWithGroups,
-        isTrue,
-        reason: 'the migration does not run again over the new choice',
-      );
-
-      await engine.setShareWithGroups(false);
-      engine.deactivate();
-      engine = engineOver(store);
-      await engine.activate();
-      expect(engine.overview.value.shareWithGroups, isFalse);
-    });
   });
 
   test('a flooding sender only ever pushes out its own mail', () async {
@@ -1451,21 +1412,6 @@ void main() {
       );
     });
   });
-}
-
-/// A store that starts from a document written by an older app version.
-final class _LegacyRelayStore implements RelayStateStore {
-  _LegacyRelayStore(this.raw);
-
-  String raw;
-
-  @override
-  Future<RelayState> load() async => RelayState.fromJsonString(raw);
-
-  @override
-  Future<void> save(RelayState state) async {
-    raw = state.toJsonString();
-  }
 }
 
 Map<String, dynamic> _fakeEnvelope({

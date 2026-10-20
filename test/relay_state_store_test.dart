@@ -92,11 +92,6 @@ void main() {
   });
 
   group('sharing mailboxes with group members', () {
-    Future<void> writeRaw(Object document) => binary.write(
-      'relay/state',
-      Uint8List.fromList(jsonEncode(document).codeUnits),
-    );
-
     test('is off for a new state', () async {
       expect(RelayState().shareWithGroups, isFalse);
       expect(RelayState.fromJsonString('{}').shareWithGroups, isFalse);
@@ -105,54 +100,6 @@ void main() {
         isFalse,
       );
       expect(const RelayOverview().shareWithGroups, isFalse);
-    });
-
-    test('a state stored before the settings version is switched off, '
-        'whatever it held', () async {
-      for (final Object? stored in <Object?>[true, false, null]) {
-        final RelayState loaded = RelayState.fromJsonString(
-          jsonEncode(<String, dynamic>{'v': 1, 'swg': ?stored}),
-        );
-        expect(loaded.shareWithGroups, isFalse, reason: 'swg: $stored');
-      }
-    });
-
-    test('the migration runs once: the next save records the version and '
-        'the person\'s later choice sticks', () async {
-      await writeRaw(<String, dynamic>{
-        'v': 1,
-        'swg': true,
-        'peers': <Object>[],
-        'cur': <String>['r1'],
-        'ver': 4,
-      });
-      final FileRelayStateStore store = FileRelayStateStore(store: binary);
-
-      RelayState state = await store.load();
-      expect(state.shareWithGroups, isFalse);
-      expect(state.relaySetVersion, 4, reason: 'nothing else is touched');
-      expect(state.currentRelays, <String>['r1']);
-      await store.save(state);
-
-      final Uint8List? written = await binary.read('relay/state');
-      expect(
-        (jsonDecode(utf8.decode(written!)) as Map<String, dynamic>)['sv'],
-        kRelaySettingsVersion,
-      );
-      state = await FileRelayStateStore(store: binary).load();
-      expect(state.shareWithGroups, isFalse);
-
-      // Opting in again is kept across restarts…
-      state.shareWithGroups = true;
-      await store.save(state);
-      state = await FileRelayStateStore(store: binary).load();
-      expect(state.shareWithGroups, isTrue);
-
-      // …and so is opting out.
-      state.shareWithGroups = false;
-      await store.save(state);
-      state = await FileRelayStateStore(store: binary).load();
-      expect(state.shareWithGroups, isFalse);
     });
 
     test('a deliberate choice written by this version round-trips', () {

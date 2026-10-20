@@ -79,17 +79,17 @@ final Provider<DatingService> datingServiceProvider = Provider<DatingService>((
   return dating;
 });
 
-/// One minute of dating housekeeping (called by a widget's timer, so it
-/// stops with the app): deadlines of "Idę na randkę" every minute; the
-/// weekly package and the position of a running date every 10 minutes
-/// (the package not right at start, so it does not mark when the app was
+/// One minute of dating housekeeping (`ZenCore`'s minute, so it stops
+/// with the app): deadlines of "Idę na randkę" every minute; the
+/// weekly lantern and the position of a running date every 10 minutes
+/// (the lantern not right at start, so it does not mark when the app was
 /// opened).
 void datingMinute(DatingService dating, int minute) {
   unawaitedLogged(dating.tick(), context: 'Randki: terminy');
   if (minute % 10 != 0) {
     return;
   }
-  unawaitedLogged(dating.maybePublish(), context: 'Randki: paczka');
+  unawaitedLogged(dating.maybePublish(), context: 'Randki: latarnia');
   if (dating.mySafeDate != null) {
     unawaitedLogged(
       currentFix().then((GeoFix? fix) async {

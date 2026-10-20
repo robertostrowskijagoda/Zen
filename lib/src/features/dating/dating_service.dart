@@ -19,10 +19,12 @@ import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 abstract final class DatingTypes {
-  /// A dating profile (or a cover one) flooding up to 3 steps.
-  static const String package = 'date_pkg';
+  /// A lantern (§19.7): the dating key and what is needed to see whether two
+  /// people fit, flooding up to [kDatingMaxHops] steps (a real one, or a
+  /// decoy when dating is off).
+  static const String lantern = 'date_lantern';
 
-  /// A sealed message travelling back along the way a package came.
+  /// A sealed message travelling back along the way a lantern came.
   static const String back = 'date_back';
 
   /// Between friends: "Co sądzisz o …?" and the answer.
@@ -42,7 +44,7 @@ abstract final class DatingTypes {
   static const String locationRequest = 'date_loc_req';
 
   static const Set<String> all = <String>{
-    package,
+    lantern,
     back,
     ask,
     askAnswer,
@@ -68,24 +70,21 @@ String? cleanDatingPhoto(String? photo) {
   }
 }
 
-/// How often a phone sends its package (a real profile, or a cover one when
-/// dating is off, so nobody can tell the difference).
+/// How often a phone sends its lantern (a real one, or a decoy when dating
+/// is off, so nobody can tell the difference).
 const Duration kDatingPublishEvery = Duration(days: 7);
 
 /// A profile not refreshed for this long disappears.
 const Duration kDatingProfileLife = Duration(days: 16);
 
-/// Routes and seen packages are kept this long.
+/// Routes and seen lanterns are kept this long.
 const Duration kDatingRouteLife = Duration(days: 30);
-
-/// Steps a package travels (always the same, real or cover).
-const int kDatingHops = 3;
 
 /// Independent reports of a minor (from different dating keys) that hide a
 /// dating profile on a phone which never reported it itself (§19.6).
 const int kDatingMinorQuorum = 2;
 
-/// Reports of a minor a phone carries in its own packages, at most (the
+/// Reports of a minor a phone carries in the profiles it sends, at most (the
 /// newest), and for how long.
 const int _minorCarried = 16;
 const Duration _minorCarriedLife = Duration(days: 60);
@@ -97,12 +96,20 @@ const int _minorKeysMax = 300;
 /// A request for the location of a date is answered at most this often.
 const Duration kDatingLocationAskEvery = Duration(minutes: 2);
 
-/// Flood guard on the receiving side: new packages taken in from one
+/// Flood guard on the receiving side: new lanterns taken in from one
 /// friend a day (their own and the ones they pass on). Every phone sends
 /// one a week (and again when its profile changes), so this covers a
-/// friend whose three steps of friends are several hundred phones; a
-/// broken or modified app cannot make the whole network pass on more.
-const int kDatingPackagesPerFriendPerDay = 100;
+/// friend whose friends are several hundred phones; a broken or modified
+/// app cannot make the whole network pass on more.
+const int kDatingLanternsPerFriendPerDay = 100;
+
+/// Requests for a profile answered per dating key a day: an answer is up to
+/// a few hundred kilobytes, so one key cannot make a phone send many.
+const int kDatingFetchesPerKeyPerDay = 10;
+
+/// The share of lanterns a phone with dating off asks the profile of anyway
+/// (and drops the answer), so that asking does not tell who dates.
+const double kDatingDecoyFetchShare = 0.25;
 
 /// Largest sealed message travelling back (an introduction carries a whole
 /// profile with its photos).
@@ -113,19 +120,22 @@ const int _maxBackTtl = 8;
 
 /// "Randki przez znajomych" (§19).
 ///
-/// * Every phone has a dating key and sends a package every week, also with
-///   dating off (then a cover package), and passes on its friends'
-///   packages up to 3 steps. From the outside, and to the friends passing
-///   them on, everybody looks the same.
-/// * A phone with dating off never opens or keeps the packages it passes
-///   on.
-/// * Likes, messages and introductions go back the way packages came,
+/// * Every phone has a dating key and sends a small lantern every week, also
+///   with dating off (then a decoy lantern), and passes on its friends'
+///   lanterns up to [kDatingMaxHops] steps (§19.7). From the outside, and to
+///   the friends passing them on, everybody looks the same.
+/// * Only when a lantern fits (age, gender, preferences, distance, both
+///   ways) does the phone ask for the profile, back along the way the
+///   lantern came; the answer is a profile or a cover of the same size
+///   range. A phone with dating off asks for a share of the lanterns too and
+///   drops the answers.
+/// * Likes, messages and introductions go back the way lanterns came,
 ///   sealed with dating keys (§19.2–19.3): the phones in between cannot read
 ///   them or tell who wrote them.
 /// * "Tak" sends a token both sides can compute only with their keys; "Nie"
 ///   sends nothing — so a "Nie" looks exactly like no decision at all.
-/// * Packages are sealed (see [DatingPackageSeal]): the phones passing them
-///   on cannot read them; the key is handed out on request.
+/// * A profile travels only sealed to the one who asked (see [DatingBox]):
+///   the phones in between cannot read it.
 /// * Vouches are signed by the friend who wrote them ([DatingVouch]).
 final class DatingService extends ChangeNotifier {
   DatingService({
@@ -139,6 +149,7 @@ final class DatingService extends ChangeNotifier {
     this.canPay,
     this.pay,
     this.currentPosition,
+    this.decoyFetchShare = kDatingDecoyFetchShare,
     int Function()? now,
     Random? random,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch),
@@ -176,15 +187,19 @@ final class DatingService extends ChangeNotifier {
   /// be read: answers a friend's request for the location of a date at once
   /// when the person agreed to that beforehand ([SafeDate.autoShare]).
   final Future<(double, double)?> Function()? currentPosition;
+
+  /// The share of lanterns a phone with dating off asks the profile of
+  /// anyway ([kDatingDecoyFetchShare]; tests set 0 or 1).
+  final double decoyFetchShare;
   final int Function() _now;
   final Random _random;
   static const String _key = 'dating/state';
 
-  /// A sealed package waits this long for its key.
-  static const Duration _pendingLife = Duration(days: 3);
+  /// A profile asked for is waited for this long.
+  static const Duration _wantedLife = Duration(days: 3);
 
-  /// Sealed packages kept waiting for a key, at most.
-  static const int _pendingMax = 200;
+  /// Profiles waited for, at most.
+  static const int _wantedMax = 200;
 
   RelayIdentity? _identity;
 
@@ -201,8 +216,12 @@ final class DatingService extends ChangeNotifier {
   final Map<String, (String, String, int)> _routes =
       <String, (String, String, int)>{};
 
-  /// Ids that end here: own package ids and marks.
+  /// Ids that end here: own lantern ids and marks.
   final Map<String, int> _own = <String, int>{};
+
+  /// This phone's own lanterns (id → when): only their ids are answered with
+  /// a profile.
+  final Map<String, int> _lanterns = <String, int>{};
 
   /// The mark others use to answer us, per dating key.
   final Map<String, String> _marks = <String, String>{};
@@ -221,20 +240,21 @@ final class DatingService extends ChangeNotifier {
   /// words can be signed for that profile.
   final Map<String, String> _vouchFor = <String, String>{};
 
-  /// Keys of this phone's own packages (package id → key, base64url).
-  final Map<String, String> _pkgKeys = <String, String>{};
-
-  /// Sealed packages waiting for their key (only with dating on).
-  final Map<String, Map<String, dynamic>> _pending =
+  /// Profiles asked for (lantern id → who sent the lantern, which friend
+  /// passed it on, the way, when): an answer is taken only for these.
+  final Map<String, Map<String, dynamic>> _wanted =
       <String, Map<String, dynamic>>{};
 
-  /// Friends' own dating keys (address → key), learnt from the packages
-  /// they send themselves: a friend this person hides from gets no key for
-  /// this phone's packages (see [_onKeyRequest]).
+  /// Friends' own dating keys (address → key), learnt from the lanterns
+  /// they send themselves: a friend this person hides from gets no profile
+  /// from this phone (see [_onFetch]).
   final Map<String, String> _friendKeys = <String, String>{};
 
-  /// New packages taken in per friend (when), for the flood guard.
-  final Map<String, List<int>> _packagesFrom = <String, List<int>>{};
+  /// New lanterns taken in per friend (when), for the flood guard.
+  final Map<String, List<int>> _lanternsFrom = <String, List<int>>{};
+
+  /// Profile requests answered per dating key (when), for the flood guard.
+  final Map<String, List<int>> _fetchesFrom = <String, List<int>>{};
 
   /// Sends made while a frame is handled; they go out once the handling is
   /// over, so two phones answering each other never wait on each other.
@@ -242,10 +262,10 @@ final class DatingService extends ChangeNotifier {
   final Map<String, SafeDate> _safe = <String, SafeDate>{};
 
   /// Dating keys this person reported as a minor (key → when): switched off
-  /// on this phone at once and carried in this phone's own packages.
+  /// on this phone at once and carried in the profiles this phone sends.
   final Map<String, int> _minorSelf = <String, int>{};
 
-  /// Reports of a minor seen in other people's packages: reported dating
+  /// Reports of a minor seen in other people's profiles: reported dating
   /// key → (reporting dating key → when).
   final Map<String, Map<String, int>> _minorSeen = <String, Map<String, int>>{};
   Future<void> _queue = Future<void>.value();
@@ -296,7 +316,7 @@ final class DatingService extends ChangeNotifier {
   /// Whether the dating profile [key] is switched off on this phone because
   /// of a report of a minor (§19.6): this person reported it, or at least
   /// [kDatingMinorQuorum] other dating keys did (independent reports, from
-  /// the packages of the people around). A pyramid decision comes through
+  /// the profiles of the people around). A pyramid decision comes through
   /// [isBanned]. It cannot be shown again.
   bool isMinorOff(String key) {
     if (_minorSelf.containsKey(key)) {
@@ -484,18 +504,18 @@ final class DatingService extends ChangeNotifier {
     _vouchFor
       ..clear()
       ..addAll(_strings(json['vfor']));
-    _pkgKeys
+    _lanterns
       ..clear()
-      ..addAll(_strings(json['pkeys']));
+      ..addAll(_ints(json['lan']));
     _friendKeys
       ..clear()
       ..addAll(_strings(json['fkeys']));
-    _pending.clear();
-    final Object? pending = json['pend'];
-    if (pending is Map) {
-      pending.forEach((Object? k, Object? v) {
+    _wanted.clear();
+    final Object? wanted = json['want'];
+    if (wanted is Map) {
+      wanted.forEach((Object? k, Object? v) {
         if (k is String && v is Map) {
-          _pending[k] = Map<String, dynamic>.from(v);
+          _wanted[k] = Map<String, dynamic>.from(v);
         }
       });
     }
@@ -556,11 +576,11 @@ final class DatingService extends ChangeNotifier {
     _safe.removeWhere(
       (String _, SafeDate s) => s.isOver && t - s.okAt! > 2 * 24 * 3600 * 1000,
     );
-    _pkgKeys.removeWhere((String id, String _) => !_own.containsKey(id));
+    _lanterns.removeWhere((String id, int _) => !_own.containsKey(id));
     _pruneMinorReports(t);
-    _pending.removeWhere(
+    _wanted.removeWhere(
       (String _, Map<String, dynamic> p) =>
-          p['at'] is! int || t - (p['at'] as int) > _pendingLife.inMilliseconds,
+          p['at'] is! int || t - (p['at'] as int) > _wantedLife.inMilliseconds,
     );
     _vouchFor.removeWhere(
       (String id, String _) => !vouchRequests.containsKey(id),
@@ -604,9 +624,9 @@ final class DatingService extends ChangeNotifier {
           ],
           'vreq': vouchRequests,
           'vfor': _vouchFor,
-          'pkeys': _pkgKeys,
+          'lan': _lanterns,
           if (_friendKeys.isNotEmpty) 'fkeys': _friendKeys,
-          'pend': _pending,
+          'want': _wanted,
           'safe': <Map<String, dynamic>>[
             for (final SafeDate s in _safe.values) s.toJson(),
           ],
@@ -637,7 +657,7 @@ final class DatingService extends ChangeNotifier {
 
   // ---- own profile ----
 
-  /// Saves the profile and settings; the next package carries them.
+  /// Saves the profile and settings; the next lantern carries the change.
   Future<void> saveMine(void Function(MyDating me) change) async {
     change(me);
     _dirty = true;
@@ -656,7 +676,7 @@ final class DatingService extends ChangeNotifier {
       return null;
     }
     // Hidden friends first, then members of hidden groups: phones read
-    // [kDatingMaxHidden] of them (and the package stays a sane size).
+    // [kDatingMaxHidden] of them (and the profile stays a sane size).
     final Set<String> hidden = <String>{
       ...me.hiddenFriends.map(_n),
       for (final String g in me.hiddenGroups) ...?groupMembers?.call(g).map(_n),
@@ -680,36 +700,30 @@ final class DatingService extends ChangeNotifier {
     );
   }
 
-  /// Sends this phone's package when it is time (or the profile changed).
+  /// Sends this phone's lantern when it is time (or the profile changed).
   Future<void> maybePublish({bool force = false}) async {
     final int t = _now();
-    if (_identity == null) {
+    final String? key = myKey;
+    if (_identity == null || key == null) {
       return;
     }
     final bool due = t - _publishedAt >= kDatingPublishEvery.inMilliseconds;
     if (!force && !due && !(_dirty && active)) {
       return;
     }
-    final String salt = _newId(12);
-    final DatingProfile? mine = _myProfile(salt);
+    // A phone with dating off sends a decoy of the same shape (§19.7).
+    final bool real = active;
+    final DatingLantern lantern = real
+        ? DatingLantern.of(
+            key: key,
+            age: me.age,
+            gender: me.gender,
+            wants: me.wants,
+          )
+        : DatingLantern.decoy(key, _random);
     final String id = _newId(16);
-    // Sealed for the phones on the way; a cover is padded to the size of a
-    // profile with one to four photos (see DatingPackageSeal).
-    final (Uint8List, Map<String, dynamic>)
-    sealed = await DatingPackageSeal.seal(
-      sender: myKey!,
-      packageId: id,
-      content: <String, dynamic>{
-        ...(mine?.toJson() ?? const <String, dynamic>{'v': 1, 'cover': true}),
-        // Reports of a minor travel inside every package, real or
-        // cover, so they do not tell whether dating is on.
-        ...?_carriedMinorReports(t),
-      },
-      minBuckets: mine == null ? 2 + _random.nextInt(11) : 2,
-    );
-    final Map<String, dynamic> p = sealed.$2;
-    _pkgKeys[id] = base64Url.encode(sealed.$1);
     _own[id] = t;
+    _lanterns[id] = t;
     _seen[id] = t;
     _publishedAt = t;
     _dirty = false;
@@ -720,15 +734,15 @@ final class DatingService extends ChangeNotifier {
     };
     for (final String f in host.friends()) {
       // Hidden people do not even get it directly.
-      if (mine != null && hiddenFriends.contains(_n(f))) {
+      if (real && hiddenFriends.contains(_n(f))) {
         continue;
       }
       await _send(f, <String, dynamic>{
-        'type': DatingTypes.package,
+        'type': DatingTypes.lantern,
         'id': id,
-        'hops': kDatingHops - 1,
+        'hops': kDatingMaxHops - 1,
         'path': const <String>[],
-        'p': p,
+        'l': lantern.toJson(),
       });
     }
   }
@@ -857,7 +871,7 @@ final class DatingService extends ChangeNotifier {
 
   /// Reports the dating profile [key] as a minor (§19.6): it is switched
   /// off on this phone at once (gone from the lists and the matches, never
-  /// shown again), and the report travels in this phone's next packages. A
+  /// shown again), and the report travels in the profiles this phone sends. A
   /// phone that gets reports from [kDatingMinorQuorum] different dating keys
   /// switches the profile off too. The chat is kept (as evidence), unreadable
   /// in the lists.
@@ -872,7 +886,8 @@ final class DatingService extends ChangeNotifier {
     await maybePublish();
   }
 
-  /// The `mr` entry of this phone's package: the newest reports of a minor.
+  /// The `mr` entry of a profile this phone sends: the newest reports of a
+  /// minor.
   Map<String, dynamic>? _carriedMinorReports(int t) {
     final List<String> keys = <String>[
       for (final MapEntry<String, int> e in _minorSelf.entries)
@@ -887,7 +902,7 @@ final class DatingService extends ChangeNotifier {
     return <String, dynamic>{'mr': newest};
   }
 
-  /// Reports of a minor found in the opened package of [sender] (a dating
+  /// Reports of a minor found in the profile sent by [sender] (a dating
   /// key): counted once per reporting key. Returns whether anything new was
   /// learnt.
   bool _noteMinorReports(String sender, Object? reported) {
@@ -1515,8 +1530,8 @@ final class DatingService extends ChangeNotifier {
 
   Future<void> _handle(String type, String from, Map<String, dynamic> p) async {
     switch (type) {
-      case DatingTypes.package:
-        await _onPackage(from, p);
+      case DatingTypes.lantern:
+        await _onLantern(from, p);
       case DatingTypes.back:
         await _onBack(from, p);
       case DatingTypes.ask:
@@ -1629,20 +1644,36 @@ final class DatingService extends ChangeNotifier {
     }
   }
 
-  /// Whether a new package from the friend [from] may be taken in (the
+  /// Whether a new lantern from the friend [from] may be taken in (the
   /// flood guard). Counts it when it may.
-  bool _takePackage(String from) {
+  bool _takeLantern(String from) {
     final int t = _now();
-    final List<int> recent = (_packagesFrom[from] ??= <int>[])
+    final List<int> recent = (_lanternsFrom[from] ??= <int>[])
       ..removeWhere((int at) => t - at > 24 * 3600 * 1000);
-    if (recent.length >= kDatingPackagesPerFriendPerDay) {
+    if (recent.length >= kDatingLanternsPerFriendPerDay) {
       return false;
     }
     recent.add(t);
     return true;
   }
 
-  /// Notes [key] (the sender's key of a sealed package) as the dating key of
+  /// Whether the dating key [requester] may be answered with a profile now
+  /// (the flood guard). Counts it when it may.
+  bool _takeFetch(String requester) {
+    final int t = _now();
+    final List<int> recent = (_fetchesFrom[requester] ??= <int>[])
+      ..removeWhere((int at) => t - at > 24 * 3600 * 1000);
+    if (recent.length >= kDatingFetchesPerKeyPerDay) {
+      return false;
+    }
+    recent.add(t);
+    while (_fetchesFrom.length > 500) {
+      _fetchesFrom.remove(_fetchesFrom.keys.first);
+    }
+    return true;
+  }
+
+  /// Notes [key] (the sender's key of a lantern) as the dating key of
   /// the friend [from]. Returns whether it changed anything.
   bool _learnFriendKey(String from, Object? key) {
     if (key is! String ||
@@ -1659,106 +1690,124 @@ final class DatingService extends ChangeNotifier {
     return true;
   }
 
-  Future<void> _onPackage(String from, Map<String, dynamic> p) async {
+  Future<void> _onLantern(String from, Map<String, dynamic> p) async {
     final Object? id = p['id'];
     final Object? hops = p['hops'];
     final Object? path = p['path'];
-    final Object? raw = p['p'];
     if (id is! String ||
         id.isEmpty ||
         id.length > 40 ||
         hops is! int ||
-        path is! List ||
-        raw is! Map) {
+        path is! List) {
       return;
     }
-    // A friend's own package (nobody passed it on yet) names their dating
-    // key — also when the same package already came through someone else.
-    final bool learnt = path.isEmpty && _learnFriendKey(from, raw['k']);
+    // Checked before anything is kept or passed on: a lantern of a shape
+    // this app never makes, or one too many from this friend today, goes no
+    // further (and may still come through another friend later). It is
+    // rebuilt from its own fields, so nothing else rides along.
+    final DatingLantern? lantern = DatingLantern.fromJson(p['l']);
+    if (lantern == null) {
+      return;
+    }
+    // A friend's own lantern (nobody passed it on yet) names their dating
+    // key — also when the same lantern already came through someone else.
+    final bool learnt = path.isEmpty && _learnFriendKey(from, lantern.key);
     if (_seen.containsKey(id)) {
       if (learnt) {
         await _save();
       }
       return;
     }
-    // Checked before anything is kept or passed on: a package of a shape
-    // this app never makes, or one too many from this friend today, goes no
-    // further (and may still come through another friend later).
-    // Only sealed packages, rebuilt from their own fields.
-    final Map<String, dynamic>? body = DatingPackageSeal.wellFormed(raw);
-    if (body == null || !_takePackage(from)) {
+    if (!_takeLantern(from)) {
       return;
     }
     final int t = _now();
     _seen[id] = t;
     _routes[id] = (from, id, t);
     final List<String> names = <String>[
-      for (final String n in path.whereType<String>().take(kDatingHops))
+      for (final String n in path.whereType<String>().take(kDatingMaxHops))
         n.length > 40 ? n.substring(0, 40) : n,
     ];
-    // Everyone passes packages on, with dating on or off — once, not kept
-    // waiting for friends who are away (the package comes again next week),
+    // Everyone passes lanterns on, with dating on or off — once, not kept
+    // waiting for friends who are away (the lantern comes again next week),
     // so a flood cannot fill every phone's outbox.
     if (hops > 0) {
       final List<String> next = <String>[...names, host.ownName()];
       for (final String f in host.friends()) {
         if (_n(f) != from) {
           await _send(f, <String, dynamic>{
-            'type': DatingTypes.package,
+            'type': DatingTypes.lantern,
             'id': id,
-            'hops': min(hops, kDatingHops) - 1,
+            'hops': min(hops, kDatingMaxHops - 1) - 1,
             'path': next,
-            'p': body,
+            'l': lantern.toJson(),
             kSendOnceKey: true,
           });
         }
       }
     }
-    await _onSealedPackage(from, id, names, body, t);
+    await _onLanternSeen(from, id, names, lantern, t);
   }
 
-  /// A sealed package: every phone asks for its key, with dating on or off
-  /// (so asking tells nobody anything); only with dating on is it kept until
-  /// the key comes.
-  Future<void> _onSealedPackage(
+  /// A lantern reached this phone. With dating on and a lantern that fits
+  /// (age, gender, preferences, distance — both ways), this phone asks for
+  /// the profile; with dating off it asks for a share of the lanterns anyway
+  /// ([decoyFetchShare]) and drops the answer, so asking tells nobody
+  /// anything. A lantern that does not fit costs nothing (§19.7).
+  Future<void> _onLanternSeen(
     String from,
     String id,
     List<String> names,
-    Map<String, dynamic> body,
+    DatingLantern lantern,
     int t,
   ) async {
-    final String? sender = DatingPackageSeal.senderOf(body);
-    final RelayIdentity? me = _identity;
-    final Uint8List? senderKey = decodeRelayKey(sender);
-    if (sender == null || senderKey == null || me == null || sender == myKey) {
+    final RelayIdentity? identity = _identity;
+    final Uint8List? senderKey = decodeRelayKey(lantern.key);
+    if (senderKey == null ||
+        identity == null ||
+        lantern.key == myKey ||
+        _blocked.contains(lantern.key) ||
+        isMinorOff(lantern.key)) {
       await _save();
       return;
     }
-    if (active && !_blocked.contains(sender)) {
-      _pending[id] = <String, dynamic>{
-        'b': body,
+    final bool wanted =
+        active &&
+        lantern.fits(
+          myAge: me.age,
+          myGender: me.gender,
+          myWants: me.wants,
+          distance: names.length + 1,
+        );
+    if (!wanted && (active || _random.nextDouble() >= decoyFetchShare)) {
+      await _save();
+      return;
+    }
+    if (wanted) {
+      _wanted[id] = <String, dynamic>{
+        'k': lantern.key,
         'f': from,
         'path': names,
         'at': t,
       };
-      while (_pending.length > _pendingMax) {
-        _pending.remove(_pending.keys.first);
+      while (_wanted.length > _wantedMax) {
+        _wanted.remove(_wanted.keys.first);
       }
     }
     // A one-off mark the answer comes back to (not the per-person mark: a
-    // phone asks every sender in range for keys).
+    // phone asks every sender in range).
     final String mark = _newId(16);
     _own[mark] = t;
     final Map<String, String> box = await DatingBox.seal(
-      me: me,
+      me: identity,
       recipient: senderKey,
-      payload: <String, dynamic>{'k': 'key?', 'id': id},
+      payload: <String, dynamic>{'k': 'fetch', 'id': id},
     );
     await _save();
     await _route(id, mark, box, from: null);
   }
 
-  /// A profile out of an opened package: kept when it fits both ways and is
+  /// A profile out of an answer: kept when it fits both ways and is
   /// not hidden from this person.
   Future<void> _acceptProfile(
     String from,
@@ -1859,35 +1908,29 @@ final class DatingService extends ChangeNotifier {
     return p.copyWith(photos: photos, vouches: vouches);
   }
 
-  /// The key of a sealed package came: open it.
-  Future<void> _onPackageKey(String sender, Map<String, dynamic> msg) async {
+  /// The profile asked for came (from [sender], a dating key): kept when it
+  /// is what was asked for.
+  Future<void> _onProfile(String sender, Map<String, dynamic> msg) async {
     final Object? id = msg['id'];
-    final Uint8List? key = decodeRelayKey(msg['key']);
-    final Map<String, dynamic>? waiting = id is String ? _pending[id] : null;
-    if (id is! String || key == null || waiting == null) {
+    final Object? content = msg['p'];
+    final Map<String, dynamic>? waiting = id is String ? _wanted[id] : null;
+    // Only the sender of the lantern can answer for it.
+    if (id is! String ||
+        content is! Map ||
+        waiting == null ||
+        waiting['k'] != sender) {
       return;
     }
-    final Object? body = waiting['b'];
-    // Only the package's own sender can hand out its key.
-    if (DatingPackageSeal.senderOf(body) != sender) {
-      return;
-    }
-    _pending.remove(id);
-    final Map<String, dynamic>? content = await DatingPackageSeal.open(
-      body: body,
-      packageId: id,
-      key: key,
-    );
+    _wanted.remove(id);
     final Object? from = waiting['f'];
     final Object? path = waiting['path'];
     final Object? at = waiting['at'];
     // Covers carry reports of a minor too.
-    if (content != null && active) {
+    if (active) {
       _noteMinorReports(sender, content['mr']);
     }
     // A cover, or a profile wrapped by someone else's key: nothing to show.
-    if (content == null ||
-        content['k'] != sender ||
+    if (content['k'] != sender ||
         from is! String ||
         path is! List ||
         at is! int ||
@@ -1904,35 +1947,44 @@ final class DatingService extends ChangeNotifier {
     );
   }
 
-  /// Someone asks for the key of this phone's package (real or cover —
-  /// every phone answers alike). Blocked and banned dating keys get none,
-  /// and neither do the dating keys of the people this person hides from,
-  /// when this phone knows them (friends' own keys, from their packages) —
-  /// with dating on or off alike, so a missing answer says nothing about
-  /// dating.
+  /// Someone asks for the profile behind this phone's lantern (a real one or
+  /// a cover — every phone answers alike, the answer padded to whole
+  /// [kDatingBucket]s). Blocked and banned dating keys get none, and neither
+  /// do the dating keys of the people this person hides from, when this phone
+  /// knows them (friends' own keys, from their lanterns) — with dating on or
+  /// off alike, so a missing answer says nothing about dating.
   /// A modified app can still ask with a key nobody knows: hiding works
   /// against the ordinary app, not against a determined one (§19.1).
-  Future<void> _onKeyRequest(
+  Future<void> _onFetch(
     Uint8List sender,
     String? mark,
     Map<String, dynamic> msg,
   ) async {
     final Object? id = msg['id'];
-    final String? key = id is String ? _pkgKeys[id] : null;
-    final RelayIdentity? me = _identity;
+    final RelayIdentity? identity = _identity;
     final String senderKey = base64Url.encode(sender);
-    if (key == null ||
+    if (id is! String ||
+        !_lanterns.containsKey(id) ||
         mark == null ||
-        me == null ||
+        identity == null ||
         (isBanned?.call(senderKey) ?? false) ||
         isMinorOff(senderKey) ||
-        _hiddenKey(senderKey)) {
+        _hiddenKey(senderKey) ||
+        !_takeFetch(senderKey)) {
       return;
     }
+    final int t = _now();
+    final DatingProfile? mine = _myProfile(_newId(12));
+    final Map<String, dynamic> content = datingPadded(<String, dynamic>{
+      ...(mine?.toJson() ?? const <String, dynamic>{'v': 1, 'cover': true}),
+      // Reports of a minor travel with every answer, real or cover, so
+      // they do not tell whether dating is on.
+      ...?_carriedMinorReports(t),
+    }, minBuckets: mine == null ? 2 + _random.nextInt(11) : 2);
     final Map<String, String> box = await DatingBox.seal(
-      me: me,
+      me: identity,
       recipient: sender,
-      payload: <String, dynamic>{'k': 'key', 'id': id, 'key': key},
+      payload: <String, dynamic>{'k': 'prof', 'id': id, 'p': content},
     );
     await _route(mark, null, box, from: null);
   }
@@ -1983,16 +2035,16 @@ final class DatingService extends ChangeNotifier {
     if (mark is String) {
       _routes[mark] = (from, mark, _now());
       final SeenProfile? s = _profiles[sender];
-      if (s != null && msg['k'] != 'intro' && msg['k'] != 'key?') {
+      if (s != null && msg['k'] != 'intro' && msg['k'] != 'fetch') {
         s.replyTo = mark;
       }
     }
     switch (msg['k']) {
-      case 'key?':
-        await _onKeyRequest(opened.$1, mark is String ? mark : null, msg);
+      case 'fetch':
+        await _onFetch(opened.$1, mark is String ? mark : null, msg);
         await _save();
-      case 'key':
-        await _onPackageKey(sender, msg);
+      case 'prof':
+        await _onProfile(sender, msg);
       case 'like':
         final Object? tok = msg['tok'];
         if (tok is String && tok.length <= 100) {

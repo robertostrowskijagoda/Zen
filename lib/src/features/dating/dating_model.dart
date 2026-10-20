@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
@@ -31,6 +32,10 @@ enum DatingGender {
   }
 }
 
+/// Steps of friendship a lantern travels, and the farthest a person can ask
+/// for (§19.7).
+const int kDatingMaxHops = 2;
+
 /// Whom one is looking for.
 @immutable
 final class DatingWants {
@@ -42,14 +47,14 @@ final class DatingWants {
       DatingGender.man,
       DatingGender.other,
     },
-    this.hops = 3,
+    this.hops = kDatingMaxHops,
   });
 
   final int minAge;
   final int maxAge;
   final Set<DatingGender> genders;
 
-  /// How far in the friendship graph (1–3 steps).
+  /// How far in the friendship graph (1–[kDatingMaxHops] steps).
   final int hops;
 
   bool accepts({
@@ -83,7 +88,153 @@ final class DatingWants {
       minAge: json['min'] is int ? (json['min'] as int).clamp(18, 99) : 18,
       maxAge: json['max'] is int ? (json['max'] as int).clamp(18, 99) : 99,
       genders: genders.isEmpty ? const DatingWants().genders : genders,
-      hops: json['hops'] is int ? (json['hops'] as int).clamp(1, 3) : 3,
+      hops: json['hops'] is int
+          ? (json['hops'] as int).clamp(1, kDatingMaxHops)
+          : kDatingMaxHops,
+    );
+  }
+}
+
+/// A lantern (§19.7): the small thing every phone sends its friends every
+/// week, passed on up to [kDatingMaxHops] steps. It carries only the dating
+/// key and what is needed to see whether two people could fit — age,
+/// gender and preferences, six bytes — so it stays about 100 bytes. The
+/// profile itself is fetched only when the lantern fits. A phone with
+/// dating off sends a decoy lantern (random but valid values), so nobody
+/// can tell a real lantern from a decoy.
+@immutable
+final class DatingLantern {
+  const DatingLantern({
+    required this.key,
+    required this.age,
+    required this.gender,
+    required this.wants,
+  });
+
+  /// The lantern of a person with the given data (the values are brought
+  /// into the range a lantern can carry).
+  factory DatingLantern.of({
+    required String key,
+    required int age,
+    required DatingGender gender,
+    required DatingWants wants,
+  }) => DatingLantern(
+    key: key,
+    age: age.clamp(18, 120),
+    gender: gender,
+    wants: DatingWants(
+      minAge: wants.minAge.clamp(18, 99),
+      maxAge: wants.maxAge.clamp(18, 99),
+      genders: wants.genders,
+      hops: wants.hops.clamp(1, kDatingMaxHops),
+    ),
+  );
+
+  /// A lantern that belongs to nobody: plausible random values.
+  factory DatingLantern.decoy(String key, Random random) {
+    final int min = 18 + random.nextInt(30);
+    return DatingLantern(
+      key: key,
+      age: 18 + random.nextInt(50),
+      gender: DatingGender.values[random.nextInt(DatingGender.values.length)],
+      wants: DatingWants(
+        minAge: min,
+        maxAge: min + random.nextInt(100 - min),
+        genders: <DatingGender>{
+          for (final DatingGender g in DatingGender.values)
+            if (random.nextBool()) g,
+          DatingGender.values[random.nextInt(DatingGender.values.length)],
+        },
+        hops: 1 + random.nextInt(kDatingMaxHops),
+      ),
+    );
+  }
+
+  /// The dating key (X25519, base64url).
+  final String key;
+  final int age;
+  final DatingGender gender;
+  final DatingWants wants;
+
+  /// Whether this person and the one with [myAge], [myGender], [myWants]
+  /// could fit, [distance] steps apart (both ways, like a profile).
+  bool fits({
+    required int myAge,
+    required DatingGender myGender,
+    required DatingWants myWants,
+    required int distance,
+  }) =>
+      myWants.accepts(age: age, gender: gender, distance: distance) &&
+      wants.accepts(age: myAge, gender: myGender, distance: distance);
+
+  Map<String, dynamic> toJson() {
+    int mask = 0;
+    for (final DatingGender g in wants.genders) {
+      mask |= 1 << g.index;
+    }
+    return <String, dynamic>{
+      'v': 3,
+      'k': key,
+      'h': base64Url.encode(<int>[
+        age,
+        gender.index,
+        wants.minAge,
+        wants.maxAge,
+        mask,
+        wants.hops,
+      ]),
+    };
+  }
+
+  /// `null` for anything that is not a lantern this app makes.
+  static DatingLantern? fromJson(Object? json) {
+    if (json is! Map || json['v'] != 3) {
+      return null;
+    }
+    final Object? k = json['k'];
+    final Object? h = json['h'];
+    if (k is! String || k.length > 64 || h is! String || h.length != 8) {
+      return null;
+    }
+    final List<int> b;
+    try {
+      b = base64Url.decode(h);
+    } on FormatException {
+      return null;
+    }
+    if (b.length != 6) {
+      return null;
+    }
+    final int age = b[0];
+    final int gender = b[1];
+    final int minAge = b[2];
+    final int maxAge = b[3];
+    final int mask = b[4];
+    final int hops = b[5];
+    if (age < 18 ||
+        age > 120 ||
+        gender >= DatingGender.values.length ||
+        minAge < 18 ||
+        maxAge > 99 ||
+        mask == 0 ||
+        mask >= 1 << DatingGender.values.length ||
+        hops < 1 ||
+        hops > kDatingMaxHops) {
+      return null;
+    }
+    return DatingLantern(
+      key: k,
+      age: age,
+      gender: DatingGender.values[gender],
+      wants: DatingWants(
+        minAge: minAge,
+        maxAge: maxAge,
+        genders: <DatingGender>{
+          for (final DatingGender g in DatingGender.values)
+            if (mask & (1 << g.index) != 0) g,
+        },
+        hops: hops,
+      ),
     );
   }
 }
