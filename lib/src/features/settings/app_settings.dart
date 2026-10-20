@@ -214,7 +214,6 @@ final class AppSettings {
     this.inboxLimitMb = defaultInboxLimitMb,
     this.autoCleanupDays = defaultAutoCleanupDays,
     this.notificationDelaySeconds = defaultNotificationDelaySeconds,
-    this.encryptionEnabled = defaultEncryptionEnabled,
     this.lockMode = defaultLockMode,
     this.backgroundLockDelaySeconds = defaultBackgroundLockDelaySeconds,
     this.themeMode = defaultThemeMode,
@@ -241,10 +240,6 @@ final class AppSettings {
   static const int minimumNotificationDelaySeconds = 2;
   static const int maximumNotificationDelaySeconds = 10;
 
-  /// Local encryption is always on; the flag survives only for storage
-  /// compatibility and is forced true everywhere it matters.
-  static const bool defaultEncryptionEnabled = true;
-
   /// Locks when Zen has been in the background for a while (5 min), so a
   /// phone left unlocked on a table does not show the conversations.
   static const AppLockMode defaultLockMode = AppLockMode.background;
@@ -257,7 +252,6 @@ final class AppSettings {
   final int inboxLimitMb;
   final int autoCleanupDays;
   final int notificationDelaySeconds;
-  final bool encryptionEnabled;
   final AppLockMode lockMode;
   final int backgroundLockDelaySeconds;
   final AppThemeMode themeMode;
@@ -317,11 +311,13 @@ final class AppSettings {
 
   /// "Szukaj znajomych w tej samej sieci Wi-Fi" (§5.1 item 6): the
   /// account's own devices on one network connect directly. `null` until
-  /// the person chooses: then on for computers, off for phones.
+  /// the person chooses: then off on every platform.
   final bool? lanDiscovery;
 
-  /// Whether LAN discovery runs on this device ([phone]: Android or iOS).
-  bool lanDiscoveryOn({required bool phone}) => lanDiscovery ?? !phone;
+  /// Whether LAN discovery runs on this device: only once the person turned
+  /// it on. [phone] is kept for callers (Android or iOS) and no longer
+  /// matters.
+  bool lanDiscoveryOn({required bool phone}) => lanDiscovery ?? false;
 
   /// Longest key accepted; real keys are ~64 characters.
   static const int maximumGifApiKeyLength = 200;
@@ -352,7 +348,6 @@ final class AppSettings {
     int? inboxLimitMb,
     int? autoCleanupDays,
     int? notificationDelaySeconds,
-    bool? encryptionEnabled,
     AppLockMode? lockMode,
     int? backgroundLockDelaySeconds,
     AppThemeMode? themeMode,
@@ -379,7 +374,6 @@ final class AppSettings {
       notificationDelaySeconds: normalizeNotificationDelaySeconds(
         notificationDelaySeconds ?? this.notificationDelaySeconds,
       ),
-      encryptionEnabled: encryptionEnabled ?? this.encryptionEnabled,
       lockMode: lockMode ?? this.lockMode,
       backgroundLockDelaySeconds: normalizeBackgroundLockDelaySeconds(
         backgroundLockDelaySeconds ?? this.backgroundLockDelaySeconds,

@@ -8,10 +8,10 @@ import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
 void main() {
-  test('LAN discovery is on by default on computers, off on phones', () {
+  test('LAN discovery is off by default on every platform', () {
     const AppSettings defaults = AppSettings();
     expect(defaults.lanDiscovery, isNull);
-    expect(defaults.lanDiscoveryOn(phone: false), isTrue);
+    expect(defaults.lanDiscoveryOn(phone: false), isFalse);
     expect(defaults.lanDiscoveryOn(phone: true), isFalse);
     expect(defaults.toJson().containsKey('lanDiscovery'), isFalse);
 
@@ -73,10 +73,12 @@ void main() {
 
     final LedgerIdentity identity = await LedgerIdentity.loadOrCreate(disk);
     final String expected = await deriveLanDiscoverySecret(identity.selfKey!);
-    expect(await resolver(phone: false)(), expected);
+    // Off by default on every platform.
+    expect(await resolver(phone: false)(), isNull);
     expect(await resolver(phone: true)(), isNull);
 
     settings = settings.copyWith(lanDiscovery: true);
+    expect(await resolver(phone: false)(), expected);
     expect(await resolver(phone: true)(), expected);
 
     settings = settings.copyWith(lanDiscovery: false);

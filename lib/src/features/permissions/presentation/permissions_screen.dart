@@ -33,7 +33,7 @@ class PermissionsScreen extends StatelessWidget {
 }
 
 /// The first start, right after the app password (§25.2): the same steps
-/// once, then this phone is shown nearby — unless the person said no.
+/// once; this phone is shown nearby only if the person turns that on.
 class PermissionsSetupStage extends StatelessWidget {
   const PermissionsSetupStage({super.key});
 
@@ -68,8 +68,8 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
   final Set<ZenPermission> _asked = <ZenPermission>{};
   ZenPermission? _busy;
 
-  /// Shown to people nearby (on by default on the first start).
-  bool _visible = true;
+  /// Shown to people nearby (off until the person turns it on).
+  bool _visible = false;
   bool _finishing = false;
   StreamSubscription<bool>? _bluetooth;
   Timer? _later;

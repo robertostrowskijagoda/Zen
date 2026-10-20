@@ -457,6 +457,11 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                 const IntroInboxSection(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 ),
+                // Conversations with people who are not friends (§13).
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: StrangerChatsSection(),
+                ),
                 if (groups.isNotEmpty) ...<Widget>[
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -753,6 +758,15 @@ class _SettingsScreen extends ConsumerWidget {
                   subtitle: settings.groupInviteFrom.label,
                   pageTitle: t('Zaproszenia do grup'),
                   pageChildren: const <Widget>[GroupInviteFromTile()],
+                ),
+                _SettingsNavTile(
+                  key: const Key('settings-nav-stranger-messages'),
+                  icon: Icons.mark_chat_unread_outlined,
+                  toneIndex: 2,
+                  title: t('Wiadomości spoza znajomych'),
+                  subtitle: t('Kto może napisać pierwszy'),
+                  pageTitle: t('Wiadomości spoza znajomych'),
+                  pageChildren: const <Widget>[StrangerMessagesFromTile()],
                 ),
               ],
             ),
@@ -1271,7 +1285,7 @@ class _LiveTechInfoSection extends ConsumerWidget {
 }
 
 /// "Szukaj znajomych w tej samej sieci Wi-Fi" (§5.1 item 6): the account's
-/// own devices on one network connect directly. Off by default on phones.
+/// own devices on one network connect directly. Off by default.
 class _LanDiscoverySection extends ConsumerWidget {
   const _LanDiscoverySection();
 
@@ -3001,6 +3015,9 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
                 child: FilledButton(
                   key: Key('qr-accept-$peerAddress'),
                   onPressed: () async {
+                    // The card goes once answered; the question after it
+                    // needs a context that stays.
+                    final NavigatorState navigator = Navigator.of(context);
                     try {
                       // They keep the name from their profile.
                       await ref
@@ -3018,6 +3035,15 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
                               }),
                             ),
                           ),
+                        );
+                      }
+                      if (navigator.mounted) {
+                        // They just scanned this code: this side confirms
+                        // the meeting too (§6.2).
+                        await showMetLevelPrompt(
+                          navigator.context,
+                          address: peerAddress,
+                          name: title,
                         );
                       }
                     } catch (error) {

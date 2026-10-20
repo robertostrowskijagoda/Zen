@@ -58,9 +58,9 @@ Future<Uint8List?> _noImage(String? path) async => null;
 
 void main() {
   group('fields and who sees them', () {
-    test('defaults keep what earlier versions showed', () {
+    test('defaults: status for friends, photo public', () {
       const UserProfile p = UserProfile();
-      expect(fieldVisibility(p, ProfileField.status), FieldVisibility.public);
+      expect(fieldVisibility(p, ProfileField.status), FieldVisibility.all);
       expect(fieldVisibility(p, ProfileField.photo), FieldVisibility.public);
       expect(fieldVisibility(p, ProfileField.nationality), FieldVisibility.all);
       // A default is not stored; anything else is, and survives JSON.

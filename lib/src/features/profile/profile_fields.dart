@@ -45,12 +45,11 @@ Map<ProfileField, String> get kProfileFieldLabels => <ProfileField, String>{
   ProfileField.followerCount: t('Liczba obserwujących'),
 };
 
-/// What a field shows when the user never chose: what earlier versions
-/// did (the photo, status and bio were public), the new fields for
-/// friends.
+/// What a field shows when the user never chose. The status line is for
+/// friends only (privacy by default); the photo and bio stay public.
 const Map<ProfileField, FieldVisibility> kDefaultFieldVisibility =
     <ProfileField, FieldVisibility>{
-      ProfileField.status: FieldVisibility.public,
+      ProfileField.status: FieldVisibility.all,
       ProfileField.bio: FieldVisibility.public,
       ProfileField.photo: FieldVisibility.public,
       ProfileField.cover: FieldVisibility.public,

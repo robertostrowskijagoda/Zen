@@ -223,15 +223,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(platform.opened, <ZenPermission>[ZenPermission.camera]);
 
-    // Visible nearby: on unless the person turns it off.
+    // Visible nearby: off until the person turns it on.
     expect(
       tester
           .widget<SwitchListTile>(
             find.byKey(const Key('permissions-nearby-visible')),
           )
           .value,
-      isTrue,
+      isFalse,
     );
+    await tester.tap(find.byKey(const Key('permissions-nearby-visible')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('permissions-setup-done')));
     await tester.pumpAndSettle();
     expect(find.text('aplikacja'), findsOneWidget);
@@ -262,7 +264,7 @@ void main() {
     await tester.runAsync(near.nearby.close);
   });
 
-  testWidgets('saying no to being visible keeps the phone hidden', (
+  testWidgets('not turning visibility on keeps the phone hidden', (
     WidgetTester tester,
   ) async {
     _tallScreen(tester);
@@ -277,8 +279,6 @@ void main() {
         ],
       ),
     );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('permissions-nearby-visible')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('permissions-setup-done')));
     await tester.pumpAndSettle();
@@ -397,6 +397,6 @@ void main() {
     );
     expect(ZenPermission.camera.optional, isTrue);
     expect(ZenPermission.bluetooth.optional, isFalse);
-    expect(MeetBook().nearbyVisible, isTrue, reason: 'visible by default');
+    expect(MeetBook().nearbyVisible, isFalse, reason: 'hidden by default');
   });
 }

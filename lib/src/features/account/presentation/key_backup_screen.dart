@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
@@ -10,6 +10,7 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
 import 'package:zen/src/features/account/key_file.dart';
@@ -570,11 +571,8 @@ class _PaperBackupViewState extends State<PaperBackupView> {
         IconButton(
           key: const Key('paper-backup-copy'),
           tooltip: t('Kopiuj'),
-          onPressed: () => unawaited(
-            Clipboard.setData(
-              ClipboardData(text: formatPaperBackup(widget.code)),
-            ),
-          ),
+          onPressed: () =>
+              unawaited(copyWithExpiry(formatPaperBackup(widget.code))),
           icon: const Icon(Icons.copy_rounded),
         ),
       ],
