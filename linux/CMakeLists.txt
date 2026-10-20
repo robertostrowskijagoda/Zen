@@ -144,6 +144,19 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/runner/resources/app_icon.png"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 
+# Desktop integration (linux/packaging): the .desktop file (menu entry,
+# zen:// links, the icon on Wayland) and the AppStream metadata, with a
+# script that adds them for the current user when Zen runs from the unpacked
+# tar.gz. The .deb installs them to /usr/share instead (build_deb.sh).
+install(FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/packaging/com.roj.zen.desktop"
+  "${CMAKE_CURRENT_SOURCE_DIR}/packaging/com.roj.zen.metainfo.xml"
+  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
+  COMPONENT Runtime)
+install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/install-desktop-entry.sh"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"

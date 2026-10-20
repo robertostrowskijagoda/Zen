@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata (software centres, Flatpak). Installed by the .deb
+     to /usr/share/metainfo; the id matches APPLICATION_ID in
+     linux/CMakeLists.txt and the .desktop file name. -->
+<component type="desktop-application">
+  <id>com.roj.zen</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary=https://polyformproject.org/licenses/strict/1.0.0</project_license>
+  <name>Zen</name>
+  <summary>A network of people who know each other</summary>
+  <summary xml:lang="pl">Sieć ludzi, którzy się znają</summary>
+  <developer id="io.github.robertostrowskijagoda">
+    <name>Robert Ostrowski-Jagoda</name>
+  </developer>
+  <description>
+    <p>
+      Zen connects you with people you know, directly and without servers,
+      ads or an algorithm. Messages, calls and posts travel between your
+      friends' devices over an encrypted mesh network.
+    </p>
+    <p xml:lang="pl">
+      Zen łączy Cię z ludźmi, których znasz — bezpośrednio, bez serwerów,
+      reklam i algorytmu. Wiadomości, rozmowy i wpisy płyną między
+      urządzeniami znajomych przez szyfrowaną sieć.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.roj.zen.desktop</launchable>
+  <url type="homepage">https://robertostrowskijagoda.github.io/Zen/</url>
+  <url type="vcs-browser">https://github.com/robertostrowskijagoda/Zen</url>
+  <url type="bugtracker">https://github.com/robertostrowskijagoda/Zen/issues</url>
+  <categories>
+    <category>Network</category>
+    <category>InstantMessaging</category>
+  </categories>
+  <provides>
+    <binary>zen</binary>
+    <mediatype>x-scheme-handler/zen</mediatype>
+  </provides>
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-chat">intense</content_attribute>
+    <content_attribute id="social-audio">intense</content_attribute>
+    <content_attribute id="social-contacts">intense</content_attribute>
+    <content_attribute id="social-info">mild</content_attribute>
+    <content_attribute id="social-location">intense</content_attribute>
+  </content_rating>
+  <releases>
+    <release version="1.10.0" date="2026-10-14"/>
+  </releases>
+</component>

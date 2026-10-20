@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The "store" flavor (Google Play, Galaxy Store; STAN D12), merged over
+     src/main/AndroidManifest.xml. Stores update the app themselves and do
+     not allow it to install APKs: the permission is removed, and Dart hides
+     self-update and APK sharing (lib/src/features/update/store_build.dart). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission
+        android:name="android.permission.REQUEST_INSTALL_PACKAGES"
+        tools:node="remove" />
+</manifest>

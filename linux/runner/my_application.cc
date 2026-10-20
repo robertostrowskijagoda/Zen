@@ -6,6 +6,7 @@
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
+#include "zen_media_player.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
@@ -36,6 +37,16 @@ static void set_window_icon(GtkWindow* window) {
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+
+  // A second launch (e.g. a zen:// link opened from the browser) reaches the
+  // running instance through D-Bus: show its window instead of a new one.
+  // The link itself goes to Dart through app_links' command-line handling.
+  GList* windows = gtk_application_get_windows(GTK_APPLICATION(application));
+  if (windows != nullptr) {
+    gtk_window_present(GTK_WINDOW(windows->data));
+    return;
+  }
+
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
@@ -91,6 +102,8 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+  // video_player has no Linux backend: Zen's own, on GStreamer.
+  zen_media_player_register(FL_PLUGIN_REGISTRY(view));
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
@@ -113,7 +126,10 @@ static gboolean my_application_local_command_line(GApplication* application,
   g_application_activate(application);
   *exit_status = 0;
 
-  return TRUE;
+  // FALSE: GApplication goes on to emit "command-line" (in this process, or
+  // in the running one when this is a second launch), where app_links picks
+  // up a zen:// link from the arguments.
+  return FALSE;
 }
 
 // Implements GApplication::startup.
@@ -152,14 +168,22 @@ static void my_application_class_init(MyApplicationClass* klass) {
 
 static void my_application_init(MyApplication* self) {}
 
-MyApplication* my_application_new() {
+MyApplication* my_application_new(gboolean unique) {
   // Set the program name to the application ID, which helps various systems
   // like GTK and desktop environments map this running application to its
   // corresponding .desktop file. This ensures better integration by allowing
   // the application to be recognized beyond its binary name.
   g_set_prgname(APPLICATION_ID);
 
+  // One instance per desktop session, so links reach the running app
+  // (app_links, doc/README_linux.md). A test profile (--zen-profile=NAME or
+  // ZEN_PROFILE) runs beside the others on purpose: not unique.
+  GApplicationFlags flags = static_cast<GApplicationFlags>(
+      G_APPLICATION_HANDLES_COMMAND_LINE | G_APPLICATION_HANDLES_OPEN);
+  if (!unique) {
+    flags = static_cast<GApplicationFlags>(flags | G_APPLICATION_NON_UNIQUE);
+  }
   return MY_APPLICATION(g_object_new(my_application_get_type(),
                                      "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+                                     flags, nullptr));
 }

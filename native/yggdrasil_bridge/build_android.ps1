@@ -1,3 +1,15 @@
+# Builds libyggdrasil_bridge.so for Android with the NDK's clang, one per ABI:
+#
+#   powershell -NoProfile -ExecutionPolicy Bypass -File build_android.ps1 [-Abis arm64-v8a,armeabi-v7a,x86_64]
+#
+# Without -Abis: ZEN_ANDROID_ABIS (comma-separated), else every ABI the app
+# ships (Get-ZenAndroidAbis in bridge_tools.ps1). Output:
+# android/app/src/main/jniLibs/<abi>/libyggdrasil_bridge.so. The twin of
+# build_android.sh; Gradle calls it through build_if_changed.ps1.
+param(
+  [string]$Abis = ''
+)
+
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -21,9 +33,11 @@ if (-not (Test-Path $toolchainBin)) {
   throw "Android NDK LLVM toolchain not found at $toolchainBin"
 }
 
-$abis = @(
-  @{ Abi = 'arm64-v8a'; GoArch = 'arm64'; Clang = 'aarch64-linux-android21-clang.cmd' }
-)
+if (-not $Abis) {
+  $Abis = $env:ZEN_ANDROID_ABIS
+}
+# (PowerShell names are case-insensitive: not $abis, which is $Abis.)
+$selectedAbis = @(Select-ZenAndroidAbis -List $Abis)
 
 $env:PATH = "$(Split-Path $go.Exe -Parent);$env:PATH"
 if ($go.Root) {
@@ -34,7 +48,7 @@ $env:CGO_ENABLED = '1'
 
 Push-Location $root
 try {
-  foreach ($abi in $abis) {
+  foreach ($abi in $selectedAbis) {
     $outDir = Join-Path $projectRoot "android\app\src\main\jniLibs\$($abi.Abi)"
     New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
@@ -51,6 +65,7 @@ try {
     }
 
     $output = Join-Path $outDir 'libyggdrasil_bridge.so'
+    Write-Host "Go bridge: building android/$($abi.Abi)"
     & $go.Exe build -trimpath -buildmode=c-shared -ldflags='-s -w -checklinkname=0' -o $output .
     if ($LASTEXITCODE -ne 0) {
       throw "go build failed for $($abi.Abi)"

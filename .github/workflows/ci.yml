@@ -1,7 +1,8 @@
 # Every push to main and every pull request: format, analysis and all tests
 # of the app, and the Go bridge's own tests. Runs on Windows, like the
-# maintainer's machine (docs/TESTOWANIE.md). Next to them the Linux and
-# macOS builds (the Go bridge builds itself inside them) and a short start
+# maintainer's machine (docs/TESTING.md). Next to them the Go bridge for
+# the three Android ABIs, the Linux, Windows on ARM and macOS builds (the Go
+# bridge builds itself inside them), the Linux packaging and a short start
 # of each app. Actions are pinned to commit SHAs (Dependabot updates them,
 # .github/dependabot.yml); the token is read-only and no secret is used.
 name: CI
@@ -74,6 +75,34 @@ jobs:
           go vet .
           go test -count=1 .
 
+  android-bridge:
+    name: Go bridge for Android (3 ABIs)
+    # The APK carries arm64-v8a, armeabi-v7a (32-bit) and x86_64: each must
+    # build and export the bridge (a 32-bit-only break shows up here, not
+    # on the maintainer's arm64 phone). The NDK is on the runner.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache-dependency-path: native/yggdrasil_bridge/go.sum
+
+      - name: Build
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          sh native/yggdrasil_bridge/build_android.sh
+          nm="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            lib="android/app/src/main/jniLibs/$abi/libyggdrasil_bridge.so"
+            "$nm" -D --defined-only "$lib" | grep -q ' YggStartNode$'
+            ls -l "$lib"
+          done
+
   linux:
     name: Linux build
     runs-on: ubuntu-latest
@@ -84,14 +113,18 @@ jobs:
           persist-credentials: false
 
       # Flutter's Linux toolchain; libsecret for flutter_secure_storage,
-      # the app indicator for system_tray; Xvfb for the start below.
+      # the app indicator for system_tray, GStreamer for audio and video;
+      # Xvfb for the start below; dpkg-dev and the validators for the
+      # packaging check.
       - name: Build tools and libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
             libstdc++-12-dev libsecret-1-dev libayatana-appindicator3-dev \
-            xvfb libgl1-mesa-dri libglx-mesa0
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            xvfb libgl1-mesa-dri libglx-mesa0 \
+            dpkg-dev desktop-file-utils appstream
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
@@ -110,10 +143,18 @@ jobs:
       - name: Build (the Go bridge builds itself)
         run: flutter build linux --release
 
-      - name: Go bridge in the bundle
+      - name: Go bridge and media player in the bundle
         run: |
           bridge=build/linux/x64/release/bundle/lib/libyggdrasil_bridge.so
           nm -D --defined-only "$bridge" | grep ' YggStartNode$'
+          ldd build/linux/x64/release/bundle/zen | grep 'libgstreamer-1.0'
+
+      - name: Packaging (.desktop, AppStream, .deb)
+        run: |
+          desktop-file-validate linux/packaging/com.roj.zen.desktop
+          appstreamcli validate --no-net linux/packaging/com.roj.zen.metainfo.xml
+          sh linux/packaging/build_deb.sh build/linux/x64/release/bundle x64 /tmp/zen.deb
+          dpkg-deb --info /tmp/zen.deb
 
       - name: Start (still running after 20 seconds)
         run: |
@@ -123,6 +164,60 @@ jobs:
             echo "::error::zen stopped with status $status within 20 seconds"
             exit 1
           fi
+
+  windows-arm64:
+    name: Windows on ARM build
+    # As the macOS job: pushes to main and runs by hand only. Not required
+    # (continue-on-error) until it has passed once; see release.yml.
+    if: github.event_name != 'pull_request'
+    runs-on: windows-11-arm
+    timeout-minutes: 75
+    continue-on-error: true
+    env:
+      LLVM_MINGW_VERSION: '20251021'
+      LLVM_MINGW_SHA256: d31dd2799c18440acb7cc13b03cadfc3069dff48168cd406a44930e965b09655
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache-dependency-path: native/yggdrasil_bridge/go.sum
+
+      - name: C compiler for cgo (llvm-mingw, checked against its SHA-256)
+        shell: pwsh
+        run: |
+          $name = "llvm-mingw-$env:LLVM_MINGW_VERSION-ucrt-aarch64"
+          $zip = Join-Path $env:RUNNER_TEMP "$name.zip"
+          Invoke-WebRequest -UseBasicParsing -OutFile $zip `
+            -Uri "https://github.com/mstorsjo/llvm-mingw/releases/download/$env:LLVM_MINGW_VERSION/$name.zip"
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+          if ($hash -ne $env:LLVM_MINGW_SHA256) {
+            throw "llvm-mingw: SHA-256 $hash, expected $env:LLVM_MINGW_SHA256"
+          }
+          Expand-Archive -LiteralPath $zip -DestinationPath $env:RUNNER_TEMP
+          Join-Path $env:RUNNER_TEMP "$name\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: master
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: false
+
+      - name: Packages
+        run: flutter pub get
+
+      - name: Build
+        run: flutter build windows --release
+
+      - name: Go bridge in the app
+        shell: pwsh
+        run: |
+          if (-not (Test-Path build/windows/arm64/runner/Release/yggdrasil_bridge.dll)) {
+            throw 'The ARM64 build has no Go bridge'
+          }
 
   macos:
     name: macOS build

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>pl</string>
+	<string>en</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIconFile</key>
@@ -62,21 +62,21 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Zen używa kamery do rozmów wideo.</string>
+	<string>Zen uses the camera for video calls.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
-	<string>Zen zapisuje w Pobranych tylko to, co sam każesz zapisać, na przykład nową wersję aplikacji.</string>
+	<string>Zen saves to Downloads only what you tell it to save, for example a new version of the app.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Zen łączy się bezpośrednio z urządzeniami znajomych, także w tej samej sieci Wi-Fi, bez żadnego serwera.</string>
+	<string>Zen connects directly to your friends’ devices, including on the same Wi-Fi network, without any server.</string>
 	<key>NSLocationUsageDescription</key>
-	<string>Zen pyta o położenie tylko wtedy, gdy sam chcesz je komuś wysłać, na przykład w alarmie albo przy spotkaniu.</string>
+	<string>Zen asks for your location only when you choose to send it to someone, for example in an alert or when meeting up.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Zen pyta o położenie tylko wtedy, gdy sam chcesz je komuś wysłać, na przykład w alarmie albo przy spotkaniu.</string>
+	<string>Zen asks for your location only when you choose to send it to someone, for example in an alert or when meeting up.</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Zen używa mikrofonu do rozmów głosowych i wideo oraz do nagrywania wiadomości głosowych.</string>
+	<string>Zen uses the microphone for voice and video calls and for recording voice messages.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

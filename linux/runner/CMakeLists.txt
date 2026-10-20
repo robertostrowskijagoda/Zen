@@ -9,6 +9,7 @@ project(runner LANGUAGES CXX)
 add_executable(${BINARY_NAME}
   "main.cc"
   "my_application.cc"
+  "zen_media_player.cc"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )
 
@@ -24,3 +25,17 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
 
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+
+# Audio and video playback (zen_media_player.cc): GStreamer, which every
+# common desktop already has. Without its development files (libgstreamer1.0-dev,
+# libgstreamer-plugins-base1.0-dev) the app builds anyway and plays nothing.
+pkg_check_modules(GSTREAMER IMPORTED_TARGET
+  gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0)
+if(GSTREAMER_FOUND)
+  target_compile_definitions(${BINARY_NAME} PRIVATE ZEN_HAVE_GSTREAMER=1)
+  target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GSTREAMER)
+else()
+  message(WARNING "GStreamer development files not found: Zen will build "
+    "without audio and video playback (install libgstreamer1.0-dev and "
+    "libgstreamer-plugins-base1.0-dev).")
+endif()
