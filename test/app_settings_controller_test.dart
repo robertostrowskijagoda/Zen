@@ -84,7 +84,7 @@ void main() {
     },
   );
 
-  test('the LAN discovery choice is saved', () async {
+  test('the offline link choices are saved', () async {
     final MemoryAppSettingsStore store = MemoryAppSettingsStore();
     final ProviderContainer container = ProviderContainer(
       overrides: [appSettingsStoreProvider.overrideWithValue(store)],
@@ -93,12 +93,21 @@ void main() {
     container.read(appSettingsControllerProvider);
     await Future<void>.delayed(Duration.zero);
 
-    // The preview runtime (no node) is not restarted.
-    await container
-        .read(appSettingsControllerProvider.notifier)
-        .setLanDiscovery(false);
+    final AppSettingsController controller = container.read(
+      appSettingsControllerProvider.notifier,
+    );
+    await controller.setLanDiscovery(false);
+    await controller.setWifiDirect(true);
+    await controller.setBluetoothLinks(true);
+    await controller.setMultipeerLinks(true);
 
     expect(container.read(appSettingsControllerProvider).lanDiscovery, false);
-    expect((await store.load())!.lanDiscoveryOn(phone: false), isFalse);
+    expect((await store.load())!.lanDiscoveryOn, isFalse);
+    expect((await store.load())!.wifiDirect, isTrue);
+    expect((await store.load())!.bluetoothLinks, isTrue);
+    expect((await store.load())!.multipeerLinks, isTrue);
+
+    await controller.setBluetoothLinks(false);
+    expect((await store.load())!.bluetoothLinks, isFalse);
   });
 }

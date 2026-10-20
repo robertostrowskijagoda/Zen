@@ -1,8 +1,11 @@
 package com.roj.zen
 
+import android.app.NotificationManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -21,7 +24,8 @@ import io.flutter.plugin.common.MethodChannel
  * page (so a Zen QR scanned with the camera opens straight in Zen) and open
  * an https page in the browser. `setDisguise` switches the launcher entry
  * between Zen's own icon and name and a neutral notes one (two
- * activity-aliases, exactly one enabled; §14.2).
+ * activity-aliases, exactly one enabled; §14.2). `soundsSilenced` tells
+ * whether the phone keeps quiet (Zen's in-app sounds follow it).
  */
 object ZenSystemBridge {
     private const val TAG = "ZenSystem"
@@ -71,6 +75,7 @@ object ZenSystemBridge {
                             result.success(true)
                         }
                         "sdkInt" -> result.success(Build.VERSION.SDK_INT)
+                        "soundsSilenced" -> result.success(soundsSilenced(activity))
                         "openUrl" -> result.success(openInBrowser(activity, call.argument<String>("url")))
                         "openLinkSettings" -> {
                             val page = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -134,6 +139,22 @@ object ZenSystemBridge {
      * Only https, and in a browser: Zen itself answers links to its own
      * GitHub page (invitations), so a plain VIEW could come straight back.
      */
+    /**
+     * Whether the phone is set to keep quiet: silent or vibrate mode, or
+     * "Do not disturb" in any form. Zen's in-app sounds stay silent then.
+     */
+    private fun soundsSilenced(context: Context): Boolean {
+        val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        if (audio != null && audio.ringerMode != AudioManager.RINGER_MODE_NORMAL) {
+            return true
+        }
+        val notifications =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            notifications != null &&
+            notifications.currentInterruptionFilter > NotificationManager.INTERRUPTION_FILTER_ALL
+    }
+
     private fun openInBrowser(activity: FragmentActivity, url: String?): Boolean {
         val uri = Uri.parse(url ?: return false)
         if (uri.scheme != "https" || uri.host.isNullOrEmpty()) {

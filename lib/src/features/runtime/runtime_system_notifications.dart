@@ -13,6 +13,7 @@ import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+import 'package:zen/src/features/sound/zen_sound_effects.dart';
 
 final Provider<RuntimeSystemNotificationService>
 runtimeSystemNotificationServiceProvider =
@@ -27,7 +28,9 @@ List buildRuntimeSystemNotificationProviderOverrides({
     runtimeSystemNotificationServiceProvider.overrideWith(
       (Ref ref) => PrivacyRedactingNotificationService(
         serviceFactory?.call() ??
-            FlutterLocalRuntimeSystemNotificationService(),
+            FlutterLocalRuntimeSystemNotificationService(
+              soundEffects: ref.read(zenSoundEffectsProvider),
+            ),
         // Read on every post, so flipping the setting applies at once.
         // Also while this device shares its screen in a call (§13.1).
         hideContent: () =>
@@ -49,6 +52,26 @@ enum RuntimeSystemNotificationCategory {
 
   /// A friend's alarm (§16.3): loudest, full screen, cannot be missed.
   alarm,
+}
+
+/// Whether [notification] comes from the neighbours section (its posts'
+/// ids start with `flat-`, see NeighborsService).
+bool isNeighboursNotification(RuntimeSystemNotification notification) =>
+    notification.id.startsWith('flat-');
+
+/// The sound [notification] makes: also which Android channel it goes to.
+/// A call that is not ringing (missed, declined, ended) is told like a
+/// message, never with the ringtone.
+ZenSound? zenSoundFor(RuntimeSystemNotification notification) {
+  return switch (notification.category) {
+    RuntimeSystemNotificationCategory.alarm => ZenSound.alarm,
+    RuntimeSystemNotificationCategory.call =>
+      notification.isRingingCall ? ZenSound.ringtone : ZenSound.message,
+    RuntimeSystemNotificationCategory.message => ZenSound.message,
+    RuntimeSystemNotificationCategory.social =>
+      isNeighboursNotification(notification) ? ZenSound.knock : ZenSound.social,
+    RuntimeSystemNotificationCategory.transfer => null,
+  };
 }
 
 @immutable
@@ -421,7 +444,13 @@ final class FlutterLocalRuntimeSystemNotificationService
   FlutterLocalRuntimeSystemNotificationService({
     FlutterLocalNotificationsPlugin? plugin,
     this.canRequestPermission = true,
+    this.soundEffects,
   }) : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
+
+  /// Plays the notification sounds on Windows and Linux, where the toast
+  /// itself stays silent (see [ZenSoundEffects.playsNotificationSounds]).
+  /// `null` in the background isolate.
+  final ZenSoundEffects? soundEffects;
 
   /// Whether this isolate may ask for POST_NOTIFICATIONS.
   ///
@@ -431,11 +460,110 @@ final class FlutterLocalRuntimeSystemNotificationService
   /// foreground app's job anyway.
   final bool canRequestPermission;
 
-  static const String _socialChannelId = 'zen_social';
-  static const String _messageChannelId = 'zen_messages';
-  static const String _callChannelId = 'zen_calls_v3';
-  static const String _alarmChannelId = 'zen_alarm_v1';
+  // A channel keeps the sound it was created with: a new sound needs a new
+  // channel id.
+  static const String _socialChannelId = 'zen_social_v2';
+  static const String _neighboursChannelId = 'zen_neighbours_v1';
+  static const String _messageChannelId = 'zen_messages_v2';
+  static const String _callChannelId = 'zen_calls_v4';
+  static const String _alarmChannelId = 'zen_alarm_v2';
   static const String _transferChannelId = 'zen_transfers';
+
+  /// Android's FLAG_INSISTENT: the sound repeats until the notification is
+  /// opened or cancelled (a friend's alarm).
+  static const int _flagInsistent = 4;
+
+  /// Every Android channel Zen posts to, each with its own sound.
+  @visibleForTesting
+  static List<AndroidNotificationChannel> androidChannels() {
+    AndroidNotificationChannel sounding(
+      String id,
+      String name,
+      String description,
+      ZenSound sound, {
+      Importance importance = Importance.high,
+      AudioAttributesUsage usage = AudioAttributesUsage.notification,
+      bool bypassDnd = false,
+    }) {
+      return AndroidNotificationChannel(
+        id,
+        name,
+        description: description,
+        importance: importance,
+        bypassDnd: bypassDnd,
+        playSound: true,
+        sound: RawResourceAndroidNotificationSound(sound.fileName),
+        enableVibration: true,
+        showBadge: true,
+        audioAttributesUsage: usage,
+      );
+    }
+
+    return <AndroidNotificationChannel>[
+      sounding(
+        _messageChannelId,
+        t('Wiadomości'),
+        t('Nowe wiadomości od znajomych.'),
+        ZenSound.message,
+      ),
+      sounding(
+        _callChannelId,
+        t('Połączenia'),
+        t('Dzwoniący znajomi.'),
+        ZenSound.ringtone,
+        importance: Importance.max,
+        usage: AudioAttributesUsage.notificationRingtone,
+      ),
+      sounding(
+        _alarmChannelId,
+        t('Alarmy'),
+        t('Alarm przyjaciela, który potrzebuje pomocy.'),
+        ZenSound.alarm,
+        importance: Importance.max,
+        usage: AudioAttributesUsage.alarm,
+        bypassDnd: true,
+      ),
+      sounding(
+        _socialChannelId,
+        t('Relacje'),
+        t('Zaproszenia, akceptacje i zmiany stanu relacji.'),
+        ZenSound.social,
+      ),
+      sounding(
+        _neighboursChannelId,
+        t('Sąsiedzi'),
+        t('Pukanie do drzwi i sprawy domowników.'),
+        ZenSound.knock,
+      ),
+      AndroidNotificationChannel(
+        _transferChannelId,
+        t('Transfery'),
+        description: t('Statusy anulowania i problemów transferu.'),
+        importance: Importance.defaultImportance,
+        playSound: false,
+        enableVibration: false,
+        showBadge: false,
+      ),
+    ];
+  }
+
+  /// The channel [notification] goes to: the one with its sound.
+  @visibleForTesting
+  static AndroidNotificationChannel androidChannelFor(
+    RuntimeSystemNotification notification,
+  ) {
+    final String id = switch (zenSoundFor(notification)) {
+      ZenSound.alarm => _alarmChannelId,
+      ZenSound.ringtone => _callChannelId,
+      ZenSound.knock => _neighboursChannelId,
+      ZenSound.social => _socialChannelId,
+      null => _transferChannelId,
+      _ => _messageChannelId,
+    };
+    return androidChannels().firstWhere(
+      (AndroidNotificationChannel channel) => channel.id == id,
+    );
+  }
 
   final FlutterLocalNotificationsPlugin _plugin;
   final Map<String, RuntimeSystemNotification> _activeNotificationsBySlot =
@@ -444,6 +572,10 @@ final class FlutterLocalRuntimeSystemNotificationService
   final _NotificationSuppressionWindow _suppressionWindow =
       _NotificationSuppressionWindow();
   final Map<String, int> _lastAlertAtBySlot = <String, int>{};
+
+  /// Windows and Linux: a ringing alarm's sound, repeating per slot.
+  final Map<String, ZenSoundLoop> _alarmLoops = <String, ZenSoundLoop>{};
+  final Set<String> _alarmLoopsStarting = <String>{};
 
   Future<void> Function(String routeKey) _onOpenRoute = _noopOpenRoute;
   NotificationActionCallback? _onAction;
@@ -523,6 +655,7 @@ final class FlutterLocalRuntimeSystemNotificationService
         ),
         payload: notification.routeKey,
       );
+      _playOwnSound(notification, slotKey, onlyAlertOnce: onlyAlertOnce);
       return true;
     } catch (error, stackTrace) {
       // Not the title: the diagnostics log must not collect who wrote.
@@ -543,6 +676,7 @@ final class FlutterLocalRuntimeSystemNotificationService
           ),
           payload: notification.routeKey,
         );
+        _playOwnSound(notification, slotKey, onlyAlertOnce: onlyAlertOnce);
         return true;
       } catch (fallbackError, fallbackStackTrace) {
         logZenError(
@@ -568,6 +702,7 @@ final class FlutterLocalRuntimeSystemNotificationService
       (_, String mappedSlotKey) => mappedSlotKey == slotKey,
     );
     _activeNotificationsBySlot.remove(slotKey);
+    _stopAlarmLoop(slotKey);
     try {
       await _ensureInitialized();
       await _plugin.cancel(id: slotKey.hashCode & 0x7fffffff);
@@ -583,6 +718,7 @@ final class FlutterLocalRuntimeSystemNotificationService
     );
     _activeNotificationsBySlot.remove(slotKey);
     _suppressionWindow.forget(slotKey);
+    _stopAlarmLoop(slotKey);
     try {
       await _ensureInitialized();
       await _plugin.cancel(id: slotKey.hashCode & 0x7fffffff);
@@ -600,6 +736,10 @@ final class FlutterLocalRuntimeSystemNotificationService
     _activeNotificationsBySlot.clear();
     _slotKeyByNotificationId.clear();
     _suppressionWindow.clear();
+    _alarmLoopsStarting.clear();
+    for (final String slotKey in _alarmLoops.keys.toList()) {
+      _stopAlarmLoop(slotKey);
+    }
     try {
       await _ensureInitialized();
       await _plugin.cancelAll();
@@ -691,68 +831,9 @@ final class FlutterLocalRuntimeSystemNotificationService
           );
         }
       }
-      await _createChannel(
-        android,
-        AndroidNotificationChannel(
-          _messageChannelId,
-          t('Wiadomości'),
-          description: t('Nowe wiadomości od znajomych.'),
-          importance: Importance.high,
-          playSound: true,
-          enableVibration: true,
-          showBadge: true,
-        ),
-      );
-      await _createChannel(
-        android,
-        AndroidNotificationChannel(
-          _callChannelId,
-          t('Połączenia'),
-          description: t('Zaproszenia i zmiany stanu połączeń.'),
-          importance: Importance.max,
-          playSound: true,
-          enableVibration: true,
-          showBadge: true,
-          audioAttributesUsage: AudioAttributesUsage.notificationRingtone,
-        ),
-      );
-      await _createChannel(
-        android,
-        AndroidNotificationChannel(
-          _alarmChannelId,
-          t('Alarmy'),
-          description: t('Alarm przyjaciela, który potrzebuje pomocy.'),
-          importance: Importance.max,
-          playSound: true,
-          enableVibration: true,
-          showBadge: true,
-          audioAttributesUsage: AudioAttributesUsage.alarm,
-        ),
-      );
-      await _createChannel(
-        android,
-        AndroidNotificationChannel(
-          _socialChannelId,
-          t('Relacje'),
-          description: t('Zaproszenia, akceptacje i zmiany stanu relacji.'),
-          importance: Importance.high,
-          playSound: true,
-          enableVibration: true,
-          showBadge: true,
-        ),
-      );
-      await _createChannel(
-        android,
-        AndroidNotificationChannel(
-          _transferChannelId,
-          t('Transfery'),
-          description: t('Statusy anulowania i problemów transferu.'),
-          importance: Importance.defaultImportance,
-          playSound: false,
-          enableVibration: false,
-          showBadge: false,
-        ),
-      );
+      for (final AndroidNotificationChannel channel in androidChannels()) {
+        await _createChannel(android, channel);
+      }
     }
     _initialized = true;
     try {
@@ -777,8 +858,8 @@ final class FlutterLocalRuntimeSystemNotificationService
     }
   }
 
-  /// Registers one channel. A single failing channel must not take the other
-  /// three - or the caller - down with it.
+  /// Registers one channel. A single failing channel must not take the
+  /// others - or the caller - down with it.
   Future<void> _createChannel(
     AndroidFlutterLocalNotificationsPlugin android,
     AndroidNotificationChannel channel,
@@ -799,34 +880,8 @@ final class FlutterLocalRuntimeSystemNotificationService
     bool fallback = false,
     bool onlyAlertOnce = false,
   }) {
-    final ({String id, String name, String description}) channel =
-        switch (notification.category) {
-          RuntimeSystemNotificationCategory.social => (
-            id: _socialChannelId,
-            name: t('Relacje'),
-            description: t('Zaproszenia, akceptacje i zmiany stanu relacji.'),
-          ),
-          RuntimeSystemNotificationCategory.message => (
-            id: _messageChannelId,
-            name: t('Wiadomości'),
-            description: t('Nowe wiadomości od znajomych.'),
-          ),
-          RuntimeSystemNotificationCategory.alarm => (
-            id: _alarmChannelId,
-            name: t('Alarmy'),
-            description: t('Alarm przyjaciela, który potrzebuje pomocy.'),
-          ),
-          RuntimeSystemNotificationCategory.call => (
-            id: _callChannelId,
-            name: t('Połączenia'),
-            description: t('Zaproszenia i zmiany stanu połączeń.'),
-          ),
-          RuntimeSystemNotificationCategory.transfer => (
-            id: _transferChannelId,
-            name: t('Transfery'),
-            description: t('Statusy anulowania i problemów transferu.'),
-          ),
-        };
+    final AndroidNotificationChannel channel = androidChannelFor(notification);
+    final ZenSound? sound = zenSoundFor(notification);
     final bool isAlarm =
         notification.category == RuntimeSystemNotificationCategory.alarm;
     final bool isCall =
@@ -838,6 +893,7 @@ final class FlutterLocalRuntimeSystemNotificationService
       presentBanner: true,
       presentSound: true,
       presentBadge: true,
+      sound: sound?.appleFileName,
       categoryIdentifier: isRinging && !isAlarm ? 'zen_incoming_call' : null,
       interruptionLevel: isRinging
           ? InterruptionLevel.timeSensitive
@@ -882,7 +938,10 @@ final class FlutterLocalRuntimeSystemNotificationService
         // dismissible or they pile up as notifications the user cannot swipe.
         ongoing: isRinging,
         autoCancel: !isRinging,
-        playSound: true,
+        playSound: sound != null,
+        sound: sound == null
+            ? null
+            : RawResourceAndroidNotificationSound(sound.fileName),
         enableVibration: true,
         vibrationPattern: isRinging
             ? Int64List.fromList(<int>[0, 500, 200, 500, 200, 800])
@@ -892,6 +951,9 @@ final class FlutterLocalRuntimeSystemNotificationService
             : isRinging
             ? AudioAttributesUsage.notificationRingtone
             : AudioAttributesUsage.notification,
+        additionalFlags: isAlarm && isRinging
+            ? Int32List.fromList(<int>[_flagInsistent])
+            : null,
         onlyAlertOnce: onlyAlertOnce && !isRinging,
         number: notification.stackCount > 1 ? notification.stackCount : null,
         styleInformation: notification.lines.length > 1
@@ -936,6 +998,8 @@ final class FlutterLocalRuntimeSystemNotificationService
             ? WindowsNotificationScenario.incomingCall
             : null,
         subtitle: channel.name,
+        // Zen plays its own sound instead (see [_playOwnSound]).
+        audio: _playsOwnSounds ? WindowsNotificationAudio.silent() : null,
       ),
       iOS: darwin,
       macOS: darwin,
@@ -943,8 +1007,74 @@ final class FlutterLocalRuntimeSystemNotificationService
         urgency: isCall
             ? LinuxNotificationUrgency.critical
             : LinuxNotificationUrgency.normal,
+        suppressSound: _playsOwnSounds,
       ),
     );
+  }
+
+  bool get _playsOwnSounds => soundEffects?.playsNotificationSounds ?? false;
+
+  /// Windows and Linux: the sound of a notification just posted. A ringing
+  /// call rings from [RuntimeSystemNotificationsBridge] (for as long as it
+  /// rings); a ringing alarm repeats until its notification goes.
+  void _playOwnSound(
+    RuntimeSystemNotification notification,
+    String slotKey, {
+    required bool onlyAlertOnce,
+  }) {
+    final ZenSoundEffects? effects = soundEffects;
+    final ZenSound? sound = zenSoundFor(notification);
+    if (!notification.isRingingCall) {
+      _stopAlarmLoop(slotKey);
+    }
+    if (effects == null ||
+        !_playsOwnSounds ||
+        sound == null ||
+        sound == ZenSound.ringtone ||
+        onlyAlertOnce) {
+      return;
+    }
+    if (sound == ZenSound.alarm && notification.isRingingCall) {
+      unawaitedLogged(
+        _startAlarmLoop(effects, slotKey),
+        context: 'Starting the alarm sound failed',
+      );
+      return;
+    }
+    unawaitedLogged(
+      effects.play(sound),
+      context: 'Playing a notification sound failed',
+    );
+  }
+
+  Future<void> _startAlarmLoop(ZenSoundEffects effects, String slotKey) async {
+    if (_alarmLoops[slotKey]?.isStopped == false ||
+        !_alarmLoopsStarting.add(slotKey)) {
+      return;
+    }
+    try {
+      final ZenSoundLoop? loop = await effects.loop(ZenSound.alarm);
+      if (loop == null) {
+        return;
+      }
+      if (!_alarmLoopsStarting.contains(slotKey) ||
+          _activeNotificationsBySlot[slotKey]?.isRingingCall != true) {
+        // The alarm went while the sound was starting.
+        await loop.stop();
+        return;
+      }
+      _alarmLoops[slotKey] = loop;
+    } finally {
+      _alarmLoopsStarting.remove(slotKey);
+    }
+  }
+
+  void _stopAlarmLoop(String slotKey) {
+    _alarmLoopsStarting.remove(slotKey);
+    final ZenSoundLoop? loop = _alarmLoops.remove(slotKey);
+    if (loop != null) {
+      unawaitedLogged(loop.stop(), context: 'Stopping the alarm sound failed');
+    }
   }
 
   void _handleNotificationResponse(NotificationResponse response) {
@@ -983,10 +1113,31 @@ class RuntimeSystemNotificationsBridge extends ConsumerStatefulWidget {
       _RuntimeSystemNotificationsBridgeState();
 }
 
+/// What the call sounds follow: which call, in which state, which way.
+typedef _CallSoundState = ({
+  String? id,
+  CallSessionStatus? status,
+  bool incoming,
+});
+
+_CallSoundState _callSoundStateOf(SocialHubState state) {
+  final CallSession? call = state.activeCall;
+  return (
+    id: call?.id,
+    status: call?.status,
+    incoming: call?.isIncoming ?? false,
+  );
+}
+
 final class _RuntimeSystemNotificationsBridgeState
     extends ConsumerState<RuntimeSystemNotificationsBridge> {
   bool _initialized = false;
   bool _lastFocused = false;
+
+  /// Windows and Linux: the ringtone while a call rings here.
+  ZenSoundLoop? _ringtone;
+  bool _ringtoneStarting = false;
+  bool _wantsRingtone = false;
 
   @override
   void initState() {
@@ -998,7 +1149,18 @@ final class _RuntimeSystemNotificationsBridgeState
   }
 
   @override
+  void dispose() {
+    _wantsRingtone = false;
+    _stopRingtone();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    ref.listen<_CallSoundState>(
+      socialHubControllerProvider.select(_callSoundStateOf),
+      _onCallSoundState,
+    );
     final bool isFocused = ref.watch(
       socialHubControllerProvider.select((state) => state.lifecycle.isFocused),
     );
@@ -1012,6 +1174,68 @@ final class _RuntimeSystemNotificationsBridgeState
     }
     _lastFocused = isFocused;
     return widget.child;
+  }
+
+  /// A call that connects or ends gets its short sound; on Windows and
+  /// Linux an incoming call rings here for as long as it rings.
+  void _onCallSoundState(_CallSoundState? previous, _CallSoundState next) {
+    final ZenSoundEffects effects = ref.read(zenSoundEffectsProvider);
+    final bool wasOn = previous?.status == CallSessionStatus.active;
+    final bool isOn = next.status == CallSessionStatus.active;
+    final bool sameCall = previous?.id == next.id;
+    if (isOn && !(wasOn && sameCall)) {
+      unawaitedLogged(
+        effects.play(ZenSound.callConnected),
+        context: 'Playing the call sound failed',
+      );
+    } else if (wasOn && !(isOn && sameCall)) {
+      unawaitedLogged(
+        effects.play(ZenSound.callEnded),
+        context: 'Playing the call sound failed',
+      );
+    }
+    if (!effects.playsNotificationSounds) {
+      // Elsewhere the system rings (the notification, Android's call card).
+      return;
+    }
+    _wantsRingtone = next.incoming && next.status == CallSessionStatus.ringing;
+    if (!_wantsRingtone) {
+      _stopRingtone();
+    } else if ((_ringtone == null || _ringtone!.isStopped) &&
+        !_ringtoneStarting) {
+      unawaitedLogged(
+        _startRingtone(effects),
+        context: 'Starting the ringtone failed',
+      );
+    }
+  }
+
+  Future<void> _startRingtone(ZenSoundEffects effects) async {
+    _ringtoneStarting = true;
+    try {
+      final ZenSoundLoop? loop = await effects.loop(
+        ZenSound.ringtone,
+        maxDuration: const Duration(minutes: 2),
+      );
+      if (loop == null) {
+        return;
+      }
+      if (!_wantsRingtone || !mounted) {
+        await loop.stop();
+        return;
+      }
+      _ringtone = loop;
+    } finally {
+      _ringtoneStarting = false;
+    }
+  }
+
+  void _stopRingtone() {
+    final ZenSoundLoop? ringtone = _ringtone;
+    _ringtone = null;
+    if (ringtone != null) {
+      unawaitedLogged(ringtone.stop(), context: 'Stopping the ringtone failed');
+    }
   }
 
   Future<void> _initialize() async {

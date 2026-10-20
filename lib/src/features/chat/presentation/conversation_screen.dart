@@ -50,6 +50,7 @@ import 'package:zen/src/features/social/presentation/friend_nickname_prompt.dart
 import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+import 'package:zen/src/features/sound/zen_sound_effects.dart';
 
 part 'conversation_screen_widgets.dart';
 part 'conversation_screen_media.dart';
@@ -701,6 +702,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         displayName: displayName,
         text: text,
       );
+      if (mounted) {
+        unawaited(ref.read(zenSoundEffectsProvider).play(ZenSound.messageSent));
+      }
     } on StrangerMessageRefused catch (refused) {
       // Over the limits for someone who is not a friend: the text stays.
       _composerController.text = text;

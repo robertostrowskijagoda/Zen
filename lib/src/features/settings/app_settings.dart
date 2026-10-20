@@ -22,7 +22,7 @@ enum AppThemeMode {
   dark;
 
   String get label => switch (this) {
-    AppThemeMode.system => t('Systemowy'),
+    AppThemeMode.system => t('Jak w systemie'),
     AppThemeMode.light => t('Jasny'),
     AppThemeMode.dark => t('Ciemny'),
   };
@@ -185,6 +185,35 @@ enum AppAccentTheme {
   }
 }
 
+/// The look of the whole app (Ustawienia → Wygląd). [classic] is the
+/// accent-driven look ([AppAccentTheme] picks its colour); the others are
+/// fixed palettes that share one calmer component style (soft page
+/// transitions, no ink ripples). Each has a light and a dark variant; the
+/// mode is chosen separately ([AppThemeMode]).
+enum AppPalette {
+  classic,
+  calm,
+  neon,
+  forest,
+  dusk;
+
+  String get label => switch (this) {
+    AppPalette.classic => t('Klasyczny'),
+    AppPalette.calm => t('Cisza'),
+    AppPalette.neon => t('Neon nocą'),
+    AppPalette.forest => t('Las'),
+    AppPalette.dusk => t('Zmierzch'),
+  };
+
+  String get tagline => switch (this) {
+    AppPalette.classic => t('akcent do wyboru'),
+    AppPalette.calm => t('kamień / piasek / łupek'),
+    AppPalette.neon => t('grafit / cyjan / magenta'),
+    AppPalette.forest => t('mech / papier'),
+    AppPalette.dusk => t('indygo / fiolet'),
+  };
+}
+
 /// Who may invite this person to a new group (§8). Members of a group the
 /// person is in may always add people to it.
 enum GroupInviteFrom {
@@ -218,10 +247,12 @@ final class AppSettings {
     this.backgroundLockDelaySeconds = defaultBackgroundLockDelaySeconds,
     this.themeMode = defaultThemeMode,
     this.accentTheme = defaultAccentTheme,
+    this.palette = defaultPalette,
     this.gifApiKey = '',
     this.autoDownloadMedia = true,
     this.mediaOnlyOnWifi = true,
     this.hideNotificationContent = true,
+    this.inAppSounds = true,
     this.secureScreens = true,
     this.allowNoAppPassword = false,
     this.disguiseIcon = false,
@@ -231,6 +262,9 @@ final class AppSettings {
     this.paperBackupDone = false,
     this.groupInviteFrom = GroupInviteFrom.friends,
     this.lanDiscovery,
+    this.wifiDirect = false,
+    this.bluetoothLinks = false,
+    this.multipeerLinks = false,
   });
 
   static const int defaultInboxLimitMb = 100;
@@ -248,6 +282,7 @@ final class AppSettings {
   static const int maximumBackgroundLockDelaySeconds = 3600;
   static const AppThemeMode defaultThemeMode = AppThemeMode.system;
   static const AppAccentTheme defaultAccentTheme = AppAccentTheme.graphite;
+  static const AppPalette defaultPalette = AppPalette.classic;
 
   final int inboxLimitMb;
   final int autoCleanupDays;
@@ -255,7 +290,10 @@ final class AppSettings {
   final AppLockMode lockMode;
   final int backgroundLockDelaySeconds;
   final AppThemeMode themeMode;
+
+  /// The accent of the [AppPalette.classic] palette.
   final AppAccentTheme accentTheme;
+  final AppPalette palette;
 
   /// The user's own Klipy key; empty means the app's shared key is used.
   final String gifApiKey;
@@ -277,6 +315,12 @@ final class AppSettings {
   /// Notifications say only "Nowa wiadomość", so message text never lands
   /// in the system's notification history (§14.1). On by default.
   final bool hideNotificationContent;
+
+  /// "Dźwięki w aplikacji": short sounds when a message is sent and a call
+  /// connects or ends; on Windows and Linux also the notification sounds
+  /// Zen plays itself. Never silences a ringing call or an alarm. On by
+  /// default.
+  final bool inAppSounds;
 
   /// Screenshots and screen recording are blocked on conversations and
   /// account screens, and their content is hidden in the recent-apps view
@@ -309,15 +353,29 @@ final class AppSettings {
   /// Who may invite this person to a new group (§8).
   final GroupInviteFrom groupInviteFrom;
 
-  /// "Szukaj znajomych w tej samej sieci Wi-Fi" (§5.1 item 6): the
-  /// account's own devices on one network connect directly. `null` until
-  /// the person chooses: then off on every platform.
+  /// "Znajomi w tej samej sieci Wi-Fi" (§5.1 item 6): friends' and the
+  /// account's own devices on one network connect directly, also without
+  /// internet. `null` until the person chooses.
   final bool? lanDiscovery;
 
-  /// Whether LAN discovery runs on this device: only once the person turned
-  /// it on. [phone] is kept for callers (Android or iOS) and no longer
-  /// matters.
-  bool lanDiscoveryOn({required bool phone}) => lanDiscovery ?? false;
+  /// Whether LAN discovery runs on this device: on unless the person turned
+  /// it off. Its beacons tell strangers nothing about who is there
+  /// (native/yggdrasil_bridge/local_link.go).
+  bool get lanDiscoveryOn => lanDiscovery ?? true;
+
+  /// "Wi-Fi Direct (Android)": with no Wi-Fi network around, nearby
+  /// friends' phones form a Wi-Fi Direct group and link over it. Off by
+  /// default: it needs a permission and costs battery.
+  final bool wifiDirect;
+
+  /// "Bluetooth": nearby friends' devices link over Bluetooth when there is
+  /// no network. Off by default: it needs a permission, costs battery and
+  /// is slow (text and photos; calls may not work).
+  final bool bluetoothLinks;
+
+  /// "Apple Wi-Fi/Bluetooth" (iPhone, iPad, Mac): Apple's Multipeer
+  /// Connectivity between nearby Apple devices. Off by default.
+  final bool multipeerLinks;
 
   /// Longest key accepted; real keys are ~64 characters.
   static const int maximumGifApiKeyLength = 200;
@@ -352,10 +410,12 @@ final class AppSettings {
     int? backgroundLockDelaySeconds,
     AppThemeMode? themeMode,
     AppAccentTheme? accentTheme,
+    AppPalette? palette,
     String? gifApiKey,
     bool? autoDownloadMedia,
     bool? mediaOnlyOnWifi,
     bool? hideNotificationContent,
+    bool? inAppSounds,
     bool? secureScreens,
     bool? allowNoAppPassword,
     bool? disguiseIcon,
@@ -365,6 +425,9 @@ final class AppSettings {
     bool? paperBackupDone,
     GroupInviteFrom? groupInviteFrom,
     bool? lanDiscovery,
+    bool? wifiDirect,
+    bool? bluetoothLinks,
+    bool? multipeerLinks,
   }) {
     return AppSettings(
       inboxLimitMb: normalizeInboxLimitMb(inboxLimitMb ?? this.inboxLimitMb),
@@ -380,11 +443,13 @@ final class AppSettings {
       ),
       themeMode: themeMode ?? this.themeMode,
       accentTheme: accentTheme ?? this.accentTheme,
+      palette: palette ?? this.palette,
       gifApiKey: normalizeGifApiKey(gifApiKey ?? this.gifApiKey),
       autoDownloadMedia: autoDownloadMedia ?? this.autoDownloadMedia,
       mediaOnlyOnWifi: mediaOnlyOnWifi ?? this.mediaOnlyOnWifi,
       hideNotificationContent:
           hideNotificationContent ?? this.hideNotificationContent,
+      inAppSounds: inAppSounds ?? this.inAppSounds,
       secureScreens: secureScreens ?? this.secureScreens,
       allowNoAppPassword: allowNoAppPassword ?? this.allowNoAppPassword,
       disguiseIcon: disguiseIcon ?? this.disguiseIcon,
@@ -394,6 +459,9 @@ final class AppSettings {
       paperBackupDone: paperBackupDone ?? this.paperBackupDone,
       groupInviteFrom: groupInviteFrom ?? this.groupInviteFrom,
       lanDiscovery: lanDiscovery ?? this.lanDiscovery,
+      wifiDirect: wifiDirect ?? this.wifiDirect,
+      bluetoothLinks: bluetoothLinks ?? this.bluetoothLinks,
+      multipeerLinks: multipeerLinks ?? this.multipeerLinks,
     );
   }
 
@@ -407,10 +475,12 @@ final class AppSettings {
     'backgroundLockDelaySeconds': backgroundLockDelaySeconds,
     'themeMode': themeMode.name,
     'accentTheme': accentTheme.name,
+    'palette': palette.name,
     'gifApiKey': gifApiKey,
     'autoDownloadMedia': autoDownloadMedia,
     'mediaOnlyOnWifi': mediaOnlyOnWifi,
     'hideNotificationContent': hideNotificationContent,
+    'inAppSounds': inAppSounds,
     'secureScreens': secureScreens,
     'allowNoAppPassword': allowNoAppPassword,
     'disguiseIcon': disguiseIcon,
@@ -420,6 +490,9 @@ final class AppSettings {
     'paperBackupDone': paperBackupDone,
     'groupInviteFrom': groupInviteFrom.name,
     'lanDiscovery': ?lanDiscovery,
+    'wifiDirect': wifiDirect,
+    'bluetoothLinks': bluetoothLinks,
+    'multipeerLinks': multipeerLinks,
   };
 
   static AppSettings fromJson(Map<String, dynamic> json) {
@@ -446,10 +519,12 @@ final class AppSettings {
       backgroundLockDelaySeconds: pick<int>('backgroundLockDelaySeconds'),
       themeMode: byName(AppThemeMode.values, 'themeMode'),
       accentTheme: byName(AppAccentTheme.values, 'accentTheme'),
+      palette: byName(AppPalette.values, 'palette'),
       gifApiKey: pick<String>('gifApiKey'),
       autoDownloadMedia: pick<bool>('autoDownloadMedia'),
       mediaOnlyOnWifi: pick<bool>('mediaOnlyOnWifi'),
       hideNotificationContent: pick<bool>('hideNotificationContent'),
+      inAppSounds: pick<bool>('inAppSounds'),
       secureScreens: pick<bool>('secureScreens'),
       allowNoAppPassword: pick<bool>('allowNoAppPassword'),
       disguiseIcon: pick<bool>('disguiseIcon'),
@@ -459,6 +534,9 @@ final class AppSettings {
       paperBackupDone: pick<bool>('paperBackupDone'),
       groupInviteFrom: byName(GroupInviteFrom.values, 'groupInviteFrom'),
       lanDiscovery: pick<bool>('lanDiscovery'),
+      wifiDirect: pick<bool>('wifiDirect'),
+      bluetoothLinks: pick<bool>('bluetoothLinks'),
+      multipeerLinks: pick<bool>('multipeerLinks'),
     );
   }
 

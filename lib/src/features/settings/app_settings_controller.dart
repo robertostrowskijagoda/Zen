@@ -1,6 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
-import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
@@ -104,6 +103,10 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(accentTheme: value));
   }
 
+  Future<void> setPalette(AppPalette value) async {
+    await _save(state.copyWith(palette: value));
+  }
+
   Future<void> setLockMode(AppLockMode value) async {
     await _save(state.copyWith(lockMode: value));
   }
@@ -120,6 +123,10 @@ final class AppSettingsController extends Notifier<AppSettings> {
 
   Future<void> setHideNotificationContent(bool value) async {
     await _save(state.copyWith(hideNotificationContent: value));
+  }
+
+  Future<void> setInAppSounds(bool value) async {
+    await _save(state.copyWith(inAppSounds: value));
   }
 
   Future<void> setSecureScreens(bool value) async {
@@ -145,11 +152,25 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(bridgeEnabled: value));
   }
 
-  /// "Szukaj znajomych w tej samej sieci Wi-Fi" (§5.1 item 6). The node
-  /// reads it at start, so a running node restarts.
+  /// "Znajomi w tej samej sieci Wi-Fi" (§5.1 item 6); the local links
+  /// controller applies it to the running node.
   Future<void> setLanDiscovery(bool value) async {
     await _save(state.copyWith(lanDiscovery: value));
-    await ref.read(runtimeNodeRuntimeProvider).restartIfRunning();
+  }
+
+  /// "Wi-Fi Direct (Android)" (§5.1 item 6).
+  Future<void> setWifiDirect(bool value) async {
+    await _save(state.copyWith(wifiDirect: value));
+  }
+
+  /// "Bluetooth" (§5.1 item 6).
+  Future<void> setBluetoothLinks(bool value) async {
+    await _save(state.copyWith(bluetoothLinks: value));
+  }
+
+  /// "Apple Wi-Fi/Bluetooth" (§5.1 item 6, iPhone, iPad and Mac).
+  Future<void> setMultipeerLinks(bool value) async {
+    await _save(state.copyWith(multipeerLinks: value));
   }
 
   /// The first-start permissions step is done (§25.2).
