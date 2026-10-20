@@ -18,4 +18,8 @@
     <string name="biometric_unlock_reason">Unlock Zen</string>
     <string name="share_zen_chooser">Send Zen</string>
     <string name="update_installer_opened">The system installer opened — confirm the installation.</string>
+    <!-- Launcher name while the neutral icon is on ("Kamuflaż ikony"); the
+         same in every language on purpose, it must look like an ordinary
+         notes app. -->
+    <string name="disguise_label" translatable="false">Notatki</string>
 </resources>

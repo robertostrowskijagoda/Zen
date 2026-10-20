@@ -1,6 +1,8 @@
 package com.roj.zen
 
+import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -17,7 +19,9 @@ import io.flutter.plugin.common.MethodChannel
  * service may use), open this app's page in the system settings (where
  * phone makers keep their own battery limits), open the "open by default"
  * page (so a Zen QR scanned with the camera opens straight in Zen) and open
- * an https page in the browser.
+ * an https page in the browser. `setDisguise` switches the launcher entry
+ * between Zen's own icon and name and a neutral notes one (two
+ * activity-aliases, exactly one enabled; §14.2).
  */
 object ZenSystemBridge {
     private const val TAG = "ZenSystem"
@@ -88,6 +92,9 @@ object ZenSystemBridge {
                             )
                             result.success(true)
                         }
+                        "setDisguise" -> result.success(
+                            setDisguise(activity, call.argument<Boolean>("enabled") ?: false),
+                        )
                         else -> result.notImplemented()
                     }
                 } catch (error: Exception) {
@@ -95,6 +102,32 @@ object ZenSystemBridge {
                     result.success(false)
                 }
             }
+    }
+
+    private fun alias(activity: FragmentActivity, name: String) =
+        ComponentName(activity.packageName, "${activity.packageName}.$name")
+
+    /**
+     * Enables the launcher alias for the wanted look and disables the other,
+     * so exactly one launcher entry exists. The wanted one is enabled first:
+     * there is never a moment with none. DONT_KILL_APP keeps the app running
+     * (some launchers still take a moment to refresh their icon).
+     */
+    private fun setDisguise(activity: FragmentActivity, enabled: Boolean): Boolean {
+        val pm = activity.packageManager
+        val on = alias(activity, if (enabled) "LauncherDisguise" else "LauncherDefault")
+        val off = alias(activity, if (enabled) "LauncherDefault" else "LauncherDisguise")
+        pm.setComponentEnabledSetting(
+            on,
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+            PackageManager.DONT_KILL_APP,
+        )
+        pm.setComponentEnabledSetting(
+            off,
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            PackageManager.DONT_KILL_APP,
+        )
+        return true
     }
 
     /**

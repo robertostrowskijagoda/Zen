@@ -3,6 +3,19 @@ part of 'app_shell_screen.dart';
 class _SettingsSecuritySection extends ConsumerWidget {
   const _SettingsSecuritySection();
 
+  Future<void> _setDisguise(
+    BuildContext context,
+    AppSettingsController controller,
+    bool value,
+  ) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    if (!await controller.setDisguiseIcon(value)) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(t('Nie udało się zmienić ikony.'))),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ZenColors zen = ZenColors.of(context);
@@ -197,6 +210,36 @@ class _SettingsSecuritySection extends ConsumerWidget {
                   ),
               ],
             ),
+            if (!kIsWeb && Platform.isAndroid) ...<Widget>[
+              ZenSection(t('Kamuflaż'), top: 16),
+              ZenGroup(
+                children: <Widget>[
+                  SwitchListTile.adaptive(
+                    key: const Key('settings-disguise-icon-switch'),
+                    secondary: ZenIconBadge(
+                      icon: Icons.sticky_note_2_outlined,
+                      tone: zenTone(zen, 3),
+                      size: 40,
+                    ),
+                    value: settings.disguiseIcon,
+                    title: Text(t('Kamuflaż ikony')),
+                    subtitle: Text(
+                      t(
+                        'Na liście aplikacji telefon pokaże neutralną ikonę '
+                        '„Notatki” zamiast Zen. To tylko inny wygląd: '
+                        'aplikacja nadal ma te same uprawnienia, a w '
+                        'ustawieniach systemu zobaczysz jej prawdziwą nazwę. '
+                        'Niektóre ekrany startowe odświeżą ikonę dopiero po '
+                        'chwili.',
+                      ),
+                      style: TextStyle(color: zen.textSecondary, height: 1.35),
+                    ),
+                    onChanged: (bool value) =>
+                        unawaited(_setDisguise(context, controller, value)),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 8),
             ZenInfo(
               icon: Icons.memory_rounded,
