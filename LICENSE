@@ -5,103 +5,215 @@ All rights reserved.
 Required Notice: Copyright (c) 2026 Robert Ostrowski-Jagoda (https://github.com/robertostrowskijagoda/Zen)
 Required Notice: Zen tworzy Robert Ostrowski-Jagoda. Zbiórka: https://buycoffee.to/zen
 
+
 ==========================================================================
-LICENCJA / LICENSE
+                    W SKRÓCIE  ·  IN SHORT
+   (skrót nie zastępuje warunków niżej · the summary does not replace
+                          the terms below)
 ==========================================================================
+
+  WOLNO / YOU MAY
+  + używać Zen do każdego celu: prywatnie, w firmie, w pracy, w szkole,
+    w urzędzie, w organizacji — bez opłat i bez pytania o zgodę
+    use Zen for any purpose: privately, in a company, at work, at school,
+    in public offices and organisations — free, without asking
+  + instalować go na dowolnej liczbie urządzeń, także pracownikom
+    install it on any number of devices, also for your staff
+  + czytać kod, badać jego bezpieczeństwo i publikować wyniki
+    read the code, audit its security and publish the results
+  + zgłaszać błędy i wysyłać poprawki (pull requesty)
+    report bugs and send fixes (pull requests)
+  + budować Zen z niezmienionego kodu i rozdawać oficjalne wydania
+    build Zen from the unmodified code and give away official releases
+
+  NIE WOLNO / YOU MAY NOT
+  - sprzedawać Zen ani brać pieniędzy za jego udostępnianie
+    sell Zen or take money for providing it
+  - dołączać Zen do płatnych produktów ani usług
+    include Zen in paid products or services
+  - dodawać reklam, płatności ani własnych zbiórek
+    add ads, payments or your own fundraising
+  - usuwać autora ani zbiórki autora
+    remove the author or the author's fundraising
+  - publikować przerobionych wersji ani forków
+    publish modified versions or forks
+
+  Prawa autorskie zostają przy Autorze. Wyjątki daje tylko Autor.
+  The copyright stays with the Author. Only the Author grants exceptions.
+
+
+==========================================================================
+                       LICENCJA (wersja polska)
+==========================================================================
+
+§ 1. Podstawa
 
 Zen jest udostępniany na licencji PolyForm Strict License 1.0.0
-https://polyformproject.org/licenses/strict/1.0.0
-razem z dodatkowymi zezwoleniami Autora opisanymi niżej.
+(https://polyformproject.org/licenses/strict/1.0.0) razem z dodatkowymi
+zezwoleniami i warunkami Autora z §§ 2–7. Tam, gdzie te paragrafy
+pozwalają na więcej niż PolyForm Strict, obowiązują te paragrafy.
+
+§ 2. Używanie do każdego celu
+
+Każda osoba i każda organizacja — także firma, przedsiębiorca, szkoła,
+urząd czy organizacja pozarządowa — może instalować i używać Zen do
+dowolnego celu, także w działalności zarobkowej (np. do rozmów w zespole
+albo z klientami), na dowolnej liczbie urządzeń. Pracodawca może
+instalować Zen pracownikom i zarządzać tymi instalacjami. Zgoda ta
+obejmuje każdy cel, nie tylko cele niekomercyjne opisane w PolyForm
+Strict, z zastrzeżeniem § 3.
+
+§ 3. Zakaz zarabiania na Zen
+
+Nie wolno:
+  1. sprzedawać Zen ani jego kopii, a także sprzedawać licencji, kont,
+     kodów ani dostępu do Zen;
+  2. pobierać opłat za pobranie, przekazanie, instalację, aktywację,
+     hosting ani inne udostępnienie Zen — także w cenie czegoś innego;
+  3. dołączać Zen do produktu albo usługi, za które się płaci (np. do
+     sprzedawanego urządzenia, płatnego pakietu aplikacji, abonamentu
+     czy płatnego sklepu z aplikacjami);
+  4. dodawać do Zen reklam, płatności, subskrypcji ani własnych zbiórek.
+
+Używanie Zen przy prowadzeniu płatnej działalności (np. firma rozmawia
+przez Zen z klientami) jest dozwolone. Zabronione jest, by to Zen albo
+dostęp do niego był tym, za co ktoś płaci, albo częścią tego.
+
+§ 4. Kod źródłowy i poprawki
+
+Wolno:
+  1. czytać i analizować kod źródłowy, także pod kątem bezpieczeństwa,
+     i publikować wyniki takich analiz z cytatami kodu w zakresie
+     niezbędnym do ich przedstawienia;
+  2. zgłaszać błędy i uwagi oraz proponować zmiany do oficjalnego
+     repozytorium (https://github.com/robertostrowskijagoda/Zen) przez
+     pull requesty. W tym celu wolno zmieniać kod lokalnie i utworzyć
+     fork w serwisie GitHub — wyłącznie do przygotowania pull requesta;
+  3. budować Zen z niezmienionego kodu źródłowego i używać go tak jak
+     w § 2.
+
+Wysyłając zmianę, udzielasz Autorowi nieodpłatnej, niewyłącznej,
+nieograniczonej w czasie i terytorialnie licencji na jej wykorzystanie,
+zmienianie i rozpowszechnianie w Zen, także na innych warunkach
+licencyjnych, i potwierdzasz, że masz prawo jej udzielić.
+
+§ 5. Przekazywanie wydań
+
+Wolno nieodpłatnie przekazywać innym niezmienione kopie oficjalnych
+plików wydań, których suma SHA-256 zgadza się z sumą opublikowaną przez
+Autora (np. przez „Podaj dalej”, z ręki do ręki, przez lustra), razem
+z niniejszą licencją albo odnośnikiem do niej.
+
+§ 6. Warunki
+
+Wszystkie zezwolenia obowiązują pod warunkiem, że:
+  1. nie usuwasz, nie ukrywasz ani nie zmieniasz informacji
+     o autorstwie, linii „Required Notice” ani informacji o zbiórce
+     Autora — ani w kodzie, ani w aplikacji;
+  2. nie publikujesz zmienionych wersji ani forków jako osobnych
+     aplikacji i nie podajesz kopii zbudowanej samodzielnie za oficjalne
+     wydanie;
+  3. nie używasz nazwy „Zen” ani logo w sposób sugerujący, że Autor
+     popiera inną wersję niż oficjalna;
+  4. przestrzegasz § 3.
+
+§ 7. Postanowienia końcowe
+
+  1. Wyjątki od tej licencji (np. sprzedaż, wersja zmieniona) może
+     zezwolić wyłącznie Autor, na piśmie.
+  2. Zen jest dostarczany „tak jak jest”, bez żadnych gwarancji;
+     odpowiedzialność Autora ogranicza się tak, jak w PolyForm Strict
+     („No Liability”), w granicach dopuszczalnych przez prawo.
+  3. Biblioteki innych autorów zawarte w Zen mają własne licencje
+     („O aplikacji → Licencje”, plik LICENSES-GO.txt).
+  4. Zastosowanie ma prawo polskie, w szczególności ustawa o prawie
+     autorskim i prawach pokrewnych.
+  5. Jeśli wersje językowe się różnią, rozstrzyga wersja polska.
+
+
+==========================================================================
+                       LICENSE (English version)
+==========================================================================
+
+§ 1. Basis
 
 Zen is licensed under the PolyForm Strict License 1.0.0
-https://polyformproject.org/licenses/strict/1.0.0
-together with the Author's additional permissions below.
+(https://polyformproject.org/licenses/strict/1.0.0) together with the
+Author's additional permissions and conditions in §§ 2–7. Where these
+sections allow more than PolyForm Strict, these sections apply.
 
-PolyForm Strict w skrócie (wiąże pełny tekst pod linkiem): wolno używać
-Zen wyłącznie w celach niekomercyjnych (osobiście, w organizacjach
-pożytku publicznego, szkołach, instytucjach publicznych); nie wolno go
-rozpowszechniać ani tworzyć zmienionych wersji; prawa autorskie zostają
-przy Autorze.
+§ 2. Use for any purpose
 
---------------------------------------------------------------------------
-DODATKOWE ZEZWOLENIA (wersja polska)
---------------------------------------------------------------------------
+Any person and any organisation — including companies, businesses,
+schools, public offices and non-governmental organisations — may install
+and use Zen for any purpose, including for profit (e.g. to talk within a
+team or with customers), on any number of devices. An employer may
+install Zen for its employees and manage those installations. This
+permission covers every purpose, not only the noncommercial purposes
+described in PolyForm Strict, subject to § 3.
 
-Poza tym, na co pozwala PolyForm Strict License 1.0.0, Autor zezwala:
+§ 3. No making money on Zen
 
-1. Czytać i analizować kod źródłowy, także pod kątem bezpieczeństwa,
-   i publikować wyniki takich analiz z cytatami kodu w zakresie
-   niezbędnym do ich przedstawienia.
-2. Zgłaszać błędy i uwagi oraz proponować zmiany do oficjalnego
-   repozytorium (https://github.com/robertostrowskijagoda/Zen) przez
-   pull requesty. W tym celu wolno zmieniać kod lokalnie i utworzyć fork
-   w serwisie GitHub — wyłącznie do przygotowania pull requesta.
-   Wysyłając zmianę, udzielasz Autorowi nieodpłatnej, niewyłącznej,
-   nieograniczonej w czasie i terytorialnie licencji na jej
-   wykorzystanie, zmienianie i rozpowszechnianie w Zen, także na innych
-   warunkach licencyjnych.
-3. Budować Zen z niezmienionego kodu źródłowego na własny,
-   niekomercyjny użytek.
-4. Przekazywać innym osobom, nieodpłatnie i w celach niekomercyjnych,
-   niezmienione kopie oficjalnych plików wydań, których suma SHA-256
-   zgadza się z sumą opublikowaną przez Autora (np. przez „Podaj dalej”,
-   z ręki do ręki, przez lustra), razem z niniejszą licencją albo
-   odnośnikiem do niej.
+You may not:
+  1. sell Zen or copies of it, or sell licences, accounts, codes or
+     access to Zen;
+  2. charge for downloading, passing on, installing, activating, hosting
+     or otherwise providing Zen — including within the price of
+     something else;
+  3. include Zen in a product or service that is paid for (e.g. a device
+     that is sold, a paid app bundle, a subscription or a paid app
+     store);
+  4. add ads, payments, subscriptions or your own fundraising to Zen.
 
-Warunki wszystkich zezwoleń:
-- nie wolno usuwać, ukrywać ani zmieniać informacji o autorstwie,
-  linii „Required Notice” ani informacji o zbiórce Autora — ani w kodzie,
-  ani w aplikacji;
-- nie wolno dodawać własnych zbiórek, reklam ani płatności, sprzedawać
-  Zen ani pobierać opłat za jego udostępnianie;
-- nie wolno publikować zmienionych wersji ani forków jako osobnych
-  aplikacji, ani podawać kopii zbudowanej samodzielnie za oficjalne
-  wydanie;
-- nie wolno używać nazwy „Zen” ani logo w sposób sugerujący, że Autor
-  popiera inną wersję niż oficjalna.
+Using Zen while running a paid business (e.g. a company talking to its
+customers through Zen) is allowed. What is forbidden is Zen, or access
+to it, being what someone pays for, or a part of it.
 
-Zgody na użycie komercyjne albo inne wyjątki udziela wyłącznie Autor,
-na piśmie. Biblioteki innych autorów zawarte w Zen mają własne licencje
-(„O aplikacji → Licencje”, plik LICENSES-GO.txt). Zastosowanie ma prawo
-polskie, w szczególności ustawa o prawie autorskim i prawach pokrewnych.
+§ 4. Source code and contributions
 
---------------------------------------------------------------------------
-ADDITIONAL PERMISSIONS (English version, for convenience)
---------------------------------------------------------------------------
+You may:
+  1. read and analyse the source code, including for security research,
+     and publish the results with quotes of the code as far as needed to
+     present them;
+  2. report bugs and suggestions and propose changes to the official
+     repository (https://github.com/robertostrowskijagoda/Zen) through
+     pull requests. For that purpose you may change the code locally and
+     fork it on GitHub — only to prepare a pull request;
+  3. build Zen from the unmodified source code and use it as in § 2.
 
-In addition to what the PolyForm Strict License 1.0.0 allows, the Author
-permits you to:
+By submitting a change you grant the Author a free, non-exclusive,
+perpetual, worldwide licence to use, modify and distribute it in Zen,
+also under other licence terms, and you confirm that you have the right
+to grant it.
 
-1. Read and analyse the source code, including for security research,
-   and publish the results with quotes of the code as far as needed to
-   present them.
-2. Report bugs and suggestions and propose changes to the official
-   repository (https://github.com/robertostrowskijagoda/Zen) through pull
-   requests. For that purpose you may change the code locally and fork it
-   on GitHub — only to prepare a pull request. By submitting a change you
-   grant the Author a free, non-exclusive, perpetual, worldwide licence
-   to use, modify and distribute it in Zen, also under other licence
-   terms.
-3. Build Zen from the unmodified source code for your own noncommercial
-   use.
-4. Give other people, free of charge and for noncommercial purposes,
-   unmodified copies of official release files whose SHA-256 checksum
-   matches the one the Author published (e.g. with "Podaj dalej",
-   hand to hand, through mirrors), together with this licence or a link
-   to it.
+§ 5. Passing on releases
 
-Conditions of all these permissions:
-- do not remove, hide or change the authorship information, the
-  "Required Notice" lines or the Author's fundraising information, in the
-  code or in the app;
-- do not add your own fundraising, ads or payments, sell Zen or charge
-  for providing it;
-- do not publish modified versions or forks as separate apps, and do not
-  present a self-built copy as an official release;
-- do not use the name "Zen" or its logo to suggest that the Author
-  endorses any version other than the official one.
+You may give other people, free of charge, unmodified copies of official
+release files whose SHA-256 checksum matches the one the Author
+published (e.g. with "Podaj dalej", hand to hand, through mirrors),
+together with this licence or a link to it.
 
-Only the Author can permit commercial use or other exceptions, in
-writing. Third-party libraries included in Zen keep their own licences
-("O aplikacji → Licencje", LICENSES-GO.txt). Polish law applies. If the
-two language versions differ, the Polish version prevails.
+§ 6. Conditions
+
+All permissions apply on condition that:
+  1. you do not remove, hide or change the authorship information, the
+     "Required Notice" lines or the Author's fundraising information, in
+     the code or in the app;
+  2. you do not publish modified versions or forks as separate apps, and
+     do not present a self-built copy as an official release;
+  3. you do not use the name "Zen" or its logo to suggest that the Author
+     endorses any version other than the official one;
+  4. you comply with § 3.
+
+§ 7. Final provisions
+
+  1. Only the Author can permit exceptions to this licence (e.g. selling,
+     a modified version), in writing.
+  2. Zen is provided "as is", without any warranty; the Author's
+     liability is limited as in PolyForm Strict ("No Liability"), to the
+     extent permitted by law.
+  3. Third-party libraries included in Zen keep their own licences
+     ("O aplikacji → Licencje", LICENSES-GO.txt).
+  4. Polish law applies, in particular the Polish Act on Copyright and
+     Related Rights.
+  5. If the two language versions differ, the Polish version prevails.
