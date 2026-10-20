@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_kind_video">مكالمة فيديو</string>
+    <string name="call_kind_audio">مكالمة صوتية</string>
+    <string name="call_subtitle_video">دعوة إلى مكالمة فيديو</string>
+    <string name="call_subtitle_audio">دعوة إلى مكالمة صوتية</string>
+    <string name="call_notification_video">مكالمة فيديو واردة</string>
+    <string name="call_notification_audio">مكالمة صوتية واردة</string>
+    <string name="call_decline">رفض</string>
+    <string name="call_accept">ردّ</string>
+    <string name="call_hang_up">إنهاء</string>
+    <string name="call_channel_name">مكالمة واردة</string>
+    <string name="biometric_use_password">استخدم كلمة المرور</string>
+    <string name="biometric_unlock_reason">افتح قفل Zen</string>
+    <string name="share_zen_chooser">أرسل Zen</string>
+    <string name="update_installer_opened">فُتح مثبّت النظام — أكّد التثبيت.</string>
+</resources>

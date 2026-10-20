@@ -1,0 +1,8 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSAppleMusicUsageDescription" = "Zen hanya memerlukan akses ke musik Anda saat Anda sendiri memilih rekaman untuk dikirim dalam pesan atau kiriman.";
+"NSCameraUsageDescription" = "Zen menggunakan kamera untuk panggilan video, memindai kode QR teman, serta mengambil foto dan video yang Anda kirim.";
+"NSFaceIDUsageDescription" = "Zen dapat menggunakan Face ID untuk membuka kunci aplikasi sebagai pengganti kata sandi.";
+"NSLocalNetworkUsageDescription" = "Zen terhubung langsung ke perangkat teman Anda, termasuk di jaringan Wi-Fi yang sama, tanpa server apa pun.";
+"NSLocationWhenInUseUsageDescription" = "Zen meminta lokasi Anda hanya saat Anda sendiri ingin mengirimnya ke seseorang, misalnya dalam peringatan atau saat bertemu.";
+"NSMicrophoneUsageDescription" = "Zen menggunakan mikrofon untuk panggilan suara dan video serta untuk merekam pesan suara.";
+"NSPhotoLibraryUsageDescription" = "Zen memerlukan akses ke foto Anda saat Anda memilih foto atau video untuk dikirim, untuk kiriman, atau untuk profil.";

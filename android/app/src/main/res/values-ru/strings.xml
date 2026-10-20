@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_kind_video">Видеозвонок</string>
+    <string name="call_kind_audio">Аудиозвонок</string>
+    <string name="call_subtitle_video">Приглашение на видеозвонок</string>
+    <string name="call_subtitle_audio">Приглашение на голосовой звонок</string>
+    <string name="call_notification_video">Входящий видеозвонок</string>
+    <string name="call_notification_audio">Входящий аудиозвонок</string>
+    <string name="call_decline">Отклонить</string>
+    <string name="call_accept">Ответить</string>
+    <string name="call_hang_up">Завершить</string>
+    <string name="call_channel_name">Входящий звонок</string>
+    <string name="biometric_use_password">Использовать пароль</string>
+    <string name="biometric_unlock_reason">Разблокировать Zen</string>
+    <string name="share_zen_chooser">Отправить Zen</string>
+    <string name="update_installer_opened">Открыт системный установщик — подтверди установку.</string>
+</resources>

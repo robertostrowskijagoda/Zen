@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "Zen używa kamery do rozmów wideo.";
+"NSDownloadsFolderUsageDescription" = "Zen zapisuje w Pobranych tylko to, co sam każesz zapisać, na przykład nową wersję aplikacji.";
+"NSLocalNetworkUsageDescription" = "Zen łączy się bezpośrednio z urządzeniami znajomych, także w tej samej sieci Wi-Fi, bez żadnego serwera.";
+"NSLocationUsageDescription" = "Zen pyta o położenie tylko wtedy, gdy sam chcesz je komuś wysłać, na przykład w alarmie albo przy spotkaniu.";
+"NSLocationWhenInUseUsageDescription" = "Zen pyta o położenie tylko wtedy, gdy sam chcesz je komuś wysłać, na przykład w alarmie albo przy spotkaniu.";
+"NSMicrophoneUsageDescription" = "Zen używa mikrofonu do rozmów głosowych i wideo oraz do nagrywania wiadomości głosowych.";

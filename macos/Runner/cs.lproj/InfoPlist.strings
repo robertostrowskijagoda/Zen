@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "Zen používá kameru pro video hovory.";
+"NSDownloadsFolderUsageDescription" = "Zen ukládá do Stažených jen to, co mu sami řeknete uložit, například novou verzi aplikace.";
+"NSLocalNetworkUsageDescription" = "Zen se připojuje přímo k zařízením vašich přátel, i v téže síti Wi-Fi, bez jakéhokoli serveru.";
+"NSLocationUsageDescription" = "Zen se ptá na polohu, jen když ji sami chcete někomu poslat, například v poplachu nebo při schůzce.";
+"NSLocationWhenInUseUsageDescription" = "Zen se ptá na polohu, jen když ji sami chcete někomu poslat, například v poplachu nebo při schůzce.";
+"NSMicrophoneUsageDescription" = "Zen používá mikrofon pro hlasové a video hovory a pro nahrávání hlasových zpráv.";

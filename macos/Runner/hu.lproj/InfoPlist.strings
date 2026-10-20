@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "A Zen a kamerát videohívásokhoz használja.";
+"NSDownloadsFolderUsageDescription" = "A Zen a Letöltésekbe csak azt menti, amit te kérsz, például az alkalmazás új verzióját.";
+"NSLocalNetworkUsageDescription" = "A Zen közvetlenül kapcsolódik a barátaid eszközeihez, akár ugyanazon a Wi-Fi-hálózaton is, szerver nélkül.";
+"NSLocationUsageDescription" = "A Zen csak akkor kéri a tartózkodási helyedet, ha te magad szeretnéd elküldeni valakinek, például riasztásban vagy találkozókor.";
+"NSLocationWhenInUseUsageDescription" = "A Zen csak akkor kéri a tartózkodási helyedet, ha te magad szeretnéd elküldeni valakinek, például riasztásban vagy találkozókor.";
+"NSMicrophoneUsageDescription" = "A Zen a mikrofont hang- és videohívásokhoz, valamint hangüzenetek felvételéhez használja.";

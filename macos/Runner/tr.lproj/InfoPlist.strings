@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "Zen kamerayı görüntülü aramalar için kullanır.";
+"NSDownloadsFolderUsageDescription" = "Zen, İndirilenler klasörüne yalnızca senin kaydetmesini istediğin şeyleri, örneğin uygulamanın yeni sürümünü kaydeder.";
+"NSLocalNetworkUsageDescription" = "Zen, hiçbir sunucu olmadan arkadaşlarının cihazlarına, aynı Wi-Fi ağında olanlar dahil, doğrudan bağlanır.";
+"NSLocationUsageDescription" = "Zen konumunu yalnızca sen birine göndermek istediğinde, örneğin bir alarmda ya da buluşmada sorar.";
+"NSLocationWhenInUseUsageDescription" = "Zen konumunu yalnızca sen birine göndermek istediğinde, örneğin bir alarmda ya da buluşmada sorar.";
+"NSMicrophoneUsageDescription" = "Zen mikrofonu sesli ve görüntülü aramalar ile sesli mesaj kaydetmek için kullanır.";

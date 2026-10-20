@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_kind_video">Apel video</string>
+    <string name="call_kind_audio">Apel audio</string>
+    <string name="call_subtitle_video">Invitație la apel video</string>
+    <string name="call_subtitle_audio">Invitație la apel vocal</string>
+    <string name="call_notification_video">Apel video de intrare</string>
+    <string name="call_notification_audio">Apel audio de intrare</string>
+    <string name="call_decline">Respinge</string>
+    <string name="call_accept">Răspunde</string>
+    <string name="call_hang_up">Încheie</string>
+    <string name="call_channel_name">Apel de intrare</string>
+    <string name="biometric_use_password">Folosește parola</string>
+    <string name="biometric_unlock_reason">Deblochează Zen</string>
+    <string name="share_zen_chooser">Trimite Zen</string>
+    <string name="update_installer_opened">S-a deschis programul de instalare al sistemului — confirmă instalarea.</string>
+</resources>

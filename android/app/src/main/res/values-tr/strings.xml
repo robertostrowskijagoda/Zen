@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_kind_video">Görüntülü arama</string>
+    <string name="call_kind_audio">Sesli arama</string>
+    <string name="call_subtitle_video">Görüntülü arama daveti</string>
+    <string name="call_subtitle_audio">Sesli arama daveti</string>
+    <string name="call_notification_video">Gelen görüntülü arama</string>
+    <string name="call_notification_audio">Gelen sesli arama</string>
+    <string name="call_decline">Reddet</string>
+    <string name="call_accept">Cevapla</string>
+    <string name="call_hang_up">Kapat</string>
+    <string name="call_channel_name">Gelen arama</string>
+    <string name="biometric_use_password">Parolayı kullan</string>
+    <string name="biometric_unlock_reason">Zen\'in kilidini aç</string>
+    <string name="share_zen_chooser">Zen’i gönder</string>
+    <string name="update_installer_opened">Sistem yükleyicisi açıldı — kurulumu onayla.</string>
+</resources>

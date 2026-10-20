@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_kind_video">영상 통화</string>
+    <string name="call_kind_audio">음성 통화</string>
+    <string name="call_subtitle_video">영상 통화 초대</string>
+    <string name="call_subtitle_audio">음성 통화 초대</string>
+    <string name="call_notification_video">수신 영상 통화</string>
+    <string name="call_notification_audio">수신 음성 통화</string>
+    <string name="call_decline">거절</string>
+    <string name="call_accept">받기</string>
+    <string name="call_hang_up">끊기</string>
+    <string name="call_channel_name">수신 전화</string>
+    <string name="biometric_use_password">비밀번호 사용</string>
+    <string name="biometric_unlock_reason">Zen 잠금 해제</string>
+    <string name="share_zen_chooser">Zen 보내기</string>
+    <string name="update_installer_opened">시스템 설치 프로그램이 열렸어요 — 설치를 확인하세요.</string>
+</resources>

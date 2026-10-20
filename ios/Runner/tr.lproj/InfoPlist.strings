@@ -1,0 +1,8 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSAppleMusicUsageDescription" = "Zen, müziğine yalnızca sen bir mesajda ya da gönderide paylaşmak üzere bir kayıt seçtiğinde erişmek ister.";
+"NSCameraUsageDescription" = "Zen kamerayı görüntülü aramalar, arkadaşlarının QR kodlarını taramak ve gönderdiğin fotoğraf ile videoları çekmek için kullanır.";
+"NSFaceIDUsageDescription" = "Zen, uygulamanın kilidini parola yerine Face ID ile açabilir.";
+"NSLocalNetworkUsageDescription" = "Zen, hiçbir sunucu olmadan arkadaşlarının cihazlarına, aynı Wi-Fi ağında olanlar dahil, doğrudan bağlanır.";
+"NSLocationWhenInUseUsageDescription" = "Zen konumunu yalnızca sen birine göndermek istediğinde, örneğin bir alarmda ya da buluşmada sorar.";
+"NSMicrophoneUsageDescription" = "Zen mikrofonu sesli ve görüntülü aramalar ile sesli mesaj kaydetmek için kullanır.";
+"NSPhotoLibraryUsageDescription" = "Zen, göndermek, gönderide kullanmak ya da profiline eklemek için fotoğraf veya video seçtiğinde fotoğraflarına erişmek ister.";

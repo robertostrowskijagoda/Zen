@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_kind_video">Video hovor</string>
+    <string name="call_kind_audio">Audio hovor</string>
+    <string name="call_subtitle_video">Pozvánka do video hovoru</string>
+    <string name="call_subtitle_audio">Pozvánka do hlasového hovoru</string>
+    <string name="call_notification_video">Příchozí video hovor</string>
+    <string name="call_notification_audio">Příchozí audio hovor</string>
+    <string name="call_decline">Odmítnout</string>
+    <string name="call_accept">Přijmout</string>
+    <string name="call_hang_up">Zavěsit</string>
+    <string name="call_channel_name">Příchozí hovor</string>
+    <string name="biometric_use_password">Použít heslo</string>
+    <string name="biometric_unlock_reason">Odemknout Zen</string>
+    <string name="share_zen_chooser">Odeslat Zen</string>
+    <string name="update_installer_opened">Otevřel se systémový instalátor — potvrď instalaci.</string>
+</resources>

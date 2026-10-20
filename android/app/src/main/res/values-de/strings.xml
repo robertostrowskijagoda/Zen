@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_kind_video">Videoanruf</string>
+    <string name="call_kind_audio">Audioanruf</string>
+    <string name="call_subtitle_video">Einladung zu einem Videoanruf</string>
+    <string name="call_subtitle_audio">Einladung zu einem Sprachanruf</string>
+    <string name="call_notification_video">Eingehender Videoanruf</string>
+    <string name="call_notification_audio">Eingehender Audioanruf</string>
+    <string name="call_decline">Ablehnen</string>
+    <string name="call_accept">Annehmen</string>
+    <string name="call_hang_up">Auflegen</string>
+    <string name="call_channel_name">Eingehender Anruf</string>
+    <string name="biometric_use_password">Passwort verwenden</string>
+    <string name="biometric_unlock_reason">Zen entsperren</string>
+    <string name="share_zen_chooser">Zen senden</string>
+    <string name="update_installer_opened">Das System-Installationsprogramm wurde geöffnet – bestätige die Installation.</string>
+</resources>

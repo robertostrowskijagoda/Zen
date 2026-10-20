@@ -1,0 +1,8 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSAppleMusicUsageDescription" = "O Zen só precisa de acesso à sua música quando você mesmo escolhe uma gravação para enviar em uma mensagem ou publicação.";
+"NSCameraUsageDescription" = "O Zen usa a câmera para chamadas de vídeo, para ler os códigos QR de amigos e para tirar as fotos e gravar os vídeos que você envia.";
+"NSFaceIDUsageDescription" = "O Zen pode usar o Face ID para desbloquear o app em vez da senha.";
+"NSLocalNetworkUsageDescription" = "O Zen se conecta diretamente aos dispositivos dos seus amigos, inclusive na mesma rede Wi-Fi, sem nenhum servidor.";
+"NSLocationWhenInUseUsageDescription" = "O Zen só pede sua localização quando você mesmo quer enviá-la a alguém, por exemplo em um alerta ou num encontro.";
+"NSMicrophoneUsageDescription" = "O Zen usa o microfone para chamadas de voz e de vídeo e para gravar mensagens de voz.";
+"NSPhotoLibraryUsageDescription" = "O Zen precisa de acesso às suas fotos quando você escolhe uma foto ou um vídeo para enviar, para uma publicação ou para o perfil.";

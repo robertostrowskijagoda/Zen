@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_kind_video">视频通话</string>
+    <string name="call_kind_audio">语音通话</string>
+    <string name="call_subtitle_video">视频通话邀请</string>
+    <string name="call_subtitle_audio">语音通话邀请</string>
+    <string name="call_notification_video">视频来电</string>
+    <string name="call_notification_audio">语音来电</string>
+    <string name="call_decline">拒接</string>
+    <string name="call_accept">接听</string>
+    <string name="call_hang_up">挂断</string>
+    <string name="call_channel_name">来电</string>
+    <string name="biometric_use_password">使用密码</string>
+    <string name="biometric_unlock_reason">解锁 Zen</string>
+    <string name="share_zen_chooser">发送 Zen</string>
+    <string name="update_installer_opened">已打开系统安装程序——请确认安装。</string>
+</resources>

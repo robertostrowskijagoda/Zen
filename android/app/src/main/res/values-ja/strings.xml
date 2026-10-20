@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_kind_video">ビデオ通話</string>
+    <string name="call_kind_audio">音声通話</string>
+    <string name="call_subtitle_video">ビデオ通話への招待</string>
+    <string name="call_subtitle_audio">音声通話への招待</string>
+    <string name="call_notification_video">ビデオ通話の着信</string>
+    <string name="call_notification_audio">音声通話の着信</string>
+    <string name="call_decline">拒否</string>
+    <string name="call_accept">応答</string>
+    <string name="call_hang_up">通話を終了</string>
+    <string name="call_channel_name">着信</string>
+    <string name="biometric_use_password">パスワードを使用</string>
+    <string name="biometric_unlock_reason">Zenのロックを解除</string>
+    <string name="share_zen_chooser">Zen を送る</string>
+    <string name="update_installer_opened">システムのインストーラーを開きました — インストールを確認してください。</string>
+</resources>

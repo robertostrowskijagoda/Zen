@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "Zen gebruikt de camera voor videogesprekken.";
+"NSDownloadsFolderUsageDescription" = "Zen bewaart in Downloads alleen wat jij laat opslaan, bijvoorbeeld een nieuwe versie van de app.";
+"NSLocalNetworkUsageDescription" = "Zen maakt rechtstreeks verbinding met de apparaten van je vrienden, ook op hetzelfde wifi-netwerk, zonder server.";
+"NSLocationUsageDescription" = "Zen vraagt alleen om je locatie wanneer je die zelf naar iemand wilt sturen, bijvoorbeeld bij een alarm of een afspraak.";
+"NSLocationWhenInUseUsageDescription" = "Zen vraagt alleen om je locatie wanneer je die zelf naar iemand wilt sturen, bijvoorbeeld bij een alarm of een afspraak.";
+"NSMicrophoneUsageDescription" = "Zen gebruikt de microfoon voor spraak- en videogesprekken en voor het opnemen van spraakberichten.";

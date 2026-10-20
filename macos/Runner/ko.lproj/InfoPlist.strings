@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "Zen은 영상 통화에 카메라를 사용합니다.";
+"NSDownloadsFolderUsageDescription" = "Zen은 앱의 새 버전처럼 직접 저장하라고 한 것만 다운로드 폴더에 저장합니다.";
+"NSLocalNetworkUsageDescription" = "Zen은 서버 없이 같은 Wi-Fi 네트워크를 포함해 친구의 기기와 직접 연결됩니다.";
+"NSLocationUsageDescription" = "Zen은 경보나 만남 등에서 직접 누군가에게 위치를 보내려고 할 때에만 위치를 요청합니다.";
+"NSLocationWhenInUseUsageDescription" = "Zen은 경보나 만남 등에서 직접 누군가에게 위치를 보내려고 할 때에만 위치를 요청합니다.";
+"NSMicrophoneUsageDescription" = "Zen은 음성 및 영상 통화와 음성 메시지 녹음에 마이크를 사용합니다.";

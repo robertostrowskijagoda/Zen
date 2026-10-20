@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "Zen використовує камеру для відеодзвінків.";
+"NSDownloadsFolderUsageDescription" = "Zen зберігає в «Завантаження» лише те, що ви самі просите зберегти, наприклад нову версію застосунку.";
+"NSLocalNetworkUsageDescription" = "Zen з’єднується напряму з пристроями друзів, зокрема в одній мережі Wi-Fi, без жодного сервера.";
+"NSLocationUsageDescription" = "Zen запитує геопозицію, лише коли ви самі хочете надіслати її комусь, наприклад у тривозі або під час зустрічі.";
+"NSLocationWhenInUseUsageDescription" = "Zen запитує геопозицію, лише коли ви самі хочете надіслати її комусь, наприклад у тривозі або під час зустрічі.";
+"NSMicrophoneUsageDescription" = "Zen використовує мікрофон для голосових і відеодзвінків та для запису голосових повідомлень.";

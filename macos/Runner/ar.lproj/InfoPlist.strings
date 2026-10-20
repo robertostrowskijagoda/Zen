@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "يستخدم Zen الكاميرا لمكالمات الفيديو.";
+"NSDownloadsFolderUsageDescription" = "يحفظ Zen في التنزيلات فقط ما تطلب منه حفظه، مثل إصدار جديد من التطبيق.";
+"NSLocalNetworkUsageDescription" = "يتصل Zen مباشرةً بأجهزة أصدقائك، بما في ذلك على شبكة Wi-Fi نفسها، دون أي خادم.";
+"NSLocationUsageDescription" = "يطلب Zen موقعك فقط عندما تريد أنت إرساله إلى شخص ما، مثلًا في تنبيه أو عند اللقاء.";
+"NSLocationWhenInUseUsageDescription" = "يطلب Zen موقعك فقط عندما تريد أنت إرساله إلى شخص ما، مثلًا في تنبيه أو عند اللقاء.";
+"NSMicrophoneUsageDescription" = "يستخدم Zen الميكروفون للمكالمات الصوتية ومكالمات الفيديو ولتسجيل الرسائل الصوتية.";
