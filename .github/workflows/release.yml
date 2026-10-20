@@ -2,6 +2,7 @@
 # the release key; arm64-v8a, armeabi-v7a and x86_64 in one APK),
 # Zen-Windows.zip (x64), Zen-Windows-arm64.zip, Zen-Linux-x64.tar.gz,
 # Zen-Linux-arm64.tar.gz, Zen-Linux-x64.deb, Zen-Linux-arm64.deb,
+# Zen-Linux-x64.flatpak,
 # Zen-macOS.zip (universal), Zen-unsigned.ipa (the iOS workflow),
 # LICENSES-GO.txt and SHA256SUMS of all of them, and attaches them to a draft
 # release of that tag. Every build job uploads its files as an artifact; the
@@ -326,6 +327,60 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  # Flatpak of the Linux x64 bundle built above (no second build from
+  # source): linux/packaging/com.roj.zen.yml only unpacks the tar.gz.
+  flatpak:
+    name: Flatpak (x64)
+    needs: linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-linux-x64
+          path: linux-dist
+
+      - name: Flatpak tools and the tray libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            flatpak flatpak-builder libayatana-appindicator3-1 libgtk-3-0t64
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Build
+        run: |
+          work="$RUNNER_TEMP/flatpak"
+          mkdir -p "$work/extra-lib" dist
+          cp linux/packaging/com.roj.zen.yml linux/packaging/com.roj.zen.desktop \
+            linux/packaging/com.roj.zen.metainfo.xml "$work/"
+          cp linux-dist/Zen-Linux-x64.tar.gz "$work/"
+          # The GNOME runtime has no libayatana-appindicator3: take it and
+          # its dependencies that the runtime lacks from this runner.
+          tar -xzf linux-dist/Zen-Linux-x64.tar.gz -C "$RUNNER_TEMP"
+          LD_LIBRARY_PATH="$RUNNER_TEMP/Zen/lib" ldd "$RUNNER_TEMP/Zen/zen" \
+            | awk '/(ayatana|dbusmenu|indicator)/ && $3 ~ /^\// { print $3 }' \
+            | while read -r library; do cp -L "$library" "$work/extra-lib/"; done
+          ls "$work/extra-lib"
+          test -n "$(ls "$work/extra-lib")"
+          cd "$work"
+          flatpak-builder --user --force-clean --install-deps-from=flathub \
+            --repo=repo build com.roj.zen.yml
+          flatpak build-bundle repo "$GITHUB_WORKSPACE/dist/Zen-Linux-x64.flatpak" com.roj.zen
+          ls -l "$GITHUB_WORKSPACE/dist/Zen-Linux-x64.flatpak"
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-flatpak
+          path: dist/
+          if-no-files-found: error
+
   macos:
     name: macOS
     runs-on: macos-latest
@@ -376,7 +431,7 @@ jobs:
 
   checksums:
     name: SHA256SUMS
-    needs: [android, windows, windows-arm64, linux, macos, ios]
+    needs: [android, windows, windows-arm64, linux, flatpak, macos, ios]
     # Also when the android job was skipped (a run from a branch); never
     # after a failed or cancelled build of a required file. windows-arm64
     # is not required yet (see that job): its file is included when built.
@@ -385,6 +440,7 @@ jobs:
       && needs.android.result != 'failure' && needs.android.result != 'cancelled'
       && needs.windows.result == 'success'
       && needs.linux.result == 'success'
+      && needs.flatpak.result == 'success'
       && needs.macos.result == 'success'
       && needs.ios.result == 'success'
     runs-on: ubuntu-latest
