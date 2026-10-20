@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_screen.dart';
@@ -9,13 +10,13 @@ import 'package:zen/src/features/pyramid/presentation/pyramid_wallet.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
-const Map<String, String> kPowerNames = <String, String>{
-  'ban': 'Bany (także stałe)',
-  'pause': 'Przerwy (ban czasowy)',
-  'content': 'Bany treści',
-  'reports': 'Przyjmowanie zgłoszeń',
-  'referendum': 'Referenda',
-  'alarm': 'Ogłoszenia alarmowe',
+Map<String, String> get kPowerNames => <String, String>{
+  'ban': t('Bany (także stałe)'),
+  'pause': t('Przerwy (ban czasowy)'),
+  'content': t('Bany treści'),
+  'reports': t('Przyjmowanie zgłoszeń'),
+  'referendum': t('Referenda'),
+  'alarm': t('Ogłoszenia alarmowe'),
 };
 
 /// Power (§21): delegations, reports, bans, referenda, alarms, the rules,
@@ -48,7 +49,7 @@ class PyramidPower extends StatelessWidget {
   }
 
   Future<void> _delegate(BuildContext context) async {
-    final String? to = await pickMember(context, s, title: 'Komu?');
+    final String? to = await pickMember(context, s, title: t('Komu?'));
     if (to == null || !context.mounted) {
       return;
     }
@@ -61,7 +62,11 @@ class PyramidPower extends StatelessWidget {
       context: context,
       builder: (BuildContext context) => StatefulBuilder(
         builder: (BuildContext context, StateSetter set) => AlertDialog(
-          title: Text('Delegacja dla ${s.members[to]?.name}'),
+          title: Text(
+            t('Delegacja dla {name}', <String, Object?>{
+              'name': s.members[to]?.name,
+            }),
+          ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -77,33 +82,33 @@ class PyramidPower extends StatelessWidget {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   value: branch,
-                  title: const Text('Tylko gałąź tej osoby'),
-                  subtitle: const Text('Inaczej: cała piramida.'),
+                  title: Text(t('Tylko gałąź tej osoby')),
+                  subtitle: Text(t('Inaczej: cała piramida.')),
                   onChanged: (bool v) => set(() => branch = v),
                 ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: limit,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Limit na 30 dni',
-                    helperText: '0 = bez limitu',
-                    prefixIcon: Icon(Icons.speed_rounded),
+                  decoration: InputDecoration(
+                    labelText: t('Limit na 30 dni'),
+                    helperText: t('0 = bez limitu'),
+                    prefixIcon: const Icon(Icons.speed_rounded),
                   ),
                 ),
                 const SizedBox(height: 14),
                 TextField(
                   controller: days,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Na ile dni',
-                    prefixIcon: Icon(Icons.event_rounded),
+                  decoration: InputDecoration(
+                    labelText: t('Na ile dni'),
+                    prefixIcon: const Icon(Icons.event_rounded),
                   ),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   value: sub,
-                  title: const Text('Może delegować dalej'),
+                  title: Text(t('Może delegować dalej')),
                   onChanged: (bool v) => set(() => sub = v),
                 ),
               ],
@@ -112,11 +117,11 @@ class PyramidPower extends StatelessWidget {
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Anuluj'),
+              child: Text(t('Anuluj')),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Deleguj'),
+              child: Text(t('Deleguj')),
             ),
           ],
         ),
@@ -138,8 +143,21 @@ class PyramidPower extends StatelessWidget {
       sub: sub,
     );
     if (context.mounted) {
-      snack(context, 'Potrzebny podpis drugiej osoby ze szczytu.');
+      snack(context, t('Potrzebny podpis drugiej osoby ze szczytu.'));
     }
+  }
+
+  /// What an appeal is about (§21.4): the ban it names, else the decision
+  /// on the report it names.
+  String _appealedDecision(Object? rep) {
+    final PyrBan? ban = rep is String ? s.bans[rep] : null;
+    if (ban != null) {
+      return t('Ban ({kind}): {reason}', <String, Object?>{
+        'kind': ban.kind,
+        'reason': ban.reason,
+      });
+    }
+    return s.decisions[rep] ?? '?';
   }
 
   Future<void> _decide(BuildContext context, PyrReport r) async {
@@ -152,19 +170,25 @@ class PyramidPower extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
             child: ZenInfo(
               icon: Icons.description_outlined,
-              text:
-                  '${r.target.isEmpty ? '' : 'Kogo: ${pyrWho(s, r.target)}\n'}'
-                  '${r.datingKey != null ? 'Profil randkowy\n' : ''}'
-                  'Dowód: ${r.evidence.isEmpty ? '(brak)' : r.evidence}',
+              text: <String>[
+                if (r.target.isNotEmpty)
+                  t('Kogo: {who}', <String, Object?>{
+                    'who': pyrWho(s, r.target),
+                  }),
+                if (r.datingKey != null) t('Profil randkowy'),
+                t('Dowód: {evidence}', <String, Object?>{
+                  'evidence': r.evidence.isEmpty ? t('(brak)') : r.evidence,
+                }),
+              ].join('\n'),
             ),
           ),
-          for (final MapEntry<String, String> o in const <String, String>{
-            'none': 'Bez naruszenia',
-            'pause': 'Przerwa 7 dni',
-            'content': 'Ban treści',
-            'dating': 'Wyłącz profil randkowy',
-            'noadmit': 'Zakaz przyjmowania do piramidy (90 dni)',
-            'perm': 'Ban stały',
+          for (final MapEntry<String, String> o in <String, String>{
+            'none': t('Bez naruszenia'),
+            'pause': t('Przerwa 7 dni'),
+            'content': t('Ban treści'),
+            'dating': t('Wyłącz profil randkowy'),
+            'noadmit': t('Zakaz przyjmowania do piramidy (90 dni)'),
+            'perm': t('Ban stały'),
           }.entries)
             SimpleDialogOption(
               onPressed: () => Navigator.of(context).pop(o.key),
@@ -178,12 +202,12 @@ class PyramidPower extends StatelessWidget {
       return;
     }
     final String outcome = switch (choice) {
-      'none' => 'Bez naruszenia',
-      'pause' => 'Przerwa 7 dni',
-      'content' => 'Ban treści',
-      'dating' => 'Wyłączony profil randkowy',
-      'noadmit' => 'Zakaz przyjmowania na 90 dni',
-      _ => 'Ban stały',
+      'none' => t('Bez naruszenia'),
+      'pause' => t('Przerwa 7 dni'),
+      'content' => t('Ban treści'),
+      'dating' => t('Wyłączony profil randkowy'),
+      'noadmit' => t('Zakaz przyjmowania na 90 dni'),
+      _ => t('Ban stały'),
     };
     final int? until = switch (choice) {
       'pause' => pyr.now + 7 * 24 * 3600 * 1000,
@@ -208,7 +232,9 @@ class PyramidPower extends StatelessWidget {
 
   Future<void> _referendum(BuildContext context) async {
     final TextEditingController q = TextEditingController();
-    final TextEditingController opts = TextEditingController(text: 'Tak, Nie');
+    final TextEditingController opts = TextEditingController(
+      text: t('Tak, Nie'),
+    );
     final TextEditingController days = TextEditingController(text: '7');
     final TextEditingController params = TextEditingController(
       text: const JsonEncoder.withIndent(' ').convert(s.params.toJson()),
@@ -221,7 +247,7 @@ class PyramidPower extends StatelessWidget {
         builder: (BuildContext context, StateSetter set) {
           final ZenColors zen = ZenColors.of(context);
           return AlertDialog(
-            title: const Text('Referendum'),
+            title: Text(t('Referendum')),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -233,20 +259,20 @@ class PyramidPower extends StatelessWidget {
                     minLines: 1,
                     maxLines: 3,
                     textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      labelText: 'Pytanie',
-                      hintText: 'np. Czy budujemy świetlicę?',
-                      prefixIcon: Icon(Icons.help_outline_rounded),
+                    decoration: InputDecoration(
+                      labelText: t('Pytanie'),
+                      hintText: t('np. Czy budujemy świetlicę?'),
+                      prefixIcon: const Icon(Icons.help_outline_rounded),
                     ),
                   ),
                   const SizedBox(height: 14),
                   if (kind != 'constitution') ...<Widget>[
                     TextField(
                       controller: opts,
-                      decoration: const InputDecoration(
-                        labelText: 'Odpowiedzi',
-                        helperText: 'Po przecinku, np. Tak, Nie',
-                        prefixIcon: Icon(Icons.list_rounded),
+                      decoration: InputDecoration(
+                        labelText: t('Odpowiedzi'),
+                        helperText: t('Po przecinku, np. Tak, Nie'),
+                        prefixIcon: const Icon(Icons.list_rounded),
                       ),
                     ),
                     const SizedBox(height: 14),
@@ -254,24 +280,26 @@ class PyramidPower extends StatelessWidget {
                   TextField(
                     controller: days,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Ile dni',
-                      prefixIcon: Icon(Icons.event_rounded),
+                    decoration: InputDecoration(
+                      labelText: t('Ile dni'),
+                      prefixIcon: const Icon(Icons.event_rounded),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Text('KTO GŁOSUJE', style: zen.label(color: zen.textMuted)),
+                  Text(
+                    t('KTO GŁOSUJE'),
+                    style: zen.label(color: zen.textMuted),
+                  ),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: <Widget>[
-                      for (final MapEntry<String, String> o
-                          in const <String, String>{
-                            'all': 'Cała piramida',
-                            'branch': 'Moja gałąź',
-                            'nat': 'Moja narodowość',
-                          }.entries)
+                      for (final MapEntry<String, String> o in <String, String>{
+                        'all': t('Cała piramida'),
+                        'branch': t('Moja gałąź'),
+                        'nat': t('Moja narodowość'),
+                      }.entries)
                         ChoiceChip(
                           label: Text(o.value),
                           selected: scope == o.key,
@@ -280,17 +308,16 @@ class PyramidPower extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  Text('RODZAJ', style: zen.label(color: zen.textMuted)),
+                  Text(t('RODZAJ'), style: zen.label(color: zen.textMuted)),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: <Widget>[
-                      for (final MapEntry<String, String> o
-                          in const <String, String>{
-                            'normal': 'Zwykłe',
-                            'constitution': 'Zmiana zasad',
-                          }.entries)
+                      for (final MapEntry<String, String> o in <String, String>{
+                        'normal': t('Zwykłe'),
+                        'constitution': t('Zmiana zasad'),
+                      }.entries)
                         ChoiceChip(
                           label: Text(o.value),
                           selected: kind == o.key,
@@ -301,7 +328,7 @@ class PyramidPower extends StatelessWidget {
                   if (kind == 'constitution') ...<Widget>[
                     const SizedBox(height: 8),
                     Text(
-                      'Odpowiedzi: Tak / Nie.',
+                      t('Odpowiedzi: Tak / Nie.'),
                       style: TextStyle(color: zen.textSecondary, fontSize: 13),
                     ),
                     const SizedBox(height: 12),
@@ -309,12 +336,13 @@ class PyramidPower extends StatelessWidget {
                       controller: params,
                       maxLines: 8,
                       style: zen.mono(color: zen.textPrimary, size: 12),
-                      decoration: const InputDecoration(
-                        labelText: 'Nowe zasady',
+                      decoration: InputDecoration(
+                        labelText: t('Nowe zasady'),
                         alignLabelWithHint: true,
                         // Money in the rules is in hundredths.
-                        helperText:
-                            'emitLimit w setnych: 100000000 = 1 000 000,00',
+                        helperText: t(
+                          'emitLimit w setnych: 100000000 = 1 000 000,00',
+                        ),
                         helperMaxLines: 2,
                       ),
                     ),
@@ -325,11 +353,11 @@ class PyramidPower extends StatelessWidget {
             actions: <Widget>[
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Anuluj'),
+                child: Text(t('Anuluj')),
               ),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Ogłoś'),
+                child: Text(t('Ogłoś')),
               ),
             ],
           );
@@ -338,7 +366,7 @@ class PyramidPower extends StatelessWidget {
     );
     final String question = q.text.trim();
     final List<String> options = kind == 'constitution'
-        ? <String>['Tak', 'Nie']
+        ? <String>[t('Tak'), t('Nie')]
         : opts.text
               .split(',')
               .map((String o) => o.trim())
@@ -379,7 +407,7 @@ class PyramidPower extends StatelessWidget {
   Future<void> _alarm(BuildContext context) async {
     final String? text = await askText(
       context,
-      title: 'Ogłoszenie alarmowe (np. powódź)',
+      title: t('Ogłoszenie alarmowe (np. powódź)'),
       maxLines: 3,
     );
     if (text == null) {
@@ -407,8 +435,22 @@ class PyramidPower extends StatelessWidget {
           SnackBar(
             content: Text(
               asked == 0
-                  ? 'Nikt ze znajomych nie ma innej piramidy (albo jeszcze się nie odezwał).'
-                  : 'Poprosiłem znajomych o $asked piramid(y) — spróbuj za chwilę.',
+                  ? t(
+                      'Nikt ze znajomych nie ma innej piramidy (albo jeszcze '
+                      'się nie odezwał).',
+                    )
+                  : tn(
+                      asked,
+                      one:
+                          'Poprosiłem znajomych o {n} piramidę — spróbuj za '
+                          'chwilę.',
+                      few:
+                          'Poprosiłem znajomych o {n} piramidy — spróbuj za '
+                          'chwilę.',
+                      many:
+                          'Poprosiłem znajomych o {n} piramid — spróbuj za '
+                          'chwilę.',
+                    ),
             ),
           ),
         );
@@ -418,12 +460,12 @@ class PyramidPower extends StatelessWidget {
     final String? into = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => SimpleDialog(
-        title: const Text('Dołącz naszą piramidę jako gałąź…'),
+        title: Text(t('Dołącz naszą piramidę jako gałąź…')),
         children: <Widget>[
           if (others.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Nie znasz innej piramidy.'),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(t('Nie znasz innej piramidy.')),
             ),
           for (final String p in others)
             SimpleDialogOption(
@@ -440,7 +482,7 @@ class PyramidPower extends StatelessWidget {
     final String? under = await pickMember(
       context,
       other,
-      title: 'Pod kim (musi mieć wolne miejsce)?',
+      title: t('Pod kim (musi mieć wolne miejsce)?'),
     );
     if (under == null || !context.mounted) {
       return;
@@ -462,7 +504,7 @@ class PyramidPower extends StatelessWidget {
       rate: rate.numer == 0 ? null : rate,
     );
     if (context.mounted) {
-      snack(context, 'Propozycja połączenia poszła do podpisu.');
+      snack(context, t('Propozycja połączenia poszła do podpisu.'));
     }
   }
 
@@ -484,7 +526,7 @@ class PyramidPower extends StatelessWidget {
               .mergeMoney(into, numer: typed <= 0 ? 1 : typed, denom: 10000);
           final bool fits = m == null || m.converted <= m.room;
           return AlertDialog(
-            title: const Text('Pieniądze przy połączeniu'),
+            title: Text(t('Pieniądze przy połączeniu')),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -493,11 +535,17 @@ class PyramidPower extends StatelessWidget {
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     value: keep,
-                    title: const Text('Przenieś nasze pieniądze'),
+                    title: Text(t('Przenieś nasze pieniądze')),
                     subtitle: Text(
                       keep
-                          ? 'Salda przejdą do „$name” po kursie.'
-                          : 'Pieniądze zostaną w zamkniętej piramidzie (bez wartości).',
+                          ? t(
+                              'Salda przejdą do „{name}” po kursie.',
+                              <String, Object?>{'name': name},
+                            )
+                          : t(
+                              'Pieniądze zostaną w zamkniętej piramidzie '
+                              '(bez wartości).',
+                            ),
                     ),
                     onChanged: (bool v) => set(() => keep = v),
                   ),
@@ -511,7 +559,10 @@ class PyramidPower extends StatelessWidget {
                       ),
                       onChanged: (_) => set(() {}),
                       decoration: InputDecoration(
-                        labelText: 'Za nasze 100,00 w „$name”',
+                        labelText: t(
+                          'Za nasze 100,00 w „{name}”',
+                          <String, Object?>{'name': name},
+                        ),
                         prefixIcon: const Icon(Icons.currency_exchange_rounded),
                       ),
                     ),
@@ -521,16 +572,50 @@ class PyramidPower extends StatelessWidget {
                           ? Icons.info_outline_rounded
                           : Icons.warning_amber_rounded,
                       text: m == null
-                          ? 'Nie znamy jeszcze stanu „$name”.'
-                          : 'Razem u nas: ${formatMoney(m.total)} → '
-                                '${formatMoney(m.converted)} w „$name”. '
-                                'To dla nich nowe pieniądze, więc liczą się jak '
-                                'emisja: mieszczą się w limicie 30 dni (wolne: '
-                                '${formatMoney(m.room)}), czekają ${pyr.pyramidState(into)?.params.emitDelayHours ?? 24} h '
-                                'i ich szczyt może je zawetować. Podpisuje też '
-                                '2 z 3 ich szczytu.'
-                                '${fits ? '' : ' Za dużo — obniż kurs albo niech zmienią limit w referendum.'}'
-                                '${m.waiting > 0 ? ' Uwaga: ${m.waiting} emisja(-e) jeszcze czeka — nie przejdzie.' : ''}',
+                          ? t(
+                              'Nie znamy jeszcze stanu „{name}”.',
+                              <String, Object?>{'name': name},
+                            )
+                          : <String>[
+                              t(
+                                'Razem u nas: {total} → {converted} w '
+                                '„{name}”. To dla nich nowe pieniądze, więc '
+                                'liczą się jak emisja: mieszczą się w limicie '
+                                '30 dni (wolne: {room}), czekają {hours} h i '
+                                'ich szczyt może je zawetować. Podpisuje też '
+                                '2 z 3 ich szczytu.',
+                                <String, Object?>{
+                                  'total': formatMoney(m.total),
+                                  'converted': formatMoney(m.converted),
+                                  'name': name,
+                                  'room': formatMoney(m.room),
+                                  'hours':
+                                      pyr
+                                          .pyramidState(into)
+                                          ?.params
+                                          .emitDelayHours ??
+                                      24,
+                                },
+                              ),
+                              if (!fits)
+                                t(
+                                  'Za dużo — obniż kurs albo niech zmienią '
+                                  'limit w referendum.',
+                                ),
+                              if (m.waiting > 0)
+                                tn(
+                                  m.waiting,
+                                  one:
+                                      'Uwaga: {n} emisja jeszcze czeka — nie '
+                                      'przejdzie.',
+                                  few:
+                                      'Uwaga: {n} emisje jeszcze czekają — nie '
+                                      'przejdą.',
+                                  many:
+                                      'Uwaga: {n} emisji jeszcze czeka — nie '
+                                      'przejdzie.',
+                                ),
+                            ].join(' '),
                     ),
                   ],
                 ],
@@ -539,13 +624,13 @@ class PyramidPower extends StatelessWidget {
             actions: <Widget>[
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Anuluj'),
+                child: Text(t('Anuluj')),
               ),
               FilledButton(
                 onPressed: !keep || (typed > 0 && fits)
                     ? () => Navigator.of(context).pop(true)
                     : null,
-                child: const Text('Zaproponuj'),
+                child: Text(t('Zaproponuj')),
               ),
             ],
           );
@@ -629,12 +714,12 @@ class PyramidPower extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final Color tone = pyrTone(zen);
-    final int t = pyr.now;
+    final int now = pyr.now;
     final List<PyrDelegation> delegations = s.delegations.values
-        .where((PyrDelegation d) => !d.revoked && d.until > t)
+        .where((PyrDelegation d) => !d.revoked && d.until > now)
         .toList();
     final List<PyrBan> bans = s.bans.values
-        .where((PyrBan b) => b.activeAt(t))
+        .where((PyrBan b) => b.activeAt(now))
         .toList();
     final List<PyrAlarm> alarms = s.alarms.reversed.toList();
     // Only a referendum that passed, once the sums had their time to come
@@ -643,7 +728,7 @@ class PyramidPower extends StatelessWidget {
         .where(
           (PyrReferendum r) =>
               r.kind == 'constitution' &&
-              t >= r.end + kPyrTallyGraceMs &&
+              now >= r.end + kPyrTallyGraceMs &&
               s.constitutionPasses(r.id),
         )
         .toList();
@@ -651,18 +736,21 @@ class PyramidPower extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: <Widget>[
         ZenHero(
-          title: _top ? 'Jesteś na szczycie' : 'Twoje delegacje',
+          title: _top ? t('Jesteś na szczycie') : t('Twoje delegacje'),
           icon: _top ? Icons.workspace_premium_rounded : Icons.badge_rounded,
           tone: tone,
           text: _top
-              ? 'Decyzje zapadają 2 z 3. Nie możesz usuwać ludzi z piramidy ani blokować awansów.'
-              : 'Każdy akt jest jawny i szczyt może go uchylić.',
+              ? t(
+                  'Decyzje zapadają 2 z 3. Nie możesz usuwać ludzi z piramidy '
+                  'ani blokować awansów.',
+                )
+              : t('Każdy akt jest jawny i szczyt może go uchylić.'),
           actions: <Widget>[
             if (_top)
               FilledButton.icon(
                 onPressed: () => unawaited(_delegate(context)),
                 icon: const Icon(Icons.badge_rounded),
-                label: const Text('Deleguj'),
+                label: Text(t('Deleguj')),
               ),
             if (_top ||
                 _myDelegation(<String>['referendum']) != null ||
@@ -670,7 +758,7 @@ class PyramidPower extends StatelessWidget {
               OutlinedButton.icon(
                 onPressed: () => unawaited(_referendum(context)),
                 icon: const Icon(Icons.how_to_vote_rounded),
-                label: const Text('Referendum'),
+                label: Text(t('Referendum')),
               ),
             if (_top ||
                 _myDelegation(<String>['alarm']) != null ||
@@ -678,18 +766,22 @@ class PyramidPower extends StatelessWidget {
               OutlinedButton.icon(
                 onPressed: () => unawaited(_alarm(context)),
                 icon: const Icon(Icons.warning_amber_rounded),
-                label: const Text('Ogłoszenie alarmowe'),
+                label: Text(t('Ogłoszenie alarmowe')),
               ),
             if (_top)
               OutlinedButton.icon(
                 onPressed: () => unawaited(_merge(context)),
                 icon: const Icon(Icons.merge_rounded),
-                label: const Text('Połącz piramidy'),
+                label: Text(t('Połącz piramidy')),
               ),
           ],
         ),
         if (pyr.inbox.isNotEmpty) ...<Widget>[
-          ZenSection('Zgłoszenia (${pyr.inbox.length})'),
+          ZenSection(
+            t('Zgłoszenia ({count})', <String, Object?>{
+              'count': pyr.inbox.length,
+            }),
+          ),
           for (final PyrReport r in pyr.inbox.values)
             ZenCard(
               tone: zen.danger,
@@ -718,7 +810,7 @@ class PyramidPower extends StatelessWidget {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              '${r.target.isEmpty ? 'treść' : pyrWho(s, r.target)} · ${pyrDate(r.at)}',
+                              '${r.target.isEmpty ? t('treść') : pyrWho(s, r.target)} · ${pyrDate(r.at)}',
                               style: TextStyle(
                                 color: zen.textSecondary,
                                 fontSize: 12.5,
@@ -735,7 +827,7 @@ class PyramidPower extends StatelessWidget {
                     alignment: Alignment.centerRight,
                     child: FilledButton(
                       onPressed: () => unawaited(_decide(context, r)),
-                      child: const Text('Rozpatrz'),
+                      child: Text(t('Rozpatrz')),
                     ),
                   ),
                 ],
@@ -743,7 +835,7 @@ class PyramidPower extends StatelessWidget {
             ),
         ],
         if (pyr.appeals.isNotEmpty && _top) ...<Widget>[
-          const ZenSection('Odwołania'),
+          ZenSection(t('Odwołania')),
           ZenGroup(
             children: <Widget>[
               for (final Map<String, dynamic> a in pyr.appeals)
@@ -755,14 +847,29 @@ class PyramidPower extends StatelessWidget {
                     size: 36,
                   ),
                   title: '${s.members[a['k']]?.name ?? '?'}: ${a['t']}',
-                  subtitle: 'Decyzja: ${s.decisions[a['rep']] ?? '?'}',
+                  subtitle: t('Decyzja: {decision}', <String, Object?>{
+                    'decision': _appealedDecision(a['rep']),
+                  }),
+                  // The answer to an appeal against a ban: lift it.
+                  trailing: _top && (s.bans[a['rep']]?.activeAt(now) ?? false)
+                      ? TextButton(
+                          key: Key('appeal-lift-${a['rep']}'),
+                          onPressed: () => unawaited(
+                            pyr.topDecision(<String, dynamic>{
+                              't': 'unban',
+                              'ban': a['rep'],
+                            }),
+                          ),
+                          child: Text(t('Uchyl')),
+                        )
+                      : null,
                 ),
             ],
           ),
         ],
-        const ZenSection('Delegacje'),
+        ZenSection(t('Delegacje')),
         if (delegations.isEmpty)
-          _none(zen, 'Brak.')
+          _none(zen, t('Brak.'))
         else
           ZenGroup(
             children: <Widget>[
@@ -776,8 +883,13 @@ class PyramidPower extends StatelessWidget {
                   ),
                   title:
                       '${kPowerNames[d.power] ?? d.power}: ${s.members[d.to]?.name ?? '?'}',
-                  subtitle:
-                      '${d.scope.isEmpty ? 'cała piramida' : 'gałąź'} · do ${pyrDate(d.until)}${d.limit > 0 ? ' · ${d.limit}/30 dni' : ''}${d.sub ? ' · może dalej' : ''}',
+                  subtitle: <String>[
+                    if (d.scope.isEmpty) t('cała piramida') else t('gałąź'),
+                    t('do {date}', <String, Object?>{'date': pyrDate(d.until)}),
+                    if (d.limit > 0)
+                      t('{limit}/30 dni', <String, Object?>{'limit': d.limit}),
+                    if (d.sub) t('może dalej'),
+                  ].join(' · '),
                   trailing: _top
                       ? TextButton(
                           onPressed: () => unawaited(
@@ -786,15 +898,15 @@ class PyramidPower extends StatelessWidget {
                               'd': d.id,
                             }),
                           ),
-                          child: const Text('Cofnij'),
+                          child: Text(t('Cofnij')),
                         )
                       : null,
                 ),
             ],
           ),
-        const ZenSection('Aktywne bany'),
+        ZenSection(t('Aktywne bany')),
         if (bans.isEmpty)
-          _none(zen, 'Brak.')
+          _none(zen, t('Brak.'))
         else
           ZenGroup(
             children: <Widget>[
@@ -807,9 +919,14 @@ class PyramidPower extends StatelessWidget {
                     size: 36,
                   ),
                   title:
-                      '${b.kind}: ${b.target.isEmpty ? 'treść' : s.members[b.target]?.name ?? '?'}',
-                  subtitle:
-                      '${b.reason}${b.until != null ? ' · do ${pyrDate(b.until!)}' : ''}',
+                      '${b.kind}: ${b.target.isEmpty ? t('treść') : s.members[b.target]?.name ?? '?'}',
+                  subtitle: <String>[
+                    b.reason,
+                    if (b.until != null)
+                      t('do {date}', <String, Object?>{
+                        'date': pyrDate(b.until!),
+                      }),
+                  ].join(' · '),
                   trailing: _top
                       ? TextButton(
                           onPressed: () => unawaited(
@@ -818,14 +935,14 @@ class PyramidPower extends StatelessWidget {
                               'ban': b.id,
                             }),
                           ),
-                          child: const Text('Uchyl'),
+                          child: Text(t('Uchyl')),
                         )
                       : null,
                 ),
             ],
           ),
-        const ZenSection('Ogłoszenia alarmowe'),
-        if (alarms.isEmpty) _none(zen, 'Brak.'),
+        ZenSection(t('Ogłoszenia alarmowe')),
+        if (alarms.isEmpty) _none(zen, t('Brak.')),
         for (final PyrAlarm a in alarms)
           ZenCard(
             tone: zen.warning,
@@ -852,7 +969,12 @@ class PyramidPower extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            '${pyrDate(a.at)} · do ${pyrDate(a.until)}',
+                            <String>[
+                              pyrDate(a.at),
+                              t('do {date}', <String, Object?>{
+                                'date': pyrDate(a.until),
+                              }),
+                            ].join(' · '),
                             style: TextStyle(
                               color: zen.textMuted,
                               fontSize: 12,
@@ -871,7 +993,18 @@ class PyramidPower extends StatelessWidget {
                       if (context.mounted) {
                         snack(
                           context,
-                          'Przez Bluetooth do $n telefonów w pobliżu; one podadzą dalej.',
+                          tn(
+                            n,
+                            one:
+                                'Przez Bluetooth do {n} telefonu w pobliżu; '
+                                'on poda dalej.',
+                            few:
+                                'Przez Bluetooth do {n} telefonów w pobliżu; '
+                                'one podadzą dalej.',
+                            many:
+                                'Przez Bluetooth do {n} telefonów w pobliżu; '
+                                'one podadzą dalej.',
+                          ),
                         );
                       }
                     }()),
@@ -882,7 +1015,11 @@ class PyramidPower extends StatelessWidget {
               ],
             ),
           ),
-        ZenSection('Zasady (wersja ${s.params.version})'),
+        ZenSection(
+          t('Zasady (wersja {version})', <String, Object?>{
+            'version': s.params.version,
+          }),
+        ),
         ZenCard(
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -901,7 +1038,12 @@ class PyramidPower extends StatelessWidget {
                   pyr.topDecision(<String, dynamic>{'t': 'const', 'ref': r.id}),
                 ),
                 icon: const Icon(Icons.gavel_rounded),
-                label: Text('Zastosuj zasady z referendum „${r.question}”'),
+                label: Text(
+                  t(
+                    'Zastosuj zasady z referendum „{question}”',
+                    <String, Object?>{'question': r.question},
+                  ),
+                ),
               ),
             ),
       ],

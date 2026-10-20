@@ -138,17 +138,43 @@ final class ZenBootstrapResult {
       // test profile (--zen-profile), which a script drives from outside.
       // Debug only: a profile build is a real install too.
       appPasswordRequiredProvider.overrideWithValue(
-        !Platform.environment.containsKey('FLUTTER_TEST') &&
-            !(ZenInstance.profile != null && kDebugMode),
+        zenStartupGatesRequired(
+          environment: Platform.environment,
+          hasTestProfile: ZenInstance.profile != null,
+        ),
       ),
       // §25.2: the permissions and Bluetooth step once after the password;
       // skipped the same way where a script drives the app.
       permissionsSetupRequiredProvider.overrideWithValue(
-        !Platform.environment.containsKey('FLUTTER_TEST') &&
-            !(ZenInstance.profile != null && kDebugMode),
+        zenStartupGatesRequired(
+          environment: Platform.environment,
+          hasTestProfile: ZenInstance.profile != null,
+        ),
       ),
     ];
   }
+}
+
+/// Whether the app password (§14.1) and the permissions step (§25.2) are
+/// required at start. They are skipped only under `flutter test`
+/// (`FLUTTER_TEST` in [environment]) or for a test profile (--zen-profile,
+/// [hasTestProfile]) in a debug build — never in a release build, whatever
+/// the environment says: `FLUTTER_TEST` is just a variable anyone starting
+/// the process can set (S-20).
+@visibleForTesting
+bool zenStartupGatesRequired({
+  required Map<String, String> environment,
+  required bool hasTestProfile,
+  bool releaseMode = kReleaseMode,
+  bool debugMode = kDebugMode,
+}) {
+  if (releaseMode) {
+    return true;
+  }
+  if (environment.containsKey('FLUTTER_TEST')) {
+    return false;
+  }
+  return !(hasTestProfile && debugMode);
 }
 
 final class ZenBootstrapper {

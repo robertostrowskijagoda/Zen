@@ -73,6 +73,14 @@ Future<Map<String, dynamic>?> decodeRuntimeSignalPayload(
   String rawPayload,
   SignalPayloadCompressor compressor,
 ) async {
+  // Signals arrive from anyone on the mesh before the app knows whether the
+  // sender is a friend, so an oversized one costs no JSON work. Senders cap
+  // the UTF-8 bytes at [kRuntimeSignalMaxBytes] (see
+  // [encodeRuntimeSignalPayload]) and every UTF-16 code unit is at least one
+  // UTF-8 byte, so a genuine signal never has more code units than that.
+  if (rawPayload.length > kRuntimeSignalMaxBytes) {
+    throw const FormatException('Signal payload exceeds 2MB limit.');
+  }
   final Object? parsed = jsonDecode(rawPayload);
   if (parsed is! Map<String, dynamic>) {
     return null;

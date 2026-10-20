@@ -25,53 +25,53 @@ Widget _pyramidGlyph(Color color, double size, bool selected) =>
 
 /// Profile first, then conversations, the wall and invitations. Settings
 /// open from the connection bar at the top (no duplicate here).
-const List<_ShellTab> _shellTabs = <_ShellTab>[
+List<_ShellTab> get _shellTabs => <_ShellTab>[
   // The graph of who-knows-who is the heart of Zen, so it leads the rail.
   _ShellTab(
     id: 'graph',
-    label: 'Graf znajomych',
+    label: t('Graf znajomych'),
     icon: Icons.hub_outlined,
     selectedIcon: Icons.hub_rounded,
   ),
   _ShellTab(
     id: 'profile',
-    label: 'Profil',
+    label: t('Profil'),
     icon: Icons.person_outline_rounded,
     selectedIcon: Icons.person_rounded,
   ),
   _ShellTab(
     id: 'chats',
-    label: 'Czaty',
+    label: t('Czaty'),
     icon: Icons.chat_bubble_outline_rounded,
     selectedIcon: Icons.chat_bubble_rounded,
   ),
   _ShellTab(
     id: 'feed',
-    label: 'Tablica',
+    label: t('Tablica'),
     icon: Icons.newspaper_outlined,
     selectedIcon: Icons.newspaper_rounded,
   ),
   _ShellTab(
     id: 'meet',
-    label: 'Spotkania',
+    label: t('Spotkania'),
     icon: Icons.diversity_3_outlined,
     selectedIcon: Icons.diversity_3_rounded,
   ),
   _ShellTab(
     id: 'dating',
-    label: 'Randki',
+    label: t('Randki'),
     icon: Icons.favorite_outline_rounded,
     selectedIcon: Icons.favorite_rounded,
   ),
   _ShellTab(
     id: 'neighbors',
-    label: 'Sąsiedzi',
+    label: t('Sąsiedzi'),
     icon: Icons.door_front_door_outlined,
     selectedIcon: Icons.door_front_door_rounded,
   ),
   _ShellTab(
     id: 'pyramid',
-    label: 'Piramida',
+    label: t('Piramida'),
     icon: kPyramidIcon,
     selectedIcon: kPyramidIcon,
     glyph: _pyramidGlyph,
@@ -79,33 +79,33 @@ const List<_ShellTab> _shellTabs = <_ShellTab>[
   // The points wallet, right before Bluetooth (§18).
   _ShellTab(
     id: 'wallet',
-    label: 'Portfel',
+    label: t('Portfel'),
     icon: Icons.attach_money_rounded,
     selectedIcon: Icons.attach_money_rounded,
   ),
   // Bluetooth "people nearby" sits right before the invite QR (§12).
   _ShellTab(
     id: 'nearby',
-    label: 'Osoby w pobliżu',
+    label: t('Osoby w pobliżu'),
     icon: Icons.bluetooth_searching_rounded,
     selectedIcon: Icons.bluetooth_connected_rounded,
   ),
   _ShellTab(
     id: 'invite',
-    label: 'Zaproś',
+    label: t('Zaproś'),
     icon: Icons.qr_code_2_rounded,
     selectedIcon: Icons.qr_code_2_rounded,
   ),
   _ShellTab(
     id: 'about',
-    label: 'O aplikacji',
+    label: t('O aplikacji'),
     icon: Icons.info_outline_rounded,
     selectedIcon: Icons.info_rounded,
   ),
   // Last, at the bottom of the rail and in red (§16.3).
   _ShellTab(
     id: 'alarm',
-    label: 'Alarm',
+    label: t('Alarm'),
     icon: Icons.campaign_outlined,
     selectedIcon: Icons.campaign_rounded,
   ),
@@ -202,13 +202,14 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
   }
 
   Widget _page(int index) => switch (_shellTabs[index].id) {
-    'chats' => const _ChatsPage(key: Key('chats-page')),
+    // The chat list shows the last messages, dating who meets whom (S-9).
+    'chats' => const SecureScreen(child: _ChatsPage(key: Key('chats-page'))),
     'feed' => const FeedScreen(),
     'meet' => const MeetHubScreen(),
     'graph' => const GraphScreen(),
     'nearby' => const NearbyScreen(),
     'about' => const AboutScreen(),
-    'dating' => const DatingScreen(),
+    'dating' => const SecureScreen(child: DatingScreen()),
     'neighbors' => const NeighborsScreen(),
     'alarm' => const AlarmScreen(),
     'pyramid' => const PyramidScreen(),
@@ -339,7 +340,7 @@ class _ShowRailTab extends StatelessWidget {
         }
       },
       child: Tooltip(
-        message: 'Pokaż pasek',
+        message: t('Pokaż pasek'),
         // See-through: it lies over the content and should not hide it.
         child: Material(
           color: zen.surfaceSunk.withValues(alpha: 0.45),
@@ -411,7 +412,7 @@ class _SideTabs extends ConsumerWidget {
             // Up top, within the thumb's reach (§25).
             IconButton(
               key: const Key('side-tabs-hide'),
-              tooltip: 'Ukryj pasek',
+              tooltip: t('Ukryj pasek'),
               visualDensity: VisualDensity.compact,
               onPressed: onHide,
               icon: Icon(
@@ -427,7 +428,7 @@ class _SideTabs extends ConsumerWidget {
                   security.canQuickLock
                   ? IconButton(
                       key: const Key('side-tabs-lock'),
-                      tooltip: 'Zablokuj teraz',
+                      tooltip: t('Zablokuj teraz'),
                       visualDensity: VisualDensity.compact,
                       onPressed: security.lock,
                       icon: Icon(

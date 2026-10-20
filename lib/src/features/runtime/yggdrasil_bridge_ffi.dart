@@ -3,6 +3,7 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart' show kDebugMode, visibleForTesting;
 import 'package:zen/src/features/runtime/yggdrasil_signal_transport.dart';
 
 abstract interface class NodeSignalBridge implements NativeSignalBridge {
@@ -16,6 +17,31 @@ abstract interface class NodeSignalBridge implements NativeSignalBridge {
 
   /// Adds a mesh peer (e.g. a bridge learnt from friends) at runtime.
   Map<String, dynamic> addPeer(int handle, String uri);
+}
+
+/// Absolute paths the Windows build looks for the bridge DLL at, in order.
+///
+/// Release and profile builds load it only from next to the executable
+/// (windows/CMakeLists.txt installs it there): the working directory can be
+/// anything the app was started from, possibly a folder someone else can
+/// write to, and a DLL planted there would run inside the app. Debug builds
+/// (`flutter run`, `flutter test`) also try the working directory, where the
+/// freshly built bridge of the checkout lives. There is never a bare-name
+/// lookup through the system DLL search path.
+@visibleForTesting
+List<String> windowsBridgeLibraryCandidates({
+  required String exeDirectory,
+  required String currentDirectory,
+  required bool debugMode,
+}) {
+  return <String>[
+    '$exeDirectory\\yggdrasil_bridge.dll',
+    if (debugMode) ...<String>[
+      '$currentDirectory\\native\\yggdrasil_bridge\\bin\\yggdrasil_bridge.dll',
+      if (currentDirectory != exeDirectory)
+        '$currentDirectory\\yggdrasil_bridge.dll',
+    ],
+  ];
 }
 
 final class YggdrasilBridgeException implements Exception {
@@ -123,19 +149,11 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
       }
     }
     if (Platform.isWindows) {
-      // Absolute candidates only; no bare-name lookup and no paths escaping
-      // the executable/project directory, so a writable CWD or a sibling
-      // directory cannot smuggle a malicious DLL into the search.
-      final String exeDirectory = File(
-        Platform.resolvedExecutable,
-      ).parent.absolute.path;
-      final String currentDirectory = Directory.current.absolute.path;
-      final List<String> candidates = <String>[
-        '$exeDirectory\\yggdrasil_bridge.dll',
-        '$currentDirectory\\native\\yggdrasil_bridge\\bin\\yggdrasil_bridge.dll',
-        if (currentDirectory != exeDirectory)
-          '$currentDirectory\\yggdrasil_bridge.dll',
-      ];
+      final List<String> candidates = windowsBridgeLibraryCandidates(
+        exeDirectory: File(Platform.resolvedExecutable).parent.absolute.path,
+        currentDirectory: Directory.current.absolute.path,
+        debugMode: kDebugMode,
+      );
       for (final String candidate in candidates) {
         if (File(candidate).existsSync()) {
           return DynamicLibrary.open(candidate);
@@ -145,21 +163,37 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
         'Could not locate yggdrasil_bridge.dll. Checked: ${candidates.join(', ')}',
       );
     }
-    if (Platform.isIOS) {
-      // iOS: the bridge is a static library linked into the app itself
-      // (ios/Flutter/GoBridge.xcconfig), so its functions live in the
-      // process. A build without it fails here with a readable cause.
+    if (Platform.isLinux) {
+      // The bundle's lib/ folder (linux/CMakeLists.txt installs it there).
+      // An absolute path, as on Windows: nothing is looked up through
+      // LD_LIBRARY_PATH or the working directory.
+      final String directory = File(
+        Platform.resolvedExecutable,
+      ).parent.absolute.path;
+      final String library = '$directory/lib/libyggdrasil_bridge.so';
+      if (!File(library).existsSync()) {
+        throw YggdrasilBridgeException(
+          'Could not locate libyggdrasil_bridge.so at $library.',
+        );
+      }
+      return DynamicLibrary.open(library);
+    }
+    if (Platform.isIOS || Platform.isMacOS) {
+      // iOS and macOS: the bridge is a static library linked into the app
+      // itself (GoBridge.xcconfig in ios/Flutter and macos/Runner/Configs),
+      // so its functions live in the process. A build without it fails here
+      // with a readable cause.
       final DynamicLibrary process = DynamicLibrary.process();
       if (!process.providesSymbol('YggStartNode')) {
         throw const YggdrasilBridgeException(
-          'The Go bridge is not linked into this iOS build '
-          '(build it with native/yggdrasil_bridge/build_ios.sh).',
+          'The Go bridge is not linked into this build (build it with '
+          'native/yggdrasil_bridge/build_ios.sh or build_macos.sh).',
         );
       }
       return process;
     }
     throw const YggdrasilBridgeException(
-      'Signal bridge is currently supported on Windows, Android and iOS only.',
+      'Signal bridge is not supported on this platform.',
     );
   }
 

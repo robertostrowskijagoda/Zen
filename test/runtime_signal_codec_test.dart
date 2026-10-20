@@ -62,6 +62,38 @@ void main() {
     expect(compressor.decompressCalls, 0);
   });
 
+  test('refuses a raw payload over the signal limit before parsing it, '
+      'and accepts one at the limit', () async {
+    final _RecordingSignalCompressor compressor = _RecordingSignalCompressor();
+    const String prefix = '{"type":"message","text":"';
+    const String suffix = '"}';
+    final String atLimit =
+        '$prefix${'a' * (kRuntimeSignalMaxBytes - prefix.length - suffix.length)}'
+        '$suffix';
+    expect(atLimit.length, kRuntimeSignalMaxBytes);
+
+    final Map<String, dynamic>? decoded = await decodeRuntimeSignalPayload(
+      atLimit,
+      compressor,
+    );
+    expect(decoded?['type'], 'message');
+
+    // Not even valid JSON: only the length check can explain a
+    // FormatException about the limit.
+    final String oversized = '!' * (kRuntimeSignalMaxBytes + 1);
+    await expectLater(
+      decodeRuntimeSignalPayload(oversized, compressor),
+      throwsA(
+        isA<FormatException>().having(
+          (FormatException error) => error.message,
+          'message',
+          contains('limit'),
+        ),
+      ),
+    );
+    expect(compressor.decompressCalls, 0);
+  });
+
   test('refuses a compressed envelope that is not a zstd frame', () async {
     final _RecordingSignalCompressor compressor = _RecordingSignalCompressor();
     final String garbage = jsonEncode(<String, dynamic>{

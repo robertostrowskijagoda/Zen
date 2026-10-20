@@ -129,6 +129,47 @@ void main() {
     expect(frame.payload, const <String, dynamic>{'type': 'pong'});
   });
 
+  test('pump drops a signal over the size limit and keeps receiving', () async {
+    final _FakeNativeSignalBridge bridge = _FakeNativeSignalBridge();
+    final YggdrasilSignalTransport transport = YggdrasilSignalTransport(
+      bridge: bridge,
+      nodeHandle: 7,
+      compressor: const _PassthroughSignalCompressor(),
+      waitTimeout: const Duration(milliseconds: 1),
+    );
+    final List<SignalTransportFrame> frames = <SignalTransportFrame>[];
+    final Completer<void> received = Completer<void>();
+
+    bridge.pollResponses.add(<String, dynamic>{
+      'available': true,
+      'from': 'eve.ygg',
+      'payload': '{"type":"pong","pad":"${'x' * kRuntimeSignalMaxBytes}"}',
+    });
+    bridge.pollResponses.add(<String, dynamic>{
+      'available': true,
+      'from': 'ada.ygg',
+      'payload': '{"type":"pong"}',
+    });
+
+    final StreamSubscription<SignalTransportFrame> subscription = transport
+        .frames
+        .listen((SignalTransportFrame frame) {
+          frames.add(frame);
+          if (frame.from == 'ada.ygg' && !received.isCompleted) {
+            received.complete();
+          }
+        });
+
+    await transport.start();
+    await received.future.timeout(const Duration(seconds: 5));
+    await transport.stop();
+    await subscription.cancel();
+
+    expect(frames.map((SignalTransportFrame frame) => frame.from), <String>[
+      'ada.ygg',
+    ]);
+  });
+
   test('pump survives pollSignal errors and keeps receiving', () async {
     final _FakeNativeSignalBridge bridge = _FakeNativeSignalBridge();
     final YggdrasilSignalTransport transport = YggdrasilSignalTransport(

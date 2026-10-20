@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app.dart';
@@ -12,6 +13,7 @@ import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+import 'package:zen/src/features/social/social_snapshot_store.dart';
 
 void main() {
   testWidgets('runtime signal bridge pings accepted friends on startup', (
@@ -204,12 +206,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // No pong goes back to a stranger, and their presence is not recorded.
+    // Nothing at all goes back to a stranger (no pong, and no automatic
+    // `friend_remove` that would confirm the device is online), and their
+    // presence is not recorded.
     expect(
       transport.sentSignals.where(
-        (entry) =>
-            entry.remoteAddress == strangerAddress &&
-            entry.payload['type'] == 'pong',
+        (entry) => entry.remoteAddress == strangerAddress,
       ),
       isEmpty,
     );
@@ -224,6 +226,106 @@ void main() {
       isFalse,
     );
   });
+
+  testWidgets(
+    'an automatic friend_remove keeps the friend; a reliable one removes',
+    (WidgetTester tester) async {
+      final MemorySignalTransport transport = MemorySignalTransport();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            signalTransportProvider.overrideWithValue(transport),
+            socialHubSeedProvider.overrideWithValue(_seedState()),
+          ],
+          child: const ZenRewriteApp(),
+        ),
+      );
+      await tester.pump();
+      final ProviderContainer container = ProviderScope.containerOf(
+        tester.element(find.byType(AppShellScreen)),
+      );
+
+      // What older versions send to every peer they do not recognise.
+      await transport.injectIncoming(
+        from: _adaAddress,
+        payload: const <String, dynamic>{'type': 'friend_remove'},
+      );
+      await tester.pumpAndSettle();
+      expect(
+        container
+            .read(socialHubControllerProvider)
+            .friends[_adaAddress]
+            ?.status,
+        FriendRelationshipStatus.accepted,
+      );
+
+      // A person's own decision travels reliably and carries its id.
+      await transport.injectIncoming(
+        from: _adaAddress,
+        payload: const <String, dynamic>{
+          'type': 'friend_remove',
+          '_rid': 'r-1',
+        },
+      );
+      await tester.pumpAndSettle();
+      expect(
+        container
+            .read(socialHubControllerProvider)
+            .friendByAddress(_adaAddress),
+        isNull,
+      );
+    },
+  );
+
+  testWidgets(
+    'runtime signal bridge stays silent while the snapshot is unreadable',
+    (WidgetTester tester) async {
+      final MemorySignalTransport transport = MemorySignalTransport();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            signalTransportProvider.overrideWithValue(transport),
+            socialSnapshotStoreProvider.overrideWithValue(
+              _UnreadableSnapshotStore(),
+            ),
+          ],
+          child: const ZenRewriteApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final ProviderContainer container = ProviderScope.containerOf(
+        tester.element(find.byType(AppShellScreen)),
+      );
+      expect(
+        container.read(socialHubControllerProvider).snapshotUnreadable,
+        isTrue,
+      );
+      expect(
+        find.byKey(const Key('social-data-unreadable-notice')),
+        findsOneWidget,
+      );
+
+      // A friend whose entry could not be read pings as usual.
+      await transport.injectIncoming(
+        from: _adaAddress,
+        payload: const <String, dynamic>{'type': 'ping'},
+      );
+      await transport.injectIncoming(
+        from: _adaAddress,
+        payload: const <String, dynamic>{'type': 'message', 'msgId': 'm-1'},
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        transport.sentSignals.where(
+          (entry) => entry.remoteAddress == _adaAddress,
+        ),
+        isEmpty,
+      );
+    },
+  );
 
   testWidgets('runtime signal bridge subscribes to frames before starting', (
     WidgetTester tester,
@@ -250,6 +352,19 @@ void main() {
       lessThan(transport.events.indexOf('start')),
     );
   });
+}
+
+/// A snapshot whose file and backup both fail to read (app unlocked).
+final class _UnreadableSnapshotStore implements SocialSnapshotStore {
+  @override
+  Future<SocialHubState?> load() async {
+    throw const FormatException('unreadable');
+  }
+
+  @override
+  Future<void> save(SocialHubState state) async {
+    fail('an unreadable snapshot must never be saved over');
+  }
 }
 
 /// Records whether `frames` was listened to before `start()` ran.

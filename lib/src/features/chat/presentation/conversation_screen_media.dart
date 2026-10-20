@@ -16,7 +16,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
               _ComposerActionButton(
                 key: const Key('conversation-emoji-button'),
                 icon: Icons.emoji_emotions_outlined,
-                tooltip: 'Emotikony',
+                tooltip: t('Emotikony'),
                 toneIndex: 0,
                 onPressed: canCompose && idle ? _pickEmoji : null,
               ),
@@ -32,7 +32,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
               _ComposerActionButton(
                 key: const Key('conversation-camera-button'),
                 icon: Icons.photo_camera_outlined,
-                tooltip: 'Zrób zdjęcie lub nagraj film',
+                tooltip: t('Zrób zdjęcie lub nagraj film'),
                 toneIndex: 2,
                 onPressed: canCompose && idle ? _capturePhotoOrVideo : null,
               ),
@@ -40,7 +40,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
               _ComposerActionButton(
                 key: const Key('conversation-attach-button'),
                 icon: Icons.attach_file_rounded,
-                tooltip: 'Załącznik',
+                tooltip: t('Załącznik'),
                 toneIndex: 3,
                 onPressed: canCompose && idle ? _pickAndSendAttachment : null,
               ),
@@ -128,8 +128,11 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                                 fontSize: 14.5,
                               ),
                               hintText: canCompose
-                                  ? 'Wiadomość…'
-                                  : 'Rozmowa odblokuje się po akceptacji relacji',
+                                  ? t('Wiadomość…')
+                                  : t(
+                                      'Rozmowa odblokuje się po akceptacji '
+                                      'relacji',
+                                    ),
                             ),
                           ),
                   ),
@@ -284,13 +287,13 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
               children: <Widget>[
                 ListTile(
                   leading: Icon(Icons.photo_camera_rounded, color: zen.accent),
-                  title: const Text('Zrób zdjęcie (Aparat)'),
+                  title: Text(t('Zrób zdjęcie (Aparat)')),
                   onTap: () =>
                       Navigator.of(sheetContext).pop(_CaptureOption.photo),
                 ),
                 ListTile(
                   leading: Icon(Icons.videocam_rounded, color: zenTone(zen, 2)),
-                  title: const Text('Nagraj film (Wideo)'),
+                  title: Text(t('Nagraj film (Wideo)')),
                   onTap: () =>
                       Navigator.of(sheetContext).pop(_CaptureOption.video),
                 ),
@@ -299,7 +302,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                     Icons.photo_library_rounded,
                     color: zenTone(zen, 4),
                   ),
-                  title: const Text('Wybierz z galerii'),
+                  title: Text(t('Wybierz z galerii')),
                   onTap: () =>
                       Navigator.of(sheetContext).pop(_CaptureOption.gallery),
                 ),
@@ -309,7 +312,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                     Icons.audio_file_rounded,
                     color: zenTone(zen, 1),
                   ),
-                  title: const Text('Nagranie audio z pliku'),
+                  title: Text(t('Nagranie audio z pliku')),
                   onTap: () =>
                       Navigator.of(sheetContext).pop(_CaptureOption.audio),
                 ),
@@ -398,7 +401,9 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
       );
     } catch (error) {
       if (!mounted) return;
-      _showComposerSnackBar('Nie udało się zarejestrować pliku: $error');
+      _showComposerSnackBar(
+        t('Nie udało się zarejestrować pliku: {error}', {'error': error}),
+      );
     }
   }
 
@@ -418,14 +423,15 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
     }
     if (picked.size > kMaxAudioFileBytes) {
       _showComposerSnackBar(
-        'Nagranie jest za duże (najwyżej '
-        '${kMaxAudioFileBytes ~/ (1024 * 1024)} MB).',
+        t('Nagranie jest za duże (najwyżej {size} MB).', {
+          'size': kMaxAudioFileBytes ~/ (1024 * 1024),
+        }),
       );
       return;
     }
     final Uint8List? head = await _readAttachmentHeader(path);
     if (head == null || sniffMediaKind(head) == MediaKind.file) {
-      _showComposerSnackBar('To nie jest nagranie audio.');
+      _showComposerSnackBar(t('To nie jest nagranie audio.'));
       return;
     }
     try {
@@ -457,7 +463,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
       if (!started) {
         await recorder.cancel();
         if (mounted) {
-          _showComposerSnackBar('Brak dostępu do mikrofonu.');
+          _showComposerSnackBar(t('Brak dostępu do mikrofonu.'));
         }
         return;
       }
@@ -487,7 +493,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
     } catch (error) {
       await recorder.cancel();
       if (mounted) {
-        _showComposerSnackBar('Nie udało się rozpocząć nagrania.');
+        _showComposerSnackBar(t('Nie udało się rozpocząć nagrania.'));
       }
     } finally {
       if (mounted) {
@@ -516,7 +522,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
       final RecordedVoiceClip? clip = await recorder.stop();
       if (clip == null) {
         if (mounted) {
-          _showComposerSnackBar('Nagranie nie zawiera danych.');
+          _showComposerSnackBar(t('Nagranie nie zawiera danych.'));
         }
         return;
       }
@@ -538,7 +544,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
       }
     } catch (error) {
       if (mounted) {
-        _showComposerSnackBar('Nie udało się wysłać nagrania.');
+        _showComposerSnackBar(t('Nie udało się wysłać nagrania.'));
       }
     } finally {
       if (mounted) {
@@ -807,7 +813,7 @@ class _EmojiPickerSheetState extends State<_EmojiPickerSheet> {
                 });
               },
               decoration: InputDecoration(
-                hintText: 'Szukaj emotikony...',
+                hintText: t('Szukaj emotikony...'),
                 prefixIcon: const Icon(Icons.search_rounded, size: 20),
                 suffixIcon: _query.isNotEmpty
                     ? IconButton(
@@ -842,7 +848,7 @@ class _EmojiPickerSheetState extends State<_EmojiPickerSheet> {
             child: filtered.isEmpty
                 ? Center(
                     child: Text(
-                      'Brak emotikonów dla "$_query"',
+                      t('Brak emotikonów dla "{query}"', {'query': _query}),
                       style: TextStyle(color: zen.textMuted, fontSize: 13),
                     ),
                   )
@@ -903,7 +909,7 @@ class _RecordingComposerStatus extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  'Nagrywanie wiadomości głosowej',
+                  t('Nagrywanie wiadomości głosowej'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -914,7 +920,9 @@ class _RecordingComposerStatus extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '${_formatMediaDuration(elapsed.inMilliseconds)} • naciśnij stop, aby wysłać',
+                  t('{time} • naciśnij stop, aby wysłać', {
+                    'time': _formatMediaDuration(elapsed.inMilliseconds),
+                  }),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: zen.textSecondary, fontSize: 12),
@@ -1004,7 +1012,7 @@ class _ConversationGifPickerDialogState
                   ),
                   Expanded(
                     child: Text(
-                      'Wybierz GIF',
+                      t('Wybierz GIF'),
                       style: zen.display(
                         color: zen.textPrimary,
                         size: 20,
@@ -1024,9 +1032,9 @@ class _ConversationGifPickerDialogState
               child: TextField(
                 key: const Key('conversation-gif-search-field'),
                 controller: _searchController,
-                decoration: const InputDecoration(
-                  hintText: 'Szukaj GIF-ów',
-                  prefixIcon: Icon(Icons.search_rounded),
+                decoration: InputDecoration(
+                  hintText: t('Szukaj GIF-ów'),
+                  prefixIcon: const Icon(Icons.search_rounded),
                 ),
                 onChanged: (String value) {
                   _searchDebounce?.cancel();
@@ -1035,6 +1043,19 @@ class _ConversationGifPickerDialogState
                     () => unawaited(_loadEntries(value)),
                   );
                 },
+              ),
+            ),
+            // The search text and this device's IP address go to a third
+            // party (api.klipy.com): say so.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  t('Wyszukiwanie GIF-ów łączy się z klipy.com.'),
+                  key: const Key('conversation-gif-klipy-note'),
+                  style: TextStyle(color: zen.textMuted, fontSize: 12),
+                ),
               ),
             ),
             Expanded(
@@ -1055,27 +1076,29 @@ class _ConversationGifPickerDialogState
                                 size: 44,
                               ),
                               const SizedBox(height: 12),
-                              const Text(
-                                'Nie udało się pobrać GIF-ów.',
+                              Text(
+                                t('Nie udało się pobrać GIF-ów.'),
                                 textAlign: TextAlign.center,
-                                style: TextStyle(fontWeight: FontWeight.w700),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                               const SizedBox(height: 8),
                               FilledButton.tonal(
                                 onPressed: () => unawaited(
                                   _loadEntries(_searchController.text),
                                 ),
-                                child: const Text('Spróbuj ponownie'),
+                                child: Text(t('Spróbuj ponownie')),
                               ),
                             ],
                           ),
                         ),
                       )
                     : _entries.isEmpty
-                    ? const Center(
+                    ? Center(
                         child: ZenEmpty(
                           icon: Icons.gif_box_outlined,
-                          title: 'Brak wyników dla tego zapytania.',
+                          title: t('Brak wyników dla tego zapytania.'),
                         ),
                       )
                     : GridView.builder(
@@ -1224,7 +1247,7 @@ class _VoiceAttachmentContentState extends State<_VoiceAttachmentContent> {
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Plik audio jest niedostępny.')),
+          SnackBar(content: Text(t('Plik audio jest niedostępny.'))),
         );
       }
       return;
@@ -1338,7 +1361,7 @@ class _VoiceAttachmentContentState extends State<_VoiceAttachmentContent> {
     final int totalDurationMs = _duration.inMilliseconds > 0
         ? _duration.inMilliseconds
         : (widget.message.durationMs ?? 0);
-    final String title = widget.message.fileName ?? 'Wiadomość głosowa';
+    final String title = widget.message.fileName ?? t('Wiadomość głosowa');
     final String subtitle = totalDurationMs > 0 && _position > Duration.zero
         ? '${_formatMediaDuration(_position.inMilliseconds)} / '
               '${_formatMediaDuration(totalDurationMs)}'
@@ -1442,7 +1465,7 @@ class _VoiceAttachmentContentState extends State<_VoiceAttachmentContent> {
                         )
                       else
                         Text(
-                          'Transfer w toku',
+                          t('Transfer w toku'),
                           style: TextStyle(color: zen.textMuted, fontSize: 11),
                         ),
                     ],
@@ -1467,7 +1490,7 @@ class _VideoAttachmentContent extends StatelessWidget {
     return _MediaAttachmentPanel(
       icon: Icons.videocam_rounded,
       accent: ZenColors.of(context).accentTertiary,
-      title: message.fileName ?? 'Wideo',
+      title: message.fileName ?? t('Wideo'),
       subtitle: _buildMediaSubtitle(
         sizeBytes: message.attachmentSizeBytes,
         durationMs: message.durationMs,
@@ -1487,14 +1510,14 @@ class _VideoAttachmentContent extends StatelessWidget {
               : null,
           icon: const Icon(Icons.play_arrow_rounded),
           label: Text(
-            message.hasAttachment ? 'Otwórz podglad' : 'Transfer w toku',
+            message.hasAttachment ? t('Otwórz podglad') : t('Transfer w toku'),
           ),
         ),
         if (message.hasAttachment)
           TextButton.icon(
             onPressed: () => _saveAttachmentCopy(context, message),
             icon: const Icon(Icons.download_rounded),
-            label: const Text('Zapisz kopie'),
+            label: Text(t('Zapisz kopie')),
           ),
       ],
     );
@@ -1714,7 +1737,7 @@ class _VideoAttachmentPreviewScreenState
         : null;
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.message.fileName ?? 'Wideo'),
+        title: Text(widget.message.fileName ?? t('Wideo')),
         actions: <Widget>[
           IconButton(
             onPressed: widget.message.hasAttachment
@@ -1739,10 +1762,10 @@ class _VideoAttachmentPreviewScreenState
                 child: _isLoading
                     ? const Center(child: CircularProgressIndicator())
                     : _error != null || _controller == null
-                    ? const Center(
+                    ? Center(
                         child: Text(
-                          'Nie udało się uruchomić podgladu wideo.',
-                          style: TextStyle(color: Colors.white70),
+                          t('Nie udało się uruchomić podgladu wideo.'),
+                          style: const TextStyle(color: Colors.white70),
                           textAlign: TextAlign.center,
                         ),
                       )
@@ -1788,7 +1811,9 @@ class _VideoAttachmentPreviewScreenState
                                       ? Icons.pause_rounded
                                       : Icons.play_arrow_rounded,
                                 ),
-                                label: Text(_isPlaying ? 'Pauza' : 'Odtwarzaj'),
+                                label: Text(
+                                  _isPlaying ? t('Pauza') : t('Odtwarzaj'),
+                                ),
                               ),
                               const Spacer(),
                               Text(
@@ -1836,7 +1861,7 @@ String _buildMediaSubtitle({int? sizeBytes, int? durationMs}) {
   if (sizeBytes != null && sizeBytes > 0) {
     parts.add(formatAttachmentSize(sizeBytes));
   }
-  return parts.isEmpty ? 'Nieznane metadane' : parts.join(' • ');
+  return parts.isEmpty ? t('Nieznane metadane') : parts.join(' • ');
 }
 
 String _formatMediaDuration(int durationMs) {
@@ -1928,7 +1953,7 @@ Future<void> _saveAttachmentCopy(
     } on Object {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Nie udało się odczytać załącznika.')),
+          SnackBar(content: Text(t('Nie udało się odczytać załącznika.'))),
         );
       }
       return;
@@ -1938,59 +1963,63 @@ Future<void> _saveAttachmentCopy(
   final String suggestedName =
       safeFileName(message.fileName) ?? 'zalacznik-${message.id}';
   // Zen never opens files; one that could start a program gets a warning
-  // before it lands where a double-click would run it.
-  if (message.direction == ChatMessageDirection.incoming) {
-    Uint8List head = plain ?? Uint8List(0);
-    if (head.isEmpty && sourcePath != null) {
+  // before it lands where a double-click would run it. For every direction:
+  // a message stored as "outgoing" may be a copy from another device of the
+  // account (device_chat_sync), which a stolen device could have sent, and
+  // the stored message does not say which it is.
+  Uint8List head = plain ?? Uint8List(0);
+  if (head.isEmpty && sourcePath != null) {
+    try {
+      final RandomAccessFile handle = await File(sourcePath).open();
       try {
-        final RandomAccessFile handle = await File(sourcePath).open();
-        try {
-          head = await handle.read(16);
-        } finally {
-          await handle.close();
-        }
-      } on FileSystemException {
-        head = Uint8List(0);
+        head = await handle.read(16);
+      } finally {
+        await handle.close();
       }
+    } on FileSystemException {
+      head = Uint8List(0);
     }
-    if (isRiskyFile(head, suggestedName)) {
-      if (!context.mounted) {
-        return;
-      }
-      final bool? go = await showDialog<bool>(
-        context: context,
-        builder: (BuildContext context) => AlertDialog(
-          key: const Key('attachment-risky-warning'),
-          icon: const Icon(Icons.gpp_maybe_rounded),
-          title: const Text('Ten plik może uruchomić program'),
-          content: Text(
-            '„$suggestedName” to program albo coś, co go uruchamia. '
+  }
+  if (isRiskyFile(head, suggestedName)) {
+    if (!context.mounted) {
+      return;
+    }
+    final bool? go = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        key: const Key('attachment-risky-warning'),
+        icon: const Icon(Icons.gpp_maybe_rounded),
+        title: Text(t('Ten plik może uruchomić program')),
+        content: Text(
+          t(
+            '„{name}” to program albo coś, co go uruchamia. '
             'Tak najczęściej przychodzą wirusy — nawet od znajomych, '
             'którym ktoś przejął telefon.\n\n'
             'Zapisz go tylko, jeśli wiesz, co to jest, i ufasz nadawcy.',
+            {'name': suggestedName},
           ),
-          actions: <Widget>[
-            TextButton(
-              key: const Key('attachment-risky-save'),
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Zapisz mimo to'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Nie zapisuj'),
-            ),
-          ],
         ),
-      );
-      if (go != true) {
-        return;
-      }
+        actions: <Widget>[
+          TextButton(
+            key: const Key('attachment-risky-save'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('Zapisz mimo to')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('Nie zapisuj')),
+          ),
+        ],
+      ),
+    );
+    if (go != true) {
+      return;
     }
   }
   String? targetPath;
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     targetPath = await FilePicker.platform.saveFile(
-      dialogTitle: 'Zapisz zalacznik',
+      dialogTitle: t('Zapisz zalacznik'),
       fileName: suggestedName,
     );
   } else if (Platform.isAndroid) {
@@ -2021,12 +2050,18 @@ Future<void> _saveAttachmentCopy(
   } else {
     await File(sourcePath!).copy(targetPath);
   }
+  // From someone else (or from another device of the account, which the
+  // stored message cannot tell apart from this one): Windows should treat
+  // the copy like any download (Mark of the Web). Best effort, Windows only.
+  await markFileFromInternet(targetPath);
   // A plain file outside Zen on purpose: the panic password finds it.
   await rememberExportedFile(targetPath);
   if (!context.mounted) {
     return;
   }
-  ScaffoldMessenger.of(
-    context,
-  ).showSnackBar(SnackBar(content: Text('Zapisano kopie do:\n$targetPath')));
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(t('Zapisano kopie do:\n{path}', {'path': targetPath})),
+    ),
+  );
 }

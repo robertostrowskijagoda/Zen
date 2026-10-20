@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -184,8 +185,10 @@ final class AccountLinkSender {
     final Uint8List theirs = await answer.future.timeout(
       timeout,
       onTimeout: () => throw TimeoutException(
-        'Nowe urządzenie nie odpowiada. Czy pokazuje kod do podłączenia? '
-        'Oba urządzenia muszą mieć aktualną wersję Zen.',
+        t(
+          'Nowe urządzenie nie odpowiada. Czy pokazuje kod do podłączenia? '
+          'Oba urządzenia muszą mieć aktualną wersję Zen.',
+        ),
       ),
     );
     await transport.send(
@@ -210,7 +213,7 @@ final class AccountLinkSender {
   }) async {
     final SecretKey? key = _key;
     if (key == null || _mine == null || _helloKey == null) {
-      throw StateError('Najpierw połącz się z nowym urządzeniem.');
+      throw StateError(t('Najpierw połącz się z nowym urządzeniem.'));
     }
     final Uint8List nonce = randomBytes(12);
     final SecretBox box = await _aead.encrypt(
@@ -236,7 +239,7 @@ final class AccountLinkSender {
     await _done!.future.timeout(
       timeout,
       onTimeout: () => throw TimeoutException(
-        'Nowe urządzenie nie potwierdziło. Sprawdź, czy cyfry się zgadzały.',
+        t('Nowe urządzenie nie potwierdziło. Sprawdź, czy cyfry się zgadzały.'),
       ),
     );
   }
@@ -246,33 +249,92 @@ final class AccountLinkSender {
   }
 }
 
+/// One device that greeted the new one and got as far as the 6 digits.
+@immutable
+final class AccountLinkOffer {
+  const AccountLinkOffer({
+    required this.peer,
+    required this.digits,
+    this.account,
+  });
+
+  /// Address of the greeting device.
+  final String peer;
+
+  /// The 6 digits of this linking (compare with the other screen).
+  final String digits;
+
+  /// The account, once that device sent it (after its user confirmed the
+  /// digits there).
+  final LinkedAccount? account;
+}
+
+/// One linking attempt, per greeting device.
+final class _LinkSession {
+  _LinkSession(this.address, this.commitment);
+
+  /// The greeting device, as it wrote (answers go here).
+  final String address;
+
+  /// What it promised, until its key is revealed.
+  Uint8List? commitment;
+  SimpleKeyPair? mine;
+  Uint8List? myKey;
+  SecretKey? key;
+  String? digits;
+  LinkedAccount? account;
+}
+
 /// The new device: waits for the account from a device that has it.
+///
+/// Every greeting device gets its own attempt (at most [maxSessions], the
+/// oldest dropped first), so a stranger who greets first cannot block the
+/// real device: both show their digits ([offers]) and the user takes the
+/// account whose digits match the other screen. A new greeting from the same
+/// device starts its attempt over, and an attempt whose revealed key is not
+/// the promised one is dropped.
 final class AccountLinkReceiver {
   AccountLinkReceiver({required this.transport});
+
+  /// Attempts kept at once.
+  static const int maxSessions = 4;
 
   final SignalTransport transport;
 
   StreamSubscription<SignalTransportFrame>? _sub;
-  String? _peer;
-  SecretKey? _key;
 
-  /// What the old device promised, and this side's key pair, until its key
-  /// is revealed.
-  Uint8List? _commitment;
-  SimpleKeyPair? _mine;
-  Uint8List? _myKey;
+  /// Normalised sender address → attempt, oldest first.
+  final Map<String, _LinkSession> _sessions = <String, _LinkSession>{};
+  final StreamController<void> _changes = StreamController<void>.broadcast();
   final Completer<String> _digits = Completer<String>();
   final Completer<LinkedAccount> _account = Completer<LinkedAccount>();
 
-  /// The 6 digits, once a device greeted this one.
+  /// Fires whenever [offers] change.
+  Stream<void> get changes => _changes.stream;
+
+  /// The attempts that show digits, oldest first (usually one).
+  List<AccountLinkOffer> get offers => <AccountLinkOffer>[
+    for (final _LinkSession s in _sessions.values)
+      if (s.digits != null)
+        AccountLinkOffer(
+          peer: s.address,
+          digits: s.digits!,
+          account: s.account,
+        ),
+  ];
+
+  /// Devices with an attempt in progress (any stage).
+  List<String> get peers => <String>[
+    for (final _LinkSession s in _sessions.values) s.address,
+  ];
+
+  /// The first digits shown (for a single device; a screen shows [offers]).
   Future<String> get digits => _digits.future;
 
-  /// The account, once sent (only take it after the user confirmed the
-  /// digits match; then call [confirm]).
+  /// The first account sent (for a single device; a screen shows [offers]).
+  /// Only take it after the user confirmed the digits match; then call
+  /// [confirm].
   Future<LinkedAccount> get account => _account.future;
-
-  /// Who is linking (the first device that greets wins).
-  String? get peer => _peer;
 
   void start() {
     _sub = transport.frames.listen((SignalTransportFrame f) {
@@ -280,84 +342,123 @@ final class AccountLinkReceiver {
     });
   }
 
+  void _changed() {
+    if (!_changes.isClosed) {
+      _changes.add(null);
+    }
+  }
+
+  /// The current attempt of [f]'s sender, if [s] is still it.
+  bool _current(SignalTransportFrame f, _LinkSession s) =>
+      identical(_sessions[PeerShareCodec.normalizeAddress(f.from)], s);
+
   Future<void> _onFrame(SignalTransportFrame f) async {
     final Object? type = f.payload['type'];
-    if (type == kLinkHelloType && _peer == null) {
-      final Uint8List? commitment = _key32(f.payload['c']);
-      if (commitment == null || f.payload['v'] != kLinkProtocolVersion) {
-        return;
-      }
-      _peer = f.from;
-      final SimpleKeyPair mine = await _x25519.newKeyPair();
-      final Uint8List pub = Uint8List.fromList(
-        (await mine.extractPublicKey()).bytes,
-      );
-      // Answer with this key; the digits come once the old device reveals
-      // the key it committed to.
-      _commitment = commitment;
-      _mine = mine;
-      _myKey = pub;
-      await transport.send(
-        remoteAddress: f.from,
-        payload: <String, dynamic>{
-          'type': kLinkKeyType,
-          'v': kLinkProtocolVersion,
-          'e': b64(pub),
-        },
-      );
+    final String from = PeerShareCodec.normalizeAddress(f.from);
+    if (type == kLinkHelloType) {
+      await _onHello(f, from);
       return;
     }
-    if (type == kLinkRevealType &&
-        _peer != null &&
-        PeerShareCodec.addressesEqual(f.from, _peer!) &&
-        _key == null) {
-      await _onReveal(f);
+    final _LinkSession? session = _sessions[from];
+    if (session == null) {
       return;
     }
-    if (type == kLinkSeedType &&
-        _peer != null &&
-        PeerShareCodec.addressesEqual(f.from, _peer!) &&
-        !_account.isCompleted) {
-      final LinkedAccount? got = await _open(f);
-      if (got != null) {
-        _account.complete(got);
+    if (type == kLinkRevealType && session.key == null) {
+      await _onReveal(f, session);
+      return;
+    }
+    if (type == kLinkSeedType && session.account == null) {
+      final LinkedAccount? got = await _open(f, session);
+      if (got != null && _current(f, session) && session.account == null) {
+        session.account = got;
+        if (!_account.isCompleted) {
+          _account.complete(got);
+        }
+        _changed();
       }
     }
   }
 
-  Future<void> _onReveal(SignalTransportFrame f) async {
-    final Uint8List? commitment = _commitment;
-    final SimpleKeyPair? mine = _mine;
-    final Uint8List? myKey = _myKey;
+  Future<void> _onHello(SignalTransportFrame f, String from) async {
+    final Uint8List? commitment = _key32(f.payload['c']);
+    if (commitment == null || f.payload['v'] != kLinkProtocolVersion) {
+      return;
+    }
+    // A new greeting from the same device starts its attempt over.
+    final _LinkSession session = _LinkSession(f.from, commitment);
+    _sessions
+      ..remove(from)
+      ..[from] = session;
+    while (_sessions.length > maxSessions) {
+      _sessions.remove(_sessions.keys.first);
+    }
+    _changed();
+    final SimpleKeyPair mine = await _x25519.newKeyPair();
+    final Uint8List pub = Uint8List.fromList(
+      (await mine.extractPublicKey()).bytes,
+    );
+    if (!_current(f, session)) {
+      return; // replaced or dropped meanwhile
+    }
+    // Answer with this key; the digits come once the old device reveals
+    // the key it committed to.
+    session
+      ..mine = mine
+      ..myKey = pub;
+    await transport.send(
+      remoteAddress: f.from,
+      payload: <String, dynamic>{
+        'type': kLinkKeyType,
+        'v': kLinkProtocolVersion,
+        'e': b64(pub),
+      },
+    );
+  }
+
+  Future<void> _onReveal(SignalTransportFrame f, _LinkSession session) async {
+    final Uint8List? commitment = session.commitment;
+    final SimpleKeyPair? mine = session.mine;
+    final Uint8List? myKey = session.myKey;
     final Uint8List? theirs = _key32(f.payload['e']);
     if (commitment == null || mine == null || myKey == null || theirs == null) {
       return;
     }
     if (!_sameBytes(await linkCommitment(theirs), commitment)) {
       // Not the key that was promised: someone in between. Nothing is
-      // shown; the linking can start again.
-      _peer = null;
-      _commitment = null;
-      _mine = null;
-      _myKey = null;
+      // shown and the attempt is dropped; linking can start again.
+      if (_current(f, session)) {
+        _sessions.remove(PeerShareCodec.normalizeAddress(f.from));
+      }
       return;
     }
-    _commitment = null;
-    _mine = null;
-    _myKey = null;
-    _key = await linkSessionKey(
+    session
+      ..commitment = null
+      ..mine = null
+      ..myKey = null;
+    final SecretKey key = await linkSessionKey(
       mine: mine,
       theirs: theirs,
       helloKey: theirs,
       answerKey: myKey,
     );
-    if (!_digits.isCompleted) {
-      _digits.complete(await linkCheckDigits(_key!));
+    final String digits = await linkCheckDigits(key);
+    if (!_current(f, session)) {
+      return;
     }
+    session
+      ..key = key
+      ..digits = digits;
+    if (!_digits.isCompleted) {
+      _digits.complete(digits);
+    }
+    _changed();
   }
 
-  Future<LinkedAccount?> _open(SignalTransportFrame f) async {
-    final SecretKey? key = _key;
+  Future<LinkedAccount?> _open(
+    SignalTransportFrame f,
+    _LinkSession session,
+  ) async {
+    final SecretKey? key = session.key;
     final Uint8List? nonce = unb64(f.payload['n'], length: 12);
     final Uint8List? sealed = unb64(f.payload['c']);
     if (key == null || nonce == null || sealed == null || sealed.length < 16) {
@@ -396,12 +497,14 @@ final class AccountLinkReceiver {
     }
   }
 
-  /// Tells the sending device the account was taken.
-  Future<void> confirm() async {
-    final String? peer = _peer;
-    if (peer != null) {
+  /// Tells the device that sent [taken] (by default the first account
+  /// received) that the account was taken.
+  Future<void> confirm([LinkedAccount? taken]) async {
+    final LinkedAccount? account =
+        taken ?? (_account.isCompleted ? await _account.future : null);
+    if (account != null) {
       await transport.send(
-        remoteAddress: peer,
+        remoteAddress: account.from,
         payload: const <String, dynamic>{'type': kLinkDoneType},
       );
     }
@@ -409,5 +512,6 @@ final class AccountLinkReceiver {
 
   Future<void> dispose() async {
     await _sub?.cancel();
+    await _changes.close();
   }
 }

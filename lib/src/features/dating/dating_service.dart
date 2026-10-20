@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -112,6 +113,7 @@ final class DatingService extends ChangeNotifier {
     this.groupMembers,
     this.raiseAlarm,
     this.isBanned,
+    this.isHiddenByMe,
     this.pyramidKey,
     this.canPay,
     this.pay,
@@ -131,6 +133,10 @@ final class DatingService extends ChangeNotifier {
 
   /// Dating keys switched off by the pyramid (e.g. a minor, §19.1, §21.4).
   final bool Function(String datingKey)? isBanned;
+
+  /// Dating keys this person hid after reporting them (§21.4): left out of
+  /// the lists until they choose to see them anyway ([hiddenProfiles]).
+  final bool Function(String datingKey)? isHiddenByMe;
 
   /// This person's pyramid key, when they are a member (sent along with an
   /// introduction, so the pair can thank the matchmaker).
@@ -243,11 +249,13 @@ final class DatingService extends ChangeNotifier {
   List<SeenProfile> get matches =>
       <SeenProfile>[
         for (final String k in _matches.keys)
-          if (_profiles[k] != null) _profiles[k]!,
+          if (_profiles[k] != null && !_hiddenByMe(k)) _profiles[k]!,
       ]..sort(
         (SeenProfile a, SeenProfile b) => (_matches[b.profile.key] ?? 0)
             .compareTo(_matches[a.profile.key] ?? 0),
       );
+
+  bool _hiddenByMe(String key) => isHiddenByMe?.call(key) ?? false;
 
   Iterable<SeenProfile> _visible() {
     final int t = _now();
@@ -256,11 +264,22 @@ final class DatingService extends ChangeNotifier {
           (SeenProfile s) =>
               !_blocked.contains(s.profile.key) &&
               !(isBanned?.call(s.profile.key) ?? false) &&
+              !_hiddenByMe(s.profile.key) &&
               t - s.at < kDatingProfileLife.inMilliseconds,
         )
         .toList()
       ..sort((SeenProfile a, SeenProfile b) => b.at.compareTo(a.at)));
   }
+
+  /// Profiles this person hid after reporting them and has not blocked:
+  /// each can be shown anyway.
+  List<SeenProfile> get hiddenProfiles => <SeenProfile>[
+    for (final SeenProfile s in _profiles.values)
+      if (_hiddenByMe(s.profile.key) &&
+          !_blocked.contains(s.profile.key) &&
+          !(isBanned?.call(s.profile.key) ?? false))
+        s,
+  ]..sort((SeenProfile a, SeenProfile b) => b.at.compareTo(a.at));
 
   SeenProfile? profile(String key) => _profiles[key];
   bool isMatch(String key) => _matches.containsKey(key);
@@ -733,9 +752,10 @@ final class DatingService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'date-match-${key.hashCode}',
-        title: 'Para! ❤️',
-        body:
-            '${s?.profile.name ?? 'Ktoś'} też powiedział(a) „Tak”. Napiszcie do siebie.',
+        title: t('Para! ❤️'),
+        body: t('{name} też powiedział(a) „Tak”. Napiszcie do siebie.', {
+          'name': s?.profile.name ?? t('Ktoś'),
+        }),
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'date-match',
@@ -763,6 +783,20 @@ final class DatingService extends ChangeNotifier {
 
   Future<void> block(String key) async {
     _blocked.add(key);
+    _matches.remove(key);
+    _chats.remove(key);
+    await _save();
+  }
+
+  /// Removes the profile [key] from this phone ("Usuń z mojego urządzenia"
+  /// after a report, §21.4): its photos and text, the chat, the match and
+  /// what was decided about it. It is blocked as well, so a copy that
+  /// reaches this phone later is dropped.
+  Future<void> forget(String key) async {
+    _blocked.add(key);
+    _profiles.remove(key);
+    _decisions.remove(key);
+    _likesIn.remove(key);
     _matches.remove(key);
     _chats.remove(key);
     await _save();
@@ -999,7 +1033,7 @@ final class DatingService extends ChangeNotifier {
     }
     // The memo stays neutral: the pyramid's treasurers see transfers, and
     // must not learn that anyone dates.
-    final bool ok = await payNow(s.introPyr!, amount, 'Podziękowanie');
+    final bool ok = await payNow(s.introPyr!, amount, t('Podziękowanie'));
     if (ok) {
       s.thankedAt = _now();
       await _save();
@@ -1129,22 +1163,22 @@ final class DatingService extends ChangeNotifier {
         logZenError('Randki: odczyt terminów', error, stack);
       }
     }
-    final int t = _now();
+    final int now = _now();
     final List<SafeDate> remind = <SafeDate>[];
     final List<SafeDate> alarm = <SafeDate>[];
     for (final SafeDate d in _safe.values) {
-      if (d.isOver || t < d.until) {
+      if (d.isOver || now < d.until) {
         continue;
       }
       if (d.remindedAt == null) {
-        d.remindedAt = t;
+        d.remindedAt = now;
         remind.add(d);
       }
       // Only a phone that can raise this person's alarm marks it raised.
       if (d.alarmedAt == null &&
-          t >= d.until + SafeDate.grace.inMilliseconds &&
+          now >= d.until + SafeDate.grace.inMilliseconds &&
           (!d.mine || raiseAlarm != null)) {
-        d.alarmedAt = t;
+        d.alarmedAt = now;
         alarm.add(d);
       }
     }
@@ -1159,12 +1193,18 @@ final class DatingService extends ChangeNotifier {
         RuntimeSystemNotification(
           id: 'date-safe-rem-${d.id}',
           title: d.mine
-              ? 'Wszystko OK?'
-              : '${host.nameOf(d.friend)} miał(a) dać znać',
+              ? t('Wszystko OK?')
+              : t('{name} miał(a) dać znać', {'name': host.nameOf(d.friend)}),
           body: d.mine
-              ? 'Potwierdź w aplikacji, że wszystko w porządku — inaczej za 15 minut przyjaciel dostanie alarm.'
-              : 'Jeszcze nie potwierdził(a), że wszystko OK. Jeśli to się nie zmieni, za 15 minut dostaniesz alarm.',
-          createdAtMillis: t,
+              ? t(
+                  'Potwierdź w aplikacji, że wszystko w porządku — inaczej '
+                  'za 15 minut przyjaciel dostanie alarm.',
+                )
+              : t(
+                  'Jeszcze nie potwierdził(a), że wszystko OK. Jeśli to się '
+                  'nie zmieni, za 15 minut dostaniesz alarm.',
+                ),
+          createdAtMillis: now,
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'date-safe:${d.id}',
         ),
@@ -1173,18 +1213,19 @@ final class DatingService extends ChangeNotifier {
     for (final SafeDate d in alarm) {
       if (d.mine) {
         await raiseAlarm?.call(
-          'Nie potwierdziłem(-am), że po randce wszystko OK.',
+          t('Nie potwierdziłem(-am), że po randce wszystko OK.'),
         );
       } else {
         await host.notify(
           RuntimeSystemNotification(
             id: 'date-safe-alarm-${d.id}',
-            title:
-                '⚠️ ${host.nameOf(d.friend)} nie potwierdził(a), że wszystko OK',
+            title: t('⚠️ {name} nie potwierdził(a), że wszystko OK', {
+              'name': host.nameOf(d.friend),
+            }),
             body: d.note.isEmpty
-                ? 'Zadzwoń albo sprawdź, co się dzieje.'
-                : 'Randka: ${d.note}. Zadzwoń albo sprawdź.',
-            createdAtMillis: t,
+                ? t('Zadzwoń albo sprawdź, co się dzieje.')
+                : t('Randka: {note}. Zadzwoń albo sprawdź.', {'note': d.note}),
+            createdAtMillis: now,
             category: RuntimeSystemNotificationCategory.alarm,
             slotKey: 'date-safe:${d.id}',
             isRingingCall: true,
@@ -1240,15 +1281,18 @@ final class DatingService extends ChangeNotifier {
         await _onAsk(from, p);
       case DatingTypes.askAnswer:
         final Object? id = p['id'];
-        final Object? t = p['t'];
+        final Object? text = p['t'];
         final OpinionAsk? a = id is String ? _asks[id] : null;
-        if (a != null && a.mine && a.friend == from && t is String) {
-          a.answer = t.length > 2000 ? t.substring(0, 2000) : t;
+        if (a != null && a.mine && a.friend == from && text is String) {
+          a.answer = text.length > 2000 ? text.substring(0, 2000) : text;
           await _save();
           await host.notify(
             RuntimeSystemNotification(
               id: 'date-opinion-$id',
-              title: '${host.nameOf(from)} o ${a.name}',
+              title: t('{name} o {about}', {
+                'name': host.nameOf(from),
+                'about': a.name,
+              }),
               body: a.answer!,
               createdAtMillis: _now(),
               category: RuntimeSystemNotificationCategory.social,
@@ -1271,9 +1315,13 @@ final class DatingService extends ChangeNotifier {
           await host.notify(
             RuntimeSystemNotification(
               id: 'date-vreq-$id',
-              title: '${host.nameOf(from)} prosi o kilka słów',
-              body:
-                  'Napisz, co o niej / o nim myślisz — trafi na jej / jego profil randkowy.',
+              title: t('{name} prosi o kilka słów', {
+                'name': host.nameOf(from),
+              }),
+              body: t(
+                'Napisz, co o niej / o nim myślisz — trafi na jej / jego '
+                'profil randkowy.',
+              ),
               createdAtMillis: _now(),
               category: RuntimeSystemNotificationCategory.social,
               slotKey: 'date-vreq',
@@ -1282,15 +1330,15 @@ final class DatingService extends ChangeNotifier {
         }
       case DatingTypes.vouch:
         final Object? id = p['id'];
-        final Object? t = p['t'];
-        if (id is String && t is String && me.vouches.length < 20) {
+        final Object? text = p['t'];
+        if (id is String && text is String && me.vouches.length < 20) {
           if (me.vouches.any((DatingVouch v) => v.id == id)) {
             return;
           }
           final DatingVouch? vouch = DatingVouch.fromJson(<String, dynamic>{
             'id': id,
             'by': p['by'],
-            't': t,
+            't': text,
             'vk': p['vk'],
             'sig': p['sig'],
             'at': p['at'],
@@ -1305,8 +1353,10 @@ final class DatingService extends ChangeNotifier {
           await host.notify(
             RuntimeSystemNotification(
               id: 'date-vouch-$id',
-              title: '${host.nameOf(from)} napisał(a) o Tobie',
-              body: t,
+              title: t('{name} napisał(a) o Tobie', {
+                'name': host.nameOf(from),
+              }),
+              body: text,
               createdAtMillis: _now(),
               category: RuntimeSystemNotificationCategory.social,
               slotKey: 'date-vouch',
@@ -1324,8 +1374,8 @@ final class DatingService extends ChangeNotifier {
           await host.notify(
             RuntimeSystemNotification(
               id: 'date-safe-ok-$id',
-              title: '${host.nameOf(from)}: wszystko OK',
-              body: 'Randka skończona bezpiecznie.',
+              title: t('{name}: wszystko OK', {'name': host.nameOf(from)}),
+              body: t('Randka skończona bezpiecznie.'),
               createdAtMillis: _now(),
               category: RuntimeSystemNotificationCategory.social,
               slotKey: 'date-safe:$id',
@@ -1471,7 +1521,7 @@ final class DatingService extends ChangeNotifier {
     String id,
     List<String> names,
     Map<dynamic, dynamic> body,
-    int t,
+    int now,
   ) async {
     final DatingProfile? parsed = DatingProfile.fromJson(body);
     final DatingProfile? profile = parsed == null
@@ -1511,7 +1561,7 @@ final class DatingService extends ChangeNotifier {
     _profiles[profile.key] = SeenProfile(
       profile: profile,
       replyTo: id,
-      at: t,
+      at: now,
       friend: from,
       path: names.reversed.toList(),
       distance: distance,
@@ -1525,11 +1575,18 @@ final class DatingService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'date-new-${profile.key.hashCode}',
-          title: 'Randki: ktoś nowy',
+          title: t('Randki: ktoś nowy'),
           body: distance == 1
-              ? '${profile.name}, ${profile.age} — ktoś z Twoich znajomych'
-              : '${profile.name}, ${profile.age} — znacie się przez ${host.nameOf(from)}',
-          createdAtMillis: t,
+              ? t('{name}, {age} — ktoś z Twoich znajomych', {
+                  'name': profile.name,
+                  'age': profile.age,
+                })
+              : t('{name}, {age} — znacie się przez {friend}', {
+                  'name': profile.name,
+                  'age': profile.age,
+                  'friend': host.nameOf(from),
+                }),
+          createdAtMillis: now,
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'date-new',
         ),
@@ -1717,7 +1774,7 @@ final class DatingService extends ChangeNotifier {
         await host.notify(
           RuntimeSystemNotification(
             id: 'date-msg-$lineId',
-            title: _profiles[sender]?.profile.name ?? 'Randki',
+            title: _profiles[sender]?.profile.name ?? t('Randki'),
             body: text,
             createdAtMillis: _now(),
             category: RuntimeSystemNotificationCategory.message,
@@ -1772,7 +1829,7 @@ final class DatingService extends ChangeNotifier {
       distance: had?.distance ?? 0,
       introBy: by is String
           ? (by.length > 40 ? by.substring(0, 40) : by)
-          : 'Ktoś',
+          : t('Ktoś'),
       introNote: note is String
           ? (note.length > 300 ? note.substring(0, 300) : note)
           : null,
@@ -1783,9 +1840,16 @@ final class DatingService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'date-intro-${other.key.hashCode}',
-        title: '${by is String ? by : 'Znajomy'} chce Cię komuś przedstawić',
-        body:
-            '${other.name}, ${other.age}${note is String && note.isNotEmpty ? ' — „$note”' : ''}',
+        title: t('{name} chce Cię komuś przedstawić', {
+          'name': by is String ? by : t('Znajomy'),
+        }),
+        body: note is String && note.isNotEmpty
+            ? t('{name}, {age} — „{note}”', {
+                'name': other.name,
+                'age': other.age,
+                'note': note,
+              })
+            : '${other.name}, ${other.age}',
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'date-intro',
@@ -1818,7 +1882,7 @@ final class DatingService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'date-ask-$id',
-        title: '${host.nameOf(from)} pyta o opinię',
+        title: t('{name} pyta o opinię', {'name': host.nameOf(from)}),
         body: a.question,
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
@@ -1869,8 +1933,8 @@ final class DatingService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'date-safe-$id',
-          title: '${host.nameOf(from)} idzie na randkę',
-          body: 'Prosi, żebyś czuwał(a). Ma dać znać, że wszystko OK.',
+          title: t('{name} idzie na randkę', {'name': host.nameOf(from)}),
+          body: t('Prosi, żebyś czuwał(a). Ma dać znać, że wszystko OK.'),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'date-safe:$id',

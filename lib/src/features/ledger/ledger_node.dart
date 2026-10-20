@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
@@ -53,6 +54,8 @@ enum ReachResult {
 
 /// Where a device of an account can be reached (several devices, §6): an
 /// entry of this kind in the account's `acts` space, `{address, name}`.
+/// Only a claim (the account signs it, not whoever is at that address):
+/// the address counts once a hello from there proves the device key.
 const String kDeviceRecordKind = 'device';
 
 /// The sealed backup of friends and groups in the account's `private`
@@ -113,12 +116,32 @@ final class _DeviceRef {
   /// HLC millis of the record it came from (0: learnt from a hello).
   int at;
 
+  /// `v`: proven by a hello from this address (entries saved before that
+  /// was required have no `v`, see `LedgerNode._loadDevices`).
   Map<String, dynamic> toJson() => <String, dynamic>{
     'a': account,
     'd': device,
     'n': name,
     't': at,
+    'v': 1,
   };
+}
+
+/// What a device record says and nobody proved yet: [device] of [account]
+/// is at [address]. The address is greeted; it becomes a device only when
+/// a hello from there is signed by [device].
+final class _DeviceHint {
+  _DeviceHint(this.account, this.device, this.name, this.at, this.address);
+
+  final String account;
+  final String device;
+  final String name;
+
+  /// HLC millis of the record.
+  final int at;
+
+  /// Normalised mesh address it names.
+  final String address;
 }
 
 /// Spaces of a friend's account this device keeps and follows. `private`
@@ -280,8 +303,16 @@ final class LedgerNode {
       PeerShareCodec.normalizeAddress(localAddress?.call() ?? '');
 
   /// Other devices: this account's own and friends' other devices, by
-  /// normalised mesh address.
+  /// normalised mesh address. Only devices that proved the address (a
+  /// hello from it signed by their key, see [_learnDevice]): everything
+  /// that routes to an account's devices relies on this.
   final Map<String, _DeviceRef> _devices = <String, _DeviceRef>{};
+
+  /// Addresses device records claim, not proven yet, by device key (one
+  /// per device: its newest record). Kept in memory only: the records stay
+  /// in the store and are read again at start.
+  final Map<String, _DeviceHint> _deviceHints = <String, _DeviceHint>{};
+  static const int _maxHintsPerAccount = 16;
 
   /// Addresses to greet even though nobody vouched for them yet: the
   /// device this one was linked from, or the friends who helped recover
@@ -468,7 +499,7 @@ final class LedgerNode {
       await gate.future;
     }
     if (!createIdentity && !await LedgerIdentity.exists(disk)) {
-      throw StateError('Brak tożsamości dziennika na tym urządzeniu.');
+      throw StateError(t('Brak tożsamości dziennika na tym urządzeniu.'));
     }
     identity = await LedgerIdentity.loadOrCreate(disk, deviceName: deviceName);
     author = LedgerAuthor(
@@ -632,6 +663,8 @@ final class LedgerNode {
     for (final String device in <String>{
       ..._liveDeviceAddresses(),
       ..._deviceSeeds,
+      // Claimed by a record: known once the device there answers.
+      ..._hintAddresses(),
       ...?greetAlso?.call().map(PeerShareCodec.normalizeAddress),
     }) {
       if (device != _ownAddress) {
@@ -778,6 +811,16 @@ final class LedgerNode {
   Iterable<String> _liveDeviceAddresses() => _devices.keys.where(
     (String a) => _liveDevice(a) != null && a != _ownAddress,
   );
+
+  /// Addresses device records of this account or friends' claim, not
+  /// proven yet (greeted, never routed to).
+  Iterable<String> _hintAddresses() => <String>{
+    for (final _DeviceHint h in _deviceHints.values)
+      if (h.address != _ownAddress &&
+          !store.directory.isRevoked(h.account, h.device) &&
+          (h.account == account || _accounts.containsValue(h.account)))
+        h.address,
+  };
 
   bool _isSeed(String address) =>
       _deviceSeeds.contains(PeerShareCodec.normalizeAddress(address));
@@ -1021,30 +1064,62 @@ final class LedgerNode {
     }
   }
 
-  /// Records [address] as a device of [cert]'s account when that account is
-  /// this one or a friend's. Returns whether it is (now) known.
-  Future<bool> _learnDevice(String address, DeviceCertificate cert) async {
+  /// Records [address] as device [device] of [acc] when that account is
+  /// this one or a friend's. Only for a device that proved it is there: a
+  /// hello sent from [address] and signed by [device] ([_proven]). Returns
+  /// whether it is (now) known.
+  Future<bool> _learnDevice(
+    String address,
+    String acc,
+    String device,
+    String name,
+  ) async {
     final String n = PeerShareCodec.normalizeAddress(address);
     if (n.isEmpty ||
         n == _ownAddress ||
-        cert.device == identity.deviceKey.id ||
-        store.directory.isRevoked(cert.account, cert.device) ||
-        (cert.account != account && !_accounts.containsValue(cert.account))) {
+        device == identity.deviceKey.id ||
+        store.directory.isRevoked(acc, device) ||
+        (acc != account && !_accounts.containsValue(acc))) {
       return false;
     }
+    // Its newest record named this address: that claim is proven now.
+    final _DeviceHint? hint = _deviceHints[device];
+    final _DeviceHint? claim =
+        hint != null && hint.account == acc && hint.address == n ? hint : null;
     final _DeviceRef? had = _devices[n];
-    if (had != null &&
-        had.account == cert.account &&
-        had.device == cert.device) {
+    if (claim == null &&
+        had != null &&
+        had.account == acc &&
+        had.device == device) {
       return true;
     }
-    _devices[n] = _DeviceRef(cert.account, cert.device, cert.name, 0);
+    _devices[n] = claim != null
+        ? _DeviceRef(
+            acc,
+            device,
+            claim.name.isEmpty ? name : claim.name,
+            claim.at,
+          )
+        : _DeviceRef(acc, device, name, 0);
+    if (claim != null) {
+      _deviceHints.remove(device);
+      // It moved there: the addresses it had before are stale.
+      _devices.removeWhere(
+        (String a, _DeviceRef r) => r.device == device && a != n,
+      );
+    }
     _deviceSeeds.remove(n);
     await _saveDevices();
     _emitDevices();
     return true;
   }
 
+  /// A device record (`{address, name}` in an account's `acts`) is only a
+  /// claim: the account signed it, not whoever is at that address, so a
+  /// friend could name anyone's address. It is kept as a hint and the
+  /// address greeted; the device is known (and routed to) only once a
+  /// hello from there proves its key ([_learnDevice]). A record only
+  /// renames a device already proven at that address.
   Future<void> _onDeviceRecord(LogEntry e, {bool quiet = false}) async {
     if (e.kind != kDeviceRecordKind ||
         e.space != accountSpace('acts', e.account) ||
@@ -1067,24 +1142,66 @@ final class LedgerNode {
         return;
       }
     }
-    final _DeviceRef? had = _devices[n];
-    if (had != null && had.device == e.device && had.at >= e.hlc.millis) {
+    final _DeviceHint? pending = _deviceHints[e.device];
+    if (pending != null && pending.at >= e.hlc.millis) {
       return;
     }
-    _devices.removeWhere(
-      (String a, _DeviceRef r) => r.device == e.device && a != n,
-    );
-    final Object? name = e.body['name'];
-    _devices[n] = _DeviceRef(
+    final Object? rawName = e.body['name'];
+    final String name = rawName is String ? rawName : '';
+    final _DeviceRef? had = _devices[n];
+    if (had != null && had.account == e.account && had.device == e.device) {
+      if (had.at >= e.hlc.millis) {
+        return;
+      }
+      // Proven to be at this address already: only the name changes (and
+      // whatever address it claimed before is stale).
+      _deviceHints.remove(e.device);
+      _devices[n] = _DeviceRef(e.account, e.device, name, e.hlc.millis);
+      _devices.removeWhere(
+        (String a, _DeviceRef r) => r.device == e.device && a != n,
+      );
+      await _saveDevices();
+      _emitDevices();
+      return;
+    }
+    // Anything else waits for the proof; an entry of another device or
+    // account at that address stays as it is.
+    _deviceHints[e.device] = _DeviceHint(
       e.account,
       e.device,
-      name is String ? name : '',
+      name,
       e.hlc.millis,
+      n,
     );
-    await _saveDevices();
-    _emitDevices();
+    _capHints(e.account);
+    // Its proven hello may be here already (sent before its account was a
+    // friend's, e.g. as a group member): enough now.
+    final _DeviceRef? seen = _strangerDevices[n];
+    if (seen != null &&
+        seen.account == e.account &&
+        seen.device == e.device &&
+        await _learnDevice(n, seen.account, seen.device, seen.name)) {
+      return;
+    }
     if (!quiet) {
       _hello(n, force: true);
+    }
+  }
+
+  /// At most [_maxHintsPerAccount] unproven devices of [acc] (the oldest
+  /// claims go): an account can certify any number of devices, and each
+  /// claim is greeted.
+  void _capHints(String acc) {
+    final List<_DeviceHint> its = <_DeviceHint>[
+      for (final _DeviceHint h in _deviceHints.values)
+        if (h.account == acc) h,
+    ];
+    if (its.length <= _maxHintsPerAccount) {
+      return;
+    }
+    its.sort((_DeviceHint x, _DeviceHint y) => x.at.compareTo(y.at));
+    for (final _DeviceHint h in its.take(its.length - _maxHintsPerAccount)) {
+      _deviceHints.remove(h.device);
     }
   }
 
@@ -1129,10 +1246,10 @@ final class LedgerNode {
     await start();
     final LedgerKeyPair? key = identity.accountKey;
     if (key == null) {
-      throw StateError('Najpierw odblokuj konto hasłem konta.');
+      throw StateError(t('Najpierw odblokuj konto hasłem konta.'));
     }
     if (device == identity.deviceKey.id) {
-      throw StateError('Tego urządzenia nie można odłączyć z niego samego.');
+      throw StateError(t('Tego urządzenia nie można odłączyć z niego samego.'));
     }
     final DeviceRevocation revocation = await DeviceRevocation.issue(
       account: key,
@@ -1140,10 +1257,12 @@ final class LedgerNode {
       cutoffs: store.headsOfDevice(account: account, device: device),
       issued: _clock.wallMillis(),
     );
-    final List<String> itsAddresses = <String>[
+    final _DeviceHint? claimed = _deviceHints.remove(device);
+    final Set<String> itsAddresses = <String>{
       for (final MapEntry<String, _DeviceRef> e in _devices.entries)
         if (e.value.device == device) e.key,
-    ];
+      if (claimed != null) claimed.address,
+    };
     await replicator.publishRevocation(revocation);
     _devices.removeWhere((_, _DeviceRef r) => r.device == device);
     await _saveDevices();
@@ -1163,6 +1282,9 @@ final class LedgerNode {
       store.directory.isRevoked(account, identity.deviceKey.id);
 
   void _pruneRevoked() {
+    _deviceHints.removeWhere(
+      (_, _DeviceHint h) => store.directory.isRevoked(h.account, h.device),
+    );
     final int before = _devices.length;
     _devices.removeWhere(
       (_, _DeviceRef r) => store.directory.isRevoked(r.account, r.device),
@@ -1213,12 +1335,26 @@ final class LedgerNode {
             final Object? n = v['n'];
             final Object? t = v['t'];
             if (a is String && d is String) {
-              _devices[k] = _DeviceRef(
-                a,
-                d,
-                n is String ? n : '',
-                t is int ? t : 0,
-              );
+              final String name = n is String ? n : '';
+              final int at = t is int ? t : 0;
+              if (v['v'] == 1 || a == account) {
+                // Proven, or one of this account's own devices (only they
+                // write its records).
+                _devices[k] = _DeviceRef(a, d, name, at);
+              } else {
+                // Saved before an address needed a proof (perhaps from a
+                // record alone): greeted again, known once it answers.
+                final _DeviceHint? had = _deviceHints[d];
+                if (had == null || had.at < at) {
+                  _deviceHints[d] = _DeviceHint(
+                    a,
+                    d,
+                    name,
+                    at,
+                    PeerShareCodec.normalizeAddress(k),
+                  );
+                }
+              }
             }
           }
         });
@@ -1267,12 +1403,13 @@ final class LedgerNode {
     return true;
   }
 
-  void _sendSiblingSync(String to) {
+  void _sendSiblingSync(String to, {bool answer = false}) {
     if (!_isSibling(to)) {
       return;
     }
     _send(to, <String, dynamic>{
       'type': kLedgerSiblingType,
+      if (answer) 'ack': true,
       'own': keyring.toJson()['own'],
       'levels': <String, String>{
         for (final MapEntry<String, FriendLevel> e in _levels.entries)
@@ -1284,6 +1421,11 @@ final class LedgerNode {
   Future<void> _onSiblingSync(String from, Map<String, dynamic> m) async {
     if (!_isSibling(from)) {
       return;
+    }
+    // Ours may have reached them before they could prove who we are (and
+    // been dropped): answer once with our own, never an answer to an answer.
+    if (m['ack'] != true) {
+      _sendSiblingSync(from, answer: true);
     }
     final int added = keyring.mergeOwn(m['own']);
     bool levels = false;
@@ -1468,11 +1610,14 @@ final class LedgerNode {
       // Another device of a friend or of this account (its certificate,
       // signed by the account key, and the device key's proof for this
       // address): from now on a friend.
-      if (proven && await _learnDevice(from, cert)) {
-        await _onHello(from, frame);
+      if (proven &&
+          await _learnDevice(from, cert.account, cert.device, cert.name)) {
+        // Prove ourselves to them first: what _onHello sends next (own
+        // keys to a sibling) is only accepted from a proven device.
         if (frame.payload['r'] != 1) {
           _hello(from, force: true, reply: true);
         }
+        await _onHello(from, frame);
         return;
       }
       if (proven &&
@@ -1692,7 +1837,8 @@ final class LedgerNode {
     // Which account an address belongs to is only taken from a proven
     // hello (where this device does not know its own address yet — tests
     // without a mesh — the certificate alone).
-    if (_ownAddress.isNotEmpty && !await _proven(frame, cert)) {
+    final bool proven = await _proven(frame, cert);
+    if (_ownAddress.isNotEmpty && !proven) {
       return;
     }
     final String normalized = PeerShareCodec.normalizeAddress(from);
@@ -1711,6 +1857,10 @@ final class LedgerNode {
         // Make sure they learn about us too, then catch up both ways.
         _hello(from, force: true);
       }
+    }
+    // The device its record put here answered from here: proven now.
+    if (proven && _deviceHints[cert.device]?.address == normalized) {
+      await _learnDevice(normalized, cert.account, cert.device, cert.name);
     }
     if (cert.account != account) {
       _followAccount(cert.account);

@@ -392,6 +392,10 @@ void main() {
       await device.goOnline();
     }
     await mesh.advance(const Duration(seconds: 1));
+    // Showing the mailboxes to group members who are not friends is opt-in
+    // (off by default): both group mates have switched it on.
+    await mesh.devices[alice]!.engine.setShareWithGroups(true);
+    await mesh.devices[bob]!.engine.setShareWithGroups(true);
 
     final GroupProfile group = await mesh.devices[carol]!.controller
         .createGroup(

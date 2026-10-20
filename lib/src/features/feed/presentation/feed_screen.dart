@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_player/video_player.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
@@ -24,6 +25,8 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/media/audio_clip_player.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/moderation/content_moderation.dart';
+import 'package:zen/src/features/moderation/hidden_by_me.dart';
+import 'package:zen/src/features/moderation/local_delete.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
 import 'package:zen/src/features/profile/presentation/own_avatar.dart';
@@ -139,14 +142,24 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     return post.authorAddress;
   }
 
-  /// "Zgłoś" on someone's post (§21.4).
-  Future<void> _reportPost(FeedPost post) => reportContent(
-    context,
-    ref,
-    authorAddress: _authorAddressOf(post),
-    text: post.text,
-    header: 'Post na tablicy — ${post.authorLabel}',
-  );
+  /// "Zgłoś" on someone's post (§21.4). Once reported it is hidden here;
+  /// "Usuń z mojego urządzenia" takes its photos and films off the phone
+  /// (the text is a signed ledger entry that cannot be deleted, only
+  /// hidden).
+  Future<void> _reportPost(FeedPost post) {
+    final LedgerNode? node = _node;
+    return reportContent(
+      context,
+      ref,
+      authorAddress: _authorAddressOf(post),
+      text: post.text,
+      header: t('Post na tablicy — {name}', {'name': post.authorLabel}),
+      contentId: post.id,
+      deleteLocal: node == null || post.images.isEmpty
+          ? null
+          : () => deletePostMediaLocally(node, post.images),
+    );
+  }
 
   Future<void> _compose({bool withPhotos = false}) async {
     if (_node == null) {
@@ -164,10 +177,10 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           key: const Key('feed-published'),
-          content: const Text('Opublikowano. Twoje posty są na Twoim profilu.'),
+          content: Text(t('Opublikowano. Twoje posty są na Twoim profilu.')),
           action: SnackBarAction(
             key: const Key('feed-published-show'),
-            label: 'Pokaż',
+            label: t('Pokaż'),
             onPressed: () => unawaited(ProfileScreen.open(context)),
           ),
         ),
@@ -236,7 +249,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     await node.follow(post.authorAddress);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Obserwujesz: ${post.authorLabel}')),
+        SnackBar(
+          content: Text(t('Obserwujesz: {name}', {'name': post.authorLabel})),
+        ),
       );
       setState(() {});
     }
@@ -253,24 +268,25 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       builder: (BuildContext dialog) => StatefulBuilder(
         builder: (BuildContext dialog, StateSetter setDialog) => AlertDialog(
           key: const Key('feed-following'),
-          title: const Text('Obserwowani'),
+          title: Text(t('Obserwowani')),
           content: SizedBox(
             width: 360,
             child: ListView(
               shrinkWrap: true,
               children: <Widget>[
-                const ZenInfo(
+                ZenInfo(
                   icon: Icons.visibility_outlined,
-                  text:
-                      'Obserwować można każdego, bez zgody. Widzisz tylko '
-                      'jego posty publiczne.',
+                  text: t(
+                    'Obserwować można każdego, bez zgody. Widzisz tylko '
+                    'jego posty publiczne.',
+                  ),
                 ),
                 const SizedBox(height: 8),
                 if (node.followedAddresses.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Text(
-                      'Nikogo jeszcze nie obserwujesz.',
+                      t('Nikogo jeszcze nie obserwujesz.'),
                       style: TextStyle(
                         color: ZenColors.of(dialog).textSecondary,
                         fontSize: 13.5,
@@ -292,7 +308,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                     ),
                     trailing: IconButton(
                       key: Key('feed-unfollow-$address'),
-                      tooltip: 'Przestań obserwować',
+                      tooltip: t('Przestań obserwować'),
                       icon: const Icon(Icons.close_rounded),
                       onPressed: () async {
                         await node.unfollow(address);
@@ -304,10 +320,10 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                 TextField(
                   key: const Key('feed-follow-field'),
                   controller: field,
-                  decoration: const InputDecoration(
-                    labelText: 'Obserwuj kogoś nowego',
-                    hintText: 'Adres osoby do obserwowania',
-                    prefixIcon: Icon(Icons.person_add_alt_rounded),
+                  decoration: InputDecoration(
+                    labelText: t('Obserwuj kogoś nowego'),
+                    hintText: t('Adres osoby do obserwowania'),
+                    prefixIcon: const Icon(Icons.person_add_alt_rounded),
                   ),
                 ),
               ],
@@ -316,7 +332,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(dialog).pop(),
-              child: const Text('Zamknij'),
+              child: Text(t('Zamknij')),
             ),
             FilledButton(
               key: const Key('feed-follow-add'),
@@ -329,7 +345,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                 field.clear();
                 setDialog(() {});
               },
-              child: const Text('Obserwuj'),
+              child: Text(t('Obserwuj')),
             ),
           ],
         ),
@@ -373,11 +389,13 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Udostępniono znajomym.')));
+        ).showSnackBar(SnackBar(content: Text(t('Udostępniono znajomym.'))));
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _error = 'Nie udało się udostępnić: $e');
+        setState(
+          () => _error = t('Nie udało się udostępnić: {error}', {'error': e}),
+        );
       }
     }
   }
@@ -395,7 +413,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       );
     } catch (e) {
       if (mounted) {
-        setState(() => _error = 'Nie udało się polubić: $e');
+        setState(
+          () => _error = t('Nie udało się polubić: {error}', {'error': e}),
+        );
       }
     }
   }
@@ -424,79 +444,97 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                     children: <Widget>[
                       _SheetTitle(
                         icon: Icons.mode_comment_rounded,
-                        title: 'Komentarze',
+                        title: t('Komentarze'),
                         count: post.comments.length,
                       ),
                       const SizedBox(height: 8),
                       if (post.comments.isEmpty)
-                        const ZenEmpty(
+                        ZenEmpty(
                           icon: Icons.forum_outlined,
-                          title: 'Jeszcze nic.',
-                          text: 'Napisz pierwszy komentarz.',
+                          title: t('Jeszcze nic.'),
+                          text: t('Napisz pierwszy komentarz.'),
                         ),
                       for (final FeedComment c in post.comments)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              _Initials(
-                                name: c.authorLabel,
-                                own: false,
-                                size: 34,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Container(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    14,
-                                    10,
-                                    14,
-                                    10,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: zen.surfaceMuted,
-                                    borderRadius: ZenRadii.drop,
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: <Widget>[
-                                      Text(
-                                        c.authorLabel,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: zen.textPrimary,
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 13.5,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 3),
-                                      CopyableText(
-                                        c.text,
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          height: 1.35,
-                                          color: zen.textPrimary,
-                                        ),
-                                        onReport: () => unawaited(
-                                          reportContent(
-                                            context,
-                                            ref,
-                                            text: c.text,
-                                            header:
-                                                'Komentarz — ${c.authorLabel}',
+                        if (ref.read(hiddenByMeProvider).hides(id: c.id))
+                          HiddenContentPlaceholder(
+                            key: Key('feed-comment-hidden-${c.id}'),
+                            byMe: true,
+                            compact: true,
+                            onShow: () {
+                              showHiddenAnyway(ref, id: c.id);
+                              setSheet(() {});
+                            },
+                          )
+                        else
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                _Initials(
+                                  name: c.authorLabel,
+                                  own: false,
+                                  size: 34,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Container(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      14,
+                                      10,
+                                      14,
+                                      10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: zen.surfaceMuted,
+                                      borderRadius: ZenRadii.drop,
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: <Widget>[
+                                        Text(
+                                          c.authorLabel,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: zen.textPrimary,
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13.5,
                                           ),
                                         ),
-                                      ),
-                                    ],
+                                        const SizedBox(height: 3),
+                                        CopyableText(
+                                          c.text,
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            height: 1.35,
+                                            color: zen.textPrimary,
+                                          ),
+                                          onReport: () => unawaited(
+                                            reportContent(
+                                              context,
+                                              ref,
+                                              text: c.text,
+                                              header: t('Komentarz — {name}', {
+                                                'name': c.authorLabel,
+                                              }),
+                                              contentId: c.id,
+                                            ).then((_) {
+                                              // The reported comment is hidden now.
+                                              if (sheet.mounted) {
+                                                setSheet(() {});
+                                              }
+                                            }),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
                       const SizedBox(height: 6),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -510,7 +548,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                               maxLines: 4,
                               textCapitalization: TextCapitalization.sentences,
                               decoration: InputDecoration(
-                                hintText: 'Napisz komentarz',
+                                hintText: t('Napisz komentarz'),
                                 prefixIcon: const Icon(
                                   Icons.chat_bubble_outline_rounded,
                                 ),
@@ -524,7 +562,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                             padding: const EdgeInsets.only(top: 4),
                             child: IconButton.filled(
                               key: const Key('feed-comment-send'),
-                              tooltip: 'Wyślij',
+                              tooltip: t('Wyślij'),
                               icon: const Icon(Icons.send_rounded),
                               onPressed: () async {
                                 final Map<String, dynamic> body;
@@ -543,7 +581,11 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                                   );
                                   nav.pop();
                                 } catch (e) {
-                                  setSheet(() => error = 'Nie udało się: $e');
+                                  setSheet(
+                                    () => error = t('Nie udało się: {error}', {
+                                      'error': e,
+                                    }),
+                                  );
                                 }
                               },
                             ),
@@ -574,14 +616,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
             children: <Widget>[
               _SheetTitle(
                 icon: Icons.favorite_rounded,
-                title: 'Polubili',
+                title: t('Polubili'),
                 count: post.likers.length,
               ),
               const SizedBox(height: 8),
               if (post.likers.isEmpty)
-                const ZenEmpty(
+                ZenEmpty(
                   icon: Icons.favorite_border_rounded,
-                  title: 'Jeszcze nikt.',
+                  title: t('Jeszcze nikt.'),
                 ),
               for (final String name in post.likers)
                 ListTile(
@@ -612,6 +654,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     final LedgerNode? node = _node;
     _followPyramid();
     final Set<String> banned = bannedContentNow(ref);
+    final HiddenByMe mine = ref.watch(hiddenByMeProvider);
     List<FeedPost> posts = const <FeedPost>[];
     if (node != null && node.isReady) {
       posts = <FeedPost>[
@@ -626,14 +669,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     return Scaffold(
       key: const Key('feed-screen'),
       appBar: ZenSectionBar(
-        title: 'Tablica',
+        title: t('Tablica'),
         actions: <Widget>[
           if (node != null)
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: IconButton(
                 key: const Key('feed-open-following'),
-                tooltip: 'Obserwowani',
+                tooltip: t('Obserwowani'),
                 icon: const Icon(Icons.person_search_rounded),
                 onPressed: () => unawaited(_manageFollowing()),
               ),
@@ -643,11 +686,11 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       body: SafeArea(
         top: false,
         child: node == null
-            ? const Center(
+            ? Center(
                 child: SingleChildScrollView(
                   child: ZenEmpty(
                     icon: Icons.newspaper_rounded,
-                    title: 'Tablica jest wyłączona.',
+                    title: t('Tablica jest wyłączona.'),
                   ),
                 ),
               )
@@ -700,10 +743,15 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                       post.text,
                       id: post.id,
                       revealed: _revealed,
+                      mine: mine,
                     ))
                       HiddenContentPlaceholder(
                         key: Key('feed-hidden-${post.id}'),
-                        onShow: () => setState(() => _revealed.add(post.id)),
+                        byMe: !isContentBanned(banned, post.text),
+                        onShow: () {
+                          showHiddenAnyway(ref, id: post.id);
+                          setState(() => _revealed.add(post.id));
+                        },
                       )
                     else
                       _PostCard(
@@ -733,7 +781,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                         onReshare:
                             post.isOwn ||
                                 post.audience != Audience.public ||
-                                post.resharedBy.contains('Ty')
+                                post.resharedBy.contains(t('Ty'))
                             ? null
                             : () => unawaited(_reshare(post)),
                         onReport: post.isOwn
@@ -741,13 +789,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                             : () => unawaited(_reportPost(post)),
                       ),
                   if (posts.isEmpty)
-                    const ZenEmpty(
-                      key: Key('feed-end'),
+                    ZenEmpty(
+                      key: const Key('feed-end'),
                       icon: Icons.newspaper_rounded,
-                      title: 'Nic tu jeszcze nie ma od znajomych.',
-                      text:
-                          'Gdy znajomi coś opublikują, zobaczysz to tutaj — '
-                          'po kolei, bez algorytmu.',
+                      title: t('Nic tu jeszcze nie ma od znajomych.'),
+                      text: t(
+                        'Gdy znajomi coś opublikują, zobaczysz to tutaj — '
+                        'po kolei, bez algorytmu.',
+                      ),
                     )
                   else
                     Padding(
@@ -765,7 +814,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                           Flexible(
                             flex: 3,
                             child: Text(
-                              'Jesteś na bieżąco',
+                              t('Jesteś na bieżąco'),
                               key: const Key('feed-end'),
                               textAlign: TextAlign.center,
                               style: TextStyle(
@@ -800,10 +849,12 @@ Future<bool> editOwnPost(
     if (bytes == null) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'Nie wszystkie zdjęcia tego posta są na urządzeniu — '
-              'spróbuj za chwilę.',
+              t(
+                'Nie wszystkie zdjęcia tego posta są na urządzeniu — '
+                'spróbuj za chwilę.',
+              ),
             ),
           ),
         );
@@ -855,9 +906,9 @@ Future<bool> editOwnPost(
         );
         return null;
       } on ArgumentError catch (e) {
-        return e.message as String? ?? 'Nie udało się zapisać.';
+        return e.message as String? ?? t('Nie udało się zapisać.');
       } on Object catch (e) {
-        return 'Nie udało się zapisać: $e';
+        return t('Nie udało się zapisać: {error}', {'error': e});
       }
     },
   );
@@ -873,20 +924,22 @@ Future<String?> deleteOwnPost(
   final bool? sure = await showDialog<bool>(
     context: context,
     builder: (BuildContext dialog) => AlertDialog(
-      title: const Text('Usunąć post?'),
-      content: const Text(
-        'Post zniknie z Twojego profilu i z tablic znajomych. Post publiczny '
-        'mógł już zostać skopiowany, więc usunięcie jest dla innych prośbą.',
+      title: Text(t('Usunąć post?')),
+      content: Text(
+        t(
+          'Post zniknie z Twojego profilu i z tablic znajomych. Post publiczny '
+          'mógł już zostać skopiowany, więc usunięcie jest dla innych prośbą.',
+        ),
       ),
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(dialog).pop(false),
-          child: const Text('Anuluj'),
+          child: Text(t('Anuluj')),
         ),
         FilledButton(
           key: const Key('feed-delete-confirm'),
           onPressed: () => Navigator.of(dialog).pop(true),
-          child: const Text('Usuń'),
+          child: Text(t('Usuń')),
         ),
       ],
     ),
@@ -898,7 +951,7 @@ Future<String?> deleteOwnPost(
     await node.publish(kPostDeleteKind, deletePostBody(post.id));
     return null;
   } on Object catch (e) {
-    return 'Nie udało się usunąć: $e';
+    return t('Nie udało się usunąć: {error}', {'error': e});
   }
 }
 
@@ -907,7 +960,7 @@ Future<String?> deleteOwnPost(
 Future<String?> publishDraft(WidgetRef ref, PostDraft draft) async {
   final LedgerNode? node = ref.read(ledgerNodeProvider);
   if (node == null) {
-    return 'Tablica jest wyłączona.';
+    return t('Tablica jest wyłączona.');
   }
   final String text = draft.text;
   try {
@@ -932,9 +985,9 @@ Future<String?> publishDraft(WidgetRef ref, PostDraft draft) async {
     );
     return null;
   } on ArgumentError catch (e) {
-    return e.message as String? ?? 'Nie udało się opublikować.';
+    return e.message as String? ?? t('Nie udało się opublikować.');
   } on Object catch (e) {
-    return 'Nie udało się opublikować: $e';
+    return t('Nie udało się opublikować: {error}', {'error': e});
   }
 }
 
@@ -961,13 +1014,13 @@ String postTimeLabel(int millis, {bool withYear = false}) {
   String two(int v) => v.toString().padLeft(2, '0');
   if (!ago.isNegative) {
     if (ago.inMinutes < 1) {
-      return 'przed chwilą';
+      return t('przed chwilą');
     }
     if (ago.inMinutes < 60) {
-      return '${ago.inMinutes} min temu';
+      return t('{count} min temu', {'count': ago.inMinutes});
     }
     if (ago.inHours < 24) {
-      return '${ago.inHours} godz. temu';
+      return t('{count} godz. temu', {'count': ago.inHours});
     }
   }
   final String time = '${two(at.hour)}:${two(at.minute)}';
@@ -1019,7 +1072,7 @@ class _ComposerPrompt extends StatelessWidget {
                         border: Border.all(color: zen.outlineSoft),
                       ),
                       child: Text(
-                        'Co słychać?',
+                        t('Co słychać?'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -1041,8 +1094,8 @@ class _ComposerPrompt extends StatelessWidget {
                   child: _ComposerAction(
                     key: const Key('feed-compose-photo'),
                     icon: Icons.add_photo_alternate_rounded,
-                    label: 'Zdjęcie',
-                    tooltip: 'Post ze zdjęciem',
+                    label: t('Zdjęcie'),
+                    tooltip: t('Post ze zdjęciem'),
                     tone: zenTone(zen, 2),
                     onTap: onPhoto,
                   ),
@@ -1050,7 +1103,7 @@ class _ComposerPrompt extends StatelessWidget {
                 Expanded(
                   child: _ComposerAction(
                     icon: Icons.edit_note_rounded,
-                    label: 'Napisz post',
+                    label: t('Napisz post'),
                     tone: zen.accent,
                     onTap: onWrite,
                   ),
@@ -1208,7 +1261,11 @@ class _PostCard extends StatelessWidget {
                               children: <Widget>[
                                 Flexible(
                                   child: Text(
-                                    post.edited ? '$when · edytowano' : when,
+                                    post.edited
+                                        ? t('{time} · edytowano', {
+                                            'time': when,
+                                          })
+                                        : when,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
@@ -1245,15 +1302,15 @@ class _PostCard extends StatelessWidget {
                       shape: const StadiumBorder(),
                     ),
                     icon: const Icon(Icons.add_rounded, size: 16),
-                    label: const Text('Obserwuj'),
+                    label: Text(t('Obserwuj')),
                   ),
                 ),
               if (onEdit != null || onDelete != null || onReport != null)
                 PopupMenuButton<String>(
                   key: Key('feed-menu-${post.id}'),
                   tooltip: onEdit != null || onDelete != null
-                      ? 'Edytuj lub usuń'
-                      : 'Więcej',
+                      ? t('Edytuj lub usuń')
+                      : t('Więcej'),
                   icon: Icon(
                     Icons.more_horiz_rounded,
                     color: zen.textSecondary,
@@ -1266,28 +1323,28 @@ class _PostCard extends StatelessWidget {
                   itemBuilder: (BuildContext context) =>
                       <PopupMenuEntry<String>>[
                         if (onEdit != null)
-                          const PopupMenuItem<String>(
+                          PopupMenuItem<String>(
                             value: 'edit',
                             child: ListTile(
-                              leading: Icon(Icons.edit_outlined),
-                              title: Text('Edytuj'),
+                              leading: const Icon(Icons.edit_outlined),
+                              title: Text(t('Edytuj')),
                             ),
                           ),
                         if (onDelete != null)
-                          const PopupMenuItem<String>(
+                          PopupMenuItem<String>(
                             value: 'delete',
                             child: ListTile(
-                              leading: Icon(Icons.delete_outline_rounded),
-                              title: Text('Usuń'),
+                              leading: const Icon(Icons.delete_outline_rounded),
+                              title: Text(t('Usuń')),
                             ),
                           ),
                         if (onReport != null)
                           PopupMenuItem<String>(
                             key: Key('feed-report-${post.id}'),
                             value: 'report',
-                            child: const ListTile(
-                              leading: Icon(Icons.flag_outlined),
-                              title: Text('Zgłoś'),
+                            child: ListTile(
+                              leading: const Icon(Icons.flag_outlined),
+                              title: Text(t('Zgłoś')),
                             ),
                           ),
                       ],
@@ -1307,7 +1364,9 @@ class _PostCard extends StatelessWidget {
                     _Pill(
                       key: Key('feed-reshared-${post.id}'),
                       icon: Icons.repeat_rounded,
-                      text: 'Udostępnił(a): ${post.resharedBy.join(', ')}',
+                      text: t('Udostępnił(a): {names}', {
+                        'names': post.resharedBy.join(', '),
+                      }),
                       tone: zenTone(zen, 3),
                     ),
                   if (post.audience != Audience.public)
@@ -1339,14 +1398,14 @@ class _PostCard extends StatelessWidget {
                 key: Key('feed-comments-${post.id}'),
                 icon: Icons.mode_comment_outlined,
                 label: '${post.comments.length}',
-                tooltip: 'Komentarze',
+                tooltip: t('Komentarze'),
                 onTap: onComments,
               ),
               const Spacer(),
               if (onReshare != null)
                 IconButton(
                   key: Key('feed-reshare-${post.id}'),
-                  tooltip: 'Udostępnij znajomym',
+                  tooltip: t('Udostępnij znajomym'),
                   onPressed: onReshare,
                   icon: Icon(Icons.repeat_rounded, color: zen.textSecondary),
                 ),
@@ -1383,7 +1442,7 @@ class _LikeButton extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Tooltip(
-            message: liked ? 'Cofnij polubienie' : 'Polub',
+            message: liked ? t('Cofnij polubienie') : t('Polub'),
             child: InkWell(
               key: Key('feed-like-${post.id}'),
               onTap: onLike,
@@ -1682,7 +1741,7 @@ class PostAudio extends StatelessWidget {
     return AudioClipPlayer(
       key: Key('post-audio-${ref.id}'),
       load: () => openSafePlayable(node.blobs, ref),
-      title: 'Nagranie',
+      title: t('Nagranie'),
       durationMs: ref.durationMs,
       onMissing: entry == null || node.autoDownloadMedia()
           ? null
@@ -1789,7 +1848,7 @@ class _PostVideoState extends State<PostVideo> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = 'Nieprawidłowy plik filmu — nie otwarto go.';
+          _error = t('Nieprawidłowy plik filmu — nie otwarto go.');
         });
       }
       return;
@@ -1801,7 +1860,7 @@ class _PostVideoState extends State<PostVideo> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = 'Film jeszcze się pobiera…';
+          _error = t('Film jeszcze się pobiera…');
         });
       }
       return;
@@ -1846,7 +1905,7 @@ class _PostVideoState extends State<PostVideo> {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = 'Nie udało się odtworzyć filmu: $e';
+          _error = t('Nie udało się odtworzyć filmu: {error}', {'error': e});
         });
       }
     }
@@ -2293,7 +2352,7 @@ class _PostImageState extends State<_PostImage> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Dotknij, aby pobrać',
+                        t('Dotknij, aby pobrać'),
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: ZenColors.of(context).textSecondary,
@@ -2339,7 +2398,7 @@ class _UnsafeMediaTile extends StatelessWidget {
           Icon(Icons.gpp_maybe_rounded, color: zen.warning),
           const SizedBox(height: 4),
           Text(
-            'Nieprawidłowy plik — nie otwarto go',
+            t('Nieprawidłowy plik — nie otwarto go'),
             textAlign: TextAlign.center,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,

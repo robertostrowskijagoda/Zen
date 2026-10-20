@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
@@ -20,6 +21,7 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/profile/profile_card.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -30,7 +32,8 @@ class DatingProfileEditor extends ConsumerStatefulWidget {
 
   static Future<void> open(BuildContext context) => Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (BuildContext context) => const DatingProfileEditor(),
+      builder: (BuildContext context) =>
+          const SecureScreen(child: DatingProfileEditor()),
     ),
   );
 
@@ -152,11 +155,11 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
     if (_enabled) {
       String? problem;
       if (_name.text.trim().isEmpty) {
-        problem = 'Wpisz imię.';
+        problem = t('Wpisz imię.');
       } else if (age < 18 || age > 120) {
-        problem = 'Wpisz wiek (co najmniej 18).';
+        problem = t('Wpisz wiek (co najmniej 18).');
       } else if (_wantGenders.isEmpty) {
-        problem = 'Zaznacz, kogo szukasz.';
+        problem = t('Zaznacz, kogo szukasz.');
       }
       if (problem != null) {
         ScaffoldMessenger.of(
@@ -209,20 +212,20 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
       builder: (BuildContext context) {
         final ZenColors zen = ZenColors.of(context);
         return SimpleDialog(
-          title: const Text('Kogo poprosić o kilka słów?'),
+          title: Text(t('Kogo poprosić o kilka słów?')),
           children: <Widget>[
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: ZenInfo(
                 icon: Icons.info_outline_rounded,
-                text: 'Ta osoba dowie się, że randkujesz.',
+                text: t('Ta osoba dowie się, że randkujesz.'),
               ),
             ),
             if (social.acceptedFriends.isEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
                 child: Text(
-                  'Nie masz jeszcze znajomych.',
+                  t('Nie masz jeszcze znajomych.'),
                   style: TextStyle(color: zen.textMuted),
                 ),
               ),
@@ -260,8 +263,8 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
       await _dating.requestVouch(friend);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Wysłane. Gdy odpisze, zatwierdzisz tekst tutaj.'),
+          SnackBar(
+            content: Text(t('Wysłane. Gdy odpisze, zatwierdzisz tekst tutaj.')),
           ),
         );
       }
@@ -294,12 +297,12 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
     return Scaffold(
       key: const Key('dating-editor'),
       appBar: AppBar(
-        title: const Text('Profil randkowy'),
+        title: Text(t('Profil randkowy')),
         actions: <Widget>[
           TextButton(
             key: const Key('dating-save'),
             onPressed: () => unawaited(_save()),
-            child: const Text('Zapisz'),
+            child: Text(t('Zapisz')),
           ),
           const SizedBox(width: 4),
         ],
@@ -318,23 +321,28 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                       : Icons.favorite_border_rounded,
                   color: _enabled ? tone : zen.textMuted,
                 ),
-                title: const Text('Randki włączone'),
-                subtitle: const Text(
-                  'Wyłączone: Twój profil przestaje się rozchodzić i po ~2 '
-                  'tygodniach znika u innych.',
+                title: Text(t('Randki włączone')),
+                subtitle: Text(
+                  t(
+                    'Wyłączone: Twój profil przestaje się rozchodzić i po ~2 '
+                    'tygodniach znika u innych.',
+                  ),
                 ),
                 onChanged: (bool v) => setState(() => _enabled = v),
               ),
             ],
           ),
-          const ZenSection('Zdjęcia'),
+          ZenSection(t('Zdjęcia')),
           ZenCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
-                  'Do $kDatingMaxPhotos zdjęć. Pierwsze jest główne — dotknij innego, '
-                  'żeby je nim zrobić.',
+                  t(
+                    'Do {count} zdjęć. Pierwsze jest główne — dotknij '
+                    'innego, żeby je nim zrobić.',
+                    {'count': kDatingMaxPhotos},
+                  ),
                   style: note,
                 ),
                 const SizedBox(height: 12),
@@ -358,7 +366,7 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                               bottom: 4,
                               child: IgnorePointer(
                                 child: ZenPill(
-                                  text: 'Główne',
+                                  text: t('Główne'),
                                   tone: tone,
                                   filled: true,
                                 ),
@@ -419,29 +427,29 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                           ? null
                           : () => unawaited(_pickPhotos()),
                       icon: const Icon(Icons.photo_library_rounded),
-                      label: const Text('Dodaj zdjęcia'),
+                      label: Text(t('Dodaj zdjęcia')),
                     ),
                     OutlinedButton.icon(
                       key: const Key('dating-from-main'),
                       onPressed: () => unawaited(_fromMain()),
                       icon: const Icon(Icons.content_copy_rounded),
-                      label: const Text('Weź z mojego profilu'),
+                      label: Text(t('Weź z mojego profilu')),
                     ),
                   ],
                 ),
               ],
             ),
           ),
-          const ZenSection('O Tobie'),
+          ZenSection(t('O Tobie')),
           TextField(
             key: const Key('dating-name'),
             controller: _name,
             maxLength: 40,
             textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
-              labelText: 'Imię',
-              hintText: 'np. Ola',
-              prefixIcon: Icon(Icons.badge_rounded),
+            decoration: InputDecoration(
+              labelText: t('Imię'),
+              hintText: t('np. Ola'),
+              prefixIcon: const Icon(Icons.badge_rounded),
             ),
           ),
           const SizedBox(height: 4),
@@ -449,14 +457,14 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
             key: const Key('dating-age'),
             controller: _age,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Wiek',
-              hintText: 'co najmniej 18',
-              prefixIcon: Icon(Icons.cake_rounded),
+            decoration: InputDecoration(
+              labelText: t('Wiek'),
+              hintText: t('co najmniej 18'),
+              prefixIcon: const Icon(Icons.cake_rounded),
             ),
           ),
           const SizedBox(height: 16),
-          Text('JESTEM', style: zen.label(color: zen.textMuted)),
+          Text(t('JESTEM'), style: zen.label(color: zen.textMuted)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 6,
@@ -477,9 +485,9 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
             minLines: 2,
             maxLength: 1000,
             textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              labelText: 'O mnie',
-              hintText: 'Co lubisz, czym się zajmujesz, co Cię śmieszy…',
+            decoration: InputDecoration(
+              labelText: t('O mnie'),
+              hintText: t('Co lubisz, czym się zajmujesz, co Cię śmieszy…'),
             ),
           ),
           const SizedBox(height: 4),
@@ -488,12 +496,12 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
             maxLines: 2,
             maxLength: 300,
             textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              labelText: 'Czego szukam',
-              hintText: 'np. kogoś na długie spacery i dłużej',
+            decoration: InputDecoration(
+              labelText: t('Czego szukam'),
+              hintText: t('np. kogoś na długie spacery i dłużej'),
             ),
           ),
-          const ZenSection('Kogo szukasz'),
+          ZenSection(t('Kogo szukasz')),
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -521,7 +529,7 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
               children: <Widget>[
                 Row(
                   children: <Widget>[
-                    Expanded(child: Text('Wiek', style: rowTitle)),
+                    Expanded(child: Text(t('Wiek'), style: rowTitle)),
                     ZenPill(
                       text: '${_ages.start.round()}–${_ages.end.round()}',
                       tone: tone,
@@ -539,10 +547,14 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                 Divider(height: 16, color: zen.outlineSoft),
                 Row(
                   children: <Widget>[
-                    Expanded(child: Text('Jak daleko', style: rowTitle)),
+                    Expanded(child: Text(t('Jak daleko'), style: rowTitle)),
                     ZenPill(
-                      text:
-                          '$_hops ${_hops == 1 ? 'krok' : 'kroki'} znajomości',
+                      text: tn(
+                        _hops,
+                        one: '{n} krok znajomości',
+                        few: '{n} kroki znajomości',
+                        many: '{n} kroków znajomości',
+                      ),
                       tone: tone,
                     ),
                   ],
@@ -559,25 +571,26 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
-                    '1 — Twoi znajomi, 2 — ich znajomi, 3 — o krok dalej.',
+                    t('1 — Twoi znajomi, 2 — ich znajomi, 3 — o krok dalej.'),
                     style: TextStyle(color: zen.textMuted, fontSize: 12.5),
                   ),
                 ),
               ],
             ),
           ),
-          const ZenSection('Ukryj przed'),
+          ZenSection(t('Ukryj przed')),
           ZenInfo(
             icon: Icons.visibility_off_rounded,
             tone: tone,
-            text:
-                'Ci ludzie nie zobaczą Twojego profilu (np. rodzina, praca). '
-                'Działa też, gdy profil dotrze do nich okrężną drogą.',
+            text: t(
+              'Ci ludzie nie zobaczą Twojego profilu (np. rodzina, praca). '
+              'Działa też, gdy profil dotrze do nich okrężną drogą.',
+            ),
           ),
           const SizedBox(height: 8),
           if (social.groups.isEmpty && social.acceptedFriends.isEmpty)
             Text(
-              'Nie masz jeszcze znajomych ani grup.',
+              t('Nie masz jeszcze znajomych ani grup.'),
               style: TextStyle(color: zen.textMuted, fontSize: 13.5),
             ),
           Wrap(
@@ -623,7 +636,7 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                 ),
             ],
           ),
-          const ZenSection('Znajomi o mnie'),
+          ZenSection(t('Znajomi o mnie')),
           ListenableBuilder(
             listenable: _dating,
             builder: (BuildContext context, Widget? _) => Column(
@@ -633,7 +646,10 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(
-                      'Kilka słów od znajomego mówi o Tobie więcej niż najlepszy opis.',
+                      t(
+                        'Kilka słów od znajomego mówi o Tobie więcej niż '
+                        'najlepszy opis.',
+                      ),
                       style: note,
                     ),
                   ),
@@ -668,8 +684,15 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                '${v.by} · ✓ podpisane'
-                                '${v.approved ? ' · na profilu' : ' · czeka na Twoją zgodę'}',
+                                v.approved
+                                    ? t('{name} · ✓ podpisane · na profilu', {
+                                        'name': v.by,
+                                      })
+                                    : t(
+                                        '{name} · ✓ podpisane · czeka na '
+                                        'Twoją zgodę',
+                                        {'name': v.by},
+                                      ),
                                 style: TextStyle(
                                   color: v.approved
                                       ? zen.textMuted
@@ -683,14 +706,14 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                         ),
                         if (!v.approved)
                           IconButton(
-                            tooltip: 'Pokaż na profilu',
+                            tooltip: t('Pokaż na profilu'),
                             color: zen.success,
                             icon: const Icon(Icons.check_rounded),
                             onPressed: () =>
                                 unawaited(_dating.setVouch(v.id, keep: true)),
                           ),
                         IconButton(
-                          tooltip: 'Usuń',
+                          tooltip: t('Usuń'),
                           icon: const Icon(Icons.delete_outline_rounded),
                           onPressed: () =>
                               unawaited(_dating.setVouch(v.id, keep: false)),
@@ -705,7 +728,7 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
           OutlinedButton.icon(
             onPressed: () => unawaited(_askVouch(social)),
             icon: const Icon(Icons.rate_review_rounded),
-            label: const Text('Poproś znajomego o kilka słów'),
+            label: Text(t('Poproś znajomego o kilka słów')),
           ),
         ],
       ),

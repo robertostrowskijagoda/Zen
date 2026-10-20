@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/crypto/ring_signature.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
@@ -254,11 +255,11 @@ final class PyrReport {
 }
 
 /// What a market message asks for (§24).
-const Map<String, String> kMarketKinds = <String, String>{
-  'inbox': 'Wiadomość (płatna skrzynka)',
-  'intro': 'Prośba o przedstawienie',
-  'reshare': 'Udostępnij moje ogłoszenie swojej gałęzi',
-  'ad': 'Ogłoszenie w sieci',
+Map<String, String> get kMarketKinds => <String, String>{
+  'inbox': t('Wiadomość (płatna skrzynka)'),
+  'intro': t('Prośba o przedstawienie'),
+  'reshare': t('Udostępnij moje ogłoszenie swojej gałęzi'),
+  'ad': t('Ogłoszenie w sieci'),
 };
 
 /// A message from the access market (§24), with the payment attached.
@@ -344,15 +345,15 @@ final class PyrMarketMessage {
 }
 
 /// Report reasons (§21.4).
-const Map<String, String> kReportReasons = <String, String>{
-  'illegal': 'Nielegalna treść',
-  'fake': 'Fałszywe konto',
-  'farm': 'Farma kont',
-  'harass': 'Nękanie',
-  'fraud': 'Oszustwo',
-  'spam': 'Spam',
-  'minor': 'Osoba niepełnoletnia (randki)',
-  'other': 'Inne',
+Map<String, String> get kReportReasons => <String, String>{
+  'illegal': t('Nielegalna treść'),
+  'fake': t('Fałszywe konto'),
+  'farm': t('Farma kont'),
+  'harass': t('Nękanie'),
+  'fraud': t('Oszustwo'),
+  'spam': t('Spam'),
+  'minor': t('Osoba niepełnoletnia (randki)'),
+  'other': t('Inne'),
 };
 
 /// The pyramid on this phone (§20–24, §28): keeps and spreads the signed
@@ -441,6 +442,10 @@ final class PyramidService extends ChangeNotifier {
   /// Appeals to the top: {rep, t, k, at, f} (report, text, member key, when
   /// received, sender device).
   final List<Map<String, dynamic>> appeals = <Map<String, dynamic>>[];
+
+  /// Appeals this person sent (the matter's id → when): an appeal is made
+  /// once (§21.4), and the screen shows that it is on its way.
+  final Map<String, int> sentAppeals = <String, int>{};
   final Map<String, PyrMarketMessage> market = <String, PyrMarketMessage>{};
 
   /// Exchange keys (§23.5) this person received as the one paid out: lock
@@ -718,6 +723,9 @@ final class PyramidService extends ChangeNotifier {
         _signedOrders
           ..clear()
           ..addAll(_strs(json['so']));
+        sentAppeals
+          ..clear()
+          ..addAll(_ints(json['apl']));
         myReports.clear();
         if (json['rep'] is List) {
           for (final Object? r in json['rep'] as List) {
@@ -949,6 +957,7 @@ final class PyramidService extends ChangeNotifier {
           'rep': <Map<String, dynamic>>[
             for (final PyrReport r in myReports.values) r.toJson(),
           ],
+          'apl': sentAppeals,
           'fxk': _fxKeys,
           'fxd': _fxDone,
           'fxo': _fxOut,
@@ -2940,13 +2949,13 @@ final class PyramidService extends ChangeNotifier {
   Future<PyramidRecord?> tip(
     String key,
     int amount, {
-    String memo = 'Napiwek za odpowiedź',
+    String? memo,
     String? pyramid,
   }) async {
     if (amount <= 0 || !canTip(key, pyramid: pyramid)) {
       return null;
     }
-    return pay(key, amount, memo: memo);
+    return pay(key, amount, memo: memo ?? t('Napiwek za odpowiedź'));
   }
 
   // ---- the access market (§24) ----
@@ -3211,8 +3220,10 @@ final class PyramidService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'pyr-dm-$id',
-        title:
-            '${kMarketKinds[kind] ?? kind} od ${s.members[origin ?? sender]?.name ?? '?'}',
+        title: t('{kind} od {name}', {
+          'kind': kMarketKinds[kind] ?? kind,
+          'name': s.members[origin ?? sender]?.name ?? '?',
+        }),
         body: text,
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.message,
@@ -3423,14 +3434,17 @@ final class PyramidService extends ChangeNotifier {
     }
     final String key = _newId(32);
     final String lock = sha256Hex(utf8.encode(key));
-    final int t = _now();
+    final int nowMs = _now();
     final PyramidRecord? order = await pay(
       via,
       cost,
-      memo:
-          'Wymiana: ${formatMoney(amount)} dla ${q.members[to]?.name ?? '?'} w „${q.name}”',
+      memo: t('Wymiana: {amount} dla {name} w „{pyramid}”', {
+        'amount': formatMoney(amount),
+        'name': q.members[to]?.name ?? '?',
+        'pyramid': q.name,
+      }),
       condBy: via,
-      condUntil: t + kPyrFxWaitMs,
+      condUntil: nowMs + kPyrFxWaitMs,
       lock: lock,
       fx: <String, dynamic>{'py': other, 'to': to, 'a': amount},
     );
@@ -3443,7 +3457,7 @@ final class PyramidService extends ChangeNotifier {
       'to': to,
       'p': s.id,
       'x': order.id,
-      'at': t,
+      'at': nowMs,
       'sent': 0,
     };
     _trimFx();
@@ -3601,7 +3615,7 @@ final class PyramidService extends ChangeNotifier {
     if (me == null || py == null || to == null) {
       return;
     }
-    final int t = _now();
+    final int nowMs = _now();
     final int until = e.until - kPyrFxMarginMs;
     final PyramidState? q = _stateFor(py);
     final PyrFxRate? rate = q?.fxRates[me]?[s.id];
@@ -3614,7 +3628,7 @@ final class PyramidService extends ChangeNotifier {
         e.fxAmount <= 0 ||
         e.fxAmount > rate.payout(e.amount) ||
         (rate.max > 0 && e.fxAmount > rate.max) ||
-        until - t < kPyrFxMinPayoutMs ||
+        until - nowMs < kPyrFxMinPayoutMs ||
         q.balanceOf(me) - heldEmission(me, q) < e.fxAmount) {
       // Not possible (no offer, not enough money, too late): the payment
       // goes back now instead of waiting for days.
@@ -3631,7 +3645,10 @@ final class PyramidService extends ChangeNotifier {
     final PyramidRecord? order = await pay(
       to,
       e.fxAmount,
-      memo: 'Wymiana od ${s.members[e.from]?.name ?? '?'} z „${s.name}”',
+      memo: t('Wymiana od {name} z „{pyramid}”', {
+        'name': s.members[e.from]?.name ?? '?',
+        'pyramid': s.name,
+      }),
       condBy: to,
       condUntil: until,
       lock: e.lock,
@@ -4069,7 +4086,7 @@ final class PyramidService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'pyr-report-${r.id}',
-        title: 'Nowe zgłoszenie',
+        title: t('Nowe zgłoszenie'),
         body: kReportReasons[r.reason] ?? r.reason,
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
@@ -4146,11 +4163,21 @@ final class PyramidService extends ChangeNotifier {
     await _save();
   }
 
-  Future<void> appeal(String reportId, String text) async {
+  /// An appeal to the top against a decision (§21.4): [reportId] is the id
+  /// of the matter — the ban (or the report) it concerns — and [text] a
+  /// short reason. Once per matter; false when nothing was sent (not a
+  /// member, no reason, or it was appealed before). The top answers by
+  /// lifting the ban, which every phone sees in the state.
+  Future<bool> appeal(String reportId, String text) async {
     final PyramidState? s = state;
     final String? me = myKey;
-    if (s == null || me == null) {
-      return;
+    if (s == null ||
+        me == null ||
+        reportId.isEmpty ||
+        reportId.length > 64 ||
+        text.trim().isEmpty ||
+        sentAppeals.containsKey(reportId)) {
+      return false;
     }
     for (final String k in s.topCell) {
       final String addr = s.members[k]?.addr ?? '';
@@ -4171,6 +4198,19 @@ final class PyramidService extends ChangeNotifier {
         });
       }
     }
+    sentAppeals[reportId] = _now();
+    // Only the newest are remembered.
+    while (sentAppeals.length > kPyrMyReportsKept) {
+      final String oldest = sentAppeals.entries
+          .reduce(
+            (MapEntry<String, int> a, MapEntry<String, int> b) =>
+                b.value < a.value ? b : a,
+          )
+          .key;
+      sentAppeals.remove(oldest);
+    }
+    await _save();
+    return true;
   }
 
   // ---- crisis over Bluetooth (§28.1) ----
@@ -4206,13 +4246,13 @@ final class PyramidService extends ChangeNotifier {
     if (r == null || r.type != PyrT.alarm || _crisisSeen.contains(r.id)) {
       return;
     }
-    final int t = _now();
+    final int nowMs = _now();
     final int until = r.integer('until') > r.at
         ? r.integer('until')
         : r.at + 24 * 3600 * 1000;
-    if (r.at > t + kPyrMaxSkewMs ||
-        t - r.at > 3 * 24 * 3600 * 1000 ||
-        t >= until) {
+    if (r.at > nowMs + kPyrMaxSkewMs ||
+        nowMs - r.at > 3 * 24 * 3600 * 1000 ||
+        nowMs >= until) {
       return;
     }
     if (!await r.verifySigners()) {
@@ -4232,7 +4272,7 @@ final class PyramidService extends ChangeNotifier {
         final PyramidState trial = PyramidState.fold(
           py,
           <PyramidRecord>[..._records.values, r],
-          now: max(t, r.at),
+          now: max(nowMs, r.at),
           treasurerSigs: _tsigs,
         );
         valid = trial.alarms.any((PyrAlarm a) => a.id == r.id);
@@ -4245,9 +4285,11 @@ final class PyramidService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'pyr-crisis-${r.id}',
-        title: valid ? '⚠️ Komunikat kryzysowy' : 'Komunikat (niesprawdzony)',
+        title: valid
+            ? t('⚠️ Komunikat kryzysowy')
+            : t('Komunikat (niesprawdzony)'),
         body: r.str('text'),
-        createdAtMillis: t,
+        createdAtMillis: nowMs,
         category: RuntimeSystemNotificationCategory.alarm,
         slotKey: 'pyr-crisis',
       ),
@@ -4568,9 +4610,9 @@ final class PyramidService extends ChangeNotifier {
         r.sigs.containsKey(me)) {
       return;
     }
-    final int t = _now();
+    final int nowMs = _now();
     // Never anything dated ahead (it would wait as a time bomb).
-    if (r.at > t + kPyrMaxSkewMs) {
+    if (r.at > nowMs + kPyrMaxSkewMs) {
       return;
     }
     // From a friend, a member who signed it, or a merge asking this person
@@ -4588,7 +4630,7 @@ final class PyramidService extends ChangeNotifier {
     // A fresh copy of something this person already signed: signed again
     // without asking (the content is the same, only the time is now).
     final int? agreed = _consent[_contentKey(r)];
-    if (agreed != null && agreed > t && t - r.at <= kPyrMaxSkewMs) {
+    if (agreed != null && agreed > nowMs && nowMs - r.at <= kPyrMaxSkewMs) {
       await _cosign(r, need.clamp(1, 20), from);
       return;
     }
@@ -4627,7 +4669,7 @@ final class PyramidService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'pyr-prop-${r.id}',
-        title: 'Piramida: do podpisania',
+        title: t('Piramida: do podpisania'),
         body: describeRecord(r),
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
@@ -4670,34 +4712,58 @@ final class PyramidService extends ChangeNotifier {
             ? (r.body['m'] as Map)['n'] as String? ?? '?'
             : '?');
     return switch (r.type) {
-      PyrT.admit =>
-        'Przyjęcie do komórki: ${(r.body['m'] as Map?)?['n'] ?? '?'}',
-      PyrT.swap => 'Zamiana: ${name(r.str('up'))} zostaje szefem komórki',
-      PyrT.fill => 'Wolne miejsce zajmuje ${name(r.str('up'))}',
-      PyrT.absent =>
-        'Uznanie miejsca ${name(r.str('k'))} za wolne (nieobecność)',
-      PyrT.remove => 'Usunięcie ${name(r.str('k'))} z piramidy',
+      PyrT.admit => t('Przyjęcie do komórki: {name}', {
+        'name': (r.body['m'] as Map?)?['n'] ?? '?',
+      }),
+      PyrT.swap => t('Zamiana: {name} zostaje szefem komórki', {
+        'name': name(r.str('up')),
+      }),
+      PyrT.fill => t('Wolne miejsce zajmuje {name}', {
+        'name': name(r.str('up')),
+      }),
+      PyrT.absent => t('Uznanie miejsca {name} za wolne (nieobecność)', {
+        'name': name(r.str('k')),
+      }),
+      PyrT.remove => t('Usunięcie {name} z piramidy', {
+        'name': name(r.str('k')),
+      }),
       PyrT.migrate =>
         r.body['branch'] == true
-            ? 'Przejście ${name(r.str('k'))} z całą gałęzią pod ${name(r.str('to'))}'
-            : 'Przejście ${name(r.str('k'))} pod ${name(r.str('to'))}',
-      PyrT.transfer =>
-        'Przelew ${formatMoney(r.integer('amount'))} dla ${name(r.str('to'))}',
-      PyrT.delegate => 'Delegacja „${r.str('power')}” dla ${name(r.str('to'))}',
-      PyrT.ban => 'Ban (${r.str('kind')}) dla ${name(r.str('target'))}',
-      PyrT.unban => 'Uchylenie bana',
-      PyrT.decision => 'Decyzja w sprawie zgłoszenia',
-      PyrT.referendum => 'Referendum: ${r.str('q')}',
-      PyrT.constitution => 'Zmiana zasad piramidy',
-      PyrT.emit =>
-        'Emisja ${formatMoney(r.integer('amount'))} dla ${name(r.str('to'))}',
-      PyrT.alarm => 'Ogłoszenie alarmowe: ${r.str('text')}',
+            ? t('Przejście {name} z całą gałęzią pod {head}', {
+                'name': name(r.str('k')),
+                'head': name(r.str('to')),
+              })
+            : t('Przejście {name} pod {head}', {
+                'name': name(r.str('k')),
+                'head': name(r.str('to')),
+              }),
+      PyrT.transfer => t('Przelew {amount} dla {name}', {
+        'amount': formatMoney(r.integer('amount')),
+        'name': name(r.str('to')),
+      }),
+      PyrT.delegate => t('Delegacja „{power}” dla {name}', {
+        'power': r.str('power'),
+        'name': name(r.str('to')),
+      }),
+      PyrT.ban => t('Ban ({kind}) dla {name}', {
+        'kind': r.str('kind'),
+        'name': name(r.str('target')),
+      }),
+      PyrT.unban => t('Uchylenie bana'),
+      PyrT.decision => t('Decyzja w sprawie zgłoszenia'),
+      PyrT.referendum => t('Referendum: {question}', {'question': r.str('q')}),
+      PyrT.constitution => t('Zmiana zasad piramidy'),
+      PyrT.emit => t('Emisja {amount} dla {name}', {
+        'amount': formatMoney(r.integer('amount')),
+        'name': name(r.str('to')),
+      }),
+      PyrT.alarm => t('Ogłoszenie alarmowe: {text}', {'text': r.str('text')}),
       PyrT.merge =>
         r.body['rate'] is Map
-            ? 'Połączenie piramid (z przeliczeniem pieniędzy)'
-            : 'Połączenie piramid',
-      PyrT.merged => 'Ta piramida staje się gałęzią innej',
-      PyrT.fxRate => 'Kurs wymiany',
+            ? t('Połączenie piramid (z przeliczeniem pieniędzy)')
+            : t('Połączenie piramid'),
+      PyrT.merged => t('Ta piramida staje się gałęzią innej'),
+      PyrT.fxRate => t('Kurs wymiany'),
       _ => r.type,
     };
   }
@@ -4714,10 +4780,12 @@ final class PyramidService extends ChangeNotifier {
   static String _span(int ms) {
     final int minutes = ms ~/ 60000;
     if (minutes < 120) {
-      return '$minutes min';
+      return t('{minutes} min', {'minutes': minutes});
     }
     final int hours = minutes ~/ 60;
-    return hours < 48 ? '$hours h' : '${hours ~/ 24} dni';
+    return hours < 48
+        ? t('{hours} h', {'hours': hours})
+        : tn(hours ~/ 24, one: '{n} dzień', few: '{n} dni', many: '{n} dni');
   }
 
   static String _short(String id) =>
@@ -4729,7 +4797,7 @@ final class PyramidService extends ChangeNotifier {
   /// referendum's kind, reach, end and new rules, where a pyramid goes.
   List<String> recordDetails(PyramidRecord r) {
     final PyramidState? s = state;
-    final int t = _now();
+    final int nowMs = _now();
     String name(Object? k) {
       if (k is! String || k.isEmpty) {
         return '—';
@@ -4749,109 +4817,188 @@ final class PyramidService extends ChangeNotifier {
           : const <String, dynamic>{};
       return switch (m['k']) {
         'branch' =>
-          'gałąź ${m['p'] is String && (m['p'] as String).isNotEmpty ? m['p'] : '(szczyt)'}',
-        'nat' => 'narodowość ${m['nat'] ?? '?'}',
-        _ => 'cała piramida',
+          m['p'] is String && (m['p'] as String).isNotEmpty
+              ? t('gałąź {path}', {'path': m['p']})
+              : t('gałąź (szczyt)'),
+        'nat' => t('narodowość {nat}', {'nat': m['nat'] ?? '?'}),
+        _ => t('cała piramida'),
       };
     }
 
-    final List<String> out = <String>['Czas rekordu: ${_when(r.at)}'];
-    final int skew = r.at - t;
+    final List<String> out = <String>[
+      t('Czas rekordu: {time}', {'time': _when(r.at)}),
+    ];
+    final int skew = r.at - nowMs;
     if (skew > kPyrMaxSkewMs) {
       out.add(
-        'Uwaga: czas z przyszłości (za ${_span(skew)}) — taki rekord nie zostanie podpisany.',
+        t(
+          'Uwaga: czas z przyszłości (za {span}) — taki rekord nie zostanie podpisany.',
+          {'span': _span(skew)},
+        ),
       );
     } else if (-skew > kPyrMaxSkewMs) {
       out.add(
-        'Uwaga: rekord sprzed ${_span(-skew)} — podpis wyśle świeżą kopię z obecnym czasem.',
+        t(
+          'Uwaga: rekord sprzed {span} — podpis wyśle świeżą kopię z obecnym czasem.',
+          {'span': _span(-skew)},
+        ),
       );
     }
     final String via = r.str('via');
     if (via.isNotEmpty) {
-      out.add('Przez delegację: ${_short(via)}');
+      out.add(t('Przez delegację: {id}', {'id': _short(via)}));
     }
     switch (r.type) {
       case PyrT.transfer:
         out
-          ..add('Z: ${account(r.str('from'))} → do: ${account(r.str('to'))}')
           ..add(
-            'Kwota: ${formatMoney(r.integer('amount'))} · numer zlecenia ${r.integer('seq')}',
+            t('Z: {from} → do: {to}', {
+              'from': account(r.str('from')),
+              'to': account(r.str('to')),
+            }),
+          )
+          ..add(
+            t('Kwota: {amount} · numer zlecenia {seq}', {
+              'amount': formatMoney(r.integer('amount')),
+              'seq': r.integer('seq'),
+            }),
           );
         if (r.str('memo').isNotEmpty) {
-          out.add('Tytuł: ${r.str('memo')}');
+          out.add(t('Tytuł: {memo}', {'memo': r.str('memo')}));
         }
         final Object? cond = r.body['cond'];
         if (cond is Map) {
           out.add(
-            'Warunek: decyduje ${name(cond['by'])}, zwrot po ${cond['until'] is int ? _when(cond['until'] as int) : '7 dniach'}',
+            cond['until'] is int
+                ? t('Warunek: decyduje {name}, zwrot po {time}', {
+                    'name': name(cond['by']),
+                    'time': _when(cond['until'] as int),
+                  })
+                : t('Warunek: decyduje {name}, zwrot po 7 dniach', {
+                    'name': name(cond['by']),
+                  }),
           );
           if (cond['hl'] is String) {
-            out.add('Wymiana między piramidami: przyjęcie tylko z kluczem');
+            out.add(t('Wymiana między piramidami: przyjęcie tylko z kluczem'));
           }
         }
       case PyrT.settle:
         out.add(
           r.body['ok'] == true
-              ? 'Rozliczenie: przyjęcie płatności ${_short(r.str('x'))}'
-              : 'Rozliczenie: zwrot płatności ${_short(r.str('x'))}',
+              ? t('Rozliczenie: przyjęcie płatności {id}', {
+                  'id': _short(r.str('x')),
+                })
+              : t('Rozliczenie: zwrot płatności {id}', {
+                  'id': _short(r.str('x')),
+                }),
         );
       case PyrT.delegate:
         out
           ..add(
-            'Uprawnienie: ${r.str('power')} · zakres: ${r.str('scope').isEmpty ? 'cała piramida' : 'gałąź ${r.str('scope')}'}',
+            t('Uprawnienie: {power} · zakres: {scope}', {
+              'power': r.str('power'),
+              'scope': r.str('scope').isEmpty
+                  ? t('cała piramida')
+                  : t('gałąź {path}', {'path': r.str('scope')}),
+            }),
           )
           ..add(
-            'Limit: ${r.integer('limit') > 0 ? '${r.integer('limit')} na 30 dni' : 'bez limitu'} · ważna do ${_when(r.integer('until'))}',
+            t('Limit: {limit} · ważna do {time}', {
+              'limit': r.integer('limit') > 0
+                  ? t('{count} na 30 dni', {'count': r.integer('limit')})
+                  : t('bez limitu'),
+              'time': _when(r.integer('until')),
+            }),
           )
           ..add(
             r.body['sub'] == true
-                ? 'Może delegować dalej'
-                : 'Bez dalszego delegowania',
+                ? t('Może delegować dalej')
+                : t('Bez dalszego delegowania'),
           );
         if (r.str('parent').isNotEmpty) {
-          out.add('Przekazana z delegacji ${_short(r.str('parent'))}');
+          out.add(
+            t('Przekazana z delegacji {id}', {'id': _short(r.str('parent'))}),
+          );
         }
       case PyrT.revoke:
         final Object? acts = r.body['acts'];
         out.add(
-          'Delegacja ${_short(r.str('d'))}${acts is List ? ' · znane akty: ${acts.length}' : ''}',
+          acts is List
+              ? t('Delegacja {id} · znane akty: {count}', {
+                  'id': _short(r.str('d')),
+                  'count': acts.length,
+                })
+              : t('Delegacja {id}', {'id': _short(r.str('d'))}),
         );
       case PyrT.ban:
         out.add(
-          'Rodzaj: ${r.str('kind')} · dla: ${name(r.str('target'))} · ${r.body['until'] is int ? 'do ${_when(r.body['until'] as int)}' : 'bez końca'}',
+          t('Rodzaj: {kind} · dla: {name} · {until}', {
+            'kind': r.str('kind'),
+            'name': name(r.str('target')),
+            'until': r.body['until'] is int
+                ? t('do {time}', {'time': _when(r.body['until'] as int)})
+                : t('bez końca'),
+          }),
         );
         if (r.str('reason').isNotEmpty) {
-          out.add('Powód: ${r.str('reason')}');
+          out.add(t('Powód: {reason}', {'reason': r.str('reason')}));
         }
       case PyrT.referendum:
         out
           ..add(
-            'Rodzaj: ${r.str('kind').isEmpty ? 'normal' : r.str('kind')} · zasięg: ${scope(r.body['scope'])}',
+            t('Rodzaj: {kind} · zasięg: {scope}', {
+              'kind': r.str('kind').isEmpty ? 'normal' : r.str('kind'),
+              'scope': scope(r.body['scope']),
+            }),
           )
-          ..add('Głosowanie do ${_when(r.integer('end'))}');
+          ..add(t('Głosowanie do {time}', {'time': _when(r.integer('end'))}));
         if (r.body['opts'] is List) {
           out.add(
-            'Opcje: ${(r.body['opts'] as List).whereType<String>().join(', ')}',
+            t('Opcje: {options}', {
+              'options': (r.body['opts'] as List).whereType<String>().join(
+                ', ',
+              ),
+            }),
           );
         }
         if (r.body['params'] is Map) {
-          out.add('Nowe zasady: ${jsonEncode(r.body['params'])}');
+          out.add(
+            t('Nowe zasady: {params}', {
+              'params': jsonEncode(r.body['params']),
+            }),
+          );
         }
       case PyrT.constitution:
         out.add(
-          'Referendum: ${s?.referenda[r.str('ref')]?.question ?? _short(r.str('ref'))}',
+          t('Referendum: {question}', {
+            'question':
+                s?.referenda[r.str('ref')]?.question ?? _short(r.str('ref')),
+          }),
         );
       case PyrT.emit:
         out.add(
-          'Dla: ${name(r.str('to'))} · ${formatMoney(r.integer('amount'))} · uzasadnienie: ${r.str('why')}',
+          t('Dla: {name} · {amount} · uzasadnienie: {why}', {
+            'name': name(r.str('to')),
+            'amount': formatMoney(r.integer('amount')),
+            'why': r.str('why'),
+          }),
         );
       case PyrT.alarm:
         out.add(
-          'Zasięg: ${scope(r.body['scope'])} · ważne do ${_when(r.integer('until'))}',
+          t('Zasięg: {scope} · ważne do {time}', {
+            'scope': scope(r.body['scope']),
+            'time': _when(r.integer('until')),
+          }),
         );
       case PyrT.merge:
         out.add(
-          'Piramida ${_short(r.str('from'))} dołącza pod ${name(r.str('under'))} · osób: ${r.body['snap'] is List ? (r.body['snap'] as List).length : 0}',
+          t('Piramida {id} dołącza pod {name} · osób: {count}', {
+            'id': _short(r.str('from')),
+            'name': name(r.str('under')),
+            'count': r.body['snap'] is List
+                ? (r.body['snap'] as List).length
+                : 0,
+          }),
         );
         final Object? rate = r.body['rate'];
         int total = 0;
@@ -4872,14 +5019,26 @@ final class PyramidService extends ChangeNotifier {
               ? rate['d'] as int
               : 1;
           out.add(
-            'Pieniądze przechodzą: ${formatMoney(total)} po kursie $numer:$denom ≈ ${formatMoney(pyrConvert(total, numer, denom))} tutaj (jak emisja: limit 30 dni, czeka, można zawetować)',
+            t(
+              'Pieniądze przechodzą: {amount} po kursie {numer}:{denom} ≈ '
+              '{converted} tutaj (jak emisja: limit 30 dni, czeka, można '
+              'zawetować)',
+              {
+                'amount': formatMoney(total),
+                'numer': numer,
+                'denom': denom,
+                'converted': formatMoney(pyrConvert(total, numer, denom)),
+              },
+            ),
           );
           final String from = r.str('from');
           final PyramidState? old = knownPyramids.contains(from)
               ? _foldUpTo(from, r.integer('cut'))
               : null;
           if (old == null) {
-            out.add('Salda nie sprawdzone: ten telefon nie zna tej piramidy.');
+            out.add(
+              t('Salda nie sprawdzone: ten telefon nie zna tej piramidy.'),
+            );
           } else {
             int real = 0;
             for (final int v in _moneyOf(old).values) {
@@ -4887,23 +5046,32 @@ final class PyramidService extends ChangeNotifier {
             }
             out.add(
               real == total
-                  ? 'Salda zgadzają się z tym, co widzi ten telefon.'
-                  : 'Uwaga: ten telefon widzi inne salda (${formatMoney(real)}).',
+                  ? t('Salda zgadzają się z tym, co widzi ten telefon.')
+                  : t('Uwaga: ten telefon widzi inne salda ({amount}).', {
+                      'amount': formatMoney(real),
+                    }),
             );
           }
         }
       case PyrT.merged:
-        out.add('Staje się gałęzią piramidy ${_short(r.str('into'))}');
+        out.add(
+          t('Staje się gałęzią piramidy {id}', {'id': _short(r.str('into'))}),
+        );
         if (r.body['cut'] is int) {
           out.add(
-            'Przelewy po ${_when(r.integer('cut'))} już się tu nie liczą (pieniądze przeszły).',
+            t('Przelewy po {time} już się tu nie liczą (pieniądze przeszły).', {
+              'time': _when(r.integer('cut')),
+            }),
           );
         }
       case PyrT.fxRate:
         out.add(
           r.integer('n') == 0
-              ? 'Wycofanie kursu'
-              : 'Za ${formatMoney(r.integer('d'))} z innej piramidy wypłaca tu ${formatMoney(r.integer('n'))}',
+              ? t('Wycofanie kursu')
+              : t('Za {amount} z innej piramidy wypłaca tu {payout}', {
+                  'amount': formatMoney(r.integer('d')),
+                  'payout': formatMoney(r.integer('n')),
+                }),
         );
     }
     return out;
@@ -4917,7 +5085,7 @@ final class PyramidService extends ChangeNotifier {
     if (s == null || me == null) {
       return;
     }
-    final int t = _now();
+    final int nowMs = _now();
     final List<String> up = s.lineUp(me);
     Future<void> tell(
       String id,
@@ -4934,7 +5102,7 @@ final class PyramidService extends ChangeNotifier {
           id: 'pyr-$id',
           title: title,
           body: body,
-          createdAtMillis: t,
+          createdAtMillis: nowMs,
           category: cat,
           slotKey: 'pyr-$id',
         ),
@@ -4946,17 +5114,23 @@ final class PyramidService extends ChangeNotifier {
     if (!(before?.isMember(me) ?? false) && s.isMember(me) && s.head != me) {
       await tell(
         'joined-${s.id}',
-        'Jesteś w piramidzie',
-        'Poziom ${s.levelOf(me)} w „${s.name}”.',
+        t('Jesteś w piramidzie'),
+        t('Poziom {level} w „{pyramid}”.', {
+          'level': s.levelOf(me),
+          'pyramid': s.name,
+        }),
       );
     }
     for (final PyrPost p in s.posts.values) {
       if (p.author != me &&
           (up.contains(p.author)) &&
-          t - p.at < 7 * 24 * 3600 * 1000) {
+          nowMs - p.at < 7 * 24 * 3600 * 1000) {
         await tell(
           'post-${p.id}',
-          'Poziom ${p.level}: ${s.members[p.author]?.name ?? ''}',
+          t('Poziom {level}: {name}', {
+            'level': p.level,
+            'name': s.members[p.author]?.name ?? '',
+          }),
           p.text,
         );
       }
@@ -4968,35 +5142,48 @@ final class PyramidService extends ChangeNotifier {
         'nat' => s.members[me]?.nat == a.scopeNat,
         _ => true,
       };
-      if (mine && t < a.until) {
+      if (mine && nowMs < a.until) {
         await tell(
           'alarm-${a.id}',
-          '⚠️ Ogłoszenie alarmowe',
+          t('⚠️ Ogłoszenie alarmowe'),
           a.text,
           cat: RuntimeSystemNotificationCategory.alarm,
         );
       }
     }
     for (final PyrReferendum r in s.referenda.values) {
-      if (s.eligible(r, me) && t < r.end) {
-        await tell('ref-${r.id}', 'Referendum', r.question);
+      if (s.eligible(r, me) && nowMs < r.end) {
+        await tell('ref-${r.id}', t('Referendum'), r.question);
       }
     }
     for (final PyrElection e in s.elections.values) {
       if (!e.closed && e.ring.contains(me)) {
         await tell(
           'elect-${e.id}',
-          'Głosowanie w komórce',
-          'Ktoś z komórki chce wybrać szefa na nowo. Zagłosuj w ciągu ${s.params.electionHours} h.',
+          t('Głosowanie w komórce'),
+          t(
+            'Ktoś z komórki chce wybrać szefa na nowo. Zagłosuj w ciągu '
+            '{hours} h.',
+            {'hours': s.params.electionHours},
+          ),
         );
       }
     }
     for (final PyrTransferInfo x in s.transfers) {
-      if (x.to == me && t - x.at < 7 * 24 * 3600 * 1000) {
+      if (x.to == me && nowMs - x.at < 7 * 24 * 3600 * 1000) {
         await tell(
           'pay-${x.id}',
-          'Wpłata',
-          '${formatMoney(x.amount)} od ${s.members[x.from]?.name ?? x.from}${x.memo.isEmpty ? '' : ' — ${x.memo}'}',
+          t('Wpłata'),
+          x.memo.isEmpty
+              ? t('{amount} od {name}', {
+                  'amount': formatMoney(x.amount),
+                  'name': s.members[x.from]?.name ?? x.from,
+                })
+              : t('{amount} od {name} — {memo}', {
+                  'amount': formatMoney(x.amount),
+                  'name': s.members[x.from]?.name ?? x.from,
+                  'memo': x.memo,
+                }),
         );
       }
     }
@@ -5006,27 +5193,41 @@ final class PyramidService extends ChangeNotifier {
       if (!e.done && !e.vetoed && e.vetoers.contains(me)) {
         await tell(
           'emit-$id',
-          e.group == null ? 'Emisja czeka 24 h' : 'Przeliczenie po połączeniu',
           e.group == null
-              ? '${formatMoney(e.amount)} — możesz zawetować.'
-              : 'Pieniądze dołączonej piramidy czekają — możesz zawetować.',
+              ? t('Emisja czeka 24 h')
+              : t('Przeliczenie po połączeniu'),
+          e.group == null
+              ? t('{amount} — możesz zawetować.', {
+                  'amount': formatMoney(e.amount),
+                })
+              : t('Pieniądze dołączonej piramidy czekają — możesz zawetować.'),
         );
       } else if (seenLate(id) && canVeto(e)) {
         // It reached this phone after its own time: maybe back-dated past
         // the veto window. The veto is still possible (§23.4).
         await tell(
           'emit-late-$id',
-          'Emisja dotarła z opóźnieniem',
+          t('Emisja dotarła z opóźnieniem'),
           e.group == null
-              ? '${formatMoney(e.amount)} dla ${s.members[e.to]?.name ?? '?'} — możliwe antydatowanie. Możesz ją zawetować.'
-              : 'Przeliczenie pieniędzy po połączeniu — możliwe antydatowanie. Możesz je zawetować.',
+              ? t(
+                  '{amount} dla {name} — możliwe antydatowanie. Możesz ją '
+                  'zawetować.',
+                  {
+                    'amount': formatMoney(e.amount),
+                    'name': s.members[e.to]?.name ?? '?',
+                  },
+                )
+              : t(
+                  'Przeliczenie pieniędzy po połączeniu — możliwe '
+                  'antydatowanie. Możesz je zawetować.',
+                ),
           cat: RuntimeSystemNotificationCategory.alarm,
         );
       }
     }
     for (final MapEntry<String, String> d in s.decisions.entries) {
       if (myReports.containsKey(d.key)) {
-        await tell('dec-${d.key}', 'Decyzja w Twoim zgłoszeniu', d.value);
+        await tell('dec-${d.key}', t('Decyzja w Twoim zgłoszeniu'), d.value);
       }
     }
     await _retryHeld();

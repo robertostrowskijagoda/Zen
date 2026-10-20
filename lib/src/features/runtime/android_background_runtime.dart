@@ -8,6 +8,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/i18n/zen_language_preference.dart';
 import 'package:zen/src/app/persistent_stores.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
@@ -33,7 +35,6 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/nearby_keeper.dart';
-import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_signal_bridge.dart';
@@ -182,22 +183,22 @@ String _backgroundServiceNotificationText(
   AndroidBackgroundRuntimeMode mode = AndroidBackgroundRuntimeMode.active,
 }) {
   if (mode == AndroidBackgroundRuntimeMode.standby) {
-    return 'Zen jest gotowy';
+    return t('Zen jest gotowy');
   }
   if (session == null) {
-    return 'Zen działa w tle';
+    return t('Zen działa w tle');
   }
   if (session.status == CallSessionStatus.ringing) {
     // An incoming ring already has its own full-screen call notification with
     // the accept/decline buttons; repeating it here put two entries for one
     // call in the shade.
     return session.isIncoming
-        ? 'Zen działa w tle'
-        : 'Wywoływanie ${session.displayName}';
+        ? t('Zen działa w tle')
+        : t('Wywoływanie {name}', {'name': session.displayName});
   }
   return session.kind == CallInviteKind.video
-      ? 'Aktywna rozmowa wideo z ${session.displayName}'
-      : 'Aktywna rozmowa audio z ${session.displayName}';
+      ? t('Aktywna rozmowa wideo z {name}', {'name': session.displayName})
+      : t('Aktywna rozmowa audio z {name}', {'name': session.displayName});
 }
 
 /// Heads-up for a service parked without an unlocked key (password mode).
@@ -214,9 +215,11 @@ Future<bool> showLockedBackgroundRuntimeNotice(
   return service.show(
     RuntimeSystemNotification(
       id: 'background-runtime-locked',
-      title: 'Zen czeka na odblokowanie',
-      body:
-          'Połączenia przychodzące nie będą odbierane, dopóki nie odblokujesz aplikacji.',
+      title: t('Zen czeka na odblokowanie'),
+      body: t(
+        'Połączenia przychodzące nie będą odbierane, dopóki nie odblokujesz '
+        'aplikacji.',
+      ),
       createdAtMillis: createdAtMillis,
       routeKey: buildInboxRouteKey(),
       slotKey: 'background-runtime-locked',
@@ -250,8 +253,8 @@ Future<bool> showBackgroundRuntimeStoppedNotice(
   return service.show(
     RuntimeSystemNotification(
       id: kBackgroundRuntimeStoppedSlot,
-      title: 'Zen nie odbiera w tle',
-      body: 'Android zatrzymał działanie w tle. Dotknij, żeby wznowić.',
+      title: t('Zen nie odbiera w tle'),
+      body: t('Android zatrzymał działanie w tle. Dotknij, żeby wznowić.'),
       createdAtMillis: createdAtMillis,
       routeKey: buildInboxRouteKey(),
       slotKey: kBackgroundRuntimeStoppedSlot,
@@ -551,11 +554,12 @@ final class FlutterForegroundAndroidBackgroundServiceController
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: kAndroidBackgroundChannelId,
-        channelName: 'Zen — działanie w tle',
-        channelDescription:
-            'Ciche powiadomienie, którego Android wymaga, żeby Zen odbierał '
-            'wiadomości i połączenia w tle. Bez ikony na pasku stanu; '
-            'można je przesunąć albo całkiem wyłączyć — Zen działa dalej.',
+        channelName: t('Zen — działanie w tle'),
+        channelDescription: t(
+          'Ciche powiadomienie, którego Android wymaga, żeby Zen odbierał '
+          'wiadomości i połączenia w tle. Bez ikony na pasku stanu; '
+          'można je przesunąć albo całkiem wyłączyć — Zen działa dalej.',
+        ),
         // Minimum: no icon in the status bar, folded at the bottom of the
         // shade, nothing on the lock screen.
         channelImportance: NotificationChannelImportance.MIN,
@@ -1649,6 +1653,12 @@ final class HeadlessBackgroundRuntimeCoordinator {
       await _meetInbox.handle(frame);
       return;
     }
+    if ((type == 'ping' || type == 'pong') &&
+        _container.read(socialHubControllerProvider).snapshotUnreadable) {
+      // The stored friend list could not be read: every friend would look
+      // like a stranger. Presence waits - no answer, nothing recorded.
+      return;
+    }
     // Presence is friend-gated exactly like in the foreground: never reveal
     // our state to, or take state from, a peer we have not accepted.
     final bool isAcceptedFriend = _isAcceptedFriend(from);
@@ -1656,21 +1666,10 @@ final class HeadlessBackgroundRuntimeCoordinator {
         !isAcceptedFriend && _isAcceptedFriendOrGroupMember(from);
     if (type == 'ping') {
       if (!isAcceptedFriend && !isGroupMember) {
-        final FriendProfile? profile = _container
-            .read(socialHubControllerProvider)
-            .friendByAddress(from);
-        final FriendRelationshipStatus status =
-            profile?.status ?? FriendRelationshipStatus.none;
-        if (status == FriendRelationshipStatus.none) {
-          await environment.transport.send(
-            remoteAddress: from,
-            payload: const <String, dynamic>{
-              'type': 'friend_remove',
-              // A reflex reply to a stranger: never queued or retried.
-              kSendOnceKey: true,
-            },
-          );
-        }
+        // No answer at all to a peer we do not know: any reply would confirm
+        // that this device is online at this address. (An automatic
+        // `friend_remove` used to go back, which also ended real friendships
+        // whenever this side had only lost its friend list.)
         return;
       }
       await environment.transport.send(
@@ -1688,21 +1687,7 @@ final class HeadlessBackgroundRuntimeCoordinator {
     }
     if (type == 'pong') {
       if (!isAcceptedFriend && !isGroupMember) {
-        final FriendProfile? profile = _container
-            .read(socialHubControllerProvider)
-            .friendByAddress(from);
-        final FriendRelationshipStatus status =
-            profile?.status ?? FriendRelationshipStatus.none;
-        if (status == FriendRelationshipStatus.none) {
-          await environment.transport.send(
-            remoteAddress: from,
-            payload: const <String, dynamic>{
-              'type': 'friend_remove',
-              // A reflex reply to a stranger: never queued or retried.
-              kSendOnceKey: true,
-            },
-          );
-        }
+        // Not taken, and not answered either (see the ping above).
         return;
       }
       await _container
@@ -1716,6 +1701,17 @@ final class HeadlessBackgroundRuntimeCoordinator {
       if (isAcceptedFriend) {
         await _meetInbox.meet.onHello(from, frame.payload);
       }
+      return;
+    }
+    if (isUnconfirmedFriendRemovePayload(frame.payload)) {
+      // An older peer's automatic reply, not a person's decision: it must
+      // not end the friendship here.
+      await _container
+          .read(socialHubControllerProvider.notifier)
+          .receiveUnconfirmedFriendRemove(
+            from,
+            receivedAtMillis: frame.receivedAtMillis,
+          );
       return;
     }
     final ZenSignal? signal = zenSignalFromTransportPayload(
@@ -1818,12 +1814,22 @@ final class HeadlessBackgroundRuntimeCoordinator {
   }
 }
 
+/// The person's language, loading in the service isolate (started by its
+/// entry point; [TaskHandler.onStart] waits for it before any notice).
+Future<void>? _serviceLanguageLoad;
+
 @pragma('vm:entry-point')
 void _androidBackgroundRuntimeTaskEntryPoint() {
   runZonedGuarded(
     () {
       WidgetsFlutterBinding.ensureInitialized();
       DartPluginRegistrant.ensureInitialized();
+      // The service's own notices (and the channels it registers) speak the
+      // person's language, not the source Polish.
+      unawaitedLogged(
+        _serviceLanguageLoad = loadZenLanguage(),
+        context: 'Loading the language in the background service failed',
+      );
       FlutterForegroundTask.setTaskHandler(
         _ZenRewriteAndroidBackgroundTaskHandler(),
       );
@@ -1893,6 +1899,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    await (_serviceLanguageLoad ?? Future<void>.value());
     try {
       await ZenDiagnosticsLog.attach(
         await ZenInstance.supportDirectory(),

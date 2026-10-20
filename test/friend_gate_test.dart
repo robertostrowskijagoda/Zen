@@ -188,7 +188,7 @@ void main() {
   });
 
   test(
-    'unauthorized message from peer with none status sends friend_remove back to reconcile',
+    'unauthorized message from a stranger is dropped without any reply',
     () async {
       final MemorySignalTransport transport = MemorySignalTransport();
       const String stranger = '200:1111:2222:3333:4444:5555:6666:7777';
@@ -209,13 +209,13 @@ void main() {
         receivedAtMillis: 10,
       );
 
+      // An answer would confirm the device is online at this address, and
+      // an automatic `friend_remove` ended real friendships whenever this
+      // side had merely lost its friend list.
+      expect(transport.sentSignals, isEmpty);
       expect(
-        transport.sentSignals.any(
-          (entry) =>
-              PeerShareCodec.addressesEqual(entry.remoteAddress, stranger) &&
-              entry.payload['type'] == 'friend_remove',
-        ),
-        isTrue,
+        container.read(socialHubControllerProvider).friendByAddress(stranger),
+        isNull,
       );
     },
   );

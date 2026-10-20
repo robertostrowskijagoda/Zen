@@ -107,6 +107,46 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
     await _transferStore.deleteOutgoing(peerAddress, message.id);
   }
 
+  /// Removes one message from this phone only ("Usuń z mojego urządzenia"
+  /// after a report, §21.4): the other side keeps its copy. Its file and
+  /// unfinished transfers go with it, and the chat list shows the message
+  /// before it. [key] is a friend's address, or `group:<id>` for a group.
+  /// False when the message is not there (any more).
+  Future<bool> deleteMessageLocally({
+    required String key,
+    required String messageId,
+  }) async {
+    final List<ChatMessage> thread = await _messageTimelineStore.load(key);
+    final int index = thread.indexWhere(
+      (ChatMessage message) => message.id == messageId,
+    );
+    if (index < 0) {
+      return false;
+    }
+    final ChatMessage message = thread[index];
+    final List<ChatMessage> rest = List<ChatMessage>.of(thread)
+      ..removeAt(index);
+    await _messageTimelineStore.save(key, List<ChatMessage>.unmodifiable(rest));
+    await _deleteManagedAttachmentIfPresent(message);
+    if (!key.startsWith('group:')) {
+      await _transferStore.deleteIncoming(key, message.id);
+      await _transferStore.deleteOutgoing(key, message.id);
+    }
+    if (!ref.mounted) {
+      return true;
+    }
+    _bumpTimelineRevision();
+    if (!key.startsWith('group:')) {
+      _syncFriendPreviewFromTimeline(
+        peerAddress: key,
+        thread: rest,
+        resetUnread: false,
+      );
+      await _persistState();
+    }
+    return true;
+  }
+
   void _syncFriendPreviewFromTimeline({
     required String peerAddress,
     required List<ChatMessage> thread,
@@ -186,7 +226,7 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
       isOnline: true,
       lastPresenceAtMillis: timestamp,
       lastMessagePreview: preview,
-      lastActivityLabel: 'Teraz',
+      lastActivityLabel: t('Teraz'),
       unreadCount: 0,
     );
     state = state.copyWith(friends: friends);

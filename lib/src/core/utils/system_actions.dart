@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/windows_system_paths.dart';
 
 const MethodChannel _system = MethodChannel('zen/system');
 
@@ -46,7 +47,7 @@ Future<bool> openMap(double lat, double lon, {String label = ''}) async {
     }
     final String url = mapUrl(lat, lon);
     if (Platform.isWindows) {
-      await Process.run('explorer', <String>[url]);
+      await Process.run(windowsExplorerPath(), <String>[url]);
     } else if (Platform.isMacOS) {
       await Process.run('open', <String>[url]);
     } else {
@@ -76,7 +77,7 @@ Future<bool> openWebLink(String url) async {
           false;
     }
     if (Platform.isWindows) {
-      await Process.run('explorer', <String>[link]);
+      await Process.run(windowsExplorerPath(), <String>[link]);
     } else if (Platform.isMacOS) {
       await Process.run('open', <String>[link]);
     } else if (Platform.isLinux) {

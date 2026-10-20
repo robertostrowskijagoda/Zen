@@ -1,5 +1,6 @@
 package com.roj.zen
 
+import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
@@ -42,6 +43,8 @@ object ZenSecurityBridge {
     private const val KEYSTORE = "AndroidKeyStore"
     private const val ALIAS = "zen_master_wrap_v1"
     private const val TRANSFORMATION = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding"
+    private const val PREFS = "zen_secure_window"
+    private const val PREF_SECURE = "secure"
 
     private val oaep = OAEPParameterSpec(
         "SHA-256",
@@ -52,25 +55,20 @@ object ZenSecurityBridge {
 
     fun register(engine: FlutterEngine, activity: FragmentActivity) {
         val messenger = engine.dartExecutor.binaryMessenger
+        // From the first frame, as the app last left it: Dart says again once
+        // its settings are loaded, but a recent-apps preview or a screenshot
+        // could be taken before that.
+        applySecure(activity, wasSecure(activity))
         MethodChannel(messenger, "zen/secure_window").setMethodCallHandler { call, result ->
             when (call.method) {
                 "setSecure" -> {
+                    // While "Blokuj zrzuty i nagrywanie ekranu" is on, Dart keeps the
+                    // whole window secure (S-9), not only the protected screens:
+                    // the recent-apps preview is taken whenever the app is left,
+                    // from whatever screen is open then (the chat list too).
                     val secure = call.argument<Boolean>("secure") ?: false
-                    activity.runOnUiThread {
-                        if (secure) {
-                            activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                            // The recent-apps preview is taken whenever the app is left,
-                            // from whatever screen is open then, protected or not.
-                            // Someone protecting their screens wants no preview at all.
-                            // Unlike FLAG_SECURE this blocks neither screenshots nor
-                            // screen sharing on the other screens (calls keep working).
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                activity.setRecentsScreenshotEnabled(false)
-                            }
-                        } else {
-                            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                        }
-                    }
+                    activity.runOnUiThread { applySecure(activity, secure) }
+                    rememberSecure(activity, secure)
                     result.success(true)
                 }
                 else -> result.notImplemented()
@@ -114,6 +112,37 @@ object ZenSecurityBridge {
                 "check" -> result.success(integrity(activity))
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    /** FLAG_SECURE (no screenshots, recording or casting) and no recent-apps preview. */
+    private fun applySecure(activity: FragmentActivity, secure: Boolean) {
+        if (secure) {
+            activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            activity.setRecentsScreenshotEnabled(!secure)
+        }
+    }
+
+    private fun wasSecure(activity: FragmentActivity): Boolean =
+        try {
+            activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(PREF_SECURE, true)
+        } catch (_: Exception) {
+            true
+        }
+
+    private fun rememberSecure(activity: FragmentActivity, secure: Boolean) {
+        try {
+            activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_SECURE, secure)
+                .apply()
+        } catch (error: Exception) {
+            Log.w(TAG, "Remembering the screen protection failed", error)
         }
     }
 

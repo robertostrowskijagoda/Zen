@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
@@ -37,6 +38,7 @@ import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/profile/profile_card.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_notification_center.dart';
@@ -273,8 +275,23 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   Future<void> get whenHydrated => _hydrationSettled.future;
 
   /// Whether the stored friends are known yet (false while a locked app
-  /// waits to read them).
+  /// waits to read them). Also true after a read that failed: check
+  /// [SocialHubState.snapshotUnreadable] before trusting an empty list.
   bool get isHydrated => _hydrationCompleted;
+
+  /// Whether a read of the stored snapshot has come back in this run (with
+  /// data or with "nothing stored"). Until then a failed read leaves the
+  /// state a stand-in (see [SocialHubState.snapshotUnreadable]); after it,
+  /// the state in memory is the user's own and a failed re-read changes
+  /// nothing.
+  bool _snapshotLoaded = false;
+
+  /// Logged once per run: saving is paused over an unreadable snapshot.
+  bool _loggedPausedSave = false;
+
+  /// When an automatic `friend_remove` from each friend was last noted in
+  /// their conversation (see `receiveUnconfirmedFriendRemove`).
+  final Map<String, int> _unconfirmedRemoveNotedAt = <String, int>{};
 
   /// Releases the writers. Called once the read came back — or failed, because
   /// an unreadable snapshot must not block saving for the rest of the session.
@@ -721,6 +738,18 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     _activePersist = completer.future;
     try {
       if (_controllerDisposed || !ref.mounted) {
+        return;
+      }
+      if (state.snapshotUnreadable) {
+        // A stand-in for a snapshot that could not be read: saving it would
+        // put it over that snapshot, and one save later over its backup too,
+        // turning a read error into an empty friend list for good.
+        if (!_loggedPausedSave) {
+          _loggedPausedSave = true;
+          logZenWarning(
+            'Social snapshot unreadable: saving is paused for this run.',
+          );
+        }
         return;
       }
       await _snapshotStore.save(state);
@@ -1191,6 +1220,21 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
 
 /// What the group call controls switch.
 enum GroupCallToggle { mute, speaker, camera }
+
+/// Whether [payload] is a `friend_remove` that did not come through reliable
+/// delivery.
+///
+/// A person's own "remove friend" always goes out reliably and carries a
+/// reliable id ([kReliableIdKey]) - straight from them or unpacked from a
+/// relay. Without one it is the automatic reply older versions send to
+/// every peer they do not recognise, also when they have only lost their
+/// own friend list. Such a payload goes to
+/// `SocialHubController.receiveUnconfirmedFriendRemove`, never to
+/// `receiveSignal`.
+bool isUnconfirmedFriendRemovePayload(Map<String, dynamic> payload) {
+  return payload['type'] == 'friend_remove' &&
+      payload[kReliableIdKey] is! String;
+}
 
 bool _isGroupCallSignalType(ZenSignalType type) => switch (type) {
   ZenSignalType.groupCallInvite ||

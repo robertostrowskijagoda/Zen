@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -67,7 +68,7 @@ class IntroInboxSection extends ConsumerWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(4, 8, 0, 4),
                 child: Text(
-                  'Prośby o kontakt (${open.length})',
+                  t('Prośby o kontakt ({count})', {'count': open.length}),
                   style: zen.label(color: zen.accent),
                 ),
               ),
@@ -98,7 +99,7 @@ class _IntroCard extends StatelessWidget {
       ok = false;
     }
     if (context.mounted) {
-      _snack(context, ok ? done : 'Nie udało się. Spróbuj jeszcze raz.');
+      _snack(context, ok ? done : t('Nie udało się. Spróbuj jeszcze raz.'));
     }
   }
 
@@ -111,7 +112,7 @@ class _IntroCard extends StatelessWidget {
     await _run(
       context,
       () => intro.forward(item.id, note: note),
-      'Przekazano do: $target.',
+      t('Przekazano do: {name}.', {'name': target}),
     );
   }
 
@@ -128,23 +129,25 @@ class _IntroCard extends StatelessWidget {
     )) {
       (IntroRole.middle, IntroKind.list) => (
         Icons.visibility_rounded,
-        '$x prosi o Twoją listę znajomych',
-        'Zobaczy, kogo znasz. Zgodę możesz cofnąć w Grafie.',
+        t('{name} prosi o Twoją listę znajomych', {'name': x}),
+        t('Zobaczy, kogo znasz. Zgodę możesz cofnąć w Grafie.'),
       ),
       (IntroRole.middle, _) => (
         Icons.waving_hand_rounded,
-        '$x prosi o przedstawienie',
-        'Komu: ${intro.host.nameOf(c.target)}',
+        t('{name} prosi o przedstawienie', {'name': x}),
+        t('Komu: {name}', {'name': intro.host.nameOf(c.target)}),
       ),
       (_, IntroKind.letter) => (
         Icons.mail_outline_rounded,
-        'List od: $x',
-        'Przez: $via. Możesz zaprosić do znajomych albo zignorować.',
+        t('List od: {name}', {'name': x}),
+        t('Przez: {via}. Możesz zaprosić do znajomych albo zignorować.', {
+          'via': via,
+        }),
       ),
       _ => (
         Icons.waving_hand_rounded,
-        '$via przedstawia Ci: $x',
-        'Zdecyduj, czy chcesz się poznać.',
+        t('{via} przedstawia Ci: {name}', {'via': via, 'name': x}),
+        t('Zdecyduj, czy chcesz się poznać.'),
       ),
     };
     final TextStyle quote = TextStyle(
@@ -188,6 +191,29 @@ class _IntroCard extends StatelessWidget {
               ),
             ],
           ),
+          // Not confirmed by the asker's signature (an older app, or an
+          // address it does not cover): the middle friend could have
+          // changed it (S-17).
+          if (c.role == IntroRole.target && !c.signed) ...<Widget>[
+            const SizedBox(height: 8),
+            Row(
+              key: Key('intro-unverified-${c.id}'),
+              children: <Widget>[
+                Icon(Icons.gpp_maybe_rounded, size: 16, color: zen.warning),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    introUnverifiedLabel(),
+                    style: TextStyle(
+                      color: zen.warning,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (c.note.isNotEmpty) ...<Widget>[
             const SizedBox(height: 10),
             Text('„${c.note}” — $via', style: quote),
@@ -211,18 +237,18 @@ class _IntroCard extends StatelessWidget {
                     _run(
                       context,
                       () => intro.approveList(c.id),
-                      'Pokazano listę: $x.',
+                      t('Pokazano listę: {name}.', {'name': x}),
                     ),
                   ),
                   icon: const Icon(Icons.visibility_rounded, size: 18),
-                  label: const Text('Pokaż listę'),
+                  label: Text(t('Pokaż listę')),
                 )
               else if (middle)
                 FilledButton.icon(
                   key: Key('intro-forward-${c.id}'),
                   onPressed: () => unawaited(_forward(context)),
                   icon: const Icon(Icons.send_rounded, size: 18),
-                  label: const Text('Przekaż'),
+                  label: Text(t('Przekaż')),
                 )
               else
                 FilledButton.icon(
@@ -231,32 +257,34 @@ class _IntroCard extends StatelessWidget {
                     _run(
                       context,
                       () => intro.accept(c.id),
-                      'Wysłano zaproszenie do znajomych.',
+                      t('Wysłano zaproszenie do znajomych.'),
                     ),
                   ),
                   icon: const Icon(Icons.person_add_rounded, size: 18),
                   label: Text(
                     c.kind == IntroKind.letter
-                        ? 'Zaproś do znajomych'
-                        : 'Poznajmy się',
+                        ? t('Zaproś do znajomych')
+                        : t('Poznajmy się'),
                   ),
                 ),
               if (middle)
                 OutlinedButton(
                   key: Key('intro-decline-${c.id}'),
                   onPressed: () => unawaited(
-                    _run(context, () => intro.decline(c.id), 'Odmówiono.'),
+                    _run(context, () => intro.decline(c.id), t('Odmówiono.')),
                   ),
-                  child: const Text('Odmów'),
+                  child: Text(t('Odmów')),
                 )
               else
                 OutlinedButton(
                   key: Key('intro-refuse-${c.id}'),
                   onPressed: () => unawaited(
-                    _run(context, () => intro.refuse(c.id), 'Gotowe.'),
+                    _run(context, () => intro.refuse(c.id), t('Gotowe.')),
                   ),
                   child: Text(
-                    c.kind == IntroKind.letter ? 'Zignoruj' : 'Nie, dziękuję',
+                    c.kind == IntroKind.letter
+                        ? t('Zignoruj')
+                        : t('Nie, dziękuję'),
                   ),
                 ),
             ],
@@ -274,7 +302,7 @@ Future<String?> _forwardNote(BuildContext context, String target) async {
   final bool? ok = await showDialog<bool>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
-      title: Text('Przekaż do: $target'),
+      title: Text(t('Przekaż do: {name}', {'name': target})),
       content: TextField(
         key: const Key('intro-forward-note'),
         controller: note,
@@ -283,20 +311,20 @@ Future<String?> _forwardNote(BuildContext context, String target) async {
         maxLines: 4,
         maxLength: kIntroNoteMaxChars,
         textCapitalization: TextCapitalization.sentences,
-        decoration: const InputDecoration(
-          labelText: 'Twoje słowo (nieobowiązkowe)',
-          hintText: 'Skąd się znacie, dlaczego warto…',
+        decoration: InputDecoration(
+          labelText: t('Twoje słowo (nieobowiązkowe)'),
+          hintText: t('Skąd się znacie, dlaczego warto…'),
         ),
       ),
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Anuluj'),
+          child: Text(t('Anuluj')),
         ),
         FilledButton(
           key: const Key('intro-forward-send'),
           onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('Przekaż'),
+          child: Text(t('Przekaż')),
         ),
       ],
     ),
@@ -307,53 +335,69 @@ Future<String?> _forwardNote(BuildContext context, String target) async {
 }
 
 String _askedTitle(IntroService intro, IntroCase c) => switch (c.kind) {
-  IntroKind.intro => 'Przedstawienie: ${c.targetName}',
-  IntroKind.letter => 'List do: ${c.targetName}',
-  IntroKind.list => 'Lista znajomych: ${intro.host.nameOf(c.middle)}',
+  IntroKind.intro => t('Przedstawienie: {name}', {'name': c.targetName}),
+  IntroKind.letter => t('List do: {name}', {'name': c.targetName}),
+  IntroKind.list => t('Lista znajomych: {name}', {
+    'name': intro.host.nameOf(c.middle),
+  }),
 };
 
 String _askedStatus(IntroService intro, IntroCase c) {
   final String via = intro.host.nameOf(c.middle);
   return switch (c.kind) {
     IntroKind.list => switch (c.status) {
-      IntroStatus.open || IntroStatus.forwarded => 'Czeka na zgodę: $via',
-      IntroStatus.accepted => 'Widzisz tę listę',
-      IntroStatus.declined || IntroStatus.refused => 'Bez zgody',
+      IntroStatus.open ||
+      IntroStatus.forwarded => t('Czeka na zgodę: {via}', {'via': via}),
+      IntroStatus.accepted => t('Widzisz tę listę'),
+      IntroStatus.declined || IntroStatus.refused => t('Bez zgody'),
     },
     IntroKind.intro => switch (c.status) {
-      IntroStatus.open => 'Czeka na: $via',
-      IntroStatus.forwarded =>
-        'Przekazane przez: $via. Decyduje: ${c.targetName}',
-      IntroStatus.accepted => 'Przyjęte — zaproszenie do znajomych wysłane',
-      IntroStatus.declined => 'Nie przekazane przez: $via',
-      IntroStatus.refused => 'Bez odpowiedzi',
+      IntroStatus.open => t('Czeka na: {via}', {'via': via}),
+      IntroStatus.forwarded => t('Przekazane przez: {via}. Decyduje: {name}', {
+        'via': via,
+        'name': c.targetName,
+      }),
+      IntroStatus.accepted => t('Przyjęte — zaproszenie do znajomych wysłane'),
+      IntroStatus.declined => t('Nie przekazane przez: {via}', {'via': via}),
+      IntroStatus.refused => t('Bez odpowiedzi'),
     },
     IntroKind.letter => switch (c.status) {
-      IntroStatus.open => 'Wysłany do: $via',
-      IntroStatus.forwarded => 'Przekazany przez: $via',
-      IntroStatus.accepted => 'Odpowiedź: zaproszenie do znajomych',
-      IntroStatus.declined => 'Nie poszedł (przez: $via)',
-      IntroStatus.refused => 'Bez odpowiedzi',
+      IntroStatus.open => t('Wysłany do: {via}', {'via': via}),
+      IntroStatus.forwarded => t('Przekazany przez: {via}', {'via': via}),
+      IntroStatus.accepted => t('Odpowiedź: zaproszenie do znajomych'),
+      IntroStatus.declined => t('Nie poszedł (przez: {via})', {'via': via}),
+      IntroStatus.refused => t('Bez odpowiedzi'),
     },
   };
 }
 
 String _handledLine(IntroService intro, IntroCase c) {
   final String done = switch (c.status) {
-    IntroStatus.open => 'czeka',
-    IntroStatus.forwarded => 'przekazane',
-    IntroStatus.accepted => 'przyjęte',
-    IntroStatus.declined => 'odmówione',
-    IntroStatus.refused => 'odrzucone',
+    IntroStatus.open => t('czeka'),
+    IntroStatus.forwarded => t('przekazane'),
+    IntroStatus.accepted => t('przyjęte'),
+    IntroStatus.declined => t('odmówione'),
+    IntroStatus.refused => t('odrzucone'),
   };
   if (c.role == IntroRole.target) {
-    return '${c.askerName} (przez: ${intro.host.nameOf(c.middle)}) — $done';
+    return t('{name} (przez: {via}) — {status}', {
+      'name': c.askerName,
+      'via': intro.host.nameOf(c.middle),
+      'status': done,
+    });
   }
   final String x = intro.host.nameOf(c.asker);
   return switch (c.kind) {
-    IntroKind.list => '$x: Twoja lista znajomych — $done',
+    IntroKind.list => t('{name}: Twoja lista znajomych — {status}', {
+      'name': x,
+      'status': done,
+    }),
     IntroKind.intro => '$x → ${intro.host.nameOf(c.target)} — $done',
-    IntroKind.letter => 'List: $x → ${intro.host.nameOf(c.target)} — $done',
+    IntroKind.letter => t('List: {from} → {to} — {status}', {
+      'from': x,
+      'to': intro.host.nameOf(c.target),
+      'status': done,
+    }),
   };
 }
 
@@ -380,9 +424,11 @@ class MyIntrosTile extends ConsumerWidget {
               ExpansionTile(
                 key: const Key('intro-mine'),
                 leading: const Icon(Icons.outbox_rounded),
-                title: const Text('Twoje prośby i listy'),
+                title: Text(t('Twoje prośby i listy')),
                 subtitle: Text(
-                  going == 0 ? 'Wszystkie zakończone' : 'W toku: $going',
+                  going == 0
+                      ? t('Wszystkie zakończone')
+                      : t('W toku: {count}', {'count': going}),
                 ),
                 children: <Widget>[
                   for (final IntroCase c in mine)
@@ -393,7 +439,7 @@ class MyIntrosTile extends ConsumerWidget {
                       trailing: c.isPending
                           ? null
                           : IconButton(
-                              tooltip: 'Usuń z listy',
+                              tooltip: t('Usuń z listy'),
                               icon: const Icon(Icons.delete_outline_rounded),
                               onPressed: () => unawaited(intro.forget(c.id)),
                             ),
@@ -404,7 +450,7 @@ class MyIntrosTile extends ConsumerWidget {
               ExpansionTile(
                 key: const Key('intro-handled'),
                 leading: const Icon(Icons.history_rounded),
-                title: const Text('Przeszło przez Ciebie'),
+                title: Text(t('Przeszło przez Ciebie')),
                 subtitle: Text('${handled.length}'),
                 children: <Widget>[
                   for (final IntroCase c in handled)
@@ -412,7 +458,7 @@ class MyIntrosTile extends ConsumerWidget {
                       dense: true,
                       title: Text(_handledLine(intro, c)),
                       trailing: IconButton(
-                        tooltip: 'Usuń z listy',
+                        tooltip: t('Usuń z listy'),
                         icon: const Icon(Icons.delete_outline_rounded),
                         onPressed: () => unawaited(intro.forget(c.id)),
                       ),
@@ -462,7 +508,7 @@ class FriendListAudienceTile extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                'Kto widzi moją listę znajomych',
+                t('Kto widzi moją listę znajomych'),
                 style: TextStyle(
                   color: zen.textPrimary,
                   fontSize: 16,
@@ -472,15 +518,18 @@ class FriendListAudienceTile extends ConsumerWidget {
               const SizedBox(height: 4),
               Text(
                 switch (audience) {
-                  FriendListAudience.all =>
+                  FriendListAudience.all => t(
                     'Znajomi widzą wspólnych znajomych i znajomych znajomych '
-                        'w grafie i na wydarzeniach.',
-                  FriendListAudience.onRequest =>
+                    'w grafie i na wydarzeniach.',
+                  ),
+                  FriendListAudience.onRequest => t(
                     'Znajomy może poprosić, a Ty zgadzasz się w Skrzynce. '
-                        'Zgodę cofniesz w każdej chwili.',
-                  FriendListAudience.nobody =>
+                    'Zgodę cofniesz w każdej chwili.',
+                  ),
+                  FriendListAudience.nobody => t(
                     'Nikt nie widzi Twoich znajomych, więc nikt nie poprosi '
-                        'Cię przez graf o przedstawienie.',
+                    'Cię przez graf o przedstawienie.',
+                  ),
                 },
                 style: TextStyle(
                   color: zen.textSecondary,
@@ -495,9 +544,9 @@ class FriendListAudienceTile extends ConsumerWidget {
                 children: <Widget>[
                   for (final (FriendListAudience a, String label)
                       in <(FriendListAudience, String)>[
-                        (FriendListAudience.all, 'Wszyscy znajomi'),
-                        (FriendListAudience.onRequest, 'Tylko na prośbę'),
-                        (FriendListAudience.nobody, 'Nikt'),
+                        (FriendListAudience.all, t('Wszyscy znajomi')),
+                        (FriendListAudience.onRequest, t('Tylko na prośbę')),
+                        (FriendListAudience.nobody, t('Nikt')),
                       ])
                     ChoiceChip(
                       key: Key('meet-list-audience-${a.name}'),
@@ -512,7 +561,7 @@ class FriendListAudienceTile extends ConsumerWidget {
                   allowed.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 12),
                 Text(
-                  'Widzą ją (${allowed.length})',
+                  t('Widzą ją ({count})', {'count': allowed.length}),
                   style: zen.label(color: zen.textMuted),
                 ),
                 for (final FriendProfile f in allowed)
@@ -534,7 +583,7 @@ class FriendListAudienceTile extends ConsumerWidget {
                         onPressed: () => unawaited(
                           meet.allowFriendList(f.address, allow: false),
                         ),
-                        child: const Text('Cofnij'),
+                        child: Text(t('Cofnij')),
                       ),
                     ],
                   ),
@@ -560,11 +609,14 @@ class RelayLettersSwitch extends ConsumerWidget {
       builder: (BuildContext context, Widget? _) => SwitchListTile(
         key: const Key('intro-relay-letters'),
         value: intro.relayLetters,
-        title: const Text('Przekazuj listy od znajomych'),
-        subtitle: const Text(
-          'Znajomy może wysłać przez Ciebie jeden list do kogoś z Twoich '
-          'znajomych. Limit: $kLettersPerWeek tygodniowo od jednej osoby, '
-          '$kLettersRelayedPerWeek łącznie.',
+        title: Text(t('Przekazuj listy od znajomych')),
+        subtitle: Text(
+          t(
+            'Znajomy może wysłać przez Ciebie jeden list do kogoś z Twoich '
+            'znajomych. Limit: {perPerson} tygodniowo od jednej osoby, '
+            '{total} łącznie.',
+            {'perPerson': kLettersPerWeek, 'total': kLettersRelayedPerWeek},
+          ),
         ),
         onChanged: (bool v) => unawaited(intro.setRelayLetters(v)),
       ),
@@ -597,7 +649,7 @@ class _ViaPicker extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text('PRZEZ KOGO', style: zen.label(color: zen.textSecondary)),
+          Text(t('PRZEZ KOGO'), style: zen.label(color: zen.textSecondary)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 8,
@@ -639,9 +691,11 @@ class _EconomyNote extends StatelessWidget {
       return ZenInfo(
         icon: Icons.volunteer_activism_rounded,
         tone: zenTone(zen, 5),
-        text:
-            'Bez pieniędzy i punktów: $friend decyduje, czy przekazać, '
-            'a druga osoba — czy chce się poznać.',
+        text: t(
+          'Bez pieniędzy i punktów: {name} decyduje, czy przekazać, '
+          'a druga osoba — czy chce się poznać.',
+          {'name': friend},
+        ),
       );
     }
     return Column(
@@ -651,10 +705,12 @@ class _EconomyNote extends StatelessWidget {
           key: const Key('intro-pyramid-note'),
           icon: kPyramidIcon,
           tone: zenTone(zen, 2),
-          title: 'Jesteście w jednej piramidzie',
-          text:
-              '$friend może też ustalić cenę za przedstawienie na rynku '
-              'piramidy. Tu prosisz za darmo — walutą jest zgoda.',
+          title: t('Jesteście w jednej piramidzie'),
+          text: t(
+            '{name} może też ustalić cenę za przedstawienie na rynku '
+            'piramidy. Tu prosisz za darmo — walutą jest zgoda.',
+            {'name': friend},
+          ),
         ),
         Align(
           alignment: Alignment.centerLeft,
@@ -662,7 +718,7 @@ class _EconomyNote extends StatelessWidget {
             key: const Key('intro-open-market'),
             onPressed: onOpenMarket,
             icon: const Icon(Icons.storefront_rounded, size: 18),
-            label: const Text('Otwórz rynek'),
+            label: Text(t('Otwórz rynek')),
           ),
         ),
       ],
@@ -701,7 +757,7 @@ Future<void> askIntroduction(
         );
         return AlertDialog(
           key: const Key('intro-dialog'),
-          title: Text('Poznaj: $targetName'),
+          title: Text(t('Poznaj: {name}', {'name': targetName})),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -716,7 +772,9 @@ Future<void> askIntroduction(
                 if (had != null)
                   ZenInfo(
                     icon: Icons.history_rounded,
-                    text: 'Prośba już wysłana — czeka na: $f.',
+                    text: t('Prośba już wysłana — czeka na: {name}.', {
+                      'name': f,
+                    }),
                   )
                 else
                   TextField(
@@ -727,8 +785,8 @@ Future<void> askIntroduction(
                     maxLength: kIntroNoteMaxChars,
                     textCapitalization: TextCapitalization.sentences,
                     decoration: InputDecoration(
-                      labelText: 'Kilka słów dla: $f',
-                      hintText: 'Dlaczego chcesz poznać tę osobę…',
+                      labelText: t('Kilka słów dla: {name}', {'name': f}),
+                      hintText: t('Dlaczego chcesz poznać tę osobę…'),
                     ),
                   ),
                 _EconomyNote(
@@ -752,13 +810,13 @@ Future<void> askIntroduction(
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Anuluj'),
+              child: Text(t('Anuluj')),
             ),
             if (had == null)
               FilledButton(
                 key: const Key('intro-send'),
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Poproś'),
+                child: Text(t('Poproś')),
               ),
           ],
         );
@@ -780,7 +838,9 @@ Future<void> askIntroduction(
   if (context.mounted) {
     _snack(
       context,
-      c == null ? 'Nie można teraz poprosić.' : 'Prośba poszła do: $f.',
+      c == null
+          ? t('Nie można teraz poprosić.')
+          : t('Prośba poszła do: {name}.', {'name': f}),
     );
   }
 }
@@ -807,7 +867,7 @@ Future<void> sendLetterTo(
         final int left = intro.lettersLeft(middle);
         return AlertDialog(
           key: const Key('letter-dialog'),
-          title: Text('List do: $targetName'),
+          title: Text(t('List do: {name}', {'name': targetName})),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -827,22 +887,28 @@ Future<void> sendLetterTo(
                   maxLines: 8,
                   maxLength: kLetterMaxChars,
                   textCapitalization: TextCapitalization.sentences,
-                  decoration: const InputDecoration(
-                    labelText: 'Treść',
-                    hintText: 'Kim jesteś i dlaczego piszesz…',
+                  decoration: InputDecoration(
+                    labelText: t('Treść'),
+                    hintText: t('Kim jesteś i dlaczego piszesz…'),
                     alignLabelWithHint: true,
                   ),
                 ),
                 ZenInfo(
                   icon: Icons.mail_outline_rounded,
                   text: left > 0
-                      ? 'Jeden list, bez rozmowy: odbiorca może tylko '
-                            'zaprosić Cię do znajomych albo go zignorować. '
-                            'List przejdzie przez telefon: $f. '
-                            'Zostało w tym tygodniu: $left z $kLettersPerWeek.'
-                      : 'Limit listów przez: $f na ten tydzień już się '
-                            'skończył. Spróbuj przez kogoś innego albo za '
-                            'kilka dni.',
+                      ? t(
+                          'Jeden list, bez rozmowy: odbiorca może tylko '
+                          'zaprosić Cię do znajomych albo go zignorować. '
+                          'List przejdzie przez telefon: {name}. '
+                          'Zostało w tym tygodniu: {left} z {limit}.',
+                          {'name': f, 'left': left, 'limit': kLettersPerWeek},
+                        )
+                      : t(
+                          'Limit listów przez: {name} na ten tydzień już się '
+                          'skończył. Spróbuj przez kogoś innego albo za '
+                          'kilka dni.',
+                          {'name': f},
+                        ),
                 ),
               ],
             ),
@@ -850,14 +916,14 @@ Future<void> sendLetterTo(
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Anuluj'),
+              child: Text(t('Anuluj')),
             ),
             FilledButton(
               key: const Key('letter-send'),
               onPressed: left > 0
                   ? () => Navigator.of(context).pop(true)
                   : null,
-              child: const Text('Wyślij'),
+              child: Text(t('Wyślij')),
             ),
           ],
         );
@@ -881,8 +947,8 @@ Future<void> sendLetterTo(
     _snack(
       context,
       c == null
-          ? 'List nie poszedł.'
-          : 'List poszedł do: ${intro.host.nameOf(middle)}.',
+          ? t('List nie poszedł.')
+          : t('List poszedł do: {name}.', {'name': intro.host.nameOf(middle)}),
     );
   }
 }
@@ -905,9 +971,11 @@ Future<void> askOpinion(
   final SocialHubState people = ref.read(socialHubControllerProvider);
   final NavigatorState nav = Navigator.of(context);
   final TextEditingController text = TextEditingController(
-    text:
-        'Hej! Chcę zapytać o kogoś z Twoich znajomych: $targetName. '
-        'Co sądzisz o tej osobie?',
+    text: t(
+      'Hej! Chcę zapytać o kogoś z Twoich znajomych: {name}. '
+      'Co sądzisz o tej osobie?',
+      {'name': targetName},
+    ),
   );
   String middle = via.first;
   final bool? ok = await showDialog<bool>(
@@ -917,7 +985,7 @@ Future<void> askOpinion(
         final String f = meet.host.nameOf(middle);
         return AlertDialog(
           key: const Key('opinion-dialog'),
-          title: const Text('Zapytaj o opinię'),
+          title: Text(t('Zapytaj o opinię')),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -939,9 +1007,11 @@ Future<void> askOpinion(
                 ),
                 ZenInfo(
                   icon: Icons.lock_outline_rounded,
-                  text:
-                      'Zwykła wiadomość tylko do: $f. Osoba, o którą pytasz, '
-                      'nic nie zobaczy.',
+                  text: t(
+                    'Zwykła wiadomość tylko do: {name}. Osoba, o którą '
+                    'pytasz, nic nie zobaczy.',
+                    {'name': f},
+                  ),
                 ),
               ],
             ),
@@ -949,12 +1019,12 @@ Future<void> askOpinion(
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Anuluj'),
+              child: Text(t('Anuluj')),
             ),
             FilledButton(
               key: const Key('opinion-send'),
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Wyślij'),
+              child: Text(t('Wyślij')),
             ),
           ],
         );
@@ -972,7 +1042,7 @@ Future<void> askOpinion(
     await social.sendLocalMessage(peerAddress: peer, text: message);
   } on Object {
     if (context.mounted) {
-      _snack(context, 'Nie udało się wysłać.');
+      _snack(context, t('Nie udało się wysłać.'));
     }
     return;
   }

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
@@ -90,11 +91,12 @@ final class RuntimeSystemNotification {
   final bool contentRedacted;
 
   /// This notification with its text replaced by [body] (and no stacked
-  /// lines), see [PrivacyRedactingNotificationService].
-  RuntimeSystemNotification withRedactedBody(String body) {
+  /// lines), and its title by [title] when given, see
+  /// [PrivacyRedactingNotificationService].
+  RuntimeSystemNotification withRedactedBody(String body, {String? title}) {
     return RuntimeSystemNotification(
       id: id,
-      title: title,
+      title: title ?? this.title,
       body: body,
       createdAtMillis: createdAtMillis,
       category: category,
@@ -191,7 +193,10 @@ abstract interface class RuntimeSystemNotificationService {
 /// so their text still reached the shade and the lock screen. Here, with
 /// the setting on (the default), the body of every message, social and
 /// transfer notification is replaced by a generic line; the title (who or
-/// what it is about) stays, as it always did for chat messages. Calls and
+/// what it is about) stays, as it always did for chat messages — except
+/// where the title itself tells too much ("X idzie na randkę", "Odpowiedź:
+/// {pytanie}", "Zaproszenie: {wydarzenie}"): dating, questions, events,
+/// introductions and the pyramid get a generic title too (S-12). Calls and
 /// alarms are left alone: the ringing UI must say who calls, and an alarm
 /// has to be readable at a glance.
 final class PrivacyRedactingNotificationService
@@ -204,23 +209,59 @@ final class PrivacyRedactingNotificationService
   final RuntimeSystemNotificationService delegate;
   final bool Function() _hideContent;
 
+  /// Ids (see the features' `notify` calls) of the posts whose title alone
+  /// gives away what they are about: dating (`date-`), questions (`ask-`),
+  /// events and the meet-ups like them (`event-`, `plan-`, `circle-`),
+  /// introductions (`intro-`) and the pyramid (`pyr-`).
+  static const List<String> _revealingTitleIdPrefixes = <String>[
+    'date-',
+    'ask-',
+    'event-',
+    'plan-',
+    'circle-',
+    'intro-',
+    'pyr-',
+  ];
+
+  /// Of those, what stays readable: a safe-date check-in ("Wszystko OK?")
+  /// turns into an alarm when it is missed.
+  static const List<String> _explicitIdPrefixes = <String>['date-safe-rem-'];
+
   /// Body shown instead of the content, per category.
   static String genericBodyFor(RuntimeSystemNotificationCategory category) {
     return switch (category) {
-      RuntimeSystemNotificationCategory.message => 'Nowa wiadomość',
-      _ => 'Otwórz Zen, aby zobaczyć szczegóły.',
+      RuntimeSystemNotificationCategory.message => t('Nowa wiadomość'),
+      _ => t('Otwórz Zen, aby zobaczyć szczegóły.'),
     };
+  }
+
+  /// Title shown instead of one that tells too much (see [hidesTitle]).
+  static String get genericTitle => t('Nowe powiadomienie');
+
+  /// Whether, with the setting on, [notification] loses its title too.
+  static bool hidesTitle(RuntimeSystemNotification notification) {
+    final String id = notification.id;
+    return _revealingTitleIdPrefixes.any(
+          (String prefix) => id.startsWith(prefix),
+        ) &&
+        !_explicitIdPrefixes.any((String prefix) => id.startsWith(prefix));
   }
 
   /// [notification] as the shade may show it right now.
   RuntimeSystemNotification redact(RuntimeSystemNotification notification) {
-    if (notification.contentRedacted ||
-        notification.category == RuntimeSystemNotificationCategory.call ||
+    if (notification.category == RuntimeSystemNotificationCategory.call ||
         notification.category == RuntimeSystemNotificationCategory.alarm ||
         !_shouldHide()) {
       return notification;
     }
-    return notification.withRedactedBody(genericBodyFor(notification.category));
+    final bool hideTitle = hidesTitle(notification);
+    if (notification.contentRedacted && !hideTitle) {
+      return notification;
+    }
+    return notification.withRedactedBody(
+      genericBodyFor(notification.category),
+      title: hideTitle ? genericTitle : null,
+    );
   }
 
   bool _shouldHide() {
@@ -566,39 +607,43 @@ final class FlutterLocalRuntimeSystemNotificationService
     if (_initialized) {
       return;
     }
-    await _plugin.initialize(
-      settings: InitializationSettings(
-        android: const AndroidInitializationSettings('tiny_notification'),
-        iOS: DarwinInitializationSettings(
-          requestAlertPermission: true,
-          requestBadgePermission: true,
-          requestSoundPermission: true,
-          notificationCategories: <DarwinNotificationCategory>[
-            DarwinNotificationCategory(
-              'zen_incoming_call',
-              actions: <DarwinNotificationAction>[
-                DarwinNotificationAction.plain(
-                  'accept_call',
-                  'Odbierz',
-                  options: <DarwinNotificationActionOption>{
-                    DarwinNotificationActionOption.foreground,
-                  },
-                ),
-                DarwinNotificationAction.plain(
-                  'decline_call',
-                  'Odrzuć',
-                  options: <DarwinNotificationActionOption>{
-                    DarwinNotificationActionOption.destructive,
-                  },
-                ),
-              ],
-              options: <DarwinNotificationCategoryOption>{
-                DarwinNotificationCategoryOption.customDismissAction,
-                DarwinNotificationCategoryOption.allowInCarPlay,
+    final DarwinInitializationSettings darwin = DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+      notificationCategories: <DarwinNotificationCategory>[
+        DarwinNotificationCategory(
+          'zen_incoming_call',
+          actions: <DarwinNotificationAction>[
+            DarwinNotificationAction.plain(
+              'accept_call',
+              t('Odbierz'),
+              options: <DarwinNotificationActionOption>{
+                DarwinNotificationActionOption.foreground,
+              },
+            ),
+            DarwinNotificationAction.plain(
+              'decline_call',
+              t('Odrzuć'),
+              options: <DarwinNotificationActionOption>{
+                DarwinNotificationActionOption.destructive,
               },
             ),
           ],
+          options: <DarwinNotificationCategoryOption>{
+            DarwinNotificationCategoryOption.customDismissAction,
+            DarwinNotificationCategoryOption.allowInCarPlay,
+          },
         ),
+      ],
+    );
+    await _plugin.initialize(
+      settings: InitializationSettings(
+        android: const AndroidInitializationSettings('tiny_notification'),
+        iOS: darwin,
+        macOS: darwin,
+        // Linux: clicking the notification is its default action.
+        linux: LinuxInitializationSettings(defaultActionName: t('Otwórz')),
         windows: WindowsInitializationSettings(
           appName: 'Zen',
           appUserModelId: 'HuraganKodu.Zen.Rewrite.1',
@@ -643,10 +688,10 @@ final class FlutterLocalRuntimeSystemNotificationService
       }
       await _createChannel(
         android,
-        const AndroidNotificationChannel(
+        AndroidNotificationChannel(
           _messageChannelId,
-          'Wiadomości',
-          description: 'Nowe wiadomości od znajomych.',
+          t('Wiadomości'),
+          description: t('Nowe wiadomości od znajomych.'),
           importance: Importance.high,
           playSound: true,
           enableVibration: true,
@@ -655,10 +700,10 @@ final class FlutterLocalRuntimeSystemNotificationService
       );
       await _createChannel(
         android,
-        const AndroidNotificationChannel(
+        AndroidNotificationChannel(
           _callChannelId,
-          'Połączenia',
-          description: 'Zaproszenia i zmiany stanu połączeń.',
+          t('Połączenia'),
+          description: t('Zaproszenia i zmiany stanu połączeń.'),
           importance: Importance.max,
           playSound: true,
           enableVibration: true,
@@ -668,10 +713,10 @@ final class FlutterLocalRuntimeSystemNotificationService
       );
       await _createChannel(
         android,
-        const AndroidNotificationChannel(
+        AndroidNotificationChannel(
           _alarmChannelId,
-          'Alarmy',
-          description: 'Alarm przyjaciela, który potrzebuje pomocy.',
+          t('Alarmy'),
+          description: t('Alarm przyjaciela, który potrzebuje pomocy.'),
           importance: Importance.max,
           playSound: true,
           enableVibration: true,
@@ -681,10 +726,10 @@ final class FlutterLocalRuntimeSystemNotificationService
       );
       await _createChannel(
         android,
-        const AndroidNotificationChannel(
+        AndroidNotificationChannel(
           _socialChannelId,
-          'Relacje',
-          description: 'Zaproszenia, akceptacje i zmiany stanu relacji.',
+          t('Relacje'),
+          description: t('Zaproszenia, akceptacje i zmiany stanu relacji.'),
           importance: Importance.high,
           playSound: true,
           enableVibration: true,
@@ -693,10 +738,10 @@ final class FlutterLocalRuntimeSystemNotificationService
       );
       await _createChannel(
         android,
-        const AndroidNotificationChannel(
+        AndroidNotificationChannel(
           _transferChannelId,
-          'Transfery',
-          description: 'Statusy anulowania i problemów transferu.',
+          t('Transfery'),
+          description: t('Statusy anulowania i problemów transferu.'),
           importance: Importance.defaultImportance,
           playSound: false,
           enableVibration: false,
@@ -753,28 +798,28 @@ final class FlutterLocalRuntimeSystemNotificationService
         switch (notification.category) {
           RuntimeSystemNotificationCategory.social => (
             id: _socialChannelId,
-            name: 'Relacje',
-            description: 'Zaproszenia, akceptacje i zmiany stanu relacji.',
+            name: t('Relacje'),
+            description: t('Zaproszenia, akceptacje i zmiany stanu relacji.'),
           ),
           RuntimeSystemNotificationCategory.message => (
             id: _messageChannelId,
-            name: 'Wiadomości',
-            description: 'Nowe wiadomości od znajomych.',
+            name: t('Wiadomości'),
+            description: t('Nowe wiadomości od znajomych.'),
           ),
           RuntimeSystemNotificationCategory.alarm => (
             id: _alarmChannelId,
-            name: 'Alarmy',
-            description: 'Alarm przyjaciela, który potrzebuje pomocy.',
+            name: t('Alarmy'),
+            description: t('Alarm przyjaciela, który potrzebuje pomocy.'),
           ),
           RuntimeSystemNotificationCategory.call => (
             id: _callChannelId,
-            name: 'Połączenia',
-            description: 'Zaproszenia i zmiany stanu połączeń.',
+            name: t('Połączenia'),
+            description: t('Zaproszenia i zmiany stanu połączeń.'),
           ),
           RuntimeSystemNotificationCategory.transfer => (
             id: _transferChannelId,
-            name: 'Transfery',
-            description: 'Statusy anulowania i problemów transferu.',
+            name: t('Transfery'),
+            description: t('Statusy anulowania i problemów transferu.'),
           ),
         };
     final bool isAlarm =
@@ -783,6 +828,16 @@ final class FlutterLocalRuntimeSystemNotificationService
         isAlarm ||
         notification.category == RuntimeSystemNotificationCategory.call;
     final bool isRinging = notification.isRingingCall;
+    final DarwinNotificationDetails darwin = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBanner: true,
+      presentSound: true,
+      presentBadge: true,
+      categoryIdentifier: isRinging && !isAlarm ? 'zen_incoming_call' : null,
+      interruptionLevel: isRinging
+          ? InterruptionLevel.timeSensitive
+          : InterruptionLevel.active,
+    );
     return NotificationDetails(
       android: AndroidNotificationDetails(
         channel.id,
@@ -838,7 +893,12 @@ final class FlutterLocalRuntimeSystemNotificationService
             ? InboxStyleInformation(
                 notification.lines,
                 contentTitle: notification.title,
-                summaryText: _stackSummary(notification.stackCount),
+                summaryText: tn(
+                  notification.stackCount,
+                  one: '{n} nowa wiadomość',
+                  few: '{n} nowe wiadomości',
+                  many: '{n} nowych wiadomości',
+                ),
               )
             : BigTextStyleInformation(
                 notification.body,
@@ -846,15 +906,15 @@ final class FlutterLocalRuntimeSystemNotificationService
               ),
         actions: isRinging && !isAlarm
             ? <AndroidNotificationAction>[
-                const AndroidNotificationAction(
+                AndroidNotificationAction(
                   'accept_call',
-                  'Odbierz',
+                  t('Odbierz'),
                   showsUserInterface: true,
                   cancelNotification: true,
                 ),
-                const AndroidNotificationAction(
+                AndroidNotificationAction(
                   'decline_call',
-                  'Odrzuć',
+                  t('Odrzuć'),
                   showsUserInterface: false,
                   cancelNotification: true,
                 ),
@@ -872,15 +932,12 @@ final class FlutterLocalRuntimeSystemNotificationService
             : null,
         subtitle: channel.name,
       ),
-      iOS: DarwinNotificationDetails(
-        presentAlert: true,
-        presentBanner: true,
-        presentSound: true,
-        presentBadge: true,
-        categoryIdentifier: isRinging && !isAlarm ? 'zen_incoming_call' : null,
-        interruptionLevel: isRinging
-            ? InterruptionLevel.timeSensitive
-            : InterruptionLevel.active,
+      iOS: darwin,
+      macOS: darwin,
+      linux: LinuxNotificationDetails(
+        urgency: isCall
+            ? LinuxNotificationUrgency.critical
+            : LinuxNotificationUrgency.normal,
       ),
     );
   }
@@ -1074,16 +1131,4 @@ final class _NotificationSuppressionWindow {
           observedAtMillis - previousMillis >= _window.inMilliseconds,
     );
   }
-}
-
-String _stackSummary(int count) {
-  // Polish plural forms: 1 wiadomość, 2-4 wiadomości, 5+ wiadomości.
-  final int mod10 = count % 10;
-  final int mod100 = count % 100;
-  final String noun = count == 1
-      ? 'nowa wiadomość'
-      : (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14))
-      ? 'nowe wiadomości'
-      : 'nowych wiadomości';
-  return '$count $noun';
 }

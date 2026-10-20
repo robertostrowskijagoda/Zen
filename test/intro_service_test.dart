@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/meet/intro/intro_service.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
@@ -527,5 +528,152 @@ void main() {
     expect(ania.requested, <String>[celina.address]);
     expect(ania.isFriend(celina.address), isTrue);
     expect(ania.intro.caseOf(c.id)!.befriendDue, isFalse);
+  });
+
+  group('the asker signs what the middle friend passes on (S-17)', () {
+    test('a signed introduction travels through the middle friend, kept '
+        'in their store, and checks out', () async {
+      final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = _world();
+      await LedgerIdentity.loadOrCreate(ania.disk);
+      final IntroCase? c = await ania.intro.askIntro(
+        middle: bartek.address,
+        target: celina.address,
+        targetName: 'Celina',
+        note: 'Gramy w jednej drużynie',
+      );
+      final Map<String, dynamic> ask = ania.sent.last.$2;
+      expect(ask['type'], IntroTypes.ask);
+      expect(ask['sg'], isA<Map<String, dynamic>>());
+
+      // Bartek's app restarts before deciding: the signature is kept.
+      bartek.intro = bartek.openApp();
+      await bartek.intro.load();
+      expect(bartek.intro.caseOf(c!.id)!.proof, isNotNull);
+      await bartek.intro.forward(c.id, note: 'Fajna osoba');
+      final Map<String, dynamic> fwd = bartek.sent
+          .lastWhere(
+            ((String, Map<String, dynamic>) s) =>
+                s.$2['type'] == IntroTypes.forward,
+          )
+          .$2;
+      expect(fwd['sg'], isNotNull);
+
+      final IntroCase atCelina = celina.intro.needsMe.single;
+      expect(atCelina.signed, isTrue);
+      expect(atCelina.askerName, 'Ania');
+      expect(atCelina.text, 'Gramy w jednej drużynie');
+      expect(atCelina.note, 'Fajna osoba');
+      expect(celina.shown.last.body, isNot(contains(introUnverifiedLabel())));
+      // Kept as checked.
+      final IntroCase back = IntroCase.fromJson(
+        jsonDecode(jsonEncode(atCelina.toJson())),
+      )!;
+      expect(back.signed, isTrue);
+    });
+
+    test('the middle friend cannot change the letter or whom it is for, '
+        'nor pass another address off as checked', () async {
+      final (:net, :ania, :bartek, :celina, :darek, ewa: _) = _world();
+      await LedgerIdentity.loadOrCreate(ania.disk);
+      // Ania's letters are caught on their way to Bartek (he is offline).
+      net.phones.remove(bartek.address);
+      final List<Map<String, dynamic>> asks = <Map<String, dynamic>>[];
+      for (final String text in <String>['Cześć, Celina!', 'Jeszcze raz']) {
+        await ania.intro.sendLetter(
+          middle: bartek.address,
+          target: celina.address,
+          targetName: 'Celina',
+          text: text,
+        );
+        asks.add(ania.sent.last.$2);
+      }
+      net.phones[bartek.address] = bartek;
+      Map<String, dynamic> forward(
+        Map<String, dynamic> ask, {
+        String? text,
+        String? asker,
+        String name = 'Ania',
+      }) => <String, dynamic>{
+        'type': IntroTypes.forward,
+        'id': ask['id'],
+        'k': IntroKind.letter.name,
+        'a': asker ?? ania.address,
+        'n': name,
+        't': text ?? ask['t'],
+        'sg': ask['sg'],
+      };
+
+      await bartek.send(
+        celina.address,
+        forward(asks[0], text: 'Pożycz mi 500 zł'),
+      );
+      expect(celina.intro.needsMe, isEmpty, reason: 'other words');
+      await bartek.send(darek.address, forward(asks[0]));
+      expect(darek.intro.needsMe, isEmpty, reason: 'signed for Celina');
+
+      // The genuine one: shown with the name Ania signed, not Bartek's.
+      await bartek.send(celina.address, forward(asks[0], name: 'Ktoś inny'));
+      final IntroCase got = celina.intro.needsMe.single;
+      expect(got.signed, isTrue);
+      expect(got.askerName, 'Ania');
+      expect(got.text, 'Cześć, Celina!');
+      expect(got.asker, ania.address);
+
+      // Under another address (as for a letter from another device of the
+      // same account, §6): the words are Ania's, but whose address it is
+      // cannot be told here, so it is shown as unverified.
+      await bartek.send(
+        celina.address,
+        forward(asks[1], asker: addr('f7'), name: 'Fałszywa'),
+      );
+      final IntroCase other = celina.intro.needsMe.firstWhere(
+        (IntroCase c) => c.id == asks[1]['id'],
+      );
+      expect(other.signed, isFalse);
+      expect(other.asker, addr('f7'));
+      expect(celina.shown.last.body, startsWith(introUnverifiedLabel()));
+    });
+
+    test('a letter from an older app (no signature) is shown marked as '
+        'unverified', () async {
+      final (net: _, ania: _, :bartek, :celina, darek: _, ewa: _) = _world();
+      await bartek.send(celina.address, <String, dynamic>{
+        'type': IntroTypes.forward,
+        'id': 'aaaaaaaaaa11',
+        'k': IntroKind.letter.name,
+        'a': addr('f7'),
+        'n': 'Ewa',
+        't': 'Hej',
+      });
+      final IntroCase got = celina.intro.needsMe.single;
+      expect(got.signed, isFalse);
+      expect(got.askerName, 'Ewa');
+      expect(celina.shown.last.body, startsWith(introUnverifiedLabel()));
+
+      // A broken signature is not "older": dropped.
+      await bartek.send(celina.address, <String, dynamic>{
+        'type': IntroTypes.forward,
+        'id': 'aaaaaaaaaa12',
+        'k': IntroKind.letter.name,
+        'a': addr('f8'),
+        'n': 'Ola',
+        't': 'Hej',
+        'sg': <String, dynamic>{'s': 'x'},
+      });
+      expect(celina.intro.needsMe, hasLength(1));
+    });
+
+    test('without the ledger keys the asker still asks, unsigned', () async {
+      final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = _world();
+      final IntroCase? c = await ania.intro.sendLetter(
+        middle: bartek.address,
+        target: celina.address,
+        targetName: 'Celina',
+        text: 'Cześć!',
+      );
+      expect(c, isNotNull);
+      expect(ania.sent.last.$2.containsKey('sg'), isFalse);
+      expect(celina.intro.needsMe.single.signed, isFalse);
+    });
   });
 }

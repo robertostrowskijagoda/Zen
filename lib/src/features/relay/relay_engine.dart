@@ -34,9 +34,10 @@ abstract interface class RelayPeerSource {
 
   /// People this device shares a group with but is not friends with.
   ///
-  /// They get this device's key and relay list too (see
-  /// [RelayState.shareWithGroups]), so group messages to someone offline can
-  /// wait in that person's mailboxes like a friend's message would.
+  /// They get this device's key and relay list only if the person opted in
+  /// (see [RelayState.shareWithGroups], off by default), so that group
+  /// messages to someone offline can wait in that person's mailboxes like a
+  /// friend's message would. Their own announcements are accepted either way.
   List<RelayFriend> groupContacts();
 }
 
@@ -142,12 +143,13 @@ final class RelayOverview {
     this.heldEnvelopeCount = 0,
     this.heldForPeerCount = 0,
     this.publicKeyFingerprint = '',
-    this.shareWithGroups = true,
+    this.shareWithGroups = false,
   });
 
   final bool isAutomatic;
 
-  /// Whether group members who are not friends learn this device's mailboxes.
+  /// Whether group members who are not friends learn this device's mailboxes
+  /// (off unless the person switched it on).
   final bool shareWithGroups;
 
   /// Friends currently holding this device's mail.
@@ -276,6 +278,15 @@ const String kSendOnceKey = '_once';
 /// Longest reliable id accepted; the app's own are about 25 characters.
 const int _maxReliableIdLength = 128;
 
+/// The one payload type whose delivery the chat shows per message (its `msgId`
+/// is the chat message's id), and so the only one reported through
+/// [RelayEngine.takeDeliveryReports]. Others carry a `msgId` that refers to a
+/// message of the *other* side (`message_ack`, `message_read`).
+const String _chatMessageType = 'message';
+
+/// Delivery reports kept for the chat layer; the oldest go first.
+const int _maxDeliveryReports = 200;
+
 bool isReliablePayload(Map<String, dynamic> payload) {
   return payload[kSendOnceKey] != true &&
       kReliablePayloadTypes.contains(payload['type']);
@@ -331,6 +342,14 @@ final class RelayEngine {
   final ValueNotifier<RelayOverview> overview = ValueNotifier<RelayOverview>(
     const RelayOverview(),
   );
+
+  /// How many [RelayDeliveryReport]s wait for [takeDeliveryReports]. The chat
+  /// layer listens to this and takes the reports whenever it is above zero.
+  final ValueNotifier<int> deliveryReportCount = ValueNotifier<int>(0);
+
+  /// Outbox ids already reported as [RelayDeliveryStatus.directOnly]. Memory
+  /// only: after a restart the repeat is harmless (the chat applies it once).
+  final Set<String> _reportedDirectOnly = <String>{};
 
   RelayState? _state;
   bool _active = false;
@@ -433,6 +452,84 @@ final class RelayEngine {
     });
   }
 
+  /// Hands the chat layer what it must not keep believing about its queued
+  /// messages, and forgets it here. Each [RelayDeliveryReport] names the chat
+  /// message (`messageId`, in the conversation with `recipient`):
+  ///
+  /// * [RelayDeliveryStatus.directOnly] — too large for the mailboxes, so it
+  ///   only arrives if both devices are online together. Reported once the
+  ///   mailboxes would have received a copy ([RelayConfig.depositAfter]) and
+  ///   nobody has acknowledged it yet.
+  /// * [RelayDeliveryStatus.expired] — dropped from the queue after
+  ///   [RelayConfig.messageTtl] without an acknowledgement: it failed.
+  ///
+  /// The reports live in the stored state until taken, so they are not lost
+  /// when the queue was last worked on by another isolate (the Android
+  /// background service) or before the chat layer was listening. Reports of a
+  /// message that was acknowledged in the meantime are withdrawn, but the
+  /// chat's own delivery receipt (`message_ack`) can still outrun one: apply a
+  /// report only to a message that is still waiting, never to a delivered one.
+  ///
+  /// Returns nothing while this isolate does not own the mesh node (the
+  /// owner is the only writer of the stored state); the reports are still
+  /// there after [activate]. Watch [deliveryReportCount] to know when to call.
+  Future<List<RelayDeliveryReport>> takeDeliveryReports() {
+    return _locked(() async {
+      if (!_active) {
+        return const <RelayDeliveryReport>[];
+      }
+      final RelayState state = await _load();
+      if (state.deliveryReports.isEmpty) {
+        return const <RelayDeliveryReport>[];
+      }
+      final List<RelayDeliveryReport> taken = List<RelayDeliveryReport>.of(
+        state.deliveryReports,
+      );
+      state.deliveryReports.clear();
+      try {
+        await _save(state);
+      } catch (_) {
+        // Not stored as taken: they must be offered again.
+        state.deliveryReports.insertAll(0, taken);
+        rethrow;
+      }
+      return taken;
+    });
+  }
+
+  /// Queues delivery news about [entry] for the chat layer; only chat messages
+  /// are reported. Returns whether the queue changed.
+  bool _report(
+    RelayState state,
+    RelayOutboxEntry entry,
+    RelayDeliveryStatus status,
+    int now,
+  ) {
+    final Object? messageId = entry.payload['msgId'];
+    if (entry.payload['type'] != _chatMessageType ||
+        messageId is! String ||
+        messageId.isEmpty ||
+        state.deliveryReports.any(
+          (RelayDeliveryReport r) => r.rid == entry.rid && r.status == status,
+        )) {
+      return false;
+    }
+    state.deliveryReports.add(
+      RelayDeliveryReport(
+        rid: entry.rid,
+        recipient: entry.recipient,
+        messageId: messageId,
+        status: status,
+        atMillis: now,
+      ),
+    );
+    final int excess = state.deliveryReports.length - _maxDeliveryReports;
+    if (excess > 0) {
+      state.deliveryReports.removeRange(0, excess);
+    }
+    return true;
+  }
+
   // ---------------------------------------------------------------------------
   // Incoming
   // ---------------------------------------------------------------------------
@@ -511,6 +608,11 @@ final class RelayEngine {
         final RelayOutboxEntry? entry = state.outbox[payload['rid']];
         if (entry != null && entry.recipient == from) {
           state.outbox.remove(entry.rid);
+          // Arrived after all: whatever was about to be said about it is stale.
+          state.deliveryReports.removeWhere(
+            (RelayDeliveryReport r) => r.rid == entry.rid,
+          );
+          _reportedDirectOnly.remove(entry.rid);
           return true;
         }
         return false;
@@ -1508,8 +1610,17 @@ final class RelayEngine {
         state.tombstones.length +
         state.seen.length +
         state.mailbox.values.fold<int>(0, (int s, Map m) => s + m.length);
-    state.outbox.removeWhere(
-      (String _, RelayOutboxEntry e) => e.expiresAtMillis <= now,
+    // Dropped unacknowledged after the retention window: the chat must not go
+    // on showing such a message as sent.
+    final List<RelayOutboxEntry> lapsed = state.outbox.values
+        .where((RelayOutboxEntry e) => e.expiresAtMillis <= now)
+        .toList(growable: false);
+    for (final RelayOutboxEntry entry in lapsed) {
+      state.outbox.remove(entry.rid);
+      _report(state, entry, RelayDeliveryStatus.expired, now);
+    }
+    _reportedDirectOnly.removeWhere(
+      (String rid) => !state.outbox.containsKey(rid),
     );
     state.tombstones.removeWhere((String _, int expiry) => expiry <= now);
     _capTombstones(state);
@@ -1617,8 +1728,18 @@ final class RelayEngine {
     final int now = _now();
     bool changed = false;
     for (final RelayOutboxEntry entry in state.outbox.values.toList()) {
-      if (!entry.relayable ||
-          now - entry.createdAtMillis < config.depositAfter.inMilliseconds) {
+      if (now - entry.createdAtMillis < config.depositAfter.inMilliseconds) {
+        continue;
+      }
+      if (!entry.relayable) {
+        // The mailboxes would have got a copy by now but this one is too large
+        // for them: it waits for both devices to be online together, and the
+        // chat should say so rather than keep showing it as safely sent.
+        if (entry.payload['type'] == _chatMessageType &&
+            _reportedDirectOnly.add(entry.rid) &&
+            _report(state, entry, RelayDeliveryStatus.directOnly, now)) {
+          changed = true;
+        }
         continue;
       }
       final RelayPeerInfo? info = state.peers[entry.recipient];
@@ -1768,9 +1889,11 @@ final class RelayEngine {
     });
   }
 
-  /// Turns sharing this device's key and mailboxes with group members on or
-  /// off. Off keeps group messages direct-only (still acknowledged and
-  /// retried), and reveals nothing about your friends to group members.
+  /// Turns sharing this device's key and mailboxes with group members who are
+  /// not friends on or off (off until the person opts in). Off keeps group
+  /// messages direct-only (still acknowledged and retried), and reveals
+  /// nothing about your friends to group members. It does not take back what
+  /// group members already received while it was on.
   Future<void> setShareWithGroups(bool share) {
     return _locked(() async {
       final RelayState state = await _load();
@@ -1842,6 +1965,7 @@ final class RelayEngine {
       publicKeyFingerprint: _fingerprint(state.identity?.publicKey),
       shareWithGroups: state.shareWithGroups,
     );
+    deliveryReportCount.value = state.deliveryReports.length;
   }
 
   static String _fingerprint(Uint8List? key) {

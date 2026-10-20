@@ -7,11 +7,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/app/app_version.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/mark_of_the_web.dart';
+import 'package:zen/src/core/utils/windows_system_paths.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -366,28 +369,32 @@ final class UpdateService extends ChangeNotifier {
   /// message for the person.
   Future<String> importBundle(Uint8List data) async {
     if (!book.enabled) {
-      return 'Aktualizacje przez sieć jeszcze nie działają — nową wersję '
-          'zainstaluj od znajomego przez „Podaj dalej”.';
+      return t(
+        'Aktualizacje przez sieć jeszcze nie działają — nową wersję '
+        'zainstaluj od znajomego przez „Podaj dalej”.',
+      );
     }
     if (data.isNotEmpty && data.first == 0x7B) {
       return _importJson(data);
     }
     final ReleaseBundle? bundle = ReleaseBundle.decode(data);
     if (bundle == null) {
-      return 'To nie jest plik aktualizacji Zen albo jest uszkodzony.';
+      return t('To nie jest plik aktualizacji Zen albo jest uszkodzony.');
     }
     final SignedRelease release = bundle.release;
     if (!await release.isTrusted(
       maintainers: book.maintainers,
       threshold: book.threshold,
     )) {
-      return 'Aktualizacja nie ma wymaganych podpisów opiekunów — odrzucona.';
+      return t(
+        'Aktualizacja nie ma wymaganych podpisów opiekunów — odrzucona.',
+      );
     }
     if (release.manifest.build <= book.currentBuild) {
-      return 'Masz już tę albo nowszą wersję.';
+      return t('Masz już tę albo nowszą wersję.');
     }
     if (book.isRevoked(release.manifest.build)) {
-      return 'Ta wersja została wycofana przez opiekuna.';
+      return t('Ta wersja została wycofana przez opiekuna.');
     }
     for (final MapEntry<String, Uint8List> f in bundle.files.entries) {
       await host.blobs.put(f.value, mime: releaseMime(f.key));
@@ -399,8 +406,12 @@ final class UpdateService extends ChangeNotifier {
     notifyListeners();
     final String v = release.manifest.version;
     return added
-        ? 'Wczytano wersję $v. Zostanie przekazana znajomym.'
-        : 'Wersja $v była już znana; pliki uzupełnione.';
+        ? t('Wczytano wersję {version}. Zostanie przekazana znajomym.', {
+            'version': v,
+          })
+        : t('Wersja {version} była już znana; pliki uzupełnione.', {
+            'version': v,
+          });
   }
 
   /// A maintainer's veto (`revoke-*.json`) or a signed release without its
@@ -410,31 +421,36 @@ final class UpdateService extends ChangeNotifier {
     try {
       json = jsonDecode(utf8.decode(data));
     } on FormatException {
-      return 'To nie jest plik aktualizacji Zen.';
+      return t('To nie jest plik aktualizacji Zen.');
     }
     final ReleaseRevocation? revocation = ReleaseRevocation.fromJson(json);
     if (revocation != null) {
       if (!await revocation.isValid(maintainers: book.maintainers)) {
-        return 'Wstrzymanie nie jest podpisane przez opiekuna — odrzucone.';
+        return t('Wstrzymanie nie jest podpisane przez opiekuna — odrzucone.');
       }
       final bool added = await book.offerRevocation(revocation);
       await _save();
       _enqueue(_announceToAll);
       notifyListeners();
       return added
-          ? 'Wczytano wstrzymanie wersji ${revocation.build}. Zostanie '
-                'przekazane znajomym.'
-          : 'To wstrzymanie było już znane.';
+          ? t(
+              'Wczytano wstrzymanie wersji {build}. Zostanie '
+              'przekazane znajomym.',
+              {'build': revocation.build},
+            )
+          : t('To wstrzymanie było już znane.');
     }
     final SignedRelease? release = SignedRelease.fromJson(json);
     if (release == null) {
-      return 'To nie jest plik aktualizacji Zen.';
+      return t('To nie jest plik aktualizacji Zen.');
     }
     if (!await release.isTrusted(
       maintainers: book.maintainers,
       threshold: book.threshold,
     )) {
-      return 'Aktualizacja nie ma wymaganych podpisów opiekunów — odrzucona.';
+      return t(
+        'Aktualizacja nie ma wymaganych podpisów opiekunów — odrzucona.',
+      );
     }
     final bool added = await book.offerRelease(release, now: _now());
     await _save();
@@ -442,9 +458,10 @@ final class UpdateService extends ChangeNotifier {
     _resumeDownload();
     notifyListeners();
     return added
-        ? 'Wczytano wersję ${release.manifest.version}; pliki przyjdą od '
-              'znajomych.'
-        : 'Ta wersja jest już znana albo nie jest nowsza.';
+        ? t('Wczytano wersję {version}; pliki przyjdą od znajomych.', {
+            'version': release.manifest.version,
+          })
+        : t('Ta wersja jest już znana albo nie jest nowsza.');
   }
 
   /// The bytes of the candidate's file for [forPlatform] (default: this
@@ -471,11 +488,11 @@ final class UpdateService extends ChangeNotifier {
     final UpdateStatus s = status;
     final ReleaseFile? file = s.file;
     if (s.phase != UpdatePhase.ready || file == null) {
-      return 'Aktualizacja nie jest jeszcze gotowa.';
+      return t('Aktualizacja nie jest jeszcze gotowa.');
     }
     final Uint8List? bytes = await fileBytes();
     if (bytes == null) {
-      return 'Plik aktualizacji jest niepełny albo uszkodzony.';
+      return t('Plik aktualizacji jest niepełny albo uszkodzony.');
     }
     if (!kIsWeb && Platform.isAndroid) {
       final Directory dir = await getTemporaryDirectory();
@@ -487,13 +504,20 @@ final class UpdateService extends ChangeNotifier {
     final Directory dir = downloads ?? await ZenInstance.supportDirectory();
     final File out = File('${dir.path}${Platform.pathSeparator}${file.name}');
     await out.writeAsBytes(bytes, flush: true);
+    // It came from friends, not from the person's own computer: Windows
+    // should ask before running it as it does for any download.
+    await markFileFromInternet(out.path);
     // Outside Zen's folders: the panic password finds it there.
     await rememberExportedFile(out.path);
     if (!kIsWeb && Platform.isWindows) {
-      unawaited(Process.run('explorer', <String>['/select,', out.path]));
+      unawaited(
+        Process.run(windowsExplorerPath(), <String>['/select,', out.path]),
+      );
     }
-    return 'Zapisano ${file.name} w ${dir.path}. Uruchom go, żeby '
-        'zaktualizować Zen.';
+    return t(
+      'Zapisano {file} w {folder}. Uruchom go, żeby zaktualizować Zen.',
+      {'file': file.name, 'folder': dir.path},
+    );
   }
 }
 
@@ -507,18 +531,26 @@ Future<String> installApk(String path) async {
         await _appUpdateChannel.invokeMethod<bool>('canInstall') ?? false;
     if (!allowed) {
       await _appUpdateChannel.invokeMethod<void>('openInstallSettings');
-      return 'Zezwól Zen na instalowanie aplikacji, wróć i naciśnij '
-          '„Zainstaluj” jeszcze raz.';
+      return t(
+        'Zezwól Zen na instalowanie aplikacji, wróć i naciśnij '
+        '„Zainstaluj” jeszcze raz.',
+      );
     }
     final String? result = await _appUpdateChannel.invokeMethod<String>(
       'install',
       <String, Object>{'path': path},
     );
-    return result ?? 'Otwarto instalator systemu.';
+    // The installer answers with one fixed (Polish) text: said here in the
+    // app's language instead.
+    return result == null
+        ? t('Otwarto instalator systemu.')
+        : t('Otwarto instalator systemu — potwierdź instalację.');
   } on MissingPluginException {
-    return 'Instalowanie nie działa na tym urządzeniu.';
+    return t('Instalowanie nie działa na tym urządzeniu.');
   } on PlatformException catch (error) {
-    return 'Instalacja nie udała się: ${error.message ?? error.code}';
+    return t('Instalacja nie udała się: {reason}', {
+      'reason': error.message ?? error.code,
+    });
   }
 }
 

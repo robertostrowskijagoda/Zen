@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_notification_center.dart';
@@ -40,8 +41,15 @@ Future<void> performZenLocalDataReset(WidgetRef ref) async {
     scratch: await findZenScratchPlaces(),
     deleteExports: () => const ExportedFilesIndex().deleteAll(),
   );
+  // The diagnostics log is plain text (S-16): it goes with the support
+  // folder, and again here in case a line written during the wipe brought
+  // it back.
+  await ZenDiagnosticsLog.clear();
   await ref.read(appSettingsControllerProvider.notifier).reset();
   await ref.read(socialHubControllerProvider.notifier).resetLocalState();
+  // What the person hid after reports is gone from the disk with the rest;
+  // the list in memory must not write it back.
+  ref.invalidate(hiddenByMeProvider);
   await ref.read(runtimeNotificationCenterProvider).clear();
   await ref.read(runtimeSystemNotificationServiceProvider).clear();
   await runtime.start();

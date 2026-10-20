@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
@@ -23,6 +24,8 @@ import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/moderation/content_moderation.dart';
+import 'package:zen/src/features/moderation/hidden_by_me.dart';
+import 'package:zen/src/features/moderation/local_delete.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
 import 'package:zen/src/features/profile/presentation/gallery_add_screen.dart';
@@ -119,7 +122,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final String? text = await showDialog<String>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
-        title: const Text('Podziękuj'),
+        title: Text(t('Podziękuj')),
         content: TextField(
           key: const Key('profile-thanks-field'),
           controller: field,
@@ -127,21 +130,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           maxLines: 3,
           minLines: 1,
           textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(
-            labelText: 'Za co dziękujesz?',
-            hintText: 'Np. „pomógł wnieść lodówkę”',
-            prefixIcon: Icon(Icons.volunteer_activism_outlined),
+          decoration: InputDecoration(
+            labelText: t('Za co dziękujesz?'),
+            hintText: t('Np. „pomógł wnieść lodówkę”'),
+            prefixIcon: const Icon(Icons.volunteer_activism_outlined),
           ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialog).pop(),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             key: const Key('profile-thanks-send'),
             onPressed: () => Navigator.of(dialog).pop(field.text),
-            child: const Text('Wyślij'),
+            child: Text(t('Wyślij')),
           ),
         ],
       ),
@@ -160,7 +163,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     } on ArgumentError catch (e) {
       error = e.message as String?;
     } catch (e) {
-      error = 'Nie udało się: $e';
+      error = t('Nie udało się: {error}', {'error': e});
     }
     if (mounted && error != null) {
       ScaffoldMessenger.of(
@@ -194,6 +197,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final Set<String> banned = _isOwn
         ? const <String>{}
         : bannedContentNow(ref);
+    final HiddenByMe mine = ref.watch(hiddenByMeProvider);
     final FriendProfile? friend = address == null
         ? null
         : social.friendByAddress(address);
@@ -368,7 +372,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       label: Text(
                         friend.hasNickname
                             ? friend.nickname.trim()
-                            : 'Dodaj pseudonim',
+                            : t('Dodaj pseudonim'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -406,7 +410,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         size: 16,
                       ),
                       label: Text(
-                        status.isEmpty ? 'Ustaw status' : status,
+                        status.isEmpty ? t('Ustaw status') : status,
                         key: const Key('profile-status'),
                         textAlign: TextAlign.center,
                         maxLines: 2,
@@ -487,7 +491,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           key: const Key('profile-edit'),
                           onPressed: () => ProfileEditDialog.show(context),
                           icon: const Icon(Icons.edit_outlined, size: 18),
-                          label: const Text('Edytuj profil'),
+                          label: Text(t('Edytuj profil')),
                         ),
                         if (node != null)
                           FilledButton.icon(
@@ -497,7 +501,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               Icons.add_photo_alternate_outlined,
                               size: 18,
                             ),
-                            label: const Text('Dodaj zdjęcie lub film'),
+                            label: Text(t('Dodaj zdjęcie lub film')),
                           ),
                       ],
                     )
@@ -513,7 +517,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               }),
                             ),
                             icon: const Icon(Icons.check_rounded, size: 18),
-                            label: const Text('Obserwujesz'),
+                            label: Text(t('Obserwujesz')),
                           )
                         : FilledButton.icon(
                             key: const Key('profile-follow'),
@@ -528,7 +532,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                               Icons.person_add_alt_rounded,
                               size: 18,
                             ),
-                            label: const Text('Obserwuj'),
+                            label: Text(t('Obserwuj')),
                           )
                   else if (account != null)
                     Wrap(
@@ -575,7 +579,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                   DropdownMenuItem<FriendLevel>(
                                     value: l,
                                     child: Text(
-                                      'Poziom: ${kFriendLevelLabels[l]}',
+                                      t('Poziom: {level}', {
+                                        'level': kFriendLevelLabels[l],
+                                      }),
                                     ),
                                   ),
                               ],
@@ -593,8 +599,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           ),
                           label: Text(
                             left > 0
-                                ? 'Podziękuj (zostało $left)'
-                                : 'Limit podziękowań na ten miesiąc',
+                                ? t('Podziękuj (zostało {count})', {
+                                    'count': left,
+                                  })
+                                : t('Limit podziękowań na ten miesiąc'),
                           ),
                         ),
                       ],
@@ -611,7 +619,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       length: 3,
       child: Scaffold(
         key: const Key('profile-screen'),
-        appBar: ZenSectionBar(title: _isOwn ? 'Mój profil' : 'Profil'),
+        appBar: ZenSectionBar(title: _isOwn ? t('Mój profil') : t('Profil')),
         body: NestedScrollView(
           headerSliverBuilder: (BuildContext context, bool scrolled) =>
               <Widget>[
@@ -621,14 +629,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   delegate: _TabsHeader(
                     color: zen.background,
                     line: zen.outlineSoft,
-                    tabs: const TabBar(
+                    tabs: TabBar(
                       isScrollable: true,
                       tabAlignment: TabAlignment.center,
-                      labelPadding: EdgeInsets.symmetric(horizontal: 18),
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 18),
                       tabs: <Widget>[
-                        Tab(text: 'Posty'),
-                        Tab(key: Key('profile-tab-media'), text: 'Galeria'),
-                        Tab(text: 'Podziękowania'),
+                        Tab(text: t('Posty')),
+                        Tab(
+                          key: const Key('profile-tab-media'),
+                          text: t('Galeria'),
+                        ),
+                        Tab(text: t('Podziękowania')),
                       ],
                     ),
                   ),
@@ -637,13 +648,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           body: account == null
               ? ListView(
                   padding: readableInsets(context),
-                  children: const <Widget>[
+                  children: <Widget>[
                     ZenEmpty(
                       icon: Icons.sync_rounded,
-                      title: 'Profil jeszcze się synchronizuje…',
-                      text:
-                          'To potrwa chwilę — posty, galeria i '
-                          'podziękowania pojawią się same.',
+                      title: t('Profil jeszcze się synchronizuje…'),
+                      text: t(
+                        'To potrwa chwilę — posty, galeria i '
+                        'podziękowania pojawią się same.',
+                      ),
                     ),
                   ],
                 )
@@ -657,12 +669,16 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           ZenEmpty(
                             icon: Icons.article_outlined,
                             tone: zenTone(zen, 0),
-                            title: 'Brak postów.',
+                            title: t('Brak postów.'),
                             text: _isOwn
-                                ? 'Napisz coś na Tablicy — Twoje posty '
-                                      'zbiorą się tutaj.'
-                                : 'Ta osoba nie opublikowała jeszcze nic, '
-                                      'co możesz zobaczyć.',
+                                ? t(
+                                    'Napisz coś na Tablicy — Twoje posty '
+                                    'zbiorą się tutaj.',
+                                  )
+                                : t(
+                                    'Ta osoba nie opublikowała jeszcze nic, '
+                                    'co możesz zobaczyć.',
+                                  ),
                           ),
                         for (final FeedPost p in posts)
                           if (isContentHidden(
@@ -670,10 +686,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             p.text,
                             id: p.id,
                             revealed: _revealed,
+                            mine: mine,
                           ))
                             HiddenContentPlaceholder(
                               key: Key('profile-hidden-${p.id}'),
-                              onShow: () => setState(() => _revealed.add(p.id)),
+                              byMe: !isContentBanned(banned, p.text),
+                              onShow: () {
+                                showHiddenAnyway(ref, id: p.id);
+                                setState(() => _revealed.add(p.id));
+                              },
                             )
                           else
                             _ProfilePost(
@@ -693,7 +714,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                         ref,
                                         authorAddress: other,
                                         text: p.text,
-                                        header: 'Post na profilu — $name',
+                                        header: t('Post na profilu — {name}', {
+                                          'name': name,
+                                        }),
+                                        contentId: p.id,
+                                        deleteLocal:
+                                            node == null || p.images.isEmpty
+                                            ? null
+                                            : () => deletePostMediaLocally(
+                                                node,
+                                                p.images,
+                                              ),
                                       ),
                                     ),
                             ),
@@ -708,12 +739,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             icon: Icons.photo_library_outlined,
                             tone: zenTone(zen, 2),
                             title: _isOwn
-                                ? 'Nie masz jeszcze zdjęć ani filmów'
-                                : 'Brak zdjęć i filmów.',
+                                ? t('Nie masz jeszcze zdjęć ani filmów')
+                                : t('Brak zdjęć i filmów.'),
                             text: _isOwn
-                                ? 'Dodaj je przyciskiem „Dodaj zdjęcie lub '
-                                      'film” — domyślnie widzą je tylko '
-                                      'znajomi.'
+                                ? t(
+                                    'Dodaj je przyciskiem „Dodaj zdjęcie lub '
+                                    'film” — domyślnie widzą je tylko '
+                                    'znajomi.',
+                                  )
                                 : null,
                           )
                         else if (node != null)
@@ -734,10 +767,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           ZenEmpty(
                             icon: Icons.volunteer_activism_outlined,
                             tone: zenTone(zen, 5),
-                            title: 'Jeszcze nikt nie podziękował.',
-                            text:
-                                'Podziękowania od znajomych za pomoc '
-                                'i dobre gesty zbierają się tutaj.',
+                            title: t('Jeszcze nikt nie podziękował.'),
+                            text: t(
+                              'Podziękowania od znajomych za pomoc '
+                              'i dobre gesty zbierają się tutaj.',
+                            ),
                           ),
                         for (final ThanksCard c in thanks) _ThanksTile(card: c),
                       ],
@@ -755,7 +789,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       setState(() {});
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Zapisano zmiany.')));
+      ).showSnackBar(SnackBar(content: Text(t('Zapisano zmiany.'))));
     }
   }
 
@@ -810,7 +844,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Kto widzi to zdjęcie lub film',
+                  t('Kto widzi to zdjęcie lub film'),
                   style: TextStyle(
                     color: ZenColors.of(context).textPrimary,
                     fontSize: 17,
@@ -846,7 +880,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 color: ZenColors.of(context).danger,
               ),
               title: Text(
-                'Usuń z galerii',
+                t('Usuń z galerii'),
                 style: TextStyle(color: ZenColors.of(context).danger),
               ),
               onTap: () => Navigator.of(context).pop('remove'),
@@ -866,9 +900,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         await changeGalleryAudience(node, item, choice);
       } on Object catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Nie udało się zmienić: $e')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(t('Nie udało się zmienić: {error}', {'error': e})),
+            ),
+          );
         }
       }
       if (mounted) {
@@ -887,20 +923,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final bool? yes = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('Usunąć z galerii?'),
-        content: const Text(
-          'Zniknie z Twojego profilu. Znajomi, którzy już to pobrali, mogą '
-          'mieć kopię.',
+        title: Text(t('Usunąć z galerii?')),
+        content: Text(
+          t(
+            'Zniknie z Twojego profilu. Znajomi, którzy już to pobrali, mogą '
+            'mieć kopię.',
+          ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             key: const Key('gallery-remove-confirm'),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Usuń'),
+            child: Text(t('Usuń')),
           ),
         ],
       ),
@@ -1086,11 +1124,11 @@ class _ProfileStats extends StatelessWidget {
       ),
       child: Row(
         children: <Widget>[
-          stat(posts, 'Wpisy', zenTone(zen, 0)),
+          stat(posts, t('Wpisy'), zenTone(zen, 0)),
           divider(),
-          stat(media, 'W galerii', zenTone(zen, 2)),
+          stat(media, t('W galerii'), zenTone(zen, 2)),
           divider(),
-          stat(thanks, 'Dzięki', zenTone(zen, 5)),
+          stat(thanks, t('Dzięki'), zenTone(zen, 5)),
         ],
       ),
     );
@@ -1134,7 +1172,7 @@ class _ThanksTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'od: ${card.fromLabel}',
+                  t('od: {name}', {'name': card.fromLabel}),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: zen.textSecondary, fontSize: 13),
@@ -1311,7 +1349,7 @@ class _ProfilePost extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  post.edited ? '$when · edytowano' : when,
+                  post.edited ? t('{time} · edytowano', {'time': when}) : when,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: zen.textSecondary, fontSize: 12.5),
@@ -1330,8 +1368,8 @@ class _ProfilePost extends StatelessWidget {
                 PopupMenuButton<String>(
                   key: Key('profile-post-menu-${post.id}'),
                   tooltip: onEdit != null || onDelete != null
-                      ? 'Edytuj lub usuń'
-                      : 'Więcej',
+                      ? t('Edytuj lub usuń')
+                      : t('Więcej'),
                   icon: Icon(
                     Icons.more_horiz_rounded,
                     color: zen.textSecondary,
@@ -1344,30 +1382,30 @@ class _ProfilePost extends StatelessWidget {
                   itemBuilder: (BuildContext context) =>
                       <PopupMenuEntry<String>>[
                         if (onEdit != null)
-                          const PopupMenuItem<String>(
-                            key: Key('profile-post-edit'),
+                          PopupMenuItem<String>(
+                            key: const Key('profile-post-edit'),
                             value: 'edit',
                             child: ListTile(
-                              leading: Icon(Icons.edit_outlined),
-                              title: Text('Edytuj'),
+                              leading: const Icon(Icons.edit_outlined),
+                              title: Text(t('Edytuj')),
                             ),
                           ),
                         if (onDelete != null)
-                          const PopupMenuItem<String>(
-                            key: Key('profile-post-delete'),
+                          PopupMenuItem<String>(
+                            key: const Key('profile-post-delete'),
                             value: 'delete',
                             child: ListTile(
-                              leading: Icon(Icons.delete_outline_rounded),
-                              title: Text('Usuń'),
+                              leading: const Icon(Icons.delete_outline_rounded),
+                              title: Text(t('Usuń')),
                             ),
                           ),
                         if (onReport != null)
-                          const PopupMenuItem<String>(
-                            key: Key('profile-post-report'),
+                          PopupMenuItem<String>(
+                            key: const Key('profile-post-report'),
                             value: 'report',
                             child: ListTile(
-                              leading: Icon(Icons.flag_outlined),
-                              title: Text('Zgłoś'),
+                              leading: const Icon(Icons.flag_outlined),
+                              title: Text(t('Zgłoś')),
                             ),
                           ),
                       ],

@@ -2,13 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/app_data_reset.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
@@ -25,16 +29,125 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
     with WidgetsBindingObserver {
   DateTime? _pausedAt;
 
+  /// "Po wyjściu z aplikacji": locks the set delay after the app left the
+  /// screen, while it is still in the background — the master key and the
+  /// drawn screens do not wait in memory for the person to come back
+  /// (S-8). Where the system suspends the app (iOS) the timer cannot run;
+  /// the check on resume covers that.
+  Timer? _backgroundLockTimer;
+
+  /// On a computer: locks after the same delay without a key press or the
+  /// mouse moving over Zen (the window may stay open on a desk).
+  Timer? _idleLockTimer;
+
+  AppSecurityService? _security;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    HardwareKeyboard.instance.addHandler(_onKey);
+    _follow(ref.read(appSecurityServiceProvider));
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    HardwareKeyboard.instance.removeHandler(_onKey);
+    _security?.removeListener(_onSecurityChanged);
+    _backgroundLockTimer?.cancel();
+    _idleLockTimer?.cancel();
     super.dispose();
+  }
+
+  void _follow(AppSecurityService security) {
+    if (identical(security, _security)) {
+      return;
+    }
+    _security?.removeListener(_onSecurityChanged);
+    _security = security;
+    security.addListener(_onSecurityChanged);
+    _onSecurityChanged();
+  }
+
+  /// Whether locking by time means anything now: the "after leaving the
+  /// app" mode, a password, and the app open.
+  static bool _locksByTime(AppSecurityService security) =>
+      security.lockMode == AppLockMode.background &&
+      security.hasPassword &&
+      !security.isLocked;
+
+  static Duration _delay(AppSecurityService security) =>
+      Duration(seconds: security.backgroundLockDelaySeconds);
+
+  static bool get _idleLockPlatform => switch (defaultTargetPlatform) {
+    TargetPlatform.windows ||
+    TargetPlatform.macOS ||
+    TargetPlatform.linux => true,
+    _ => false,
+  };
+
+  /// Locked, unlocked, a password set or the settings changed.
+  void _onSecurityChanged() {
+    final AppSecurityService? security = _security;
+    if (security == null || !_locksByTime(security)) {
+      _backgroundLockTimer?.cancel();
+      _backgroundLockTimer = null;
+      _idleLockTimer?.cancel();
+      _idleLockTimer = null;
+      return;
+    }
+    _restartIdleLock();
+  }
+
+  void _restartIdleLock() {
+    _idleLockTimer?.cancel();
+    _idleLockTimer = null;
+    final AppSecurityService? security = _security;
+    if (!_idleLockPlatform || security == null || !_locksByTime(security)) {
+      return;
+    }
+    _idleLockTimer = Timer(_delay(security), () {
+      _idleLockTimer = null;
+      if (ref.read(callSurfaceActiveProvider)) {
+        // A call on screen is being watched, not left: the lock would
+        // cover it. The count starts again.
+        _restartIdleLock();
+        return;
+      }
+      final AppSecurityService? current = _security;
+      if (current != null && _locksByTime(current)) {
+        current.lock();
+      }
+    });
+  }
+
+  /// Any key press or pointer over Zen counts as the person being there.
+  void _noteInput() {
+    if (_idleLockTimer != null) {
+      _restartIdleLock();
+    }
+  }
+
+  bool _onKey(KeyEvent event) {
+    _noteInput();
+    // Only watching: the key goes on to whoever handles it.
+    return false;
+  }
+
+  void _onPointer(PointerEvent event) => _noteInput();
+
+  void _startBackgroundLock(AppSecurityService security) {
+    if (_backgroundLockTimer != null || !_locksByTime(security)) {
+      return;
+    }
+    _backgroundLockTimer = Timer(_delay(security), () {
+      _backgroundLockTimer = null;
+      final AppSecurityService? current = _security;
+      if (current != null && _locksByTime(current)) {
+        current.lock();
+      }
+    });
   }
 
   @override
@@ -42,10 +155,10 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
     final AppSecurityService security = ref.read(appSecurityServiceProvider);
     switch (state) {
       case AppLifecycleState.paused:
-        _pausedAt = DateTime.now();
-        break;
       case AppLifecycleState.hidden:
-        _pausedAt = DateTime.now();
+        // From the first of the two (hidden comes before paused).
+        _pausedAt ??= DateTime.now();
+        _startBackgroundLock(security);
         break;
       case AppLifecycleState.detached:
         if (security.lockMode == AppLockMode.appClose) {
@@ -53,6 +166,8 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
         }
         break;
       case AppLifecycleState.resumed:
+        _backgroundLockTimer?.cancel();
+        _backgroundLockTimer = null;
         if (security.lockMode == AppLockMode.background &&
             _pausedAt != null &&
             DateTime.now().difference(_pausedAt!) >
@@ -70,12 +185,29 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
   Widget build(BuildContext context) {
     final AppSettings appSettings = ref.watch(appSettingsControllerProvider);
     final AppSecurityService security = ref.watch(appSecurityServiceProvider);
+    _follow(security);
     // §25.2: once, after the app password, the permissions and Bluetooth
     // step (skipped where there is nothing to ask).
     final bool permissionsStep =
         ref.watch(permissionsSetupRequiredProvider) &&
         !appSettings.permissionsSetupDone &&
         ref.watch(permissionsPlatformProvider).hasAnything;
+    // The whole app, lock screen included: Android keeps its window out of
+    // screenshots and the recent apps while the setting is on (S-9), and
+    // every touch, click or mouse move restarts the idle lock (S-8).
+    return SecureAppWindow(
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: _onPointer,
+        onPointerMove: _onPointer,
+        onPointerHover: _onPointer,
+        onPointerSignal: _onPointer,
+        child: _gated(security, permissionsStep),
+      ),
+    );
+  }
+
+  Widget _gated(AppSecurityService security, bool permissionsStep) {
     return AnimatedBuilder(
       animation: security,
       builder: (BuildContext context, Widget? child) {
@@ -205,7 +337,7 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
     }
     setState(() {
       _isSubmitting = false;
-      _errorText = unlocked ? null : 'Nieprawidłowe hasło.';
+      _errorText = unlocked ? null : t('Nieprawidłowe hasło.');
     });
   }
 
@@ -226,7 +358,7 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
       _isSubmitting = false;
       _errorText = unlocked
           ? null
-          : 'Nie udało się odblokować biometrią. Użyj hasła.';
+          : t('Nie udało się odblokować biometrią. Użyj hasła.');
     });
   }
 
@@ -244,14 +376,14 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
             const SizedBox(height: 18),
             Center(
               child: ZenPill(
-                text: 'Blokada aplikacji',
+                text: t('Blokada aplikacji'),
                 tone: zen.accent,
                 icon: Icons.shield_outlined,
               ),
             ),
             const SizedBox(height: 12),
             Text(
-              'Zen jest zablokowany',
+              t('Zen jest zablokowany'),
               textAlign: TextAlign.center,
               style: zen.display(
                 color: zen.textPrimary,
@@ -262,8 +394,10 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
             ),
             const SizedBox(height: 10),
             Text(
-              'Dane na tym urządzeniu są zaszyfrowane. Zen dalej odbiera '
-              'wiadomości — zobaczysz je po odblokowaniu.',
+              t(
+                'Dane na tym urządzeniu są zaszyfrowane. Zen dalej odbiera '
+                'wiadomości — zobaczysz je po odblokowaniu.',
+              ),
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: zen.textSecondary,
@@ -280,11 +414,11 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
               enableIMEPersonalizedLearning: false,
               textInputAction: TextInputAction.done,
               decoration: InputDecoration(
-                labelText: 'Hasło',
-                hintText: 'Wpisz hasło aplikacji',
+                labelText: t('Hasło'),
+                hintText: t('Wpisz hasło aplikacji'),
                 prefixIcon: const Icon(Icons.key_rounded),
                 suffixIcon: IconButton(
-                  tooltip: _obscureText ? 'Pokaż hasło' : 'Ukryj hasło',
+                  tooltip: _obscureText ? t('Pokaż hasło') : t('Ukryj hasło'),
                   onPressed: () {
                     setState(() => _obscureText = !_obscureText);
                   },
@@ -297,7 +431,7 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
               ),
               validator: (String? value) {
                 if (value == null || value.isEmpty) {
-                  return 'Podaj hasło.';
+                  return t('Podaj hasło.');
                 }
                 return null;
               },
@@ -320,7 +454,7 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.lock_open_rounded, size: 20),
-              label: Text(_isSubmitting ? 'Odblokowywanie…' : 'Odblokuj'),
+              label: Text(_isSubmitting ? t('Odblokowywanie…') : t('Odblokuj')),
             ),
             if (_canUseBiometrics) ...<Widget>[
               const SizedBox(height: 10),
@@ -331,7 +465,7 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
                 ),
                 onPressed: _isSubmitting ? null : _unlockWithBiometrics,
                 icon: const Icon(Icons.fingerprint_rounded, size: 22),
-                label: const Text('Biometria'),
+                label: Text(t('Biometria')),
               ),
             ],
             const SizedBox(height: 16),
@@ -342,8 +476,10 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
-                    'Kiedy Zen ma się blokować, ustawisz w Ustawieniach → '
-                    'Bezpieczeństwo.',
+                    t(
+                      'Kiedy Zen ma się blokować, ustawisz w Ustawieniach → '
+                      'Bezpieczeństwo.',
+                    ),
                     textAlign: TextAlign.center,
                     style: TextStyle(color: zen.textMuted, fontSize: 12),
                   ),
@@ -527,14 +663,17 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
     final String password = _password.text;
     if (password.length < kMinAppPasswordLength) {
       setState(
-        () => _error =
-            'Hasło musi mieć co najmniej $kMinAppPasswordLength '
-            'znaków.',
+        () => _error = tn(
+          kMinAppPasswordLength,
+          one: 'Hasło musi mieć co najmniej {n} znak.',
+          few: 'Hasło musi mieć co najmniej {n} znaki.',
+          many: 'Hasło musi mieć co najmniej {n} znaków.',
+        ),
       );
       return;
     }
     if (password != _repeat.text) {
-      setState(() => _error = 'Hasła się różnią.');
+      setState(() => _error = t('Hasła się różnią.'));
       return;
     }
     final AppSecurityService security = ref.read(appSecurityServiceProvider);
@@ -564,7 +703,11 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
       }
     } on Object catch (error) {
       if (mounted) {
-        setState(() => _error = 'Nie udało się ustawić hasła: $error');
+        setState(
+          () => _error = t('Nie udało się ustawić hasła: {error}', {
+            'error': error,
+          }),
+        );
       }
     } finally {
       if (mounted) {
@@ -581,24 +724,27 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
         return AlertDialog(
           key: const Key('app-password-biometric-question'),
           icon: Icon(Icons.fingerprint_rounded, color: zen.accent, size: 32),
-          title: const Text('Odblokowywać odciskiem lub twarzą?'),
-          content: const SingleChildScrollView(
+          title: Text(t('Odblokowywać odciskiem lub twarzą?')),
+          content: SingleChildScrollView(
             child: Text(
-              'Wygodniej, ale słabiej niż hasło. $kBiometricRiskText\n\n'
-              'Hasło i tak zostaje (przyda się po restarcie), a zmienić to '
-              'możesz w Ustawieniach.',
+              t(
+                'Wygodniej, ale słabiej niż hasło. {risk}\n\n'
+                'Hasło i tak zostaje (przyda się po restarcie), a zmienić to '
+                'możesz w Ustawieniach.',
+                {'risk': kBiometricRiskText},
+              ),
             ),
           ),
           actions: <Widget>[
             TextButton(
               key: const Key('app-password-biometric-yes'),
               onPressed: () => Navigator.of(dialog).pop(true),
-              child: const Text('Włącz mimo to'),
+              child: Text(t('Włącz mimo to')),
             ),
             FilledButton(
               key: const Key('app-password-biometric-no'),
               onPressed: () => Navigator.of(dialog).pop(false),
-              child: const Text('Tylko hasło'),
+              child: Text(t('Tylko hasło')),
             ),
           ],
         );
@@ -616,21 +762,23 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
           color: ZenColors.of(dialog).warning,
           size: 32,
         ),
-        title: const Text('Bez hasła?'),
-        content: const Text(
-          'Bez hasła każdy, kto dostanie się do tego urządzenia albo '
-          'skopiuje jego pliki, może przeczytać Twoje rozmowy. Hasło '
-          'możesz ustawić później w Ustawieniach.',
+        title: Text(t('Bez hasła?')),
+        content: Text(
+          t(
+            'Bez hasła każdy, kto dostanie się do tego urządzenia albo '
+            'skopiuje jego pliki, może przeczytać Twoje rozmowy. Hasło '
+            'możesz ustawić później w Ustawieniach.',
+          ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialog).pop(false),
-            child: const Text('Wróć'),
+            child: Text(t('Wróć')),
           ),
           TextButton(
             key: const Key('app-password-skip-confirm'),
             onPressed: () => Navigator.of(dialog).pop(true),
-            child: const Text('Tak, bez hasła'),
+            child: Text(t('Tak, bez hasła')),
           ),
         ],
       ),
@@ -655,14 +803,14 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
           const SizedBox(height: 18),
           Center(
             child: ZenPill(
-              text: 'Hasło aplikacji',
+              text: t('Hasło aplikacji'),
               tone: zen.accent,
               icon: Icons.shield_outlined,
             ),
           ),
           const SizedBox(height: 12),
           Text(
-            'Ustaw hasło',
+            t('Ustaw hasło'),
             textAlign: TextAlign.center,
             style: zen.display(
               color: zen.textPrimary,
@@ -673,10 +821,12 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
           ),
           const SizedBox(height: 10),
           Text(
-            'Hasło szyfruje wszystko, co Zen trzyma na tym urządzeniu. '
-            'Gdy aplikacja jest zablokowana, na dysku leży tylko '
-            'szyfrogram — bez hasła nikt go nie odczyta. Potem możesz '
-            'odblokowywać odciskiem palca lub twarzą.',
+            t(
+              'Hasło szyfruje wszystko, co Zen trzyma na tym urządzeniu. '
+              'Gdy aplikacja jest zablokowana, na dysku leży tylko '
+              'szyfrogram — bez hasła nikt go nie odczyta. Potem możesz '
+              'odblokowywać odciskiem palca lub twarzą.',
+            ),
             textAlign: TextAlign.center,
             style: TextStyle(
               color: zen.textSecondary,
@@ -692,9 +842,14 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
             enableIMEPersonalizedLearning: false,
             textInputAction: TextInputAction.next,
             decoration: InputDecoration(
-              labelText: 'Hasło',
-              hintText: 'Wymyśl hasło',
-              helperText: 'Co najmniej $kMinAppPasswordLength znaków',
+              labelText: t('Hasło'),
+              hintText: t('Wymyśl hasło'),
+              helperText: tn(
+                kMinAppPasswordLength,
+                one: 'Co najmniej {n} znak',
+                few: 'Co najmniej {n} znaki',
+                many: 'Co najmniej {n} znaków',
+              ),
               prefixIcon: const Icon(Icons.key_rounded),
             ),
           ),
@@ -705,10 +860,10 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
             obscureText: true,
             enableIMEPersonalizedLearning: false,
             textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(
-              labelText: 'Powtórz hasło',
-              hintText: 'To samo hasło jeszcze raz',
-              prefixIcon: Icon(Icons.key_rounded),
+            decoration: InputDecoration(
+              labelText: t('Powtórz hasło'),
+              hintText: t('To samo hasło jeszcze raz'),
+              prefixIcon: const Icon(Icons.key_rounded),
             ),
             onSubmitted: (_) => _set(),
           ),
@@ -729,13 +884,13 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.lock_rounded, size: 20),
-            label: Text(_busy ? 'Ustawiam…' : 'Ustaw hasło'),
+            label: Text(_busy ? t('Ustawiam…') : t('Ustaw hasło')),
           ),
           const SizedBox(height: 6),
           TextButton(
             key: const Key('app-password-skip'),
             onPressed: _busy ? null : _skip,
-            child: const Text('Bez hasła (niezalecane)'),
+            child: Text(t('Bez hasła (niezalecane)')),
           ),
         ],
       ),

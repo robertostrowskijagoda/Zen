@@ -2,12 +2,18 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-/// Shared application key for the Klipy catalog. GIF browsing works out of
-/// the box without any user configuration. Client-side catalog keys are
+/// Shared application key for the Klipy catalog, embedded in the app and used
+/// unless the user sets their own key in the settings. GIF browsing works out
+/// of the box without any user configuration. Client-side catalog keys are
 /// public by nature (they ship in every GUI client), so embedding one is a
 /// deliberate product decision.
+///
+/// GIF search is the one feature that talks to a third party: the search
+/// text, the app language and this device's IP address reach api.klipy.com
+/// (the picker says so), and the GIFs themselves come from klipy.com.
 const String kZenSharedKlipyApiKey =
     'yvzMn6WP9oU5ZUKnlbVIyIzSJHUxU4bznsvFA0cJJQ0uJFGiFuzYBh9z0jiiW3Bj';
 
@@ -46,8 +52,10 @@ abstract interface class GifCatalog {
   Future<List<GifCatalogEntry>> search(String query);
 }
 
-/// Placeholder used until the user provides their own Klipy API key in the
-/// settings. The app ships without any embedded third-party credentials.
+/// A catalog that returns no GIFs, for wiring in where GIF search should be
+/// off (tests, a build without it). Not the default: the app embeds a Klipy
+/// key ([kZenSharedKlipyApiKey]) and uses [KlipyGifCatalog] unless
+/// [gifCatalogProvider] is overridden.
 final class EmptyGifCatalog implements GifCatalog {
   const EmptyGifCatalog();
 
@@ -60,6 +68,36 @@ final class EmptyGifCatalog implements GifCatalog {
       const <GifCatalogEntry>[];
 }
 
+/// The catalog locale (`xx_YY`) for a Zen language code such as
+/// [ZenI18n.code]; English (`en_US`) for a code Zen does not speak.
+String klipyLocaleFor(String languageCode) =>
+    _klipyLocales[languageCode] ?? 'en_US';
+
+/// Every language in `kZenLanguages`, with the region it is most used in.
+const Map<String, String> _klipyLocales = <String, String>{
+  'pl': 'pl_PL',
+  'id': 'id_ID',
+  'cs': 'cs_CZ',
+  'de': 'de_DE',
+  'en': 'en_US',
+  'es': 'es_ES',
+  'fr': 'fr_FR',
+  'it': 'it_IT',
+  'hu': 'hu_HU',
+  'nl': 'nl_NL',
+  'pt': 'pt_BR',
+  'ro': 'ro_RO',
+  'vi': 'vi_VN',
+  'tr': 'tr_TR',
+  'ru': 'ru_RU',
+  'uk': 'uk_UA',
+  'ar': 'ar_SA',
+  'hi': 'hi_IN',
+  'zh': 'zh_CN',
+  'ja': 'ja_JP',
+  'ko': 'ko_KR',
+};
+
 final class KlipyGifCatalog implements GifCatalog {
   const KlipyGifCatalog({
     required this.apiKey,
@@ -71,15 +109,27 @@ final class KlipyGifCatalog implements GifCatalog {
 
   final HttpClient Function() _clientFactory;
 
+  /// The app's current language, read per request so switching it takes
+  /// effect at once.
+  String get _locale => klipyLocaleFor(ZenI18n.code);
+
+  /// The request for the featured GIFs.
+  Uri featuredUri() => Uri.parse(
+    'https://api.klipy.com/v2/featured'
+    '?key=$apiKey&client_key=$_clientKey'
+    '&limit=30&media_filter=tinygif,gif&locale=$_locale',
+  );
+
+  /// The request for GIFs matching [query] (already trimmed, non-empty).
+  Uri searchUri(String query) => Uri.parse(
+    'https://api.klipy.com/v2/search'
+    '?q=${Uri.encodeComponent(query)}'
+    '&key=$apiKey&client_key=$_clientKey'
+    '&limit=30&media_filter=tinygif,gif&locale=$_locale',
+  );
+
   @override
-  Future<List<GifCatalogEntry>> loadFeatured() {
-    final Uri uri = Uri.parse(
-      'https://api.klipy.com/v2/featured'
-      '?key=$apiKey&client_key=$_clientKey'
-      '&limit=30&media_filter=tinygif,gif&locale=pl_PL',
-    );
-    return _fetch(uri);
-  }
+  Future<List<GifCatalogEntry>> loadFeatured() => _fetch(featuredUri());
 
   @override
   Future<List<GifCatalogEntry>> search(String query) {
@@ -87,13 +137,7 @@ final class KlipyGifCatalog implements GifCatalog {
     if (normalizedQuery.isEmpty) {
       return loadFeatured();
     }
-    final Uri uri = Uri.parse(
-      'https://api.klipy.com/v2/search'
-      '?q=${Uri.encodeComponent(normalizedQuery)}'
-      '&key=$apiKey&client_key=$_clientKey'
-      '&limit=30&media_filter=tinygif,gif&locale=pl_PL',
-    );
-    return _fetch(uri);
+    return _fetch(searchUri(normalizedQuery));
   }
 
   Future<List<GifCatalogEntry>> _fetch(Uri uri) async {
