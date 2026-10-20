@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/meet/encounters.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby_crypto.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -372,6 +373,10 @@ final class NearbyService extends ChangeNotifier {
   /// Bluetooth was switched on (`true`) or off on this phone.
   final List<void Function(bool on)> bluetoothHandlers =
       <void Function(bool on)>[];
+
+  /// "Mijani" (§15): told about every phone seen while something scans
+  /// anyway (no scanning of its own), written when a scan ends.
+  EncounterLog? encounters;
   Timer? _tick;
 
   /// Seen within this long counts as "here".
@@ -560,11 +565,16 @@ final class NearbyService extends ChangeNotifier {
     await radio.stopScan();
     _syncTimer();
     notifyListeners();
+    // One write per look around in the background.
+    final EncounterLog? log = encounters;
+    if (log != null) {
+      unawaitedLogged(log.flush(), context: 'Mijani: zapis');
+    }
   }
 
   /// One short, low-power look around (§15: without the "W pobliżu" screen
-  /// the phone only peeks now and then, to save the battery). Friends in
-  /// range are marked met in person as usual. Skipped while something else
+  /// the phone only peeks now and then, to save the battery). Who is in
+  /// range goes to "Mijani" ([encounters]). Skipped while something else
   /// is scanning; whoever starts scanning meanwhile takes the scan over.
   /// Returns whether it ran.
   Future<bool> scanWindow(Duration length) async {
@@ -655,6 +665,8 @@ final class NearbyService extends ChangeNotifier {
     _refreshFriendKeys();
     final String? friend = _recognise(raw, _hex(hint), token);
     final int t = _now();
+    // Only who (a friend) or how many (anyone else) — never the address.
+    encounters?.saw(token: token, at: t, friend: friend);
     final NearbyPerson? had = _people[token];
     if (had != null) {
       had

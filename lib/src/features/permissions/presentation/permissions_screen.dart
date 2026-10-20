@@ -514,7 +514,8 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
         t(
           'Alarm wysyła znajomym miejsce, w którym jesteś, a sąsiedzi '
           'widzą, kto jest obok. Zen pyta o położenie tylko wtedy, gdy '
-          'jest potrzebne, i nie zapisuje trasy.',
+          'jest potrzebne. Nie zapisuje trasy, ale przy spotkaniu na liście '
+          '„Mijani” może zapamiętać przybliżone miejsce (do około 100 m).',
         ),
       ),
       ZenPermission.backgroundLocation => (

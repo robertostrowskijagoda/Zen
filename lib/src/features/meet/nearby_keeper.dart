@@ -27,9 +27,9 @@ const Duration kNearbyLookFor = Duration(seconds: 10);
 ///    dating deadline) goes out nearby too.
 ///
 /// Anywhere, when the person allowed it ([MeetBook.nearbyBackgroundScan]):
-/// a short low-power look around every [lookEvery], which only marks
-/// friends in range met in person. Friends' alarms heard only over
-/// Bluetooth end after [kNearbyAlarmLife].
+/// a short low-power look around every [lookEvery]; friends in range (and
+/// how many others) go to "Mijani" ([NearbyService.encounters]). Friends'
+/// alarms heard only over Bluetooth end after [kNearbyAlarmLife].
 final class NearbyKeeper {
   NearbyKeeper({
     required this.nearby,

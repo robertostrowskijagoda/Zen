@@ -8,11 +8,15 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/core/utils/system_actions.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/meet/encounters.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
+import 'package:zen/src/features/meet/presentation/encounters_section.dart';
 import 'package:zen/src/features/meet/presentation/met_level_prompt.dart';
+import 'package:zen/src/features/profile/presentation/mini_profile.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
 /// "Osoby w pobliżu" (§15).
@@ -32,6 +36,7 @@ class NearbyScreen extends ConsumerStatefulWidget {
 class _NearbyScreenState extends ConsumerState<NearbyScreen>
     with WidgetsBindingObserver {
   late final NearbyService _nearby = ref.read(nearbyServiceProvider);
+  late final EncounterLog _encounters = ref.read(encounterLogProvider);
   Map<Object?, Object?> _state = const <Object?, Object?>{};
   bool _loaded = false;
 
@@ -43,6 +48,8 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
     WidgetsBinding.instance.addObserver(this);
     _nearby.bluetoothHandlers.add(_onBluetooth);
     unawaited(_refresh(scan: true));
+    // The background service may have noted people passed meanwhile.
+    unawaited(_encounters.load());
   }
 
   @override
@@ -59,6 +66,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
     switch (state) {
       case AppLifecycleState.resumed:
         unawaited(_refresh(scan: true));
+        unawaited(_encounters.load());
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
       case AppLifecycleState.detached:
@@ -348,9 +356,9 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                       subtitle: Text(
                         t(
                           'Co 5 minut telefon na 10 sekund oszczędnie sprawdza, '
-                          'czy obok są znajomi, i zaznacza ich jako „spotkanych '
-                          'osobiście”. Działa też przy zamkniętym Zen. Pełne '
-                          'szukanie tylko na tym ekranie.',
+                          'czy obok są znajomi, i zapisuje ich w „Mijani”. '
+                          'Działa też przy zamkniętym Zen. Pełne szukanie tylko '
+                          'na tym ekranie.',
                         ),
                       ),
                       onChanged: (bool v) =>
@@ -428,12 +436,39 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                         unawaited(NearbyChatScreen.open(context, s.id)),
                   ),
               ],
+              ListenableBuilder(
+                listenable: meet,
+                builder: (BuildContext context, Widget? _) =>
+                    _encountersSection(meet),
+              ),
             ],
           );
         },
       ),
     );
   }
+
+  /// "Mijani" (§15): who was passed, kept only on this phone.
+  Widget _encountersSection(MeetService meet) => EncountersSection(
+    log: _encounters,
+    lookingInBackground: meet.book.nearbyBackgroundScan,
+    nameOf: meet.host.nameOf,
+    hasMet: (String friend) =>
+        ref.read(ledgerNodeProvider)?.hasMet(friend) ?? false,
+    onOpen: (String friend) => unawaited(showMiniProfile(context, friend)),
+    onMet: (String friend) => unawaited(
+      showMetLevelPrompt(
+        context,
+        address: friend,
+        name: meet.host.nameOf(friend),
+      ).then((_) {
+        if (mounted) {
+          setState(() {});
+        }
+      }),
+    ),
+    onPlace: (EncounterPlace place) => unawaited(openMap(place.lat, place.lon)),
+  );
 
   Widget _personTile(
     MeetService meet,
