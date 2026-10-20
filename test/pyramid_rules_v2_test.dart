@@ -3,11 +3,9 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
-/// The rules of generation 2 ([kPyrRules]), switched on by the genesis (or
-/// a constitution): S18 (a rule failing halfway leaves no trace), the
+/// The fold's rules: S18 (a rule failing halfway leaves no trace), the
 /// quorum from active members and the time-bound full count (§6 pt 11),
-/// emission above the limit by referendum (§23.4) — and the new kinds a
-/// 1.10.0 phone rejects without folding anything else differently: the
+/// emission above the limit by referendum (§23.4), the
 /// national section's pins (§22.2), badges (§20.2a), bans of entries (S36).
 const int t0 = 1700000000000;
 const int h = 3600 * 1000;
@@ -42,6 +40,24 @@ Map<String, dynamic> member(
   String dc = 'x',
 }) => <String, dynamic>{'k': k.id, 'n': name, 'nat': nat, 'dc': dc};
 
+/// Each member met in person by the two after them (§6.2), so all six may
+/// vote in referenda (§20.6).
+Future<List<PyramidRecord>> metRecords(
+  String py,
+  List<LedgerKeyPair> k,
+  int at,
+) async => <PyramidRecord>[
+  for (int i = 0; i < k.length; i++)
+    for (int j = 1; j <= 2; j++)
+      await rec(
+        PyrT.met,
+        py,
+        at + i * 2 + j,
+        <LedgerKeyPair>[k[(i + j) % k.length]],
+        <String, dynamic>{'k': k[i].id},
+      ),
+];
+
 const Map<String, String> allScope = <String, String>{
   'k': 'all',
   'p': '',
@@ -49,7 +65,7 @@ const Map<String, String> allScope = <String, String>{
 };
 
 /// S on top, A and B under S, A1 and A2 under A, B1 under B; the genesis
-/// sets [params] (the rules generation among them).
+/// sets [params].
 final class World {
   World._(this.s, this.a, this.b, this.a1, this.a2, this.b1, this.records);
 
@@ -64,7 +80,6 @@ final class World {
   String get py => records.first.id;
 
   static Future<World> make({
-    int rules = 2,
     Map<String, dynamic> params = const <String, dynamic>{},
     String a1Commit = 'x',
   }) async {
@@ -79,7 +94,7 @@ final class World {
       <String, dynamic>{
         'name': 'Test',
         'founder': member(k[0], 'S'),
-        'params': <String, dynamic>{'rules': rules, ...params},
+        'params': params,
       },
     );
     final String py = g.id;
@@ -123,6 +138,7 @@ final class World {
         <LedgerKeyPair>[k[2], k[5]],
         <String, dynamic>{'head': k[2].id, 'm': member(k[5], 'B1')},
       ),
+      ...await metRecords(py, k, t0 + 10),
     ]);
   }
 
@@ -198,8 +214,8 @@ void main() {
   tearDown(() => PyramidState.debugAfterApply = null);
 
   group('S18: a rule failing halfway', () {
-    Future<(World, PyramidRecord, PyramidRecord)> setUpZ(int rules) async {
-      final World w = await World.make(rules: rules);
+    Future<(World, PyramidRecord, PyramidRecord)> setUpZ() async {
+      final World w = await World.make();
       final LedgerKeyPair z = await LedgerKeyPair.generate();
       // A2 admits Z, and the rule fails after placing Z.
       final PyramidRecord admitZ = await rec(
@@ -218,9 +234,9 @@ void main() {
       return (w, admitZ, aliveZ);
     }
 
-    test('with rules 2 the record leaves no trace', () async {
+    test('the record leaves no trace', () async {
       final (World w, PyramidRecord admitZ, PyramidRecord aliveZ) =
-          await setUpZ(2);
+          await setUpZ();
       final PyramidState st = w.fold(<PyramidRecord>[admitZ, aliveZ]);
       expect(st.rejected[admitZ.id], 'błędny rekord');
       expect(st.members, hasLength(6), reason: 'Z never got in');
@@ -228,19 +244,6 @@ void main() {
       // What follows sees the pyramid without Z.
       expect(st.rejected[aliveZ.id], 'nie członek');
     });
-
-    test(
-      'with the old rules the half-done change stays, as in 1.10.0',
-      () async {
-        final (World w, PyramidRecord admitZ, PyramidRecord aliveZ) =
-            await setUpZ(1);
-        final PyramidState st = w.fold(<PyramidRecord>[admitZ, aliveZ]);
-        expect(st.rejected[admitZ.id], 'błędny rekord');
-        // A 1.10.0 phone keeps Z placed: the old fold is kept exactly.
-        expect(st.members, hasLength(7));
-        expect(st.applied, contains(aliveZ.id));
-      },
-    );
   });
 
   group('quorum from the active members (§6 pt 11)', () {
@@ -271,7 +274,7 @@ void main() {
           await w.alive(w.a1, at - 5 * day),
         ];
 
-    test('rules 2: half of those seen in the last 60 days is enough', () async {
+    test('half of those seen in the last 60 days is enough', () async {
       final World w = await World.make();
       const int at = t0 + 200 * day;
       const int end = at + 72 * h;
@@ -285,59 +288,6 @@ void main() {
       expect(st.applied, contains(rs.last.id));
       expect(st.params.emitLimit, 5);
     });
-
-    test('rules 1: every place counts, the dead ones too', () async {
-      final World w = await World.make(rules: 1);
-      const int at = t0 + 200 * day;
-      const int end = at + 72 * h;
-      final List<PyramidRecord> rs = <PyramidRecord>[
-        ...await onlyThreeAlive(w, at),
-        ...await vote(w, at, end),
-      ];
-      final PyramidState st = w.fold(rs);
-      expect(st.quorumBase(end), 6);
-      expect(st.rejected[rs.last.id], 'referendum nie przeszło');
-      expect(st.params.emitLimit, PyrParams().emitLimit);
-    });
-
-    test(
-      'a constitution can switch the new rules on (the gate for old phones)',
-      () async {
-        final World w = await World.make(rules: 1);
-        const int at = t0 + day;
-        const int end = at + 72 * h;
-        final PyramidRecord ref = await w.referendum(
-          at,
-          end,
-          params: <String, dynamic>{'rules': 2},
-        );
-        final PyramidRecord tA = await w.tally(w.a, end + 60000, ref.id, <int>[
-          3,
-          0,
-        ], extra: true);
-        final PyramidRecord tB = await w.tally(w.b, end + 60000, ref.id, <int>[
-          1,
-          0,
-        ]);
-        final PyramidRecord top = await w.tally(
-          w.s,
-          end + 7 * h,
-          ref.id,
-          <int>[6, 0],
-          kids: <String>[tA.id, tB.id],
-        );
-        final PyramidRecord change = await w.constitution(end + 8 * h, ref.id);
-        final PyramidState st = w.fold(<PyramidRecord>[
-          ref,
-          tA,
-          tB,
-          top,
-          change,
-        ]);
-        expect(st.applied, contains(change.id));
-        expect(st.params.rules, 2);
-      },
-    );
   });
 
   group('a full count with a time limit (§6 pt 11)', () {
@@ -367,25 +317,13 @@ void main() {
       return (<PyramidRecord>[ref, tA, top, lateB, change], change);
     }
 
-    test(
-      'rules 2: a branch sum after the top\'s count does not void it',
-      () async {
-        final World w = await World.make();
-        final (List<PyramidRecord> rs, PyramidRecord change) =
-            await withLateBranch(w);
-        final PyramidState st = w.fold(rs);
-        expect(st.resultOf(rs.first.id, strict: true), <int>[4, 0]);
-        expect(st.applied, contains(change.id));
-      },
-    );
-
-    test('rules 1: the late sum still voids the count', () async {
-      final World w = await World.make(rules: 1);
+    test('a branch sum after the top\'s count does not void it', () async {
+      final World w = await World.make();
       final (List<PyramidRecord> rs, PyramidRecord change) =
           await withLateBranch(w);
       final PyramidState st = w.fold(rs);
-      expect(st.resultOf(rs.first.id, strict: true), isNull);
-      expect(st.rejected[change.id], 'referendum nie przeszło');
+      expect(st.resultOf(rs.first.id, strict: true), <int>[4, 0]);
+      expect(st.applied, contains(change.id));
     });
   });
 
@@ -478,41 +416,20 @@ void main() {
       expect(st.balanceOf(w.a1.id), 4 * limit);
     });
 
-    test(
-      'a short emission vote is refused; rules 1 knows no such vote',
-      () async {
-        final World w = await World.make();
-        const int at = t0 + day;
-        final PyramidRecord short = await w.referendum(
-          at,
-          at + 2 * h,
-          kind: 'emit',
-          params: <String, dynamic>{'to': w.a1.id, 'amount': 5},
-        );
-        expect(w.fold(<PyramidRecord>[short]).rejected[short.id], isNotNull);
-
-        final World old = await World.make(rules: 1);
-        final int limit = PyrParams().emitLimit;
-        const int end = at + 72 * h;
-        final List<PyramidRecord> vote = await passedVote(
-          old,
-          at,
-          end,
-          3 * limit,
-        );
-        final PyramidRecord e = await old.emit(
-          end + 7 * h + 2,
-          old.a1,
-          3 * limit,
-          ref: vote.first.id,
-        );
-        final PyramidState st = old.fold(<PyramidRecord>[...vote, e]);
-        expect(st.rejected[e.id], contains('limit'));
-      },
-    );
+    test('a short emission vote is refused', () async {
+      final World w = await World.make();
+      const int at = t0 + day;
+      final PyramidRecord short = await w.referendum(
+        at,
+        at + 2 * h,
+        kind: 'emit',
+        params: <String, dynamic>{'to': w.a1.id, 'amount': 5},
+      );
+      expect(w.fold(<PyramidRecord>[short]).rejected[short.id], isNotNull);
+    });
   });
 
-  group('kinds a 1.10.0 phone does not know', () {
+  group('national pins, badges, entry bans', () {
     test('the national lead pins posts; nobody else can', () async {
       final World w = await World.make(
         params: const <String, dynamic>{'nationalMin': 1},
@@ -542,9 +459,7 @@ void main() {
       expect(st.nationalLead('PL'), w.s.id);
       expect(st.rejected[pinByA.id], isNotNull);
       expect(st.natPins['PL']!.keys, <String>[post.id]);
-      // Not a sign of life: a 1.10.0 phone, which rejects it, agrees on
-      // who was seen when.
-      expect(st.lastSeen[w.s.id], t0 + day);
+      expect(st.lastSeen[w.s.id], t0 + 3 * day);
       final PyramidRecord unpin = await rec(
         PyrT.natPin,
         w.py,
@@ -589,26 +504,21 @@ void main() {
       },
     );
 
-    test(
-      'a content ban names the entry, and keeps the hash for old phones',
-      () async {
-        final World w = await World.make();
-        final PyramidRecord ban = await rec(
-          PyrT.ban,
-          w.py,
-          t0 + day,
-          <LedgerKeyPair>[w.s, w.a],
-          <String, dynamic>{
-            'target': w.b1.id,
-            'kind': 'content',
-            'hash': 'a' * 64,
-            'eid': 'entry-1',
-          },
-        );
-        final PyramidState st = w.fold(<PyramidRecord>[ban]);
-        expect(st.bannedEntries(t0 + 2 * day), <String>{'entry-1'});
-        expect(st.bannedContent(t0 + 2 * day), <String>{'a' * 64});
-      },
-    );
+    test('a content ban names the entry', () async {
+      final World w = await World.make();
+      final PyramidRecord ban = await rec(
+        PyrT.ban,
+        w.py,
+        t0 + day,
+        <LedgerKeyPair>[w.s, w.a],
+        <String, dynamic>{
+          'target': w.b1.id,
+          'kind': 'content',
+          'eid': 'entry-1',
+        },
+      );
+      final PyramidState st = w.fold(<PyramidRecord>[ban]);
+      expect(st.bannedEntries(t0 + 2 * day), <String>{'entry-1'});
+    });
   });
 }

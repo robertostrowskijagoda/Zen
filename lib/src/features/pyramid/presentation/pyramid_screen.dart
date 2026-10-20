@@ -474,7 +474,9 @@ Future<void> showProposals(
                           <String, Object?>{
                             'name': (p.record.body['m'] as Map?)?['n'],
                             'nat': (p.record.body['m'] as Map?)?['nat'],
-                            'year': p.extra['by'],
+                            'year': (p.extra['by'] is int && p.extra['by'] > 0)
+                                ? p.extra['by']
+                                : t('nie podano'),
                             'gender': p.extra['g'],
                           },
                         ),
@@ -623,12 +625,18 @@ class _JoinViewState extends ConsumerState<_JoinView> {
                   ),
                   const SizedBox(height: 16),
                   TextField(
+                    key: const Key('pyr-birth-year'),
                     controller: year,
                     keyboardType: TextInputType.number,
                     decoration: InputDecoration(
-                      labelText: t('Rok urodzenia'),
+                      labelText: t('Rok urodzenia (opcjonalnie)'),
                       hintText: t('np. 1990'),
                       prefixIcon: const Icon(Icons.cake_outlined),
+                      helperText: t(
+                        'Możesz pominąć — wtedy bez odznaki wieku i bez '
+                        'wieku w statystykach.',
+                      ),
+                      helperMaxLines: 3,
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -675,6 +683,7 @@ class _JoinViewState extends ConsumerState<_JoinView> {
                 child: Text(t('Anuluj')),
               ),
               FilledButton(
+                key: const Key('pyr-data-next'),
                 onPressed: () => Navigator.of(context).pop(true),
                 child: Text(t('Dalej')),
               ),
@@ -683,14 +692,15 @@ class _JoinViewState extends ConsumerState<_JoinView> {
         },
       ),
     );
-    final int? y = int.tryParse(year.text.trim());
-    final Map<String, Object>? out =
-        ok == true && name.text.trim().isNotEmpty && y != null && y > 1900
+    // The birth year is optional: skipped or unreadable means "not given".
+    final int? parsed = int.tryParse(year.text.trim());
+    final int? y = parsed != null && parsed > 1900 ? parsed : null;
+    final Map<String, Object>? out = ok == true && name.text.trim().isNotEmpty
         ? <String, Object>{
             'pname': pname.text.trim(),
             'name': name.text.trim(),
             'nat': nat.text.trim(),
-            'year': y,
+            'year': ?y,
             'g': gender,
           }
         : null;
@@ -726,7 +736,7 @@ class _JoinViewState extends ConsumerState<_JoinView> {
       invite: code,
       myName: d['name']! as String,
       nat: d['nat']! as String,
-      birthYear: d['year']! as int,
+      birthYear: d['year'] as int?,
       gender: d['g']! as String,
     );
     if (mounted) {
@@ -748,7 +758,7 @@ class _JoinViewState extends ConsumerState<_JoinView> {
           : d['pname']! as String,
       myName: d['name']! as String,
       nat: d['nat']! as String,
-      birthYear: d['year']! as int,
+      birthYear: d['year'] as int?,
       gender: d['g']! as String,
     );
   }
@@ -1743,6 +1753,8 @@ class PyrBadgeAndStats extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final bool shown = s.badges.containsKey(me);
+    final Object? year = pyr.myData['by'];
+    final bool hasYear = year is int && year > 0;
     final List<int>? stats = pyr.branchStats();
     final List<String> ages = <String>[
       t('do 24'),
@@ -1771,7 +1783,10 @@ class PyrBadgeAndStats extends StatelessWidget {
                 'statystyk.',
               ),
             ),
-            onChanged: (bool v) => unawaited(pyr.showBadge(v)),
+            // Without a birth year given at entry there is no badge.
+            onChanged: !shown && !hasYear
+                ? null
+                : (bool v) => unawaited(pyr.showBadge(v)),
           ),
           const SizedBox(height: 4),
           Text(
@@ -1999,7 +2014,6 @@ class PyrPostCard extends ConsumerWidget {
                                     'name': s.members[c.author]?.name ?? '?',
                                     'text': c.text,
                                   }),
-                                  contentHash: contentHash(c.text),
                                   contentId: c.id,
                                   entryId: c.id,
                                 ),
@@ -2074,7 +2088,6 @@ class PyrPostCard extends ConsumerWidget {
                     pyr,
                     target: post.author,
                     evidence: post.text,
-                    contentHash: contentHash(post.text),
                     contentId: post.id,
                     // The post is a signed record every member keeps: its
                     // id is the evidence and what a ban names (S36).
@@ -2102,7 +2115,6 @@ class _PoliticsTab extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final Color tone = pyrTone(zen);
     final Set<String> up = s.lineUp(me).toSet();
-    final Set<String> banned = s.bannedContent(pyr.now);
     final Set<String> bannedIds = s.bannedEntries(pyr.now);
     // §22.1: the top first, then the line up from the highest, newest first
     // within a level; then this person's own posts.
@@ -2113,8 +2125,7 @@ class _PoliticsTab extends StatelessWidget {
                   (up.contains(p.author) ||
                       p.author == me ||
                       p.author == s.head) &&
-                  !bannedIds.contains(p.id) &&
-                  !banned.contains(contentHash(p.text)),
+                  !bannedIds.contains(p.id),
             )
             .toList()
           ..sort(
@@ -2225,16 +2236,10 @@ class _NationTab extends StatelessWidget {
     final Map<String, int> grants = s.natGrants[nat] ?? const <String, int>{};
     final Map<String, int> pins = s.natPins[nat] ?? const <String, int>{};
     final int now = pyr.now;
-    final Set<String> banned = s.bannedContent(now);
     final Set<String> bannedIds = s.bannedEntries(now);
     final List<PyrPost> posts =
         s.natPosts.values
-            .where(
-              (PyrPost p) =>
-                  p.nat == nat &&
-                  !bannedIds.contains(p.id) &&
-                  !banned.contains(contentHash(p.text)),
-            )
+            .where((PyrPost p) => p.nat == nat && !bannedIds.contains(p.id))
             .toList()
           ..sort((PyrPost a, PyrPost b) {
             // Pinned by the lead first, newest pin on top (§22.2).
@@ -2450,14 +2455,33 @@ class _VotesTab extends StatelessWidget {
     final Color tone = pyrTone(zen);
     final int now = pyr.now;
     final List<PyrReferendum> list =
-        s.referenda.values
-            .where((PyrReferendum r) => s.eligible(r, me))
-            .toList()
+        s.referenda.values.where((PyrReferendum r) => s.inScope(r, me)).toList()
           ..sort((PyrReferendum a, PyrReferendum b) => b.at.compareTo(a.at));
+    // Votes count only from members met in person by 2 others (§20.6).
+    final bool met = s.metInPerson(me);
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: <Widget>[
         ZenSection(t('Referenda'), top: 4),
+        if (!met)
+          ZenInfo(
+            key: const Key('pyr-vote-not-met'),
+            icon: Icons.handshake_outlined,
+            tone: zen.warning,
+            title: t('Głosujesz po spotkaniu osobiście'),
+            text: tn(
+              s.metCount(me),
+              one:
+                  'W referendach głosują osoby, które co najmniej 2 członków '
+                  'piramidy poznało osobiście. Potwierdził(a) to {n} członek.',
+              few:
+                  'W referendach głosują osoby, które co najmniej 2 członków '
+                  'piramidy poznało osobiście. Potwierdziło to {n} członków.',
+              many:
+                  'W referendach głosują osoby, które co najmniej 2 członków '
+                  'piramidy poznało osobiście. Potwierdziło to {n} członków.',
+            ),
+          ),
         if (list.isEmpty)
           ZenEmpty(
             icon: Icons.how_to_vote_outlined,
@@ -2526,7 +2550,7 @@ class _VotesTab extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
-                if (now < r.end && !pyr.myVotes.containsKey(r.id))
+                if (now < r.end && met && !pyr.myVotes.containsKey(r.id))
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -2540,7 +2564,7 @@ class _VotesTab extends StatelessWidget {
                         ),
                     ],
                   )
-                else if (now < r.end)
+                else if (now < r.end && pyr.myVotes.containsKey(r.id))
                   ZenInfo(
                     icon: Icons.check_circle_rounded,
                     tone: zen.success,

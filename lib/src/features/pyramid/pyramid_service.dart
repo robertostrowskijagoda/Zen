@@ -14,6 +14,7 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
+import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_record_log.dart';
@@ -65,8 +66,7 @@ abstract final class PyramidTypes {
   static const String fxKey = 'pyr_fx';
 
   /// Anonymous sums of a branch for the cell head above (§20.2a statistics,
-  /// §22.1a "Dotarło / przeczytało"). 1.10.0 phones do not know it: their
-  /// branches are simply not counted.
+  /// §22.1a "Dotarło / przeczytało").
   static const String sum = 'pyr_sum';
 
   static const Set<String> all = <String>{
@@ -242,7 +242,6 @@ final class PyrReport {
     this.target = '',
     this.evidence = '',
     this.datingKey,
-    this.contentHash,
     this.from,
     this.escalated = false,
     this.entryId,
@@ -259,9 +258,6 @@ final class PyrReport {
   final String target;
   final String evidence;
   final String? datingKey;
-
-  /// Hash of the reported text: what 1.10.0 phones ban by.
-  final String? contentHash;
 
   /// Id of the reported entry (a post, comment, message): what a content
   /// ban names (S36).
@@ -291,7 +287,6 @@ final class PyrReport {
     't': target,
     'ev': evidence,
     if (datingKey != null) 'dk': datingKey,
-    if (contentHash != null) 'h': contentHash,
     if (from != null) 'f': from,
     if (escalated) 'esc': true,
     if (entryId != null) 'eid': entryId,
@@ -315,7 +310,6 @@ final class PyrReport {
       target: s('t') ?? '',
       evidence: s('ev') ?? '',
       datingKey: s('dk'),
-      contentHash: s('h'),
       from: s('f'),
       escalated: json['esc'] == true,
       entryId: s('eid'),
@@ -450,6 +444,9 @@ final class PyramidService extends ChangeNotifier {
     this.crisisBroadcast,
     this.friendsOf,
     this.friendLevelOf,
+    this.identitySeed,
+    this.metInPerson,
+    this.otherDevices,
     int Function()? now,
     Random? random,
     this.tallyWait = const Duration(hours: 6),
@@ -473,6 +470,22 @@ final class PyramidService extends ChangeNotifier {
   /// newcomer is admitted only at "Znajomy" or above (§20.2). Null: not
   /// known here (tests, no ledger), so only friendship is checked.
   final FriendLevel? Function(String address)? friendLevelOf;
+
+  /// The seed of this person's pyramid key, derived from the account key
+  /// (§6.1): the same on every device of the account and after recovery.
+  /// By default the one of the ledger identity on [disk]; null while there
+  /// is none.
+  final Future<Uint8List?> Function()? identitySeed;
+
+  /// Addresses of people this account attested as met in person (signed
+  /// entries in its `acts`, §6.2): members among them are attested in the
+  /// pyramid too, so they may vote in referenda (§20.6).
+  final Iterable<String> Function()? metInPerson;
+
+  /// Addresses of this account's other devices: they share the pyramid key
+  /// ([identitySeed]), so pyramid traffic going to one of them is not taken
+  /// over by this device (they would take turns for ever).
+  final Iterable<String> Function()? otherDevices;
 
   /// Sends a crisis wave over Bluetooth to phones around (§28.1).
   final Future<int> Function(Map<String, dynamic> wave)? crisisBroadcast;
@@ -508,7 +521,7 @@ final class PyramidService extends ChangeNotifier {
   Future<void> _recordsWriting = Future<void>.value();
 
   LedgerKeyPair? _identity;
-  String? _seed;
+  Uint8List? _seed;
 
   /// Private data confirmed at entry (§20.2a): birth year, gender, salt.
   Map<String, dynamic> myData = <String, dynamic>{};
@@ -771,12 +784,10 @@ final class PyramidService extends ChangeNotifier {
   Future<void> load() async {
     try {
       _diskUnreadable = true;
+      await _loadIdentity();
       final List<int>? raw = await disk.read(_keyMe);
       final Object? json = raw == null ? null : jsonDecode(utf8.decode(raw));
       if (json is Map) {
-        _seed = json['seed'] is String ? json['seed'] as String : null;
-        final Uint8List? seed = unb64(_seed, length: 32);
-        _identity = seed == null ? null : await LedgerKeyPair.fromSeed(seed);
         myData = json['data'] is Map
             ? Map<String, dynamic>.from(json['data'] as Map)
             : <String, dynamic>{};
@@ -1071,7 +1082,6 @@ final class PyramidService extends ChangeNotifier {
       _keyMe,
       utf8.encode(
         jsonEncode(<String, dynamic>{
-          if (_seed != null) 'seed': _seed,
           'data': myData,
           if (current != null) 'cur': current,
           'props': <Map<String, dynamic>>[
@@ -1184,14 +1194,27 @@ final class PyramidService extends ChangeNotifier {
     if (_tsigs[r.id] != null) 'tv': _tsigs[r.id]!.toList(),
   };
 
-  Future<LedgerKeyPair> _ensureIdentity() async {
+  /// The pyramid key from the account's seed (§6.1), when there is one.
+  Future<void> _loadIdentity() async {
     if (_identity != null) {
-      return _identity!;
+      return;
     }
-    final LedgerKeyPair k = await LedgerKeyPair.generate();
-    _identity = k;
-    _seed = b64(k.seed);
-    await _save();
+    final Uint8List? seed = identitySeed != null
+        ? await identitySeed!()
+        : (await LedgerIdentity.read(disk))?.pyramidSeed;
+    if (seed == null || seed.length != 32 || _identity != null) {
+      return;
+    }
+    _seed = seed;
+    _identity = await LedgerKeyPair.fromSeed(seed);
+  }
+
+  Future<LedgerKeyPair> _ensureIdentity() async {
+    await _loadIdentity();
+    final LedgerKeyPair? k = _identity;
+    if (k == null) {
+      throw StateError(t('Brak klucza konta na tym urządzeniu.'));
+    }
     return k;
   }
 
@@ -1435,7 +1458,7 @@ final class PyramidService extends ChangeNotifier {
   /// MAC of the cache of verified ring signatures, keyed with a secret of
   /// this phone (derived from the pyramid identity seed); null without one.
   String? _ringOkMac(List<Object?> keys) {
-    final Uint8List? seed = unb64(_seed, length: 32);
+    final Uint8List? seed = _seed;
     if (seed == null) {
       return null;
     }
@@ -1702,6 +1725,7 @@ final class PyramidService extends ChangeNotifier {
         'addr': _n(host.ownAddress()),
       };
 
+  /// The birth year is optional (§20.2a): 0 means "not given".
   void _setData(int birthYear, String gender) {
     final String salt = _newId(16);
     myData = <String, dynamic>{
@@ -1717,11 +1741,11 @@ final class PyramidService extends ChangeNotifier {
     required String name,
     required String myName,
     required String nat,
-    required int birthYear,
+    int? birthYear,
     required String gender,
   }) async {
     final LedgerKeyPair me = await _ensureIdentity();
-    _setData(birthYear, gender);
+    _setData(birthYear ?? 0, gender);
     final PyramidRecord g = await PyramidRecord(
       body: <String, dynamic>{
         't': PyrT.genesis,
@@ -1730,8 +1754,7 @@ final class PyramidService extends ChangeNotifier {
         'by': <String>[me.id],
         'name': name.trim(),
         'founder': _memberJson(me, myName, nat),
-        // A new pyramid starts with the newest rules (rules 2, §21.7).
-        'params': PyrParams(rules: kPyrRules).toJson(),
+        'params': PyrParams().toJson(),
       },
     ).signedBy(me);
     current = g.id;
@@ -1780,7 +1803,7 @@ final class PyramidService extends ChangeNotifier {
     required String invite,
     required String myName,
     required String nat,
-    required int birthYear,
+    int? birthYear,
     required String gender,
   }) async {
     final Map<String, String>? inv = parseInvite(invite);
@@ -1788,7 +1811,7 @@ final class PyramidService extends ChangeNotifier {
       return false;
     }
     final LedgerKeyPair me = await _ensureIdentity();
-    _setData(birthYear, gender);
+    _setData(birthYear ?? 0, gender);
     final PyramidRecord r = await PyramidRecord(
       body: <String, dynamic>{
         't': PyrT.admit,
@@ -1811,7 +1834,7 @@ final class PyramidService extends ChangeNotifier {
       'r': r.toJson(),
       'need': 2,
       'x': <String, dynamic>{
-        'by': birthYear,
+        'by': birthYear ?? 0,
         'g': gender,
         'salt': myData['salt'],
         'what': 'admit',
@@ -2353,7 +2376,6 @@ final class PyramidService extends ChangeNotifier {
     required String target,
     required String kind,
     int? until,
-    String? hash,
     String? datingKey,
     String reason = '',
     String? via,
@@ -2374,8 +2396,7 @@ final class PyramidService extends ChangeNotifier {
         'target': target,
         'kind': kind,
         'until': ?until,
-        'hash': ?hash,
-        // The entry itself (S36); the hash stays for 1.10.0 phones.
+        // The entry itself (S36).
         'eid': ?entryId,
         'dk': ?datingKey,
         'reason': reason,
@@ -2666,13 +2687,18 @@ final class PyramidService extends ChangeNotifier {
         }
       }
       for (final MapEntry<String, int> v in direct.entries) {
-        if (s.pathOf(v.key) != null && PyrPath.parent(s.pathOf(v.key)!) == mp) {
+        if (s.pathOf(v.key) != null &&
+            PyrPath.parent(s.pathOf(v.key)!) == mp &&
+            s.eligible(r, v.key)) {
           counts[v.value]++;
         }
       }
       for (final String v in extra) {
         final int? o = int.tryParse(v.split(':').last);
-        if (o != null && o >= 0 && o < counts.length) {
+        if (o != null &&
+            o >= 0 &&
+            o < counts.length &&
+            s.eligible(r, v.split(':').first)) {
           counts[o]++;
         }
       }
@@ -4063,11 +4089,7 @@ final class PyramidService extends ChangeNotifier {
     int? end,
   }) async {
     final PyramidState? s = state;
-    if (s == null ||
-        s.params.rules < 2 ||
-        !s.isMember(to) ||
-        amount <= 0 ||
-        amount > kPyrMaxAmount) {
+    if (s == null || !s.isMember(to) || amount <= 0 || amount > kPyrMaxAmount) {
       return null;
     }
     return referendum(
@@ -4117,6 +4139,39 @@ final class PyramidService extends ChangeNotifier {
     );
   }
 
+  /// Says in the pyramid that this person met the member at [address] in
+  /// person (§6.2, §20.6). Made only from a signed "met in person"
+  /// attestation in the ledger ([metInPerson]); null when [address] is no
+  /// other member of the pyramid shown, or it was said already.
+  Future<PyramidRecord?> attestMet(String address) async {
+    final PyramidState? s = state;
+    final String? me = myKey;
+    final String a = _n(address);
+    if (s == null || me == null || !s.isMember(me) || a.isEmpty) {
+      return null;
+    }
+    String? other;
+    for (final PyrMember m in s.members.values) {
+      if (m.key != me && _n(m.addr) == a && s.isMember(m.key)) {
+        other = m.key;
+        break;
+      }
+    }
+    if (other == null ||
+        (s.metBy[other]?.contains(me) ?? false) ||
+        proposals.values.any(
+          (PyrProposal p) =>
+              p.record.type == PyrT.met && p.record.str('k') == other,
+        )) {
+      return null;
+    }
+    return propose(
+      <String, dynamic>{'t': PyrT.met, 'k': other},
+      candidates: <String>[me],
+      need: 1,
+    );
+  }
+
   /// Shows (or hides) this person's age and gender badge (§20.2a): the
   /// data confirmed at admission is opened publicly, so anybody can check
   /// it against the commitment. Null when there is nothing to show.
@@ -4128,7 +4183,8 @@ final class PyramidService extends ChangeNotifier {
     if (k == null || !isMember) {
       return null;
     }
-    if (show && (year is! int || gender is! String || salt is! String)) {
+    if (show &&
+        (year is! int || year <= 0 || gender is! String || salt is! String)) {
       return null;
     }
     return propose(
@@ -4162,7 +4218,7 @@ final class PyramidService extends ChangeNotifier {
       final List<int> out = List<int>.filled(kPyrStatsBuckets, 0);
       final Object? year = myData['by'];
       final Object? gender = myData['g'];
-      if (year is int && gender is String) {
+      if (year is int && year > 0 && gender is String) {
         final int now = DateTime.fromMillisecondsSinceEpoch(_now()).year;
         out[pyrStatsBucket(year, gender, now)] = 1;
       }
@@ -4395,14 +4451,12 @@ final class PyramidService extends ChangeNotifier {
 
   /// Reports something (§21.4). [entryId] names the reported entry (a
   /// post, comment or message) and [entry] is its signed original when
-  /// this phone has it (S36): a ban then names the entry, not only the
-  /// hash of its text.
+  /// this phone has it (S36): a ban then names the entry.
   Future<PyrReport> report({
     required String reason,
     String target = '',
     String evidence = '',
     String? datingKey,
-    String? contentHash,
     String? entryId,
     Map<String, dynamic>? entry,
   }) async {
@@ -4419,7 +4473,6 @@ final class PyramidService extends ChangeNotifier {
       target: target,
       evidence: _cut(evidence, kPyrReportEvidenceChars),
       datingKey: datingKey,
-      contentHash: contentHash,
       entryId: entryId != null && entryId.isNotEmpty && entryId.length <= 128
           ? entryId
           : null,
@@ -4514,7 +4567,6 @@ final class PyramidService extends ChangeNotifier {
       return null;
     }
     final String? dk = r.datingKey;
-    final String? hash = r.contentHash;
     return PyrReport(
       id: r.id,
       reason: kReportReasons.containsKey(r.reason) ? r.reason : 'other',
@@ -4522,9 +4574,6 @@ final class PyramidService extends ChangeNotifier {
       target: PyramidRecord.isCanonicalKey(r.target) ? r.target : '',
       evidence: _cut(r.evidence, kPyrReportEvidenceChars),
       datingKey: dk != null && dk.isNotEmpty && dk.length <= 200 ? dk : null,
-      contentHash: hash != null && RegExp(r'^[0-9a-f]{64}$').hasMatch(hash)
-          ? hash
-          : null,
       from: from is String && from.length <= 300 ? from : null,
       escalated: r.escalated,
       entryId: r.entryId != null && r.entryId!.length <= 128 ? r.entryId : null,
@@ -4654,7 +4703,6 @@ final class PyramidService extends ChangeNotifier {
       target: r.target,
       evidence: r.evidence,
       datingKey: r.datingKey,
-      contentHash: r.contentHash,
       from: _n(from),
       entryId: original?.id ?? r.entryId,
       entry: original == null ? null : r.entry,
@@ -4734,7 +4782,6 @@ final class PyramidService extends ChangeNotifier {
         target: r.target,
         kind: banKind,
         until: until,
-        hash: r.contentHash,
         entryId: banKind == 'content' ? r.entryId : null,
         datingKey: r.datingKey,
         reason: kReportReasons[r.reason] ?? r.reason,
@@ -5353,6 +5400,10 @@ final class PyramidService extends ChangeNotifier {
         r.body['on'] == false
             ? t('Odpięcie posta w sekcji krajowej')
             : t('Przypięcie posta w sekcji krajowej'),
+      PyrT.met => t('{name} poznał(a) osobiście: {other}', {
+        'name': name(r.signers.firstOrNull ?? ''),
+        'other': name(r.str('k')),
+      }),
       PyrT.badge =>
         r.body['off'] == true
             ? t('Ukrycie odznaki wieku i płci')
@@ -5840,11 +5891,17 @@ final class PyramidService extends ChangeNotifier {
   /// Periodic work (every few minutes): counting, escalating reports,
   /// saying hello, a sign of life.
   Future<void> duties() async {
+    await _loadIdentity();
     await _countDuties();
     final PyramidState? s = state;
     final String? me = myKey;
     if (s == null || me == null) {
       return;
+    }
+    // People this account signed "met in person" for (§6.2), in the
+    // pyramid too.
+    for (final String a in metInPerson?.call() ?? const <String>[]) {
+      await attestMet(a);
     }
     final int t = _now();
     _consent.removeWhere((String _, int until) => until <= t);
@@ -5889,7 +5946,10 @@ final class PyramidService extends ChangeNotifier {
     final PyrMember? m = s.members[me];
     if (m != null &&
         _n(m.addr) != _n(host.ownAddress()) &&
-        host.ownAddress().isNotEmpty) {
+        host.ownAddress().isNotEmpty &&
+        !(otherDevices?.call() ?? const <String>[])
+            .map(_n)
+            .contains(_n(m.addr))) {
       await propose(
         <String, dynamic>{
           't': PyrT.address,

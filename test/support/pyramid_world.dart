@@ -1,3 +1,6 @@
+import 'dart:math';
+import 'dart:typed_data';
+
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/dev/sim/sim_network.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
@@ -53,6 +56,17 @@ final class PyramidWorld {
   }
 
   final SimNetwork net;
+
+  /// Each phone's pyramid key seed (from its account, §6.1), by its disk:
+  /// a phone started again on the same disk is the same person.
+  final Map<LedgerDisk, Uint8List> _seeds = <LedgerDisk, Uint8List>{};
+  final Random _seedRandom = Random(7);
+
+  /// The account-derived seed of the phone on [disk].
+  Future<Uint8List?> Function() seedOf(LedgerDisk disk) =>
+      () async => _seeds[disk] ??= Uint8List.fromList(
+        List<int>.generate(32, (_) => _seedRandom.nextInt(256)),
+      );
   final Map<String, List<Map<String, dynamic>>> waves =
       <String, List<Map<String, dynamic>>>{};
 
@@ -67,9 +81,11 @@ final class PyramidWorld {
     FriendLevel? Function(String address)? friendLevelOf,
   }) {
     final SimPhone p = net.phone(name);
+    final LedgerDisk d = disk ?? MemoryLedgerDisk();
     final PyramidService s = PyramidService(
       host: p,
-      disk: disk ?? MemoryLedgerDisk(),
+      disk: d,
+      identitySeed: seedOf(d),
       now: () => net.now,
       tallyWait: const Duration(minutes: 30),
       recordSegmentEntries: recordSegmentEntries,
@@ -127,6 +143,19 @@ final class PyramidWorld {
     final PyramidService h = pyr(head);
     final String id = h.proposals.keys.single;
     await h.approve(id);
+    await net.run();
+  }
+
+  /// Every member met every other in person (§6.2): each says so in the
+  /// pyramid, so all may vote in referenda (§20.6).
+  Future<void> meetAll() async {
+    for (final SimPhone p in net.phones) {
+      for (final SimPhone q in net.phones) {
+        if (p != q && pyr(p).isMember) {
+          await pyr(p).attestMet(q.address);
+        }
+      }
+    }
     await net.run();
   }
 

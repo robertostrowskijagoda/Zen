@@ -705,7 +705,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       )) {
         return HiddenContentPlaceholder(
           key: Key('feed-hidden-${post.id}'),
-          byMe: !isContentBanned(banned, post.text, id: post.id),
+          byMe: !isContentBanned(banned, id: post.id),
           onShow: () {
             showHiddenAnyway(ref, id: post.id);
             setState(() => _revealed.add(post.id));
@@ -1435,7 +1435,10 @@ class _PostCard extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   child: Text(
-                    summary,
+                    switch (verifiedSummary(post)) {
+                      final String verified => '$summary · $verified',
+                      null => summary,
+                    },
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(color: zen.textSecondary, fontSize: 13),

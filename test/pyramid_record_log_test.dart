@@ -28,6 +28,7 @@ PyramidService _restart(
 }) => PyramidService(
   host: w.net[name],
   disk: disk,
+  identitySeed: w.seedOf(disk),
   now: () => w.net.now,
   recordSegmentEntries: recordSegmentEntries,
 );

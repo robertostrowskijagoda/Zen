@@ -12,7 +12,7 @@ import 'package:zen/src/features/pyramid/pyramid_service.dart';
 /// signed original when the screen has one (S36).
 ///
 /// What was reported is hidden on this phone at once (a post, comment or
-/// message by [contentId], else by [contentHash]; a dating profile by
+/// message by [contentId], else by [contentHash] (local only); a dating profile by
 /// [datingKey]); the hiding can be undone with "Pokaż mimo to" where the
 /// content would have been. With [deleteLocal] the person may also remove
 /// the local copy ("Usuń z mojego urządzenia"): pass it only where the
@@ -67,8 +67,7 @@ Future<void> showReportSheet(
     target: target,
     evidence: evidence,
     datingKey: datingKey,
-    contentHash: contentHash,
-    // The entry itself (S36): a ban names it, not only its text's hash.
+    // The entry itself (S36): a ban names it.
     entryId: entryId,
     entry: entry,
   );

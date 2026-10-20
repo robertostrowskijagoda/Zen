@@ -66,6 +66,8 @@ void main() {
     'a referendum counted up the tree: votes secret, sums checkable',
     () async {
       final PyramidWorld w = await PyramidWorld.six();
+      // Votes count from members met in person by 2 others (§20.6).
+      await w.meetAll();
       final PyramidService s = w['S'];
       await s.referendum(
         question: 'Zbiórka na świetlicę?',
