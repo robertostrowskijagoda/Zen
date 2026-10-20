@@ -1,12 +1,43 @@
 # A version tag (v1.10.0, …) builds the release files: Zen.apk (signed with
-# the release key from the repository secrets), Zen-Windows.zip,
-# LICENSES-GO.txt and SHA256SUMS, and attaches them to a draft release of
-# that tag (the iOS workflow adds Zen-unsigned.ipa). Publish the draft by
-# hand after checking it (docs/WYDANIA.md, section 3).
+# the release key), Zen-Windows.zip, Zen-Linux-x64.tar.gz,
+# Zen-Linux-arm64.tar.gz, Zen-macOS.zip, Zen-unsigned.ipa (the iOS workflow),
+# LICENSES-GO.txt and SHA256SUMS of all of them, and attaches them to a draft
+# release of that tag. Every build job uploads its files as an artifact; the
+# checksums job gathers them and writes SHA256SUMS, and the last job attaches
+# everything. Publish the draft by hand after checking it (docs/WYDANIA.md,
+# section 3).
 #
-# Secrets for signing the APK (without them the APK is not built):
-#   ANDROID_KEYSTORE_BASE64  the .jks file, base64
-#   ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+# The release key (security audit S-6):
+# - Only a run of a tag v* ever touches it. The android job runs only for
+#   refs/tags/v*, and its "Release key" step checks the ref once more.
+#   Actions -> Release -> Run workflow from a BRANCH still builds the other
+#   files (unsigned, as always: Windows, Linux, macOS ad hoc, iOS) as
+#   artifacts of the run, with SHA256SUMS, but no Zen.apk and nothing is
+#   attached to a release. Without the key the release APK would be signed
+#   with the debug key (android/app/build.gradle.kts), and such a file must
+#   never look like a release file. For a signed APK push a tag (or run the
+#   workflow from the tag).
+# - The android job runs in the environment "release". Create it once in
+#   Settings -> Environments -> New environment "release":
+#     * Required reviewers: the maintainer, so every tag run waits for an
+#       approval before the job (and the key) starts;
+#     * Deployment branches and tags: "Selected branches and tags", one tag
+#       rule "v*";
+#     * Environment secrets: ANDROID_KEYSTORE_BASE64 (the .jks file, base64),
+#       ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD;
+#       then delete them from the repository secrets, so that no other job
+#       can read them. Without them the APK is not built (a warning).
+#   Environments with reviewers are free for public repositories. A private
+#   repository needs a paid plan for environments (Pro, Team or Enterprise),
+#   and GitHub Enterprise for required reviewers. Until the environment
+#   exists GitHub creates an empty one (no reviewers, no rules) at the first
+#   run; the tag condition holds anyway.
+# - Every action is pinned to a full commit SHA (Dependabot keeps them
+#   current: .github/dependabot.yml). No caches in this workflow: a cache
+#   written by another run could change what is built and signed, and
+#   flutter-action's own cache step uses actions/cache by tag, not by SHA.
+# - GITHUB_TOKEN: read-only in every job; contents: write only in the last
+#   job, which runs only for tags and does nothing but attach the files.
 name: Release
 
 on:
@@ -15,8 +46,7 @@ on:
       - 'v*'
   workflow_dispatch:
 
-permissions:
-  contents: write
+permissions: {}
 
 concurrency:
   group: release-${{ github.ref }}
@@ -26,34 +56,46 @@ env:
   FLUTTER_VERSION: '3.47.1'
 
 jobs:
-  build:
-    name: Android and Windows
+  android:
+    name: Android (signed)
+    # Never from a branch (see the top).
+    if: startsWith(github.ref, 'refs/tags/v')
+    # Windows: the Go bridge for Android rebuilds itself only there
+    # (docs/WYDANIA.md, section 3.1).
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
+    environment: release
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: native/yggdrasil_bridge/go.mod
-          cache-dependency-path: native/yggdrasil_bridge/go.sum
+          cache: false
 
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
+          cache: false
 
       - name: Packages
         run: flutter pub get
 
       - name: Release key
         id: key
+        # Only a tag run gets the key, even if the job condition above is
+        # ever changed.
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -62,7 +104,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           if (-not $env:KEYSTORE) {
-            Write-Output "::warning::No release key in the secrets: Zen.apk is not built."
+            Write-Output "::warning::No release key in the secrets of the environment 'release': Zen.apk is not built."
             "ready=false" >> $env:GITHUB_OUTPUT
             exit 0
           }
@@ -76,28 +118,16 @@ jobs:
           ) | Set-Content -Encoding ascii android/key.properties
           "ready=true" >> $env:GITHUB_OUTPUT
 
-      - name: Android (the Go bridge builds itself)
+      - name: Build (the Go bridge builds itself)
         if: steps.key.outputs.ready == 'true'
         run: flutter build apk --release
 
-      - name: Windows (the Go bridge builds itself)
-        run: flutter build windows --release
-
       - name: Release files
+        if: steps.key.outputs.ready == 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          if (Test-Path build/app/outputs/flutter-apk/app-release.apk) {
-            Copy-Item build/app/outputs/flutter-apk/app-release.apk dist/Zen.apk
-          }
-          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dist/Zen-Windows.zip
-          Copy-Item native/yggdrasil_bridge/LICENSES-GO.txt dist/
-          Push-Location dist
-          Get-ChildItem -File | Sort-Object Name | ForEach-Object {
-            "$((Get-FileHash -Algorithm SHA256 $_.Name).Hash.ToLower())  $($_.Name)"
-          } | Set-Content -Encoding ascii SHA256SUMS
-          Get-Content SHA256SUMS
-          Pop-Location
+          Copy-Item build/app/outputs/flutter-apk/app-release.apk dist/Zen.apk
 
       - name: Forget the release key
         if: always()
@@ -106,23 +136,233 @@ jobs:
           Remove-Item -Force -ErrorAction SilentlyContinue android/key.properties
           Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $env:RUNNER_TEMP 'zen-release.jks')
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: steps.key.outputs.ready == 'true'
+        with:
+          name: release-android
+          path: dist/
+          if-no-files-found: error
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache: false
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: false
+
+      - name: Packages
+        run: flutter pub get
+
+      - name: Build (the Go bridge builds itself)
+        run: flutter build windows --release
+
+      - name: Release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dist/Zen-Windows.zip
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-windows
+          path: dist/
+          if-no-files-found: error
+
+  linux:
+    name: Linux (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-latest
+          # Flutter publishes no SDK archive for Linux ARM64, so the
+          # flutter-action clones the repository (channel master) and checks
+          # out the release tag; libwebrtc and Go have arm64 builds.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      # Flutter's Linux toolchain; libsecret for flutter_secure_storage,
+      # the app indicator for system_tray.
+      - name: Build tools and libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
+            libstdc++-12-dev libsecret-1-dev libayatana-appindicator3-dev
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache: false
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: ${{ matrix.arch == 'arm64' && 'master' || 'stable' }}
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: false
+
+      - name: Packages
+        run: flutter pub get
+
+      - name: Build (the Go bridge builds itself)
+        run: flutter build linux --release
+
+      - name: Release files
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          test -f "build/linux/$ARCH/release/bundle/lib/libyggdrasil_bridge.so"
+          mkdir -p dist
+          tar -C "build/linux/$ARCH/release" --transform 's,^bundle,Zen,' \
+            -czf "dist/Zen-Linux-$ARCH.tar.gz" bundle
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache: false
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: false
+
+      - name: Go bridge (universal static library)
+        run: sh native/yggdrasil_bridge/build_macos.sh
+
+      - name: Packages
+        run: flutter pub get
+
+      - name: Build (signed ad hoc, not notarized)
+        run: flutter build macos --release
+
+      - name: Release files
+        run: |
+          mkdir -p dist
+          ditto -c -k --keepParent build/macos/Build/Products/Release/Zen.app dist/Zen-macOS.zip
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-macos
+          path: dist/
+          if-no-files-found: error
+
+  ios:
+    name: iOS
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ios.yml
+
+  checksums:
+    name: SHA256SUMS
+    needs: [android, windows, linux, macos, ios]
+    # Also when the android job was skipped (a run from a branch); never
+    # after a failed or cancelled build.
+    if: >-
+      !cancelled()
+      && !contains(needs.*.result, 'failure')
+      && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: Zen-unsigned-ipa
+          path: dist
+
+      - name: Licenses and SHA256SUMS
+        run: |
+          export LC_ALL=C
+          rm -f dist/*.sha256
+          cp native/yggdrasil_bridge/LICENSES-GO.txt dist/
+          cd dist
+          sums=$(sha256sum -- *)
+          printf '%s\n' "$sums" > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: zen-release
           path: dist/
           if-no-files-found: error
 
+  attach:
+    name: Draft release
+    needs: checksums
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The only job that can write: it creates the draft and attaches the
+    # files, without checking out or building anything.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: zen-release
+          path: dist
+
       - name: Attach to the release
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $env:TAG --draft --title $env:TAG `
-              --notes "Wersja robocza. Opis: CHANGELOG.md, odcisk certyfikatu i sumy SHA-256." `
-              --repo $env:GITHUB_REPOSITORY
-          }
-          gh release upload $env:TAG (Get-ChildItem dist -File).FullName --clobber --repo $env:GITHUB_REPOSITORY
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "$TAG" \
+              --notes "Wersja robocza. Opis: CHANGELOG.md, odcisk certyfikatu i sumy SHA-256." \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+          gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"

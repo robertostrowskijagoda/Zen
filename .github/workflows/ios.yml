@@ -1,18 +1,17 @@
 # iPhone build without signing: Zen-unsigned.ipa for SideStore / AltStore
-# (README, section "iPhone"). Runs by hand (Actions -> iOS -> Run workflow)
-# and for version tags (v*). A tag also attaches the file to that tag's
-# GitHub release; when there is no release yet, a draft is created.
-# See docs/WYDANIA.md.
+# (README, section "iPhone"). Runs by hand (Actions -> iOS -> Run workflow),
+# and for version tags as part of the Release workflow, which attaches the
+# file to the draft release with the other release files. See
+# docs/WYDANIA.md. Actions are pinned to commit SHAs (Dependabot updates
+# them); this workflow never sees a secret and only reads the repository.
 name: iOS
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
+  workflow_call:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ios-${{ github.ref }}
@@ -28,7 +27,9 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Go version from go.mod
         id: go
@@ -36,16 +37,18 @@ jobs:
           version=$(awk '$1 == "go" { split($2, v, "."); print v[1] "." v[2] ".x" }' native/yggdrasil_bridge/go.mod)
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v6
+      # No caches: the file goes into a release (see release.yml, "No
+      # caches in this workflow").
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: ${{ steps.go.outputs.version }}
-          cache-dependency-path: native/yggdrasil_bridge/go.sum
+          cache: false
 
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
         with:
           channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
+          cache: false
 
       - name: Go bridge (static library for iPhone)
         run: sh native/yggdrasil_bridge/build_ios.sh iphoneos
@@ -64,24 +67,10 @@ jobs:
           (cd build/ipa && zip -qry ../Zen-unsigned.ipa Payload)
           (cd build && shasum -a 256 Zen-unsigned.ipa | tee Zen-unsigned.ipa.sha256)
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: Zen-unsigned-ipa
           path: |
             build/Zen-unsigned.ipa
             build/Zen-unsigned.ipa.sha256
           if-no-files-found: error
-
-      - name: Attach to the release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" build/Zen-unsigned.ipa --clobber --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$TAG" build/Zen-unsigned.ipa --draft --title "$TAG" \
-              --notes "Wersja robocza z workflow iOS. Dodaj Zen.apk, Zen-Windows.zip i SHA256SUMS (z sumą Zen-unsigned.ipa), potem opublikuj." \
-              --repo "$GITHUB_REPOSITORY"
-          fi
