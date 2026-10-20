@@ -4,41 +4,17 @@ import 'dart:math';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 
-/// How long one legacy (1.10.0) nearby token lives. Kept for a transition:
-/// tokens and alarm waves of 1.10.0 phones are still understood.
-const Duration kNearbyEpoch = Duration(minutes: 15);
-
-int nearbyEpoch(int millis) => millis ~/ kNearbyEpoch.inMilliseconds;
-
-/// The legacy (1.10.0) token a phone with [secret] shows in [epoch]: every
-/// friend who knows the secret recognises it — and could show it too (S6),
-/// which is why newer phones show [NearbyOwnKeys.advert] instead. Kept for
-/// a transition: 1.10.0 friends are still recognised by it.
-Uint8List nearbyToken(String secret, int epoch) {
-  final List<int> key = base64Url.decode(secret);
-  final List<int> mac = crypto.Hmac(
-    crypto.sha256,
-    key,
-  ).convert(utf8.encode('zen-nearby|$epoch')).bytes;
-  return Uint8List.fromList(mac.sublist(0, 16));
-}
-
 /// [bytes] as lowercase hex.
 String nearbyHex(List<int> bytes) =>
     bytes.map((int x) => x.toRadixString(16).padLeft(2, '0')).join();
 
 /// Bluetooth wave version of an alarm told to phones nearby (§16.3).
 ///
-/// 5: signed (HMAC-SHA256 with the sender's legacy nearby secret, which
-/// every friend has) and dated. Still built for strangers and 1.10.0
-/// friends, and read from friends who gave only a legacy secret
-/// (transition). Older versions are not read.
-const int kAlarmWaveVersion = 5;
-
-/// Alarm wave signed with the key of one pair of friends
-/// ([FriendNearbyKey.pair]): only that friend can check it, and no other
-/// friend can make it (S6). `t` is the pair's id for the wave's slot ([nearbyPairId]).
-const int kAlarmPairWaveVersion = 6;
+/// Built unsigned for everyone, and signed with the key of one pair of
+/// friends ([FriendNearbyKey.pair]) for a friend: only that friend can
+/// check it, and no other friend can make it (S6). `t` is the pair's id
+/// for the wave's slot ([nearbyPairId]).
+const int kAlarmWaveVersion = 6;
 
 /// A wave dated further than this from the receiver's clock (either way)
 /// is dropped: a recorded wave cannot be played back later.
@@ -51,10 +27,9 @@ final RegExp _hex32 = RegExp(r'^[0-9a-f]{32}$');
 
 /// An alarm wave heard over Bluetooth (§16.3).
 ///
-/// `{v, id, at, end?, t?, m?}`: `t` is the sender's nearby token (v5) or
-/// the pair's id (v6) — friends look up who it is — and `m` the MAC over all
-/// of it. Without `t` and `m` the wave is unsigned (the sender has no nearby
-/// secret yet): nobody can tell whose it is.
+/// `{v, id, at, end?, t?, m?}`: `t` is the pair's id — friends look up who
+/// it is — and `m` the MAC over all of it. Without `t` and `m` the wave is
+/// unsigned (told to everyone nearby): nobody can tell whose it is.
 @immutable
 final class AlarmWave {
   const AlarmWave({
@@ -63,12 +38,7 @@ final class AlarmWave {
     required this.ended,
     this.token = '',
     this.mac = '',
-    this.version = kAlarmWaveVersion,
   });
-
-  /// [kAlarmWaveVersion] (legacy, one secret for all friends) or
-  /// [kAlarmPairWaveVersion] (one key per pair of friends).
-  final int version;
 
   final String id;
 
@@ -80,32 +50,17 @@ final class AlarmWave {
 
   bool get signed => token.isNotEmpty && mac.isNotEmpty;
 
-  /// The wave for alarm [id], made at [at]. Signed with [secret] (this
-  /// person's nearby secret) when there is one and it is readable.
+  /// The unsigned wave for alarm [id], made at [at].
   static Map<String, dynamic> build({
     required String id,
     required int at,
     required bool ended,
-    String? secret,
-  }) {
-    final Map<String, dynamic> wave = <String, dynamic>{
-      'v': kAlarmWaveVersion,
-      'id': id,
-      'at': at,
-      if (ended) 'end': true,
-    };
-    if (secret == null) {
-      return wave;
-    }
-    try {
-      final String token = nearbyHex(nearbyToken(secret, nearbyEpoch(at)));
-      wave['t'] = token;
-      wave['m'] = _mac(secret, id: id, at: at, ended: ended, token: token);
-    } on FormatException {
-      // A damaged secret: the wave goes unsigned.
-    }
-    return wave;
-  }
+  }) => <String, dynamic>{
+    'v': kAlarmWaveVersion,
+    'id': id,
+    'at': at,
+    if (ended) 'end': true,
+  };
 
   /// The wave for alarm [id] signed for one friend with [pairKey] (the key
   /// this phone gave that friend, [NearbyOwnKeys.pairKey]).
@@ -117,7 +72,7 @@ final class AlarmWave {
   }) {
     final String token = nearbyPairId(pairKey, nearbySlot(at));
     return <String, dynamic>{
-      'v': kAlarmPairWaveVersion,
+      'v': kAlarmWaveVersion,
       'id': id,
       'at': at,
       if (ended) 'end': true,
@@ -135,8 +90,8 @@ final class AlarmWave {
     final Object? end = json['end'];
     final Object? t = json['t'];
     final Object? m = json['m'];
-    if ((v != kAlarmWaveVersion && v != kAlarmPairWaveVersion) ||
-        (v == kAlarmPairWaveVersion && (t == null || m == null)) ||
+    if (v != kAlarmWaveVersion ||
+        (t == null) != (m == null) ||
         id is! String ||
         !kAlarmIdPattern.hasMatch(id) ||
         at is! int ||
@@ -151,7 +106,6 @@ final class AlarmWave {
       ended: end == true,
       token: t is String ? t : '',
       mac: m is String ? m : '',
-      version: v as int,
     );
   }
 
@@ -159,12 +113,8 @@ final class AlarmWave {
   bool isFreshAt(int now) =>
       (now - at).abs() <= kAlarmWaveFreshFor.inMilliseconds;
 
-  /// Whether the friend who gave this phone [stored] (their legacy secret
-  /// or their per-friend keys, [FriendNearbyKey]) made this very wave.
-  ///
-  /// A friend who gave per-friend keys is checked only against them: a
-  /// legacy wave "from" them (which any of their friends could make) does
-  /// not count. A legacy secret checks only legacy waves (transition).
+  /// Whether the friend who gave this phone [stored] (their per-friend
+  /// keys, [FriendNearbyKey]) made this very wave.
   bool verify(String stored) {
     if (!signed) {
       return false;
@@ -173,30 +123,16 @@ final class AlarmWave {
     if (key == null) {
       return false;
     }
-    final String expected;
-    try {
-      final List<int>? pair = key.pair;
-      if (pair != null) {
-        if (version != kAlarmPairWaveVersion ||
-            token != nearbyPairId(pair, nearbySlot(at))) {
-          return false;
-        }
-        expected = _pairMac(pair, id: id, at: at, ended: ended, token: token);
-      } else {
-        if (version != kAlarmWaveVersion) {
-          return false;
-        }
-        expected = _mac(
-          key.legacy!,
-          id: id,
-          at: at,
-          ended: ended,
-          token: token,
-        );
-      }
-    } on FormatException {
+    if (token != nearbyPairId(key.pair, nearbySlot(at))) {
       return false;
     }
+    final String expected = _pairMac(
+      key.pair,
+      id: id,
+      at: at,
+      ended: ended,
+      token: token,
+    );
     // Same length (both 32 hex): compare every character.
     int diff = 0;
     for (int i = 0; i < expected.length; i++) {
@@ -204,25 +140,6 @@ final class AlarmWave {
     }
     return diff == 0;
   }
-}
-
-String _mac(
-  String secret, {
-  required String id,
-  required int at,
-  required bool ended,
-  required String token,
-}) {
-  final List<int> key = base64Url.decode(secret);
-  final List<int> mac = crypto.Hmac(crypto.sha256, key)
-      .convert(
-        utf8.encode(
-          'zen-nearby-alarm|$kAlarmWaveVersion|$id|$at|'
-          '${ended ? 1 : 0}|$token',
-        ),
-      )
-      .bytes;
-  return nearbyHex(mac.sublist(0, 16));
 }
 
 String _pairMac(
@@ -234,7 +151,7 @@ String _pairMac(
 }) => nearbyHex(
   _hmac(
     pairKey,
-    'zen-nearby-alarm|$kAlarmPairWaveVersion|$id|$at|${ended ? 1 : 0}|$token',
+    'zen-nearby-alarm|$kAlarmWaveVersion|$id|$at|${ended ? 1 : 0}|$token',
   ).sublist(0, 16),
 );
 
@@ -251,7 +168,7 @@ String _pairMac(
 //    that has not been shown yet (each value is the hash of the next one) —
 //    so a friend can no longer show "this person is here" to others;
 //  - a pair key per friend, which signs alarm waves only that friend can
-//    check and nobody else can make ([kAlarmPairWaveVersion]).
+//    check and nobody else can make ([kAlarmWaveVersion]).
 // The token changes every [kNearbySlot], shorter than Android's 15-minute
 // address rotation: advertising restarts with each new token (and a new
 // address), so the address does not change in the middle of a token and
@@ -268,8 +185,7 @@ const int kNearbyChainSlots = 4320;
 
 int nearbyChainOf(int slot) => slot ~/ kNearbyChainSlots;
 
-/// What a stored friend's key starts with when it holds per-friend keys
-/// (else it is a legacy secret).
+/// What a stored friend's key starts with.
 const String kNearbyKeyPrefix = 'z2.';
 
 /// Longest stored per-friend key taken from a friend.
@@ -406,43 +322,33 @@ final class NearbyOwnKeys {
   }
 }
 
-/// What a friend gave this phone: a legacy secret (1.10.0) or per-friend
-/// keys ([NearbyOwnKeys.materialFor]).
+/// What a friend gave this phone: per-friend keys
+/// ([NearbyOwnKeys.materialFor]).
 @immutable
 final class FriendNearbyKey {
   const FriendNearbyKey._({
-    this.legacy,
-    this.mask,
-    this.pair,
-    this.anchors = const <int, List<int>>{},
+    required this.mask,
+    required this.pair,
+    required this.anchors,
   });
 
-  /// The friend's legacy secret (transition), when that is all they gave.
-  final String? legacy;
-  final List<int>? mask;
+  final List<int> mask;
 
   /// The key the friend signs alarm waves to this phone with.
-  final List<int>? pair;
+  final List<int> pair;
 
   /// Chain → anchor.
   final Map<int, List<int>> anchors;
 
-  /// Per-friend keys (not a legacy secret).
-  bool get paired => pair != null;
-
   /// The key handed to the native alarm-wave check.
-  String get radioKey =>
-      paired ? '$kNearbyPairKeyPrefix${base64Url.encode(pair!)}' : legacy!;
+  String get radioKey => '$kNearbyPairKeyPrefix${base64Url.encode(pair)}';
 
-  /// [stored] read, or `null` when it is neither form.
+  /// [stored] read, or `null` when it is not a friend's keys.
   static FriendNearbyKey? parse(String? stored) {
-    if (stored == null || stored.isEmpty) {
-      return null;
-    }
-    if (!stored.startsWith(kNearbyKeyPrefix)) {
-      return stored.length <= 64 ? FriendNearbyKey._(legacy: stored) : null;
-    }
-    if (stored.length > kNearbyKeyMaxLength) {
+    if (stored == null ||
+        stored.isEmpty ||
+        !stored.startsWith(kNearbyKeyPrefix) ||
+        stored.length > kNearbyKeyMaxLength) {
       return null;
     }
     try {
@@ -487,11 +393,10 @@ final class FriendNearbyKey {
   /// really this friend's; else `null`. [last]: a value of this friend
   /// checked before (its slot and value), which makes the check short.
   List<int>? open(List<int> token, int slot, {(int, List<int>)? last}) {
-    final List<int>? m = mask;
-    if (m == null || token.length != 16 || slot < 0) {
+    if (token.length != 16 || slot < 0) {
       return null;
     }
-    final List<int> mk = nearbyMask(m, slot);
+    final List<int> mk = nearbyMask(mask, slot);
     final List<int> c = <int>[for (int i = 0; i < 16; i++) token[i] ^ mk[i]];
     final int chain = nearbyChainOf(slot);
     if (last != null &&

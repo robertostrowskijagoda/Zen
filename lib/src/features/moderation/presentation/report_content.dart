@@ -13,7 +13,7 @@ import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
 /// "Zgłoś" for a post, comment or message (§21.4): the author is found in
 /// the pyramid by their device [authorAddress], [text] goes in as evidence
-/// (under [header]) and, with [hashContent], its hash so the delegate can
+/// (under [header]) and, with [hashContent], the entry so the delegate can
 /// ban the content itself. Once reported, the content is hidden on this
 /// phone ([contentId] is what it is hidden by, else the hash of [text]).
 /// With [deleteLocal] the person may also remove the local copy; leave it
@@ -65,9 +65,9 @@ void showHiddenAnyway(
     .read(hiddenByMeProvider.notifier)
     .showContent(id: id, text: text, datingKey: datingKey);
 
-/// Content the pyramid banned, now: ids of banned entries (S36) and
-/// hashes of banned texts (1.10.0 bans), for [isContentBanned]. Empty when
-/// the pyramid has not started (it is never started just for this).
+/// Content the pyramid banned, now: ids of banned entries (S36), for
+/// [isContentBanned]. Empty when the pyramid has not started (it is never
+/// started just for this).
 Set<String> bannedContentNow(WidgetRef ref) {
   if (!ref.exists(pyramidServiceProvider)) {
     return const <String>{};
@@ -77,7 +77,7 @@ Set<String> bannedContentNow(WidgetRef ref) {
   if (s == null) {
     return const <String>{};
   }
-  return <String>{...s.bannedContent(pyr.now), ...s.bannedEntries(pyr.now)};
+  return s.bannedEntries(pyr.now);
 }
 
 /// The running pyramid service, when there is one (to listen for bans).

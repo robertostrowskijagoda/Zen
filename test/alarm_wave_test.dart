@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -110,13 +111,16 @@ void main() {
       final _Host ania = _Host(net, 'ania', <String>['bob']);
       final _Host bob = _Host(net, 'bob', <String>['ania']);
       await ania.service.shareNearbySecret('bob');
-      final String secret = ania.service.book.nearbySecret!;
       const AlarmRecord alarm = AlarmRecord(id: 'abc123', from: 'self', at: 1);
-
-      // Someone who saw Ania's beacon knows her token, not her secret.
-      final String token = nearbyHex(
-        nearbyToken(secret, nearbyEpoch(ania.clock)),
+      // Bob has Ania's keys for him alone (S6): her wave to him is signed
+      // for this pair.
+      final Map<String, dynamic> wave = ania.service.alarmWave(
+        alarm,
+        to: 'bob',
       );
+
+      // Someone who saw Ania's wave knows her token, not her key.
+      final String token = wave['t'] as String;
       await bob.service.onAlarmWave(
         <String, dynamic>{
           'v': kAlarmWaveVersion,
@@ -150,13 +154,8 @@ void main() {
       expect(bob.service.book.alarms, isEmpty);
       expect(bob.ringing, 0);
 
-      // A changed field breaks the signature. Bob has Ania's keys for him
-      // alone (S6): her wave to him is signed for this pair.
-      final Map<String, dynamic> wave = ania.service.alarmWave(
-        alarm,
-        to: 'bob',
-      );
-      expect(wave['v'], kAlarmPairWaveVersion);
+      // A changed field breaks the signature.
+      expect(wave['v'], kAlarmWaveVersion);
       await bob.service.onAlarmWave(<String, dynamic>{
         ...wave,
         'id': 'abc124',
@@ -389,32 +388,41 @@ void main() {
     },
   );
 
-  test('the wave codec: signed with the secret, checked against it', () {
-    final String secret = base64Url.encode(List<int>.filled(32, 7));
-    final Map<String, dynamic> wave = AlarmWave.build(
+  test('the wave codec: signed with the pair key, checked against it', () {
+    final NearbyOwnKeys own = NearbyOwnKeys(newNearbyPrivateKey(Random(1)));
+    final String stored = own.materialFor('bob', 5000);
+    final Map<String, dynamic> wave = AlarmWave.buildPair(
       id: 'abc',
       at: 5000,
       ended: true,
-      secret: secret,
+      pairKey: own.pairKey('bob'),
     );
     final AlarmWave parsed = AlarmWave.parse(
       jsonDecode(jsonEncode(wave)) as Map<String, dynamic>,
     )!;
     expect(parsed.ended, isTrue);
     expect(parsed.signed, isTrue);
-    expect(parsed.verify(secret), isTrue);
-    expect(parsed.verify(base64Url.encode(List<int>.filled(32, 8))), isFalse);
+    expect(parsed.verify(stored), isTrue);
+    // Another friend's keys, another person's keys, junk.
+    expect(parsed.verify(own.materialFor('cyryl', 5000)), isFalse);
+    expect(
+      parsed.verify(
+        NearbyOwnKeys(newNearbyPrivateKey(Random(2))).materialFor('bob', 5000),
+      ),
+      isFalse,
+    );
     expect(parsed.verify('to nie jest klucz'), isFalse);
     expect(parsed.isFreshAt(5000 + kAlarmWaveFreshFor.inMilliseconds), isTrue);
     expect(
       parsed.isFreshAt(5000 + kAlarmWaveFreshFor.inMilliseconds + 1),
       isFalse,
     );
-    // A damaged secret: unsigned, never a crash.
-    expect(
-      AlarmWave.build(id: 'abc', at: 1, ended: false, secret: '%%%'),
-      isNot(contains('m')),
-    );
+    // Told to everyone it is unsigned: nothing to verify.
+    final AlarmWave open = AlarmWave.parse(
+      AlarmWave.build(id: 'abc', at: 5000, ended: false),
+    )!;
+    expect(open.signed, isFalse);
+    expect(open.verify(stored), isFalse);
     // Junk is not a wave.
     expect(
       AlarmWave.parse(<String, dynamic>{

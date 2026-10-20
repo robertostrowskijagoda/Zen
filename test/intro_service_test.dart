@@ -148,15 +148,17 @@ void _befriend(_Phone a, _Phone b) {
 }
 
 /// Ania knows Bartek, Bartek knows Celina, Darek and Ewa.
-({
-  _Net net,
-  _Phone ania,
-  _Phone bartek,
-  _Phone celina,
-  _Phone darek,
-  _Phone ewa,
-})
-_world({bool aniaInBackground = false}) {
+Future<
+  ({
+    _Net net,
+    _Phone ania,
+    _Phone bartek,
+    _Phone celina,
+    _Phone darek,
+    _Phone ewa,
+  })
+>
+_world({bool aniaInBackground = false}) async {
   final _Net net = _Net();
   final _Phone ania = _Phone(net, 'Ania', 'a1', background: aniaInBackground);
   final _Phone bartek = _Phone(net, 'Bartek', 'b2');
@@ -167,6 +169,10 @@ _world({bool aniaInBackground = false}) {
   _befriend(bartek, celina);
   _befriend(bartek, darek);
   _befriend(bartek, ewa);
+  // Everything that travels through a middle friend is signed.
+  for (final _Phone p in <_Phone>[ania, bartek, celina, darek, ewa]) {
+    await LedgerIdentity.loadOrCreate(p.disk);
+  }
   return (
     net: net,
     ania: ania,
@@ -179,7 +185,7 @@ _world({bool aniaInBackground = false}) {
 
 void main() {
   test('who sees the friend list: on request, agreed, taken back', () async {
-    final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = _world();
+    final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = await _world();
     await bartek.meet.setFriendListAudience(FriendListAudience.onRequest);
     await bartek.meet.shareFriendList(bartek.meet.friendNames!(), force: true);
     expect(ania.meet.book.friendsOf(bartek.address), isEmpty);
@@ -239,20 +245,12 @@ void main() {
       ..friendListAllowed.add(a);
     final Map<String, dynamic> json =
         jsonDecode(jsonEncode(book.toJson())) as Map<String, dynamic>;
-    expect(json['listAsk'], isTrue);
-    expect(json.containsKey('noList'), isFalse);
+    expect(json['la'], 'onRequest');
     final MeetBook back = MeetBook.fromJson(json);
     expect(back.friendListAudience, FriendListAudience.onRequest);
     expect(back.showsFriendListTo(a), isTrue);
     expect(back.showsFriendListTo(addr('c3')), isFalse);
     expect(back.shareFriendList, isTrue);
-    expect(
-      MeetBook.fromJson(<String, dynamic>{
-        'v': 1,
-        'noList': true,
-      }).friendListAudience,
-      FriendListAudience.nobody,
-    );
     expect(
       MeetBook.fromJson(<String, dynamic>{'v': 1}).shareFriendList,
       isTrue,
@@ -261,7 +259,7 @@ void main() {
 
   test('an introduction: passed on with a note, accepted, both invite '
       'each other and become friends', () async {
-    final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = _world();
+    final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = await _world();
     final IntroCase? c = await ania.intro.askIntro(
       middle: bartek.address,
       target: celina.address,
@@ -317,7 +315,7 @@ void main() {
 
   test('declined by the middle friend: the asker learns, the other never '
       'sees it', () async {
-    final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = _world();
+    final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = await _world();
     final IntroCase? c = await ania.intro.askIntro(
       middle: bartek.address,
       target: celina.address,
@@ -333,7 +331,8 @@ void main() {
   test(
     'declined by the one introduced: only the middle friend learns',
     () async {
-      final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = _world();
+      final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) =
+          await _world();
       final IntroCase? c = await ania.intro.askIntro(
         middle: bartek.address,
         target: celina.address,
@@ -349,7 +348,7 @@ void main() {
   );
 
   test('only a friend of the middle friend can be introduced', () async {
-    final (:net, :ania, :bartek, celina: _, darek: _, ewa: _) = _world();
+    final (:net, :ania, :bartek, celina: _, darek: _, ewa: _) = await _world();
     final _Phone obcy = _Phone(net, 'Obcy', 'f6');
     final IntroCase? c = await ania.intro.askIntro(
       middle: bartek.address,
@@ -371,7 +370,7 @@ void main() {
 
   test('letters: passed on within limits, the recipient can only invite '
       'or ignore', () async {
-    final (:net, :ania, :bartek, :celina, :darek, :ewa) = _world();
+    final (:net, :ania, :bartek, :celina, :darek, :ewa) = await _world();
     final List<IntroCase> letters = <IntroCase>[];
     for (final _Phone to in <_Phone>[celina, darek, ewa]) {
       final IntroCase? c = await ania.intro.sendLetter(
@@ -438,7 +437,7 @@ void main() {
   test(
     'only friends may send these frames; names and texts are cleaned',
     () async {
-      final (:net, ania: _, :bartek, :celina, darek: _, ewa: _) = _world();
+      final (:net, :ania, :bartek, :celina, darek: _, ewa: _) = await _world();
       final _Phone obcy = _Phone(net, 'Obcy', 'f6');
       // A stranger cannot pass anything on.
       await obcy.send(celina.address, <String, dynamic>{
@@ -451,29 +450,29 @@ void main() {
       });
       expect(celina.intro.needsMe, isEmpty);
 
-      // A friend's frame: the name is one clean line, the letter cut.
+      // A friend's frame without the asker's signature: dropped.
       await bartek.send(celina.address, <String, dynamic>{
         'type': IntroTypes.forward,
         'id': 'aaaaaaaaaa02',
         'k': IntroKind.letter.name,
         'a': addr('f7'),
-        'n': 'Ewa\u202e\n${'x' * 200}',
-        't': 'a' * 5000,
+        'n': 'Ewa',
+        't': 'Hej',
       });
+      expect(celina.intro.needsMe, isEmpty);
+
+      // A signed letter: the name is Ania's signed one, the text cut.
+      await ania.intro.sendLetter(
+        middle: bartek.address,
+        target: celina.address,
+        targetName: 'Celina',
+        text: 'a' * 5000,
+      );
       final IntroCase got = celina.intro.needsMe.single;
-      expect(got.askerName.length, lessThanOrEqualTo(60));
-      expect(got.askerName, isNot(contains('\u202e')));
-      expect(got.askerName, isNot(contains('\n')));
+      expect(got.askerName, 'Ania');
       expect(got.text.length, kLetterMaxChars);
 
-      // Too big, a bad id, or a second one from the same person: dropped.
-      await bartek.send(celina.address, <String, dynamic>{
-        'type': IntroTypes.forward,
-        'id': 'aaaaaaaaaa03',
-        'k': IntroKind.letter.name,
-        'a': addr('f8'),
-        't': 'x' * 9000,
-      });
+      // A bad id, or a second one from the same person: dropped.
       await bartek.send(celina.address, <String, dynamic>{
         'type': IntroTypes.forward,
         'id': 'BAD',
@@ -481,13 +480,12 @@ void main() {
         'a': addr('f9'),
         't': 'Hej',
       });
-      await bartek.send(celina.address, <String, dynamic>{
-        'type': IntroTypes.forward,
-        'id': 'aaaaaaaaaa04',
-        'k': IntroKind.letter.name,
-        'a': addr('f7'),
-        't': 'Drugi list',
-      });
+      await ania.intro.sendLetter(
+        middle: bartek.address,
+        target: celina.address,
+        targetName: 'Celina',
+        text: 'Drugi list',
+      );
       expect(celina.intro.needsMe, hasLength(1));
 
       // Someone Celina blocked never reaches her.
@@ -505,7 +503,7 @@ void main() {
 
   test('an answer that came while the app was away becomes a friend '
       'request when it opens', () async {
-    final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = _world(
+    final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = await _world(
       aniaInBackground: true,
     );
     expect(MeetInbox.handles(IntroTypes.result), isTrue);
@@ -533,8 +531,8 @@ void main() {
   group('the asker signs what the middle friend passes on (S-17)', () {
     test('a signed introduction travels through the middle friend, kept '
         'in their store, and checks out', () async {
-      final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = _world();
-      await LedgerIdentity.loadOrCreate(ania.disk);
+      final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) =
+          await _world();
       final IntroCase? c = await ania.intro.askIntro(
         middle: bartek.address,
         target: celina.address,
@@ -559,22 +557,18 @@ void main() {
       expect(fwd['sg'], isNotNull);
 
       final IntroCase atCelina = celina.intro.needsMe.single;
-      expect(atCelina.signed, isTrue);
       expect(atCelina.askerName, 'Ania');
       expect(atCelina.text, 'Gramy w jednej drużynie');
       expect(atCelina.note, 'Fajna osoba');
-      expect(celina.shown.last.body, isNot(contains(introUnverifiedLabel())));
-      // Kept as checked.
       final IntroCase back = IntroCase.fromJson(
         jsonDecode(jsonEncode(atCelina.toJson())),
       )!;
-      expect(back.signed, isTrue);
+      expect(back.askerName, 'Ania');
     });
 
     test('the middle friend cannot change the letter or whom it is for, '
         'nor pass another address off as checked', () async {
-      final (:net, :ania, :bartek, :celina, :darek, ewa: _) = _world();
-      await LedgerIdentity.loadOrCreate(ania.disk);
+      final (:net, :ania, :bartek, :celina, :darek, ewa: _) = await _world();
       // Ania's letters are caught on their way to Bartek (he is offline).
       net.phones.remove(bartek.address);
       final List<Map<String, dynamic>> asks = <Map<String, dynamic>>[];
@@ -614,66 +608,73 @@ void main() {
       // The genuine one: shown with the name Ania signed, not Bartek's.
       await bartek.send(celina.address, forward(asks[0], name: 'Ktoś inny'));
       final IntroCase got = celina.intro.needsMe.single;
-      expect(got.signed, isTrue);
       expect(got.askerName, 'Ania');
       expect(got.text, 'Cześć, Celina!');
       expect(got.asker, ania.address);
 
       // Under another address (as for a letter from another device of the
       // same account, §6): the words are Ania's, but whose address it is
-      // cannot be told here, so it is shown as unverified.
+      // cannot be told here, so it is dropped.
       await bartek.send(
         celina.address,
         forward(asks[1], asker: addr('f7'), name: 'Fałszywa'),
       );
-      final IntroCase other = celina.intro.needsMe.firstWhere(
-        (IntroCase c) => c.id == asks[1]['id'],
-      );
-      expect(other.signed, isFalse);
-      expect(other.asker, addr('f7'));
-      expect(celina.shown.last.body, startsWith(introUnverifiedLabel()));
-    });
-
-    test('a letter from an older app (no signature) is shown marked as '
-        'unverified', () async {
-      final (net: _, ania: _, :bartek, :celina, darek: _, ewa: _) = _world();
-      await bartek.send(celina.address, <String, dynamic>{
-        'type': IntroTypes.forward,
-        'id': 'aaaaaaaaaa11',
-        'k': IntroKind.letter.name,
-        'a': addr('f7'),
-        'n': 'Ewa',
-        't': 'Hej',
-      });
-      final IntroCase got = celina.intro.needsMe.single;
-      expect(got.signed, isFalse);
-      expect(got.askerName, 'Ewa');
-      expect(celina.shown.last.body, startsWith(introUnverifiedLabel()));
-
-      // A broken signature is not "older": dropped.
-      await bartek.send(celina.address, <String, dynamic>{
-        'type': IntroTypes.forward,
-        'id': 'aaaaaaaaaa12',
-        'k': IntroKind.letter.name,
-        'a': addr('f8'),
-        'n': 'Ola',
-        't': 'Hej',
-        'sg': <String, dynamic>{'s': 'x'},
-      });
       expect(celina.intro.needsMe, hasLength(1));
     });
 
-    test('without the ledger keys the asker still asks, unsigned', () async {
-      final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = _world();
+    test(
+      'a letter without a signature, or with a broken one, is dropped',
+      () async {
+        final (net: _, ania: _, :bartek, :celina, darek: _, ewa: _) =
+            await _world();
+        await bartek.send(celina.address, <String, dynamic>{
+          'type': IntroTypes.forward,
+          'id': 'aaaaaaaaaa11',
+          'k': IntroKind.letter.name,
+          'a': addr('f7'),
+          'n': 'Ewa',
+          't': 'Hej',
+        });
+        expect(celina.intro.needsMe, isEmpty);
+
+        await bartek.send(celina.address, <String, dynamic>{
+          'type': IntroTypes.forward,
+          'id': 'aaaaaaaaaa12',
+          'k': IntroKind.letter.name,
+          'a': addr('f8'),
+          'n': 'Ola',
+          't': 'Hej',
+          'sg': <String, dynamic>{'s': 'x'},
+        });
+        expect(celina.intro.needsMe, isEmpty);
+
+        // The middle friend does not take an unsigned ask either.
+        await celina.send(bartek.address, <String, dynamic>{
+          'type': IntroTypes.ask,
+          'id': 'aaaaaaaaaa13',
+          'k': IntroKind.letter.name,
+          'a': addr('d4'),
+          't': 'Hej',
+        });
+        expect(bartek.intro.needsMe, isEmpty);
+      },
+    );
+
+    test('without the ledger keys the asker cannot ask', () async {
+      final _Net net = _Net();
+      final _Phone ania = _Phone(net, 'Ania', 'a1');
+      final _Phone bartek = _Phone(net, 'Bartek', 'b2');
+      final _Phone celina = _Phone(net, 'Celina', 'c3');
+      _befriend(ania, bartek);
+      _befriend(bartek, celina);
       final IntroCase? c = await ania.intro.sendLetter(
         middle: bartek.address,
         target: celina.address,
         targetName: 'Celina',
         text: 'Cześć!',
       );
-      expect(c, isNotNull);
-      expect(ania.sent.last.$2.containsKey('sg'), isFalse);
-      expect(celina.intro.needsMe.single.signed, isFalse);
+      expect(c, isNull);
+      expect(ania.sent, isEmpty);
     });
   });
 }

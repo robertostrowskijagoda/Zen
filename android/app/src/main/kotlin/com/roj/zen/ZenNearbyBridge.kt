@@ -48,7 +48,7 @@ import javax.crypto.spec.SecretKeySpec
  *  - advertising: manufacturer data (id 0xFFFF, "ZN" + 16-byte token +
  *    4-byte hint; a new token every 10 minutes, and advertising restarts
  *    with it, so the Bluetooth address changes together with the token;
- *    only friends can tell whose it is). 1.10.0 phones show 16 bytes only;
+ *    only friends can tell whose it is);
  *  - scanning: reports every Zen token seen (and its hint), with signal
  *    strength;
  *  - a tiny GATT server with one writable characteristic: someone nearby
@@ -56,9 +56,8 @@ import javax.crypto.spec.SecretKeySpec
  *    either side learning the other's account. Anyone can write to it (no
  *    pairing), so waves are limited per phone here and checked in Dart
  *    (an alarm wave rings only when a friend signed it, §16.3). An alarm
- *    wave signed with a friend's key (handed over by Dart: a pair key
- *    "p:…" for version 6, or a 1.10.0 friend's legacy secret for version 5)
- *    is checked here too and counted apart, so a flood of other waves from
+ *    wave signed with a friend's key (handed over by Dart as a pair key
+ *    "p:…") is checked here too and counted apart, so a flood of other waves from
  *    changing addresses cannot crowd it out.
  *
  * Advertising is low power, so it can stay on all the time; scanning costs
@@ -98,7 +97,7 @@ object ZenNearbyBridge {
 
         /**
          * Friends' alarm keys this engine knows (§16.3): "p:" + a pair key
-         * (base64url, version 6) or a legacy secret (version 5).
+         * (base64url).
          */
         var alarmKeys: List<String> = emptyList()
     }
@@ -136,14 +135,11 @@ object ZenNearbyBridge {
     private const val MAX_VERIFIED_WAVES = 60
 
     /**
-     * Must match `kAlarmWaveVersion`, `kAlarmPairWaveVersion`,
-     * `kAlarmWaveFreshFor`, `kNearbyEpoch`, `kNearbySlot`,
+     * Must match `kAlarmWaveVersion`, `kAlarmWaveFreshFor`, `kNearbySlot`,
      * `kNearbyPairKeyPrefix` and `kNearbyHintLength` in Dart.
      */
-    private const val ALARM_WAVE_VERSION = 5
-    private const val ALARM_PAIR_WAVE_VERSION = 6
+    private const val ALARM_WAVE_VERSION = 6
     private const val ALARM_WAVE_FRESH_MS = 10 * 60_000L
-    private const val NEARBY_EPOCH_MS = 15 * 60_000L
     private const val NEARBY_SLOT_MS = 10 * 60_000L
     private const val PAIR_KEY_PREFIX = "p:"
     private const val TOKEN_BYTES = 16
@@ -152,15 +148,12 @@ object ZenNearbyBridge {
     private val ALARM_ID = Regex("^[0-9A-Za-z_-]{1,40}$")
     private val HEX32 = Regex("^[0-9a-f]{32}$")
 
-    /** A key that checks alarm waves of one [version]. */
-    private class AlarmKey(val key: ByteArray, val version: Int)
-
     /**
-     * Friends' alarm-wave tokens (hex) around now → the key that checks the
-     * wave: legacy tokens per [NEARBY_EPOCH_MS], pair ids per
-     * [NEARBY_SLOT_MS]. Rebuilt when the slot or the keys change.
+     * Friends' alarm-wave tokens (hex: pair ids per [NEARBY_SLOT_MS]) around
+     * now → the pair key that checks the wave. Rebuilt when the slot or the
+     * keys change.
      */
-    private var tokenKeys: Map<String, AlarmKey> = emptyMap()
+    private var tokenKeys: Map<String, ByteArray> = emptyMap()
     private var tokenKeysEpoch = Long.MIN_VALUE
 
     /** The app's engine: permission requests go through its Activity. */
@@ -464,7 +457,7 @@ object ZenNearbyBridge {
         val data = AdvertiseData.Builder()
             .setIncludeDeviceName(false)
             .setIncludeTxPowerLevel(false)
-            // Token and hint (20 bytes; a legacy token alone is 16).
+            // Token and hint (20 bytes).
             .addManufacturerData(
                 COMPANY_ID,
                 MAGIC + token.copyOf(token.size.coerceIn(TOKEN_BYTES, TOKEN_BYTES + HINT_BYTES)),
@@ -551,16 +544,13 @@ object ZenNearbyBridge {
 
     private fun report(result: ScanResult) {
         val data = result.scanRecord?.getManufacturerSpecificData(COMPANY_ID) ?: return
-        if (data.size < 2 + TOKEN_BYTES || data[0] != MAGIC[0] || data[1] != MAGIC[1]) {
+        if (data.size < 2 + TOKEN_BYTES + HINT_BYTES || data[0] != MAGIC[0] || data[1] != MAGIC[1]) {
             return
         }
         val event = HashMap<String, Any>()
         event["type"] = "seen"
         event["token"] = data.copyOfRange(2, 2 + TOKEN_BYTES)
-        // Newer phones add a hint after the token; 1.10.0 phones do not.
-        if (data.size >= 2 + TOKEN_BYTES + HINT_BYTES) {
-            event["hint"] = data.copyOfRange(2 + TOKEN_BYTES, 2 + TOKEN_BYTES + HINT_BYTES)
-        }
+        event["hint"] = data.copyOfRange(2 + TOKEN_BYTES, 2 + TOKEN_BYTES + HINT_BYTES)
         event["rssi"] = result.rssi
         event["device"] = result.device.address
         main.post {
@@ -734,22 +724,19 @@ object ZenNearbyBridge {
     /**
      * Friends' alarm-wave tokens around now, rebuilt when the slot or the
      * keys change. A fresh wave (dated within [ALARM_WAVE_FRESH_MS] of now)
-     * carries one of these:
-     *  - version 6: the pair's id, as Dart's `nearbyPairId`:
-     *    HMAC-SHA256(pairKey, "zen-nearby-pair-id|<slot>"), first 16 bytes;
-     *  - version 5 (1.10.0 friends, transition): the legacy token, as Dart's
-     *    `nearbyToken`: HMAC-SHA256(secret, "zen-nearby|<epoch>").
+     * carries the pair's id, as Dart's `nearbyPairId`:
+     * HMAC-SHA256(pairKey, "zen-nearby-pair-id|<slot>"), first 16 bytes.
      */
-    private fun friendTokens(): Map<String, AlarmKey> {
-        val now = System.currentTimeMillis()
-        val slot = now / NEARBY_SLOT_MS
+    private fun friendTokens(): Map<String, ByteArray> {
+        val slot = System.currentTimeMillis() / NEARBY_SLOT_MS
         if (slot == tokenKeysEpoch) {
             return tokenKeys
         }
-        val epoch = now / NEARBY_EPOCH_MS
-        val map = HashMap<String, AlarmKey>()
+        val map = HashMap<String, ByteArray>()
         for (entry in clients.flatMap { it.alarmKeys }.distinct()) {
-            val pair = entry.startsWith(PAIR_KEY_PREFIX)
+            if (!entry.startsWith(PAIR_KEY_PREFIX)) {
+                continue
+            }
             val key = try {
                 Base64.decode(entry.removePrefix(PAIR_KEY_PREFIX), Base64.URL_SAFE or Base64.NO_WRAP)
             } catch (_: IllegalArgumentException) {
@@ -758,16 +745,8 @@ object ZenNearbyBridge {
             if (key.isEmpty()) {
                 continue
             }
-            if (pair) {
-                val checks = AlarmKey(key, ALARM_PAIR_WAVE_VERSION)
-                for (s in slot - 2..slot + 2) {
-                    map[hex(hmac(key, "zen-nearby-pair-id|$s").copyOf(16))] = checks
-                }
-            } else {
-                val checks = AlarmKey(key, ALARM_WAVE_VERSION)
-                for (e in epoch - 1..epoch + 1) {
-                    map[hex(hmac(key, "zen-nearby|$e").copyOf(16))] = checks
-                }
+            for (s in slot - 2..slot + 2) {
+                map[hex(hmac(key, "zen-nearby-pair-id|$s").copyOf(16))] = key
             }
         }
         tokenKeys = map
@@ -793,7 +772,7 @@ object ZenNearbyBridge {
         try {
             val json = JSONObject(String(data, Charsets.UTF_8))
             val version = json.opt("v")
-            if (version != ALARM_WAVE_VERSION && version != ALARM_PAIR_WAVE_VERSION) {
+            if (version != ALARM_WAVE_VERSION) {
                 return null
             }
             val id = json.opt("id") as? String ?: return null
@@ -816,21 +795,14 @@ object ZenNearbyBridge {
                 return null
             }
             val key = keys[token] ?: return null
-            // A friend who gave a pair key counts only with version 6 (any
-            // of their friends could make a legacy one).
-            if (key.version != version) {
-                return null
-            }
             // The pair's id must be the one of the wave's own slot.
-            if (key.version == ALARM_PAIR_WAVE_VERSION &&
-                hex(hmac(key.key, "zen-nearby-pair-id|${at / NEARBY_SLOT_MS}").copyOf(16)) != token
-            ) {
+            if (hex(hmac(key, "zen-nearby-pair-id|${at / NEARBY_SLOT_MS}").copyOf(16)) != token) {
                 return null
             }
             val expected = hex(
                 hmac(
-                    key.key,
-                    "zen-nearby-alarm|${key.version}|$id|$at|${if (ended) 1 else 0}|$token",
+                    key,
+                    "zen-nearby-alarm|$ALARM_WAVE_VERSION|$id|$at|${if (ended) 1 else 0}|$token",
                 ).copyOf(16),
             )
             val same = MessageDigest.isEqual(

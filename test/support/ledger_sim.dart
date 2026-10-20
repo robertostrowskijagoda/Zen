@@ -20,6 +20,10 @@ final class SimNode {
       acceptsFrom: (String peer, String space) =>
           acceptsFrom?.call(peer, space) ??
           replicator.subscriptions.contains(space),
+      servesTo: (String peer, String space) =>
+          servesTo?.call(peer, space) ?? true,
+      forwardsFrom: (String peer, String space) =>
+          forwardsFrom?.call(peer, space) ?? false,
     );
   }
 
@@ -34,6 +38,12 @@ final class SimNode {
 
   /// Optional narrowing of who may push what (see [LedgerReplicator]).
   bool Function(String peer, String space)? acceptsFrom;
+
+  /// Optional limit on what a peer may get (default: everything).
+  bool Function(String peer, String space)? servesTo;
+
+  /// Optional: spaces taken from a peer only to pass on.
+  bool Function(String peer, String space)? forwardsFrom;
 
   Future<void> becomeAuthor() async {
     final LedgerAccountSetup setup = await LedgerAccountSetup.create(

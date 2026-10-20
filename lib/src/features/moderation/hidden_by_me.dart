@@ -13,7 +13,7 @@ import 'package:zen/src/features/pyramid/pyramid_service.dart' show contentHash;
 /// A report hides the reported post, comment, message or dating profile
 /// from the reporter at once, whatever the pyramid decides. The keys are
 /// opaque: [idKey] for content with an id (a post, a comment, a message),
-/// [textKey] (the hash the pyramid bans content by) for content that has
+/// [textKey] (a hash of the text) for content that has
 /// none, [datingKeyOf] for a dating profile. [keys] are kept on disk;
 /// [shown] holds the ones the person chose to look at anyway, and lasts
 /// until the app is closed.

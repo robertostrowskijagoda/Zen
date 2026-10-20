@@ -47,7 +47,6 @@ final class FileUserProfileStore implements UserProfileStore {
 
   @override
   Future<void> save(UserProfile profile) async {
-    // `v` since 1.11 (STAN §7); files without it are version 1 too.
     final String jsonStr = jsonEncode(withFormatVersion(profile.toJson()));
     await store.write(storageKey, Uint8List.fromList(utf8.encode(jsonStr)));
   }
@@ -94,9 +93,6 @@ final class UserProfileController extends Notifier<UserProfile> {
     }
     if (persisted != null) {
       state = persisted;
-      // Profiles from earlier versions kept the photo and cover as plain
-      // files: move them into the vault (§14.1).
-      await _sealImages();
     }
   }
 
@@ -108,27 +104,6 @@ final class UserProfileController extends Notifier<UserProfile> {
       logZenError('The media vault is not available', error, stackTrace);
       return null;
     }
-  }
-
-  Future<void> _sealImages() async {
-    if (!needsProfileImageSealing(state)) {
-      return;
-    }
-    final ProfileImageSealer? seal = _sealer();
-    if (seal == null || !ref.mounted) {
-      return;
-    }
-    final UserProfile before = state;
-    final UserProfile sealed = await sealOwnProfileImages(before, seal);
-    if (identical(sealed, before) || !ref.mounted) {
-      return;
-    }
-    if (!identical(state, before)) {
-      // Edited meanwhile: the edit seals its own pictures.
-      return;
-    }
-    state = sealed;
-    await ref.read(userProfileStoreProvider).save(sealed);
   }
 
   Future<void> updateProfile({

@@ -189,7 +189,7 @@ void main() {
     ).write('pyramid/ring-ok', Uint8List.fromList(<int>[8, 9]));
     expect(await current().read('pyramid/ring-ok'), isNull);
 
-    // Sealed the older way, without the storage key.
+    // Sealed in another envelope (without the storage key): refused.
     final File hub = await current().write(
       'social/hub',
       Uint8List.fromList(<int>[1]),

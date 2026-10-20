@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/meet/ask/ask_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
@@ -48,6 +49,10 @@ void main() {
     await w.approve('B', PyrT.emit);
     await w.net.advance(const Duration(hours: 25));
 
+    // Answers are signed: the answerers have ledger keys.
+    for (final String n in <String>['A', 'B', 'A2']) {
+      await LedgerIdentity.loadOrCreate(w.ask(n).disk);
+    }
     // A1 asks its friends (A and B).
     final Question q = (await w.ask('A1').ask('Kto zna dobrego hydraulika?'))!;
     await w.net.run();

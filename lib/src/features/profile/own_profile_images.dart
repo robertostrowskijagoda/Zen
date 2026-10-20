@@ -9,8 +9,7 @@ import 'package:zen/src/features/media/media_vault.dart';
 // Your own photo and cover live in the media vault, encrypted like
 // everything else of yours (§14.1), not as plain files. The profile editor
 // prepares a plain file first (checked, re-encoded); saving the profile
-// moves it into the vault, and profiles from earlier versions are moved at
-// the next start.
+// moves it into the vault.
 
 /// Largest own picture read back (the cover and the photo are far smaller).
 const int kMaxOwnProfileImageBytes = 20 * 1024 * 1024;
@@ -37,8 +36,8 @@ bool isOwnPlainProfileImage(String? path) {
 }
 
 /// Moves the plain picture at [path] into [vault]. A file this app wrote
-/// ([isOwnPlainProfileImage]) is deleted afterwards; anything else (a file
-/// an old version pointed at directly) is only copied.
+/// ([isOwnPlainProfileImage]) is deleted afterwards; anything else is only
+/// copied.
 Future<String?> sealProfileImageFile(MediaVault vault, String path) async {
   if (isMediaVaultPath(path)) {
     return path;

@@ -60,11 +60,6 @@ Uint8List askAnswerSignedBytes({
   'py': pyramid ?? '',
 });
 
-/// The mark on an answer that came without the answerer's signature (from
-/// an older app): someone on the way could have changed it.
-String askUnsignedLabel() =>
-    t('Niepodpisana — mogła zostać zmieniona po drodze');
-
 /// One answer, with the way it came back ("znajomy Bartka").
 @immutable
 final class AskAnswer {
@@ -76,14 +71,9 @@ final class AskAnswer {
     this.pyramidKey,
     this.pyramid,
     this.tipped = 0,
-    this.signed = false,
   });
 
   final String text;
-
-  /// The answerer's signature checked out: the words, name and tip key are
-  /// theirs. False for answers from older apps (shown marked).
-  final bool signed;
 
   /// Names from the one who answered back towards the asker (the first is
   /// the one who answered).
@@ -109,7 +99,6 @@ final class AskAnswer {
     pyramid: pyramid,
     tipped: tipped + amount,
     from: from,
-    signed: signed,
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -119,7 +108,6 @@ final class AskAnswer {
     'k': ?pyramidKey,
     'py': ?pyramid,
     if (tipped > 0) 'tip': tipped,
-    if (signed) 'sd': true,
     'f': from,
   };
 
@@ -143,7 +131,6 @@ final class AskAnswer {
           ? json['tip'] as int
           : 0,
       from: json['f'] as String,
-      signed: json['sd'] == true,
     );
   }
 }
@@ -425,6 +412,9 @@ final class AskService extends ChangeNotifier {
       pyramidKey: key,
       pyramid: py,
     );
+    if (proof == null) {
+      return; // an answer nobody can check is not sent
+    }
     await _send(from, <String, dynamic>{
       'type': AskTypes.answer,
       'id': id,
@@ -432,15 +422,14 @@ final class AskService extends ChangeNotifier {
       'p': <String>[name],
       'k': ?key,
       'py': ?py,
-      'sg': ?proof,
+      'sg': proof,
     });
     q.answeredByMe = true;
     await _save();
   }
 
   /// This person's signature on an answer ([askAnswerSignedBytes]); null
-  /// before the ledger made the keys (the answer then goes unsigned, as
-  /// from an older app).
+  /// before the ledger made the keys.
   Future<Map<String, dynamic>?> _signAnswer({
     required String id,
     required String name,
@@ -481,12 +470,11 @@ final class AskService extends ChangeNotifier {
 
   /// Checks the answerer's signature ([proof]) over what came:
   ///  - `true`: signed by the device in its certificate, for this question,
-  ///    these words, this name (the first of [path]) and tip key;
-  ///  - `false` (the answer is dropped): malformed or not matching;
-  ///  - `null` (kept, shown marked): no signature (an older app), or a
-  ///    sound one under another address than the friend who answered
-  ///    directly — it may be another of their devices (§6).
-  Future<bool?> _checkAnswer(
+  ///    these words, this name (the first of [path]) and tip key, and (for
+  ///    a friend's own answer) by the friend who sent it;
+  ///  - `false` (the answer is dropped): missing, malformed or not
+  ///    matching.
+  Future<bool> _checkAnswer(
     Object? proof, {
     required String id,
     required String from,
@@ -495,9 +483,6 @@ final class AskService extends ChangeNotifier {
     String? pyramidKey,
     String? pyramid,
   }) async {
-    if (proof == null) {
-      return null;
-    }
     if (proof is! Map ||
         proof['s'] is! String ||
         (proof['s'] as String).length > 200 ||
@@ -528,10 +513,7 @@ final class AskService extends ChangeNotifier {
     if (!sound) {
       return false;
     }
-    if (path.length == 1 && answerer != from) {
-      return null;
-    }
-    return true;
+    return path.length != 1 || answerer == from;
   }
 
   /// Notes a tip given for answer [index] of this person's question [id].
@@ -650,10 +632,11 @@ final class AskService extends ChangeNotifier {
     ];
     final String? key = askKeyField(p['k']);
     final String? pyramid = askKeyField(p['py']);
-    // A signed answer is checked before it is shown or passed on; a
-    // signature that does not fit (words, name or tip key changed) drops it.
+    // A signed answer is checked before it is shown or passed on; a missing
+    // signature, or one that does not fit (words, name or tip key
+    // changed), drops it.
     final Object? sg = p['sg'];
-    final bool? checked = raw.length > kAnswerMaxChars && sg != null
+    final bool checked = raw.length > kAnswerMaxChars
         ? false
         : await _checkAnswer(
             sg,
@@ -664,10 +647,9 @@ final class AskService extends ChangeNotifier {
             pyramidKey: key,
             pyramid: pyramid,
           );
-    if (checked == false) {
+    if (!checked) {
       return;
     }
-    final bool signed = checked == true;
     if (q.isMine) {
       final int fromThem = q.answers
           .where((AskAnswer a) => a.from == from)
@@ -684,7 +666,6 @@ final class AskService extends ChangeNotifier {
           pyramidKey: key,
           pyramid: pyramid,
           from: from,
-          signed: signed,
         ),
       );
       await _save();

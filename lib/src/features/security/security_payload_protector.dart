@@ -9,9 +9,9 @@ import 'package:zen/src/features/security/app_security_service.dart';
 ///
 /// One envelope opens: `ZENENC2`, bound to the key the payload is stored
 /// under (authenticated, not stored), so a file copied over another key's
-/// file does not open either. Plaintext and the older unbound `ZENENC1`
-/// are refused ([UnsupportedStoredPayloadException], which the store reads
-/// as "nothing stored"): with access to the files alone nobody can plant a
+/// file does not open either. Plaintext is refused
+/// ([UnsupportedStoredPayloadException], which the store reads as "nothing
+/// stored"): with access to the files alone nobody can plant a
 /// record — a node config, a cache of verified signatures.
 ///
 /// It also gives the key that hides file names that would show who the
@@ -19,17 +19,6 @@ import 'package:zen/src/features/security/app_security_service.dart';
 final class EncryptedBinaryPayloadProtector
     implements KeyedBinaryPayloadProtector, BinaryStoreNameKeySource {
   EncryptedBinaryPayloadProtector(this._security);
-
-  /// `ZENENC1`: sealed without a storage key (older versions).
-  static const List<int> _unboundMagic = <int>[
-    0x5A,
-    0x45,
-    0x4E,
-    0x45,
-    0x4E,
-    0x43,
-    0x31,
-  ];
 
   /// `ZENENC2`: bound to the storage key.
   static const List<int> _boundMagic = <int>[
@@ -104,25 +93,6 @@ final class EncryptedBinaryPayloadProtector
 
   @override
   bool isSealed(Uint8List payload) => _startsWith(payload, _boundMagic);
-
-  /// Whether [payload] was sealed the older way, without a storage key.
-  bool isUnboundSeal(Uint8List payload) => _startsWith(payload, _unboundMagic);
-
-  /// Opens a payload sealed the older way (`ZENENC1`). Only the one-time
-  /// upgrade of the node config uses it: a lost node key would be a new
-  /// address for every friend. Kept on purpose: the only compatibility path
-  /// left.
-  Future<Uint8List> unsealUnbound(Uint8List payload) async {
-    if (!isUnboundSeal(payload)) {
-      throw const UnsupportedStoredPayloadException(
-        'Not a payload sealed without a storage key.',
-      );
-    }
-    return decryptSecurityBytes(
-      Uint8List.sublistView(payload, _unboundMagic.length),
-      await _key(sealing: false),
-    );
-  }
 
   @override
   Future<Uint8List?> fileNameKey() async {

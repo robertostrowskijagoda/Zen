@@ -5,7 +5,9 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
+import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/intro/intro_service.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
@@ -154,6 +156,9 @@ void main() {
       await meet.handle(_list(_celina, const <String, String>{}));
     });
     final MemorySignalTransport transport = MemorySignalTransport();
+    // Introductions are signed: this phone has ledger keys and an address.
+    final MemoryLedgerDisk ledger = MemoryLedgerDisk();
+    await tester.runAsync(() => LedgerIdentity.loadOrCreate(ledger));
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -168,7 +173,21 @@ void main() {
             ),
           ),
           signalTransportProvider.overrideWithValue(transport),
-          ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+          ledgerDiskProvider.overrideWithValue(ledger),
+          introServiceProvider.overrideWith((Ref ref) {
+            final IntroService intro = IntroService(
+              host: MeetEventHost(
+                AppMeetHost(ref),
+                address: () => addr('01'),
+                name: () => 'Ja',
+              ),
+              disk: ledger,
+              meet: () => ref.read(meetServiceProvider),
+              friending: AppIntroFriending(ref),
+            );
+            ref.onDispose(intro.dispose);
+            return intro;
+          }),
           meetServiceProvider.overrideWithValue(meet),
           pyramidServiceProvider.overrideWithValue(
             PyramidService(

@@ -225,28 +225,24 @@ void main() {
     final _Host ania = _Host(net, 'ania', <String>['bob']);
     final _Host bob = _Host(net, 'bob', <String>['ania']);
     await ania.service.shareNearbySecret('bob');
-    final String first = ania.service.book.nearbySecret!;
-    // Bob keeps Ania's keys for him alone (S6), not her legacy secret.
+    final String first = ania.service.book.nearbyPrivate!;
+    // Bob keeps Ania's keys for him alone (S6), never her private key.
     final String firstKeys = ania.service.nearbyKeysFor('bob')!;
     expect(bob.service.book.friendNearbySecrets['ania'], firstKeys);
     expect(ania.service.book.nearbyGivenTo, contains('bob'));
     await ania.service.rotateNearbySecret();
-    expect(ania.service.book.nearbySecret, isNot(first));
+    expect(ania.service.book.nearbyPrivate, isNot(first));
     expect(ania.service.nearbyKeysFor('bob'), isNot(firstKeys));
     expect(
       bob.service.book.friendNearbySecrets['ania'],
       ania.service.nearbyKeysFor('bob'),
     );
 
-    await ania.service.markMet('bob');
-    expect(ania.service.book.metAt('bob'), 1000);
-
     // The book survives a round trip.
     final MeetBook again = MeetBook.fromJson(
       jsonDecode(jsonEncode(ania.service.book.toJson())),
     );
-    expect(again.nearbySecret, ania.service.book.nearbySecret);
-    expect(again.metAt('bob'), 1000);
+    expect(again.nearbyPrivate, ania.service.book.nearbyPrivate);
   });
 
   test('sound recorded during an alarm goes to the friends who got it and '
@@ -348,7 +344,7 @@ void main() {
     expect(ania.service.book.alarmNearby, isFalse);
 
     await ania.service.setAlarmNearby(true);
-    // Kasia has Ania's nearby secret: she can check Ania's waves.
+    // Kasia has Ania's nearby keys: she can check Ania's waves.
     await ania.service.shareNearbySecret('kasia');
     final AlarmRecord alarm = await ania.service.raiseAlarm();
     await ania.service.pendingNearbyWave;
@@ -357,7 +353,7 @@ void main() {
     expect(wave['v'], kAlarmWaveVersion);
     expect(wave['id'], alarm.id);
     expect(wave['at'], ania.clock);
-    expect(wave['m'], hasLength(32));
+    expect(wave.containsKey('m'), isFalse, reason: 'told to everyone');
     expect(wave.containsKey('end'), isFalse);
     expect(utf8.encode(jsonEncode(wave)).length, lessThan(200));
 
@@ -370,7 +366,8 @@ void main() {
       alarm,
       to: 'kasia',
     );
-    expect(forKasia['v'], kAlarmPairWaveVersion);
+    expect(forKasia['v'], kAlarmWaveVersion);
+    expect(forKasia['m'], hasLength(32));
     // The wave for everyone (which any of her friends could make) does not
     // ring at a friend who has her per-friend keys.
     await kasia.service.onAlarmWave(wave, friend: 'ania');

@@ -190,26 +190,6 @@ void main() {
     expect(onAgain.followers.single.account, c.account);
   });
 
-  test('follows of an older version get their entry', () async {
-    final LedgerNode a = await make(ada);
-    final LedgerNode c = await make(cel);
-    await FollowLedger.of(a).ready;
-    // Followed the old way: only the local list.
-    await c.follow(ada);
-    await _settle();
-    expect(latestFollows(c.entriesOf(spaceKind: 'acts')), isEmpty);
-
-    final FollowLedger onC = FollowLedger.of(c);
-    await onC.ready;
-    expect(latestFollows(c.entriesOf(spaceKind: 'acts'))[ada]?.body['on'], 1);
-    expect(onC.followed, <String>{ada});
-
-    // From now on the hello tells A.
-    c.greet(ada);
-    await _settle();
-    expect(FollowLedger.of(a).followers.single.account, c.account);
-  });
-
   test('followers who stop greeting drop off after a while', () async {
     int now = DateTime(2026, 10, 1).millisecondsSinceEpoch;
     final LedgerNode a = await make(ada);

@@ -123,9 +123,13 @@ final class _Phone implements MeetHost {
       ownAddress: () => address,
       sendMesh: send,
       frames: frames.stream,
+      onMet: (String friend) async => met.add(friend),
       now: () => clock,
     );
   }
+
+  /// Friends this phone signed "met in person" for (§6.2).
+  final List<String> met = <String>[];
 
   final _Air air;
   final Map<String, _Phone> mesh;
@@ -198,14 +202,16 @@ List<int> _unhexed(String hex) => <int>[
 ];
 
 void main() {
-  test('tokens change every 15 minutes and only friends can tell whose', () {
-    final String secret = base64Url.encode(List<int>.filled(32, 7));
-    final Uint8List a = nearbyToken(secret, 100);
+  test('tokens change every slot and only friends can tell whose', () {
+    final NearbyOwnKeys keys = NearbyOwnKeys(
+      base64Url.encode(List<int>.filled(32, 7)),
+    );
+    final Uint8List a = keys.token(100);
     expect(a, hasLength(16));
-    expect(nearbyToken(secret, 100), a);
-    expect(nearbyToken(secret, 101), isNot(a));
+    expect(keys.token(100), a);
+    expect(keys.token(101), isNot(a));
     expect(
-      nearbyToken(base64Url.encode(List<int>.filled(32, 8)), 100),
+      NearbyOwnKeys(base64Url.encode(List<int>.filled(32, 8))).token(100),
       isNot(a),
     );
     expect(nearbyPseudonym(a), matches(RegExp(r'^\S+ \S+$')));
@@ -236,7 +242,7 @@ void main() {
     expect(seen.first.friend, 'ania', reason: 'friends first');
     expect(seen.last.friend, isNull);
     expect(seen.last.pseudonym, obcy.nearby.myPseudonym);
-    expect(bob.meet.book.metAt('ania'), isNotNull);
+    expect(bob.met, <String>['ania']);
 
     // 15 minutes later Ania's token is new, Bob still knows her.
     ania.clock += 15 * 60 * 1000;
@@ -268,7 +274,6 @@ void main() {
     await _settle();
 
     final NearbyPerson bobSeen = ania.nearby.people.single;
-    expect(bobSeen.modern, isTrue);
     final NearbySession mine = (await ania.nearby.wave(bobSeen, 'Cześć!'))!;
     await _settle();
     expect(mine.canSend, isFalse, reason: 'one message until they answer');
@@ -351,81 +356,33 @@ void main() {
     expect(ania.nearby.sessions, hasLength(2), reason: 'hers, two hellos');
   });
 
-  test('1.10.0 phones (transition): their hello with an address is read, a '
-      'hello to them is the old one, and a stranger gets one message until '
-      'you answer — kept here, not only by their app', () async {
-    final _Air air = _Air();
-    final Map<String, _Phone> mesh = <String, _Phone>{};
-    final String a = PeerShareCodec.normalizeAddress('200::a1');
-    final String b = PeerShareCodec.normalizeAddress('200::b2');
-    // Ania's phone stands in for a 1.10.0 one on the network.
-    final _Phone ania = _Phone(air, mesh, a, <String>[]);
-    final _Phone bob = _Phone(air, mesh, b, <String>[]);
-    final _Radio old = _Radio(air, 'mac-old')
-      ..advertised = Uint8List.fromList(List<int>.filled(16, 9));
-    await bob.nearby.startScanning();
-    old.broadcast();
-    await _settle();
-    final NearbyPerson oldSeen = bob.nearby.people.single;
-    expect(oldSeen.modern, isFalse);
-
-    expect(await bob.nearby.wave(oldSeen, 'Hej'), isNotNull);
-    final Map<String, dynamic> sent = _json(bob.radio.written.last.$2);
-    expect(sent['v'], kNearbyLegacyHelloVersion);
-    expect(sent['a'], b, reason: 'the only hello a 1.10.0 phone reads');
-
-    Map<String, dynamic> hello(String sid) => <String, dynamic>{
-      'v': kNearbyLegacyHelloVersion,
-      'sid': sid,
-      'n': 'Zielony Lis',
-      'a': a,
-      'm': 'Cześć',
-    };
-    bob.radio.hear(hello('s1'), from: 'mac-old');
-    await _settle();
-    final NearbySession theirs = bob.nearby.session('s1')!;
-    expect(theirs.legacy, isTrue);
-    expect(theirs.address, a);
-
-    // More before Bob answers: neither a network message nor a new hello.
-    await ania.send(b, <String, dynamic>{
-      'type': kNearbyMessageType,
-      'sid': 's1',
-      'm': 'i jeszcze',
-    });
-    bob.radio.hear(hello('s2'), from: 'mac-old');
-    await _settle();
-    expect(theirs.lines, hasLength(1));
-    expect(bob.nearby.session('s2'), isNull);
-
-    // After the answer they may write.
-    expect(await bob.nearby.send(theirs, 'No hej'), isTrue);
-    await ania.send(b, <String, dynamic>{
-      'type': kNearbyMessageType,
-      'sid': 's1',
-      'm': 'Super',
-    });
-    await _settle();
-    expect(theirs.lines.last.text, 'Super');
-    await bob.nearby.close();
-  });
-
   test('blocks are kept across restarts', () async {
     final _Air air = _Air();
     final Map<String, _Phone> mesh = <String, _Phone>{};
     final String a = PeerShareCodec.normalizeAddress('200::a1');
     final String b = PeerShareCodec.normalizeAddress('200::b2');
+    final _Phone ania = _Phone(air, mesh, a, <String>[]);
     final _Phone bob = _Phone(air, mesh, b, <String>[]);
-    final Map<String, dynamic> hello = <String, dynamic>{
-      'v': kNearbyLegacyHelloVersion,
-      'sid': 's1',
-      'n': 'Zielony Lis',
-      'a': a,
-      'm': 'Cześć',
-    };
-    bob.radio.hear(hello);
+    await ania.nearby.setVisible(true);
+    await bob.nearby.setVisible(true);
+    await ania.nearby.startScanning();
+    await bob.nearby.startScanning();
+    ania.radio.broadcast();
+    bob.radio.broadcast();
     await _settle();
-    bob.nearby.block(bob.nearby.session('s1')!);
+    final NearbySession mine = (await ania.nearby.wave(
+      ania.nearby.people.single,
+      'Cześć',
+    ))!;
+    await _settle();
+    final NearbySession theirs = bob.nearby.sessions.single;
+    expect(await bob.nearby.send(theirs, 'Hej'), isTrue);
+    await _until(() => mine.address != null);
+    expect(await ania.nearby.send(mine, 'Jestem Ania'), isTrue);
+    await _settle();
+    expect(theirs.address, a);
+
+    bob.nearby.block(theirs);
     await _until(() => bob.meet.book.nearbyBlocked.isNotEmpty);
     expect(bob.nearby.blockedCount, 1);
 
@@ -434,15 +391,9 @@ void main() {
     await again.meet.reload();
     expect(again.meet.book.nearbyBlocked, <String>{a});
     expect(again.nearby.blockedCount, 1);
-    again.radio.hear(<String, dynamic>{...hello, 'sid': 's2'});
-    await _settle();
-    expect(again.nearby.sessions, isEmpty);
 
     await again.nearby.unblockAll();
     expect(again.nearby.blockedCount, 0);
-    again.radio.hear(<String, dynamic>{...hello, 'sid': 's3'});
-    await _settle();
-    expect(again.nearby.sessions, hasLength(1));
   });
 
   test('visibility is remembered', () async {
@@ -471,37 +422,35 @@ void main() {
         <String>[],
       );
       final _Radio spammer = _Radio(air, 'mac-spam');
-      Future<bool> hello(String sid, String address) => spammer.wave(
+      final String key = base64Url.encode(List<int>.filled(32, 4));
+      String token(int i) => i.toRadixString(16).padLeft(32, '0');
+      Future<bool> hello(String sid, String from) => spammer.wave(
         bob.radio.device,
         Uint8List.fromList(
           utf8.encode(
             jsonEncode(<String, dynamic>{
-              'v': 1,
+              'v': kNearbyHelloVersion,
               'sid': sid,
               'n': 'Zielony Lis',
-              'a': address,
+              't': from,
+              'e': key,
               'm': 'x' * 5000,
             }),
           ),
         ),
       );
 
-      // One address: one hello until Bob answers, cut to size.
+      // One token: one hello until Bob answers, cut to size.
       for (int i = 0; i < 20; i++) {
-        await hello('s$i', PeerShareCodec.normalizeAddress('200::a1'));
+        await hello('s$i', token(1));
       }
       await _settle();
       expect(bob.nearby.sessions, hasLength(1));
       expect(bob.nearby.sessions.first.lines.single.text, hasLength(300));
 
-      // Many addresses: the oldest unanswered ones make room.
+      // Many tokens: the oldest unanswered ones make room.
       for (int i = 0; i < 100; i++) {
-        await hello(
-          't$i',
-          PeerShareCodec.normalizeAddress(
-            '200::${(0x100 + i).toRadixString(16)}',
-          ),
-        );
+        await hello('t$i', token(0x100 + i));
       }
       await _settle();
       expect(bob.nearby.sessions, hasLength(NearbyService.maxSessions));
@@ -525,7 +474,6 @@ void main() {
     final FriendNearbyKey cyryl = FriendNearbyKey.parse(
       keys.materialFor('cyryl', now),
     )!;
-    expect(bob.paired, isTrue);
     expect(bob.pair, isNot(cyryl.pair), reason: 'a key per friend');
     expect(bob.mask, cyryl.mask, reason: 'unmasking is the same for all');
     // The private key itself never goes to a friend.
@@ -547,7 +495,7 @@ void main() {
       isNotNull,
     );
     // What a friend saw cannot be made into the next slot's token.
-    final List<int> mask = nearbyMask(bob.mask!, slot + 1);
+    final List<int> mask = nearbyMask(bob.mask, slot + 1);
     final List<int> replayed = <int>[
       for (int i = 0; i < 16; i++) value[i] ^ mask[i],
     ];
@@ -559,10 +507,11 @@ void main() {
     expect(bob.open(keys.token(end), end), isNotNull);
     expect(bob.open(keys.token(end + 1), end + 1), isNotNull);
 
-    // A 1.10.0 friend's secret is still read; junk is not.
-    final String legacy = base64Url.encode(List<int>.filled(32, 7));
-    expect(FriendNearbyKey.parse(legacy)!.paired, isFalse);
-    expect(FriendNearbyKey.parse(legacy)!.radioKey, legacy);
+    // A bare secret is not a friend's keys; junk is not either.
+    expect(
+      FriendNearbyKey.parse(base64Url.encode(List<int>.filled(32, 7))),
+      isNull,
+    );
     expect(bob.radioKey, startsWith(kNearbyPairKeyPrefix));
     expect(FriendNearbyKey.parse('${kNearbyKeyPrefix}xyz'), isNull);
   });
@@ -589,8 +538,8 @@ void main() {
     expect(bob.nearby.people.single.friend, 'ania');
     final NearbyPerson seen = bob.nearby.people.single;
 
-    // Ten minutes on, Ania is gone. Cyryl knows all he was given, her
-    // legacy secret and the token she showed, and tries to be her.
+    // Ten minutes on, Ania is gone. Cyryl knows all he was given and the
+    // token she showed, and tries to be her.
     ania.radio.advertised = null;
     for (final _Phone p in <_Phone>[ania, bob, cyryl]) {
       p.clock += kNearbySlot.inMilliseconds;
@@ -598,7 +547,7 @@ void main() {
     final FriendNearbyKey given = FriendNearbyKey.parse(cyrylHas)!;
     final int slot = nearbySlot(bob.clock);
     final List<int> before = given.open(_unhexed(seen.token), slot - 1)!;
-    final List<int> mask = nearbyMask(given.mask!, slot);
+    final List<int> mask = nearbyMask(given.mask, slot);
     final _Radio fake = _Radio(air, 'mac-fake');
     for (final List<int> guess in <List<int>>[
       before,
@@ -607,18 +556,12 @@ void main() {
       fake
         ..advertised = Uint8List.fromList(<int>[
           for (int i = 0; i < 16; i++) guess[i] ^ mask[i],
-          ...nearbyHint(given.mask!, slot),
+          ...nearbyHint(given.mask, slot),
         ])
         ..broadcast();
     }
-    fake
-      ..advertised = nearbyToken(
-        ania.meet.book.nearbySecret!,
-        nearbyEpoch(bob.clock),
-      )
-      ..broadcast();
     await _settle();
-    expect(bob.nearby.people, hasLength(3));
+    expect(bob.nearby.people, hasLength(2));
     expect(
       bob.nearby.people.every((NearbyPerson p) => p.friend == null),
       isTrue,
@@ -650,73 +593,20 @@ void main() {
     await _settle();
     final AlarmRecord alarm = await ania.meet.raiseAlarm(note: 'pomocy');
     expect(await ania.nearby.waveAll(ania.meet.alarmWave(alarm)), 1);
-    expect(bob.radio.got.last['v'], kAlarmPairWaveVersion);
+    expect(bob.radio.got.last['t'], isNotNull, reason: 'signed for the pair');
     await _until(() => bob.meet.book.alarm(alarm.id) != null);
     expect(bob.meet.book.alarm(alarm.id)!.from, 'ania');
 
-    // Cyryl's waves "from Ania": with her legacy secret, and with the key
-    // she gave him. Neither rings at Bob, even named as hers.
-    final Map<String, dynamic> legacyWave = AlarmWave.build(
-      id: 'falsz1',
-      at: bob.clock,
-      ended: false,
-      secret: ania.meet.book.nearbySecret,
-    );
+    // Cyryl's wave "from Ania", with the key she gave him. It does not
+    // ring at Bob, even named as hers.
     final Map<String, dynamic> pairWave = AlarmWave.buildPair(
       id: 'falsz2',
       at: bob.clock,
       ended: false,
-      pairKey: given.pair!,
+      pairKey: given.pair,
     );
-    expect(bob.nearby.friendOfToken(legacyWave['t']), isNull);
     expect(bob.nearby.friendOfToken(pairWave['t']), isNull);
-    await bob.meet.onAlarmWave(legacyWave, friend: 'ania', source: 'mac-c1');
     await bob.meet.onAlarmWave(pairWave, friend: 'ania', source: 'mac-c2');
-    expect(bob.meet.book.alarm('falsz1'), isNull);
     expect(bob.meet.book.alarm('falsz2'), isNull);
   });
-
-  test(
-    '1.10.0 friends (transition): known by their legacy token, their '
-    'legacy-signed alarm wave rings, and they get one they can read',
-    () async {
-      final _Air air = _Air();
-      final Map<String, _Phone> mesh = <String, _Phone>{};
-      final _Phone bob = _Phone(air, mesh, 'bob', <String>['olek']);
-      final String secret = base64Url.encode(List<int>.filled(32, 5));
-      // A 1.10.0 phone sends only its legacy secret.
-      await bob.meet.handle(
-        SignalTransportFrame(
-          from: 'olek',
-          payload: <String, dynamic>{'type': 'nearby_key', 'k': secret},
-          receivedAtMillis: 0,
-        ),
-      );
-      expect(bob.meet.book.friendNearbySecrets['olek'], secret);
-      final _Radio old = _Radio(air, 'mac-olek')
-        ..advertised = nearbyToken(secret, nearbyEpoch(bob.clock));
-      await bob.nearby.startScanning();
-      old.broadcast();
-      await _settle();
-      final NearbyPerson olek = bob.nearby.people.single;
-      expect(olek.friend, 'olek');
-      expect(olek.modern, isFalse);
-
-      final Map<String, dynamic> wave = AlarmWave.build(
-        id: 'olek1',
-        at: bob.clock,
-        ended: false,
-        secret: secret,
-      );
-      await bob.meet.onAlarmWave(
-        wave,
-        friend: bob.nearby.friendOfToken(wave['t']),
-      );
-      expect(bob.meet.book.alarm('olek1')?.from, 'olek');
-
-      final AlarmRecord alarm = await bob.meet.raiseAlarm(note: 'pomocy');
-      expect(await bob.nearby.waveAll(bob.meet.alarmWave(alarm)), 1);
-      expect(old.got.single['v'], kAlarmWaveVersion);
-    },
-  );
 }

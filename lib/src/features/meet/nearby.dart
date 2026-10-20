@@ -19,11 +19,6 @@ export 'package:zen/src/features/meet/nearby_crypto.dart';
 /// Mesh payload of a conversation started nearby.
 const String kNearbyMessageType = 'nearby_msg';
 
-/// Hello of 1.10.0 phones: it carries the sender's mesh address. Still read,
-/// and sent only to phones that show a 1.10.0 token (transition; the screen
-/// says so before sending).
-const int kNearbyLegacyHelloVersion = 1;
-
 /// Hello without any address (S5): the pseudonym, the message, the
 /// sender's token and a one-time X25519 key. Nobody learns an address until
 /// the other person answers.
@@ -192,7 +187,7 @@ final class ChannelNearbyRadio implements NearbyRadio {
   Future<void> setAlarmReceiver(bool on) => _call<void>('setAlarmReceiver', on);
 
   /// Friends' keys for alarm waves ([FriendNearbyKey.radioKey]: a pair key
-  /// `p:…`, or a 1.10.0 friend's legacy secret): the radio side checks an
+  /// `p:…`): the radio side checks an
   /// alarm wave's signature with them before counting it, so a flood of
   /// other waves cannot crowd a friend's alarm out (§16.3).
   Future<void> setAlarmKeys(List<String> secrets) =>
@@ -207,7 +202,6 @@ final class NearbyPerson {
     required this.rssi,
     required this.seenAt,
     this.friend,
-    this.modern = false,
   });
 
   final String token;
@@ -217,10 +211,6 @@ final class NearbyPerson {
 
   /// A friend's address when the token is theirs.
   final String? friend;
-
-  /// The phone shows a token with a hint (a version newer than 1.10.0): it
-  /// understands hellos without an address.
-  bool modern;
 
   String get pseudonym => nearbyPseudonym(_unhex(token));
 }
@@ -250,19 +240,15 @@ final class NearbySession {
     required this.pseudonym,
     this.address,
     this.startedByMe = false,
-    this.legacy = false,
     this.peerToken = '',
   });
 
   final String id;
   String pseudonym;
 
-  /// Their mesh address (known once they answered, or from a 1.10.0 hello).
+  /// Their mesh address (known once they answered).
   String? address;
   final bool startedByMe;
-
-  /// A 1.10.0 hello: the address went with the hello itself.
-  final bool legacy;
 
   /// The other phone's token when the conversation started (badges).
   final String peerToken;
@@ -290,7 +276,7 @@ final class NearbySession {
     if (address != null) {
       return true;
     }
-    return !legacy && _peerPublic != null && !iAnswered;
+    return _peerPublic != null && !iAnswered;
   }
 
   /// This person answered a hello without an address and waits for its
@@ -308,6 +294,7 @@ final class NearbyService extends ChangeNotifier {
     required this.ownAddress,
     required this.sendMesh,
     required Stream<SignalTransportFrame> frames,
+    this.onMet,
     int Function()? now,
     Random? random,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch),
@@ -321,6 +308,11 @@ final class NearbyService extends ChangeNotifier {
   final MeetService meet;
   final String Function() ownAddress;
   final Future<void> Function(String to, Map<String, dynamic> payload) sendMesh;
+
+  /// A friend is right here (§15): signs the "met in person" attestation
+  /// (§6.2). Called once per friend while this service runs.
+  final Future<void> Function(String friend)? onMet;
+  final Set<String> _metHere = <String>{};
   final int Function() _now;
   final Random _random;
   final List<StreamSubscription<Object?>> _subs =
@@ -342,10 +334,8 @@ final class NearbyService extends ChangeNotifier {
   /// for the slots around now.
   Map<String, FriendNearbyKey> _friendKeys = <String, FriendNearbyKey>{};
   Map<String, String> _friendKeyText = <String, String>{};
-  Map<String, String> _legacyTokens = <String, String>{};
   Map<String, List<(String, int)>> _hints = <String, List<(String, int)>>{};
   Map<String, String> _pairIds = <String, String>{};
-  int _keysEpoch = -1;
   int _keysSlot = -1;
 
   /// Per friend: the last checked chain value (its slot), so the next
@@ -376,7 +366,7 @@ final class NearbyService extends ChangeNotifier {
   final List<void Function(Map<dynamic, dynamic> json)> otherWaveHandlers =
       <void Function(Map<dynamic, dynamic> json)>[];
 
-  /// Alarm waves ([kAlarmWaveVersion], [kAlarmPairWaveVersion], §16.3) with
+  /// Alarm waves ([kAlarmWaveVersion], §16.3) with
   /// the Bluetooth address of the phone that wrote them (for limits on what
   /// strangers send).
   final List<void Function(Map<dynamic, dynamic> json, String device)>
@@ -454,22 +444,18 @@ final class NearbyService extends ChangeNotifier {
     return token.isEmpty ? t('Ktoś obok') : nearbyPseudonym(_unhex(token));
   }
 
-  /// Reads the friends' keys again when the slot (or the legacy epoch)
-  /// changed, or always with [force].
+  /// Reads the friends' keys again when the slot changed, or always with
+  /// [force].
   void _refreshFriendKeys({bool force = false}) {
-    final int now = _now();
-    final int epoch = nearbyEpoch(now);
-    final int slot = nearbySlot(now);
-    if (!force && epoch == _keysEpoch && slot == _keysSlot) {
+    final int slot = nearbySlot(_now());
+    if (!force && slot == _keysSlot) {
       return;
     }
-    _keysEpoch = epoch;
     _keysSlot = slot;
     final Map<String, String> stored = Map<String, String>.of(
       meet.book.friendNearbySecrets,
     );
     final Map<String, FriendNearbyKey> keys = <String, FriendNearbyKey>{};
-    final Map<String, String> legacy = <String, String>{};
     final Map<String, List<(String, int)>> hints =
         <String, List<(String, int)>>{};
     final Map<String, String> pairIds = <String, String>{};
@@ -480,27 +466,14 @@ final class NearbyService extends ChangeNotifier {
         continue;
       }
       keys[friend] = key;
-      final List<int>? mask = key.mask;
-      final List<int>? pair = key.pair;
-      if (mask == null || pair == null) {
-        // A 1.10.0 friend (transition): their legacy tokens.
-        for (final int ep in <int>[epoch - 1, epoch, epoch + 1]) {
-          try {
-            legacy[_hex(nearbyToken(key.legacy!, ep))] = friend;
-          } on FormatException {
-            // a damaged secret: nothing to match
-          }
-        }
-        continue;
-      }
       for (int s = slot - 1; s <= slot + 1; s++) {
-        (hints[_hex(nearbyHint(mask, s))] ??= <(String, int)>[]).add((
+        (hints[_hex(nearbyHint(key.mask, s))] ??= <(String, int)>[]).add((
           friend,
           s,
         ));
       }
       for (int s = slot - 2; s <= slot + 2; s++) {
-        pairIds[nearbyPairId(pair, s)] = friend;
+        pairIds[nearbyPairId(key.pair, s)] = friend;
       }
     }
     final Set<String> changed = <String>{
@@ -514,7 +487,6 @@ final class NearbyService extends ChangeNotifier {
     );
     _friendKeyText = stored;
     _friendKeys = keys;
-    _legacyTokens = legacy;
     _hints = hints;
     _pairIds = pairIds;
     _pushAlarmKeys(keys.values);
@@ -654,6 +626,9 @@ final class NearbyService extends ChangeNotifier {
         if (h == null && token.length >= 16 + kNearbyHintLength) {
           h = token.sublist(16, 16 + kNearbyHintLength);
         }
+        if (h == null) {
+          return;
+        }
         _seen(token.sublist(0, 16), h, device, rssi);
       case 'wave':
         final Object? data = event['data'];
@@ -678,24 +653,21 @@ final class NearbyService extends ChangeNotifier {
     }
   }
 
-  /// A Zen phone nearby showed [raw] (16 bytes) with [hint] (newer phones).
-  void _seen(List<int> raw, List<int>? hint, String device, int rssi) {
+  /// A Zen phone nearby showed [raw] (16 bytes) with [hint].
+  void _seen(List<int> raw, List<int> hint, String device, int rssi) {
     final String token = _hex(raw);
     if (token == myToken) {
       return;
     }
     _refreshFriendKeys();
-    final String? friend =
-        _legacyTokens[token] ??
-        (hint == null ? null : _recognise(raw, _hex(hint), token));
+    final String? friend = _recognise(raw, _hex(hint), token);
     final int t = _now();
     final NearbyPerson? had = _people[token];
     if (had != null) {
       had
         ..device = device
         ..rssi = rssi
-        ..seenAt = t
-        ..modern = hint != null;
+        ..seenAt = t;
     } else {
       if (_people.length >= maxPeople) {
         _people.removeWhere(
@@ -711,11 +683,14 @@ final class NearbyService extends ChangeNotifier {
         rssi: rssi,
         seenAt: t,
         friend: friend,
-        modern: hint != null,
       );
     }
-    if (friend != null && rssi >= metRssi && meet.book.metAt(friend) == null) {
-      unawaitedLogged(meet.markMet(friend), context: 'Spotkani osobiście');
+    final Future<void> Function(String friend)? met = onMet;
+    if (friend != null &&
+        rssi >= metRssi &&
+        met != null &&
+        _metHere.add(friend)) {
+      unawaitedLogged(met(friend), context: 'Spotkani osobiście');
     }
     notifyListeners();
   }
@@ -758,9 +733,7 @@ final class NearbyService extends ChangeNotifier {
 
   /// Says hello to [person] over Bluetooth: they get this phone's pseudonym
   /// and [text] — no account and no address (S5); the address goes only to
-  /// someone who answers ([kNearbyReplyVersion]). A 1.10.0 phone
-  /// ([NearbyPerson.modern] false) understands only the old hello, which
-  /// carries the mesh address (the screen says so first).
+  /// someone who answers ([kNearbyReplyVersion]).
   Future<NearbySession?> wave(NearbyPerson person, String text) async {
     final String message = _clip(text.trim(), kNearbyHelloMaxLength);
     if (ownAddress().isEmpty || message.isEmpty) {
@@ -768,29 +741,16 @@ final class NearbyService extends ChangeNotifier {
     }
     await meet.nearbyPrivateKey();
     final String id = _newId();
-    cg.SimpleKeyPair? keys;
-    final Map<String, dynamic> json;
-    if (person.modern) {
-      keys = await _x25519.newKeyPair();
-      final cg.SimplePublicKey publicKey = await keys.extractPublicKey();
-      json = <String, dynamic>{
-        'v': kNearbyHelloVersion,
-        'sid': id,
-        'n': myPseudonym,
-        't': myToken,
-        'e': base64Url.encode(publicKey.bytes),
-        'm': message,
-      };
-    } else {
-      // Transition: a 1.10.0 phone reads only this one.
-      json = <String, dynamic>{
-        'v': kNearbyLegacyHelloVersion,
-        'sid': id,
-        'n': myPseudonym,
-        'a': ownAddress(),
-        'm': message,
-      };
-    }
+    final cg.SimpleKeyPair keys = await _x25519.newKeyPair();
+    final cg.SimplePublicKey publicKey = await keys.extractPublicKey();
+    final Map<String, dynamic> json = <String, dynamic>{
+      'v': kNearbyHelloVersion,
+      'sid': id,
+      'n': myPseudonym,
+      't': myToken,
+      'e': base64Url.encode(publicKey.bytes),
+      'm': message,
+    };
     if (!await radio.wave(person.device, _encode(json))) {
       return null;
     }
@@ -799,7 +759,6 @@ final class NearbyService extends ChangeNotifier {
             id: id,
             pseudonym: person.pseudonym,
             startedByMe: true,
-            legacy: !person.modern,
             peerToken: person.token,
           )
           .._helloKeys = keys
@@ -812,9 +771,8 @@ final class NearbyService extends ChangeNotifier {
   /// Sends [json] over Bluetooth to every phone around right now ([only]:
   /// to those it picks). Returns how many got it.
   ///
-  /// An alarm wave ([kAlarmWaveVersion], signed for everyone) goes to a
-  /// friend who gave per-friend keys signed with the key of that pair
-  /// instead ([kAlarmPairWaveVersion]): only they can check it.
+  /// An alarm wave ([kAlarmWaveVersion], unsigned) goes to a friend
+  /// signed with the key of that pair instead: only they can check it.
   Future<int> waveAll(
     Map<String, dynamic> json, {
     bool Function(NearbyPerson person)? only,
@@ -837,7 +795,7 @@ final class NearbyService extends ChangeNotifier {
       if (alarm != null &&
           own != null &&
           friend != null &&
-          (_friendKeys[friend]?.paired ?? false)) {
+          _friendKeys.containsKey(friend)) {
         out = _encode(
           AlarmWave.buildPair(
             id: alarm.id,
@@ -879,14 +837,14 @@ final class NearbyService extends ChangeNotifier {
     }
   }
 
-  /// The friend whose alarm-wave token [token] (hex) is — a pair's id, or a
-  /// 1.10.0 friend's legacy token — or `null` for a stranger.
+  /// The friend whose alarm-wave token [token] (hex) is — a pair's id — or
+  /// `null` for a stranger.
   String? friendOfToken(Object? token) {
     if (token is! String || token.isEmpty) {
       return null;
     }
     _refreshFriendKeys();
-    return _pairIds[token] ?? _legacyTokens[token];
+    return _pairIds[token];
   }
 
   /// [device]: the Bluetooth address of the phone that wrote it.
@@ -904,7 +862,7 @@ final class NearbyService extends ChangeNotifier {
         return;
       }
       final Object? v = json['v'];
-      if (v == kAlarmWaveVersion || v == kAlarmPairWaveVersion) {
+      if (v == kAlarmWaveVersion) {
         if (alarmsElsewhere) {
           return;
         }
@@ -914,9 +872,7 @@ final class NearbyService extends ChangeNotifier {
         }
         return;
       }
-      if (v == kNearbyLegacyHelloVersion) {
-        _onLegacyHello(json);
-      } else if (v == kNearbyHelloVersion) {
+      if (v == kNearbyHelloVersion) {
         _onHello(json);
       } else if (v == kNearbyReplyVersion) {
         unawaitedLogged(_onReply(json), context: 'W pobliżu: odpowiedź');
@@ -948,37 +904,6 @@ final class NearbyService extends ChangeNotifier {
       return false;
     }
     return _sessions.length < maxSessions || _dropOldSession();
-  }
-
-  /// A 1.10.0 hello (transition): it carries the sender's mesh address.
-  void _onLegacyHello(Map<dynamic, dynamic> json) {
-    final Object? id = json['sid'];
-    final Object? name = json['n'];
-    final Object? address = json['a'];
-    final Object? text = json['m'];
-    if (id is! String ||
-        id.length > 40 ||
-        name is! String ||
-        address is! String ||
-        !isRoutablePeerAddress(address) ||
-        text is! String ||
-        _isBlocked(address) ||
-        _sessions.containsKey(id)) {
-      return;
-    }
-    // The address is the sender's own word (Bluetooth carries no proof):
-    // an answer goes there, nothing else is done with it.
-    final String from = PeerShareCodec.normalizeAddress(address);
-    if (!_roomFor((NearbySession x) => x.address == from)) {
-      return;
-    }
-    _sessions[id] = NearbySession(
-      id: id,
-      pseudonym: _clip(name, 40),
-      address: from,
-      legacy: true,
-    )..lines.add(NearbyLine(false, _clip(text, kNearbyHelloMaxLength), _now()));
-    notifyListeners();
   }
 
   static final RegExp _hex32 = RegExp(r'^[0-9a-f]{32}$');
@@ -1089,20 +1014,16 @@ final class NearbyService extends ChangeNotifier {
       nonce: nonce,
       aad: _replyAad(s.id),
     );
-    final int sent = await waveAround(
-      <String, dynamic>{
-        'v': kNearbyReplyVersion,
-        'sid': s.id,
-        'e': base64Url.encode(mine),
-        'c': base64Url.encode(<int>[
-          ...nonce,
-          ...box.cipherText,
-          ...box.mac.bytes,
-        ]),
-      },
-      listen: replyListen,
-      only: (NearbyPerson p) => p.modern,
-    );
+    final int sent = await waveAround(<String, dynamic>{
+      'v': kNearbyReplyVersion,
+      'sid': s.id,
+      'e': base64Url.encode(mine),
+      'c': base64Url.encode(<int>[
+        ...nonce,
+        ...box.cipherText,
+        ...box.mac.bytes,
+      ]),
+    }, listen: replyListen);
     if (sent == 0) {
       return false;
     }
@@ -1238,10 +1159,7 @@ final class NearbyService extends ChangeNotifier {
     if (had == null) {
       if (s.startedByMe) {
         // The answer to a hello without an address comes over Bluetooth.
-        if (!s.legacy) {
-          return;
-        }
-        s.address = from;
+        return;
       } else {
         // The hello's author writes first after this person answered: the
         // proof shows they hold the hello's key.
