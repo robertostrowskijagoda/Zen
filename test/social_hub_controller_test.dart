@@ -1968,7 +1968,7 @@ void main() {
             displayName: 'Ada',
             fileName: 'gif.gif',
             mimeType: 'image/gif',
-            gifUrl: 'https://example.com/cat.gif',
+            bytes: Uint8List.fromList(<int>[71, 73, 70]),
             sentAtMillis: 13,
           );
 
@@ -1976,14 +1976,11 @@ void main() {
         '200:1111:2222:3333:4444:5555:6666:7777',
       );
       expect(messages.single.type, ChatMessageType.image);
-      expect(messages.single.gifUrl, 'https://example.com/cat.gif');
+      expect(messages.single.attachmentBytes, <int>[71, 73, 70]);
       expect(messages.single.mimeType, 'image/gif');
       expect(messages.single.fileName, 'gif.gif');
       expect(transport.sentSignals.single.payload['messageType'], 'image');
-      expect(
-        transport.sentSignals.single.payload['gifUrl'],
-        'https://example.com/cat.gif',
-      );
+      expect(transport.sentSignals.single.payload, isNot(contains('gifUrl')));
       expect(transport.sentSignals.single.payload['mimeType'], 'image/gif');
     },
   );

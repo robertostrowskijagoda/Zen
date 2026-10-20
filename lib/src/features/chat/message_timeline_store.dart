@@ -567,7 +567,6 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
       (m.fileName?.length ?? 0) +
       (m.mimeType?.length ?? 0) +
       (m.attachmentPath?.length ?? 0) +
-      (m.gifUrl?.length ?? 0) +
       (m.attachmentBytes?.length ?? 0);
 
   static bool _sameMessages(List<ChatMessage> a, List<ChatMessage> b) {
@@ -597,7 +596,6 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
           a.attachmentPath == b.attachmentPath &&
           a.readAtMillis == b.readAtMillis &&
           a.durationMs == b.durationMs &&
-          a.gifUrl == b.gifUrl &&
           a.expiresAtMillis == b.expiresAtMillis &&
           _sameBytes(a.attachmentBytes, b.attachmentBytes));
 
@@ -657,7 +655,6 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
         ..writeNullableString(message.attachmentPath)
         ..writeNullableInt64(message.readAtMillis)
         ..writeNullableInt64(message.durationMs)
-        ..writeNullableString(message.gifUrl)
         ..writeNullableInt64(message.expiresAtMillis);
     }
     return writer.toBytes();
@@ -731,7 +728,6 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
       attachmentPath: reader.readNullableString(),
       readAtMillis: reader.readNullableInt64(),
       durationMs: reader.readNullableInt64(),
-      gifUrl: reader.readNullableString(),
       expiresAtMillis: reader.readNullableInt64(),
     );
   }

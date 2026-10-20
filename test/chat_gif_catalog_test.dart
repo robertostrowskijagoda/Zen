@@ -87,4 +87,18 @@ void main() {
       expect(klipyLocaleFor('xx'), 'en_US');
     });
   });
+
+  test('the GIF downloader only fetches from the catalog host', () async {
+    final HttpGifDownloader downloader = HttpGifDownloader(
+      clientFactory: () => throw StateError('no request may be made'),
+    );
+    for (final String url in <String>[
+      'http://cdn.klipy.com/cat.gif',
+      'https://evil.com/cat.gif',
+      'https://192.168.0.10/cat.gif',
+      '',
+    ]) {
+      await expectLater(downloader.download(url), throwsFormatException);
+    }
+  });
 }

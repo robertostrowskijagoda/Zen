@@ -1,8 +1,12 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/features/chat/remote_media_guard.dart';
+import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
 /// Shared application key for the Klipy catalog, embedded in the app and used
@@ -11,9 +15,11 @@ import 'package:zen/src/features/settings/app_settings_controller.dart';
 /// public by nature (they ship in every GUI client), so embedding one is a
 /// deliberate product decision.
 ///
-/// GIF search is the one feature that talks to a third party: the search
-/// text, the app language and this device's IP address reach api.klipy.com
-/// (the picker says so), and the GIFs themselves come from klipy.com.
+/// GIF search is the one feature that talks to a third party, and only from
+/// the sender's device: the search text, the app language and this device's IP
+/// address reach api.klipy.com, and the previews and the chosen GIF are
+/// downloaded from klipy.com (the picker says so). The chosen GIF is then sent
+/// as an ordinary image attachment, so the recipient never contacts klipy.com.
 const String kZenSharedKlipyApiKey =
     'yvzMn6WP9oU5ZUKnlbVIyIzSJHUxU4bznsvFA0cJJQ0uJFGiFuzYBh9z0jiiW3Bj';
 
@@ -33,6 +39,11 @@ final Provider<GifCatalog> gifCatalogProvider = Provider<GifCatalog>((Ref ref) {
     ownKey.isEmpty ? kZenSharedKlipyApiKey : ownKey,
   );
 });
+
+/// Downloads the bytes of a catalog GIF; swapped out in tests.
+final Provider<GifDownloader> gifDownloaderProvider = Provider<GifDownloader>(
+  (Ref ref) => HttpGifDownloader(),
+);
 
 final class GifCatalogEntry {
   const GifCatalogEntry({
@@ -216,5 +227,114 @@ final class KlipyGifCatalog implements GifCatalog {
       }
     }
     return null;
+  }
+}
+
+/// Fetches a GIF from the catalog host as bytes.
+abstract interface class GifDownloader {
+  /// The bytes of the GIF at [url]. Throws when the URL is not an allowed
+  /// catalog URL, the download fails or is too large, or the bytes are not a
+  /// well-formed GIF within the limits of `media_guard` ([isAcceptableGif]).
+  Future<Uint8List> download(String url);
+}
+
+/// Downloads over HTTPS from the allow-listed catalog host only
+/// ([isAllowedRemoteMediaUrl]). Redirects are followed by hand and each hop
+/// is checked against the allow-list. Recent GIFs are kept in memory so the
+/// picker does not fetch a preview again when scrolling back.
+final class HttpGifDownloader implements GifDownloader {
+  HttpGifDownloader({HttpClient Function()? clientFactory})
+    : _clientFactory = clientFactory ?? HttpClient.new;
+
+  static const int _maxRedirects = 3;
+  static const int _maxCached = 40;
+
+  final HttpClient Function() _clientFactory;
+  final LinkedHashMap<String, Uint8List> _cache =
+      LinkedHashMap<String, Uint8List>();
+  final Map<String, Future<Uint8List>> _inFlight =
+      <String, Future<Uint8List>>{};
+
+  @override
+  Future<Uint8List> download(String url) async {
+    if (!isAllowedRemoteMediaUrl(url)) {
+      throw const FormatException('GIF URL is not allowed.');
+    }
+    final Uint8List? cached = _cache.remove(url);
+    if (cached != null) {
+      _cache[url] = cached; // most recently used last
+      return cached;
+    }
+    final Future<Uint8List>? running = _inFlight[url];
+    if (running != null) {
+      return running;
+    }
+    final Future<Uint8List> pending = _fetch(url);
+    _inFlight[url] = pending;
+    try {
+      final Uint8List bytes = await pending;
+      _cache[url] = bytes;
+      while (_cache.length > _maxCached) {
+        _cache.remove(_cache.keys.first);
+      }
+      return bytes;
+    } finally {
+      _inFlight.remove(url);
+    }
+  }
+
+  Future<Uint8List> _fetch(String url) async {
+    final HttpClient client = _clientFactory()
+      ..connectionTimeout = const Duration(seconds: 15);
+    try {
+      Uri target = Uri.parse(url);
+      HttpClientResponse? response;
+      for (int hop = 0; hop <= _maxRedirects; hop++) {
+        final HttpClientRequest request = await client.getUrl(target);
+        request.followRedirects = false;
+        final HttpClientResponse candidate = await request.close();
+        if (!candidate.isRedirect) {
+          response = candidate;
+          break;
+        }
+        final String? location = candidate.headers.value(
+          HttpHeaders.locationHeader,
+        );
+        await candidate.drain<void>();
+        if (location == null) {
+          throw const HttpException('GIF redirect without a location.');
+        }
+        final Uri next = target.resolve(location);
+        if (!isAllowedRemoteMediaUrl(next.toString())) {
+          throw const FormatException('GIF redirect is not allowed.');
+        }
+        target = next;
+      }
+      if (response == null || response.statusCode != HttpStatus.ok) {
+        throw HttpException(
+          'GIF download failed with ${response?.statusCode}.',
+          uri: target,
+        );
+      }
+      if (response.contentLength > kMaxGifBytes) {
+        throw const FormatException('GIF is too large.');
+      }
+      final BytesBuilder builder = BytesBuilder(copy: false);
+      await for (final List<int> chunk in response) {
+        builder.add(chunk);
+        if (builder.length > kMaxGifBytes) {
+          throw const FormatException('GIF is too large.');
+        }
+      }
+      final Uint8List bytes = builder.takeBytes();
+      if (!isAcceptableGif(bytes)) {
+        throw const FormatException(
+          'Downloaded file is not an acceptable GIF.',
+        );
+      }
+      return bytes;
+    } finally {
+      client.close(force: true);
+    }
   }
 }

@@ -24,15 +24,21 @@ final class GroupCallPeerView {
     this.renderer,
     this.hasVideo = false,
     this.sharingScreen = false,
+    this.screenRenderer,
   });
 
   final String address;
   final GroupCallLegState state;
+
+  /// The participant's camera.
   final RTCVideoRenderer? renderer;
   final bool hasVideo;
 
-  /// This participant shows its screen (or one app) instead of the camera.
+  /// This participant shares its screen (or one app), next to its camera.
   final bool sharingScreen;
+
+  /// The shared screen, once its picture is there.
+  final RTCVideoRenderer? screenRenderer;
 }
 
 /// Sends one group-call media payload (`gc_offer` / `gc_answer`) to [peer].
@@ -47,9 +53,10 @@ typedef GroupCallLegListener =
 /// remote participant, all fed from one shared microphone/camera.
 ///
 /// Signalling decides *who* is in the call; this only builds and tears down
-/// the legs it is told about. Camera on/off never renegotiates: every leg is
-/// negotiated with a video slot from the start and the track is swapped in
-/// and out, so two people toggling at once cannot collide.
+/// the legs it is told about. Camera on/off and screen sharing never
+/// renegotiate: every leg is negotiated with two video slots from the start
+/// (camera, then screen) and the tracks are swapped in and out, so two
+/// people toggling at once cannot collide.
 abstract class GroupCallMedia extends ChangeNotifier {
   String? get activeCallId;
 
@@ -99,8 +106,8 @@ abstract class GroupCallMedia extends ChangeNotifier {
   Future<void> setCameraEnabled(bool enabled);
   Future<void> switchCamera();
 
-  /// Screen sharing (§13.1): the shared screen replaces the camera on every
-  /// leg; everyone is told who shares.
+  /// Screen sharing (§13.1): the shared screen goes out on every leg's
+  /// screen slot, the camera stays on; everyone is told who shares.
   bool get isScreenSharing => false;
 
   Future<List<ScreenShareSource>> listScreenSources() async =>

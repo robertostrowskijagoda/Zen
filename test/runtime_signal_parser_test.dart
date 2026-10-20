@@ -68,7 +68,7 @@ void main() {
         'msgId': 'gif-1',
         'messageType': 'image',
         'text': '🎞 GIF',
-        'gifUrl': 'https://cdn.klipy.com/zen.gif',
+        'attachmentData': 'R0lG',
         'mimeType': 'image/gif',
         'fileName': 'gif.gif',
       },
@@ -87,36 +87,10 @@ void main() {
       },
     );
 
-    expect(gifSignal?.gifUrl, 'https://cdn.klipy.com/zen.gif');
+    expect(gifSignal?.attachmentData, 'R0lG');
     expect(gifSignal?.messageType, ChatMessageType.image);
     expect(voiceSignal?.messageType, ChatMessageType.voice);
     expect(voiceSignal?.durationMs, 4200);
-  });
-
-  test('drops remote GIF URLs outside the allow-list', () {
-    final ZenSignal? filtered = zenSignalFromTransportPayload(
-      sender: 'ada.ygg',
-      payload: const <String, dynamic>{
-        'type': 'message',
-        'msgId': 'gif-evil',
-        'messageType': 'image',
-        'text': '🎞 GIF',
-        'gifUrl': 'https://evil.example.com/track.gif',
-      },
-    );
-    final ZenSignal? gifOnlyDropped = zenSignalFromTransportPayload(
-      sender: 'ada.ygg',
-      payload: const <String, dynamic>{
-        'type': 'message',
-        'msgId': 'gif-evil-only',
-        'messageType': 'image',
-        'gifUrl': 'http://192.168.0.10/track.gif',
-      },
-    );
-
-    expect(filtered?.gifUrl, isNull);
-    expect(filtered?.content, '🎞 GIF');
-    expect(gifOnlyDropped, isNull);
   });
 
   test('parses placeholder and chunk attachment payloads', () {

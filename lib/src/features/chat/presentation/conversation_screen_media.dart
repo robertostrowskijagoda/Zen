@@ -254,14 +254,29 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
     if (entry == null || !mounted) {
       return;
     }
+    // The sender fetches the GIF and sends its bytes as an ordinary image
+    // attachment: the recipient never contacts the GIF host, and the bytes
+    // pass through media_guard on arrival like any other image.
+    final Uint8List bytes;
+    try {
+      bytes = await ref.read(gifDownloaderProvider).download(entry.sendUrl);
+    } on Object {
+      if (mounted) {
+        _showComposerSnackBar(t('Nie udało się pobrać GIF-a.'));
+      }
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
     try {
       await _socialHubController.sendLocalAttachment(
         peerAddress: widget.peerAddress,
         displayName: _conversationDisplayName,
+        bytes: bytes,
         fileName: 'gif.gif',
         mimeType: 'image/gif',
         type: ChatMessageType.image,
-        gifUrl: entry.sendUrl,
       );
     } on FormatException catch (error) {
       _showComposerSnackBar(error.message);
@@ -1128,7 +1143,7 @@ class _ConversationGifPickerDialogState
                                 child: Stack(
                                   fit: StackFit.expand,
                                   children: <Widget>[
-                                    ZenAnimatedImage(
+                                    _GifPreview(
                                       url: entry.previewUrl,
                                       errorBuilder:
                                           (
@@ -2064,4 +2079,61 @@ Future<void> _saveAttachmentCopy(
       content: Text(t('Zapisano kopie do:\n{path}', {'path': targetPath})),
     ),
   );
+}
+
+/// A catalog GIF preview in the picker: downloaded by this device (the
+/// sender's, which already talks to the GIF host to search) and played from
+/// memory.
+class _GifPreview extends ConsumerStatefulWidget {
+  const _GifPreview({required this.url, required this.errorBuilder});
+
+  final String url;
+  final ImageErrorWidgetBuilder errorBuilder;
+
+  @override
+  ConsumerState<_GifPreview> createState() => _GifPreviewState();
+}
+
+class _GifPreviewState extends ConsumerState<_GifPreview> {
+  Uint8List? _bytes;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    try {
+      final Uint8List bytes = await ref
+          .read(gifDownloaderProvider)
+          .download(widget.url);
+      if (mounted) {
+        setState(() => _bytes = bytes);
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() => _error = error);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Object? error = _error;
+    if (error != null) {
+      return widget.errorBuilder(context, error, null);
+    }
+    final Uint8List? bytes = _bytes;
+    if (bytes == null) {
+      return const Center(
+        child: SizedBox.square(
+          dimension: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+    return ZenAnimatedImage(bytes: bytes, errorBuilder: widget.errorBuilder);
+  }
 }

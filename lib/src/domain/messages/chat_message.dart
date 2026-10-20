@@ -25,7 +25,6 @@ final class ChatMessage {
     this.mimeType,
     this.attachmentSizeBytes,
     this.durationMs,
-    this.gifUrl,
     this.deliveryState = ChatMessageDeliveryState.none,
     this.readAtMillis,
     this.expiresAtMillis,
@@ -43,7 +42,6 @@ final class ChatMessage {
   final String? mimeType;
   final int? attachmentSizeBytes;
   final int? durationMs;
-  final String? gifUrl;
   final ChatMessageDeliveryState deliveryState;
   final int? readAtMillis;
 
@@ -65,7 +63,6 @@ final class ChatMessage {
   bool get isRead => readAtMillis != null;
 
   bool get hasAttachment =>
-      (gifUrl?.trim().isNotEmpty ?? false) ||
       (attachmentBytes != null && attachmentBytes!.isNotEmpty) ||
       (attachmentPath?.trim().isNotEmpty ?? false);
 
@@ -78,7 +75,6 @@ final class ChatMessage {
   bool get isVideoAttachment => type == ChatMessageType.video;
 
   bool get isGif =>
-      (gifUrl?.trim().isNotEmpty ?? false) ||
       (mimeType?.toLowerCase() == 'image/gif') ||
       (fileName?.toLowerCase().endsWith('.gif') ?? false) ||
       (attachmentPath?.toLowerCase().endsWith('.gif') ?? false);
@@ -96,7 +92,6 @@ final class ChatMessage {
     Object? mimeType = _chatMessageUnset,
     Object? attachmentSizeBytes = _chatMessageUnset,
     Object? durationMs = _chatMessageUnset,
-    Object? gifUrl = _chatMessageUnset,
     Object? readAtMillis = _chatMessageUnset,
     Object? expiresAtMillis = _chatMessageUnset,
     ChatMessageDeliveryState? deliveryState,
@@ -135,9 +130,6 @@ final class ChatMessage {
       durationMs: identical(durationMs, _chatMessageUnset)
           ? this.durationMs
           : castCopyWithValue<int>(durationMs, fieldName: 'durationMs'),
-      gifUrl: identical(gifUrl, _chatMessageUnset)
-          ? this.gifUrl
-          : castCopyWithValue<String>(gifUrl, fieldName: 'gifUrl'),
       readAtMillis: identical(readAtMillis, _chatMessageUnset)
           ? this.readAtMillis
           : castCopyWithValue<int>(readAtMillis, fieldName: 'readAtMillis'),
@@ -156,13 +148,11 @@ String chatMessageLabelForType(
   ChatMessageType type, {
   String? fileName,
   String? mimeType,
-  String? gifUrl,
 }) {
   return switch (type) {
     ChatMessageType.text => '',
     ChatMessageType.image =>
-      ((gifUrl?.trim().isNotEmpty ?? false) ||
-              mimeType?.toLowerCase() == 'image/gif' ||
+      (mimeType?.toLowerCase() == 'image/gif' ||
               (fileName?.toLowerCase().endsWith('.gif') ?? false))
           ? '🎞 GIF'
           : t('📷 Zdjęcie'),

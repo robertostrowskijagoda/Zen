@@ -259,7 +259,6 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           }
         }
       }
-      // Added after 1.10.0: older snapshots simply have none.
       final Object? versions = decoded['peerVersions'];
       if (versions is Map) {
         for (final MapEntry<dynamic, dynamic> e in versions.entries) {
@@ -271,8 +270,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           }
         }
       }
-      // Added in 1.11.0: what the inbox texts say, so they are shown in the
-      // language of the moment (older snapshots keep their saved texts).
+      // What the inbox texts say, so they are shown in the language of the
+      // moment.
       final Object? inboxText = decoded['inboxText'];
       if (inboxText is Map) {
         inbox = _withInboxEvents(inbox, inboxText);

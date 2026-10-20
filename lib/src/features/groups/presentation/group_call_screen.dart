@@ -326,9 +326,7 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
                                           }),
                                     isSelf: true,
                                     isMuted: activeCall.isMuted,
-                                    renderer:
-                                        activeCall.isCameraEnabled ||
-                                            media.isScreenSharing
+                                    renderer: activeCall.isCameraEnabled
                                         ? localRenderer
                                         : null,
                                     sharingScreen: media.isScreenSharing,
@@ -349,6 +347,8 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
                                       sharingScreen:
                                           peers[address]?.sharingScreen ??
                                           false,
+                                      screenRenderer:
+                                          peers[address]?.screenRenderer,
                                     ),
                                 ],
                               );
@@ -622,6 +622,7 @@ class _ParticipantTile extends StatelessWidget {
     this.state = GroupCallLegState.connected,
     this.renderer,
     this.sharingScreen = false,
+    this.screenRenderer,
   });
 
   final String name;
@@ -629,6 +630,9 @@ class _ParticipantTile extends StatelessWidget {
   final bool isMuted;
   final GroupCallLegState state;
   final RTCVideoRenderer? renderer;
+
+  /// The participant's shared screen: fills the tile, the camera goes small.
+  final RTCVideoRenderer? screenRenderer;
 
   /// Shows "udostępnia ekran" on the tile (§13.1): everyone sees who shares.
   final bool sharingScreen;
@@ -639,6 +643,9 @@ class _ParticipantTile extends StatelessWidget {
     final RTCVideoRenderer? video = renderer;
     final bool renderVideo =
         video != null && video.textureId != null && video.srcObject != null;
+    final RTCVideoRenderer? screen = screenRenderer;
+    final bool renderScreen =
+        screen != null && screen.textureId != null && screen.srcObject != null;
     final String? stateLabel = switch (state) {
       GroupCallLegState.connected => null,
       GroupCallLegState.connecting => t('Łączenie…'),
@@ -670,31 +677,19 @@ class _ParticipantTile extends StatelessWidget {
         child: Stack(
           alignment: Alignment.center,
           children: <Widget>[
-            if (sharingScreen)
-              Positioned(
-                top: 8,
-                left: 8,
-                child: Container(
-                  key: const Key('group-call-sharing-badge'),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: zen.accent.withValues(alpha: 0.85),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    isSelf ? t('Udostępniasz ekran') : t('Udostępnia ekran'),
-                    style: TextStyle(
-                      color: zen.onAccent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                    ),
+            if (renderScreen)
+              Positioned.fill(
+                child: ColoredBox(
+                  key: const Key('group-call-screen-view'),
+                  color: Colors.black,
+                  child: RTCVideoView(
+                    screen,
+                    objectFit:
+                        RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
                   ),
                 ),
-              ),
-            if (renderVideo)
+              )
+            else if (renderVideo)
               Positioned.fill(
                 child: RTCVideoView(
                   video,
@@ -744,6 +739,51 @@ class _ParticipantTile extends StatelessWidget {
                     ),
                   ],
                 ],
+              ),
+            if (renderScreen && renderVideo)
+              Positioned(
+                right: 8,
+                top: 8,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    width: 72,
+                    height: 96,
+                    child: ColoredBox(
+                      color: Colors.black,
+                      child: RTCVideoView(
+                        video,
+                        mirror: isSelf,
+                        objectFit:
+                            RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (sharingScreen)
+              Positioned(
+                top: 8,
+                left: 8,
+                child: Container(
+                  key: const Key('group-call-sharing-badge'),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: zen.accent.withValues(alpha: 0.85),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    isSelf ? t('Udostępniasz ekran') : t('Udostępnia ekran'),
+                    style: TextStyle(
+                      color: zen.onAccent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
               ),
             Positioned(
               left: 8,

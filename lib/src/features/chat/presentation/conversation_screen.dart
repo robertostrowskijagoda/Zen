@@ -31,7 +31,6 @@ import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/disappearing_timer_dialog.dart';
-import 'package:zen/src/features/chat/remote_media_guard.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/media/media_guard.dart';

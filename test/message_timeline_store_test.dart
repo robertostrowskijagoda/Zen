@@ -67,7 +67,6 @@ void main() {
           type: ChatMessageType.image,
           fileName: 'gif.gif',
           mimeType: 'image/gif',
-          gifUrl: 'https://cdn.example.com/zen.gif',
         ),
         const ChatMessage(
           id: 'voice-6',
@@ -93,7 +92,6 @@ void main() {
       expect(restored[3].fileName, 'raport.txt');
       expect(restored[3].attachmentBytes, <int>[1, 2, 3]);
       expect(restored[3].attachmentPath, r'C:\Zen\raport.txt');
-      expect(restored[4].gifUrl, 'https://cdn.example.com/zen.gif');
       expect(restored[4].isGif, isTrue);
       expect(restored[5].type, ChatMessageType.voice);
       expect(restored[5].durationMs, 12345);

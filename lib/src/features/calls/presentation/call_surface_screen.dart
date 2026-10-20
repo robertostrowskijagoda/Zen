@@ -138,6 +138,9 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
                   callMedia.hasLocalVideo &&
                   callMedia.localRenderer != null &&
                   (callMedia.localRenderer!.srcObject != null);
+              final RTCVideoRenderer? remoteScreen = ownsMedia
+                  ? callMedia.remoteScreenRenderer
+                  : null;
               final bool animateEntrance = !_controlsEntrancePlayed;
               _controlsEntrancePlayed = true;
 
@@ -162,6 +165,9 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
                           : null,
                       localRenderer: showLocalPreview
                           ? callMedia.localRenderer
+                          : null,
+                      screenRenderer: remoteScreen?.srcObject != null
+                          ? remoteScreen
                           : null,
                     ),
                   ),
@@ -692,12 +698,16 @@ class _CallMediaStage extends StatefulWidget {
     required this.zen,
     this.remoteRenderer,
     this.localRenderer,
+    this.screenRenderer,
   });
 
   final CallSession session;
   final ZenColors zen;
   final RTCVideoRenderer? remoteRenderer;
   final RTCVideoRenderer? localRenderer;
+
+  /// The other side's shared screen: shown large, both cameras small.
+  final RTCVideoRenderer? screenRenderer;
 
   @override
   State<_CallMediaStage> createState() => _CallMediaStageState();
@@ -720,6 +730,16 @@ class _CallMediaStageState extends State<_CallMediaStage> {
             widget.localRenderer!.srcObject != null
         ? widget.localRenderer
         : null;
+
+    final RTCVideoRenderer? screen =
+        widget.screenRenderer != null &&
+            widget.screenRenderer!.textureId != null &&
+            widget.screenRenderer!.srcObject != null
+        ? widget.screenRenderer
+        : null;
+    if (screen != null) {
+      return _ScreenShareStage(screen: screen, remote: remote, local: local);
+    }
 
     if (remote == null && local == null) {
       return _AmbientAudioStage(session: widget.session, zen: widget.zen);
@@ -817,6 +837,71 @@ class _CallMediaStageState extends State<_CallMediaStage> {
               ),
             ),
           ),
+      ],
+    );
+  }
+}
+
+/// The other side's screen fills the stage, uncropped; the cameras that are
+/// on sit small in the corner.
+class _ScreenShareStage extends StatelessWidget {
+  const _ScreenShareStage({required this.screen, this.remote, this.local});
+
+  final RTCVideoRenderer screen;
+  final RTCVideoRenderer? remote;
+  final RTCVideoRenderer? local;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget thumb(RTCVideoRenderer renderer, {required bool mirror}) => Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: SizedBox(
+          width: 96,
+          height: 128,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.3),
+                width: 1.5,
+              ),
+              color: Colors.black,
+            ),
+            child: RTCVideoView(
+              renderer,
+              mirror: mirror,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+            ),
+          ),
+        ),
+      ),
+    );
+    final RTCVideoRenderer? remoteCamera = remote;
+    final RTCVideoRenderer? localCamera = local;
+    return Stack(
+      key: const Key('call-remote-screen-stage'),
+      children: <Widget>[
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: const BoxDecoration(color: Colors.black),
+            child: RTCVideoView(
+              screen,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+            ),
+          ),
+        ),
+        Positioned(
+          right: 12,
+          top: 12,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              if (remoteCamera != null) thumb(remoteCamera, mirror: false),
+              if (localCamera != null) thumb(localCamera, mirror: true),
+            ],
+          ),
+        ),
       ],
     );
   }

@@ -27,7 +27,6 @@ Map<String, dynamic> chatMessageToSync(ChatMessage m) => <String, dynamic>{
   if (m.mimeType != null) 'mt': m.mimeType,
   if (m.attachmentSizeBytes != null) 'sz': m.attachmentSizeBytes,
   if (m.durationMs != null) 'du': m.durationMs,
-  if (m.gifUrl != null) 'g': m.gifUrl,
   'ds': m.deliveryState.name,
   if (m.readAtMillis != null) 'r': m.readAtMillis,
 };
@@ -62,7 +61,6 @@ ChatMessage? chatMessageFromSync(Object? json) {
     mimeType: asString(json['mt']),
     attachmentSizeBytes: asInt(json['sz']),
     durationMs: asInt(json['du']),
-    gifUrl: asString(json['g']),
     deliveryState: byName(
       ChatMessageDeliveryState.values,
       json['ds'],
@@ -72,8 +70,7 @@ ChatMessage? chatMessageFromSync(Object? json) {
   );
 }
 
-bool _hasFile(ChatMessage m) =>
-    m.type != ChatMessageType.text && m.gifUrl == null;
+bool _hasFile(ChatMessage m) => m.type != ChatMessageType.text;
 
 bool _fileReady(ChatMessage m) =>
     (m.attachmentBytes?.isNotEmpty ?? false) ||
