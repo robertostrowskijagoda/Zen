@@ -1,91 +1,79 @@
-# Bezpieczeństwo
+# Security
 
-*English below.*
+## How to report a vulnerability
 
-## Jak zgłosić podatność
-
-Zgłaszaj **prywatnie**, przez GitHuba:
+Report **privately**, through GitHub:
 
 **https://github.com/robertostrowskijagoda/Zen/security/advisories/new**
 
-(albo zakładka **Security → Report a vulnerability** w tym repozytorium).
-Zgłoszenie widzisz tylko Ty i opiekun projektu. Proszę **nie** zakładać
-publicznego Issue ani pull requesta z opisem podatności, zanim nie będzie
-poprawki. Jeśli nie możesz użyć tej drogi, załóż Issue z prośbą o kontakt —
-bez żadnych szczegółów.
+(or the **Security → Report a vulnerability** tab in this repository).
+Only you and the project maintainer see the report. Please do **not** open a
+public issue or pull request describing the vulnerability before a fix exists.
+If you cannot use this route, open an issue asking for contact — with no
+details.
 
-Co napisać (po polsku albo po angielsku):
+What to include (in English or Polish):
 
-- wersja Zen i system (Android, Windows, Linux, macOS, iPhone);
-- kroki do odtworzenia i co się dzieje zamiast tego, co powinno;
-- skutek: co zyskuje atakujący i jakie warunki są potrzebne;
-- dowód (PoC), jeśli jest — bez prawdziwych danych innych osób.
+- the Zen version and system (Android, Windows, Linux, macOS, iPhone);
+- steps to reproduce, and what happens instead of what should happen;
+- the impact: what the attacker gains and what conditions are needed;
+- a proof of concept, if you have one — without real data of other people.
 
-## Zakres
+## Scope
 
-- **Aplikacja Zen** na wszystkie systemy (`lib/`, `android/`, `ios/`,
-  `windows/`, `linux/`, `macos/`).
-- **Most Go** (`native/yggdrasil_bridge`): węzeł Yggdrasil, sygnalizacja,
-  przekaźnik.
-- **Proces wydań**: workflowy GitHub Actions (`.github/workflows`), podpis
-  APK, `SHA256SUMS`, pliki w Releases.
-- **Strona zaproszeń** (`tool/pages`,
+- **The Zen app** on all systems (`lib/`, `android/`, `ios/`, `windows/`,
+  `linux/`, `macos/`).
+- **The Go bridge** (`native/yggdrasil_bridge`): the Yggdrasil node,
+  signalling, relay.
+- **The release process**: GitHub Actions workflows (`.github/workflows`),
+  APK signing, `SHA256SUMS`, files in Releases (including the Linux `.deb`
+  packages).
+- **The invite page** (`tool/pages`,
   https://robertostrowskijagoda.github.io/Zen/).
 
-Poprawki dostaje tylko **najnowsze wydanie**. Błędy w Yggdrasil, Flutterze
-czy bibliotekach zgłaszaj ich autorom — ale daj znać i tutaj, jeśli
-dotykają Zen. Kopia Zen z innym kluczem podpisu nie jest oficjalnym Zen;
-jeśli ktoś rozpowszechnia podróbkę jako Zen, zgłoś to tą samą drogą.
+Only the **latest release** receives fixes. Report bugs in Yggdrasil, Flutter
+or other libraries to their authors — but let us know here too if they affect
+Zen. A copy of Zen signed with a different key is not the official Zen; if
+someone distributes a fake as Zen, report it the same way.
 
-**Oficjalna kopia:** odcisk certyfikatu APK (SHA-256) jest w
-[README](README.md), w sekcji „Czy to nie wirus? Jak sprawdzić”, i w opisie
-każdego wydania; obok plików wydania jest `SHA256SUMS`.
+**Official copy:** the APK certificate fingerprint (SHA-256) is in the
+[README](README.md), in the section "Isn't it a virus? How to check", and in
+every release description; next to the release files there is `SHA256SUMS`.
 
-## Czego się spodziewać
+Related documents: [privacy policy](docs/PRIVACY.md), [terms](docs/TERMS.md),
+[protocol specification](docs/PROTOCOL.md), [security status and audits](docs/STATUS.md).
 
-Zen tworzy **jedna osoba**, po godzinach. Odpowiadam najszybciej, jak mogę
-(best effort), ale bez gwarantowanych terminów. Zwykle: potwierdzenie
-zgłoszenia, ocena, poprawka w kolejnym wydaniu, a potem publiczne advisory
-— z podziękowaniem, jeśli chcesz być wymieniony. Proszę o czas na poprawkę
-przed publikacją szczegółów; datę ujawnienia ustalimy razem.
+## What to expect
 
-**Nie ma programu bug bounty** — Zen jest darmowy i nie ma za nim firmy,
-więc nie ma nagród pieniężnych.
+Zen is made by **one person**, in spare time. I answer as fast as I can
+(best effort), but with no guaranteed deadlines. Usually: acknowledgement of
+the report, assessment, a fix in the next release, and then a public advisory
+— with credit, if you want to be named. Please allow time for a fix before
+publishing details; we will agree on the disclosure date together.
 
-## Zasady testowania
+**There is no bug bounty** — Zen is free and there is no company behind it,
+so there are no cash rewards.
 
-- Testuj **tylko na własnych urządzeniach, kontach i sieciach** (np. kilka
-  własnych telefonów albo komputerów, własny węzeł lub most Yggdrasil).
-- **Nie testuj na cudzych telefonach, komputerach ani sieciach** i nie
-  wysyłaj niczego szkodliwego ludziom, którzy się na to nie zgodzili.
-- Nie przeciążaj publicznych węzłów Yggdrasil i nie próbuj sięgać po
-  cudze dane.
-- Słabości procesu wydań opisz w zgłoszeniu; nie próbuj ich wykorzystać na
-  tym repozytorium (pull requesty, tagi, próby dostania się do sekretów).
+## Testing rules
+
+- Test **only on your own devices, accounts and networks** (e.g. several of
+  your own phones or computers, your own Yggdrasil node or bridge).
+- **Do not test on other people's phones, computers or networks**, and do not
+  send anything harmful to people who have not agreed to it.
+- Do not overload public Yggdrasil nodes and do not try to reach other
+  people's data.
+- Describe weaknesses of the release process in the report; do not try to
+  exploit them against this repository (pull requests, tags, attempts to
+  reach secrets).
 
 ---
 
-## English
+## Po polsku (skrót)
 
-**Report vulnerabilities privately** via GitHub private vulnerability
-reporting:
-https://github.com/robertostrowskijagoda/Zen/security/advisories/new
-(Security tab → *Report a vulnerability*). Please do not open public issues
-or pull requests about a vulnerability before a fix is released. Reports in
-Polish or English are welcome.
-
-**In scope:** the Zen app (all platforms), the Go bridge
-(`native/yggdrasil_bridge`), the release pipeline (GitHub Actions, APK
-signing, `SHA256SUMS`, release files) and the invite page
-(`tool/pages`, robertostrowskijagoda.github.io/Zen). Only the latest release
-is supported. The official APK certificate fingerprint (SHA-256) is in the
-[README](README.md) (section “Czy to nie wirus? Jak sprawdzić”) and in every
-release description.
-
-**Expectations:** Zen is maintained by one person; responses are best
-effort, with no guaranteed timelines. Please allow time for a fix before
-disclosure. **There is no bug bounty.**
-
-**Testing:** only on your own devices, accounts and networks — never on
-other people's devices or networks, never against public Yggdrasil nodes,
-and do not try to exploit the release pipeline of this repository.
+Podatności zgłaszaj **prywatnie** przez GitHuba (link na górze, zakładka
+Security → *Report a vulnerability*); nie zakładaj publicznego Issue ani
+pull requesta przed poprawką. Można pisać po polsku. Zakres: aplikacja Zen,
+most Go, proces wydań i strona zaproszeń; poprawki dostaje tylko najnowsze
+wydanie. Zen tworzy jedna osoba, więc odpowiedzi są bez gwarantowanych
+terminów, a **programu bug bounty nie ma**. Testuj tylko na własnych
+urządzeniach, kontach i sieciach.
