@@ -93,13 +93,23 @@ endif()
 # Go bridge (native/yggdrasil_bridge): checked on every build and rebuilt
 # only when its Go sources changed (the hash is kept next to the DLL; see
 # build_if_changed.ps1). Without Go an existing DLL is used with a warning.
+# One DLL per architecture: x64 in bin/ (as always), arm64 (Windows on ARM,
+# built on an ARM64 computer with llvm-mingw) in bin/windows-arm64/.
 set(YGGDRASIL_BRIDGE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../native/yggdrasil_bridge")
-set(YGGDRASIL_BRIDGE_DLL "${YGGDRASIL_BRIDGE_DIR}/bin/yggdrasil_bridge.dll")
+if(FLUTTER_TARGET_PLATFORM STREQUAL "windows-arm64"
+    OR CMAKE_GENERATOR_PLATFORM MATCHES "^[Aa][Rr][Mm]64$")
+  set(YGGDRASIL_BRIDGE_ARCH "arm64")
+  set(YGGDRASIL_BRIDGE_DLL "${YGGDRASIL_BRIDGE_DIR}/bin/windows-arm64/yggdrasil_bridge.dll")
+else()
+  set(YGGDRASIL_BRIDGE_ARCH "x64")
+  set(YGGDRASIL_BRIDGE_DLL "${YGGDRASIL_BRIDGE_DIR}/bin/yggdrasil_bridge.dll")
+endif()
 add_custom_target(yggdrasil_bridge ALL
   COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File "${YGGDRASIL_BRIDGE_DIR}/build_if_changed.ps1" -Target windows
+    -Arch ${YGGDRASIL_BRIDGE_ARCH}
   WORKING_DIRECTORY "${YGGDRASIL_BRIDGE_DIR}"
-  COMMENT "Go bridge (yggdrasil_bridge.dll)"
+  COMMENT "Go bridge (yggdrasil_bridge.dll, ${YGGDRASIL_BRIDGE_ARCH})"
   VERBATIM)
 add_dependencies(${BINARY_NAME} yggdrasil_bridge)
 install(FILES "${YGGDRASIL_BRIDGE_DLL}"

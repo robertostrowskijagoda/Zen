@@ -1,0 +1,73 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/features/update/presentation/store_share_dialog.dart';
+import 'package:zen/src/features/update/store_build.dart';
+
+void main() {
+  test('only the store flavor or ZEN_STORE make a store build', () {
+    expect(isStoreBuildFor(flavor: null), isFalse);
+    expect(isStoreBuildFor(flavor: 'direct'), isFalse);
+    expect(isStoreBuildFor(flavor: 'store'), isTrue);
+    expect(isStoreBuildFor(flavor: null, define: true), isTrue);
+    expect(isStoreBuildFor(flavor: 'direct', define: true), isTrue);
+  });
+
+  test('tests run as the direct build', () {
+    expect(isStoreBuild, isFalse);
+  });
+
+  test('the shared link is the project page by default', () {
+    expect(kStoreShareUrl, 'https://robertostrowskijagoda.github.io/Zen/');
+  });
+
+  testWidgets('the store share dialog shows and copies the link', (
+    WidgetTester tester,
+  ) async {
+    final List<MethodCall> calls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall call) async {
+        calls.add(call);
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ZenTheme.dark(),
+        home: Scaffold(
+          body: Builder(
+            builder: (BuildContext context) => TextButton(
+              onPressed: () => showStoreShareDialog(context),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('store-share-dialog')), findsOneWidget);
+    expect(
+      tester
+          .widget<SelectableText>(find.byKey(const Key('store-share-url')))
+          .data,
+      kStoreShareUrl,
+    );
+
+    await tester.tap(find.byKey(const Key('store-share-copy')));
+    await tester.pumpAndSettle();
+    final MethodCall copy = calls.singleWhere(
+      (MethodCall call) => call.method == 'Clipboard.setData',
+    );
+    expect((copy.arguments as Map<Object?, Object?>)['text'], kStoreShareUrl);
+    expect(find.byKey(const Key('store-share-dialog')), findsNothing);
+  });
+}

@@ -25,6 +25,44 @@ fun releaseSigningValue(name: String): String =
     releaseSigning.getProperty(name)?.trim()?.takeIf { it.isNotEmpty() }
         ?: throw GradleException("android/key.properties: \"$name\" is missing")
 
+// ABIs the APK carries, each with its own Go bridge (native/yggdrasil_bridge,
+// built per ABI by build_android.*): arm64-v8a (phones), armeabi-v7a (older
+// 32-bit phones) and x86_64 (ChromeOS, emulators). Flutter passes the
+// platforms it builds for as "target-platform" (all three for
+// `flutter build apk`, only the device's for `flutter run`), so a debug run
+// builds one bridge, not three. 32-bit x86 has no Flutter release engine.
+val zenAbiOfPlatform = mapOf(
+    "android-arm64" to "arm64-v8a",
+    "android-arm" to "armeabi-v7a",
+    "android-x64" to "x86_64",
+)
+val zenAbis: List<String> = (project.findProperty("target-platform") as String?)
+    ?.split(",")
+    ?.mapNotNull { zenAbiOfPlatform[it.trim()] }
+    ?.distinct()
+    ?.takeIf { it.isNotEmpty() }
+    ?: zenAbiOfPlatform.values.toList()
+// `flutter build apk --split-per-abi` uses ABI splits, which AGP does not
+// allow together with abiFilters.
+val zenSplitPerAbi = project.hasProperty("split-per-abi")
+
+// Distribution flavors (STAN D12):
+//   direct - the full app (self-update, "Podaj dalej" with the APK);
+//   store  - Google Play / Galaxy Store: no REQUEST_INSTALL_PACKAGES
+//            (src/store/AndroidManifest.xml), and Dart hides self-update
+//            and APK sharing (appFlavor == "store",
+//            lib/src/features/update/store_build.dart).
+//   flutter build appbundle --release --flavor store   (Play)
+//   flutter build apk --release --flavor store         (Galaxy Store)
+// The flavors exist only when a flavored task is asked for (or with
+// -Pzen.flavors=true, e.g. for Android Studio), so plain `flutter build apk`
+// and `flutter run` still build the direct app as app-release.apk.
+val zenFlavors: Boolean =
+    (project.findProperty("zen.flavors") as String?)?.toBoolean() == true ||
+        Regex("(direct|store)(debug|profile|release)").containsMatchIn(
+            gradle.startParameter.taskNames.joinToString(" ").lowercase(),
+        )
+
 android {
     namespace = "com.roj.zen"
     compileSdk = flutter.compileSdkVersion
@@ -55,9 +93,24 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        ndk {
-            abiFilters.clear()
-            abiFilters += "arm64-v8a"
+        if (!zenSplitPerAbi) {
+            ndk {
+                abiFilters.clear()
+                abiFilters += zenAbis
+            }
+        }
+    }
+
+    if (zenFlavors) {
+        flavorDimensions += "distribution"
+        productFlavors {
+            create("direct") {
+                dimension = "distribution"
+                isDefault = true
+            }
+            create("store") {
+                dimension = "distribution"
+            }
         }
     }
 
@@ -97,11 +150,16 @@ android {
 
     packaging {
         jniLibs {
+            // Native libraries compressed in the APK (extracted on install):
+            // with three ABIs the universal Zen.apk would otherwise grow
+            // about 2.5 times, and it travels over Wi-Fi, hotspots and the
+            // mesh ("Podaj dalej", updates from friends).
+            useLegacyPackaging = true
+            // Plugins' libraries for ABIs without a Go bridge (and so
+            // without a working app).
             excludes += listOf(
-                "lib/armeabi-v7a/**",
                 "lib/armeabi/**",
                 "lib/x86/**",
-                "lib/x86_64/**",
             )
         }
         resources {
@@ -117,7 +175,7 @@ flutter {
 // Go bridge (native/yggdrasil_bridge): checked before every build and
 // rebuilt only when its Go sources changed (the hash is kept next to the
 // .so): build_if_changed.ps1 on Windows, build_if_changed.sh elsewhere.
-// ZEN_SKIP_GO_BRIDGE=1 skips the check. See docs/WYDANIA.md.
+// ZEN_SKIP_GO_BRIDGE=1 skips the check. See docs/RELEASES.md.
 val goBridgeDir = rootProject.file("../native/yggdrasil_bridge")
 val isWindowsHost = System.getProperty("os.name").lowercase().contains("windows")
 val buildGoBridge = tasks.register<Exec>("buildGoBridge") {
@@ -145,6 +203,8 @@ val buildGoBridge = tasks.register<Exec>("buildGoBridge") {
         localPropertiesFile.inputStream().use { localProperties.load(it) }
     }
     localProperties.getProperty("sdk.dir")?.let { environment("ANDROID_HOME", it) }
+    // Only the ABIs this build packages (one for `flutter run`).
+    environment("ZEN_ANDROID_ABIS", zenAbis.joinToString(","))
 }
 tasks.configureEach {
     if (name == "preBuild") {

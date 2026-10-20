@@ -1,10 +1,12 @@
 # A version tag (v1.10.0, …) builds the release files: Zen.apk (signed with
-# the release key), Zen-Windows.zip, Zen-Linux-x64.tar.gz,
-# Zen-Linux-arm64.tar.gz, Zen-macOS.zip, Zen-unsigned.ipa (the iOS workflow),
+# the release key; arm64-v8a, armeabi-v7a and x86_64 in one APK),
+# Zen-Windows.zip (x64), Zen-Windows-arm64.zip, Zen-Linux-x64.tar.gz,
+# Zen-Linux-arm64.tar.gz, Zen-Linux-x64.deb, Zen-Linux-arm64.deb,
+# Zen-macOS.zip (universal), Zen-unsigned.ipa (the iOS workflow),
 # LICENSES-GO.txt and SHA256SUMS of all of them, and attaches them to a draft
 # release of that tag. Every build job uploads its files as an artifact; the
 # checksums job gathers them and writes SHA256SUMS, and the last job attaches
-# everything. Publish the draft by hand after checking it (docs/WYDANIA.md,
+# everything. Publish the draft by hand after checking it (docs/RELEASES.md,
 # section 3).
 #
 # The release key (security audit S-6):
@@ -61,7 +63,7 @@ jobs:
     # Never from a branch (see the top).
     if: startsWith(github.ref, 'refs/tags/v')
     # Windows: the Go bridge for Android rebuilds itself only there
-    # (docs/WYDANIA.md, section 3.1).
+    # (docs/RELEASES.md, section 3.1).
     runs-on: windows-latest
     timeout-minutes: 60
     environment: release
@@ -118,6 +120,8 @@ jobs:
           ) | Set-Content -Encoding ascii android/key.properties
           "ready=true" >> $env:GITHUB_OUTPUT
 
+      # One universal APK, as the self-update and "Podaj dalej" expect;
+      # Gradle builds the Go bridge for each of its three ABIs.
       - name: Build (the Go bridge builds itself)
         if: steps.key.outputs.ready == 'true'
         run: flutter build apk --release
@@ -183,6 +187,75 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  # Windows on ARM: built natively (Flutter builds windows-arm64 only on an
+  # ARM64 computer), the Go bridge with llvm-mingw (MSVC's clang cannot
+  # build cgo). Not required for a release yet: until its first green run
+  # a failure here leaves out Zen-Windows-arm64.zip and nothing else (see
+  # the checksums job). The x64 Zen-Windows.zip also runs there, emulated.
+  windows-arm64:
+    name: Windows (ARM64)
+    runs-on: windows-11-arm
+    timeout-minutes: 75
+    continue-on-error: true
+    permissions:
+      contents: read
+    env:
+      LLVM_MINGW_VERSION: '20251021'
+      LLVM_MINGW_SHA256: d31dd2799c18440acb7cc13b03cadfc3069dff48168cd406a44930e965b09655
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache: false
+
+      - name: C compiler for cgo (llvm-mingw, checked against its SHA-256)
+        shell: pwsh
+        run: |
+          $name = "llvm-mingw-$env:LLVM_MINGW_VERSION-ucrt-aarch64"
+          $zip = Join-Path $env:RUNNER_TEMP "$name.zip"
+          Invoke-WebRequest -UseBasicParsing -OutFile $zip `
+            -Uri "https://github.com/mstorsjo/llvm-mingw/releases/download/$env:LLVM_MINGW_VERSION/$name.zip"
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+          if ($hash -ne $env:LLVM_MINGW_SHA256) {
+            throw "llvm-mingw: SHA-256 $hash, expected $env:LLVM_MINGW_SHA256"
+          }
+          Expand-Archive -LiteralPath $zip -DestinationPath $env:RUNNER_TEMP
+          Join-Path $env:RUNNER_TEMP "$name\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      # No Flutter SDK archive for Windows ARM64: the action clones the
+      # repository (channel master) and checks out the release tag, as for
+      # Linux ARM64.
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: master
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: false
+
+      - name: Packages
+        run: flutter pub get
+
+      - name: Build (the Go bridge builds itself)
+        run: flutter build windows --release
+
+      - name: Release files
+        shell: pwsh
+        run: |
+          if (-not (Test-Path build/windows/arm64/runner/Release/yggdrasil_bridge.dll)) {
+            throw 'The ARM64 build has no Go bridge'
+          }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path build/windows/arm64/runner/Release/* -DestinationPath dist/Zen-Windows-arm64.zip
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-windows-arm64
+          path: dist/
+          if-no-files-found: error
+
   linux:
     name: Linux (${{ matrix.arch }})
     strategy:
@@ -206,13 +279,15 @@ jobs:
           persist-credentials: false
 
       # Flutter's Linux toolchain; libsecret for flutter_secure_storage,
-      # the app indicator for system_tray.
+      # the app indicator for system_tray, GStreamer for audio and video
+      # (linux/runner/zen_media_player.cc), dpkg-dev for the .deb.
       - name: Build tools and libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
-            libstdc++-12-dev libsecret-1-dev libayatana-appindicator3-dev
+            libstdc++-12-dev libsecret-1-dev libayatana-appindicator3-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev dpkg-dev
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
@@ -235,10 +310,15 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
         run: |
-          test -f "build/linux/$ARCH/release/bundle/lib/libyggdrasil_bridge.so"
+          bundle="build/linux/$ARCH/release/bundle"
+          test -f "$bundle/lib/libyggdrasil_bridge.so"
+          # Built with the media player (GStreamer), not without it.
+          ldd "$bundle/zen" | grep -q 'libgstreamer-1.0'
           mkdir -p dist
           tar -C "build/linux/$ARCH/release" --transform 's,^bundle,Zen,' \
             -czf "dist/Zen-Linux-$ARCH.tar.gz" bundle
+          sh linux/packaging/build_deb.sh "$bundle" "$ARCH" "dist/Zen-Linux-$ARCH.deb"
+          dpkg-deb --info "dist/Zen-Linux-$ARCH.deb"
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -296,13 +376,17 @@ jobs:
 
   checksums:
     name: SHA256SUMS
-    needs: [android, windows, linux, macos, ios]
+    needs: [android, windows, windows-arm64, linux, macos, ios]
     # Also when the android job was skipped (a run from a branch); never
-    # after a failed or cancelled build.
+    # after a failed or cancelled build of a required file. windows-arm64
+    # is not required yet (see that job): its file is included when built.
     if: >-
       !cancelled()
-      && !contains(needs.*.result, 'failure')
-      && !contains(needs.*.result, 'cancelled')
+      && needs.android.result != 'failure' && needs.android.result != 'cancelled'
+      && needs.windows.result == 'success'
+      && needs.linux.result == 'success'
+      && needs.macos.result == 'success'
+      && needs.ios.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -342,7 +426,12 @@ jobs:
   attach:
     name: Draft release
     needs: checksums
-    if: startsWith(github.ref, 'refs/tags/v')
+    # !cancelled(): the optional windows-arm64 job may have failed further
+    # up, which alone would skip this job.
+    if: >-
+      !cancelled()
+      && needs.checksums.result == 'success'
+      && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The only job that can write: it creates the draft and attaches the
@@ -362,7 +451,7 @@ jobs:
         run: |
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release create "$TAG" --draft --title "$TAG" \
-              --notes "Wersja robocza. Opis: CHANGELOG.md, odcisk certyfikatu i sumy SHA-256." \
+              --notes "Draft release. What changed: see CHANGELOG.md. Verify your download against the SHA-256 sums (SHA256SUMS) and the signing certificate fingerprint before installing." \
               --repo "$GITHUB_REPOSITORY"
           fi
           gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
