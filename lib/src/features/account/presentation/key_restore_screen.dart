@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,31 +7,35 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/features/account/key_file.dart';
+import 'package:zen/src/features/account/key_file_io.dart';
 import 'package:zen/src/features/account/paper_backup.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
 
-/// "Mam kopię na papierze" (§6.1): takes the account back on a new device
-/// from the typed or scanned paper copy. As with recovery through the
-/// circle, nothing is taken before the person confirms the account by its
-/// fingerprint.
-class PaperRestoreScreen extends ConsumerStatefulWidget {
-  const PaperRestoreScreen({super.key});
+/// "Przywróć klucz" (§6.1): takes the account back on a new device from the
+/// encrypted backup file (and its password) or from the typed or scanned
+/// code. As with recovery through the circle, nothing is taken before the
+/// person confirms the account by its fingerprint.
+class KeyRestoreScreen extends ConsumerStatefulWidget {
+  const KeyRestoreScreen({super.key});
 
   /// Opened from "Konto i odzyskiwanie", which has asked who the person is.
   static Future<void> open(BuildContext context) => Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (BuildContext context) => const PaperRestoreScreen(),
+      builder: (BuildContext context) => const KeyRestoreScreen(),
     ),
   );
 
   @override
-  ConsumerState<PaperRestoreScreen> createState() => _PaperRestoreScreenState();
+  ConsumerState<KeyRestoreScreen> createState() => _KeyRestoreScreenState();
 }
 
-class _PaperRestoreScreenState extends ConsumerState<PaperRestoreScreen> {
+class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
   final TextEditingController _input = TextEditingController();
+  final TextEditingController _filePassword = TextEditingController();
+  Uint8List? _fileBytes;
   PaperBackupAccount? _found;
   bool _busy = false;
   bool _restored = false;
@@ -39,6 +44,7 @@ class _PaperRestoreScreenState extends ConsumerState<PaperRestoreScreen> {
   @override
   void dispose() {
     _input.dispose();
+    _filePassword.dispose();
     super.dispose();
   }
 
@@ -47,11 +53,11 @@ class _PaperRestoreScreenState extends ConsumerState<PaperRestoreScreen> {
       'To nie wygląda na cały klucz: powinno być 14 grup po 4 znaki.',
     ),
     PaperBackupError.characters => t(
-      'W kluczu są znaki, których nie ma w kopii. Sprawdź kartkę.',
+      'W kluczu są znaki, których nie ma w kopii. Sprawdź zapis.',
     ),
     PaperBackupError.checksum => t(
       'Suma kontrolna się nie zgadza: gdzieś jest literówka. Sprawdź '
-      'kartkę znak po znaku.',
+      'zapis znak po znaku.',
     ),
   };
 
@@ -71,6 +77,58 @@ class _PaperRestoreScreenState extends ConsumerState<PaperRestoreScreen> {
       found = await PaperBackupAccount.fromSeed(decoded.seed!);
     } else {
       message = _errorText(decoded.error!);
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _busy = false;
+      _found = found;
+      _message = message;
+    });
+  }
+
+  Future<void> _pickFile() async {
+    final Uint8List? bytes = await ref.read(keyFileIoProvider).pick();
+    if (bytes == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _fileBytes = bytes;
+      _found = null;
+      _message = null;
+    });
+  }
+
+  Future<void> _openFile() async {
+    final Uint8List? bytes = _fileBytes;
+    if (_busy || bytes == null) {
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _message = null;
+      _found = null;
+    });
+    PaperBackupAccount? found;
+    String? message;
+    try {
+      final KeyFileDecoded decoded = await decryptKeyFile(
+        bytes,
+        _filePassword.text,
+      );
+      if (decoded.isOk) {
+        found = await PaperBackupAccount.fromSeed(decoded.seed!);
+      } else {
+        message = switch (decoded.error!) {
+          KeyFileError.format => t(
+            'To nie jest plik kopii klucza Zen (albo jest uszkodzony).',
+          ),
+          KeyFileError.password => t('Złe hasło pliku. Spróbuj jeszcze raz.'),
+        };
+      }
+    } on Object catch (e) {
+      message = t('Nie udało się: {error}', <String, Object?>{'error': e});
     }
     if (!mounted) {
       return;
@@ -104,6 +162,8 @@ class _PaperRestoreScreenState extends ConsumerState<PaperRestoreScreen> {
       await adoptPaperBackup(disk, account, deviceName: thisDeviceName);
       restored = true;
       _input.clear();
+      _filePassword.clear();
+      _fileBytes = null;
     } on Object catch (e) {
       message = t('Nie udało się: {error}', <String, Object?>{'error': e});
     }
@@ -127,8 +187,8 @@ class _PaperRestoreScreenState extends ConsumerState<PaperRestoreScreen> {
     final bool canScan = ref.watch(peerQrScannerProvider).isSupported;
     return SecureScreen(
       child: Scaffold(
-        key: const Key('paper-restore-screen'),
-        appBar: AppBar(title: Text(t('Konto z kopii na papierze'))),
+        key: const Key('key-restore-screen'),
+        appBar: AppBar(title: Text(t('Przywróć klucz'))),
         body: SafeArea(
           top: false,
           child: ListView(
@@ -148,12 +208,75 @@ class _PaperRestoreScreenState extends ConsumerState<PaperRestoreScreen> {
                 ZenInfo(
                   icon: Icons.history_edu_rounded,
                   text: t(
-                    'Wpisz klucz z kartki (14 grup po 4 znaki) albo zeskanuj '
-                    'jego kod QR. To urządzenie stanie się Twoim kolejnym '
-                    'urządzeniem tego konta. Znajomych i grupy przywróci '
-                    'dopiero krąg odzyskiwania; kopia na papierze zwraca '
-                    'samo konto.',
+                    'Kopia klucza zwraca samo konto, nie czaty. To '
+                    'urządzenie stanie się Twoim kolejnym urządzeniem tego '
+                    'konta. Znajomych i grupy przywróci dopiero krąg '
+                    'odzyskiwania.',
                   ),
+                ),
+                ZenCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Text(
+                        t('Mam plik kopii'),
+                        style: TextStyle(
+                          color: zen.textPrimary,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        key: const Key('key-restore-pick'),
+                        onPressed: _busy ? null : () => unawaited(_pickFile()),
+                        icon: const Icon(Icons.folder_open_rounded),
+                        label: Text(
+                          _fileBytes == null
+                              ? t('Wybierz plik kopii')
+                              : t('Wybrano plik — zmień'),
+                        ),
+                      ),
+                      if (_fileBytes != null) ...<Widget>[
+                        const SizedBox(height: 8),
+                        TextField(
+                          key: const Key('key-restore-password'),
+                          controller: _filePassword,
+                          obscureText: true,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          decoration: InputDecoration(
+                            labelText: t('Hasło pliku'),
+                          ),
+                          onChanged: (_) {
+                            if (_found != null || _message != null) {
+                              setState(() {
+                                _found = null;
+                                _message = null;
+                              });
+                            }
+                          },
+                          onSubmitted: (_) => unawaited(_openFile()),
+                        ),
+                        const SizedBox(height: 8),
+                        FilledButton(
+                          key: const Key('key-restore-open'),
+                          onPressed: _busy
+                              ? null
+                              : () => unawaited(_openFile()),
+                          child: Text(t('Odszyfruj plik')),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  t(
+                    'Albo wpisz klucz z kartki (14 grup po 4 znaki) lub '
+                    'zeskanuj jego kod QR.',
+                  ),
+                  style: TextStyle(color: zen.textSecondary, height: 1.4),
                 ),
                 const SizedBox(height: 8),
                 TextField(
@@ -166,7 +289,7 @@ class _PaperRestoreScreenState extends ConsumerState<PaperRestoreScreen> {
                   textCapitalization: TextCapitalization.characters,
                   style: zen.mono(color: zen.textPrimary, size: 16),
                   decoration: InputDecoration(
-                    labelText: t('Klucz z kartki'),
+                    labelText: t('Klucz jako kod'),
                     hintText: 'ABCD-EFGH-…',
                   ),
                   onChanged: (_) {
@@ -185,7 +308,7 @@ class _PaperRestoreScreenState extends ConsumerState<PaperRestoreScreen> {
                       child: FilledButton(
                         key: const Key('paper-restore-check'),
                         onPressed: _busy ? null : () => unawaited(_check()),
-                        child: Text(t('Sprawdź klucz')),
+                        child: Text(t('Sprawdź kod')),
                       ),
                     ),
                     if (canScan) ...<Widget>[

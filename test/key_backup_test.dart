@@ -10,10 +10,12 @@ import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
+import 'package:zen/src/features/account/key_file.dart';
+import 'package:zen/src/features/account/key_file_io.dart';
 import 'package:zen/src/features/account/paper_backup.dart';
 import 'package:zen/src/features/account/presentation/account_secure_stage.dart';
-import 'package:zen/src/features/account/presentation/paper_backup_screen.dart';
-import 'package:zen/src/features/account/presentation/paper_restore_screen.dart';
+import 'package:zen/src/features/account/presentation/key_backup_screen.dart';
+import 'package:zen/src/features/account/presentation/key_restore_screen.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -25,6 +27,18 @@ Widget _app(Widget home, {List<Override> overrides = const <Override>[]}) =>
       overrides: overrides,
       child: MaterialApp(theme: ZenTheme.light(), home: home),
     );
+
+final class _FakeKeyFileIo implements KeyFileIo {
+  _FakeKeyFileIo(this.file);
+
+  final Uint8List file;
+
+  @override
+  Future<Uint8List?> pick() async => file;
+
+  @override
+  Future<String?> save(String name, Uint8List bytes) async => name;
+}
 
 void main() {
   test('encode and decode round trip, grouped like the paper', () {
@@ -201,7 +215,7 @@ void main() {
       final MemoryLedgerDisk disk = MemoryLedgerDisk();
       await tester.pumpWidget(
         _app(
-          const PaperRestoreScreen(),
+          const KeyRestoreScreen(),
           overrides: <Override>[ledgerDiskProvider.overrideWithValue(disk)],
         ),
       );
@@ -248,6 +262,179 @@ void main() {
     },
   );
 
+  const PasswordCost light = PasswordCost(memoryKiB: 8, iterations: 1);
+
+  test('key file: encrypt and decrypt round trip', () async {
+    final Uint8List seed = randomBytes(32);
+    final Uint8List file = await encryptKeyFile(
+      seed,
+      'correct horse',
+      cost: light,
+    );
+    expect(file.sublist(0, 6), 'ZENKEY'.codeUnits);
+    expect(file[6], kKeyFileVersion);
+    final KeyFileDecoded back = await decryptKeyFile(file, 'correct horse');
+    expect(back.isOk, isTrue);
+    expect(back.seed, seed);
+    // Two files of the same key differ (fresh salt and nonce).
+    expect(
+      await encryptKeyFile(seed, 'correct horse', cost: light),
+      isNot(file),
+    );
+    expect(keyFileName(DateTime(2026, 10, 5)), 'zen-klucz-2026-10-05.zenkey');
+  });
+
+  test(
+    'key file: wrong password, damage and foreign files are refused',
+    () async {
+      final Uint8List seed = randomBytes(32);
+      final Uint8List file = await encryptKeyFile(
+        seed,
+        'correct horse',
+        cost: light,
+      );
+
+      final KeyFileDecoded wrong = await decryptKeyFile(file, 'wrong horse!');
+      expect(wrong.isOk, isFalse);
+      expect(wrong.error, KeyFileError.password);
+
+      // Any changed byte of the header or the sealed seed is caught.
+      for (final int i in <int>[12, 20, 40, 50, file.length - 1]) {
+        final Uint8List changed = Uint8List.fromList(file)..[i] ^= 1;
+        expect(
+          (await decryptKeyFile(changed, 'correct horse')).isOk,
+          isFalse,
+          reason: 'byte $i',
+        );
+      }
+      final Uint8List newer = Uint8List.fromList(file)
+        ..[6] = kKeyFileVersion + 1;
+      expect(
+        (await decryptKeyFile(newer, 'correct horse')).error,
+        KeyFileError.format,
+      );
+      expect(
+        (await decryptKeyFile(Uint8List(10), 'correct horse')).error,
+        KeyFileError.format,
+      );
+      expect(
+        (await decryptKeyFile(
+          Uint8List.fromList(file.sublist(0, file.length - 1)),
+          'correct horse',
+        )).error,
+        KeyFileError.format,
+      );
+      // An absurd Argon2 cost in the header is refused before it runs.
+      final Uint8List heavy = Uint8List.fromList(file)
+        ..buffer.asByteData().setUint32(7, 0xFFFFFFF);
+      expect(
+        (await decryptKeyFile(heavy, 'correct horse')).error,
+        KeyFileError.format,
+      );
+      await expectLater(
+        encryptKeyFile(Uint8List(31), 'correct horse', cost: light),
+        throwsArgumentError,
+      );
+    },
+  );
+
+  test('key file: restore adopts the account of the file', () async {
+    final MemoryLedgerDisk first = MemoryLedgerDisk();
+    final LedgerIdentity original = await LedgerIdentity.loadOrCreate(first);
+    final Uint8List file = await encryptKeyFile(
+      original.accountKey!.seed,
+      'correct horse',
+      cost: light,
+    );
+
+    final MemoryLedgerDisk fresh = MemoryLedgerDisk();
+    final LedgerIdentity own = await LedgerIdentity.loadOrCreate(fresh);
+    expect(own.account, isNot(original.account));
+
+    final KeyFileDecoded opened = await decryptKeyFile(file, 'correct horse');
+    final PaperBackupAccount found = await PaperBackupAccount.fromSeed(
+      opened.seed!,
+    );
+    expect(found.account, original.account);
+    expect(found.fingerprint, accountFingerprint(original.account));
+
+    final LedgerIdentity adopted = await adoptPaperBackup(fresh, found);
+    expect(adopted.account, original.account);
+    expect((await LedgerIdentity.read(fresh))!.account, original.account);
+  });
+
+  testWidgets('restore screen: file and password, fingerprint, account taken', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final Uint8List seed = randomBytes(32);
+    final LedgerKeyPair pair =
+        await tester.runAsync(() => LedgerKeyPair.fromSeed(seed))
+            as LedgerKeyPair;
+    final Uint8List file =
+        await tester.runAsync(
+              () => encryptKeyFile(seed, 'correct horse', cost: light),
+            )
+            as Uint8List;
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    await tester.pumpWidget(
+      _app(
+        const KeyRestoreScreen(),
+        overrides: <Override>[
+          ledgerDiskProvider.overrideWithValue(disk),
+          keyFileIoProvider.overrideWithValue(_FakeKeyFileIo(file)),
+        ],
+      ),
+    );
+    expect(find.byKey(const Key('key-restore-password')), findsNothing);
+    await tester.tap(find.byKey(const Key('key-restore-pick')));
+    await tester.pump();
+
+    await tester.enterText(
+      find.byKey(const Key('key-restore-password')),
+      'wrong horse!',
+    );
+    await tester.tap(find.byKey(const Key('key-restore-open')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
+    expect(find.byKey(const Key('paper-restore-message')), findsOneWidget);
+    expect(find.byKey(const Key('paper-restore-adopt')), findsNothing);
+
+    await tester.enterText(
+      find.byKey(const Key('key-restore-password')),
+      'correct horse',
+    );
+    await tester.tap(find.byKey(const Key('key-restore-open')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<SelectableText>(
+            find.byKey(const Key('paper-restore-fingerprint')),
+          )
+          .data,
+      accountFingerprint(pair.id),
+    );
+    expect(await LedgerIdentity.read(disk), isNull, reason: 'not yet taken');
+
+    await tester.tap(find.byKey(const Key('paper-restore-adopt')));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
+    expect(find.byKey(const Key('paper-restore-done')), findsOneWidget);
+    final LedgerIdentity? saved = await tester.runAsync<LedgerIdentity?>(
+      () => LedgerIdentity.read(disk),
+    );
+    expect(saved!.account, pair.id);
+  });
+
   test('the new settings survive a round trip and default to not done', () {
     expect(const AppSettings().accountSecureOffered, isFalse);
     expect(const AppSettings().paperBackupDone, isFalse);
@@ -279,7 +466,7 @@ void main() {
       ),
     );
     expect(find.byKey(const Key('account-secure-circle')), findsOneWidget);
-    expect(find.byKey(const Key('account-secure-paper')), findsOneWidget);
+    expect(find.byKey(const Key('account-secure-key')), findsOneWidget);
     await tester.tap(find.byKey(const Key('account-secure-later')));
     await tester.pumpAndSettle();
     expect((await store.load())!.accountSecureOffered, isTrue);

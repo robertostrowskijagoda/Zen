@@ -10,7 +10,10 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
+import 'package:zen/src/features/account/key_file.dart';
+import 'package:zen/src/features/account/key_file_io.dart';
 import 'package:zen/src/features/account/paper_backup.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -18,12 +21,16 @@ import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-/// "Kopia klucza konta na papierze" (§6.1): shows the account key as 14
-/// groups of four characters (and a QR code on request) to write down,
-/// then checks two random groups. Opens only after the app password is
+/// "Kopia zapasowa klucza" (§6.1): the two ways to back up the account key,
+/// on one screen. (a) an encrypted file protected by a password the person
+/// types twice; (b) the key shown as a code (14 groups of four and a QR) to
+/// write down or scan on a new phone. Opens only after the app password is
 /// entered again, and needs the account password when one is set.
-class PaperBackupScreen extends ConsumerStatefulWidget {
-  const PaperBackupScreen({super.key});
+class KeyBackupScreen extends ConsumerStatefulWidget {
+  const KeyBackupScreen({this.fileCost = kRecoveryPasswordCost, super.key});
+
+  /// Argon2id cost of the backup file (tests pass a light one).
+  final PasswordCost fileCost;
 
   static Future<void> open(BuildContext context) async {
     // Always ask again: this is the key to the whole account.
@@ -40,23 +47,27 @@ class PaperBackupScreen extends ConsumerStatefulWidget {
     }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (BuildContext context) => const PaperBackupScreen(),
+        builder: (BuildContext context) => const KeyBackupScreen(),
       ),
     );
   }
 
   @override
-  ConsumerState<PaperBackupScreen> createState() => _PaperBackupScreenState();
+  ConsumerState<KeyBackupScreen> createState() => _KeyBackupScreenState();
 }
 
-class _PaperBackupScreenState extends ConsumerState<PaperBackupScreen> {
+class _KeyBackupScreenState extends ConsumerState<KeyBackupScreen> {
   final TextEditingController _password = TextEditingController();
+  final TextEditingController _filePassword = TextEditingController();
+  final TextEditingController _filePassword2 = TextEditingController();
   LedgerNode? _node;
-  String? _code;
+  Uint8List? _seed;
   bool _needPassword = false;
   bool _busy = false;
   bool _weUnlocked = false;
   String? _message;
+  String? _fileMessage;
+  String? _savedPath;
 
   @override
   void initState() {
@@ -72,6 +83,8 @@ class _PaperBackupScreenState extends ConsumerState<PaperBackupScreen> {
       _node?.identity.lock();
     }
     _password.dispose();
+    _filePassword.dispose();
+    _filePassword2.dispose();
     super.dispose();
   }
 
@@ -97,7 +110,7 @@ class _PaperBackupScreenState extends ConsumerState<PaperBackupScreen> {
       if (key == null) {
         _needPassword = true;
       } else {
-        _code = encodePaperBackup(key.seed);
+        _seed = key.seed;
       }
     });
   }
@@ -121,7 +134,7 @@ class _PaperBackupScreenState extends ConsumerState<PaperBackupScreen> {
       if (ok && key != null) {
         _weUnlocked = true;
         _needPassword = false;
-        _code = encodePaperBackup(key.seed);
+        _seed = key.seed;
         _password.clear();
       } else {
         _message = t('Złe hasło konta.');
@@ -129,17 +142,225 @@ class _PaperBackupScreenState extends ConsumerState<PaperBackupScreen> {
     });
   }
 
-  Future<void> _confirmed() async {
+  Future<void> _markDone() async {
     await ref
         .read(appSettingsControllerProvider.notifier)
         .setPaperBackupDone(true);
     ref.invalidate(accountSecureReminderProvider);
   }
 
+  Future<void> _saveFile() async {
+    final Uint8List? seed = _seed;
+    if (seed == null || _busy) {
+      return;
+    }
+    final String password = _filePassword.text;
+    String? problem;
+    if (password.length < kKeyFileMinPasswordLength) {
+      problem = t(
+        'Hasło pliku ma mieć co najmniej {n} znaków.',
+        <String, Object?>{'n': kKeyFileMinPasswordLength},
+      );
+    } else if (password != _filePassword2.text) {
+      problem = t('Hasła się nie zgadzają.');
+    }
+    if (problem != null) {
+      setState(() {
+        _fileMessage = problem;
+        _savedPath = null;
+      });
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _fileMessage = null;
+      _savedPath = null;
+    });
+    String? path;
+    String? failure;
+    try {
+      final Uint8List data = await encryptKeyFile(
+        seed,
+        password,
+        cost: widget.fileCost,
+      );
+      path = await ref
+          .read(keyFileIoProvider)
+          .save(keyFileName(DateTime.now()), data);
+      if (path != null) {
+        await _markDone();
+      }
+    } on Object catch (error, stack) {
+      logZenError('Plik kopii klucza', error, stack);
+      failure = t('Nie udało się zapisać pliku: {error}', <String, Object?>{
+        'error': error,
+      });
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _busy = false;
+      _fileMessage = failure;
+      _savedPath = path;
+      if (path != null) {
+        _filePassword.clear();
+        _filePassword2.clear();
+      }
+    });
+  }
+
+  Future<void> _showCode(Uint8List seed) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (BuildContext context) => SecureScreen(
+        child: Scaffold(
+          key: const Key('key-code-screen'),
+          appBar: AppBar(title: Text(t('Klucz jako kod'))),
+          body: SafeArea(
+            top: false,
+            child: PaperBackupView(
+              code: encodePaperBackup(seed),
+              onConfirmed: _markDone,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget _title(ZenColors zen, String text) => Text(
+    text,
+    style: TextStyle(
+      color: zen.textPrimary,
+      fontWeight: FontWeight.w700,
+      fontSize: 15.5,
+    ),
+  );
+
+  Widget _body(ZenColors zen, Uint8List seed) => ListView(
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+    children: <Widget>[
+      ZenInfo(
+        icon: Icons.warning_amber_rounded,
+        tone: zen.danger,
+        title: t('Kto to ma, ten ma Twoje konto'),
+        text: t(
+          'Kopia klucza przywraca samo konto — Twoją tożsamość — na nowym '
+          'telefonie. Nie przywraca czatów ani historii. Kto ma plik kopii '
+          'i jego hasło albo kod klucza, ma Twoje konto, więc nikomu ich '
+          'nie dawaj. Zen nigdy nie poprosi Cię o nie.',
+        ),
+      ),
+      ZenCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            _title(zen, t('Zapisz plik kopii')),
+            const SizedBox(height: 4),
+            Text(
+              t(
+                'Klucz zaszyfrowany hasłem, które teraz wymyślisz. Plik '
+                'schowaj w bezpiecznym miejscu, na przykład na pendrajwie. '
+                'Bez hasła jest bezużyteczny — a hasła nie da się odzyskać, '
+                'więc je zapamiętaj.',
+              ),
+              style: TextStyle(
+                color: zen.textSecondary,
+                fontSize: 13.5,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              key: const Key('key-file-password'),
+              controller: _filePassword,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: InputDecoration(labelText: t('Hasło pliku')),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              key: const Key('key-file-password-again'),
+              controller: _filePassword2,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: InputDecoration(
+                labelText: t('Hasło pliku jeszcze raz'),
+              ),
+              onSubmitted: (_) => unawaited(_saveFile()),
+            ),
+            if (_fileMessage != null) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                _fileMessage!,
+                key: const Key('key-file-message'),
+                style: TextStyle(color: zen.danger, height: 1.4),
+              ),
+            ],
+            if (_savedPath != null) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                t(
+                  'Zapisano: {path}. Schowaj plik i zapamiętaj hasło.',
+                  <String, Object?>{'path': _savedPath},
+                ),
+                key: const Key('key-file-saved'),
+                style: TextStyle(color: zen.success, height: 1.4),
+              ),
+            ],
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              key: const Key('key-file-save'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+              ),
+              onPressed: _busy ? null : () => unawaited(_saveFile()),
+              icon: const Icon(Icons.save_alt_rounded),
+              label: Text(t('Zapisz plik kopii')),
+            ),
+          ],
+        ),
+      ),
+      ZenCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            _title(zen, t('Pokaż klucz jako kod')),
+            const SizedBox(height: 4),
+            Text(
+              t(
+                'To Twój klucz — przepisz go na kartkę albo zeskanuj na '
+                'nowym telefonie. Bez hasła, więc kartkę trzymaj jak '
+                'klucz do domu.',
+              ),
+              style: TextStyle(
+                color: zen.textSecondary,
+                fontSize: 13.5,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              key: const Key('key-code-open'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+              ),
+              onPressed: () => unawaited(_showCode(seed)),
+              icon: const Icon(Icons.qr_code_2_rounded),
+              label: Text(t('Pokaż klucz jako kod')),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    final String? code = _code;
+    final Uint8List? seed = _seed;
     final Widget body;
     if (_node == null) {
       body = Center(
@@ -151,15 +372,15 @@ class _PaperBackupScreenState extends ConsumerState<PaperBackupScreen> {
           ),
         ),
       );
-    } else if (code != null) {
-      body = PaperBackupView(code: code, onConfirmed: _confirmed);
+    } else if (seed != null) {
+      body = _body(zen, seed);
     } else if (_needPassword) {
       body = ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: <Widget>[
           ZenInfo(
             icon: Icons.lock_outline_rounded,
-            text: t('To konto ma hasło. Podaj je, żeby pokazać kopię klucza.'),
+            text: t('To konto ma hasło. Podaj je, żeby zrobić kopię klucza.'),
           ),
           const SizedBox(height: 8),
           TextField(
@@ -186,7 +407,7 @@ class _PaperBackupScreenState extends ConsumerState<PaperBackupScreen> {
               minimumSize: const Size.fromHeight(52),
             ),
             onPressed: _busy ? null : () => unawaited(_unlock()),
-            child: Text(t('Pokaż kopię klucza')),
+            child: Text(t('Dalej')),
           ),
         ],
       );
@@ -200,8 +421,8 @@ class _PaperBackupScreenState extends ConsumerState<PaperBackupScreen> {
     }
     return SecureScreen(
       child: Scaffold(
-        key: const Key('paper-backup-screen'),
-        appBar: AppBar(title: Text(t('Kopia klucza na papierze'))),
+        key: const Key('key-backup-screen'),
+        appBar: AppBar(title: Text(t('Kopia zapasowa klucza'))),
         body: SafeArea(top: false, child: body),
       ),
     );
@@ -211,7 +432,7 @@ class _PaperBackupScreenState extends ConsumerState<PaperBackupScreen> {
 enum _Step { show, check, done }
 
 /// The copy itself, the "I wrote it down" check and the result. Separate
-/// from [PaperBackupScreen] so it needs no account to be shown.
+/// from [KeyBackupScreen] so it needs no account to be shown.
 class PaperBackupView extends StatefulWidget {
   const PaperBackupView({
     required this.code,
@@ -267,7 +488,7 @@ class _PaperBackupViewState extends State<PaperBackupView> {
       if (!paperBackupGroupMatches(widget.code, _asked[i], _answers[i].text)) {
         setState(() {
           _error = t(
-            'Któraś grupa się nie zgadza. Sprawdź kartkę — albo wróć '
+            'Któraś grupa się nie zgadza. Sprawdź zapis — albo wróć '
             'i przepisz klucz jeszcze raz.',
           );
         });
@@ -311,15 +532,15 @@ class _PaperBackupViewState extends State<PaperBackupView> {
       tone: zen.danger,
       title: t('Kto to ma, ten ma Twoje konto'),
       text: t(
-        'Przepisz ręcznie na kartkę i schowaj w bezpiecznym miejscu. '
-        'Nie rób zdjęcia, nie wysyłaj, nie wklejaj do notatek ani '
-        'do chmury. Zen nigdy nie poprosi Cię o ten klucz.',
+        'To Twój klucz — przepisz go na kartkę albo zeskanuj na nowym '
+        'telefonie. Nie rób zdjęcia, nie wysyłaj, nie wklejaj do notatek '
+        'ani do chmury. Zen nigdy nie poprosi Cię o ten klucz.',
       ),
     ),
     ZenInfo(
       icon: Icons.history_edu_rounded,
       text: t(
-        'Z kartki odzyskasz samo konto na nowym telefonie. Znajomych '
+        'Z klucza odzyskasz samo konto na nowym telefonie. Znajomych '
         'i grupy odzyskasz tylko z kręgiem odzyskiwania, a historii '
         'czatów i portfela nie odzyska nic.',
       ),
@@ -391,7 +612,7 @@ class _PaperBackupViewState extends State<PaperBackupView> {
       style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
       onPressed: _startCheck,
       icon: const Icon(Icons.edit_note_rounded),
-      label: Text(t('Mam to na papierze')),
+      label: Text(t('Mam to zapisane')),
     ),
   ];
 
@@ -399,7 +620,7 @@ class _PaperBackupViewState extends State<PaperBackupView> {
     ZenInfo(
       icon: Icons.fact_check_outlined,
       text: t(
-        'Sprawdźmy, czy kartka jest dobra. Przepisz z niej dwie grupy, '
+        'Sprawdźmy, czy zapis jest dobry. Przepisz z niego dwie grupy, '
         'o które pytamy.',
       ),
     ),
@@ -457,7 +678,7 @@ class _PaperBackupViewState extends State<PaperBackupView> {
     Text(
       t(
         'Schowaj kartkę dobrze. Na nowym telefonie wybierz „Konto '
-        'i odzyskiwanie” → „Mam kopię na papierze”.',
+        'i odzyskiwanie” → „Przywróć klucz”.',
       ),
       key: const Key('paper-backup-done'),
       textAlign: TextAlign.center,
