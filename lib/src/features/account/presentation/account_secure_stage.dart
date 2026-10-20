@@ -7,13 +7,13 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
 import 'package:zen/src/features/account/presentation/account_recovery_screen.dart';
-import 'package:zen/src/features/account/presentation/paper_backup_screen.dart';
+import 'package:zen/src/features/account/presentation/key_backup_screen.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
 /// "Zabezpiecz konto" (§6.1, §6.3): the first start, right after the
-/// permissions step. Offers the recovery circle and the paper copy of the
-/// key, or "later" — remembered, with a reminder in Settings until the
-/// account is secured.
+/// permissions step. Offers the recovery circle and the backup of the
+/// key (file or code), or "later" — remembered, with a reminder in Settings
+/// until the account is secured.
 class AccountSecureStage extends ConsumerWidget {
   const AccountSecureStage({super.key});
 
@@ -85,7 +85,7 @@ class AccountSecureStage extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
                   Text(
-                    t('Kopia na papierze'),
+                    t('Kopia zapasowa klucza'),
                     style: TextStyle(
                       color: zen.textPrimary,
                       fontWeight: FontWeight.w700,
@@ -95,8 +95,9 @@ class AccountSecureStage extends ConsumerWidget {
                   const SizedBox(height: 4),
                   Text(
                     t(
-                      'Przepisz klucz konta na kartkę i schowaj. Działa '
-                      'bez niczyjej pomocy, ale kto ma kartkę, ma konto.',
+                      'Zapisz klucz konta w pliku z hasłem albo przepisz go '
+                      'jako kod. Działa bez niczyjej pomocy, ale kto ma '
+                      'plik z hasłem lub kod, ma konto.',
                     ),
                     style: TextStyle(
                       color: zen.textSecondary,
@@ -106,13 +107,13 @@ class AccountSecureStage extends ConsumerWidget {
                   ),
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
-                    key: const Key('account-secure-paper'),
+                    key: const Key('account-secure-key'),
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size.fromHeight(48),
                     ),
-                    onPressed: () => unawaited(PaperBackupScreen.open(context)),
+                    onPressed: () => unawaited(KeyBackupScreen.open(context)),
                     icon: const Icon(Icons.history_edu_rounded),
-                    label: Text(t('Zapisz kopię na papierze')),
+                    label: Text(t('Zrób kopię klucza')),
                   ),
                 ],
               ),

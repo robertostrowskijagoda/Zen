@@ -11,8 +11,8 @@ import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
-import 'package:zen/src/features/account/presentation/paper_backup_screen.dart';
-import 'package:zen/src/features/account/presentation/paper_restore_screen.dart';
+import 'package:zen/src/features/account/presentation/key_backup_screen.dart';
+import 'package:zen/src/features/account/presentation/key_restore_screen.dart';
 import 'package:zen/src/features/account/recovery_circle_pick.dart';
 import 'package:zen/src/features/account/recovery_providers.dart';
 import 'package:zen/src/features/account/recovery_service.dart';
@@ -1097,7 +1097,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                     ],
                   ),
                 ),
-                ZenSection(t('Kopia klucza na papierze')),
+                ZenSection(t('Kopia zapasowa klucza')),
                 ZenCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1105,32 +1105,33 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                       _paragraph(
                         zen,
                         t(
-                          'Klucz konta zapisany na kartce wraca konto na '
-                          'nowym telefonie, nawet gdy nikt z kręgu nie '
-                          'pomoże. Kto ma kartkę, ma konto.',
+                          'Kopia klucza (plik z hasłem albo kod) przywraca samo '
+                          'konto na nowym telefonie, nawet gdy nikt z kręgu '
+                          'nie pomoże; czatów nie wraca. Kto ma plik z '
+                          'hasłem lub kod, ma konto.',
                         ),
                       ),
                       const SizedBox(height: 10),
                       FilledButton.icon(
-                        key: const Key('paper-backup-open'),
+                        key: const Key('key-backup-open'),
                         style: FilledButton.styleFrom(
                           minimumSize: const Size.fromHeight(48),
                         ),
                         onPressed: () =>
-                            unawaited(PaperBackupScreen.open(context)),
+                            unawaited(KeyBackupScreen.open(context)),
                         icon: const Icon(Icons.history_edu_rounded),
-                        label: Text(t('Zapisz kopię na papierze')),
+                        label: Text(t('Zrób kopię klucza')),
                       ),
                       const SizedBox(height: 8),
                       OutlinedButton.icon(
-                        key: const Key('paper-restore-open'),
+                        key: const Key('key-restore-open-screen'),
                         style: OutlinedButton.styleFrom(
                           minimumSize: const Size.fromHeight(48),
                         ),
                         onPressed: () =>
-                            unawaited(PaperRestoreScreen.open(context)),
+                            unawaited(KeyRestoreScreen.open(context)),
                         icon: const Icon(Icons.restore_page_outlined),
-                        label: Text(t('Mam kopię na papierze')),
+                        label: Text(t('Przywróć klucz')),
                       ),
                     ],
                   ),
