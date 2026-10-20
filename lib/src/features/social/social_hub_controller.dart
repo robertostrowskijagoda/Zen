@@ -35,7 +35,8 @@ import 'package:zen/src/features/chat/conversation_history_preview.dart';
 import 'package:zen/src/features/chat/disappearing_messages.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/realtime_attachment_transfer.dart';
-import 'package:zen/src/features/groups/group_board.dart';
+import 'package:zen/src/features/chat/stranger_chats.dart';
+import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/health/clock_skew_tracker.dart';
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/media/media_guard.dart';
@@ -69,6 +70,7 @@ part 'social_hub_controller_group_call.dart';
 part 'social_hub_controller_profile.dart';
 part 'social_hub_controller_devices.dart';
 part 'social_hub_controller_disappearing.dart';
+part 'social_hub_controller_strangers.dart';
 
 final Provider<SignalQueueStore> signalQueueStoreProvider =
     Provider<SignalQueueStore>((Ref ref) {
@@ -843,6 +845,23 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
 
   Future<void> _persistSignalArtifacts(ZenSignal signal, int timestamp);
 
+  /// Conversations with people who are not friends
+  /// (`social_hub_controller_strangers.dart`).
+  bool _isStrangerChatPeer(String address);
+
+  Future<Map<String, dynamic>> _strangerMessageMini(
+    String peerAddress,
+    String text,
+  );
+
+  Future<void> _noteStrangerMessageSent(
+    String peerAddress,
+    String text,
+    String? name,
+  );
+
+  Future<bool> _handleStrangerChatSignal(ZenSignal signal, int timestamp);
+
   Future<void> _queueOutgoingAttachmentTransfer({
     required String peerAddress,
     required ChatMessage message,
@@ -1267,7 +1286,8 @@ final class SocialHubController extends _SocialHubControllerBase
         _SocialHubGroupCallMixin,
         _SocialHubProfileMixin,
         _SocialHubDevicesMixin,
-        _SocialHubDisappearingMixin {}
+        _SocialHubDisappearingMixin,
+        _SocialHubStrangersMixin {}
 
 /// An incoming attachment as stored (after `guardIncomingMedia`).
 @immutable

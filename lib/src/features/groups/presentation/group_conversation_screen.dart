@@ -18,6 +18,8 @@ import 'package:zen/src/features/chat/disappearing_messages.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/disappearing_timer_dialog.dart';
+import 'package:zen/src/features/groups/group_board.dart';
+import 'package:zen/src/features/groups/group_board_providers.dart';
 import 'package:zen/src/features/groups/presentation/group_board_view.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
@@ -159,15 +161,31 @@ class _GroupConversationScreenState
     if (text.isEmpty || !_canWrite) {
       return;
     }
+    if (_boardTab && text.length > kMaxBoardPostChars) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            tn(
+              kMaxBoardPostChars,
+              one: 'Post jest za długi (maks. {n} znak).',
+              few: 'Post jest za długi (maks. {n} znaki).',
+              many: 'Post jest za długi (maks. {n} znaków).',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
     _composerController.clear();
     try {
+      if (_boardTab) {
+        // A post on the group's board (§13), not a chat message.
+        await ref.read(groupBoardServiceProvider).publish(widget.groupId, text);
+        return;
+      }
       await ref
           .read(socialHubControllerProvider.notifier)
-          .sendGroupMessage(
-            groupId: widget.groupId,
-            text: text,
-            board: _boardTab,
-          );
+          .sendGroupMessage(groupId: widget.groupId, text: text);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -531,29 +549,19 @@ class _GroupConversationScreenState
           // Message List
           Expanded(
             child: _boardTab && isMember
-                ? messagesAsync.when(
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (Object err, _) => Center(
-                      child: Text(t('Błąd ładowania: {error}', {'error': err})),
-                    ),
-                    data: (List<ChatMessage> messages) => GroupBoardView(
-                      messages: messages
-                          .where(
-                            (ChatMessage m) =>
-                                m.isOutgoing || !hiddenByMe.hides(id: m.id),
-                          )
-                          .toList(),
-                      canPost: isMember,
-                      senderName: (ChatMessage m) =>
-                          friends[m.sender]?.displayLabel ??
-                          ref
-                              .read(socialHubControllerProvider)
-                              .friendByAddress(m.sender)
-                              ?.displayLabel ??
-                          group.memberNames[m.sender] ??
-                          t('Uczestnik'),
-                    ),
+                ? GroupBoardView(
+                    key: Key('group-board-${widget.groupId}'),
+                    board: ref.watch(groupBoardServiceProvider),
+                    groupId: widget.groupId,
+                    canPost: isMember,
+                    nameOf: (GroupBoardPost p) =>
+                        friends[p.author]?.displayLabel ??
+                        ref
+                            .read(socialHubControllerProvider)
+                            .friendByAddress(p.author)
+                            ?.displayLabel ??
+                        group.memberNames[p.author] ??
+                        (p.authorName.isEmpty ? t('Uczestnik') : p.authorName),
                   )
                 : messagesAsync.when(
                     loading: () =>

@@ -14,6 +14,12 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     if (trimmed.isEmpty) {
       return;
     }
+    // Someone who is not a friend (§13, §24.1): within the limits, and
+    // with this person's mini-profile. Throws [StrangerMessageRefused].
+    final bool toStranger = _isStrangerChatPeer(peerAddress);
+    final Map<String, dynamic>? mini = toStranger
+        ? await _strangerMessageMini(peerAddress, trimmed)
+        : null;
 
     await _messageTimelineStore.append(
       peerAddress,
@@ -29,17 +35,22 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       ),
     );
     _bumpTimelineRevision();
-    _updateFriendPreview(
-      peerAddress: peerAddress,
-      displayName: displayName,
-      preview: trimmed,
-    );
+    if (toStranger) {
+      await _noteStrangerMessageSent(peerAddress, trimmed, displayName);
+    } else {
+      _updateFriendPreview(
+        peerAddress: peerAddress,
+        displayName: displayName,
+        preview: trimmed,
+      );
+    }
     try {
       await _sendNetworkMessage(
         peerAddress: peerAddress,
         messageId: messageId,
         text: trimmed,
         sentAtMillis: timestamp,
+        miniProfile: mini,
       );
       await _updateMessageDeliveryState(
         peerAddress: peerAddress,
@@ -65,7 +76,10 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     required String peerAddress,
     required bool isTyping,
   }) async {
-    if (!isRoutablePeerAddress(peerAddress)) {
+    // Not to someone who is not a friend: it would tell them when this
+    // person is online.
+    if (!isRoutablePeerAddress(peerAddress) ||
+        _isStrangerChatPeer(peerAddress)) {
       return;
     }
     try {
@@ -832,6 +846,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     required String messageId,
     required String text,
     required int sentAtMillis,
+    Map<String, dynamic>? miniProfile,
   }) async {
     if (!isRoutablePeerAddress(peerAddress)) {
       return;
@@ -840,12 +855,15 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         .read(signalTransportProvider)
         .send(
           remoteAddress: peerAddress,
-          payload: _buildOutgoingTextPayload(
-            messageId: messageId,
-            text: text,
-            sentAtMillis: sentAtMillis,
-            ttl: state.disappearSecondsFor(peerAddress),
-          ),
+          payload: <String, dynamic>{
+            ..._buildOutgoingTextPayload(
+              messageId: messageId,
+              text: text,
+              sentAtMillis: sentAtMillis,
+              ttl: state.disappearSecondsFor(peerAddress),
+            ),
+            'mp': ?miniProfile,
+          },
         );
   }
 

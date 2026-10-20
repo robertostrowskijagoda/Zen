@@ -140,6 +140,9 @@ ZenSignal? zenSignalFromTransportPayload({
         durationMs: _readInt(payload['durationMs']),
         sentAtMillis: _readTimestamp(payload['createdAt']),
         disappearSeconds: _readInt(payload['ttl']),
+        miniProfile: payload['mp'] is Map
+            ? Map<String, dynamic>.from(payload['mp'] as Map)
+            : null,
       );
     case 'message_transfer_cancel':
       return ZenSignal(

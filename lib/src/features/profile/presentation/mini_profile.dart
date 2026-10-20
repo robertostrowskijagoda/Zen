@@ -21,6 +21,7 @@ import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
 import 'package:zen/src/features/profile/presentation/profile_screen.dart';
 import 'package:zen/src/features/profile/profile_fields.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -300,6 +301,34 @@ class _MiniProfileSheetState extends ConsumerState<MiniProfileSheet> {
                   icon: const Icon(Icons.person_rounded, size: 18),
                   label: Text(t('Profil')),
                 ),
+                // Someone who is not a friend can be written to as well
+                // (§13, §24.1): text only, within limits, with this
+                // person's mini-profile.
+                if (!isFriend &&
+                    friend?.status != FriendRelationshipStatus.blocked &&
+                    isRoutablePeerAddress(address))
+                  OutlinedButton.icon(
+                    key: const Key('mini-profile-message-stranger'),
+                    onPressed: () {
+                      final NavigatorState nav = Navigator.of(context)..pop();
+                      unawaited(
+                        nav.push(
+                          MaterialPageRoute<void>(
+                            builder: (BuildContext context) =>
+                                ConversationScreen(
+                                  peerAddress: address,
+                                  title: shownName,
+                                ),
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.chat_bubble_outline_rounded,
+                      size: 18,
+                    ),
+                    label: Text(t('Napisz')),
+                  ),
                 if (isFriend)
                   FilledButton.icon(
                     key: const Key('mini-profile-message'),

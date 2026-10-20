@@ -1848,12 +1848,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
   }
 
-  /// [board] makes the message a post on the group board (§13): same
-  /// signal, only the message id carries the flag (see `group_board.dart`).
   Future<void> sendGroupMessage({
     required String groupId,
     required String text,
-    bool board = false,
   }) async {
     final GroupProfile? group = state.groups[groupId];
     if (group == null || text.trim().isEmpty) {
@@ -1864,9 +1861,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     final String trimmed = text.trim();
     final int timestamp = DateTime.now().millisecondsSinceEpoch;
-    final String messageId = board
-        ? newBoardPostId(timestamp: timestamp, groupId: groupId)
-        : 'grp-msg-$timestamp-$groupId';
+    final String messageId = 'grp-msg-$timestamp-$groupId';
 
     await _messageTimelineStore.append(
       'group:$groupId',

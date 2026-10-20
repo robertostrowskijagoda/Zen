@@ -606,6 +606,11 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       // amounts to, which the user still has to confirm.
       signal = _unsolicitedAcceptAsRequest(signal);
     }
+    // Someone who is not a friend writing in an ordinary chat (§13, §24.1):
+    // let in only within the limits, with their mini-profile.
+    if (await _handleStrangerChatSignal(signal, timestamp)) {
+      return;
+    }
     if (!_isSignalAllowedFromPeer(state, signal)) {
       // Dropped without a word. This used to answer a peer it did not know
       // with an automatic `friend_remove`: that told anyone probing an

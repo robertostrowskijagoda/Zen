@@ -31,6 +31,8 @@ import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/disappearing_timer_dialog.dart';
+import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
+import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/media/media_guard.dart';
@@ -547,6 +549,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   ),
                 ),
               ),
+            // Someone who is not a friend (§13, §24.1).
+            if (isStrangerConversation(friend, widget.peerAddress))
+              StrangerChatBanner(address: widget.peerAddress, friend: friend),
             Expanded(
               child: messages.when(
                 data: (List<ChatMessage> thread) {
@@ -696,6 +701,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         displayName: displayName,
         text: text,
       );
+    } on StrangerMessageRefused catch (refused) {
+      // Over the limits for someone who is not a friend: the text stays.
+      _composerController.text = text;
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(refused.message)));
+      }
     } catch (error) {
       if (!mounted) {
         return;

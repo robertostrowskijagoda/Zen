@@ -87,6 +87,7 @@ final class ZenSignal {
     this.inviteId,
     this.cameraOn,
     this.disappearSeconds,
+    this.miniProfile,
   });
 
   final ZenSignalType type;
@@ -133,6 +134,10 @@ final class ZenSignal {
   /// `disappear_timer` signal.
   final int? disappearSeconds;
 
+  /// A message to someone who is not a friend: the sender's mini-profile
+  /// (§9, `{n: name, av: photo}`), so the person written to sees who it is.
+  final Map<String, dynamic>? miniProfile;
+
   ZenSignal withSender(String sender) {
     if (sender == this.sender) {
       return this;
@@ -168,6 +173,7 @@ final class ZenSignal {
       inviteId: inviteId,
       cameraOn: cameraOn,
       disappearSeconds: disappearSeconds,
+      miniProfile: miniProfile,
     );
   }
 }

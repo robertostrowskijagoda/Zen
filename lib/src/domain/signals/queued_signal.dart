@@ -97,6 +97,7 @@ String? _encodeExtras(ZenSignal signal) {
     'inviteId': ?signal.inviteId,
     'cameraOn': ?signal.cameraOn,
     'ttl': ?signal.disappearSeconds,
+    'mp': ?signal.miniProfile,
   };
   return extras.isEmpty ? null : jsonEncode(extras);
 }
@@ -136,6 +137,9 @@ ZenSignal _withExtras(ZenSignal base, Map<String, dynamic> extras) {
     inviteId: extras['inviteId'] as String?,
     cameraOn: extras['cameraOn'] as bool?,
     disappearSeconds: (extras['ttl'] as num?)?.toInt(),
+    miniProfile: extras['mp'] is Map
+        ? Map<String, dynamic>.from(extras['mp'] as Map)
+        : null,
   );
 }
 

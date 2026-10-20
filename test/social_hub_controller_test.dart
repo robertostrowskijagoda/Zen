@@ -1777,7 +1777,17 @@ void main() {
             MemoryMessageTimelineStore(),
           ),
           signalTransportProvider.overrideWithValue(transport),
-          socialHubSeedProvider.overrideWithValue(SocialHubState.empty()),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              friends: const <String, FriendProfile>{
+                '200:1111:2222:3333:4444:5555:6666:7777': FriendProfile(
+                  address: '200:1111:2222:3333:4444:5555:6666:7777',
+                  displayName: 'Maks',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -1818,7 +1828,17 @@ void main() {
             MemoryMessageTimelineStore(),
           ),
           signalTransportProvider.overrideWithValue(transport),
-          socialHubSeedProvider.overrideWithValue(SocialHubState.empty()),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              friends: const <String, FriendProfile>{
+                '200:1111:2222:3333:4444:5555:6666:7777': FriendProfile(
+                  address: '200:1111:2222:3333:4444:5555:6666:7777',
+                  displayName: 'Maks',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
+          ),
         ],
       );
       addTearDown(container.dispose);
