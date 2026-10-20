@@ -94,6 +94,7 @@ func YggStartNode(configJSON *C.char) *C.char {
 //export YggStopNode
 func YggStopNode(handle C.int) *C.char {
 	return withNode(handle, func(node *bridgeNode) *C.char {
+		node.stopDoor()
 		node.closeAllRelays()
 		node.stopLeafMonitor()
 		node.stopPeerProbeMonitor()
@@ -108,6 +109,8 @@ func YggStopNode(handle C.int) *C.char {
 		}
 		node.core.Stop()
 		nodes.Delete(int32(handle))
+		// Wakes the app's thread blocked in YggWaitSignal.
+		node.signalInbox.close()
 		return responseOK(map[string]any{"stopped": true})
 	})
 }
@@ -122,7 +125,7 @@ func YggGetNodeInfo(handle C.int) *C.char {
 //export YggGetPeersJson
 func YggGetPeersJson(handle C.int) *C.char {
 	return withNode(handle, func(node *bridgeNode) *C.char {
-		return responseOK(buildPeerJSON(node.core.GetPeers()))
+		return responseOK(buildPeerJSON(node.meshPeers()))
 	})
 }
 
@@ -243,13 +246,15 @@ func YggSendSignal(handle C.int, remoteAddress *C.char, payload *C.char) *C.char
 }
 
 func signalInboxResponse(message signalMessage) *C.char {
-	return responseOK(
-		map[string]any{
-			"available": true,
-			"from":      message.From,
-			"payload":   message.Payload,
-		},
-	)
+	data := map[string]any{
+		"available": true,
+		"from":      message.From,
+		"payload":   message.Payload,
+	}
+	if message.Door {
+		data["door"] = true
+	}
+	return responseOK(data)
 }
 
 func waitSignalResponse(node *bridgeNode, timeout time.Duration) *C.char {
@@ -257,6 +262,10 @@ func waitSignalResponse(node *bridgeNode, timeout time.Duration) *C.char {
 	// Taking a signal releases its share of the inbox budget.
 	message, ok := node.signalInbox.wait(timeout)
 	if !ok {
+		if node.signalInbox.isClosed() {
+			// The node stopped: the app's waiting thread can end.
+			return responseOK(map[string]any{"available": false, "closed": true})
+		}
 		return responseOK(map[string]any{"available": false})
 	}
 	return signalInboxResponse(message)
@@ -269,6 +278,11 @@ func YggPollSignal(handle C.int) *C.char {
 	})
 }
 
+// YggWaitSignal blocks up to timeoutMs for a signal. The app calls it from
+// a thread of its own (a Dart isolate), so signals arrive as they come
+// instead of on a polling timer. When the node stops, a waiting call
+// returns at once with {"available": false, "closed": true}.
+//
 //export YggWaitSignal
 func YggWaitSignal(handle C.int, timeoutMs C.int) *C.char {
 	return withNode(handle, func(node *bridgeNode) *C.char {
@@ -311,5 +325,39 @@ func YggCloseRelay(handle C.int, callID *C.char) *C.char {
 	return withNode(handle, func(node *bridgeNode) *C.char {
 		node.closeRelay(C.GoString(callID))
 		return responseOK(map[string]any{"closed": true})
+	})
+}
+
+// YggStartDoorNode runs the flat's door next to the node (door_node.go):
+// a second node with its own key (seedHex: a 32-byte ed25519 seed as hex,
+// kept by the app), peered to this one over loopback, that only takes
+// knocks. A door with another key is replaced; the same key keeps it.
+//
+//export YggStartDoorNode
+func YggStartDoorNode(handle C.int, seedHex *C.char) *C.char {
+	return withNode(handle, func(node *bridgeNode) *C.char {
+		// Sessions with the door need the node's packet loop.
+		startPacketLoop(node)
+		if _, err := node.startDoor(C.GoString(seedHex)); err != nil {
+			return responseError(err)
+		}
+		return responseOK(node.doorState())
+	})
+}
+
+//export YggStopDoorNode
+func YggStopDoorNode(handle C.int) *C.char {
+	return withNode(handle, func(node *bridgeNode) *C.char {
+		node.stopDoor()
+		return responseOK(map[string]any{"stopped": true})
+	})
+}
+
+// YggGetDoorNodeJson tells whether the door runs, and its address.
+//
+//export YggGetDoorNodeJson
+func YggGetDoorNodeJson(handle C.int) *C.char {
+	return withNode(handle, func(node *bridgeNode) *C.char {
+		return responseOK(node.doorState())
 	})
 }

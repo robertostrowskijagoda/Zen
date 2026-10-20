@@ -37,11 +37,16 @@ final class SignalTransportFrame {
     required this.from,
     required this.payload,
     required this.receivedAtMillis,
+    this.door = false,
   });
 
   final String from;
   final Map<String, dynamic> payload;
   final int receivedAtMillis;
+
+  /// It came to the flat's door address (a knock on the door sticker,
+  /// §18.2), not to this phone's own address.
+  final bool door;
 }
 
 abstract interface class SignalTransport {

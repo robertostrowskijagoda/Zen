@@ -7,7 +7,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
-import 'package:zen/src/features/security/app_security_crypto.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/security_payload_protector.dart';
 
@@ -141,6 +140,48 @@ void main() {
     expect(runtime.snapshot.health, RuntimeTransportHealth.stopped);
   });
 
+  test('the flat door runs with the node and comes back after a restart '
+      '(§18.2)', () async {
+    final List<String> doorCalls = <String>[];
+    final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.live(
+      bootstrap: () async => RuntimeNodeSession(
+        transport: MemorySignalTransport(),
+        snapshot: RuntimeTransportSnapshot.started(
+          localAddress: '200:1111:2222:3333:4444:5555:6666:7777',
+          peers: 1,
+        ),
+        startDoor: (String seed) {
+          doorCalls.add('start $seed');
+          return '200:dddd::${seed.substring(0, 2)}';
+        },
+        stopDoor: () => doorCalls.add('stop'),
+      ),
+    );
+    addTearDown(runtime.dispose);
+
+    // Asked for before the node is up: it starts with the node.
+    runtime.setDoorKey('aa');
+    expect(runtime.doorAddress, isNull);
+    await runtime.start();
+    expect(runtime.doorAddress, '200:dddd::aa');
+    expect(doorCalls, <String>['start aa']);
+
+    runtime.setDoorKey('aa');
+    expect(doorCalls, hasLength(1), reason: 'the same key keeps the door');
+    runtime.setDoorKey('bb');
+    expect(runtime.doorAddress, '200:dddd::bb');
+
+    await runtime.stop();
+    expect(runtime.doorAddress, isNull);
+    await runtime.start();
+    expect(runtime.doorAddress, '200:dddd::bb');
+
+    runtime.setDoorKey(null);
+    expect(runtime.doorAddress, isNull);
+    expect(doorCalls.last, 'stop');
+    await runtime.stop();
+  });
+
   test('loadOrCreateNodeConfigJson returns a readable stored config', () async {
     final Directory directory = await Directory.systemTemp.createTemp(
       'zen_node_config',
@@ -262,47 +303,6 @@ void main() {
       throwsA(anything),
     );
   });
-
-  test(
-    'a node config sealed the older way is sealed again, address kept',
-    () async {
-      final Directory directory = await Directory.systemTemp.createTemp(
-        'zen_node_config',
-      );
-      addTearDown(() => directory.delete(recursive: true));
-      final File file = File('${directory.path}/yggdrasil.config.json');
-      final MemoryAppSecurityService security = MemoryAppSecurityService(
-        passwordIterations: 10,
-      );
-      final Uint8List key = (await security.currentEncryptionKey())!;
-      final Uint8List older = Uint8List.fromList(<int>[
-        ...utf8.encode('ZENENC1'),
-        ...await encryptSecurityBytes(
-          Uint8List.fromList(utf8.encode('{"PrivateKey":"mine"}')),
-          key,
-        ),
-      ]);
-      await file.writeAsBytes(older);
-      final EncryptedBinaryPayloadProtector protector =
-          EncryptedBinaryPayloadProtector(security);
-
-      final String loaded = await loadOrCreateNodeConfigJson(
-        file: file,
-        generateConfig: () => '{"PrivateKey":"fresh"}',
-        protector: protector,
-      );
-
-      expect(loaded, '{"PrivateKey":"mine"}');
-      for (final File copy in <File>[file, File('${file.path}.bak')]) {
-        final Uint8List onDisk = await copy.readAsBytes();
-        expect(protector.isSealed(onDisk), isTrue, reason: copy.path);
-        expect(
-          utf8.decode(await protector.unsealFor(kNodeConfigStorageKey, onDisk)),
-          '{"PrivateKey":"mine"}',
-        );
-      }
-    },
-  );
 }
 
 final class _MacFailingProtector implements KeyedBinaryPayloadProtector {

@@ -6,7 +6,8 @@
 #
 # ABIs: the arguments, else ZEN_ANDROID_ABIS (comma-separated, set by Gradle
 # from the ABIs it packages), else all (build_android.sh). Each ABI has its
-# own stamp (<library>.sha256: the sources, the build script and the ABI), so
+# own stamp (<library>.sha256: the sources, the build script, the ABI and
+# `go version`, so a new Go release with security fixes rebuilds too), so
 # only the ABIs whose stamp is stale are built. Without Go or the NDK an
 # existing library is used with a warning. ZEN_SKIP_GO_BRIDGE=1 skips the
 # check.
@@ -44,11 +45,15 @@ sources=$(
   done
 )
 
+# The Go that would build the library (go.mod may pick another toolchain,
+# so asked from the module folder); empty without Go.
+go_version=$(cd "$root" && go version 2> /dev/null || true)
+
 library_of() {
   printf '%s' "$project/android/app/src/main/jniLibs/$1/libyggdrasil_bridge.so"
 }
 hash_of() {
-  printf '%s\nabi=%s\n' "$sources" "$1" | sha
+  printf '%s\nabi=%s\ngo=%s\n' "$sources" "$1" "$go_version" | sha
 }
 
 stale=""

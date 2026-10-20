@@ -261,3 +261,37 @@ func TestSignalRateLimiterStaysBoundedAndRemembersFlooders(t *testing.T) {
 		t.Fatal("a source that used up its budget must not be forgotten for idler ones")
 	}
 }
+
+func TestSignalInboxCloseWakesEveryWaiter(t *testing.T) {
+	var inbox signalQueue
+	results := make(chan bool, 2)
+	for index := 0; index < 2; index++ {
+		go func() {
+			_, ok := inbox.wait(time.Minute)
+			results <- ok
+		}()
+	}
+	time.Sleep(20 * time.Millisecond)
+	if inbox.isClosed() {
+		t.Fatal("a new inbox must not be closed")
+	}
+	inbox.close()
+	inbox.close() // a second stop is harmless
+	for index := 0; index < 2; index++ {
+		select {
+		case ok := <-results:
+			if ok {
+				t.Fatal("a closed inbox has no signal to give")
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("close did not wake a waiter")
+		}
+	}
+	if !inbox.isClosed() {
+		t.Fatal("the inbox should report it is closed")
+	}
+	started := time.Now()
+	if _, ok := inbox.wait(time.Minute); ok || time.Since(started) > time.Second {
+		t.Fatal("waiting on a closed inbox must return at once")
+	}
+}

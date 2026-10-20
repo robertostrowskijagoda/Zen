@@ -14,5 +14,6 @@ ZEN_GO_BRIDGE_SYSTEM = -framework Foundation -framework CoreFoundation -framewor
 ZEN_GO_BRIDGE_KEEP_1 = -Wl,-u,_YggFreeString -Wl,-u,_YggGetVersion -Wl,-u,_YggGenerateConfigJson -Wl,-u,_YggSummarizeConfigJson -Wl,-u,_YggStartNode -Wl,-u,_YggStopNode -Wl,-u,_YggGetNodeInfo
 ZEN_GO_BRIDGE_KEEP_2 = -Wl,-u,_YggGetPeersJson -Wl,-u,_YggGetPathsJson -Wl,-u,_YggGetTreeJson -Wl,-u,_YggGetSessionsJson -Wl,-u,_YggRetryPeersNow -Wl,-u,_YggAddPeer -Wl,-u,_YggRemovePeer
 ZEN_GO_BRIDGE_KEEP_3 = -Wl,-u,_YggCallPeer -Wl,-u,_YggStartSignaling -Wl,-u,_YggSendSignal -Wl,-u,_YggPollSignal -Wl,-u,_YggWaitSignal -Wl,-u,_YggOpenRelayJson -Wl,-u,_YggCloseRelay
+ZEN_GO_BRIDGE_KEEP_4 = -Wl,-u,_YggStartDoorNode -Wl,-u,_YggStopDoorNode -Wl,-u,_YggGetDoorNodeJson -Wl,-u,_YggGetBuildInfoJson -Wl,-u,_YggSetDnsServersJson
 
-ZEN_GO_BRIDGE_LDFLAGS = -force_load "$(ZEN_GO_BRIDGE_LIB)" $(ZEN_GO_BRIDGE_SYSTEM) $(ZEN_GO_BRIDGE_KEEP_1) $(ZEN_GO_BRIDGE_KEEP_2) $(ZEN_GO_BRIDGE_KEEP_3)
+ZEN_GO_BRIDGE_LDFLAGS = -force_load "$(ZEN_GO_BRIDGE_LIB)" $(ZEN_GO_BRIDGE_SYSTEM) $(ZEN_GO_BRIDGE_KEEP_1) $(ZEN_GO_BRIDGE_KEEP_2) $(ZEN_GO_BRIDGE_KEEP_3) $(ZEN_GO_BRIDGE_KEEP_4)

@@ -33,38 +33,49 @@ void main() {
       bridge: bridge,
       nodeHandle: 7,
       compressor: const _PassthroughSignalCompressor(),
-      waitTimeout: const Duration(milliseconds: 1),
+      fallbackPollInterval: const Duration(milliseconds: 10),
     );
-    final Completer<SignalTransportFrame> completer =
-        Completer<SignalTransportFrame>();
+    final List<SignalTransportFrame> frames = <SignalTransportFrame>[];
+    final Completer<void> completer = Completer<void>();
 
-    bridge.pollResponses.add(<String, dynamic>{
-      'available': true,
-      'from': 'ada.ygg',
-      'payload': '{"type":"pong","state":"foreground"}',
-    });
+    bridge.pollResponses
+      ..add(<String, dynamic>{
+        'available': true,
+        'from': 'ada.ygg',
+        'payload': '{"type":"pong","state":"foreground"}',
+      })
+      // A knock that came to the flat's door (door_node.go).
+      ..add(<String, dynamic>{
+        'available': true,
+        'from': 'bob.ygg',
+        'payload': '{"type":"flat_hello"}',
+        'door': true,
+      });
 
     final StreamSubscription<SignalTransportFrame> subscription = transport
         .frames
         .listen((SignalTransportFrame frame) {
-          if (!completer.isCompleted) {
-            completer.complete(frame);
+          frames.add(frame);
+          if (frames.length == 2 && !completer.isCompleted) {
+            completer.complete();
           }
         });
 
     await transport.start();
-    final SignalTransportFrame frame = await completer.future.timeout(
-      const Duration(seconds: 1),
-    );
+    await completer.future.timeout(const Duration(seconds: 1));
     await transport.stop();
     await subscription.cancel();
 
     expect(bridge.startSignalingCalls, 1);
+    final SignalTransportFrame frame = frames.first;
     expect(frame.from, 'ada.ygg');
     expect(frame.payload, const <String, dynamic>{
       'type': 'pong',
       'state': 'foreground',
     });
+    expect(frame.door, isFalse);
+    expect(frames.last.from, 'bob.ygg');
+    expect(frames.last.door, isTrue);
   });
 
   test('openRelay delegates to the native bridge', () async {
@@ -94,7 +105,7 @@ void main() {
       bridge: bridge,
       nodeHandle: 7,
       compressor: const _PassthroughSignalCompressor(),
-      waitTimeout: const Duration(milliseconds: 1),
+      fallbackPollInterval: const Duration(milliseconds: 10),
     );
     final Completer<SignalTransportFrame> completer =
         Completer<SignalTransportFrame>();
@@ -135,7 +146,7 @@ void main() {
       bridge: bridge,
       nodeHandle: 7,
       compressor: const _PassthroughSignalCompressor(),
-      waitTimeout: const Duration(milliseconds: 1),
+      fallbackPollInterval: const Duration(milliseconds: 10),
     );
     final List<SignalTransportFrame> frames = <SignalTransportFrame>[];
     final Completer<void> received = Completer<void>();
@@ -170,42 +181,246 @@ void main() {
     ]);
   });
 
-  test('pump survives pollSignal errors and keeps receiving', () async {
+  test(
+    'pump survives pollSignal errors and keeps receiving (polling)',
+    () async {
+      final _FakeNativeSignalBridge bridge = _FakeNativeSignalBridge();
+      final YggdrasilSignalTransport transport = YggdrasilSignalTransport(
+        bridge: bridge,
+        nodeHandle: 7,
+        compressor: const _PassthroughSignalCompressor(),
+        fallbackPollInterval: const Duration(milliseconds: 10),
+      );
+      final Completer<SignalTransportFrame> completer =
+          Completer<SignalTransportFrame>();
+
+      bridge.pollFailuresRemaining = 2;
+      bridge.pollResponses.add(<String, dynamic>{
+        'available': true,
+        'from': 'ada.ygg',
+        'payload': '{"type":"pong"}',
+      });
+
+      final StreamSubscription<SignalTransportFrame> subscription = transport
+          .frames
+          .listen((SignalTransportFrame frame) {
+            if (!completer.isCompleted) {
+              completer.complete(frame);
+            }
+          });
+
+      await transport.start();
+      final SignalTransportFrame frame = await completer.future.timeout(
+        const Duration(seconds: 10),
+      );
+      await transport.stop();
+      await subscription.cancel();
+
+      expect(frame.from, 'ada.ygg');
+      expect(frame.payload, const <String, dynamic>{'type': 'pong'});
+    },
+  );
+
+  test('signals arrive through the waiter as they come', () async {
     final _FakeNativeSignalBridge bridge = _FakeNativeSignalBridge();
+    final _FakeSignalWaiter waiter = _FakeSignalWaiter();
     final YggdrasilSignalTransport transport = YggdrasilSignalTransport(
       bridge: bridge,
       nodeHandle: 7,
       compressor: const _PassthroughSignalCompressor(),
-      waitTimeout: const Duration(milliseconds: 1),
+      openWaiter: () async => waiter,
+      // A poll would show up here only as the drain after each signal.
+      fallbackPollInterval: const Duration(hours: 1),
     );
-    final Completer<SignalTransportFrame> completer =
-        Completer<SignalTransportFrame>();
+    final List<SignalTransportFrame> frames = <SignalTransportFrame>[];
+    final StreamSubscription<SignalTransportFrame> subscription = transport
+        .frames
+        .listen(frames.add);
 
-    bridge.pollFailuresRemaining = 2;
+    await transport.start();
+    await waiter.untilWaiting();
+    expect(frames, isEmpty);
+    expect(bridge.pollCalls, 0);
+
+    waiter.deliver(<String, dynamic>{
+      'available': true,
+      'from': 'ada.ygg',
+      'payload': '{"type":"ping"}',
+    });
+    await waiter.untilWaiting();
+    expect(frames.single.from, 'ada.ygg');
+    // One drain after the signal, nothing on a timer.
+    expect(bridge.pollCalls, 1);
+
+    // An empty wait (its timeout) is simply renewed.
+    waiter.deliver(const <String, dynamic>{'available': false});
+    await waiter.untilWaiting();
+    expect(frames, hasLength(1));
+    expect(bridge.pollCalls, 1);
+    expect(waiter.timeouts.toSet(), <Duration>{const Duration(seconds: 2)});
+
+    await transport.stop();
+    await subscription.cancel();
+    expect(waiter.closed, isTrue);
+  });
+
+  test('stop does not wait for a pending wait', () async {
+    final _FakeSignalWaiter waiter = _FakeSignalWaiter();
+    final YggdrasilSignalTransport transport = YggdrasilSignalTransport(
+      bridge: _FakeNativeSignalBridge(),
+      nodeHandle: 7,
+      compressor: const _PassthroughSignalCompressor(),
+      openWaiter: () async => waiter,
+      waitTimeout: const Duration(hours: 1),
+    );
+
+    await transport.start();
+    await waiter.untilWaiting();
+    await transport.stop().timeout(const Duration(seconds: 1));
+
+    expect(waiter.closed, isTrue);
+  });
+
+  test('the pump ends when the node stops', () async {
+    final _FakeSignalWaiter waiter = _FakeSignalWaiter();
+    final YggdrasilSignalTransport transport = YggdrasilSignalTransport(
+      bridge: _FakeNativeSignalBridge(),
+      nodeHandle: 7,
+      compressor: const _PassthroughSignalCompressor(),
+      openWaiter: () async => waiter,
+    );
+
+    await transport.start();
+    await waiter.untilWaiting();
+    waiter.deliver(const <String, dynamic>{'available': false, 'closed': true});
+    await waiter.closedFuture.timeout(const Duration(seconds: 1));
+    expect(waiter.waitCount, 1);
+    await transport.stop();
+  });
+
+  test('a failing waiter falls back to polling', () async {
+    final _FakeNativeSignalBridge bridge = _FakeNativeSignalBridge();
+    final _FakeSignalWaiter waiter = _FakeSignalWaiter();
+    final YggdrasilSignalTransport transport = YggdrasilSignalTransport(
+      bridge: bridge,
+      nodeHandle: 7,
+      compressor: const _PassthroughSignalCompressor(),
+      openWaiter: () async => waiter,
+      fallbackPollInterval: const Duration(milliseconds: 10),
+    );
+    final Completer<SignalTransportFrame> received =
+        Completer<SignalTransportFrame>();
+    final StreamSubscription<SignalTransportFrame> subscription = transport
+        .frames
+        .listen((SignalTransportFrame frame) {
+          if (!received.isCompleted) {
+            received.complete(frame);
+          }
+        });
+
+    await transport.start();
+    await waiter.untilWaiting();
+    waiter.fail(StateError('simulated waiter crash'));
     bridge.pollResponses.add(<String, dynamic>{
       'available': true,
       'from': 'ada.ygg',
       'payload': '{"type":"pong"}',
     });
-
-    final StreamSubscription<SignalTransportFrame> subscription = transport
-        .frames
-        .listen((SignalTransportFrame frame) {
-          if (!completer.isCompleted) {
-            completer.complete(frame);
-          }
-        });
-
-    await transport.start();
-    final SignalTransportFrame frame = await completer.future.timeout(
-      const Duration(seconds: 10),
+    final SignalTransportFrame frame = await received.future.timeout(
+      const Duration(seconds: 5),
     );
     await transport.stop();
     await subscription.cancel();
 
     expect(frame.from, 'ada.ygg');
-    expect(frame.payload, const <String, dynamic>{'type': 'pong'});
+    expect(waiter.closed, isTrue);
   });
+
+  test('a waiter that cannot start falls back to polling', () async {
+    final _FakeNativeSignalBridge bridge = _FakeNativeSignalBridge();
+    final YggdrasilSignalTransport transport = YggdrasilSignalTransport(
+      bridge: bridge,
+      nodeHandle: 7,
+      compressor: const _PassthroughSignalCompressor(),
+      openWaiter: () async => throw StateError('no isolate'),
+      fallbackPollInterval: const Duration(milliseconds: 10),
+    );
+    final Completer<SignalTransportFrame> received =
+        Completer<SignalTransportFrame>();
+    bridge.pollResponses.add(<String, dynamic>{
+      'available': true,
+      'from': 'ada.ygg',
+      'payload': '{"type":"pong"}',
+    });
+    final StreamSubscription<SignalTransportFrame> subscription = transport
+        .frames
+        .listen((SignalTransportFrame frame) {
+          if (!received.isCompleted) {
+            received.complete(frame);
+          }
+        });
+
+    await transport.start();
+    final SignalTransportFrame frame = await received.future.timeout(
+      const Duration(seconds: 5),
+    );
+    await transport.stop();
+    await subscription.cancel();
+
+    expect(frame.from, 'ada.ygg');
+  });
+}
+
+/// A waiter driven by the test: each wait stays pending until [deliver].
+final class _FakeSignalWaiter implements SignalWaiter {
+  final Completer<void> _closed = Completer<void>();
+  final List<Duration> timeouts = <Duration>[];
+  Completer<Map<String, dynamic>>? _pending;
+  int waitCount = 0;
+
+  bool get closed => _closed.isCompleted;
+
+  Future<void> get closedFuture => _closed.future;
+
+  /// Returns once the transport is blocked in a wait (so whatever it did
+  /// with the previous result is done).
+  Future<void> untilWaiting() async {
+    for (int tries = 0; _pending == null; tries++) {
+      if (tries > 2000) {
+        throw StateError('The transport never waited.');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    }
+  }
+
+  void deliver(Map<String, dynamic> result) {
+    final Completer<Map<String, dynamic>> pending = _pending!;
+    _pending = null;
+    pending.complete(result);
+  }
+
+  void fail(Object error) {
+    final Completer<Map<String, dynamic>> pending = _pending!;
+    _pending = null;
+    pending.completeError(error);
+  }
+
+  @override
+  Future<Map<String, dynamic>> wait(Duration timeout) {
+    waitCount += 1;
+    timeouts.add(timeout);
+    final Completer<Map<String, dynamic>> pending =
+        Completer<Map<String, dynamic>>();
+    _pending = pending;
+    return pending.future;
+  }
+
+  @override
+  Future<void> close() async {
+    if (!_closed.isCompleted) {
+      _closed.complete();
+    }
+  }
 }
 
 final class _FakeNativeSignalBridge implements NativeSignalBridge {
@@ -219,6 +434,7 @@ final class _FakeNativeSignalBridge implements NativeSignalBridge {
   int startSignalingCalls = 0;
   int relayPort = 0;
   int pollFailuresRemaining = 0;
+  int pollCalls = 0;
 
   @override
   Map<String, dynamic> sendSignal(
@@ -247,6 +463,7 @@ final class _FakeNativeSignalBridge implements NativeSignalBridge {
 
   @override
   Map<String, dynamic> pollSignal(int handle) {
+    pollCalls += 1;
     if (pollFailuresRemaining > 0) {
       pollFailuresRemaining -= 1;
       throw StateError('simulated FFI poll failure');
