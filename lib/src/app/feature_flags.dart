@@ -9,10 +9,10 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 
 /// Parts of Zen that a "core" release (A15) can leave out of sight.
 ///
-/// A flag only hides the feature's tabs and entry points; its services keep
-/// their data (turning it back on shows everything as it was). Moving the
-/// services themselves behind the flag needs `ZenCore` with feature modules
-/// (A15, step 0).
+/// A flag hides the feature's tabs and entry points, and `ZenCore` does not
+/// start the feature's module (its services, timers and reloads). The data
+/// stays on the device: turning the feature back on shows everything as it
+/// was.
 enum ZenFeature {
   pyramid(
     'pyramid',
@@ -121,8 +121,15 @@ final class FeatureFlagsController extends Notifier<FeatureFlags> {
   /// Set once the user changed something: a slow load must not undo it.
   bool _touched = false;
 
+  Completer<void> _loaded = Completer<void>();
+
+  /// Completes once the stored choices were read (or found missing or
+  /// unreadable): `ZenCore` waits for it before it picks feature modules.
+  Future<void> get loaded => _loaded.future;
+
   @override
   FeatureFlags build() {
+    _loaded = Completer<void>();
     unawaitedLogged(
       Future<void>.microtask(_load),
       context: 'Loading feature flags failed',
@@ -131,16 +138,23 @@ final class FeatureFlagsController extends Notifier<FeatureFlags> {
   }
 
   Future<void> _load() async {
-    final Uint8List? raw = await ref
-        .read(ledgerDiskProvider)
-        .read(kFeatureFlagsKey);
-    if (raw == null || raw.isEmpty || _touched || !ref.mounted) {
-      return;
-    }
+    final Completer<void> loaded = _loaded;
     try {
-      state = FeatureFlags.fromJson(jsonDecode(utf8.decode(raw)));
-    } on FormatException {
-      // Unreadable: the build defaults stay.
+      final Uint8List? raw = await ref
+          .read(ledgerDiskProvider)
+          .read(kFeatureFlagsKey);
+      if (raw == null || raw.isEmpty || _touched || !ref.mounted) {
+        return;
+      }
+      try {
+        state = FeatureFlags.fromJson(jsonDecode(utf8.decode(raw)));
+      } on FormatException {
+        // Unreadable: the build defaults stay.
+      }
+    } finally {
+      if (!loaded.isCompleted) {
+        loaded.complete();
+      }
     }
   }
 
