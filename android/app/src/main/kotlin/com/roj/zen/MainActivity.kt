@@ -80,6 +80,7 @@ class MainActivity : FlutterFragmentActivity() {
         ZenSecurityBridge.register(flutterEngine, this)
         ZenUpdateBridge.register(flutterEngine, this)
         ZenSystemBridge.register(flutterEngine, this)
+        ZenMulticastLock.register(flutterEngine, this)
         ZenNearbyBridge.register(flutterEngine, this)
         ZenPermissionsBridge.register(flutterEngine, this)
         ZenAlarmShortcut.register(flutterEngine, this, background = false)

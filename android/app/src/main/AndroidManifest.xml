@@ -114,10 +114,6 @@
               android:value="false"
               />
             <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-            <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
@@ -150,6 +146,39 @@
                 <data android:path="/robertostrowskijagoda/zen"/>
             </intent-filter>
         </activity>
+        <!-- The launcher entries (§14.2, "Kamuflaż ikony"): exactly one of
+             these two aliases is enabled. MainActivity itself has no
+             LAUNCHER filter, so it stays enabled in both states (links and
+             notifications keep opening it); ZenSystemBridge "setDisguise"
+             flips the aliases. The default one is Zen's own icon and name;
+             the other is a neutral notes icon, off until the person turns
+             it on. -->
+        <activity-alias
+            android:name=".LauncherDefault"
+            android:targetActivity=".MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:label="Zen"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherDisguise"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/disguise_label"
+            android:icon="@mipmap/ic_disguise_notes"
+            android:roundIcon="@mipmap/ic_disguise_notes">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
         <!-- Only ever started by the app itself (explicit intents and the
              incoming-call notification's full-screen intent), so other apps
              cannot open it with a forged caller or route. -->

@@ -9,4 +9,5 @@
     <color name="incoming_call_accent">#FFF7F7F7</color>
     <color name="incoming_call_on_accent">#FF1C1C1C</color>
     <color name="incoming_call_avatar">#29333333</color>
+    <color name="disguise_icon_background">#FF3F6E9E</color>
 </resources>
