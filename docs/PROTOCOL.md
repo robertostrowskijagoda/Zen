@@ -136,7 +136,7 @@ Direction is sender -> recipient unless stated. "Reliable" means the type is in
 
 | type | Fields | Notes |
 |---|---|---|
-| `message` | `msgId`, `senderName`, `text`, `messageType` (`text|image|file|voice|video`), `attachmentData` (base64), `attachmentEncoding`, `fileName`, `mimeType`, `attachmentSizeBytes`, `durationMs`, `gifUrl`, `createdAt` (sender clock, ms), `ttl` (seconds) | Reliable. One of `text`, `attachmentData`, `gifUrl` required. `gifUrl` must be `https` on `klipy.com` or a subdomain, no IP literal; otherwise it is dropped. Frames up to 48 KB can be mailbox-relayed (section 3.2); the signal limit is 2 MiB. |
+| `message` | `msgId`, `senderName`, `text`, `messageType` (`text|image|file|voice|video`), `attachmentData` (base64), `attachmentEncoding`, `fileName`, `mimeType`, `attachmentSizeBytes`, `durationMs`, `createdAt` (sender clock, ms), `ttl` (seconds) | Reliable. One of `text`, `attachmentData` required. GIFs travel as ordinary image attachments. Frames up to 48 KB can be mailbox-relayed (section 3.2); the signal limit is 2 MiB. |
 | `message_placeholder` | as `message` plus `chunkCount`, `chunkIndex`, `attachmentTransferBytes` | Announces a large attachment sent in chunks. |
 | `message_chunk` | `msgId`, `chunkIndex`, `chunkCount`, `chunkData` (base64), + placeholder fields | Not reliable; has its own protocol. Never compressed (high-entropy). |
 | `message_chunk_ack` | `msgId`, `chunkIndex` | |
@@ -208,12 +208,12 @@ usually not friends): a door QR gives a "door secret" that authorises
 
 ### 2.8 Dating (`date_*`) [P]
 
-Only between friends, except the flooded package.
+Only between friends, except the flooded lantern.
 
 | type | Notes |
 |---|---|
-| `date_pkg` | `{id, hops, path, p}`: a sealed profile package (or a cover package when dating is off) flooded to friends, `kDatingHops = 3`. `p` is `{v:2, k: dating key, n: nonce, c: ciphertext}` padded to 4096-byte buckets, at most 128 buckets (`DatingPackage`). Passing phones cannot read it. |
-| `date_back` | A `DatingBox`-sealed message travelling back along `path` (key request/answer, replies, "Yes" token). |
+| `date_lantern` | `{id, hops, path, l}`: a lantern (a decoy when dating is off) flooded to friends, `kDatingMaxHops = 2` (`hops` starts at 1). `l` is `{v:3, k: dating key, h: base64url of 6 bytes: age, gender, min age, max age, gender mask, steps}` (`DatingLantern`), about 100 bytes. |
+| `date_back` | A `DatingBox`-sealed message travelling back along `path` (profile request `fetch` / answer `prof`, replies, "Yes" token). The `prof` answer carries the profile or a cover, padded to 4096-byte buckets. |
 | `date_ask`, `date_ask_re` | "What do you think about X?" and the answer, between friends. |
 | `date_vouch_req`, `date_vouch` | Ask for / give a few words for a profile. |
 | `date_safe`, `date_safe_ok`, `date_loc_req` | "I'm going on a date", "All OK", a one-shot location request. |
@@ -255,15 +255,12 @@ Not Yggdrasil. Implementation: `ZenNearbyBridge.kt`, `nearby.dart`,
   alarm waves from friends have a separate budget of 60 and are admitted once
   per minute per wave.
 - **Wave** = UTF-8 JSON, field `v` selects the kind:
-  - `v: 1` hello: `{v:1, sid, n (pseudonym<=40), a (mesh address), m (text<=300)}`.
-    Replies travel on the mesh as `nearby_msg` {`sid`, `n`, `m` (<=2000)}. The
-    address is the sender's own claim (Bluetooth carries no proof).
-  - `v: 5` alarm wave: `{v:5, id, at, end?, t?, m?}`; `t` = sender's nearby
-    token at `at` (hex), `m` = `HMAC-SHA256(secret, "zen-nearby-alarm|5|" + id +
-    "|" + at + "|" + (end?1:0) + "|" + t)[0..16]` (hex). Accepted only if `at`
-    is within +/-10 minutes and the MAC verifies for a friend's secret; an
-    unsigned or unverified wave is only shown as a quiet note. Older versions
-    are not read.
+  - `v: 6` alarm wave: `{v:6, id, at, end?, t?, m?}`; `t` = the pair's id at
+    `at` (hex), `m` = `HMAC-SHA256(pairKey, "zen-nearby-alarm|6|" + id + "|" +
+    at + "|" + (end?1:0) + "|" + t)[0..16]` (hex). Accepted only if `at` is
+    within +/-10 minutes and the MAC verifies for a friend's pair key; an
+    unsigned (told to everyone) or unverified wave is only shown as a quiet
+    note. Other versions are not read.
   - other `v`: handed to registered handlers (flat invitations, crisis
     announcements) [?] formats.
 
@@ -428,8 +425,8 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
 | Mailboxes | X25519 ephemeral + static sender key, `HKDF-SHA256(DH(e,R) || DH(S,R), salt = ephemeral public key, info = "zen.relay.v1")`, ChaCha20-Poly1305, AAD `zen.relay.env|id|sender|recipient|created|expires`; plaintext is the JSON of the payload | `relay_crypto.dart` |
 | Ledger entries | Ed25519 device signature; Ed25519 account-signed certificate; SHA-256 ids; canonical JSON | `core/ledger` |
 | Ledger audiences | ChaCha20-Poly1305, 32-byte keys, nonce 12 bytes random, AAD `account|kid` | `audience_keys.dart` |
-| Nearby | HMAC-SHA256 tokens (15-min epochs) and alarm MAC (v5) | `nearby_crypto.dart` |
-| Dating | `DatingBox`: two layers of the mailbox construction with AAD `zen.date.v1` (inner by the sender's dating key, outer by a one-off key); packages ChaCha20-Poly1305 under a random per-package key, padded to 4096-byte buckets; "Yes" token `HMAC-SHA256(DH(me,them), "zen-date-like|" + sorted keys)` | `dating_crypto.dart` |
+| Nearby | hash-chain tokens (10-min slots) and alarm MAC (v6) | `nearby_crypto.dart` |
+| Dating | `DatingBox`: two layers of the mailbox construction with AAD `zen.date.v1` (inner by the sender's dating key, outer by a one-off key); profile answers are `DatingBox`es padded to 4096-byte buckets; "Yes" token `HMAC-SHA256(DH(me,them), "zen-date-like|" + sorted keys)` | `dating_crypto.dart` |
 | Pyramid | Ed25519 record signatures; LSAG ring signatures; treasurer co-signatures | `pyramid_record.dart`, `ring_signature.dart` |
 | Recovery | Shamir secret sharing of the key among the recovery circle (up to 6 friends) [?] details | `core/ledger/shamir.dart`, `account/recovery_service.dart` |
 | Releases | Ed25519 maintainer signatures and APK certificate check ("Podaj dalej") | `update/release.dart`, `apk_signature.dart` |
@@ -452,8 +449,8 @@ comes from additive changes and tolerant parsing:
    new field or type. Old peers keep working because they ignore it.
 3. Where a format needs a version it has its own: ledger entry `v` (1; entries
    with a higher `v` are still stored and passed on; only this build's own checks
-   apply), dating package `v:2`, alarm wave `v:5` (older waves are not read),
-   BLE hello `v:1`, relay and dating KDF/AAD labels `*.v1`, blob manifest
+   apply), dating lantern `v:3`, alarm wave `v:6`,
+   BLE hello `v:7`, relay and dating KDF/AAD labels `*.v1`, blob manifest
    `chunk` size, `profile_update.v` (monotonic counter), relay announcement
    version `v`.
 4. The compression wire formats are all accepted: plain JSON, `ZSTD:` + base64,

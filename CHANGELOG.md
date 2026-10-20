@@ -28,7 +28,6 @@
 - **Group invites:** "Who can invite me to groups" (Anyone / All friends / Friends and close friends (default) / Close friends only); an invite below the threshold is rejected immediately.
 - **Per-field profile visibility:** status, About me, photo, background, nationality, friend count, follower count — each Public / All friends / Friends and close / Close / Only me. Public fields go in the public entry, the rest in encrypted per-audience entries.
 - Your device address goes into the public profile only when you have a public post or share.
-- **Age gate:** before Dating, Pyramid and Wallet the app asks for a date of birth or "I am 18 or older"; the answer stays on the device, and under-18s see the sections closed.
 - **Dating:** "I'm going on a date" can request your location on demand (the friend asks, your phone asks you or answers automatically if you agreed); "Report a minor" disables a profile locally at once and reports it to the pyramid, and a phone that receives reports from 2+ different reporters disables it too; re-confirmation with password or biometrics when entering Dating and after returning from the background.
 - **Screen sharing:** system notifications are shown without content, a permanent red banner says the whole screen is visible, and Android older than 14 gets a warning first.
 - Offline mailbox attachments use per-sender quotas and ciphertext only; recorded calls beep for all participants.
@@ -50,7 +49,7 @@
 ### Docs
 - New in English: `docs/PRIVACY.md`, `docs/TERMS.md`, `docs/DPIA.md` (draft impact assessment), `docs/PROTOCOL.md` (protocol specification derived from the code, with [V]/[P]/[?] markers).
 - Renamed: `STATUS.md` → `docs/STATUS.md`, `PLAN.md` → `docs/PLAN.md`, `RELEASES.md` → `docs/RELEASES.md`, `TESTING.md` → `docs/TESTING.md`.
-- README and CHANGELOG are now in English (README also in Polish: `README.pl.md`); `SECURITY.md` is English-first.
+- README and CHANGELOG are now in English; `SECURITY.md` is English-first.
 
 ## 1.10.0 — 14.10.2026 (first public release)
 
