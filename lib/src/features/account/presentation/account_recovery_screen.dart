@@ -674,17 +674,6 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
           key: Key('recovery-helpers-$index'),
           style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
         ),
-        if (!c.claimed) ...<Widget>[
-          const SizedBox(height: 8),
-          ZenInfo(
-            icon: Icons.info_outline_rounded,
-            tone: zen.warning,
-            text: t(
-              'Pomocnicy mają starszą wersję Zen i nie podali, czyje to '
-              'konto. Przejmij je tylko, jeśli odcisk się zgadza.',
-            ),
-          ),
-        ],
         const SizedBox(height: 10),
         FilledButton.icon(
           key: Key('recovery-adopt-$index'),

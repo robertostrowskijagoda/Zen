@@ -118,14 +118,11 @@ final class _DeviceRef {
   /// HLC millis of the record it came from (0: learnt from a hello).
   int at;
 
-  /// `v`: proven by a hello from this address (entries saved before that
-  /// was required have no `v`, see `LedgerNode._loadDevices`).
   Map<String, dynamic> toJson() => <String, dynamic>{
     'a': account,
     'd': device,
     'n': name,
     't': at,
-    'v': 1,
   };
 }
 
@@ -1016,6 +1013,18 @@ final class LedgerNode {
   /// This account's other devices that can be reached.
   List<String> get siblingAddresses => addressesOfAccount(account);
 
+  /// Friends' devices and this account's other devices whose key and mesh
+  /// address a signed hello proved, for direct links nearby (§5.1 item 6).
+  List<AccountDevice> get linkableDevices => <AccountDevice>[
+    for (final String a in _liveDeviceAddresses())
+      AccountDevice(
+        account: _devices[a]!.account,
+        device: _devices[a]!.device,
+        name: _devices[a]!.name,
+        address: a,
+      ),
+  ];
+
   /// [accountOfAddress], or the account of a group member's device learnt
   /// from its hello.
   String? accountOfAnyAddress(String address) {
@@ -1499,24 +1508,7 @@ final class LedgerNode {
             if (a is String && d is String) {
               final String name = n is String ? n : '';
               final int at = t is int ? t : 0;
-              if (v['v'] == 1 || a == account) {
-                // Proven, or one of this account's own devices (only they
-                // write its records).
-                _devices[k] = _DeviceRef(a, d, name, at);
-              } else {
-                // Saved before an address needed a proof (perhaps from a
-                // record alone): greeted again, known once it answers.
-                final _DeviceHint? had = _deviceHints[d];
-                if (had == null || had.at < at) {
-                  _deviceHints[d] = _DeviceHint(
-                    a,
-                    d,
-                    name,
-                    at,
-                    PeerShareCodec.normalizeAddress(k),
-                  );
-                }
-              }
+              _devices[k] = _DeviceRef(a, d, name, at);
             }
           }
         });

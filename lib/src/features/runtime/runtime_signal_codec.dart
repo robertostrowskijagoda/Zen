@@ -103,7 +103,7 @@ Future<Map<String, dynamic>?> decodeRuntimeSignalPayload(
   // Senders never compress more than [kRuntimeSignalMaxBytes] of JSON, so
   // anything claiming more is a decompression bomb, not a signal. (The Go
   // bridge compresses large signals itself and bounds its own decoder; this
-  // Dart-level wrapper is still produced and accepted for older peers.)
+  // Dart-level wrapper is the other wire form of the same thing.)
   final Uint8List decodedBytes = await boundedZstdDecompress(
     Uint8List.fromList(base64Decode(encodedPayload)),
     maxBytes: kRuntimeSignalMaxBytes,

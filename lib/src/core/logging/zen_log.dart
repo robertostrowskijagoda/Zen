@@ -109,8 +109,7 @@ abstract final class ZenDiagnosticsLog {
   }
 
   /// Reads the log back, newest content last. Returns an empty string when
-  /// nothing has been recorded yet. Lines written by an older version,
-  /// before the redaction covered URLs and paths, are redacted here too.
+  /// nothing has been recorded yet. Lines are redacted when written.
   static Future<String> read() async {
     final File? target = _file;
     if (target == null) {
@@ -120,11 +119,7 @@ abstract final class ZenDiagnosticsLog {
       if (!await target.exists()) {
         return '';
       }
-      return redactDiagnosticsText(
-        await target.readAsString(),
-        privatePlaces: _privatePlaces,
-        homeDirectory: _home,
-      );
+      return await target.readAsString();
     } catch (error) {
       return t('Nie udało się odczytać dziennika: {error}', {'error': error});
     }

@@ -21,16 +21,14 @@ import (
 )
 
 func ensureDefaultRuntimeConfig(cfg *config.NodeConfig) {
-	// LAN discovery (multicast) beacons carry this node's public key, which
-	// is also the person's Zen identity. On a café or office network anyone
-	// listening could recognise (and follow) them, and every Yggdrasil node
-	// there would peer with them on its own. So it stays off unless the app
-	// turns it on with a password (one only the person's own devices share).
-	cfg.MulticastInterfaces = lanDiscoveryInterfaces(cfg.MulticastInterfaces)
+	// Yggdrasil's multicast discovery stays off: its beacons carry this
+	// node's public key, which is also the person's Zen identity, so anyone
+	// on a café or office network could recognise (and follow) them. Devices
+	// nearby find each other through lan_discovery.go instead.
+	cfg.MulticastInterfaces = []config.MulticastInterfaceConfig{}
 	switch {
 	case isPhoneOS():
-		// iOS gets the phone profile too: no inbound port to open, and
-		// multicast needs an entitlement only paid accounts can get.
+		// iOS gets the phone profile too: no inbound port to open.
 		applyAndroidRuntimeConfig(cfg)
 	default:
 		cfg.Peers = desktopRuntimePeers(cfg.Peers)
@@ -39,55 +37,6 @@ func ensureDefaultRuntimeConfig(cfg *config.NodeConfig) {
 		// home router and announces it once friends confirm it works.
 		cfg.Listen = []string{defaultDesktopPeerListen}
 	}
-}
-
-// lanDiscoveryInterfaces keeps LAN discovery only when it was configured
-// with a password: devices then peer only with others that know it.
-// Yggdrasil's generated default (beacon and listen everywhere, no password),
-// which older app versions stored in their config, is dropped.
-func lanDiscoveryInterfaces(configured []config.MulticastInterfaceConfig) []config.MulticastInterfaceConfig {
-	for _, intf := range configured {
-		if intf.Password == "" || (!intf.Beacon && !intf.Listen) {
-			continue
-		}
-		return []config.MulticastInterfaceConfig{
-			{
-				Regex:    multicastInterfaceRegex(),
-				Beacon:   intf.Beacon,
-				Listen:   intf.Listen,
-				Port:     intf.Port,
-				Priority: intf.Priority,
-				Password: intf.Password,
-			},
-		}
-	}
-	return []config.MulticastInterfaceConfig{}
-}
-
-// applyLanDiscovery turns LAN discovery on when the app asked for it in
-// the node config (lan_discovery.go). Without that setting the node keeps
-// what ensureDefaultRuntimeConfig left: off, or an older config's own
-// password on a computer.
-func applyLanDiscovery(cfg *config.NodeConfig, setting zenLanDiscovery) {
-	regex, password, ok := currentLanDiscoveryPlan(setting)
-	if !ok {
-		return
-	}
-	cfg.MulticastInterfaces = []config.MulticastInterfaceConfig{
-		{
-			Regex:    regex,
-			Beacon:   true,
-			Listen:   true,
-			Password: password,
-		},
-	}
-}
-
-func multicastInterfaceRegex() string {
-	if runtime.GOOS == "android" {
-		return androidMulticastInterfaceRegex
-	}
-	return defaultMulticastInterfaceRegex
 }
 
 func applyAndroidRuntimeConfig(cfg *config.NodeConfig) {

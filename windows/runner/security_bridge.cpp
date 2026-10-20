@@ -20,9 +20,8 @@ using flutter::EncodableValue;
 
 constexpr wchar_t kKeyName[] = L"ZenMasterWrapV1";
 constexpr uint8_t kTpm = 'T';
-// Tokens sealed by older versions with DPAPI start with 'D'. They are no
-// longer opened: DPAPI hands the secret to any program running as this
-// Windows user, with no Windows Hello in between.
+// Tokens are sealed by the TPM only: DPAPI would hand the secret to any
+// program running as this Windows user, with no Windows Hello in between.
 
 std::unique_ptr<flutter::MethodChannel<EncodableValue>> g_window_channel;
 std::unique_ptr<flutter::MethodChannel<EncodableValue>> g_vault_channel;

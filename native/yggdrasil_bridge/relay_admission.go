@@ -24,8 +24,7 @@ import (
 // "<local ufrag>:<remote ufrag>". Until it has learned it, a local Binding
 // request is passed to the peer (rate limited) without admitting its
 // sender, so the peer can learn ours the same way and neither side waits
-// for the other. Relays of older versions forward everything, which also
-// works.
+// for the other.
 
 const (
 	stunHeaderSize       = 20

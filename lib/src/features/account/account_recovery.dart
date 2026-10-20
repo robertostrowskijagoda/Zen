@@ -88,20 +88,17 @@ final class PasswordCost {
 
 /// Argon2id cost of the password half of new recovery pieces (64 MiB,
 /// 2 passes, ~3.4× the default): those pieces leave the device, so two
-/// colluding helpers could guess the password offline. Older pieces keep
-/// the cost written in them and still open.
+/// colluding helpers could guess the password offline.
 const PasswordCost kRecoveryPasswordCost = PasswordCost(
   memoryKiB: 65536,
   iterations: 2,
 );
 
-/// The only Argon2 costs a received `normal` half may ask for: the one new
-/// pieces are written with and the default older pieces used. A half asking
-/// for anything else is refused, so nobody can make a recovering device run
-/// a heavy Argon2 for nothing.
+/// The only Argon2 cost a received `normal` half may ask for: the one
+/// pieces are written with. A half asking for anything else is refused, so
+/// nobody can make a recovering device run a heavy Argon2 for nothing.
 const List<PasswordCost> kAcceptedRecoveryCosts = <PasswordCost>[
   kRecoveryPasswordCost,
-  PasswordCost(),
 ];
 
 /// Minimum length of the account password.
@@ -419,8 +416,8 @@ Map<String, dynamic>? recoveryHalfFields(
     ..['cost'] = cost.toJson();
 }
 
-/// The account a received half names (`account`, sent by newer helpers),
-/// or `null` for halves from older helpers.
+/// The account a received half names (`account`), or `null` when it names
+/// none.
 String? claimedRecoveryAccount(Map<String, dynamic> half) {
   final Object? account = half['account'];
   return account is String && account.isNotEmpty ? account : null;
@@ -439,7 +436,6 @@ final class RecoveredAccount {
     required this.seed,
     required this.account,
     required this.helpers,
-    required this.claimed,
   });
 
   /// The account key's seed.
@@ -452,11 +448,6 @@ final class RecoveredAccount {
   /// Distinct senders whose halves really belong to this account.
   final Set<String> helpers;
 
-  /// Whether the helpers named this account. `false` when every half came
-  /// from an older helper that names none: the person must then confirm the
-  /// account by its [fingerprint] alone.
-  final bool claimed;
-
   String get fingerprint => accountFingerprint(account);
 }
 
@@ -466,7 +457,7 @@ typedef _Opener = Future<Uint8List?> Function(Uint8List secret, Object? box);
 /// Candidate sets: halves of the same encrypted copy of the seed ([setKey])
 /// that name the same account, so a stranger's fake half cannot spoil a
 /// recovery and halves for different accounts never mix. Halves that name
-/// no account (older helpers) join every set of their copy.
+/// no account are not used.
 List<List<Map<String, dynamic>>> _candidateSets(
   List<Map<String, dynamic>> halves,
   String Function(Map<String, dynamic> half) setKey,
@@ -478,19 +469,10 @@ List<List<Map<String, dynamic>>> _candidateSets(
   }
   final List<List<Map<String, dynamic>>> sets = <List<Map<String, dynamic>>>[];
   for (final List<Map<String, dynamic>> copy in byCopy.values) {
-    final List<Map<String, dynamic>> unknown = <Map<String, dynamic>>[
-      for (final Map<String, dynamic> h in copy)
-        if (claimedRecoveryAccount(h) == null) h,
-    ];
-    final Set<String> accounts = claimedRecoveryAccounts(copy);
-    if (accounts.isEmpty) {
-      sets.add(unknown);
-    }
-    for (final String account in accounts) {
+    for (final String account in claimedRecoveryAccounts(copy)) {
       sets.add(<Map<String, dynamic>>[
         for (final Map<String, dynamic> h in copy)
           if (claimedRecoveryAccount(h) == account) h,
-        ...unknown,
       ]);
     }
   }
@@ -544,10 +526,8 @@ Future<List<RecoveredAccount>> _recoverAccounts(
         continue;
       }
       final String account = (await LedgerKeyPair.fromSeed(seed)).id;
-      bool names(Map<String, dynamic> h) {
-        final String? claim = claimedRecoveryAccount(h);
-        return claim == null || claim == account;
-      }
+      bool names(Map<String, dynamic> h) =>
+          claimedRecoveryAccount(h) == account;
 
       if (!subset.every(names)) {
         // The halves say they are another account's key: not taken.
@@ -575,11 +555,6 @@ Future<List<RecoveredAccount>> _recoverAccounts(
           for (final Map<String, dynamic> h in belonging)
             if (h['from'] is String) h['from'] as String,
         },
-        claimed:
-            (had?.claimed ?? false) ||
-            belonging.any(
-              (Map<String, dynamic> h) => claimedRecoveryAccount(h) != null,
-            ),
       );
       break; // one copy opens to one seed
     }

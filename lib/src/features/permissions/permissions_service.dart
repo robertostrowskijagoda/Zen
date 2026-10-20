@@ -178,7 +178,7 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
             place == LocationPermission.always,
         ZenPermission.backgroundLocation: place == LocationPermission.always,
         ZenPermission.fullScreen: fullScreen,
-        // Missing in the answer of an older app part: nothing to ask.
+        // Missing when the platform does not answer: nothing to ask.
         ZenPermission.exactAlarms: own['exactAlarms'] != false,
         ZenPermission.battery: battery,
         ZenPermission.microphone: own['microphone'] == true,

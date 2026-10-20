@@ -386,9 +386,9 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     final Future<void> handled = _enqueueStateWork(() async {
       if (!_hydrationCompleted) {
         // Locked app: the stored friends are not read yet, so every friend
-        // would look like a stranger (and get a `friend_remove` back), and
-        // whatever this signal adds would be replaced by the snapshot read
-        // after unlocking. It waits for that read instead.
+        // would look like a stranger, and whatever this signal adds would be
+        // replaced by the snapshot read after unlocking. It waits for that
+        // read instead.
         await _hydrationSettled.future;
         if (_controllerDisposed || !ref.mounted) {
           return;
@@ -451,84 +451,6 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         syncGroupInvitesToPeer(signal.sender),
         context: 'Syncing group invites after a signal failed',
       );
-    });
-  }
-
-  /// A `friend_remove` from [sender] that did not come through reliable
-  /// delivery (see [isUnconfirmedFriendRemovePayload]).
-  ///
-  /// That is the automatic reply older versions give every peer they do not
-  /// recognise - also when it is them who lost the friend list (an
-  /// unreadable snapshot, a new phone, an account device not synced yet).
-  /// Taken at its word it ended the friendship and wiped the conversation
-  /// here, on every friend's phone at once. So nothing is removed: the
-  /// friendship, its settings and the conversation stay exactly as they are,
-  /// and the conversation says (at most once a day) that the friend's app
-  /// did not recognise this device. Should they really have removed the
-  /// user, their own decision still arrives reliably and is applied by
-  /// [receiveSignal].
-  Future<void> receiveUnconfirmedFriendRemove(
-    String sender, {
-    int? receivedAtMillis,
-  }) {
-    return _enqueueStateWork(() async {
-      if (!_hydrationCompleted) {
-        await _hydrationSettled.future;
-        if (_controllerDisposed || !ref.mounted) {
-          return;
-        }
-      }
-      if (state.snapshotUnreadable) {
-        // Nobody is known here right now; there is nothing to keep or note.
-        return;
-      }
-      final FriendProfile? friend = state.friendByAddress(sender);
-      if (friend == null ||
-          friend.status != FriendRelationshipStatus.accepted) {
-        // Pending invitations and blocks stay as they are, too.
-        return;
-      }
-      final int now = receivedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
-      final int? notedAt = _unconfirmedRemoveNotedAt[friend.address];
-      if (notedAt != null &&
-          (now - notedAt).abs() < const Duration(days: 1).inMilliseconds) {
-        // They answer every ping this way; once is enough.
-        return;
-      }
-      _unconfirmedRemoveNotedAt[friend.address] = now;
-      logZenWarning(
-        'An automatic friend_remove from a friend was not applied; the '
-        'friendship stays.',
-      );
-      final SocialEventText noteEvent = SocialEventText(
-        'chat.deviceUnknown',
-        <String, String>{'name': state.nameFor(friend)},
-      );
-      final String note = noteEvent.render();
-      await _appendSystemMessage(
-        peerAddress: friend.address,
-        event: noteEvent,
-        timestamp: now,
-      );
-      if (_controllerDisposed || !ref.mounted) {
-        return;
-      }
-      final FriendProfile? current = state.friendByAddress(friend.address);
-      if (current == null) {
-        return;
-      }
-      final Map<String, FriendProfile> friends = Map<String, FriendProfile>.of(
-        state.friends,
-      );
-      _putFriend(
-        friends,
-        current.copyWith(
-          lastMessagePreview: note,
-          lastActivityLabel: t('Teraz'),
-        ),
-      );
-      state = state.copyWith(friends: friends);
-      await _persistState();
     });
   }
 
@@ -612,11 +534,8 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       return;
     }
     if (!_isSignalAllowedFromPeer(state, signal)) {
-      // Dropped without a word. This used to answer a peer it did not know
-      // with an automatic `friend_remove`: that told anyone probing an
-      // address that the device is online right there, and - whenever this
-      // side had only lost its friend list (an unreadable snapshot, a new
-      // device) - ended real friendships on the other phones.
+      // Dropped without a word: an answer would tell anyone probing an
+      // address that the device is online right there.
       return;
     }
     // Invitations are the one thing anyone may send. Beyond the caps on what

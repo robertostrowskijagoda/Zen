@@ -1,10 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
-import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
@@ -243,62 +240,5 @@ void main() {
     expect(bob.isFriendAddress(a2), isTrue);
     expect(bob.addressesOfAccount(ania.account), containsAll(<String>[a1, a2]));
     expect(await _routedTo(bob, <String>[a1], a1), <String>{a1, a2});
-  });
-
-  test('devices saved before proofs: own ones kept, friends\' greeted '
-      'again first', () async {
-    final String b = _a('200::b');
-    final String b2 = _a('200::b2');
-    final String m = _a('200::4d');
-    final String c = _a('200::c');
-    final _Linked tb = await _transport(b);
-    final _Linked tm = await _transport(m);
-    final LedgerNode mal = _node(tm, friends: <String>[b]);
-    await mal.start();
-
-    // What an earlier version saved: Mal's device at an address only her
-    // record named, and another device of Bob's own account.
-    final MemoryLedgerDisk disk = MemoryLedgerDisk();
-    final LedgerIdentity me = await LedgerIdentity.loadOrCreate(disk);
-    final String ownOther = (await LedgerKeyPair.generate()).id;
-    Uint8List bytes(Object value) =>
-        Uint8List.fromList(utf8.encode(jsonEncode(value)));
-    await disk.write('ledger/peers', bytes(<String, String>{m: mal.account}));
-    await disk.write(
-      'ledger/devices',
-      bytes(<String, dynamic>{
-        'devices': <String, dynamic>{
-          c: <String, dynamic>{
-            'a': mal.account,
-            'd': mal.identity.deviceKey.id,
-            'n': 'Telefon',
-            't': 5,
-          },
-          b2: <String, dynamic>{
-            'a': me.account,
-            'd': ownOther,
-            'n': 'Laptop',
-            't': 7,
-          },
-        },
-        'seeds': <String>[],
-      }),
-    );
-    final LedgerNode bob = _node(tb, disk: disk, friends: <String>[m]);
-    await bob.start();
-    await _settle();
-
-    expect(bob.accountOfAddress(c), isNull);
-    expect(bob.isFriendAddress(c), isFalse);
-    expect(bob.addressesOfAccount(mal.account), <String>[m]);
-    expect(
-      tb.sentSignals.any(
-        (s) =>
-            _a(s.remoteAddress) == c && s.payload['type'] == kLedgerHelloType,
-      ),
-      isTrue,
-      reason: 'greeted: known again once it proves it',
-    );
-    expect(bob.siblingAddresses, <String>[b2]);
   });
 }

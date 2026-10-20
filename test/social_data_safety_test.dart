@@ -8,7 +8,6 @@ import 'package:zen/src/domain/signals/signal_queue_store.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
-import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -181,78 +180,6 @@ void main() {
       final SocialHubState state = container.read(socialHubControllerProvider);
       expect(state.snapshotUnreadable, isFalse);
       expect(state.friendByAddress(ada), isNotNull);
-    });
-  });
-
-  group('a friend_remove without a reliable id', () {
-    test('is recognised by its payload', () {
-      expect(
-        isUnconfirmedFriendRemovePayload(<String, dynamic>{
-          'type': 'friend_remove',
-        }),
-        isTrue,
-      );
-      expect(
-        isUnconfirmedFriendRemovePayload(<String, dynamic>{
-          'type': 'friend_remove',
-          kReliableIdKey: 'r-1',
-        }),
-        isFalse,
-      );
-      expect(
-        isUnconfirmedFriendRemovePayload(<String, dynamic>{'type': 'message'}),
-        isFalse,
-      );
-    });
-
-    test('keeps the friendship and its conversation, with one note', () async {
-      final ProviderContainer container = buildContainer(
-        seed: SocialHubState.empty().copyWith(
-          friends: <String, FriendProfile>{ada: _friend(ada, 'Ada')},
-        ),
-      );
-      await timelines.save(ada, <ChatMessage>[
-        ChatMessage(
-          id: 'm-1',
-          sender: ada,
-          text: 'stara wiadomość',
-          sentAtMillis: 1,
-          direction: ChatMessageDirection.incoming,
-        ),
-      ]);
-      final SocialHubController hub = container.read(
-        socialHubControllerProvider.notifier,
-      );
-
-      await hub.receiveUnconfirmedFriendRemove(ada, receivedAtMillis: 100);
-      // Older peers answer every ping this way.
-      await hub.receiveUnconfirmedFriendRemove(ada, receivedAtMillis: 200);
-
-      final SocialHubState state = container.read(socialHubControllerProvider);
-      expect(
-        state.friendByAddress(ada)?.status,
-        FriendRelationshipStatus.accepted,
-      );
-      final List<ChatMessage> thread = await timelines.load(ada);
-      expect(thread.first.text, 'stara wiadomość');
-      expect(
-        thread.where(
-          (ChatMessage m) => m.direction == ChatMessageDirection.system,
-        ),
-        hasLength(1),
-      );
-      expect(state.friendByAddress(ada)!.lastMessagePreview, isNotEmpty);
-      expect(transport.sentSignals, isEmpty);
-
-      // The person's own decision (delivered reliably) still applies.
-      await hub.receiveSignal(
-        ZenSignal(type: ZenSignalType.friendRemove, sender: ada),
-        receivedAtMillis: 300,
-      );
-      expect(
-        container.read(socialHubControllerProvider).friendByAddress(ada),
-        isNull,
-      );
     });
   });
 

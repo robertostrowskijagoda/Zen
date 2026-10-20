@@ -1064,8 +1064,8 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     );
     // Every quiet send is a teardown ('hangup' / 'call_decline'), and it goes
     // out as a single unacknowledged datagram. The invite is re-sent once a
-    // second for the whole ringing window; the hangup used to get exactly one
-    // attempt, and the peer that missed it stayed on a call that was over.
+    // second for the whole ringing window; a single hangup could be missed, and
+    // the peer would stay on a call that was over.
     for (final Duration delay in _callTeardownRetryDelays) {
       final Timer timer = Timer(delay, () {
         if (!ref.mounted) {

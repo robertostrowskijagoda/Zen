@@ -261,10 +261,9 @@ const int kDatingMaxPhotos = 4;
 /// Hidden people a profile carries (and a phone reads), at most.
 const int kDatingMaxHidden = 500;
 
-List<String> _photosFromJson(Object? first, Object? rest) => <String>[
-  if (first is String && first.length <= 48 * 1024) first,
-  if (rest is List)
-    for (final Object? p in rest.take(kDatingMaxPhotos))
+List<String> _photosFromJson(Object? photos) => <String>[
+  if (photos is List)
+    for (final Object? p in photos.take(kDatingMaxPhotos))
       if (p is String && p.length <= 48 * 1024) p,
 ].take(kDatingMaxPhotos).toList();
 
@@ -331,9 +330,7 @@ final class DatingProfile {
     'ab': about,
     'look': lookingFor,
     'want': wants.toJson(),
-    // The first photo, the rest beside it.
-    if (photos.isNotEmpty) 'ph': photos.first,
-    if (photos.length > 1) 'phx': photos.sublist(1),
+    if (photos.isNotEmpty) 'ph': photos,
     'xs': salt,
     'ex': hidden,
     'vo': <Map<String, dynamic>>[
@@ -371,7 +368,7 @@ final class DatingProfile {
       about: _clip(json['ab'], 1000),
       lookingFor: _clip(json['look'], 300),
       wants: DatingWants.fromJson(json['want']),
-      photos: _photosFromJson(json['ph'], json['phx']),
+      photos: _photosFromJson(json['ph']),
       salt: _clip(json['xs'], 40),
       hidden: ex is List
           ? ex.whereType<String>().take(kDatingMaxHidden).toList()
@@ -721,8 +718,7 @@ final class MyDating {
     'ab': about,
     'look': lookingFor,
     'want': wants.toJson(),
-    if (photos.isNotEmpty) 'ph': photos.first,
-    if (photos.length > 1) 'phx': photos.sublist(1),
+    if (photos.isNotEmpty) 'ph': photos,
     'hf': hiddenFriends,
     'hg': hiddenGroups,
     'vo': <Map<String, dynamic>>[
@@ -745,8 +741,7 @@ final class MyDating {
       lookingFor: json['look'] is String ? json['look'] as String : '',
       wants: DatingWants.fromJson(json['want']),
       photos: <String>[
-        if (json['ph'] is String) json['ph'] as String,
-        if (json['phx'] is List) ...(json['phx'] as List).whereType<String>(),
+        if (json['ph'] is List) ...(json['ph'] as List).whereType<String>(),
       ].take(kDatingMaxPhotos).toList(),
       hiddenFriends: hf is List ? hf.whereType<String>().toList() : null,
       hiddenGroups: hg is List ? hg.whereType<String>().toList() : null,

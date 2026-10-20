@@ -88,13 +88,20 @@ void main() {
       cost: _light,
     );
     expect(pieces, hasLength(6));
-    List<Map<String, dynamic>> normals(
-      Iterable<int> i,
-    ) => <Map<String, dynamic>>[
-      for (final int k in i) RecoveryPiece.fromJson(pieces[k].toJson())!.normal,
-    ];
+    // A received half names the account it is for.
+    List<Map<String, dynamic>> normals(Iterable<int> i) =>
+        <Map<String, dynamic>>[
+          for (final int k in i)
+            <String, dynamic>{
+              ...RecoveryPiece.fromJson(pieces[k].toJson())!.normal,
+              'account': key.id,
+            },
+        ];
     List<Map<String, dynamic>> emergencies(Iterable<int> i) =>
-        <Map<String, dynamic>>[for (final int k in i) pieces[k].emergency];
+        <Map<String, dynamic>>[
+          for (final int k in i)
+            <String, dynamic>{...pieces[k].emergency, 'account': key.id},
+        ];
     Future<Uint8List?> withPassword(
       List<Map<String, dynamic>> halves,
       String password,
@@ -117,6 +124,7 @@ void main() {
     final Map<String, dynamic> fake = <String, dynamic>{
       ...pieces[0].normal,
       'share': b64(randomBytes(33)),
+      'account': key.id,
     };
     expect(
       await withPassword(<Map<String, dynamic>>[
@@ -168,7 +176,6 @@ void main() {
     )).single;
     expect(got.account, mine.id);
     expect(got.seed, mine.seed);
-    expect(got.claimed, isTrue);
     expect(got.helpers, <String>{'h0', 'h1', 'h2', 'h3'});
     expect(got.fingerprint, accountFingerprint(mine.id));
 
@@ -180,18 +187,15 @@ void main() {
       isEmpty,
     );
 
-    // Older helpers name no account: the account is computed, not claimed.
-    final RecoveredAccount legacy = (await recoverWithoutPassword(
-      halves(pieces.take(4).toList()),
-    )).single;
-    expect(legacy.account, mine.id);
-    expect(legacy.claimed, isFalse);
+    // Halves that name no account are not used.
+    expect(
+      await recoverWithoutPassword(halves(pieces.take(4).toList())),
+      isEmpty,
+    );
 
-    // Old and new helpers of the same copy work together; a fake half
-    // naming the account does not count as a helper.
+    // A fake half naming the account does not count as a helper.
     final List<Map<String, dynamic>> mixed = <Map<String, dynamic>>[
-      ...halves(pieces.take(1).toList(), account: mine.id),
-      ...halves(pieces.skip(1).take(4).toList(), prefix: 'old'),
+      ...halves(pieces.take(5).toList(), account: mine.id),
       <String, dynamic>{
         ...pieces[0].emergency,
         'share': b64(randomBytes(33)),
@@ -200,7 +204,6 @@ void main() {
       },
     ];
     final RecoveredAccount both = (await recoverWithoutPassword(mixed)).single;
-    expect(both.claimed, isTrue);
     expect(both.helpers, hasLength(5));
     expect(both.helpers.contains('fake'), isFalse);
 
@@ -241,8 +244,8 @@ void main() {
         ...normal,
         'cost': const PasswordCost().toJson(),
       }, normal: true),
-      isNotNull,
-      reason: 'older pieces used the default cost',
+      isNull,
+      reason: 'only the cost pieces are written with is accepted',
     );
     expect(
       recoveryHalfFields(<String, dynamic>{
@@ -425,7 +428,6 @@ void main() {
       )).single;
       expect(got.seed, key.seed);
       expect(got.account, key.id);
-      expect(got.claimed, isTrue);
       expect(got.helpers, helpers.take(2).toSet());
 
       await f.endRecovery();

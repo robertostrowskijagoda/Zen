@@ -98,64 +98,19 @@ func TestEnsureRuntimePublicPeersKeepsLoopbackOnlyConfigs(t *testing.T) {
 	}
 }
 
-func TestDefaultRuntimeConfigDropsUnprotectedLanDiscovery(t *testing.T) {
-	cfg := config.GenerateConfig()
-	// What Yggdrasil generates, and what older app versions stored.
-	cfg.MulticastInterfaces = []config.MulticastInterfaceConfig{
-		{Regex: ".*", Beacon: true, Listen: true},
-	}
-	ensureDefaultRuntimeConfig(cfg)
-	if len(cfg.MulticastInterfaces) != 0 {
-		t.Fatalf("LAN beacons without a password must be off, got %#v", cfg.MulticastInterfaces)
-	}
-}
-
-func TestDefaultRuntimeConfigKeepsPasswordProtectedLanDiscovery(t *testing.T) {
-	if isPhoneOS() {
-		t.Skip("phones never run multicast")
-	}
-	cfg := config.GenerateConfig()
-	cfg.MulticastInterfaces = []config.MulticastInterfaceConfig{
-		{Regex: "eth0", Beacon: true, Listen: true, Password: "own-devices"},
-	}
-	ensureDefaultRuntimeConfig(cfg)
-	if len(cfg.MulticastInterfaces) != 1 {
-		t.Fatalf("expected one LAN discovery entry, got %#v", cfg.MulticastInterfaces)
-	}
-	got := cfg.MulticastInterfaces[0]
-	if got.Password != "own-devices" || !got.Beacon || !got.Listen {
-		t.Fatalf("password-protected LAN discovery was changed: %#v", got)
-	}
-}
-
-func TestApplyLanDiscoveryFromTheAppsSetting(t *testing.T) {
-	cfg := config.GenerateConfig()
-	ensureDefaultRuntimeConfig(cfg)
-	applyLanDiscovery(cfg, parseZenLanDiscovery(`{"Peers":[]}`))
-	if len(cfg.MulticastInterfaces) != 0 {
-		t.Fatalf("LAN discovery must stay off without the app's setting, got %+v", cfg.MulticastInterfaces)
-	}
-
-	setting := parseZenLanDiscovery(`{"ZenLanDiscovery":{"Enabled":true,"Secret":"` + testLanSecret + `"}}`)
-	applyLanDiscovery(cfg, setting)
-	if isPhoneOS() {
+func TestDefaultRuntimeConfigTurnsYggdrasilMulticastOff(t *testing.T) {
+	for _, configured := range [][]config.MulticastInterfaceConfig{
+		// What Yggdrasil generates.
+		{{Regex: ".*", Beacon: true, Listen: true}},
+		// Even with a password: the beacons would still carry the node key.
+		{{Regex: "eth0", Beacon: true, Listen: true, Password: "own-devices"}},
+	} {
+		cfg := config.GenerateConfig()
+		cfg.MulticastInterfaces = configured
+		ensureDefaultRuntimeConfig(cfg)
 		if len(cfg.MulticastInterfaces) != 0 {
-			t.Fatal("a phone needs Wi-Fi and an opt-in")
+			t.Fatalf("Yggdrasil multicast must stay off, got %#v", cfg.MulticastInterfaces)
 		}
-		return
-	}
-	if len(cfg.MulticastInterfaces) != 1 {
-		t.Fatalf("expected one discovery entry, got %+v", cfg.MulticastInterfaces)
-	}
-	entry := cfg.MulticastInterfaces[0]
-	want, _ := lanDiscoveryPassword(testLanSecret)
-	if !entry.Beacon || !entry.Listen || entry.Password != want || entry.Password == "" {
-		t.Fatalf("unexpected entry %+v", entry)
-	}
-	// What ensureDefaultRuntimeConfig keeps on the next start: the entry
-	// has a password, so it survives.
-	if kept := lanDiscoveryInterfaces(cfg.MulticastInterfaces); len(kept) != 1 {
-		t.Fatalf("a passworded entry must be kept, got %+v", kept)
 	}
 }
 

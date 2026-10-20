@@ -57,11 +57,6 @@ final class SocialEventText {
       'chat.transferCancelled' => t(
         'Transfer został anulowany i stan obu stron jest zgodny.',
       ),
-      'chat.deviceUnknown' => t(
-        '{name} nie rozpoznaje teraz tego urządzenia — może utracił(a) dane '
-        'albo zmienił(a) telefon. Znajomość i rozmowa zostają bez zmian.',
-        {'name': name},
-      ),
       'call.inviteIn' => t('Przyszło zaproszenie do rozmowy {kind}.', {
         'kind': kind,
       }),

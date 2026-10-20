@@ -243,7 +243,7 @@ func decodeSignalWire(source string, encodedPayload string) (string, bool) {
 		return string(decompressed), true
 	}
 
-	// Uncompressed (backward compat with older clients).
+	// Plain JSON.
 	return wireStr, true
 }
 

@@ -997,8 +997,7 @@ void main() {
     expect(seen.map((DatingVouch v) => v.text), <String>['Gotuje genialnie']);
   });
 
-  test('up to four photos travel with the profile; older apps still find the '
-      'first one', () async {
+  test('up to four photos travel with the profile', () async {
     String jpeg(int shade) => base64Encode(
       img.encodeJpg(
         img.Image(width: 24, height: 24)..clear(img.ColorRgb8(shade, 40, 90)),
@@ -1014,20 +1013,15 @@ void main() {
     );
     final Map<String, dynamic> json =
         jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>;
-    expect(json['ph'], photos.first, reason: 'where older apps look');
-    expect(json['phx'], photos.sublist(1));
+    expect(json['ph'], photos);
     expect(DatingProfile.fromJson(json)!.photos, photos);
     expect(DatingProfile.fromJson(json)!.photo, photos.first);
 
-    // An older profile with one photo, and too many photos.
-    expect(
-      DatingProfile.fromJson(<String, dynamic>{...json}..remove('phx'))!.photos,
-      <String>[photos.first],
-    );
+    // Too many photos.
     expect(
       DatingProfile.fromJson(<String, dynamic>{
         ...json,
-        'phx': <String>[for (int i = 0; i < 6; i++) jpeg(i * 30)],
+        'ph': <String>[for (int i = 0; i < 6; i++) jpeg(i * 30)],
       })!.photos,
       hasLength(kDatingMaxPhotos),
     );

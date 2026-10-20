@@ -357,8 +357,8 @@ func desktopPublicPeers(count int) []string {
 }
 
 // desktopRuntimePeers keeps peers the user or the app added that are not
-// public (loopback, LAN) and replaces every public entry — including stale
-// ones saved by older versions — with the current spread-out selection.
+// public (loopback, LAN) and replaces every public entry with the current
+// spread-out selection.
 func desktopRuntimePeers(existing []string) []string {
 	peers := make([]string, 0, len(existing)+desktopPublicPeerCount)
 	seen := map[string]bool{}

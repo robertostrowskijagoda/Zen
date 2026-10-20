@@ -273,8 +273,7 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
     await _transferStore.deleteIncoming(signal.sender, messageId);
     // The whole file is here: a delivery receipt the sender gets even if it
     // is offline now (the chunks may have come from its friends' mailboxes,
-    // long after it sent them). Older senders already count it delivered
-    // from the chunk acks; for them this is a harmless repeat.
+    // long after it sent them).
     unawaitedLogged(
       _sendAttachmentDeliveredAck(
         peerAddress: signal.sender,
@@ -804,11 +803,10 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
   }
 
   /// The realtime path did not work — most often because the recipient is
-  /// offline. If the recipient announced that it collects attachments from
-  /// its mailboxes (older versions did not), the file goes there: sealed
-  /// chunks wait with its friends (within their quota, for as long as
-  /// messages wait) and its app gets them as the usual chunks once it is
-  /// back. Otherwise — or if the mailboxes cannot take it — the caller goes
+  /// offline. If the recipient announced mailboxes that can hold the file,
+  /// it goes there: sealed chunks wait with its friends (within their
+  /// quota, for as long as messages wait) and its app gets them as the
+  /// usual chunks once it is back. Otherwise — or if the mailboxes cannot take it — the caller goes
   /// on with the chunked transfer, which needs both devices online.
   ///
   /// Returns whether the mailboxes took it over; the message then shows as

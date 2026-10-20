@@ -297,10 +297,6 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
   /// Logged once per run: saving is paused over an unreadable snapshot.
   bool _loggedPausedSave = false;
 
-  /// When an automatic `friend_remove` from each friend was last noted in
-  /// their conversation (see `receiveUnconfirmedFriendRemove`).
-  final Map<String, int> _unconfirmedRemoveNotedAt = <String, int>{};
-
   /// Releases the writers. Called once the read came back — or failed, because
   /// an unreadable snapshot must not block saving for the rest of the session.
   void _markHydrationSettled() {
@@ -1249,21 +1245,6 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
 
 /// What the group call controls switch.
 enum GroupCallToggle { mute, speaker, camera }
-
-/// Whether [payload] is a `friend_remove` that did not come through reliable
-/// delivery.
-///
-/// A person's own "remove friend" always goes out reliably and carries a
-/// reliable id ([kReliableIdKey]) - straight from them or unpacked from a
-/// relay. Without one it is the automatic reply older versions send to
-/// every peer they do not recognise, also when they have only lost their
-/// own friend list. Such a payload goes to
-/// `SocialHubController.receiveUnconfirmedFriendRemove`, never to
-/// `receiveSignal`.
-bool isUnconfirmedFriendRemovePayload(Map<String, dynamic> payload) {
-  return payload['type'] == 'friend_remove' &&
-      payload[kReliableIdKey] is! String;
-}
 
 bool _isGroupCallSignalType(ZenSignalType type) => switch (type) {
   ZenSignalType.groupCallInvite ||
