@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:video_player/video_player.dart';
 import 'package:zen/src/app/i18n/zen_format.dart';
@@ -11,6 +10,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 
@@ -48,7 +48,7 @@ final class AlarmAudioPump {
         if (generation != _generation || service.book.ownActiveAlarm == null) {
           break;
         }
-        final (Uint8List, int)? clip = await _recordOnce(
+        final (Uint8List, int)? clip = await recordClip(
           () =>
               generation != _generation || service.book.ownActiveAlarm == null,
         );
@@ -66,17 +66,16 @@ final class AlarmAudioPump {
   }
 
   /// One piece: the sound and how long it is, or `null` (no microphone or
-  /// no permission).
-  static Future<(Uint8List, int)?> _recordOnce(
-    bool Function() cancelled,
-  ) async {
+  /// no permission). Also what the locked Android service records with
+  /// (the alarm kit, §16.3).
+  static Future<(Uint8List, int)?> recordClip(bool Function() cancelled) async {
     final AudioRecorder recorder = AudioRecorder();
     String? path;
     try {
       if (!await recorder.hasPermission()) {
         return null;
       }
-      final Directory dir = await getTemporaryDirectory();
+      final Directory dir = await mediaTemporaryDirectory();
       path =
           '${dir.path}${Platform.pathSeparator}'
           'zen-alarm-${DateTime.now().millisecondsSinceEpoch}.m4a';
@@ -219,7 +218,7 @@ class _AlarmClipTileState extends State<AlarmClipTile> {
       if (data == null) {
         throw StateError('Brak nagrania.');
       }
-      final Directory temp = await getTemporaryDirectory();
+      final Directory temp = await mediaTemporaryDirectory();
       final File file = File(
         '${temp.path}${Platform.pathSeparator}'
         'zen-alarm-play-${widget.alarmId.hashCode}-${widget.clip.n}.m4a',

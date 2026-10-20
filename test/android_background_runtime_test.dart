@@ -1,29 +1,28 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/app/zen_core.dart';
-import 'package:zen/src/app/zen_host.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
-import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
-import 'package:zen/src/features/calls/call_media_session.dart';
-import 'package:zen/src/features/calls/noop_call_media_session.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
+import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_lifecycle_bridge.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
-import 'package:zen/src/features/security/app_security_crypto.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
@@ -32,197 +31,14 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
 
 void main() {
-  test('headless background coordinator answers no stranger and keeps a friend '
-      'on an automatic friend_remove', () async {
-    final MemorySignalTransport transport = MemorySignalTransport();
-    final NoopCallMediaSessionController callMedia =
-        NoopCallMediaSessionController();
-    const LifecycleSnapshot background = LifecycleSnapshot(
-      visibility: AppVisibilityState.background,
-      generation: 1,
-      capturedAtMillis: 0,
-    );
-    final ProviderContainer container = ProviderContainer(
-      overrides: [
-        signalTransportProvider.overrideWithValue(transport),
-        runtimeSystemNotificationServiceProvider.overrideWithValue(
-          MemoryRuntimeSystemNotificationService(),
-        ),
-        appSecurityServiceProvider.overrideWithValue(
-          MemoryAppSecurityService(),
-        ),
-        appSettingsStoreProvider.overrideWithValue(MemoryAppSettingsStore()),
-        signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
-        socialSnapshotStoreProvider.overrideWithValue(
-          MemorySocialSnapshotStore(
-            SocialHubState.empty(lifecycle: background).copyWith(
-              friends: const <String, FriendProfile>{
-                'ada.ygg': FriendProfile(
-                  address: 'ada.ygg',
-                  displayName: 'Ada',
-                  status: FriendRelationshipStatus.accepted,
-                ),
-              },
-            ),
-          ),
-        ),
-        messageTimelineStoreProvider.overrideWithValue(
-          MemoryMessageTimelineStore(),
-        ),
-        attachmentTransferStoreProvider.overrideWithValue(
-          MemoryAttachmentTransferStore(),
-        ),
-        callMediaSessionControllerProvider.overrideWithValue(callMedia),
-        zenHostProvider.overrideWithValue(ZenHost.backgroundService),
-        socialHubAutoHydrateProvider.overrideWithValue(false),
-        socialHubSeedProvider.overrideWithValue(
-          SocialHubState.empty(lifecycle: background),
-        ),
-      ],
-    );
-    final HeadlessBackgroundRuntimeCoordinator coordinator =
-        HeadlessBackgroundRuntimeCoordinator(
-          environment: BackgroundRuntimeEnvironment(
-            container: container,
-            transport: transport,
-            callMediaController: callMedia,
-          ),
-        );
-    addTearDown(() async {
-      await coordinator.dispose();
-    });
-
-    await coordinator.start();
-    // The service runs the app's own core: the same modules, one code
-    // path (A15).
-    final ZenCore core = container.read(zenCoreProvider);
-    expect(core.isStarted, isTrue);
-    expect(core.modules.map((ZenModule m) => m.id), <String>[
-      for (final ZenModule m in _appRegistry()) m.id,
-    ]);
-    expect(core.runningModules, contains('signal'));
-    transport.sentSignals.clear();
-    await transport.injectIncoming(
-      from: 'stranger.ygg',
-      payload: const <String, dynamic>{'type': 'ping'},
-    );
-    await transport.injectIncoming(
-      from: 'ada.ygg',
-      payload: const <String, dynamic>{'type': 'friend_remove'},
-    );
-    await Future<void>.delayed(const Duration(milliseconds: 20));
-
-    expect(
-      transport.sentSignals.where(
-        (entry) => entry.remoteAddress == 'stranger.ygg',
-      ),
-      isEmpty,
-    );
-    expect(
-      container.read(socialHubControllerProvider).friends['ada.ygg']?.status,
-      FriendRelationshipStatus.accepted,
-    );
-  });
-
-  test(
-    'headless background coordinator routes transport frames into background notifications',
-    () async {
-      final MemorySignalTransport transport = MemorySignalTransport();
-      final MemoryRuntimeSystemNotificationService notifications =
-          MemoryRuntimeSystemNotificationService();
-      final NoopCallMediaSessionController callMedia =
-          NoopCallMediaSessionController();
-      final SocialHubState persistedState =
-          SocialHubState.empty(
-            lifecycle: const LifecycleSnapshot(
-              visibility: AppVisibilityState.background,
-              generation: 1,
-              capturedAtMillis: 0,
-            ),
-          ).copyWith(
-            friends: const <String, FriendProfile>{
-              'ada.ygg': FriendProfile(
-                address: 'ada.ygg',
-                displayName: 'Ada',
-                status: FriendRelationshipStatus.accepted,
-              ),
-            },
-          );
-      final ProviderContainer container = ProviderContainer(
-        overrides: [
-          signalTransportProvider.overrideWithValue(transport),
-          runtimeSystemNotificationServiceProvider.overrideWithValue(
-            notifications,
-          ),
-          appSecurityServiceProvider.overrideWithValue(
-            MemoryAppSecurityService(),
-          ),
-          appSettingsStoreProvider.overrideWithValue(MemoryAppSettingsStore()),
-          signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
-          socialSnapshotStoreProvider.overrideWithValue(
-            MemorySocialSnapshotStore(persistedState),
-          ),
-          messageTimelineStoreProvider.overrideWithValue(
-            MemoryMessageTimelineStore(),
-          ),
-          attachmentTransferStoreProvider.overrideWithValue(
-            MemoryAttachmentTransferStore(),
-          ),
-          callMediaSessionControllerProvider.overrideWithValue(callMedia),
-          zenHostProvider.overrideWithValue(ZenHost.backgroundService),
-          socialHubAutoHydrateProvider.overrideWithValue(false),
-          socialHubSeedProvider.overrideWithValue(
-            SocialHubState.empty(
-              lifecycle: const LifecycleSnapshot(
-                visibility: AppVisibilityState.background,
-                generation: 1,
-                capturedAtMillis: 0,
-              ),
-            ),
-          ),
-        ],
-      );
-      final HeadlessBackgroundRuntimeCoordinator coordinator =
-          HeadlessBackgroundRuntimeCoordinator(
-            environment: BackgroundRuntimeEnvironment(
-              container: container,
-              transport: transport,
-              callMediaController: callMedia,
-            ),
-          );
-      addTearDown(() async {
-        await coordinator.dispose();
-      });
-
-      await coordinator.start();
-      await transport.injectIncoming(
-        from: 'ada.ygg',
-        payload: const <String, dynamic>{
-          'type': 'friend_accept',
-          'senderName': 'Ada',
-        },
-        receivedAtMillis: 77,
-      );
-      await Future<void>.delayed(Duration.zero);
-
-      expect(notifications.activeNotifications, hasLength(1));
-      expect(
-        notifications.activeNotifications.single.title,
-        'Ada zaakceptował(a) zaproszenie',
-      );
-      expect(
-        container.read(socialHubControllerProvider).backgroundAlerts,
-        hasLength(1),
-      );
-    },
-  );
-
   testWidgets(
-    'Android background bridge hands runtime off to the service and restores it on foreground',
+    'the unlocked app keeps the node in the background; a lock hands it to '
+    'the service without any key',
     (WidgetTester tester) async {
       final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
       final _FakeAndroidBackgroundServiceController service =
           _FakeAndroidBackgroundServiceController();
+      final _FakeBackgroundVault vault = _FakeBackgroundVault();
       final Uint8List encryptionKey = Uint8List.fromList(
         List<int>.generate(32, (int index) => index + 7),
       );
@@ -238,38 +54,11 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            androidBackgroundRuntimeBridgeEnabledProvider.overrideWithValue(
-              true,
-            ),
-            androidBackgroundServiceControllerProvider.overrideWithValue(
-              service,
-            ),
-            runtimeNodeRuntimeProvider.overrideWithValue(runtime),
-            signalTransportProvider.overrideWithValue(runtime),
-            appSecurityServiceProvider.overrideWithValue(security),
-            appSettingsStoreProvider.overrideWithValue(
-              MemoryAppSettingsStore(const AppSettings()),
-            ),
-            signalQueueStoreProvider.overrideWithValue(
-              MemorySignalQueueStore(),
-            ),
-            socialSnapshotStoreProvider.overrideWithValue(
-              MemorySocialSnapshotStore(),
-            ),
-            messageTimelineStoreProvider.overrideWithValue(
-              MemoryMessageTimelineStore(),
-            ),
-            attachmentTransferStoreProvider.overrideWithValue(
-              MemoryAttachmentTransferStore(),
-            ),
-            socialHubSeedProvider.overrideWithValue(
-              SocialHubState.empty(
-                lifecycle: const LifecycleSnapshot(
-                  visibility: AppVisibilityState.foreground,
-                  generation: 1,
-                  capturedAtMillis: 0,
-                ),
-              ),
+            ..._bridgeOverrides(
+              service: service,
+              runtime: runtime,
+              security: security,
+              vault: vault,
             ),
           ],
           child: const MaterialApp(
@@ -278,9 +67,17 @@ void main() {
         ),
       );
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
 
       final ProviderContainer container = ProviderScope.containerOf(
         tester.element(find.byType(AndroidBackgroundRuntimeBridge)),
+      );
+      // Unlocked: what the service may receive with is published, with the
+      // inbox key's public part only.
+      expect(vault.published, isNotEmpty);
+      expect(
+        vault.published.last.inboxPublicKey,
+        orderedEquals(await inboxPublicKeyFor(encryptionKey)),
       );
 
       await container
@@ -295,22 +92,35 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
 
-      // The service is parked from the foreground first, then handed the node.
+      // In the background but unlocked: the node and the key stay here.
       expect(
         service.modes,
         orderedEquals(<AndroidBackgroundRuntimeMode>[
           AndroidBackgroundRuntimeMode.standby,
-          AndroidBackgroundRuntimeMode.active,
         ]),
       );
-      expect(service.activeStarts, orderedEquals(<CallSession?>[null]));
-      expect(service.startedPayloads.last.encryptionKey, isNotNull);
-      expect(
-        service.startedPayloads.last.encryptionKey,
-        orderedEquals(encryptionKey),
-      );
-      expect(runtime.snapshot.serviceRunning, isFalse);
+      expect(runtime.snapshot.serviceRunning, isTrue);
 
+      security.lock();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(service.modes.last, AndroidBackgroundRuntimeMode.active);
+      expect(service.activeStarts, orderedEquals(<CallSession?>[null]));
+      expect(runtime.snapshot.serviceRunning, isFalse);
+      for (final AndroidBackgroundBootstrapPayload payload
+          in service.startedPayloads) {
+        final Map<String, dynamic> data = payload.toData();
+        expect(data.containsKey('encryptionKey'), isFalse);
+        expect(
+          data.values.whereType<String>().any(
+            (String v) => v.contains(base64Encode(encryptionKey)),
+          ),
+          isFalse,
+        );
+      }
+
+      // Back on screen, still locked: the service keeps receiving.
       await container
           .read(socialHubControllerProvider.notifier)
           .setLifecycle(
@@ -322,72 +132,63 @@ void main() {
           );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-
-      // Coming back parks the service again instead of stopping it: the
-      // notification channel must outlive the app being swiped away.
-      expect(service.modes.last, AndroidBackgroundRuntimeMode.standby);
+      expect(service.modes.last, AndroidBackgroundRuntimeMode.active);
       expect(service.stopCount, 0);
-      expect(runtime.snapshot.serviceRunning, isTrue);
+      expect(vault.drainCount, 0);
     },
   );
 
   testWidgets(
-    'Android background bridge forwards active call context to the service',
+    'after unlock the app takes the node back and drains the inbox into it',
     (WidgetTester tester) async {
+      // The lock screen replaced the app, so the unlocked app mounts afresh
+      // on top of a service that runs the node.
       final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
       final _FakeAndroidBackgroundServiceController service =
-          _FakeAndroidBackgroundServiceController();
+          _FakeAndroidBackgroundServiceController(running: true);
+      final _FakeBackgroundVault vault = _FakeBackgroundVault()
+        ..records.add(
+          encodeInboxFrame(
+            const SignalTransportFrame(
+              from: 'ada.ygg',
+              payload: <String, dynamic>{
+                'type': 'message',
+                '_rid': 'r1',
+                'text': 'kept while locked',
+              },
+              receivedAtMillis: 77,
+            ),
+          ),
+        );
+      final MemoryRuntimeSystemNotificationService notices =
+          MemoryRuntimeSystemNotificationService();
+      await notices.show(
+        const RuntimeSystemNotification(
+          id: 'n',
+          title: 'Nowa wiadomość',
+          body: '',
+          createdAtMillis: 1,
+          category: RuntimeSystemNotificationCategory.message,
+          slotKey: kLockedMessageSlot,
+        ),
+      );
+      final List<SignalTransportFrame> replayed = <SignalTransportFrame>[];
+      final StreamSubscription<SignalTransportFrame> frames = runtime.frames
+          .listen(replayed.add);
+      addTearDown(frames.cancel);
       addTearDown(runtime.dispose);
-      await runtime.start();
+      await runtime.stop();
 
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            androidBackgroundRuntimeBridgeEnabledProvider.overrideWithValue(
-              true,
+            ..._bridgeOverrides(
+              service: service,
+              runtime: runtime,
+              security: MemoryAppSecurityService(),
+              vault: vault,
             ),
-            androidBackgroundServiceControllerProvider.overrideWithValue(
-              service,
-            ),
-            runtimeNodeRuntimeProvider.overrideWithValue(runtime),
-            signalTransportProvider.overrideWithValue(runtime),
-            appSecurityServiceProvider.overrideWithValue(
-              MemoryAppSecurityService(),
-            ),
-            appSettingsStoreProvider.overrideWithValue(
-              MemoryAppSettingsStore(),
-            ),
-            signalQueueStoreProvider.overrideWithValue(
-              MemorySignalQueueStore(),
-            ),
-            socialSnapshotStoreProvider.overrideWithValue(
-              MemorySocialSnapshotStore(),
-            ),
-            messageTimelineStoreProvider.overrideWithValue(
-              MemoryMessageTimelineStore(),
-            ),
-            attachmentTransferStoreProvider.overrideWithValue(
-              MemoryAttachmentTransferStore(),
-            ),
-            socialHubSeedProvider.overrideWithValue(
-              SocialHubState.empty(
-                lifecycle: const LifecycleSnapshot(
-                  visibility: AppVisibilityState.foreground,
-                  generation: 1,
-                  capturedAtMillis: 0,
-                ),
-              ).copyWith(
-                activeCall: const CallSession(
-                  id: 'call-1',
-                  peerAddress: 'ada.ygg',
-                  displayName: 'Ada',
-                  kind: CallInviteKind.video,
-                  status: CallSessionStatus.active,
-                  startedAtMillis: 5,
-                  isCameraEnabled: true,
-                ),
-              ),
-            ),
+            runtimeSystemNotificationServiceProvider.overrideWithValue(notices),
           ],
           child: const MaterialApp(
             home: AndroidBackgroundRuntimeBridge(child: SizedBox.shrink()),
@@ -395,34 +196,97 @@ void main() {
         ),
       );
       await tester.pump();
-
-      final ProviderContainer container = ProviderScope.containerOf(
-        tester.element(find.byType(AndroidBackgroundRuntimeBridge)),
-      );
-      await container
-          .read(socialHubControllerProvider.notifier)
-          .setLifecycle(
-            const LifecycleSnapshot(
-              visibility: AppVisibilityState.background,
-              generation: 2,
-              capturedAtMillis: 1,
-            ),
-          );
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
       await tester.pump(const Duration(milliseconds: 50));
 
-      expect(service.activeStarts, hasLength(1));
-      expect(service.activeStarts.single?.kind, CallInviteKind.video);
       expect(
-        foregroundServiceTypesForCallSession(service.activeStarts.single),
-        orderedEquals(const <ForegroundServiceTypes>[
-          ForegroundServiceTypes.specialUse,
-          ForegroundServiceTypes.microphone,
-          ForegroundServiceTypes.camera,
+        service.modes,
+        orderedEquals(<AndroidBackgroundRuntimeMode>[
+          AndroidBackgroundRuntimeMode.standby,
         ]),
       );
+      expect(runtime.snapshot.serviceRunning, isTrue);
+      expect(vault.drainCount, 1);
+      expect(vault.records, isEmpty);
+      expect(replayed, hasLength(1));
+      expect(replayed.single.from, 'ada.ygg');
+      expect(replayed.single.payload['text'], 'kept while locked');
+      expect(replayed.single.receivedAtMillis, 77);
+      // The generic "something came" notices are gone with it.
+      expect(notices.activeNotifications, isEmpty);
     },
   );
+
+  testWidgets('a lock forwards the active call context to the service', (
+    WidgetTester tester,
+  ) async {
+    final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
+    final _FakeAndroidBackgroundServiceController service =
+        _FakeAndroidBackgroundServiceController();
+    final MemoryAppSecurityService security = MemoryAppSecurityService(
+      hasPassword: true,
+      locked: false,
+    );
+    addTearDown(runtime.dispose);
+    await runtime.start();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          ..._bridgeOverrides(
+            service: service,
+            runtime: runtime,
+            security: security,
+            vault: _FakeBackgroundVault(),
+            activeCall: const CallSession(
+              id: 'call-1',
+              peerAddress: 'ada.ygg',
+              displayName: 'Ada',
+              kind: CallInviteKind.video,
+              status: CallSessionStatus.active,
+              startedAtMillis: 5,
+              isCameraEnabled: true,
+            ),
+          ),
+        ],
+        child: const MaterialApp(
+          home: AndroidBackgroundRuntimeBridge(child: SizedBox.shrink()),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final ProviderContainer container = ProviderScope.containerOf(
+      tester.element(find.byType(AndroidBackgroundRuntimeBridge)),
+    );
+    await container
+        .read(socialHubControllerProvider.notifier)
+        .setLifecycle(
+          const LifecycleSnapshot(
+            visibility: AppVisibilityState.background,
+            generation: 2,
+            capturedAtMillis: 1,
+          ),
+        );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(service.activeStarts, isEmpty);
+
+    security.lock();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(service.activeStarts, hasLength(1));
+    expect(service.activeStarts.single?.kind, CallInviteKind.video);
+    expect(
+      foregroundServiceTypesForCallSession(service.activeStarts.single),
+      orderedEquals(const <ForegroundServiceTypes>[
+        ForegroundServiceTypes.specialUse,
+        ForegroundServiceTypes.microphone,
+        ForegroundServiceTypes.camera,
+      ]),
+    );
+  });
 
   testWidgets(
     'foreground node waits for the service to release the shared node',
@@ -445,40 +309,11 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            androidBackgroundRuntimeBridgeEnabledProvider.overrideWithValue(
-              true,
-            ),
-            androidBackgroundServiceControllerProvider.overrideWithValue(
-              service,
-            ),
-            runtimeNodeRuntimeProvider.overrideWithValue(runtime),
-            signalTransportProvider.overrideWithValue(runtime),
-            appSecurityServiceProvider.overrideWithValue(
-              MemoryAppSecurityService(),
-            ),
-            appSettingsStoreProvider.overrideWithValue(
-              MemoryAppSettingsStore(),
-            ),
-            signalQueueStoreProvider.overrideWithValue(
-              MemorySignalQueueStore(),
-            ),
-            socialSnapshotStoreProvider.overrideWithValue(
-              MemorySocialSnapshotStore(),
-            ),
-            messageTimelineStoreProvider.overrideWithValue(
-              MemoryMessageTimelineStore(),
-            ),
-            attachmentTransferStoreProvider.overrideWithValue(
-              MemoryAttachmentTransferStore(),
-            ),
-            socialHubSeedProvider.overrideWithValue(
-              SocialHubState.empty(
-                lifecycle: const LifecycleSnapshot(
-                  visibility: AppVisibilityState.foreground,
-                  generation: 1,
-                  capturedAtMillis: 0,
-                ),
-              ),
+            ..._bridgeOverrides(
+              service: service,
+              runtime: runtime,
+              security: MemoryAppSecurityService(),
+              vault: _FakeBackgroundVault(),
             ),
           ],
           child: const MaterialApp(
@@ -507,55 +342,29 @@ void main() {
   );
 
   testWidgets(
-    'handoff runs when Android backgrounds the app, with frames disabled',
+    'a lock in the background hands the node over with frames disabled',
     (WidgetTester tester) async {
       // Flutter turns frames off *before* it dispatches hidden/paused to
-      // observers, so anything that waits for a rebuild or a post-frame
-      // callback never runs from that point on. The handoff has to happen
-      // exactly then, so it must not depend on a frame.
+      // observers, and the lock timer fires while the app is away, so the
+      // handoff must not wait for a rebuild or a post-frame callback.
       final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
       final _FakeAndroidBackgroundServiceController service =
           _FakeAndroidBackgroundServiceController();
+      final MemoryAppSecurityService security = MemoryAppSecurityService(
+        hasPassword: true,
+        locked: false,
+      );
       addTearDown(runtime.dispose);
       await runtime.start();
 
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            androidBackgroundRuntimeBridgeEnabledProvider.overrideWithValue(
-              true,
-            ),
-            androidBackgroundServiceControllerProvider.overrideWithValue(
-              service,
-            ),
-            runtimeNodeRuntimeProvider.overrideWithValue(runtime),
-            signalTransportProvider.overrideWithValue(runtime),
-            appSecurityServiceProvider.overrideWithValue(
-              MemoryAppSecurityService(),
-            ),
-            appSettingsStoreProvider.overrideWithValue(
-              MemoryAppSettingsStore(),
-            ),
-            signalQueueStoreProvider.overrideWithValue(
-              MemorySignalQueueStore(),
-            ),
-            socialSnapshotStoreProvider.overrideWithValue(
-              MemorySocialSnapshotStore(),
-            ),
-            messageTimelineStoreProvider.overrideWithValue(
-              MemoryMessageTimelineStore(),
-            ),
-            attachmentTransferStoreProvider.overrideWithValue(
-              MemoryAttachmentTransferStore(),
-            ),
-            socialHubSeedProvider.overrideWithValue(
-              SocialHubState.empty(
-                lifecycle: const LifecycleSnapshot(
-                  visibility: AppVisibilityState.foreground,
-                  generation: 1,
-                  capturedAtMillis: 0,
-                ),
-              ),
+            ..._bridgeOverrides(
+              service: service,
+              runtime: runtime,
+              security: security,
+              vault: _FakeBackgroundVault(),
             ),
           ],
           child: const MaterialApp(
@@ -583,6 +392,15 @@ void main() {
       for (int i = 0; i < 12; i += 1) {
         await tester.idle();
       }
+      // Unlocked: the app keeps the node.
+      expect(service.modes.last, AndroidBackgroundRuntimeMode.standby);
+      expect(runtime.snapshot.serviceRunning, isTrue);
+
+      // The lock timer fires in the background.
+      security.lock();
+      for (int i = 0; i < 12; i += 1) {
+        await tester.idle();
+      }
 
       expect(service.modes.last, AndroidBackgroundRuntimeMode.active);
       expect(runtime.snapshot.serviceRunning, isFalse);
@@ -596,49 +414,24 @@ void main() {
   );
 
   test(
-    'loads persisted bootstrap payload from settings and credentials',
+    'the stored bootstrap payload carries the settings and no key',
     () async {
-      final MemorySecurityCredentialsStore credentials =
-          MemorySecurityCredentialsStore();
-      await credentials.write(appSecurityPasswordHashStorageKey, 'hash');
-
       final AndroidBackgroundBootstrapPayload payload =
           await loadStoredAndroidBackgroundBootstrapPayload(
             settingsStore: MemoryAppSettingsStore(
               const AppSettings(inboxLimitMb: 91, notificationDelaySeconds: 44),
             ),
-            credentialsStore: credentials,
           );
 
       expect(payload.settings.inboxLimitMb, 91);
       expect(payload.settings.notificationDelaySeconds, 44);
-      expect(payload.hasPassword, isTrue);
-      expect(payload.encryptionKey, isNull);
-      expect(payload.requiresUnlockedDataAccess, isTrue);
+      expect(payload.mode, AndroidBackgroundRuntimeMode.active);
+      final AndroidBackgroundBootstrapPayload? back =
+          AndroidBackgroundBootstrapPayload.fromData(payload.toData());
+      expect(back?.settings.inboxLimitMb, 91);
+      expect(payload.toData().containsKey('encryptionKey'), isFalse);
     },
   );
-
-  test('device mode bootstrap payload carries the device master key', () async {
-    final MemorySecurityCredentialsStore credentials =
-        MemorySecurityCredentialsStore();
-    final Uint8List deviceKey = Uint8List.fromList(
-      List<int>.generate(32, (int index) => index + 1),
-    );
-    await credentials.write(
-      appSecurityDeviceMasterKeyStorageKey,
-      securityHexFromBytes(deviceKey),
-    );
-
-    final AndroidBackgroundBootstrapPayload payload =
-        await loadStoredAndroidBackgroundBootstrapPayload(
-          settingsStore: MemoryAppSettingsStore(const AppSettings()),
-          credentialsStore: credentials,
-        );
-
-    expect(payload.hasPassword, isFalse);
-    expect(payload.encryptionKey, orderedEquals(deviceKey));
-    expect(payload.requiresUnlockedDataAccess, isFalse);
-  });
 
   test(
     'the locked background runtime notice is throttled by its suppression key',
@@ -953,9 +746,83 @@ final class _FakeAndroidBackgroundServiceController
   }
 }
 
-/// The app's module registry, as the app's own container builds it.
-List<ZenModule> _appRegistry() {
-  final ProviderContainer app = ProviderContainer();
-  addTearDown(app.dispose);
-  return app.read(zenCoreProvider).modules;
+/// The bridge's providers over fakes: no real files, no real service, and
+/// a core without modules.
+List _bridgeOverrides({
+  required _FakeAndroidBackgroundServiceController service,
+  required RuntimeNodeRuntime runtime,
+  required AppSecurityService security,
+  required _FakeBackgroundVault vault,
+  CallSession? activeCall,
+}) {
+  return [
+    androidBackgroundRuntimeBridgeEnabledProvider.overrideWithValue(true),
+    androidBackgroundServiceControllerProvider.overrideWithValue(service),
+    backgroundVaultProvider.overrideWithValue(vault),
+    zenCoreProvider.overrideWith((Ref ref) {
+      final ZenCore core = ZenCore(
+        modules: const <ZenModule>[],
+        loadFlags: () async => const FeatureFlags(),
+      );
+      ref.onDispose(core.stop);
+      return core;
+    }),
+    runtimeNodeRuntimeProvider.overrideWithValue(runtime),
+    signalTransportProvider.overrideWithValue(runtime),
+    appSecurityServiceProvider.overrideWithValue(security),
+    appSettingsStoreProvider.overrideWithValue(
+      MemoryAppSettingsStore(const AppSettings()),
+    ),
+    signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+    socialSnapshotStoreProvider.overrideWithValue(MemorySocialSnapshotStore()),
+    messageTimelineStoreProvider.overrideWithValue(
+      MemoryMessageTimelineStore(),
+    ),
+    attachmentTransferStoreProvider.overrideWithValue(
+      MemoryAttachmentTransferStore(),
+    ),
+    socialHubSeedProvider.overrideWithValue(
+      SocialHubState.empty(
+        lifecycle: const LifecycleSnapshot(
+          visibility: AppVisibilityState.foreground,
+          generation: 1,
+          capturedAtMillis: 0,
+        ),
+      ).copyWith(activeCall: activeCall),
+    ),
+  ];
+}
+
+/// What the app published and what the service "kept", in memory.
+final class _FakeBackgroundVault implements BackgroundVault {
+  final List<BackgroundCapabilityDraft> published =
+      <BackgroundCapabilityDraft>[];
+  final List<Uint8List> records = <Uint8List>[];
+  int drainCount = 0;
+
+  @override
+  Future<void> publish(BackgroundCapabilityDraft draft) async {
+    published.add(draft);
+  }
+
+  @override
+  Future<BackgroundCapability?> load() async => null;
+
+  @override
+  Future<bool> hasInbox() async => records.isNotEmpty;
+
+  @override
+  Future<int> drain({
+    required Uint8List masterKey,
+    required Future<void> Function(Uint8List record) deliver,
+    Duration settle = Duration.zero,
+  }) async {
+    drainCount += 1;
+    final List<Uint8List> kept = List<Uint8List>.of(records);
+    records.clear();
+    for (final Uint8List record in kept) {
+      await deliver(record);
+    }
+    return kept.length;
+  }
 }

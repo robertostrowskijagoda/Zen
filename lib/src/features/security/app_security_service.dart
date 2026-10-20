@@ -85,6 +85,17 @@ const String appSecurityGifApiKeyStorageKey = 'zen_rewrite_gif_api_key';
 const String appSecurityUnlockFailuresStorageKey =
     'zen_rewrite_unlock_failures';
 
+/// The background key (hex, see `background_keys.dart`, §14.1).
+///
+/// Not the master key and nothing derived from it: the Android background
+/// service reads it without the app password, and it opens only what the
+/// service needs while the app is locked — the node config (this phone's
+/// mesh identity) and the background capability (who counts as a contact,
+/// the inbox's public key). Chats, the friend list, the ledger and every
+/// other store stay under the master key; what arrives while the app is
+/// locked goes into the sealed inbox, which only the master key opens.
+const String appSecurityBackgroundKeyStorageKey = 'zen_rewrite_background_key';
+
 const int appSecurityMasterKeyLengthBytes = 32;
 
 /// Message when the main password would be the same as the panic password.
@@ -485,18 +496,6 @@ Future<bool> loadStoredAppSecurityHasPassword([
       const SecureStorageCredentialsStore(),
 ]) async {
   return await credentialsStore.read(appSecurityPasswordHashStorageKey) != null;
-}
-
-/// Device-mode master key (present only when no password is set). Read by the
-/// Android background runtime so it can decrypt stores without user input.
-Future<Uint8List?> loadStoredDeviceMasterKey([
-  AppSecurityCredentialsStore credentialsStore =
-      const SecureStorageCredentialsStore(),
-]) async {
-  final String? encoded = await credentialsStore.read(
-    appSecurityDeviceMasterKeyStorageKey,
-  );
-  return _decodeMasterKeyHex(encoded);
 }
 
 Uint8List? _decodeMasterKeyHex(String? encoded) {
@@ -1004,6 +1003,8 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     appSecurityDeviceMasterKeyStorageKey,
     appSecuritySealedBiometricTokenStorageKey,
     appSecurityPasswordHashStorageKey,
+    // The node identity and what the background service may read.
+    appSecurityBackgroundKeyStorageKey,
   ];
 
   static const List<String> _otherCredentials = <String>[
@@ -1179,22 +1180,6 @@ final class MemoryAppSecurityService extends _BaseAppSecurityService {
       encryptionKey:
           encryptionKey ??
           Uint8List.fromList(List<int>.generate(32, (int index) => index + 1)),
-    );
-  }
-}
-
-final class HeadlessAppSecurityService extends _BaseAppSecurityService {
-  HeadlessAppSecurityService({
-    required AppSettings settings,
-    required bool hasPassword,
-    Uint8List? encryptionKey,
-    int passwordIterations = 100000,
-  }) : super(MemorySecurityCredentialsStore(), passwordIterations) {
-    prime(
-      settings: settings,
-      hasPassword: hasPassword,
-      locked: hasPassword && encryptionKey == null,
-      encryptionKey: encryptionKey,
     );
   }
 }

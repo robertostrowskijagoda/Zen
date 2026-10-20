@@ -1412,6 +1412,30 @@ void main() {
       );
     });
   });
+
+  test('a payload with its own retry life is dropped after it, and the life '
+      'is not sent along (knocks at mailbox doors, §18.2)', () async {
+    final _SimMesh mesh = await _meshWithRelays();
+    await mesh.goOffline(bob);
+    await mesh.nodes[alice]!.engine.submit(bob, <String, dynamic>{
+      'type': 'flat_held',
+      'c': 'x',
+      kReliableTtlKey: const Duration(hours: 2).inMilliseconds,
+    });
+    await mesh.settle();
+    RelayState state = await mesh.nodes[alice]!.state();
+    expect(state.outbox, hasLength(1));
+    final RelayOutboxEntry entry = state.outbox.values.single;
+    expect(entry.payload.containsKey(kReliableTtlKey), isFalse);
+    expect(
+      entry.expiresAtMillis - entry.createdAtMillis,
+      const Duration(hours: 2).inMilliseconds,
+    );
+    expect(entry.relayable, isFalse, reason: 'direct only');
+    await mesh.advance(const Duration(hours: 3));
+    state = await mesh.nodes[alice]!.state();
+    expect(state.outbox, isEmpty);
+  });
 }
 
 Map<String, dynamic> _fakeEnvelope({

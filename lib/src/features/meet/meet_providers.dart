@@ -9,6 +9,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/ask/ask_service.dart';
 import 'package:zen/src/features/meet/circle/circle_service.dart';
+import 'package:zen/src/features/meet/encounters.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
@@ -96,6 +97,13 @@ final Provider<MeetService> meetServiceProvider = Provider<MeetService>((
   // Weak acquaintances get no friend list and statuses (§8); after a
   // level change [setFriendLevel] sends both again.
   service.levelOf = (String a) => ref.read(ledgerNodeProvider)?.levelOf(a);
+  // The alarm key's certificate names this device; a friend's must come
+  // from the account the ledger knows for them (§16.3).
+  service.ownAddress = () => ref.read(runtimeNodeSnapshotProvider).localAddress;
+  service.accountOf = (String a) {
+    final LedgerNode? node = ref.read(ledgerNodeProvider);
+    return node != null && node.isReady ? node.accountOf(a) : null;
+  };
   unawaitedLogged(
     service.reload().then((_) async {
       // Before the friends are read there is nothing to send (and an empty
@@ -137,6 +145,9 @@ final Provider<MeetService> meetServiceProvider = Provider<MeetService>((
       final Set<String> added = now.difference(before);
       for (final String a in added) {
         unawaitedLogged(service.replayParked(a), context: 'Ramki od znajomego');
+        if (!firstRead) {
+          unawaitedLogged(service.shareAlarmKey(a), context: 'Klucz alarmu');
+        }
       }
       if (before.difference(now).isNotEmpty) {
         unawaitedLogged(
@@ -216,7 +227,7 @@ final Provider<NearbyService> nearbyServiceProvider = Provider<NearbyService>((
     sendMesh: (String to, Map<String, dynamic> payload) =>
         transport.send(remoteAddress: to, payload: payload),
     frames: transport.frames,
-  );
+  )..encounters = ref.watch(encounterLogProvider);
   void onMeet() => nearby.friendsChanged();
   meet.addListener(onMeet);
   Future<void> showIfAllowed() async {

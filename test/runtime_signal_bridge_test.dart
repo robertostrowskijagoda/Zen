@@ -206,9 +206,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Nothing at all goes back to a stranger (no pong, and no automatic
-    // `friend_remove` that would confirm the device is online), and their
-    // presence is not recorded.
+    // Nothing at all goes back to a stranger (a reply would confirm the
+    // device is online), and their presence is not recorded.
     expect(
       transport.sentSignals.where(
         (entry) => entry.remoteAddress == strangerAddress,
@@ -226,57 +225,6 @@ void main() {
       isFalse,
     );
   });
-
-  testWidgets(
-    'an automatic friend_remove keeps the friend; a reliable one removes',
-    (WidgetTester tester) async {
-      final MemorySignalTransport transport = MemorySignalTransport();
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            signalTransportProvider.overrideWithValue(transport),
-            socialHubSeedProvider.overrideWithValue(_seedState()),
-          ],
-          child: const ZenRewriteApp(),
-        ),
-      );
-      await tester.pump();
-      final ProviderContainer container = ProviderScope.containerOf(
-        tester.element(find.byType(AppShellScreen)),
-      );
-
-      // What older versions send to every peer they do not recognise.
-      await transport.injectIncoming(
-        from: _adaAddress,
-        payload: const <String, dynamic>{'type': 'friend_remove'},
-      );
-      await tester.pumpAndSettle();
-      expect(
-        container
-            .read(socialHubControllerProvider)
-            .friends[_adaAddress]
-            ?.status,
-        FriendRelationshipStatus.accepted,
-      );
-
-      // A person's own decision travels reliably and carries its id.
-      await transport.injectIncoming(
-        from: _adaAddress,
-        payload: const <String, dynamic>{
-          'type': 'friend_remove',
-          '_rid': 'r-1',
-        },
-      );
-      await tester.pumpAndSettle();
-      expect(
-        container
-            .read(socialHubControllerProvider)
-            .friendByAddress(_adaAddress),
-        isNull,
-      );
-    },
-  );
 
   testWidgets(
     'runtime signal bridge stays silent while the snapshot is unreadable',

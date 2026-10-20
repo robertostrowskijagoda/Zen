@@ -14,10 +14,10 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
-import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/platform_key_vault.dart';
 import 'package:zen/src/features/security/security_payload_protector.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -94,9 +94,8 @@ final class ZenBootstrapResult {
   final AppSettings initialSettings;
   final ZenPersistentStores stores;
 
-  /// The app's providers. The Android background service builds the same
-  /// ones (`ZenHost.backgroundService`), reading the social state itself
-  /// ([socialHubAutoHydrate] off) from [socialHubSeed].
+  /// The app's providers; [socialHubAutoHydrate] off and [socialHubSeed]
+  /// let a caller read the social state itself.
   List buildProviderOverrides({
     RuntimeSystemNotificationServiceFactory? systemNotificationServiceFactory,
     bool socialHubAutoHydrate = true,
@@ -268,10 +267,6 @@ final class ZenBootstrapper {
           () => initRuntime(
             settings: settingsState.settings,
             appSecurityService: appSecurityService,
-            lanDiscovery: lanDiscoveryResolver(
-              loadSettings: settingsState.appSettingsStore.load,
-              ledgerDisk: stores.ledgerDisk,
-            ),
           ),
         );
     return ZenBootstrapResult(
@@ -324,15 +319,20 @@ final class ZenBootstrapper {
   Future<ZenBootstrapRuntimeState> initRuntime({
     required AppSettings settings,
     AppSecurityService? appSecurityService,
-    RuntimeLanDiscoveryResolver? lanDiscovery,
   }) async {
     final RuntimeSignalBootstrapConfig runtimeConfig =
         RuntimeSignalBootstrapConfig(
           waitTimeout: settings.signalWaitTimeout,
           nodeConfigProtector: appSecurityService == null
               ? null
+              // Android: the background service runs the node while the
+              // app is locked, without the master key (§14.1).
+              : Platform.isAndroid
+              ? BackgroundKeyProtector(
+                  appSecurityService.credentialsStore,
+                  createKey: true,
+                )
               : EncryptedBinaryPayloadProtector(appSecurityService),
-          lanDiscovery: lanDiscovery,
         );
     return ZenBootstrapRuntimeState(
       runtime: _runtimeBuilder(config: runtimeConfig),

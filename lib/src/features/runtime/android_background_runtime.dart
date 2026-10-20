@@ -8,39 +8,42 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:zen/src/app/app_bootstrap.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/i18n/zen_language_preference.dart';
 import 'package:zen/src/app/persistent_stores.dart';
 import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/app/zen_core.dart';
-import 'package:zen/src/app/zen_host.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
+import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
-import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
 import 'package:zen/src/features/calls/group_call_media.dart';
-import 'package:zen/src/features/calls/noop_call_media_session.dart';
+import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/meet/alarm_kit.dart';
 import 'package:zen/src/features/meet/alarm_shortcut.dart';
 import 'package:zen/src/features/meet/location.dart';
+import 'package:zen/src/features/meet/locked_alarm.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
-import 'package:zen/src/features/meet/nearby_keeper.dart';
 import 'package:zen/src/features/meet/presentation/alarm_audio.dart';
-import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
+import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/relay/relay_providers.dart';
+import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/app_security_crypto.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
-import 'package:zen/src/features/security/security_payload_protector.dart';
+import 'package:zen/src/features/security/background_keys.dart';
+import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
@@ -198,7 +201,8 @@ String _backgroundServiceNotificationText(
       : t('Aktywna rozmowa audio z {name}', {'name': session.displayName});
 }
 
-/// Heads-up for a service parked without an unlocked key (password mode).
+/// Heads-up for a service parked because the app has not yet published what
+/// it may receive with (not unlocked since it was installed or wiped, §14.1).
 ///
 /// In that state the background runtime cannot start the node at all, so
 /// incoming calls silently go nowhere. The suppression key keeps repeat park
@@ -261,10 +265,15 @@ Future<bool> showBackgroundRuntimeStoppedNotice(
   );
 }
 
+/// The payload the service falls back to when no app is around to send one
+/// (a boot, a self-restart): the settings, and "own the node".
+///
+/// No key of any kind: the service never holds the master key (§14.1). It
+/// receives with the background capability the app published, which it
+/// reads itself.
 Future<AndroidBackgroundBootstrapPayload>
 loadStoredAndroidBackgroundBootstrapPayload({
   AppSettingsStore? settingsStore,
-  AppSecurityCredentialsStore? credentialsStore,
 }) async {
   try {
     final AppSettingsStore resolvedSettingsStore;
@@ -278,32 +287,14 @@ loadStoredAndroidBackgroundBootstrapPayload({
     }
     final AppSettings settings =
         await resolvedSettingsStore.load() ?? const AppSettings();
-    final AppSecurityCredentialsStore resolvedCredentialsStore =
-        credentialsStore ?? const SecureStorageCredentialsStore();
-    final bool hasPassword = await loadStoredAppSecurityHasPassword(
-      resolvedCredentialsStore,
-    );
-    // Encryption is always on. Without a password the device master key from
-    // secure storage lets the background isolate decrypt stores on its own;
-    // password mode requires a key handed over from the unlocked foreground.
-    final Uint8List? deviceMasterKey = hasPassword
-        ? null
-        : await loadStoredDeviceMasterKey(resolvedCredentialsStore);
-    return AndroidBackgroundBootstrapPayload(
-      settings: settings,
-      hasPassword: hasPassword,
-      encryptionKey: deviceMasterKey,
-    );
+    return AndroidBackgroundBootstrapPayload(settings: settings);
   } catch (error, stackTrace) {
     logZenError(
       'Loading stored Android background bootstrap payload failed',
       error,
       stackTrace,
     );
-    return const AndroidBackgroundBootstrapPayload(
-      settings: AppSettings(),
-      hasPassword: false,
-    );
+    return const AndroidBackgroundBootstrapPayload(settings: AppSettings());
   }
 }
 
@@ -368,18 +359,16 @@ Future<bool> requestAndroidBackgroundDeliveryExemption() async {
   return isAndroidBackgroundDeliveryUnrestricted();
 }
 
+/// What the app tells the service: the settings it needs and the mode to
+/// reach. Never a key (§14.1).
 @immutable
 final class AndroidBackgroundBootstrapPayload {
   const AndroidBackgroundBootstrapPayload({
     required this.settings,
-    required this.hasPassword,
-    this.encryptionKey,
     this.mode = AndroidBackgroundRuntimeMode.active,
   });
 
   final AppSettings settings;
-  final bool hasPassword;
-  final Uint8List? encryptionKey;
 
   /// Mode the task isolate should converge to once it applies this payload.
   final AndroidBackgroundRuntimeMode mode;
@@ -387,17 +376,8 @@ final class AndroidBackgroundBootstrapPayload {
   AndroidBackgroundBootstrapPayload withMode(
     AndroidBackgroundRuntimeMode mode,
   ) {
-    return AndroidBackgroundBootstrapPayload(
-      settings: settings,
-      hasPassword: hasPassword,
-      encryptionKey: encryptionKey,
-      mode: mode,
-    );
+    return AndroidBackgroundBootstrapPayload(settings: settings, mode: mode);
   }
-
-  /// Local encryption is always on; password mode or an uninitialized device
-  /// master key cannot access sealed storage without the key handed over.
-  bool get requiresUnlockedDataAccess => hasPassword || encryptionKey == null;
 
   Map<String, dynamic> toData() {
     return <String, dynamic>{
@@ -407,10 +387,6 @@ final class AndroidBackgroundBootstrapPayload {
       'notificationDelaySeconds': settings.notificationDelaySeconds,
       'lockMode': settings.lockMode.index,
       'backgroundLockDelaySeconds': settings.backgroundLockDelaySeconds,
-      'hasPassword': hasPassword,
-      'encryptionKey': encryptionKey == null
-          ? null
-          : base64Encode(encryptionKey!),
       'mode': mode.name,
     };
   }
@@ -422,7 +398,6 @@ final class AndroidBackgroundBootstrapPayload {
     if ((data['type'] as String?) != 'bootstrap') {
       return null;
     }
-    final String? encodedKey = (data['encryptionKey'] as String?)?.trim();
     return AndroidBackgroundBootstrapPayload(
       settings: AppSettings(
         inboxLimitMb:
@@ -441,10 +416,6 @@ final class AndroidBackgroundBootstrapPayload {
             (data['backgroundLockDelaySeconds'] as num?)?.toInt() ??
             AppSettings.defaultBackgroundLockDelaySeconds,
       ),
-      hasPassword: (data['hasPassword'] as bool?) ?? false,
-      encryptionKey: encodedKey == null || encodedKey.isEmpty
-          ? null
-          : Uint8List.fromList(base64Decode(encodedKey)),
       // A payload without a mode (the on-disk fallback used when the
       // service restarts itself with no app around) means "own the node".
       mode:
@@ -760,6 +731,31 @@ final class FlutterForegroundAndroidBackgroundServiceController
   }
 }
 
+/// Where the app publishes the background capability and finds what the
+/// service kept while the app was locked (§14.1).
+final Provider<BackgroundVault> backgroundVaultProvider =
+    Provider<BackgroundVault>((Ref ref) {
+      return FileBackgroundVault(
+        supportDirectory: ref.read(supportDirectoryResolverProvider),
+        credentials: ref.read(appSecurityServiceProvider).credentialsStore,
+        createKey: true,
+      );
+    });
+
+/// Keeps the node where the master key is (§14.1).
+///
+/// * On screen, and in the background while unlocked, this isolate runs the
+///   node and the app's `ZenCore`; the foreground service stays parked
+///   (started from the foreground, see `_ensureServiceStandby`) and only
+///   listens for the heartbeat.
+/// * Once the app locks — or its engine is gone, which the parked service
+///   notices by the missing heartbeat — the service takes the node over in
+///   its receive-only mode ([LockedReceiver]): no master key, only the
+///   background capability this widget publishes while the app is unlocked.
+/// * Back on screen and unlocked, this isolate takes the node back and
+///   drains the sealed inbox into the app.
+/// * While unlocked it keeps the alarm kit up to date (§16.3): what the
+///   locked service raises this person's alarm with.
 class AndroidBackgroundRuntimeBridge extends ConsumerStatefulWidget {
   const AndroidBackgroundRuntimeBridge({required this.child, super.key});
 
@@ -777,22 +773,54 @@ final class _AndroidBackgroundRuntimeBridgeState
   /// system refused, so a rebuild storm cannot turn into a retry storm.
   static const Duration _standbyRetryBackoff = Duration(seconds: 30);
 
+  /// How long to wait before draining again when the node was not up yet.
+  static const Duration _drainRetryDelay = Duration(seconds: 10);
+
   bool _initialized = false;
   bool _syncScheduled = false;
   bool _syncInFlight = false;
   bool _syncQueued = false;
-  bool _handoffActive = false;
 
-  /// The app's `ZenCore` was stopped for the handoff: the service runs the
-  /// same modules meanwhile, and only one of them may do the duties.
+  /// The service runs the node (receive-only) since this app locked.
+  bool _handoffActive = false;
+  bool _handoffInFlight = false;
+
+  /// The app's `ZenCore` was stopped for the handoff: it starts again once
+  /// this isolate has the node back.
   bool _coreHandedOff = false;
-  int? _lastBackgroundHandoffGeneration;
   AndroidBackgroundRuntimeMode? _lastConfirmedMode;
   String? _lastParkedCallSignature;
   DateTime? _lastStandbyFailureAt;
 
   bool _isObserving = false;
   Timer? _heartbeatTimer;
+
+  AppSecurityService? _security;
+
+  /// The public part of the inbox key (not a secret): kept, so the
+  /// capability can still be published once a lock erased the master key.
+  Uint8List? _inboxPublicKey;
+
+  /// Fingerprint of the master key [_inboxPublicKey] belongs to.
+  String? _inboxKeyOwner;
+  String? _publishedSignature;
+  Future<void> _publishing = Future<void>.value();
+
+  bool _draining = false;
+
+  /// Keeps the alarm kit in step with the alarm setup (§16.3); made once
+  /// the app is unlocked and its core runs.
+  AlarmKitKeeper? _alarmKitKeeper;
+  MeetService? _kitMeet;
+  Future<void> _alarmKitWriting = Future<void>.value();
+
+  /// A refresh waits behind the one running: more changes meanwhile ride
+  /// on it.
+  bool _alarmKitQueued = false;
+
+  /// This widget emptied the inbox since the service last ran the node.
+  bool _inboxDrained = false;
+  Timer? _drainRetry;
 
   @override
   void initState() {
@@ -803,8 +831,8 @@ final class _AndroidBackgroundRuntimeBridgeState
     // The sync must not depend on a widget rebuild. Flutter disables frames
     // before it dispatches `hidden`/`paused` to observers, so `scheduleFrame`
     // (and with it every rebuild and post-frame callback) is a no-op from the
-    // moment the app leaves the screen - which is exactly when the handoff to
-    // the foreground service has to happen.
+    // moment the app leaves the screen - and the lock timer fires exactly
+    // then, in the background.
     _isObserving = true;
     WidgetsBinding.instance.addObserver(this);
     androidScreenCaptureActive.addListener(_onScreenCaptureChanged);
@@ -816,6 +844,9 @@ final class _AndroidBackgroundRuntimeBridgeState
         ref.read(androidBackgroundServiceControllerProvider),
       );
     };
+    final AppSecurityService security = ref.read(appSecurityServiceProvider);
+    _security = security;
+    security.addListener(_onSecurityChanged);
     unawaitedLogged(
       _initialize(),
       context: 'Android background runtime bridge initialization failed',
@@ -828,12 +859,25 @@ final class _AndroidBackgroundRuntimeBridgeState
     }
   }
 
+  /// A lock (or an unlock) reaches the handoff straight away, frame or not.
+  void _onSecurityChanged() {
+    if (_initialized && mounted) {
+      _scheduleSync();
+    }
+  }
+
   @override
   void dispose() {
     androidScreenCaptureActive.removeListener(_onScreenCaptureChanged);
     androidPrepareScreenCapture = null;
+    _security?.removeListener(_onSecurityChanged);
+    _security = null;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
+    _drainRetry?.cancel();
+    _drainRetry = null;
+    _kitMeet?.removeListener(_onMeetChanged);
+    _kitMeet = null;
     if (_isObserving) {
       WidgetsBinding.instance.removeObserver(this);
     }
@@ -870,10 +914,9 @@ final class _AndroidBackgroundRuntimeBridgeState
   /// Whether the WebRTC session in *this* isolate is on a live call.
   ///
   /// The relay a call runs over belongs to this isolate's Yggdrasil node, so
-  /// handing the node to the service mid-call cuts the media: the call simply
-  /// went dead the moment the app left the screen. The foreground service is
-  /// already holding the microphone/camera types for the call, so the process
-  /// survives without the handoff.
+  /// handing the node to the service mid-call cuts the media. The foreground
+  /// service is already holding the microphone/camera types for the call, so
+  /// the process survives without the handoff.
   bool _localMediaOwnsActiveCall() {
     final CallSession? activeCall = ref
         .read(socialHubControllerProvider)
@@ -922,6 +965,22 @@ final class _AndroidBackgroundRuntimeBridgeState
       socialHubControllerProvider.select(
         (SocialHubState state) => state.activeCall?.kind,
       ),
+    );
+    // Friends and groups as the service will recognise them while locked.
+    ref.listen<String>(
+      socialHubControllerProvider.select(backgroundContactsSignature),
+      (String? previous, String next) {
+        if (_initialized) {
+          unawaitedLogged(
+            _publishCapability(),
+            context: 'Publishing the background capability failed',
+          );
+          unawaitedLogged(
+            _publishAlarmKit(),
+            context: 'Writing the alarm kit failed',
+          );
+        }
+      },
     );
     if (_initialized) {
       _scheduleSync();
@@ -979,136 +1038,113 @@ final class _AndroidBackgroundRuntimeBridgeState
     if (!mounted) {
       return;
     }
+    if (isSecurityBlockingUi(ref.read(appSecurityServiceProvider))) {
+      await _handoffToReceiver();
+      return;
+    }
     final LifecycleSnapshot lifecycle = ref
         .read(socialHubControllerProvider)
         .lifecycle;
     if (lifecycle.isBackgroundLike) {
-      await _handoffToBackgroundService(lifecycle);
+      // Unlocked in the background: this isolate keeps the node and the
+      // core, so the master key never leaves it. The parked service waits
+      // for the heartbeat and takes over (receive-only) only once the app
+      // locks or its engine is gone.
       return;
     }
-    _lastBackgroundHandoffGeneration = null;
     await _restoreForegroundRuntime();
   }
 
-  /// Snapshot of everything the service isolate needs, or `null` when the app
-  /// is locked and cannot hand over a usable key.
-  Future<AndroidBackgroundBootstrapPayload?> _buildPayload(
+  AndroidBackgroundBootstrapPayload _payload(
     AndroidBackgroundRuntimeMode mode,
-  ) async {
-    final AppSecurityService security = ref.read(appSecurityServiceProvider);
-    final AppSettings settings = ref.read(appSettingsControllerProvider);
-    final Uint8List? encryptionKey = await security.currentEncryptionKey();
-    final AndroidBackgroundBootstrapPayload payload =
-        AndroidBackgroundBootstrapPayload(
-          settings: settings,
-          hasPassword: security.hasPassword,
-          encryptionKey: encryptionKey,
-          mode: mode,
-        );
-    if (mode == AndroidBackgroundRuntimeMode.active &&
-        payload.requiresUnlockedDataAccess &&
-        encryptionKey == null) {
-      return null;
-    }
-    return payload;
+  ) {
+    return AndroidBackgroundBootstrapPayload(
+      settings: ref.read(appSettingsControllerProvider),
+      mode: mode,
+    );
   }
 
-  Future<void> _handoffToBackgroundService(LifecycleSnapshot lifecycle) async {
-    if (_handoffActive) {
+  /// The app locked: the node goes to the service, which receives without
+  /// the master key (§14.1).
+  ///
+  /// Everything is read before the first wait. A lock on screen replaces
+  /// the app with the lock screen on the next frame, which removes this
+  /// widget; the handoff must finish without it.
+  Future<void> _handoffToReceiver() async {
+    if (_handoffActive || _handoffInFlight) {
       return;
     }
     if (_localMediaOwnsActiveCall()) {
-      // Keep the node here until the call is over. Left unset so the next
-      // sync of this same lifecycle generation retries once it ends.
-      _lastBackgroundHandoffGeneration = null;
+      // Keep the node here until the call is over; a later sync retries.
       _syncHeartbeat(ownsNode: true);
       return;
     }
-    if (_lastBackgroundHandoffGeneration == lifecycle.generation) {
-      return;
-    }
-    _lastBackgroundHandoffGeneration = lifecycle.generation;
-    logZenMessage(
-      'Handing the runtime to the background service '
-      '(${lifecycle.visibility.name})',
+    _handoffInFlight = true;
+    _inboxDrained = false;
+    final AndroidBackgroundServiceController controller = ref.read(
+      androidBackgroundServiceControllerProvider,
     );
-    final AndroidBackgroundBootstrapPayload? payload = await _buildPayload(
-      AndroidBackgroundRuntimeMode.active,
-    );
-    if (payload == null) {
-      logZenWarning(
-        'Handoff skipped: the app is locked, so no key can be handed over.',
-      );
-      return;
-    }
-    if (!mounted) {
-      return;
-    }
     final RuntimeNodeRuntime runtime = ref.read(runtimeNodeRuntimeProvider);
+    final ZenCore core = ref.read(zenCoreProvider);
+    final LedgerNode? ledger = ref.read(ledgerNodeProvider);
     final CallSession? activeCall = ref
         .read(socialHubControllerProvider)
         .activeCall;
-    // The service serves posts, photos and videos to friends while the app
-    // is away; only one process may write the ledger on disk at a time.
-    await ref.read(ledgerNodeProvider)?.suspend();
-    if (!mounted) {
-      return;
-    }
-    // Park this isolate node first: the identity key is shared, so a second
-    // Yggdrasil node must never be up while this one still holds the mesh
-    // session.
-    await runtime.stop();
-    if (!mounted) {
-      return;
-    }
-    // The service runs the app's own modules (one `ZenCore`, one code
-    // path): the app's duties pause meanwhile, so the minute work and the
-    // writes of the shared state happen in one isolate only.
-    final ZenCore core = ref.read(zenCoreProvider);
-    final bool coreWasRunning = core.isStarted;
-    if (coreWasRunning) {
-      await core.stop();
-      if (!mounted) {
-        return;
-      }
-    }
+    final AndroidBackgroundBootstrapPayload payload = _payload(
+      AndroidBackgroundRuntimeMode.active,
+    );
+    // Who counts as a contact, as of now (the key's public part is kept).
+    final Future<void> published = _publishCapability();
+    // The alarm kit was written while the app was unlocked; one still
+    // being written finishes before the service reads it.
+    final Future<void> kitWritten = _alarmKitWriting;
+    // The service is about to own the node; a heartbeat from here on would
+    // only keep it parked.
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
     _lastConfirmedMode = null;
     _lastParkedCallSignature = null;
-    // The service is about to own the node; a heartbeat from here on would
-    // only be noise.
-    _syncHeartbeat(ownsNode: false);
-    final bool started = await ref
-        .read(androidBackgroundServiceControllerProvider)
-        .start(payload, activeCall: activeCall);
-    if (!mounted) {
-      return;
-    }
-    if (!started) {
-      // Nothing took the node over, so keep serving from the UI isolate for as
-      // long as the process survives instead of going silently offline.
-      logZenWarning(
-        'Handoff failed: the service never confirmed it owns the node.',
+    logZenMessage('The app is locked: the service receives without the key.');
+    try {
+      await published;
+      await kitWritten;
+      // Saved and closed: nothing writes the ledger while the app is locked.
+      await ledger?.suspend();
+      final bool coreWasRunning = core.isStarted;
+      await core.stop();
+      // Down first: the identity key is shared, so a second Yggdrasil node
+      // must never be up while this one still holds the mesh session.
+      await runtime.stop();
+      final bool started = await controller.start(
+        payload,
+        activeCall: activeCall,
       );
-      await ref.read(ledgerNodeProvider)?.resume();
-      await runtime.start();
-      if (coreWasRunning) {
-        _restartCore();
+      if (!started) {
+        // With the heartbeat gone the parked service takes the node over by
+        // itself (kAndroidBackgroundHeartbeatTimeout).
+        logZenWarning('Handoff failed: the service did not confirm the node.');
       }
-      return;
+      if (mounted) {
+        _handoffActive = started;
+        _lastConfirmedMode = started
+            ? AndroidBackgroundRuntimeMode.active
+            : null;
+        _coreHandedOff = _coreHandedOff || coreWasRunning;
+      }
+    } on Object catch (error, stackTrace) {
+      logZenError('Handing the node to the service failed', error, stackTrace);
+    } finally {
+      _handoffInFlight = false;
     }
-    _lastConfirmedMode = AndroidBackgroundRuntimeMode.active;
-    _handoffActive = true;
-    _coreHandedOff = coreWasRunning;
-    logZenMessage('Background service owns the runtime node.');
   }
 
   Future<void> _restoreForegroundRuntime() async {
     final AndroidBackgroundServiceController controller = ref.read(
       androidBackgroundServiceControllerProvider,
     );
-    // A null `_lastConfirmedMode` means this process has not parked the
-    // service yet: either a fresh launch, or a launch on top of a service that
-    // is still running the node from a previous session.
+    // A null `_lastConfirmedMode` means this widget has not parked the
+    // service yet: a fresh launch, an unlock (the lock screen replaced this
+    // widget), or a launch on top of a service still running the node.
     final bool serviceOwnsNode =
         _handoffActive ||
         (_lastConfirmedMode == null && await controller.isRunning());
@@ -1136,8 +1172,7 @@ final class _AndroidBackgroundRuntimeBridgeState
       }
       _handoffActive = false;
     }
-    // The service has let go of the ledger (or never had it): take it back,
-    // with whatever it received meanwhile.
+    // The node is free (or never was taken): the ledger comes back.
     if (!serviceOwnsNode || parked) {
       await ref.read(ledgerNodeProvider)?.resume();
       if (!mounted) {
@@ -1154,11 +1189,88 @@ final class _AndroidBackgroundRuntimeBridgeState
       _coreHandedOff = false;
       _restartCore();
     }
+    if (!mounted) {
+      return;
+    }
+    unawaitedLogged(
+      _publishCapability(),
+      context: 'Publishing the background capability failed',
+    );
+    await _drainInbox();
+    // After the drain: an alarm the locked service raised is taken over
+    // first, then the kit gets a new one.
+    unawaitedLogged(
+      _publishAlarmKit(),
+      context: 'Writing the alarm kit failed',
+    );
   }
 
-  /// Starts the app's `ZenCore` again after the service let go, and reloads
-  /// what the service changed meanwhile. A locked app leaves it to the
-  /// security gate, which starts the core once the app is unlocked.
+  void _onMeetChanged() {
+    if (_initialized && mounted) {
+      unawaitedLogged(
+        _publishAlarmKit(),
+        context: 'Writing the alarm kit failed',
+      );
+    }
+  }
+
+  /// Writes the alarm kit again when the alarm setup changed (§16.3): the
+  /// friends it goes to (and their devices), the settings, the alarm going
+  /// on. Only while unlocked with the core running (the setup is under the
+  /// master key); everything is read before the first wait.
+  Future<void> _publishAlarmKit() {
+    if (!mounted ||
+        isSecurityBlockingUi(ref.read(appSecurityServiceProvider)) ||
+        !ref.read(zenCoreProvider).isStarted) {
+      return _alarmKitWriting;
+    }
+    // Only once the friends were read: a kit without them must not replace
+    // the one stored.
+    if (!ref.read(socialHubControllerProvider.notifier).isHydrated ||
+        ref.read(socialHubControllerProvider).snapshotUnreadable) {
+      return _alarmKitWriting;
+    }
+    AlarmKitKeeper? keeper = _alarmKitKeeper;
+    if (keeper == null) {
+      final MeetService meet = ref.read(meetServiceProvider);
+      keeper = _alarmKitKeeper = AlarmKitKeeper(
+        meet: meet,
+        store: FileAlarmKitStore(
+          supportDirectory: ref.read(supportDirectoryResolverProvider),
+          credentials: ref.read(appSecurityServiceProvider).credentialsStore,
+          createKey: true,
+        ),
+      );
+      _kitMeet = meet..addListener(_onMeetChanged);
+    }
+    if (_alarmKitQueued) {
+      return _alarmKitWriting;
+    }
+    _alarmKitQueued = true;
+    final AccountDirectoryHolder directories = ref.read(
+      accountDirectoryHolderProvider,
+    );
+    final RelayEngine? relay = ref.read(relayEngineProvider);
+    final AlarmKitKeeper current = keeper;
+    _alarmKitWriting = _alarmKitWriting.then((_) async {
+      _alarmKitQueued = false;
+      await current.refresh(
+        devicesOf: (String friend) {
+          final AccountDeviceDirectory? directory = directories.directory;
+          final String? account = directory?.accountOf(friend);
+          return directory == null || account == null
+              ? const <String>[]
+              : directory.addressesOf(account);
+        },
+        preseal: relay?.presealDeposits,
+      );
+    });
+    return _alarmKitWriting;
+  }
+
+  /// Starts the app's `ZenCore` again after the service let go. A locked app
+  /// leaves it to the security gate, which starts the core once the app is
+  /// unlocked.
   void _restartCore() {
     if (isSecurityBlockingUi(ref.read(appSecurityServiceProvider))) {
       return;
@@ -1168,6 +1280,167 @@ final class _AndroidBackgroundRuntimeBridgeState
       core.start().then((_) => core.resumed()),
       context: 'Restarting ZenCore after the background service failed',
     );
+  }
+
+  /// Tells the service who counts as a contact while the app is locked, and
+  /// the public part of the inbox key (§14.1). Only once the friends were
+  /// read: an empty list then must not replace the one stored.
+  Future<void> _publishCapability() {
+    if (!mounted) {
+      return _publishing;
+    }
+    final SocialHubController hub = ref.read(
+      socialHubControllerProvider.notifier,
+    );
+    final AppSecurityService security = ref.read(appSecurityServiceProvider);
+    final AccountDirectoryHolder directories = ref.read(
+      accountDirectoryHolderProvider,
+    );
+    final List<String> mailboxes =
+        ref.read(relayEngineProvider)?.overview.value.relays ??
+        const <String>[];
+    final BackgroundVault vault = ref.read(backgroundVaultProvider);
+    SocialHubState state = ref.read(socialHubControllerProvider);
+    _publishing = _publishing
+        .then((_) async {
+          if (!hub.isHydrated) {
+            await hub.whenHydrated;
+            if (!mounted) {
+              return;
+            }
+            state = ref.read(socialHubControllerProvider);
+          }
+          if (!hub.isHydrated || state.snapshotUnreadable) {
+            return;
+          }
+          // Derived again whenever the master key is another one (a wipe
+          // makes a new one): an inbox sealed for the old key would never
+          // open.
+          final Uint8List? masterKey = await security.currentEncryptionKey();
+          Uint8List? publicKey = _inboxPublicKey;
+          if (masterKey != null) {
+            final String owner = securityHexFromBytes(
+              securityMasterFingerprint(masterKey),
+            );
+            if (publicKey == null || owner != _inboxKeyOwner) {
+              publicKey = await inboxPublicKeyFor(masterKey);
+              _inboxPublicKey = publicKey;
+              _inboxKeyOwner = owner;
+            }
+          }
+          if (publicKey == null) {
+            return;
+          }
+          final BackgroundCapabilityDraft draft = backgroundCapabilityDraftOf(
+            state,
+            inboxPublicKey: publicKey,
+            directory: directories.directory,
+            mailboxes: mailboxes,
+          );
+          String sorted(Iterable<String> values) =>
+              (values.toList()..sort()).join(',');
+          final String signature = <String>[
+            base64Url.encode(publicKey),
+            sorted(draft.friends),
+            sorted(draft.groupMembers),
+            sorted(draft.blocked),
+            draft.mailboxes.join(','),
+          ].join('|');
+          if (signature == _publishedSignature) {
+            return;
+          }
+          await vault.publish(draft);
+          _publishedSignature = signature;
+        })
+        .catchError((Object error, StackTrace stackTrace) {
+          logZenError(
+            'Publishing the background capability failed',
+            error,
+            stackTrace,
+          );
+        });
+    return _publishing;
+  }
+
+  /// Opens what the service kept while the app was locked and hands it to
+  /// the app as if it had just arrived (§14.1). Only while the service is
+  /// parked (it is the only writer), the app unlocked, its services
+  /// listening and the node up — otherwise the inbox waits.
+  Future<void> _drainInbox() async {
+    if (_draining || _inboxDrained || !mounted) {
+      return;
+    }
+    final AndroidBackgroundServiceController controller = ref.read(
+      androidBackgroundServiceControllerProvider,
+    );
+    final AppSecurityService security = ref.read(appSecurityServiceProvider);
+    final BackgroundVault vault = ref.read(backgroundVaultProvider);
+    final ZenCore core = ref.read(zenCoreProvider);
+    final SocialHubController hub = ref.read(
+      socialHubControllerProvider.notifier,
+    );
+    final RuntimeNodeRuntime runtime = ref.read(runtimeNodeRuntimeProvider);
+    final RuntimeSystemNotificationService notices = ref.read(
+      runtimeSystemNotificationServiceProvider,
+    );
+    _draining = true;
+    try {
+      if (_lastConfirmedMode != AndroidBackgroundRuntimeMode.standby &&
+          await controller.isRunning()) {
+        return;
+      }
+      if (isSecurityBlockingUi(security)) {
+        return;
+      }
+      final Uint8List? masterKey = await security.currentEncryptionKey();
+      if (masterKey == null) {
+        return;
+      }
+      if (!await vault.hasInbox()) {
+        _inboxDrained = true;
+        return;
+      }
+      // The app's services have to be listening before anything is handed
+      // to them.
+      await core.start();
+      await hub.whenHydrated;
+      if (!mounted) {
+        return;
+      }
+      if (ref.read(socialHubControllerProvider).snapshotUnreadable) {
+        logZenWarning('The inbox waits: the stored friends are unreadable.');
+        return;
+      }
+      if (!runtime.snapshot.serviceRunning) {
+        _drainRetry?.cancel();
+        _drainRetry = Timer(_drainRetryDelay, () {
+          if (mounted) {
+            _scheduleSync();
+          }
+        });
+        return;
+      }
+      final int delivered = await vault.drain(
+        masterKey: masterKey,
+        deliver: (Uint8List record) async {
+          final SignalTransportFrame? frame = decodeInboxFrame(record);
+          if (frame != null) {
+            runtime.replayReceived(frame);
+          }
+        },
+      );
+      _inboxDrained = true;
+      for (final String slot in kLockedReceiverSlots) {
+        await notices.dismissSlot(slot);
+      }
+      logZenMessage(
+        'Drained $delivered frame(s) kept while the app was locked.',
+      );
+    } on Object catch (error, stackTrace) {
+      logZenError('Draining the inbox failed', error, stackTrace);
+    } finally {
+      _draining = false;
+    }
   }
 
   /// Starts the foreground service while the app is still on screen and parks
@@ -1193,13 +1466,10 @@ final class _AndroidBackgroundRuntimeBridgeState
         DateTime.now().difference(lastFailure) < _standbyRetryBackoff) {
       return false;
     }
-    final AndroidBackgroundBootstrapPayload? payload = await _buildPayload(
-      AndroidBackgroundRuntimeMode.standby,
+    final bool parked = await controller.start(
+      _payload(AndroidBackgroundRuntimeMode.standby),
+      activeCall: activeCall,
     );
-    if (payload == null || !mounted) {
-      return false;
-    }
-    final bool parked = await controller.start(payload, activeCall: activeCall);
     if (!mounted) {
       return false;
     }
@@ -1226,377 +1496,103 @@ final class _AndroidBackgroundRuntimeBridgeState
   }
 }
 
-final class BackgroundRuntimeEnvironment {
-  const BackgroundRuntimeEnvironment({
-    required this.container,
-    required this.transport,
-    required this.callMediaController,
-    this.runtime,
-  });
+/// The service's node while the app is locked or gone (§14.1): the mesh
+/// node with its identity under the background key, and the
+/// [LockedReceiver] on it. Nothing here can open the master key's stores.
+final class _LockedReceiverSession {
+  _LockedReceiverSession._(this._runtime, this._receiver);
 
-  /// The app's providers, built as the app builds them, with
-  /// [zenHostProvider] set to [ZenHost.backgroundService].
-  final ProviderContainer container;
-  final SignalTransport transport;
-  final CallMediaSessionController callMediaController;
-  final RuntimeNodeRuntime? runtime;
-}
+  final RuntimeNodeRuntime _runtime;
+  final LockedReceiver _receiver;
 
-/// The service's providers: the app's own ([ZenBootstrapResult]), over the
-/// same stores, with the key the app handed over, and no call media (calls
-/// are answered in the app).
-Future<BackgroundRuntimeEnvironment> buildHeadlessBackgroundRuntimeEnvironment(
-  AndroidBackgroundBootstrapPayload payload,
-) async {
-  final Directory supportDirectory = await ZenInstance.supportDirectory();
-  final HeadlessAppSecurityService security = HeadlessAppSecurityService(
-    settings: payload.settings,
-    hasPassword: payload.hasPassword,
-    encryptionKey: payload.encryptionKey,
-  );
-  final MemoryAppSettingsStore appSettingsStore = MemoryAppSettingsStore(
-    payload.settings,
-  );
-  final ZenPersistentStores stores = buildZenPersistentStoresForDirectory(
-    supportDirectory,
-    appSettingsStore: appSettingsStore,
-    dataProtector: EncryptedBinaryPayloadProtector(security),
-  );
-  final RuntimeSignalBootstrapConfig runtimeConfig =
-      RuntimeSignalBootstrapConfig(
+  /// `null` when the app never published a capability (it was never
+  /// unlocked since it was installed or wiped): nothing to receive with.
+  static Future<_LockedReceiverSession?> open(
+    AndroidBackgroundBootstrapPayload payload, {
+    required RuntimeSystemNotificationService notices,
+  }) async {
+    final Directory support = await ZenInstance.supportDirectory();
+    const AppSecurityCredentialsStore credentials =
+        SecureStorageCredentialsStore();
+    final FileBackgroundVault vault = FileBackgroundVault(
+      supportDirectory: () async => support,
+      credentials: credentials,
+    );
+    final BackgroundCapability? capability = await vault.load();
+    if (capability == null) {
+      return null;
+    }
+    // What this person's alarm goes out with while the app is locked
+    // (§16.3); `null` when the app never wrote one.
+    final AlarmKit? kit = await FileAlarmKitStore(
+      supportDirectory: () async => support,
+      credentials: credentials,
+    ).read();
+    final RuntimeNodeRuntime runtime = buildDefaultRuntimeNodeRuntime(
+      config: RuntimeSignalBootstrapConfig(
         waitTimeout: payload.settings.signalWaitTimeout,
-        nodeConfigProtector: EncryptedBinaryPayloadProtector(security),
+        nodeConfigProtector: BackgroundKeyProtector(credentials),
         // Signals wake the service as they arrive (a blocking wait in an
         // isolate of its own); this slow poll runs only if that wait fails.
         fallbackPollInterval: const Duration(seconds: 2),
-        // The same setting and account secret as the app (§5.1 item 6).
-        lanDiscovery: lanDiscoveryResolver(
-          loadSettings: appSettingsStore.load,
-          ledgerDisk: stores.ledgerDisk,
-        ),
-      );
-  final RuntimeNodeRuntime runtime = buildDefaultRuntimeNodeRuntime(
-    config: runtimeConfig,
-  );
-  final NoopCallMediaSessionController callMedia =
-      NoopCallMediaSessionController();
-  final ZenBootstrapResult app = ZenBootstrapResult(
-    runtime: runtime,
-    runtimeConfig: runtimeConfig,
-    appSecurityService: security,
-    initialSettings: payload.settings,
-    stores: stores,
-  );
-  final ProviderContainer container = ProviderContainer(
-    overrides: [
-      ...app.buildProviderOverrides(
-        // Read by the coordinator itself, which must not run on an empty
-        // stand-in (see [HeadlessBackgroundRuntimeCoordinator.start]).
-        socialHubAutoHydrate: false,
-        socialHubSeed: SocialHubState.empty(
-          lifecycle: _backgroundLifecycleSnapshot(),
-        ),
       ),
-      zenHostProvider.overrideWithValue(ZenHost.backgroundService),
-      ...buildCallMediaSessionProviderOverrides(controller: callMedia),
-    ],
-  );
-  return BackgroundRuntimeEnvironment(
-    container: container,
-    // The relay-aware transport, not the raw runtime: frames must pass the
-    // relay layer (acks, de-duplication, relayed mail) here as well.
-    transport: container.read(signalTransportProvider),
-    callMediaController: callMedia,
-    runtime: runtime,
-  );
-}
-
-/// Runs Zen in the Android background service while the app is away: the
-/// same `ZenCore` as the app (`zenAppModules`, one code path), started on
-/// the app's state, plus what only the service does — the power-button
-/// alarm, alarm waves from phones around and its own notification.
-final class HeadlessBackgroundRuntimeCoordinator {
-  HeadlessBackgroundRuntimeCoordinator({required this.environment});
-
-  final BackgroundRuntimeEnvironment environment;
-
-  /// The app's modules, running here.
-  ZenCore? _core;
-
-  /// Stops following calls (they change the service notification's text).
-  void Function()? _stopCallText;
-
-  /// People nearby while the app is away (§15, §16.3): alarm waves from
-  /// phones around and, when allowed, a short look around now and then.
-  NearbyKeeper? _nearbyKeeper;
-
-  /// Set once [dispose] began: late work (an alarm's position) stops.
-  bool _disposed = false;
-
-  /// Last text pushed onto the service notification.
-  ///
-  /// A ringing call re-sends its invite once per second, and every frame
-  /// could post the notification again: re-posting the unchanged
-  /// notification makes the shade entry flash as if a new call notification
-  /// kept arriving.
-  String? _lastServiceNotificationText;
-
-  ProviderContainer get _container => environment.container;
+    );
+    final SealedInboxWriter inbox = SealedInboxWriter(
+      file: await vault.inboxFile(),
+      recipientPublicKey: capability.inboxPublicKey,
+    );
+    return _LockedReceiverSession._(
+      runtime,
+      LockedReceiver(
+        transport: runtime,
+        capability: capability,
+        inbox: inbox,
+        notices: notices,
+        alarm: kit == null
+            ? null
+            : LockedAlarm(
+                kit: kit,
+                transport: runtime,
+                keep: (SignalTransportFrame record) =>
+                    inbox.append(encodeInboxFrame(record)),
+                locate: currentFixInBackground,
+                record: AlarmAudioPump.recordClip,
+                wave: (String id, int at, bool ended) => waveLockedAlarm(
+                  ChannelNearbyRadio(),
+                  kit,
+                  id: id,
+                  at: at,
+                  ended: ended,
+                ),
+              ),
+      ),
+    );
+  }
 
   Future<void> start() async {
-    final SocialHubController controller = _container.read(
-      socialHubControllerProvider.notifier,
-    );
-    await _container
-        .read(runtimeSystemNotificationServiceProvider)
-        .initialize(
-          onOpenRoute: controller.requestLaunchFromRouteKey,
-          onAction: _handleNotificationAction,
-        );
-    bindIncomingCallPlatformHandler((String action, String peerAddress) async {
-      await _handleNotificationAction(
-        action == 'accept'
-            ? 'accept_call'
-            : action == 'decline'
-            ? 'decline_call'
-            : action,
-        peerAddress,
-      );
-    });
-    // Hydration has to succeed before anything else runs. On the empty seed
-    // state every incoming signal is dropped (no peer is a known friend) and
-    // the first lifecycle write would overwrite the real snapshot with
-    // nothing - so let a failure propagate instead of running degraded.
-    await controller.hydrateFromStore();
-    logZenMessage(
-      'Background runtime hydrated '
-      '(${_container.read(socialHubControllerProvider).friends.length} peers).',
-    );
-    await controller.setLifecycle(_backgroundLifecycleSnapshot());
-    final callText = _container.listen<String>(
-      socialHubControllerProvider.select(
-        (SocialHubState s) => _backgroundServiceNotificationText(s.activeCall),
-      ),
-      (String? previous, String next) => unawaitedLogged(
-        _syncForegroundServiceState(),
-        context: 'Background service notification',
-      ),
-    );
-    _stopCallText = callText.close;
-    final ZenCore core = _container.read(zenCoreProvider);
-    _core = core;
-    await core.start();
-    logZenMessage(
-      'Background runtime started: ${core.runningModules.join(', ')}.',
-    );
-    await _startAlarmDuties();
-    await _syncForegroundServiceState();
+    await _setShortcutOwner(true);
+    await _receiver.start();
   }
 
-  /// What this service does for alarms while it runs the network (§16.3):
-  /// the power-button shortcut comes here, this person's running alarm is
-  /// sent once more, and phones nearby are heard.
-  Future<void> _startAlarmDuties() async {
-    final MeetService meet = _container.read(meetServiceProvider);
-    try {
-      const AlarmShortcutChannel shortcut = AlarmShortcutChannel();
-      if (Platform.isAndroid) {
-        // First: a shortcut from now on comes here, not to the app that
-        // just let the network go.
-        await shortcut.setNodeOwner(true);
-      }
-      await meet.reload();
-      if (Platform.isAndroid &&
-          meet.book.alarmPowerButton &&
-          meet.hasAlarmPin) {
-        await shortcut.setEnabled(true);
-      }
-      // The shortcut fires as the screen goes off, while the app is
-      // handing the network over: an alarm the app raised just then may
-      // not have gone out.
-      await meet.resendOwnAlarm();
-    } catch (error, stackTrace) {
-      logZenError('Background alarm duties did not start', error, stackTrace);
-    }
-    if (!Platform.isAndroid) {
-      return;
-    }
-    try {
-      // The app's "people nearby", kept working with nobody looking.
-      final NearbyService nearby = _container.read(nearbyServiceProvider);
-      final NearbyRadio radio = nearby.radio;
-      final NearbyKeeper keeper = NearbyKeeper(
-        nearby: nearby,
-        inService: true,
-        announceAlarmReceiver: radio is ChannelNearbyRadio
-            ? radio.setAlarmReceiver
-            : null,
-      );
-      _nearbyKeeper = keeper;
-      await keeper.start();
-      logZenMessage(
-        'Background nearby started '
-        '(alarm waves: ${keeper.receivesAlarms ? 'on' : 'off'}).',
-      );
-    } catch (error, stackTrace) {
-      logZenError('Background nearby did not start', error, stackTrace);
-    }
-  }
-
-  Future<void> _stopAlarmDuties() async {
-    final NearbyKeeper? keeper = _nearbyKeeper;
-    _nearbyKeeper = null;
-    try {
-      if (Platform.isAndroid) {
-        // From now on the shortcut goes to the app again.
-        await const AlarmShortcutChannel().setNodeOwner(false);
-      }
-      await keeper?.close();
-    } catch (error, stackTrace) {
-      logZenError('Stopping background nearby failed', error, stackTrace);
-    }
-  }
-
-  /// The power-button shortcut while this service runs the network
-  /// (§16.3): the same alarm as the button in the app.
-  Future<void> onPowerShortcut() async {
-    final MeetService meet = _container.read(meetServiceProvider);
-    final ShortcutAlarmResult result = await raiseAlarmFromShortcut(meet);
-    logZenMessage('Power-button alarm in the background: ${result.name}.');
-    if (result != ShortcutAlarmResult.raised) {
-      return;
-    }
-    // Sound too, when the person chose it for alarms (§16.3): the same
-    // pieces as after the button. Android lets the service record only if
-    // the microphone permission is there; without it nothing is recorded.
-    if (meet.book.alarmRecordAudio) {
-      AlarmAudioPump.start(meet);
-    }
-    // The position, if Android lets the service have it (often only the
-    // last known one); the app sends fresh ones once it is opened.
-    unawaitedLogged(() async {
-      // Fresh when the permission is there (read under a `location`
-      // foreground service); never asks: nobody is looking at the screen.
-      final GeoFix? fix = await currentFixInBackground(
-        timeout: const Duration(seconds: 15),
-      );
-      if (fix != null && !_disposed) {
-        await meet.updateAlarmLocation(
-          fix.lat,
-          fix.lon,
-          accuracy: fix.accuracy,
-        );
-      }
-    }(), context: 'Alarm position in the background');
-  }
+  /// The power-button shortcut while this service runs the node.
+  Future<void> onPowerShortcut() => _receiver.onPowerShortcut();
 
   Future<void> dispose() async {
-    _disposed = true;
-    AlarmAudioPump.stop();
-    await _stopAlarmDuties();
-    _stopCallText?.call();
-    _stopCallText = null;
-    final ZenCore? core = _core;
-    _core = null;
-    await core?.stop();
-    // Saved and closed before the app takes the ledger back.
-    if (_container.exists(ledgerNodeProvider)) {
-      try {
-        await _container.read(ledgerNodeProvider)?.stop();
-      } catch (error, stackTrace) {
-        logZenError('Stopping the background ledger failed', error, stackTrace);
-      }
-    }
-    await environment.transport.stop();
-    await environment.callMediaController.close();
-    environment.callMediaController.dispose();
-    environment.runtime?.dispose();
-    _container.dispose();
+    await _setShortcutOwner(false);
+    await _receiver.stop();
+    _runtime.dispose();
   }
 
-  /// Handles the accept/decline buttons of a ringing-call notification.
-  ///
-  /// This isolate owns the notification whenever the app is not on screen, so
-  /// without this the buttons of an incoming call were simply inert.
-  Future<void> _handleNotificationAction(
-    String actionId,
-    String? payload,
-  ) async {
-    final SocialHubController controller = _container.read(
-      socialHubControllerProvider.notifier,
-    );
-    final CallSession? session = _container
-        .read(socialHubControllerProvider)
-        .activeCall;
-    if (session == null || session.status != CallSessionStatus.ringing) {
+  /// The shortcut comes here while this service runs the network (the
+  /// alarm goes out from the alarm kit), to the app otherwise.
+  static Future<void> _setShortcutOwner(bool owner) async {
+    if (!AlarmShortcutChannel.supported) {
       return;
     }
-    switch (actionId) {
-      case 'decline_call':
-        // Fully serviceable from here: declining is one signal plus a local
-        // teardown, and needs no media capture.
-        await controller.declineIncomingCall(peerAddress: session.peerAddress);
-        await _syncForegroundServiceState();
-        return;
-      case 'accept_call':
-        try {
-          await _container
-              .read(runtimeSystemNotificationServiceProvider)
-              .dismissSlot(callNotificationSlotKey(session.peerAddress));
-        } catch (_) {}
-        // Answering needs the microphone and a renderer, which only the UI
-        // isolate has. Bring the app up on the call route with the accept flag
-        // set, so it performs the answer itself instead of showing the
-        // accept/decline overlay again; the ringing state is already
-        // persisted. The notification payload carries the plain ringing route
-        // and must not be used here - it would drop that flag.
-        await controller.requestLaunchFromRouteKey(
-          buildCallRouteKey(
-            peerAddress: session.peerAddress,
-            title: session.displayName,
-            autoAccept: true,
-            callId: session.id,
-          ),
-        );
-        try {
-          FlutterForegroundTask.launchApp();
-        } catch (error, stackTrace) {
-          logZenError(
-            'Launching the app for an accepted call failed',
-            error,
-            stackTrace,
-          );
-        }
-        return;
-      default:
-        return;
-    }
-  }
-
-  Future<void> _syncForegroundServiceState() async {
-    if (!Platform.isAndroid) {
-      return;
-    }
-    final CallSession? activeCall = _container
-        .read(socialHubControllerProvider)
-        .activeCall;
-    final String notificationText = _backgroundServiceNotificationText(
-      activeCall,
-    );
-    if (notificationText == _lastServiceNotificationText) {
-      return;
-    }
-    _lastServiceNotificationText = notificationText;
     try {
-      await FlutterForegroundTask.updateService(
-        notificationTitle: 'Zen',
-        notificationText: notificationText,
-        notificationIcon: const NotificationIcon(
-          metaDataName: 'com.roj.zen.service.NOTIFICATION_ICON',
-        ),
-      );
-    } catch (error, stackTrace) {
-      logZenError('Background service sync error', error, stackTrace);
+      await const AlarmShortcutChannel().setNodeOwner(owner);
+    } on Object catch (error, stackTrace) {
+      logZenError('Handing the alarm shortcut over failed', error, stackTrace);
     }
   }
 }
@@ -1648,7 +1644,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   final Completer<AndroidBackgroundBootstrapPayload> _bootstrapCompleter =
       Completer<AndroidBackgroundBootstrapPayload>();
 
-  HeadlessBackgroundRuntimeCoordinator? _coordinator;
+  /// The receive-only node while the app is locked or gone (§14.1).
+  _LockedReceiverSession? _session;
 
   /// Latest state the app asked for. Every queued reconcile converges to this,
   /// so out-of-order or duplicated messages cannot leave the node half-owned.
@@ -1662,9 +1659,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// Where the service's own notices go (tests); `null`: the system's.
   final RuntimeSystemNotificationService Function()? _noticeServiceFactory;
 
-  /// Lazily created: only the service's own notices need it (parked without
-  /// a key, stopped by Android), and those paths have no provider container
-  /// to borrow one from.
+  /// Lazily created: the service's own notices (parked without a background
+  /// capability, stopped by Android) and the locked receiver's.
   RuntimeSystemNotificationService? _notices;
   bool _noticesInitialized = false;
 
@@ -1680,7 +1676,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// runs the network, or when the app is not listening at all.
   StreamSubscription<void>? _powerShortcut;
 
-  /// A shortcut that came while no node ran here: raised once one does
+  /// A shortcut that came while no node ran here: answered once one does
   /// (within [kAlarmShortcutMaxDelay]).
   DateTime? _pendingPowerAlarmAt;
 
@@ -1797,8 +1793,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     await _powerShortcut?.cancel();
     _powerShortcut = null;
     await _transitions;
-    await _coordinator?.dispose();
-    _coordinator = null;
+    await _session?.dispose();
+    _session = null;
   }
 
   /// The service's own notification service, ready to post; `null` where
@@ -1872,12 +1868,13 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     }
   }
 
-  /// 5× the power button: the alarm goes out from here once the node runs
-  /// (right away when it already does).
+  /// 5× the power button while this service runs the node: the app is
+  /// locked or gone, so the alarm goes out from the alarm kit the app left
+  /// (§16.3), without the master key.
   void _onPowerShortcut() {
     logZenMessage('Power-button alarm shortcut reached the service.');
     _pendingPowerAlarmAt = DateTime.now();
-    if (_coordinator == null) {
+    if (_session == null) {
       // Nobody runs the network: take it over now if the app is gone.
       _checkStandbyWatchdog(DateTime.now());
     }
@@ -1889,12 +1886,12 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     });
   }
 
-  /// Raises a pending shortcut alarm when a node runs here; otherwise it
-  /// waits for the next activation.
+  /// Answers a pending shortcut once a node runs here; otherwise it waits
+  /// for the next activation.
   Future<void> _servePowerShortcut() async {
     final DateTime? at = _pendingPowerAlarmAt;
-    final HeadlessBackgroundRuntimeCoordinator? coordinator = _coordinator;
-    if (at == null || coordinator == null || _destroyed) {
+    final _LockedReceiverSession? session = _session;
+    if (at == null || session == null || _destroyed) {
       return;
     }
     _pendingPowerAlarmAt = null;
@@ -1903,7 +1900,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       return;
     }
     try {
-      await coordinator.onPowerShortcut();
+      await session.onPowerShortcut();
     } catch (error, stackTrace) {
       logZenError('Power-button alarm failed', error, stackTrace);
     }
@@ -1935,71 +1932,62 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     AndroidBackgroundRuntimeMode mode = payload.mode;
     logZenMessage(
       'Service reconciling to "${mode.name}" '
-      '(node ${_coordinator == null ? 'down' : 'up'}).',
+      '(node ${_session == null ? 'down' : 'up'}).',
     );
-    if (mode == AndroidBackgroundRuntimeMode.active &&
-        payload.requiresUnlockedDataAccess &&
-        payload.encryptionKey == null) {
-      // Password mode with no key handed over: the stores stay sealed, so
-      // stand by rather than run a node that cannot read anything.
-      logZenWarning(
-        'Background runtime stayed parked: no unlocked key was handed over.',
-      );
-      mode = AndroidBackgroundRuntimeMode.standby;
-      await _notifyLockedPark();
-    }
-    if (mode == AndroidBackgroundRuntimeMode.active) {
-      if (_coordinator == null) {
-        HeadlessBackgroundRuntimeCoordinator? coordinator;
-        try {
-          final BackgroundRuntimeEnvironment environment =
-              await buildHeadlessBackgroundRuntimeEnvironment(payload);
-          coordinator = HeadlessBackgroundRuntimeCoordinator(
-            environment: environment,
+    if (mode == AndroidBackgroundRuntimeMode.active && _session == null) {
+      _LockedReceiverSession? session;
+      try {
+        final RuntimeSystemNotificationService notices =
+            await _readyNotices() ?? MemoryRuntimeSystemNotificationService();
+        session = await _LockedReceiverSession.open(payload, notices: notices);
+        if (session == null) {
+          // The app never told what it may receive with (not unlocked since
+          // it was installed or wiped): stand by rather than run a node
+          // that could keep nothing.
+          logZenWarning(
+            'Background runtime stayed parked: no background capability yet.',
           );
-          if (_destroyed) {
-            await coordinator.dispose();
-            return;
-          }
-          _coordinator = coordinator;
-          await coordinator.start();
-          _lockedParkNoticeShown = false;
-        } catch (error, stackTrace) {
-          // Leaving a half-built coordinator in place would wedge the task
-          // forever: every later reconcile sees a non-null `_coordinator`,
-          // skips the start, and reports "active" for a node that does not
-          // exist. Tear it down and report the mode actually reached, so the
-          // app keeps serving from its own isolate instead of waiting on an
-          // acknowledgement that never comes.
-          logZenError(
-            'Background runtime activation failed',
-            error,
-            stackTrace,
-          );
-          _coordinator = null;
-          if (coordinator != null) {
-            try {
-              await coordinator.dispose();
-            } catch (disposeError, disposeStackTrace) {
-              logZenError(
-                'Disposing a failed background runtime failed',
-                disposeError,
-                disposeStackTrace,
-              );
-            }
-          }
-          await _updateStandbyNotification();
-          _acknowledge(AndroidBackgroundRuntimeMode.standby);
+          mode = AndroidBackgroundRuntimeMode.standby;
+          await _notifyLockedPark();
+        } else if (_destroyed) {
+          await session.dispose();
           return;
+        } else {
+          _session = session;
+          await session.start();
+          _lockedParkNoticeShown = false;
+          await _updateServiceNotification(AndroidBackgroundRuntimeMode.active);
         }
+      } catch (error, stackTrace) {
+        // Leaving a half-built session in place would wedge the task
+        // forever: every later reconcile would see a non-null `_session`,
+        // skip the start, and report "active" for a node that does not
+        // exist. Tear it down and report the mode actually reached, so the
+        // app keeps serving from its own isolate instead of waiting on an
+        // acknowledgement that never comes.
+        logZenError('Background runtime activation failed', error, stackTrace);
+        _session = null;
+        if (session != null) {
+          try {
+            await session.dispose();
+          } catch (disposeError, disposeStackTrace) {
+            logZenError(
+              'Disposing a failed background runtime failed',
+              disposeError,
+              disposeStackTrace,
+            );
+          }
+        }
+        mode = AndroidBackgroundRuntimeMode.standby;
       }
-    } else {
-      final HeadlessBackgroundRuntimeCoordinator? coordinator = _coordinator;
-      _coordinator = null;
-      if (coordinator != null) {
-        await coordinator.dispose();
+    }
+    if (mode == AndroidBackgroundRuntimeMode.standby) {
+      final _LockedReceiverSession? session = _session;
+      _session = null;
+      if (session != null) {
+        await session.dispose();
       }
-      await _updateStandbyNotification();
+      await _updateServiceNotification(AndroidBackgroundRuntimeMode.standby);
     }
     logZenMessage('Service reached "${mode.name}".');
     _acknowledge(mode);
@@ -2010,8 +1998,9 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
 
   /// Tells the user the parked service cannot take calls until they unlock.
   ///
-  /// Without it, password mode fails silently: the service stays parked with
-  /// no node, and nobody can tell why the phone never rings. Shown once per
+  /// Without it, a service with no background capability fails silently: it
+  /// stays parked with no node, and nobody can tell why the phone never
+  /// rings. Shown once per
   /// parked-locked stretch; the suppression key throttles any repeats.
   Future<void> _notifyLockedPark() async {
     if (_lockedParkNoticeShown) {
@@ -2036,23 +2025,22 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     }
   }
 
-  Future<void> _updateStandbyNotification() async {
+  Future<void> _updateServiceNotification(
+    AndroidBackgroundRuntimeMode mode,
+  ) async {
     if (!Platform.isAndroid) {
       return;
     }
     try {
       await FlutterForegroundTask.updateService(
         notificationTitle: 'Zen',
-        notificationText: _backgroundServiceNotificationText(
-          null,
-          mode: AndroidBackgroundRuntimeMode.standby,
-        ),
+        notificationText: _backgroundServiceNotificationText(null, mode: mode),
         notificationIcon: const NotificationIcon(
           metaDataName: 'com.roj.zen.service.NOTIFICATION_ICON',
         ),
       );
     } catch (error, stackTrace) {
-      logZenError('Standby notification update failed', error, stackTrace);
+      logZenError('Service notification update failed', error, stackTrace);
     }
   }
 
@@ -2072,12 +2060,4 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       );
     }
   }
-}
-
-LifecycleSnapshot _backgroundLifecycleSnapshot() {
-  return LifecycleSnapshot(
-    visibility: AppVisibilityState.background,
-    generation: 1,
-    capturedAtMillis: DateTime.now().millisecondsSinceEpoch,
-  );
 }

@@ -296,6 +296,7 @@ const Set<String> kReliablePayloadTypes = <String>{
   'pyr_appeal',
   'pyr_anon',
   'pyr_fx',
+  'pyr_nat',
   // Dating (§19): only between friends; the content is sealed anyway.
   'date_lantern',
   'date_back',
@@ -322,6 +323,11 @@ const Set<String> kReliablePayloadTypes = <String>{
   'flat_rekey',
   'flat_newkey',
   'flat_reveal',
+  // Knocks while nobody is home (flat_door_mail.dart): to a friend's
+  // mailbox door, a friend's mailbox door handed over, and passed on.
+  'flat_seal',
+  'flat_slot',
+  'flat_held',
 };
 
 /// Reliable, but only ever sent directly: the recipient is not a friend yet,
@@ -343,6 +349,10 @@ const Set<String> _directOnlyPayloadTypes = <String>{
   'flat_rekey',
   'flat_newkey',
   'flat_reveal',
+  // A door never answers; a friend passes a knock on the moment the
+  // resident shows up (the other mailboxes took the same knock).
+  'flat_seal',
+  'flat_held',
 };
 
 /// Key marking a payload as reliable: `rly_ack` echoes it back.
@@ -350,6 +360,10 @@ const String kReliableIdKey = '_rid';
 
 /// Opt-out key: sent once, never queued (e.g. automatic replies to strangers).
 const String kSendOnceKey = '_once';
+
+/// How long (ms) a reliable payload is retried, when shorter than
+/// [RelayConfig.messageTtl]; not sent along.
+const String kReliableTtlKey = '_ttl';
 
 /// Longest reliable id accepted; the app's own are about 25 characters.
 const int _maxReliableIdLength = 128;
@@ -536,6 +550,61 @@ final class RelayEngine {
     });
   }
 
+  /// [payload] sealed now for [recipient], as one `rly_deposit` frame per
+  /// mailbox the recipient chose: handed in later by a node that holds none
+  /// of this device's keys (the alarm kit of the locked Android service,
+  /// §16.3). The payload's [kReliableIdKey] becomes the envelope's id (`id`
+  /// below). Nothing is queued here. Empty while this isolate does not own
+  /// the relay state, or the recipient's key or mailboxes are not known.
+  Future<List<({String mailbox, String id, Map<String, dynamic> frame})>>
+  presealDeposits(String recipient, Map<String, dynamic> payload) {
+    return _locked(() async {
+      const List<({String mailbox, String id, Map<String, dynamic> frame})>
+      none = <({String mailbox, String id, Map<String, dynamic> frame})>[];
+      if (!_active) {
+        return none;
+      }
+      final RelayState state = await _load();
+      final String to = PeerShareCodec.normalizeAddress(recipient);
+      final RelayIdentity? identity = state.identity;
+      final RelayPeerInfo? info = state.peers[to];
+      final Uint8List? recipientKey = info?.publicKey;
+      if (identity == null || info == null || recipientKey == null) {
+        return none;
+      }
+      final List<String> mailboxes = <String>[
+        for (final String relay in info.relays)
+          if (relay != _self && relay != to) relay,
+      ];
+      if (mailboxes.isEmpty) {
+        return none;
+      }
+      final int now = _now();
+      final String rid = _newReliableId();
+      final RelayOutboxEntry entry = RelayOutboxEntry(
+        rid: rid,
+        recipient: to,
+        payload: <String, dynamic>{...payload, kReliableIdKey: rid},
+        createdAtMillis: now,
+        expiresAtMillis: now + config.messageTtl.inMilliseconds,
+        relayable: true,
+      );
+      final RelayEnvelope envelope = await _seal(identity, recipientKey, entry);
+      final Map<String, dynamic> wire = <String, dynamic>{
+        ...envelope.toJson(),
+        if (info.depositToken != null) 'tk': info.depositToken,
+      };
+      return <({String mailbox, String id, Map<String, dynamic> frame})>[
+        for (final String mailbox in mailboxes)
+          (
+            mailbox: mailbox,
+            id: rid,
+            frame: <String, dynamic>{'type': 'rly_deposit', 'env': wire},
+          ),
+      ];
+    });
+  }
+
   /// Puts [payload] into the outbox for [to] and makes the first direct try;
   /// returns its reliable id. The caller saves.
   Future<String> _enqueue(
@@ -545,8 +614,13 @@ final class RelayEngine {
     int now,
   ) async {
     final String rid = (payload[kReliableIdKey] as String?) ?? _newReliableId();
+    final Object? ttl = payload[kReliableTtlKey];
+    final int life = ttl is int && ttl > 0
+        ? min(ttl, config.messageTtl.inMilliseconds)
+        : config.messageTtl.inMilliseconds;
     final Map<String, dynamic> wire = Map<String, dynamic>.from(payload)
       ..remove(kSendOnceKey)
+      ..remove(kReliableTtlKey)
       ..[kReliableIdKey] = rid;
     final bool relayable =
         !_directOnlyPayloadTypes.contains(wire['type']) &&
@@ -556,7 +630,7 @@ final class RelayEngine {
       recipient: to,
       payload: wire,
       createdAtMillis: now,
-      expiresAtMillis: now + config.messageTtl.inMilliseconds,
+      expiresAtMillis: now + life,
       relayable: relayable,
     );
     entry = await _attemptDirect(entry, now);

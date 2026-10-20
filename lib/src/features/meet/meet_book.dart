@@ -592,6 +592,22 @@ final class MeetBook {
   /// this phone.
   List<String> alarmSmsNumbers = <String>[];
 
+  /// Seed (base64url) of this person's alarm key (§16.3): an Ed25519 key
+  /// that signs alarm frames only, certified by the device key; the alarm
+  /// kit hands it to the locked Android service instead of any other key.
+  String? alarmKeySeed;
+
+  /// The id the next alarm raised from the alarm kit carries (the kit's
+  /// mailbox copies are sealed with it); a new one once it was used.
+  String? alarmKitId;
+
+  /// Friends' certified alarm keys (address → public keys, newest last):
+  /// an alarm frame signed with one of them must check out.
+  final Map<String, List<String>> friendAlarmKeys = <String, List<String>>{};
+
+  /// Most alarm keys kept per friend (one per device of theirs).
+  static const int maxAlarmKeysPerFriend = 4;
+
   /// Look around for friends now and then without the "W pobliżu" screen
   /// open (§15, off by default: scanning is for that screen): a short
   /// low-power scan every few minutes that only marks friends met in person.
@@ -718,6 +734,9 @@ final class MeetBook {
     if (alarmNearby) 'alarmNearby': true,
     if (alarmPowerButton) 'alarmPower': true,
     if (alarmSmsNumbers.isNotEmpty) 'alarmSms': alarmSmsNumbers,
+    if (alarmKeySeed != null) 'ak': alarmKeySeed,
+    if (alarmKitId != null) 'kid': alarmKitId,
+    if (friendAlarmKeys.isNotEmpty) 'fak': friendAlarmKeys,
     // Always written: a book without it (never chosen) means on.
     'bgScan': nearbyBackgroundScan,
     'listSent': friendListSent,
@@ -789,6 +808,23 @@ final class MeetBook {
         for (final Object? n in sms.take(5))
           if (n is String && RegExp(r'^\+?\d{5,15}$').hasMatch(n)) n,
       ];
+    }
+    book.alarmKeySeed = json['ak'] is String ? json['ak'] as String : null;
+    final Object? kid = json['kid'];
+    book.alarmKitId = kid is String && kAlarmIdPattern.hasMatch(kid)
+        ? kid
+        : null;
+    final Object? fak = json['fak'];
+    if (fak is Map) {
+      for (final MapEntry<dynamic, dynamic> e in fak.entries) {
+        final Object? keys = e.value;
+        if (e.key is String && keys is List) {
+          book.friendAlarmKeys[e.key as String] = <String>[
+            for (final Object? k in keys.take(maxAlarmKeysPerFriend))
+              if (k is String && k.length <= 64) k,
+          ];
+        }
+      }
     }
     book.nearbyBackgroundScan = json['bgScan'] == true;
     book.friendListSent = json['listSent'] is String

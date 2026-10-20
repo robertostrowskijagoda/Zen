@@ -5,8 +5,12 @@ import 'dart:math';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/core/ledger/ledger_codec.dart';
+import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
+import 'package:zen/src/features/ledger/ledger_identity_store.dart';
+import 'package:zen/src/features/meet/alarm_kit.dart';
 import 'package:zen/src/features/meet/alarm_sms.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/nearby_crypto.dart';
@@ -30,6 +34,16 @@ abstract final class MeetTypes {
   /// A friend's phone confirms an alarm (§16.3): `k` is `got` (the phone
   /// has it) or `seen` (the friend opened it).
   static const String alarmAck = 'alarm_ack';
+
+  /// A friend's alarm key, certified by their device key (`c`, §16.3).
+  static const String alarmKey = 'alarm_key';
+
+  /// This person's own alarm as the locked Android service raised or
+  /// carried on with it (`a`), and a piece of its sound: records the
+  /// service leaves in the sealed inbox, taken over by the app after
+  /// unlock. Taken only from this device's own address.
+  static const String ownAlarm = 'alarm_own';
+  static const String ownAlarmAudio = 'alarm_own_audio';
   static const String nearbyKey = 'nearby_key';
   static const String friendList = 'friend_list';
 
@@ -43,6 +57,9 @@ abstract final class MeetTypes {
     alarmResponse,
     alarmAudio,
     alarmAck,
+    alarmKey,
+    ownAlarm,
+    ownAlarmAudio,
     nearbyKey,
     friendList,
     request,
@@ -51,7 +68,12 @@ abstract final class MeetTypes {
   /// Kinds that may come before the friendship is settled here (an accept
   /// still in the queue, the state not read yet): kept for a while and
   /// handled once the sender is a friend.
-  static const Set<String> parkable = <String>{intent, nearbyKey, friendList};
+  static const Set<String> parkable = <String>{
+    intent,
+    nearbyKey,
+    friendList,
+    alarmKey,
+  };
 }
 
 /// Longest name taken from a friend's list.
@@ -162,6 +184,20 @@ final class MeetService extends ChangeNotifier {
   /// background service). Without it (or `null`: the ledger is not up)
   /// every friend counts as "Znajomy".
   FriendLevel? Function(String address)? levelOf;
+
+  /// This device's own address (set by the app): it goes into the alarm
+  /// key's certificate and the alarm kit.
+  String Function()? ownAddress;
+
+  /// The account this phone knows for [address] (set by the app from the
+  /// ledger): a friend's alarm key must be certified by that account.
+  String? Function(String address)? accountOf;
+
+  /// The alarm key while it is read ([alarmKey]).
+  LedgerKeyPair? _alarmKeyPair;
+
+  /// Its certificate, once made ([_alarmCertificate]).
+  AlarmKeyCertificate? _alarmCert;
 
   /// Whether [friend] is only a weak acquaintance ("Słaby znajomy", §8):
   /// no friend list and no statuses but "Nie przeszkadzać" by default.
@@ -295,6 +331,21 @@ final class MeetService extends ChangeNotifier {
       return false;
     }
     final String from = _key(frame.from);
+    if (type == MeetTypes.ownAlarm || type == MeetTypes.ownAlarmAudio) {
+      // Only what this device's own service left in the sealed inbox.
+      if (host.isSelf(from)) {
+        try {
+          if (type == MeetTypes.ownAlarm) {
+            await _onOwnAlarm(frame.payload);
+          } else {
+            await _onOwnAlarmAudio(frame.payload);
+          }
+        } on Object catch (error, stack) {
+          logZenError('Spotkania: $type', error, stack);
+        }
+      }
+      return true;
+    }
     if (!host.isFriend(from)) {
       _park(from, type, frame);
       return true;
@@ -311,6 +362,8 @@ final class MeetService extends ChangeNotifier {
           await _onAlarmAudio(from, frame.payload);
         case MeetTypes.alarmAck:
           await _onAlarmAck(from, frame.payload);
+        case MeetTypes.alarmKey:
+          await _onAlarmKey(from, frame.payload);
         case MeetTypes.friendList:
           await _onFriendList(from, frame.payload);
         case MeetTypes.request:
@@ -399,6 +452,9 @@ final class MeetService extends ChangeNotifier {
       if (nearbyKeysFor(friend) case final String keys)
         'mz': _secretDigest(keys),
       'ms': showsStatus ? mine.setAt : 0,
+      // The alarm key friends should hold (§16.3).
+      if (_alarmKeyPair case final LedgerKeyPair key)
+        'ma': _secretDigest(key.id),
     };
   }
 
@@ -425,6 +481,14 @@ final class MeetService extends ChangeNotifier {
     if (ms is int && ms != (_book.friendIntents[friend]?.setAt ?? 0)) {
       want.add('s');
     }
+    final Object? ma = payload['ma'];
+    if (ma is String &&
+        ma.isNotEmpty &&
+        !(_book.friendAlarmKeys[friend] ?? const <String>[]).any(
+          (String k) => _secretDigest(k) == ma,
+        )) {
+      want.add('a');
+    }
     final int t = _now();
     want.removeWhere((String w) {
       final int? at = _askedAt['$friend|$w'];
@@ -448,7 +512,7 @@ final class MeetService extends ChangeNotifier {
       return;
     }
     final int t = _now();
-    for (final Object? kind in w.take(3)) {
+    for (final Object? kind in w.take(4)) {
       if (kind is! String) {
         continue;
       }
@@ -472,6 +536,8 @@ final class MeetService extends ChangeNotifier {
             'type': MeetTypes.intent,
             's': hello['ms'] == 0 ? null : mine?.toJson(),
           });
+        case 'a':
+          await shareAlarmKey(from);
       }
     }
   }
@@ -535,9 +601,21 @@ final class MeetService extends ChangeNotifier {
   }
 
   Future<void> _onAlarm(String from, Map<String, dynamic> payload) async {
+    if (!await _alarmSignatureHolds(from, payload)) {
+      logZenWarning('Spotkania: alarm ze złym podpisem od $from odrzucony.');
+      return;
+    }
+    // The copy a friend's locked phone sealed in advance for the mailboxes
+    // (the alarm kit): its time is when the kit was made, so the time it
+    // came stands in; a copy of the alarm itself always wins.
+    final bool fromKit = payload['kit'] == true;
+    if (fromKit && _book.alarm(payload['id']?.toString() ?? '') != null) {
+      return;
+    }
     final AlarmRecord? got = AlarmRecord.fromJson(<String, dynamic>{
       ...payload,
       'from': from,
+      if (fromKit) 'at': _now(),
     });
     if (got == null) {
       return;
@@ -885,7 +963,7 @@ final class MeetService extends ChangeNotifier {
     }
     final int t = _now();
     final AlarmRecord alarm = AlarmRecord(
-      id: '${t.toRadixString(36)}${_random.nextInt(1 << 30).toRadixString(36)}',
+      id: _newAlarmId(),
       from: 'self',
       at: t,
       lat: lat,
@@ -1017,6 +1095,314 @@ final class MeetService extends ChangeNotifier {
     if (targets.isNotEmpty) {
       await _broadcastAlarm(own, only: targets);
     }
+  }
+
+  String _newAlarmId() {
+    final int t = _now();
+    return '${t.toRadixString(36)}${_random.nextInt(1 << 30).toRadixString(36)}';
+  }
+
+  // ---- alarm: the alarm key and the alarm kit (§16.3) ----
+
+  /// This person's alarm key, made (and saved) on first use. It signs alarm
+  /// frames and nothing else; the alarm kit gives it to the locked Android
+  /// service, so no other key of this person ever has to go there. Friends
+  /// get its public part, certified by the device key, when it is made
+  /// and whenever their hello shows they lack it.
+  Future<LedgerKeyPair> alarmKey() async {
+    final String? seed = _book.alarmKeySeed;
+    final LedgerKeyPair? had = _alarmKeyPair;
+    if (seed != null && had != null && b64(had.seed) == seed) {
+      return had;
+    }
+    final bool made = seed == null;
+    final String stored =
+        seed ??
+        await _update<String>(
+          (MeetBook b) => b.alarmKeySeed ??= b64(_seed32()),
+        );
+    final Uint8List? bytes = unb64(stored, length: 32);
+    if (bytes == null) {
+      throw const FormatException('meet/state: damaged alarm key');
+    }
+    final LedgerKeyPair key = await LedgerKeyPair.fromSeed(bytes);
+    _alarmKeyPair = key;
+    _alarmCert = null;
+    if (made) {
+      try {
+        for (final String friend in host.friends()) {
+          await shareAlarmKey(friend);
+        }
+      } on Object catch (error, stack) {
+        // Friends ask for it again with the next hello.
+        logZenError('Klucz alarmu dla znajomych', error, stack);
+      }
+    }
+    return key;
+  }
+
+  Uint8List _seed32() =>
+      Uint8List.fromList(List<int>.generate(32, (_) => _random.nextInt(256)));
+
+  /// The certificate of [alarmKey] (signed by this device's key); `null`
+  /// before the ledger made the device key or while the own address is not
+  /// known.
+  Future<AlarmKeyCertificate?> _alarmCertificate() async {
+    final String self = _key(ownAddress?.call() ?? '');
+    if (self.isEmpty) {
+      return null;
+    }
+    final LedgerKeyPair key = await alarmKey();
+    final AlarmKeyCertificate? had = _alarmCert;
+    if (had != null && had.key == key.id && had.address == self) {
+      return had;
+    }
+    final LedgerIdentity? me = await LedgerIdentity.read(store.disk);
+    if (me == null) {
+      return null;
+    }
+    return _alarmCert = await AlarmKeyCertificate.issue(
+      deviceKey: me.deviceKey,
+      certificate: me.certificate,
+      address: self,
+      alarmKey: key.id,
+      issued: _now(),
+    );
+  }
+
+  /// Gives [friend] the certified alarm key (once there is one).
+  Future<void> shareAlarmKey(String friend) async {
+    if (_book.alarmKeySeed == null) {
+      return;
+    }
+    final AlarmKeyCertificate? cert = await _alarmCertificate();
+    if (cert == null) {
+      return;
+    }
+    await _send(friend, <String, dynamic>{
+      'type': MeetTypes.alarmKey,
+      'c': cert.toJson(),
+    });
+  }
+
+  /// A friend's certified alarm key: kept when the certificate checks out
+  /// for them (and their account, when known here).
+  Future<void> _onAlarmKey(String from, Map<String, dynamic> payload) async {
+    final AlarmKeyCertificate? cert = AlarmKeyCertificate.fromJson(
+      payload['c'],
+    );
+    if (cert == null ||
+        !await cert.verify(from: from, account: accountOf?.call(from))) {
+      logZenWarning('Spotkania: niesprawdzony klucz alarmu od $from.');
+      return;
+    }
+    final List<String> had = _book.friendAlarmKeys[from] ?? const <String>[];
+    if (had.isNotEmpty && had.last == cert.key) {
+      return;
+    }
+    await _update<void>((MeetBook b) {
+      final List<String> keys = b.friendAlarmKeys.putIfAbsent(
+        from,
+        () => <String>[],
+      );
+      keys
+        ..remove(cert.key)
+        ..add(cert.key);
+      while (keys.length > MeetBook.maxAlarmKeysPerFriend) {
+        keys.removeAt(0);
+      }
+    });
+  }
+
+  /// Whether [payload] (an alarm from [from]) may be taken: a frame signed
+  /// with an alarm key this phone holds for [from] must check out. One
+  /// signed with a key not known here, or not signed, is taken as before
+  /// (it came over the mesh from the friend's own address) and the key is
+  /// asked for with the next hello.
+  Future<bool> _alarmSignatureHolds(
+    String from,
+    Map<String, dynamic> payload,
+  ) async {
+    final Object? sk = payload['sk'];
+    final List<String> keys = _book.friendAlarmKeys[from] ?? const <String>[];
+    if (sk is! String || !keys.contains(sk)) {
+      return true;
+    }
+    return verifyAlarmFrame(sk, payload);
+  }
+
+  /// What the alarm kit holds of this person's setup now (§16.3): the
+  /// alarm key, the id the kit's alarm will carry (a new one once the last
+  /// one was used), who gets it (with this phone's Bluetooth keys for
+  /// them), the settings, and the alarm already going on. Without devices
+  /// and mailbox copies: [AlarmKitKeeper] adds those. `null` while the own
+  /// address is not known.
+  Future<AlarmKit?> prepareAlarmKit() async {
+    final String self = _key(ownAddress?.call() ?? '');
+    if (self.isEmpty) {
+      return null;
+    }
+    final LedgerKeyPair key = await alarmKey();
+    final AlarmRecord? running = _book.ownActiveAlarm;
+    String? kitId = _book.alarmKitId;
+    if (running == null && (kitId == null || _book.alarm(kitId) != null)) {
+      final String made = _newAlarmId();
+      kitId = await _update<String>((MeetBook b) {
+        final String? id = b.alarmKitId;
+        if (id == null || b.alarm(id) != null) {
+          b.alarmKitId = made;
+        }
+        return b.alarmKitId!;
+      });
+    }
+    NearbyOwnKeys? own;
+    final String? private = _book.nearbyPrivate;
+    if (private != null) {
+      try {
+        own = NearbyOwnKeys(private);
+      } on FormatException {
+        own = null;
+      }
+    }
+    final List<AlarmKitRecipient> recipients = <AlarmKitRecipient>[];
+    for (final String f in alarmRecipients()) {
+      final String a = _key(f);
+      if (a.isEmpty ||
+          recipients.any((AlarmKitRecipient r) => r.address == a)) {
+        continue;
+      }
+      recipients.add(
+        AlarmKitRecipient(
+          address: a,
+          pairKey: own == null ? null : b64(own.pairKey(a)),
+          nearbyKey: _book.friendNearbySecrets[a],
+        ),
+      );
+      if (recipients.length >= kAlarmKitMaxRecipients) {
+        break;
+      }
+    }
+    return AlarmKit(
+      createdAt: _now(),
+      self: self,
+      alarmId: running?.id ?? kitId!,
+      alarmKeySeed: b64(key.seed),
+      recipients: recipients,
+      shortcut: _book.alarmPowerButton && hasAlarmPin,
+      recordAudio: _book.alarmRecordAudio,
+      nearby: _book.alarmNearby,
+      running: running,
+    );
+  }
+
+  /// The alarm of [kit] as its mailbox copies carry it: signed with the
+  /// alarm key now, marked as made in advance (`kit`), so the friend takes
+  /// the time it came for when it was raised.
+  Future<Map<String, dynamic>> alarmKitTemplate(AlarmKit kit) async =>
+      signAlarmFrame(await alarmKey(), <String, dynamic>{
+        'type': MeetTypes.alarm,
+        'id': kit.alarmId,
+        'at': kit.createdAt,
+        if (kit.note.isNotEmpty) 'note': kit.note,
+        'resp': const <String, String>{},
+        'kit': true,
+      });
+
+  /// This person's alarm as the locked service had it (§16.3): taken over
+  /// here — the screen, answers and delivery notes that come after it in
+  /// the inbox, the position and sound from now on (`AlarmWatcher`) — and
+  /// sent once more through the mailboxes to whoever has not confirmed it.
+  /// An alarm already called off here is not brought back.
+  Future<void> _onOwnAlarm(Map<String, dynamic> payload) async {
+    final Object? a = payload['a'];
+    final AlarmRecord? got = a is Map
+        ? AlarmRecord.fromJson(<String, dynamic>{
+            ...Map<String, dynamic>.from(a),
+            'from': 'self',
+          })
+        : null;
+    if (got == null || !got.isActive) {
+      return;
+    }
+    final AlarmRecord? had = _book.alarm(got.id);
+    if (had != null && (!had.isOwn || !had.isActive)) {
+      return;
+    }
+    final AlarmRecord? running = _book.ownActiveAlarm;
+    if (had == null && running != null) {
+      return; // another alarm of this person goes on here already
+    }
+    AlarmRecord merge(AlarmRecord base) {
+      final bool newer = (got.locatedAt ?? 0) > (base.locatedAt ?? 0);
+      return base.copyWith(
+        lat: newer ? got.lat : null,
+        lon: newer ? got.lon : null,
+        accuracy: newer ? got.accuracy : null,
+        locatedAt: newer ? got.locatedAt : null,
+        responses: <String, AlarmResponse>{...got.responses, ...base.responses},
+        sentTo: <String>{
+          ...base.sentTo,
+          ...got.sentTo,
+        }.take(AlarmRecord.maxRecipients).toList(),
+        deliveries: <String, AlarmDelivery>{
+          ...got.deliveries,
+          ...base.deliveries,
+        },
+      );
+    }
+
+    // In memory first: what follows in the inbox (answers, confirmations)
+    // finds it at once.
+    final AlarmRecord adopted = merge(
+      had ?? got.copyWith(clips: const <AlarmClip>[]),
+    );
+    _keepInMemory(adopted);
+    await _saveOwnAlarm(adopted, merge);
+    if (had == null) {
+      logZenMessage('Alarm z zablokowanego telefonu przejęty.');
+      await _broadcastAlarm(adopted);
+    }
+  }
+
+  /// A piece of sound the locked service recorded for this person's alarm.
+  Future<void> _onOwnAlarmAudio(Map<String, dynamic> payload) async {
+    final Object? id = payload['id'];
+    final Object? n = payload['n'];
+    final Object? at = payload['at'];
+    final Object? ms = payload['ms'];
+    final Object? d = payload['d'];
+    final AlarmRecord? own = id is String ? _ownInMemory(id) : null;
+    if (own == null ||
+        n is! int ||
+        n < 0 ||
+        n >= kAlarmMaxClips ||
+        d is! String ||
+        d.length > kAlarmClipMaxBytes * 4 ~/ 3 + 8 ||
+        own.clips.any((AlarmClip c) => c.n == n)) {
+      return;
+    }
+    final Uint8List data;
+    try {
+      data = base64Decode(d);
+    } on FormatException {
+      return;
+    }
+    if (data.isEmpty || data.length > kAlarmClipMaxBytes) {
+      return;
+    }
+    await store.disk.write(MeetStore.audioKey(own.id, n), data);
+    final AlarmClip clip = AlarmClip(
+      n: n,
+      at: at is int ? at : _now(),
+      ms: ms is int ? ms.clamp(0, 600000) : 0,
+    );
+    await _changeAlarm(
+      own.id,
+      (AlarmRecord a) => a.copyWith(
+        clips: <AlarmClip>[...a.clips.where((AlarmClip c) => c.n != n), clip]
+          ..sort((AlarmClip x, AlarmClip y) => x.n.compareTo(y.n)),
+      ),
+    );
   }
 
   // ---- alarm: sound (§16.3) ----
@@ -1373,13 +1759,21 @@ final class MeetService extends ChangeNotifier {
         }
       }
     }
-    final Map<String, dynamic> json = alarm.toJson()
+    Map<String, dynamic> json = alarm.toJson()
       ..remove('from')
       ..remove('clips')
       ..remove('near')
       ..remove('to')
       ..remove('dlv')
       ..['type'] = MeetTypes.alarm;
+    if (alarm.isOwn && _book.alarmKeySeed != null) {
+      try {
+        json = await signAlarmFrame(await alarmKey(), json);
+      } on Object catch (error, stack) {
+        // Unsigned it still goes (friends take it as before).
+        logZenError('Podpis alarmu', error, stack);
+      }
+    }
     for (final String friend in to) {
       final bool ask =
           alarm.isOwn && current.reachOf(_key(friend)) == AlarmReach.sent;

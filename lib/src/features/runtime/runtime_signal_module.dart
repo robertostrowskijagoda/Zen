@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/peer_version.dart';
@@ -44,14 +45,19 @@ bool isSecurityBlockingUi(AppSecurityService security) {
 
 /// The core's first module: the signal transport, frames into the social
 /// state, and friends' presence (ping/pong) while the app is in use — and
-/// all the time in the Android background service, which receives for the
-/// app while it is away ([ZenHost.backgroundService]).
+/// on Android all the time the core runs (see [_runsUnseen]).
 final class RuntimeSignalModule extends ZenModule {
   RuntimeSignalModule(this._ref)
     : _inService = _ref.read(zenHostProvider) == ZenHost.backgroundService;
 
   final Ref _ref;
   final bool _inService;
+
+  /// Presence keeps going with nobody looking: in the background service,
+  /// and on Android in the app too — its core runs there only while it owns
+  /// the node, on screen or unlocked in the background (a locked app hands
+  /// the node to the receive-only service, §14.1).
+  bool get _runsUnseen => _inService || Platform.isAndroid;
   StreamSubscription<SignalTransportFrame>? _subscription;
   SignalTransport? _transport;
   Timer? _presenceTimer;
@@ -114,7 +120,9 @@ final class RuntimeSignalModule extends ZenModule {
       return;
     }
     if (!interactive) {
-      _presenceTimer?.cancel();
+      if (!_runsUnseen) {
+        _presenceTimer?.cancel();
+      }
       return;
     }
     _restartPresenceLoop();
@@ -166,9 +174,7 @@ final class RuntimeSignalModule extends ZenModule {
       }
       if (!isAcceptedFriend && !isGroupMember) {
         // No answer at all to a peer we do not know: any reply would confirm
-        // that this device is online at this address. (An automatic
-        // `friend_remove` used to go back, which also ended real friendships
-        // whenever this side had only lost its friend list.)
+        // that this device is online at this address.
         return;
       }
       await transport.send(
@@ -198,15 +204,6 @@ final class RuntimeSignalModule extends ZenModule {
       if (isAcceptedFriend) {
         await _notePeerVersion(hub, from, frame.payload);
       }
-      return;
-    }
-    if (isUnconfirmedFriendRemovePayload(frame.payload)) {
-      // An older peer's automatic reply, not a person's decision: it must
-      // not end the friendship here.
-      await hub.receiveUnconfirmedFriendRemove(
-        from,
-        receivedAtMillis: frame.receivedAtMillis,
-      );
       return;
     }
     final ZenSignal? signal = zenSignalFromTransportPayload(
@@ -339,7 +336,7 @@ final class RuntimeSignalModule extends ZenModule {
 
   /// Presence pings go out while the app is in use, and always in the
   /// background service.
-  bool _presenceRuns() => _inService || _isUiInteractive();
+  bool _presenceRuns() => _runsUnseen || _isUiInteractive();
 
   String _presenceStateLabel() {
     return _isUiInteractive() ? 'foreground' : 'background';
