@@ -6,7 +6,6 @@ import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/meet/intro/intro_service.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
-import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/relay/relay_engine.dart'
     show kReliablePayloadTypes;
@@ -506,7 +505,6 @@ void main() {
     final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = await _world(
       aniaInBackground: true,
     );
-    expect(MeetInbox.handles(IntroTypes.result), isTrue);
     // A friend who is offline gets them later.
     expect(kReliablePayloadTypes, containsAll(IntroTypes.all));
     final IntroCase? c = await ania.intro.askIntro(

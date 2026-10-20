@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/zen_host.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -159,6 +160,10 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   if (!ref.watch(ledgerNodeEnabledProvider)) {
     return null;
   }
+  // The Android background service runs the ledger while the app is away
+  // (the app has suspended its own): it starts at once, and never makes a
+  // new identity — that is the app's job, before the service ever runs.
+  final bool inService = ref.read(zenHostProvider) == ZenHost.backgroundService;
   final LedgerNode node = LedgerNode(
     // Devices, not accounts: the ledger knows which device it talks to.
     transport: ref.read(meshTransportProvider),
@@ -186,7 +191,8 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     // On Android the background service may still be serving the ledger
     // (the app was closed): the background bridge resumes this node once
     // the service has handed it back.
-    startSuspended: !kIsWeb && Platform.isAndroid,
+    startSuspended: !inService && !kIsWeb && Platform.isAndroid,
+    createIdentity: !inService,
   );
   unawaitedLogged(node.start(), context: 'Start dziennika nie udał się');
   // Follows are signed entries; followers learn of them from hellos (§12).

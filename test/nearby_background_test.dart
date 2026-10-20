@@ -121,13 +121,9 @@ final class _Phone implements MeetHost {
       ownAddress: () => address,
       sendMesh: send,
       frames: const Stream<SignalTransportFrame>.empty(),
-      onMet: (String friend) async => met.add(friend),
       now: () => clock,
     );
   }
-
-  /// Friends this phone signed "met in person" for (§6.2).
-  final List<String> met = <String>[];
 
   final _Net net;
   final String address;
@@ -204,6 +200,8 @@ void main() {
     final _Phone bob = _Phone(net, 'bob', <String>['ania']);
     await ania.meet.shareNearbySecret('bob');
     await bob.meet.setAlarmNearby(true);
+    // Hidden by default: Bob chose to be seen.
+    await bob.meet.setNearbyVisible(true);
 
     final List<bool> announced = <bool>[];
     final NearbyKeeper keeper = NearbyKeeper(
@@ -307,6 +305,7 @@ void main() {
     final _Phone bob = _Phone(net, 'bob', <String>['ania']);
     // Neither the look around nor alarms: visible still means shown (cheap
     // low-power advertising).
+    await bob.meet.setNearbyVisible(true);
     await bob.meet.setNearbyBackgroundScan(false);
     final List<bool> announced = <bool>[];
     final NearbyKeeper keeper = NearbyKeeper(
@@ -362,6 +361,7 @@ void main() {
     final _Net net = _Net();
     final _Phone bob = _Phone(net, 'bob', <String>['ania']);
     await bob.meet.setAlarmNearby(true);
+    await bob.meet.setNearbyVisible(true);
     bob.radio.enabled = false;
     final List<bool> announced = <bool>[];
     final NearbyKeeper keeper = NearbyKeeper(
@@ -488,8 +488,9 @@ void main() {
     await ania.nearby.close();
   });
 
-  test('the look around runs every few minutes only when allowed, marks '
-      'friends met in person and leaves other scans alone', () async {
+  test('the look around runs every few minutes only when allowed, sees '
+      'friends without signing anything and leaves other scans '
+      'alone', () async {
     final _Net net = _Net();
     final _Phone ania = _Phone(net, 'ania', <String>['bob']);
     final _Phone bob = _Phone(net, 'bob', <String>['ania']);
@@ -534,7 +535,12 @@ void main() {
     expect(bob.radio.lowPower, isTrue);
     expect(bob.radio.scanning, isFalse, reason: 'only a short look');
     expect(bob.nearby.scanning, isFalse);
-    expect(bob.met, contains('ania'));
+    // Seen nearby is only a hint (§6.2): nothing is signed in the
+    // background.
+    expect(
+      bob.nearby.people.map((NearbyPerson p) => p.friend),
+      contains('ania'),
+    );
 
     // "W pobliżu" opened during a look around: its scan stays on.
     bob.clock += kNearbyLookEvery.inMilliseconds;

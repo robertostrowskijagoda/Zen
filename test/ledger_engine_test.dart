@@ -213,6 +213,99 @@ void main() {
       },
     );
 
+    test('a space kind from a newer build is kept within a few device logs '
+        'and bytes (Z2-6)', () async {
+      final LedgerStore a = _store();
+      final (LedgerAccountSetup setup, LedgerAuthor ada) = await _account(a);
+      final String space = 'stories/${ada.account}';
+      final List<LedgerAuthor> devices = <LedgerAuthor>[
+        for (int i = 0; i < 3; i++)
+          LedgerAuthor(
+            deviceKey: setup.deviceKey,
+            certificate: setup.certificate,
+            store: a,
+          ),
+      ];
+      final List<LogEntry> firsts = <LogEntry>[
+        for (final LedgerAuthor device in devices)
+          await device.append(space, 'story', <String, dynamic>{}),
+      ];
+      final LogEntry second = await devices[0].append(
+        space,
+        'story',
+        <String, dynamic>{},
+      );
+      final LedgerStore few = LedgerStore(
+        clock: HlcClock(wallClock: () => _now),
+        policies: (String s) => s == space
+            ? UnknownAccountSpacePolicy(ada.account, maxWriters: 2)
+            : defaultSpacePolicy(s),
+      );
+      expect((await few.ingest(firsts[0])).status, IngestStatus.added);
+      expect((await few.ingest(firsts[1])).status, IngestStatus.added);
+      expect((await few.ingest(firsts[2])).status, IngestStatus.rejected);
+      // A log already held still grows.
+      expect((await few.ingest(second)).status, IngestStatus.added);
+
+      final LedgerStore narrow = LedgerStore(
+        clock: HlcClock(wallClock: () => _now),
+        policies: (String s) => s == space
+            ? UnknownAccountSpacePolicy(
+                ada.account,
+                maxBytes: firsts[0].encodedLength + 1,
+              )
+            : defaultSpacePolicy(s),
+      );
+      expect((await narrow.ingest(firsts[0])).status, IngestStatus.added);
+      expect((await narrow.ingest(firsts[1])).status, IngestStatus.rejected);
+      expect((await narrow.ingest(second)).status, IngestStatus.rejected);
+      expect((await narrow.ingest(firsts[0])).status, IngestStatus.duplicate);
+    });
+
+    test('spaces of unknown kinds share a byte budget per owner and in all '
+        '(Z2-6)', () async {
+      final LedgerStore a = _store();
+      final (_, LedgerAuthor ada) = await _account(a);
+      final (_, LedgerAuthor bob) = await _account(a);
+      final LogEntry stories = await ada.append(
+        'stories/${ada.account}',
+        'story',
+        <String, dynamic>{},
+      );
+      final LogEntry reels = await ada.append(
+        'reels/${ada.account}',
+        'reel',
+        <String, dynamic>{},
+      );
+      final LogEntry bobs = await bob.append(
+        'stories/${bob.account}',
+        'story',
+        <String, dynamic>{},
+      );
+      final LogEntry feed = await ada.append(
+        accountSpace('feed', ada.account),
+        'post',
+        <String, dynamic>{'text': 'Znany rodzaj'},
+      );
+      final int one = stories.encodedLength;
+      final LedgerStore perOwner = LedgerStore(
+        clock: HlcClock(wallClock: () => _now),
+        maxBoundedOwnerBytes: one + 64,
+      );
+      expect((await perOwner.ingest(stories)).status, IngestStatus.added);
+      expect((await perOwner.ingest(reels)).status, IngestStatus.rejected);
+      expect((await perOwner.ingest(bobs)).status, IngestStatus.added);
+      // Known spaces are not counted.
+      expect((await perOwner.ingest(feed)).status, IngestStatus.added);
+
+      final LedgerStore overall = LedgerStore(
+        clock: HlcClock(wallClock: () => _now),
+        maxBoundedBytes: one + 64,
+      );
+      expect((await overall.ingest(stories)).status, IngestStatus.added);
+      expect((await overall.ingest(bobs)).status, IngestStatus.rejected);
+    });
+
     test('entries from the future are refused', () async {
       final LedgerStore a = _store();
       final (LedgerAccountSetup setup, LedgerAuthor author) = await _account(a);

@@ -403,8 +403,7 @@ final class LedgerNode {
               (_isSeed(peer) && _ownSpaces.contains(space)),
     // Chat copies never leave this account's own devices. A space of a kind
     // this build does not know (kept for a newer build, §1.6) goes only to
-    // friends that said they pass such spaces on too (`spaces1`): its rules
-    // for who may read it are not known here.
+    // friends: its rules for who may read it are not known here.
     servesTo: (String peer, String space) =>
         (isKnownSpace(space) && !space.startsWith('own/')) ||
         _isSibling(peer) ||
@@ -412,26 +411,23 @@ final class LedgerNode {
     forwardsFrom: _takesUnknownFrom,
   );
 
-  /// Capabilities friends named in their hello (what they said, nothing
-  /// that guards privacy depends on more than "may get a space we hold").
-  final Map<String, List<String>> _peerCaps = <String, List<String>>{};
-
-  bool _friendHasCap(String peer, String cap) =>
-      _isFriend(peer) &&
-      (_peerCaps[PeerShareCodec.normalizeAddress(peer)]?.contains(cap) ??
-          false);
-
   /// Whether unknown-kind [space] may be given to [peer].
   bool _forwardsUnknown(String peer, String space) =>
       !isKnownSpace(space) &&
       defaultSpacePolicy(space) != null &&
-      _friendHasCap(peer, kForwardSpacesCap);
+      _isFriend(peer);
 
-  /// Whether unknown-kind [space] may be taken from [peer] to pass on, with
-  /// the same per-log cap as spaces kept for their owner and a cap on how
-  /// many such spaces are kept.
+  /// Whether unknown-kind [space] may be taken from [peer] to pass on: only
+  /// spaces of this account or of a friend's (so they do not spread past
+  /// the owner's friends), within the store's caps on writers and bytes
+  /// ([UnknownAccountSpacePolicy]) and a cap on how many such spaces are
+  /// kept.
   bool _takesUnknownFrom(String peer, String space) {
     if (!_forwardsUnknown(peer, space)) {
+      return false;
+    }
+    final String owner = space.substring(space.indexOf('/') + 1);
+    if (owner != account && !_accounts.containsValue(owner)) {
       return false;
     }
     if (store.holdsSpace(space)) {
@@ -900,10 +896,11 @@ final class LedgerNode {
     for (final String acc in metAccounts()) ...addressesOfAccount(acc),
   ];
 
-  /// This account met [address] in person just now (a scanned QR, "W
-  /// pobliżu", "Poznaliśmy się" at an event): signs the attestation into
-  /// `acts`, where friends get it. Waits for the account when it is not
-  /// known yet (a friend request on its way).
+  /// The person confirmed meeting [address] in person just now
+  /// („Poznaliśmy się osobiście?” after a QR, "W pobliżu" or an event; never
+  /// on its own, e.g. from Bluetooth): signs the attestation into `acts`,
+  /// where friends get it. Waits for the account when it is not known yet
+  /// (a friend request on its way).
   Future<void> attestMet(String address) async {
     await start();
     final String normalized = PeerShareCodec.normalizeAddress(address);
@@ -2036,7 +2033,6 @@ final class LedgerNode {
     if (_metPending.containsKey(normalized)) {
       await _attestPending(normalized, cert.account);
     }
-    _peerCaps[normalized] = capsFromPayload(frame.payload['caps']);
     replicator.syncWith(
       from,
       extra: <String>[
@@ -2416,7 +2412,12 @@ final class LedgerNode {
     Uint8List.fromList(utf8.encode(jsonEncode(_accounts))),
   );
 
-  Future<void> stop() async {
+  /// Stops for good; a second call waits for the first (the background
+  /// service stops its ledger itself before its providers go away).
+  Future<void> stop() => _stopping ??= _stop();
+  Future<void>? _stopping;
+
+  Future<void> _stop() async {
     _stopped = true;
     _syncTimer?.cancel();
     await _storeChanged?.cancel();

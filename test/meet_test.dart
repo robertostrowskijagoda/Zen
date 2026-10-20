@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
-import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
@@ -676,7 +675,6 @@ void main() {
       'background service sends and keeps them', () async {
     // Handled by the Android background service and retried until they
     // arrive.
-    expect(MeetInbox.handles(MeetTypes.alarmAck), isTrue);
     expect(kReliablePayloadTypes, contains(MeetTypes.alarmAck));
 
     final _Net net = _Net();

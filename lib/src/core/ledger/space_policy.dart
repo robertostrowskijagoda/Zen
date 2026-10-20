@@ -43,31 +43,67 @@ const Set<String> kAccountSpaceKinds = <String>{
   'own',
 };
 
+/// A space this device keeps within limits of its own: how many device logs
+/// and how many bytes it holds, besides who may write ([allows]). The
+/// [LedgerStore] also bounds the bytes of all such spaces of one [owner]
+/// and of all of them together.
+abstract interface class BoundedSpacePolicy implements SpacePolicy {
+  /// The account whose devices write here.
+  String get owner;
+
+  /// Most device logs (writers) kept in the space.
+  int get maxWriters;
+
+  /// Most bytes of entries kept in the space.
+  int get maxBytes;
+}
+
 /// Most entries kept per device log in a space kind this build does not
 /// know (written by a newer Zen): enough to hand them on, not a way to fill
 /// the disk.
 const int kMaxUnknownSpaceEntries = 1000;
 
-/// Most spaces of unknown kinds one device keeps to hand on to friends: the
-/// per-log cap above times this is the most disk friends can make it use.
+/// Most device logs kept in one space of an unknown kind: an account may
+/// certify any number of devices, each with any number of logs.
+const int kMaxUnknownSpaceWriters = 8;
+
+/// Most bytes kept in one space of an unknown kind.
+const int kMaxUnknownSpaceBytes = 4 << 20;
+
+/// Most bytes kept for one owner over all its spaces of unknown kinds.
+const int kMaxUnknownOwnerBytes = 8 << 20;
+
+/// Most bytes kept for all spaces of unknown kinds together: the most disk
+/// friends can make this device use for them.
+const int kMaxUnknownBytes = 64 << 20;
+
+/// Most spaces of unknown kinds one device keeps to hand on to friends.
 const int kMaxUnknownSpaces = 256;
 
 /// A space kind a newer build may add: short, lower-case.
 final RegExp _spaceKindPattern = RegExp(r'^[a-z][a-z0-9_]{0,23}$');
 
-/// Only devices of [owner] may write, and only [maxEntries] per device log.
+/// Only devices of [owner] may write, only [maxEntries] per device log, at
+/// most [maxWriters] logs and [maxBytes] in all.
 ///
 /// For `<kind>/<account>` spaces of a kind this build does not know (§1.6:
-/// an older version keeps what it does not understand). The entries are
+/// it keeps what it does not understand for a newer build). The entries are
 /// still signed by the owner's devices and checked like any other.
-final class UnknownAccountSpacePolicy implements SpacePolicy {
+final class UnknownAccountSpacePolicy implements BoundedSpacePolicy {
   const UnknownAccountSpacePolicy(
     this.owner, {
     this.maxEntries = kMaxUnknownSpaceEntries,
+    this.maxWriters = kMaxUnknownSpaceWriters,
+    this.maxBytes = kMaxUnknownSpaceBytes,
   });
 
+  @override
   final String owner;
   final int maxEntries;
+  @override
+  final int maxWriters;
+  @override
+  final int maxBytes;
 
   @override
   bool allows(LogEntry entry) =>
@@ -75,7 +111,7 @@ final class UnknownAccountSpacePolicy implements SpacePolicy {
 }
 
 /// Whether [space] is of a kind this build knows (and so may serve it by
-/// its own rules). Spaces kept only for forward compatibility are not.
+/// its own rules). Spaces kept only for a newer build are not.
 bool isKnownSpace(String space) {
   if (space == kPowerSpace) {
     return true;

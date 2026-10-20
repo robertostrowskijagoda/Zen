@@ -11,10 +11,12 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/friend_levels.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 
-/// After adding someone met in person (a scanned QR, "W pobliżu", an
-/// event): signs the "met in person" attestation (§6.2) and asks how close
-/// they are (§8). "Znajomy" stays when skipped. Returns the level chosen,
-/// or `null` when skipped.
+/// After adding someone who may have been met in person (a scanned or
+/// shown QR, "W pobliżu", an event): asks „Poznaliśmy się osobiście?” and
+/// how close they are (§8). Only "Tak" signs the "met in person"
+/// attestation (§6.2); each side of a meeting confirms it on its own phone.
+/// Returns the level chosen, or `null` for "Nie" ("Znajomy" stays, nothing
+/// is signed).
 Future<FriendLevel?> showMetLevelPrompt(
   BuildContext context, {
   required String address,
@@ -24,19 +26,16 @@ Future<FriendLevel?> showMetLevelPrompt(
     context,
     listen: false,
   );
-  final LedgerNode? ledger = container.read(ledgerNodeProvider);
-  if (ledger != null) {
-    unawaitedLogged(ledger.attestMet(address), context: 'Spotkani osobiście');
-  }
   final FriendLevel? level = await showDialog<FriendLevel>(
     context: context,
     builder: (BuildContext context) => MetLevelDialog(name: name),
   );
-  if (level == null || !context.mounted) {
+  if (level == null) {
     return null;
   }
   final LedgerNode? node = container.read(ledgerNodeProvider);
   if (node != null) {
+    unawaitedLogged(node.attestMet(address), context: 'Spotkani osobiście');
     unawaitedLogged(
       setFriendLevel(
         node: node,
@@ -50,7 +49,7 @@ Future<FriendLevel?> showMetLevelPrompt(
   return level;
 }
 
-/// "Jak blisko się znacie?" with the three levels (§8).
+/// „Poznaliśmy się osobiście?” with the three levels of closeness (§8).
 class MetLevelDialog extends StatefulWidget {
   const MetLevelDialog({this.name = '', super.key});
 
@@ -81,17 +80,22 @@ class _MetLevelDialogState extends State<MetLevelDialog> {
     final ZenColors zen = ZenColors.of(context);
     return AlertDialog(
       key: const Key('met-level-dialog'),
-      title: Text(t('Jak blisko się znacie?')),
+      title: Text(t('Poznaliśmy się osobiście?')),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
             widget.name.isEmpty
-                ? t('Spotkaliście się osobiście. Poziom widzisz tylko Ty.')
+                ? t(
+                    'Potwierdź tylko, jeśli stoicie obok siebie: Twoi '
+                    'znajomi zobaczą podpisane „spotkani osobiście”. Jak '
+                    'blisko się znacie, widzisz tylko Ty.',
+                  )
                 : t(
-                    'Spotkaliście się osobiście z: {name}. Poziom widzisz '
-                    'tylko Ty.',
+                    'Potwierdź tylko, jeśli stoisz obok: {name}. Twoi '
+                    'znajomi zobaczą podpisane „spotkani osobiście”. Jak '
+                    'blisko się znacie, widzisz tylko Ty.',
                     {'name': widget.name},
                   ),
             style: TextStyle(color: zen.textSecondary, height: 1.35),
@@ -122,12 +126,12 @@ class _MetLevelDialogState extends State<MetLevelDialog> {
         TextButton(
           key: const Key('met-level-skip'),
           onPressed: () => Navigator.of(context).pop(),
-          child: Text(t('Pomiń')),
+          child: Text(t('Nie')),
         ),
         FilledButton(
           key: const Key('met-level-save'),
           onPressed: () => Navigator.of(context).pop(_level),
-          child: Text(t('Zapisz')),
+          child: Text(t('Tak')),
         ),
       ],
     );

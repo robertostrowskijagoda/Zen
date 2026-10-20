@@ -454,7 +454,25 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                 'distance': nearbyDistance(p.rssi),
               })
             : nearbyDistance(p.rssi),
-        trailing: met ? Icon(Icons.verified_rounded, color: zen.success) : null,
+        // Being near is only a hint: the meeting is signed when confirmed
+        // (§6.2).
+        trailing: met
+            ? Icon(Icons.verified_rounded, color: zen.success)
+            : TextButton(
+                key: Key('nearby-met-$friend'),
+                onPressed: () => unawaited(
+                  showMetLevelPrompt(
+                    context,
+                    address: friend,
+                    name: meet.host.nameOf(friend),
+                  ).then((_) {
+                    if (mounted) {
+                      setState(() {});
+                    }
+                  }),
+                ),
+                child: Text(t('Spotkani?')),
+              ),
       );
     }
     // Badges (§15): what this phone knows of the stranger, nothing more.

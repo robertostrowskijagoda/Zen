@@ -48,8 +48,49 @@ final class _WriterLog {
   final Map<int, LogEntry> pending = <int, LogEntry>{};
   bool forked = false;
 
+  /// Bytes of [entries] and [pending].
+  int bytes = 0;
+
   int get head => entries.length;
   String get lastId => entries.isEmpty ? '' : entries.last.id;
+
+  void add(LogEntry entry) {
+    entries.add(entry);
+    bytes += entry.encodedLength;
+  }
+
+  void addPending(LogEntry entry) {
+    pending[entry.seq] = entry;
+    bytes += entry.encodedLength;
+  }
+
+  LogEntry? takePending(int seq) {
+    final LogEntry? entry = pending.remove(seq);
+    if (entry != null) {
+      bytes -= entry.encodedLength;
+    }
+    return entry;
+  }
+
+  void clearPending() {
+    for (final LogEntry entry in pending.values) {
+      bytes -= entry.encodedLength;
+    }
+    pending.clear();
+  }
+
+  void truncate(int keep) {
+    for (int i = keep; i < entries.length; i++) {
+      bytes -= entries[i].encodedLength;
+    }
+    entries.removeRange(keep, entries.length);
+  }
+
+  /// Marks the log as keeping two histories: nothing more is taken.
+  void fork() {
+    forked = true;
+    clearPending();
+  }
 }
 
 typedef SpacePolicyResolver = SpacePolicy? Function(String space);
@@ -64,6 +105,8 @@ final class LedgerStore {
     HlcClock? clock,
     SpacePolicyResolver? policies,
     this.maxPendingPerLog = 512,
+    this.maxBoundedOwnerBytes = kMaxUnknownOwnerBytes,
+    this.maxBoundedBytes = kMaxUnknownBytes,
   }) : directory = directory ?? AccountDirectory(),
        clock = clock ?? HlcClock(),
        _policies = policies ?? defaultSpacePolicy;
@@ -73,9 +116,18 @@ final class LedgerStore {
   final SpacePolicyResolver _policies;
   final int maxPendingPerLog;
 
+  /// Most bytes held in [BoundedSpacePolicy] spaces of one owner.
+  final int maxBoundedOwnerBytes;
+
+  /// Most bytes held in all [BoundedSpacePolicy] spaces together.
+  final int maxBoundedBytes;
+
   /// space → writer → log
   final Map<String, Map<String, _WriterLog>> _logs =
       <String, Map<String, _WriterLog>>{};
+
+  /// Spaces held under a [BoundedSpacePolicy] → their owner.
+  final Map<String, String> _boundedOwners = <String, String>{};
 
   /// Accounts whose entries this user refuses (their own block list).
   final Set<String> blockedAccounts = <String>{};
@@ -179,8 +231,7 @@ final class LedgerStore {
     if (late != null) {
       return late;
     }
-    final Map<String, _WriterLog> space = _logs[entry.space] ??=
-        <String, _WriterLog>{};
+    final Map<String, _WriterLog> space = _space(entry.space);
     final _WriterLog log = space[entry.writer] ??= _WriterLog(
       entry.account,
       entry.device,
@@ -190,9 +241,7 @@ final class LedgerStore {
     if (entry.seq <= log.head) {
       // Only reachable for a different id at a taken position (duplicates
       // were caught in the precheck).
-      log
-        ..forked = true
-        ..pending.clear();
+      log.fork();
       _changed.add(null);
       return const IngestResult(IngestStatus.forked, 'dwa wpisy o tym numerze');
     }
@@ -201,9 +250,7 @@ final class LedgerStore {
       if (waiting.id == entry.id) {
         return const IngestResult(IngestStatus.duplicate);
       }
-      log
-        ..forked = true
-        ..pending.clear();
+      log.fork();
       _changed.add(null);
       return const IngestResult(IngestStatus.forked, 'dwa wpisy o tym numerze');
     }
@@ -211,7 +258,7 @@ final class LedgerStore {
       if (log.pending.length >= maxPendingPerLog) {
         return const IngestResult(IngestStatus.rejected, 'za dużo zaległych');
       }
-      log.pending[entry.seq] = entry;
+      log.addPending(entry);
       return const IngestResult(IngestStatus.pending);
     }
     if (!_append(log, entry)) {
@@ -257,6 +304,63 @@ final class LedgerStore {
         return const IngestResult(IngestStatus.duplicate);
       }
     }
+    // Only what would be stored counts (a second entry at a taken position
+    // is a fork, not more data).
+    if (policy is BoundedSpacePolicy &&
+        (log == null || entry.seq > log.head) &&
+        log?.pending[entry.seq]?.id != entry.id) {
+      return _overBound(entry, policy, log);
+    }
+    return null;
+  }
+
+  /// The logs of [space], created on first use.
+  Map<String, _WriterLog> _space(String space) {
+    final Map<String, _WriterLog>? held = _logs[space];
+    if (held != null) {
+      return held;
+    }
+    if (_policies(space) case final BoundedSpacePolicy bounded) {
+      _boundedOwners[space] = bounded.owner;
+    }
+    return _logs[space] = <String, _WriterLog>{};
+  }
+
+  int _bytesOf(String space) {
+    int bytes = 0;
+    for (final _WriterLog log
+        in (_logs[space] ?? const <String, _WriterLog>{}).values) {
+      bytes += log.bytes;
+    }
+    return bytes;
+  }
+
+  /// Why [entry] would take [policy]'s space (or its owner's, or all
+  /// bounded spaces) past its limits; `null` when it fits.
+  IngestResult? _overBound(
+    LogEntry entry,
+    BoundedSpacePolicy policy,
+    _WriterLog? log,
+  ) {
+    if (log == null && (_logs[entry.space]?.length ?? 0) >= policy.maxWriters) {
+      return const IngestResult(IngestStatus.rejected, 'za dużo urządzeń');
+    }
+    final int size = entry.encodedLength;
+    if (_bytesOf(entry.space) + size > policy.maxBytes) {
+      return const IngestResult(IngestStatus.rejected, 'przestrzeń pełna');
+    }
+    int owner = 0;
+    int total = 0;
+    for (final MapEntry<String, String> held in _boundedOwners.entries) {
+      final int bytes = _bytesOf(held.key);
+      total += bytes;
+      if (held.value == policy.owner) {
+        owner += bytes;
+      }
+    }
+    if (owner + size > maxBoundedOwnerBytes || total + size > maxBoundedBytes) {
+      return const IngestResult(IngestStatus.rejected, 'brak miejsca');
+    }
     return null;
   }
 
@@ -264,13 +368,11 @@ final class LedgerStore {
     if (entry.prev != log.lastId) {
       // Signed by the device but chained to something else: it keeps two
       // histories.
-      log
-        ..forked = true
-        ..pending.clear();
+      log.fork();
       _changed.add(null);
       return false;
     }
-    log.entries.add(entry);
+    log.add(entry);
     _added.add(entry);
     _changed.add(null);
     return true;
@@ -278,7 +380,7 @@ final class LedgerStore {
 
   void _drain(_WriterLog log) {
     while (!log.forked) {
-      final LogEntry? next = log.pending.remove(log.head + 1);
+      final LogEntry? next = log.takePending(log.head + 1);
       if (next == null || !_append(log, next)) {
         return;
       }
@@ -293,9 +395,10 @@ final class LedgerStore {
     if (_policies(entry.space) == null) {
       return false;
     }
-    final _WriterLog log =
-        (_logs[entry.space] ??= <String, _WriterLog>{})[entry.writer] ??=
-            _WriterLog(entry.account, entry.device);
+    final _WriterLog log = _space(entry.space)[entry.writer] ??= _WriterLog(
+      entry.account,
+      entry.device,
+    );
     if (log.account != entry.account ||
         log.device != entry.device ||
         entry.seq != log.head + 1 ||
@@ -303,7 +406,7 @@ final class LedgerStore {
       return false;
     }
     directory.trustCertificate(entry.certificate);
-    log.entries.add(entry);
+    log.add(entry);
     clock.observe(entry.hlc);
     return true;
   }
@@ -360,9 +463,9 @@ final class LedgerStore {
             0;
         if (log.entries.length > keep) {
           removed += log.entries.length - keep;
-          log.entries.removeRange(keep, log.entries.length);
+          log.truncate(keep);
         }
-        log.pending.clear();
+        log.clearPending();
       }
     }
     _changed.add(null);

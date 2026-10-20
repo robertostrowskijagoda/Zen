@@ -2,25 +2,19 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
-import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
-import 'package:zen/src/features/dating/dating_service.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/ask/ask_service.dart';
 import 'package:zen/src/features/meet/circle/circle_service.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
-import 'package:zen/src/features/meet/intro/intro_service.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
-import 'package:zen/src/features/meet/plan/plan_service.dart';
 import 'package:zen/src/features/meet/table/table_service.dart';
-import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
-import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -208,72 +202,6 @@ Future<void> _syncNearbySecrets(MeetService service) async {
   }
 }
 
-/// [MeetHost] for the Android background service (its own container and
-/// ledger): a friend's alarm still rings while the app is closed.
-final class ContainerMeetHost implements MeetHost {
-  ContainerMeetHost({
-    required this.container,
-    required this.transport,
-    required this.ledger,
-    required this.ownAddress,
-  });
-
-  final ProviderContainer container;
-  final SignalTransport transport;
-  final LedgerNode? Function() ledger;
-  final String Function() ownAddress;
-
-  SocialHubState get _state => container.read(socialHubControllerProvider);
-
-  @override
-  Future<void> send(String to, Map<String, dynamic> payload) =>
-      transport.send(remoteAddress: to, payload: payload);
-
-  @override
-  List<String> friends() => acceptedFriendAddresses(_state);
-
-  @override
-  List<String> closeFriends() {
-    final LedgerNode? node = ledger();
-    if (node == null) {
-      return const <String>[];
-    }
-    return <String>[
-      for (final String a in friends())
-        if (node.levelOf(a) == FriendLevel.close) a,
-    ];
-  }
-
-  @override
-  bool isFriend(String address) =>
-      _state.friendByAddress(address)?.status ==
-      FriendRelationshipStatus.accepted;
-
-  @override
-  bool isSelf(String address) {
-    final String own = ownAddress();
-    return own.isNotEmpty && PeerShareCodec.addressesEqual(own, address);
-  }
-
-  @override
-  String nameOf(String address) {
-    final FriendProfile? f = _state.friendByAddress(address);
-    return f == null ? t('Ktoś') : _state.nameFor(f);
-  }
-
-  @override
-  Future<void> notify(RuntimeSystemNotification notification) async {
-    await container
-        .read(runtimeSystemNotificationServiceProvider)
-        .show(notification);
-  }
-
-  @override
-  Future<void> dismissNotification(String slotKey) => container
-      .read(runtimeSystemNotificationServiceProvider)
-      .dismissSlot(slotKey);
-}
-
 /// People nearby (§15). Starts showing this phone when Bluetooth may be
 /// used and the person did not hide it.
 final Provider<NearbyService> nearbyServiceProvider = Provider<NearbyService>((
@@ -288,10 +216,6 @@ final Provider<NearbyService> nearbyServiceProvider = Provider<NearbyService>((
     sendMesh: (String to, Map<String, dynamic> payload) =>
         transport.send(remoteAddress: to, payload: payload),
     frames: transport.frames,
-    // A friend right here: a signed "met in person" (§6.2).
-    onMet: (String friend) async {
-      await ref.read(ledgerNodeProvider)?.attestMet(friend);
-    },
   );
   void onMeet() => nearby.friendsChanged();
   meet.addListener(onMeet);
@@ -451,112 +375,3 @@ final Provider<CircleService> circleServiceProvider = Provider<CircleService>((
   ref.onDispose(circles.dispose);
   return circles;
 });
-
-/// Everything of the meeting features in one place, for the Android
-/// background service: frames that arrive while the app is away are
-/// handled (and kept) instead of lost.
-final class MeetInbox {
-  MeetInbox({
-    required this.meet,
-    required LedgerDisk disk,
-    required String Function() address,
-  }) : _host = MeetEventHost(meet.host, address: address, name: () => '') {
-    events = EventService(host: _host, disk: disk);
-    ask = AskService(host: _host, disk: disk);
-    table = TableService(
-      host: _host,
-      events: events,
-      disk: disk,
-      friendsOf: (String f) => meet.book.friendsOf(f),
-    );
-    circles = CircleService(host: _host, disk: disk);
-    neighbors = NeighborsService(host: _host, disk: disk);
-    // Deadlines of "Idę na randkę" are checked here too (§19.4), so this
-    // person's alarm can go out while the app is closed.
-    dating = DatingService(
-      host: _host,
-      disk: disk,
-      raiseAlarm: (String note) async {
-        await meet.raiseAlarm(note: note);
-      },
-    );
-    pyramid = PyramidService(
-      host: _host,
-      disk: disk,
-      friendsOf: (String f) => meet.book.friendsOf(f),
-    );
-    // Answers are kept; the app turns a full plan into an event (§17.6).
-    plans = PlanService(
-      host: _host,
-      disk: disk,
-      events: events,
-      closeFriends: () => meet.host.closeFriends(),
-      convert: false,
-    );
-    // Introductions and letters through friends (§24.1); the friend
-    // requests they lead to are made when the app opens.
-    intro = IntroService(host: _host, disk: disk, meet: () => meet);
-  }
-
-  final MeetService meet;
-  final EventHost _host;
-  late final EventService events;
-  late final AskService ask;
-  late final TableService table;
-  late final CircleService circles;
-  late final NeighborsService neighbors;
-  late final DatingService dating;
-  late final PyramidService pyramid;
-  late final PlanService plans;
-  late final IntroService intro;
-
-  static bool handles(String type) =>
-      MeetTypes.all.contains(type) ||
-      IntroTypes.all.contains(type) ||
-      EventTypes.all.contains(type) ||
-      AskTypes.all.contains(type) ||
-      CircleTypes.all.contains(type) ||
-      FlatTypes.all.contains(type) ||
-      DatingTypes.all.contains(type) ||
-      PyramidTypes.all.contains(type) ||
-      PlanTypes.all.contains(type) ||
-      type == kTableWishType;
-
-  /// Reads the current state from disk, then handles [frame].
-  Future<void> handle(SignalTransportFrame frame) async {
-    final Object? type = frame.payload['type'];
-    if (MeetTypes.all.contains(type)) {
-      await meet.handle(frame);
-    } else if (IntroTypes.all.contains(type)) {
-      // Who may see the friend list is read from the book.
-      await meet.reload();
-      await intro.load();
-      await intro.handle(frame);
-    } else if (EventTypes.all.contains(type)) {
-      await events.load();
-      await events.handle(frame);
-    } else if (AskTypes.all.contains(type)) {
-      await ask.load();
-      await ask.handle(frame);
-    } else if (CircleTypes.all.contains(type)) {
-      await circles.load();
-      await circles.handle(frame);
-    } else if (PyramidTypes.all.contains(type)) {
-      await pyramid.load();
-      await pyramid.handle(frame);
-    } else if (DatingTypes.all.contains(type)) {
-      await dating.load();
-      await dating.handle(frame);
-    } else if (FlatTypes.all.contains(type)) {
-      await neighbors.load();
-      await neighbors.handle(frame);
-    } else if (PlanTypes.all.contains(type)) {
-      await plans.load();
-      await plans.handle(frame);
-    } else if (type == kTableWishType) {
-      await meet.reload();
-      await table.load();
-      await table.handle(frame);
-    }
-  }
-}

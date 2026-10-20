@@ -285,8 +285,9 @@ final class NearbySession {
 }
 
 /// "Osoby w pobliżu" (§15): shows this phone to people around (friends
-/// recognise it, strangers see a changing pseudonym), lists who is near,
-/// marks friends met in person, and lets strangers say hello.
+/// recognise it, strangers see a changing pseudonym), lists who is near
+/// and lets strangers say hello. A friend seen here is only a hint: "met
+/// in person" (§6.2) is signed only when the person confirms it.
 final class NearbyService extends ChangeNotifier {
   NearbyService({
     required this.radio,
@@ -294,7 +295,6 @@ final class NearbyService extends ChangeNotifier {
     required this.ownAddress,
     required this.sendMesh,
     required Stream<SignalTransportFrame> frames,
-    this.onMet,
     int Function()? now,
     Random? random,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch),
@@ -309,10 +309,6 @@ final class NearbyService extends ChangeNotifier {
   final String Function() ownAddress;
   final Future<void> Function(String to, Map<String, dynamic> payload) sendMesh;
 
-  /// A friend is right here (§15): signs the "met in person" attestation
-  /// (§6.2). Called once per friend while this service runs.
-  final Future<void> Function(String friend)? onMet;
-  final Set<String> _metHere = <String>{};
   final int Function() _now;
   final Random _random;
   final List<StreamSubscription<Object?>> _subs =
@@ -380,9 +376,6 @@ final class NearbyService extends ChangeNotifier {
 
   /// Seen within this long counts as "here".
   static const Duration fresh = Duration(minutes: 2);
-
-  /// A friend this close counts as met in person.
-  static const int metRssi = -80;
 
   /// Conversations started by people nearby kept at most, and per address
   /// (or token) they came from (a wave is free to send, so a phone nearby
@@ -684,13 +677,6 @@ final class NearbyService extends ChangeNotifier {
         seenAt: t,
         friend: friend,
       );
-    }
-    final Future<void> Function(String friend)? met = onMet;
-    if (friend != null &&
-        rssi >= metRssi &&
-        met != null &&
-        _metHere.add(friend)) {
-      unawaitedLogged(met(friend), context: 'Spotkani osobiście');
     }
     notifyListeners();
   }

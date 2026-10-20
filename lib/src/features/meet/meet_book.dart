@@ -543,8 +543,9 @@ final class MeetBook {
   /// Addresses blocked in "W pobliżu" (§15), normalised.
   final Set<String> nearbyBlocked = <String>{};
 
-  /// Whether this phone shows itself to people nearby (§15, on by default).
-  bool nearbyVisible = true;
+  /// Whether this phone shows itself to people nearby (§15). Off until the
+  /// person turns it on (privacy by default).
+  bool nearbyVisible = false;
 
   /// Who may see this person's friend list (§9, §16.1, §24.1).
   FriendListAudience friendListAudience = FriendListAudience.friends;
@@ -710,7 +711,7 @@ final class MeetBook {
     'given': nearbyGivenTo.toList(),
     if (nearbyPrivate != null) 'np': nearbyPrivate,
     if (nearbyBlocked.isNotEmpty) 'nb': nearbyBlocked.toList(),
-    if (!nearbyVisible) 'hidden': true,
+    if (nearbyVisible) 'visible': true,
     'la': friendListAudience.name,
     if (friendListAllowed.isNotEmpty) 'listOk': friendListAllowed.toList(),
     if (alarmRecordAudio) 'alarmAudio': true,
@@ -767,7 +768,7 @@ final class MeetBook {
         }
       }
     }
-    book.nearbyVisible = json['hidden'] != true;
+    book.nearbyVisible = json['visible'] == true;
     book.friendListAudience =
         FriendListAudience.byName(json['la']) ?? FriendListAudience.friends;
     final Object? listOk = json['listOk'];

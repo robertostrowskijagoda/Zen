@@ -123,13 +123,9 @@ final class _Phone implements MeetHost {
       ownAddress: () => address,
       sendMesh: send,
       frames: frames.stream,
-      onMet: (String friend) async => met.add(friend),
       now: () => clock,
     );
   }
-
-  /// Friends this phone signed "met in person" for (§6.2).
-  final List<String> met = <String>[];
 
   final _Air air;
   final Map<String, _Phone> mesh;
@@ -220,8 +216,7 @@ void main() {
     expect(nearbyDistance(-95), 'dalej');
   });
 
-  test('a friend nearby is recognised and met in person; a stranger is a '
-      'pseudonym', () async {
+  test('a friend nearby is recognised; a stranger is a pseudonym', () async {
     final _Air air = _Air();
     final Map<String, _Phone> mesh = <String, _Phone>{};
     final _Phone ania = _Phone(air, mesh, 'ania', <String>['bob']);
@@ -242,7 +237,6 @@ void main() {
     expect(seen.first.friend, 'ania', reason: 'friends first');
     expect(seen.last.friend, isNull);
     expect(seen.last.pseudonym, obcy.nearby.myPseudonym);
-    expect(bob.met, <String>['ania']);
 
     // 15 minutes later Ania's token is new, Bob still knows her.
     ania.clock += 15 * 60 * 1000;
@@ -397,16 +391,16 @@ void main() {
   });
 
   test('visibility is remembered', () async {
-    final MeetBook book = MeetBook()..nearbyVisible = false;
+    final MeetBook book = MeetBook()..nearbyVisible = true;
     expect(
       MeetBook.fromJson(jsonDecode(jsonEncode(book.toJson()))).nearbyVisible,
-      isFalse,
+      isTrue,
     );
     expect(
       MeetBook.fromJson(
         jsonDecode(jsonEncode(MeetBook().toJson())),
       ).nearbyVisible,
-      isTrue,
+      isFalse,
     );
   });
 

@@ -108,6 +108,7 @@ Map<String, dynamic> _member(LedgerKeyPair k, String name) => <String, dynamic>{
   'k': k.id,
   'n': name,
   'nat': 'PL',
+  'yr': 1990,
   'dc': 'x',
 };
 
@@ -225,6 +226,16 @@ void main() {
       cela.account,
     );
     expect(verifiedSummary(post), 'w tym 1 zweryfikowana');
+
+    // A pyramid member counts as verified too ("piramida albo spotkani
+    // osobiście", §11).
+    final FeedPost withPyramid = buildFeed(
+      ada,
+      nameOf: (String a) => a,
+      pyramidAddresses: <String>{'200::b'},
+    ).single;
+    expect(withPyramid.verifiedLikes, 2);
+    expect(verifiedSummary(withPyramid), 'w tym 2 zweryfikowane');
   });
 
   group('referenda only from members met in person by 2 (§20.6)', () {
