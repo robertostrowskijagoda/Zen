@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
+import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/ledger/shamir.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/presentation/account_recovery_screen.dart';
@@ -18,6 +20,11 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 
 const PasswordCost _light = PasswordCost(memoryKiB: 64, iterations: 1);
 const String _password = 'dobre-haslo-123';
+const List<PasswordCost> _lightCosts = <PasswordCost>[_light];
+
+/// The seed of the only account found, `null` when none.
+Uint8List? _seedOf(List<RecoveredAccount> found) =>
+    found.isEmpty ? null : found.single.seed;
 
 final class _Linked extends MemorySignalTransport {
   _Linked(this.address, this.nodes);
@@ -71,9 +78,10 @@ void main() {
   });
 
   test('the seed comes back with 2 pieces + password, or 4 without', () async {
-    final Uint8List seed = randomBytes(32);
+    final LedgerKeyPair key = await LedgerKeyPair.generate();
+    final Uint8List seed = key.seed;
     final List<RecoveryPiece> pieces = await createRecoveryPieces(
-      account: 'konto',
+      account: key.id,
       seed: seed,
       password: _password,
       helpers: 6,
@@ -88,15 +96,23 @@ void main() {
     ];
     List<Map<String, dynamic>> emergencies(Iterable<int> i) =>
         <Map<String, dynamic>>[for (final int k in i) pieces[k].emergency];
-
-    expect(await recoverWithPassword(normals(<int>[1, 4]), _password), seed);
-    expect(
-      await recoverWithPassword(normals(<int>[1, 4]), 'zle-haslo-9'),
-      null,
+    Future<Uint8List?> withPassword(
+      List<Map<String, dynamic>> halves,
+      String password,
+    ) async => _seedOf(
+      await recoverWithPassword(halves, password, acceptedCosts: _lightCosts),
     );
-    expect(await recoverWithPassword(normals(<int>[2]), _password), isNull);
-    expect(await recoverWithoutPassword(emergencies(<int>[0, 2, 3, 5])), seed);
-    expect(await recoverWithoutPassword(emergencies(<int>[0, 2, 3])), isNull);
+
+    expect(await withPassword(normals(<int>[1, 4]), _password), seed);
+    expect(await withPassword(normals(<int>[1, 4]), 'zle-haslo-9'), isNull);
+    expect(await withPassword(normals(<int>[2]), _password), isNull);
+    expect(
+      _seedOf(await recoverWithoutPassword(emergencies(<int>[0, 2, 3, 5]))),
+      seed,
+    );
+    expect(await recoverWithoutPassword(emergencies(<int>[0, 2, 3])), isEmpty);
+    // A cost the app does not write is never run.
+    expect(await recoverWithPassword(normals(<int>[1, 4]), _password), isEmpty);
 
     // A stranger's fake half does not spoil the real ones.
     final Map<String, dynamic> fake = <String, dynamic>{
@@ -104,7 +120,7 @@ void main() {
       'share': b64(randomBytes(33)),
     };
     expect(
-      await recoverWithPassword(<Map<String, dynamic>>[
+      await withPassword(<Map<String, dynamic>>[
         fake,
         ...normals(<int>[3, 5]),
       ], _password),
@@ -112,7 +128,7 @@ void main() {
     );
     expect(
       () => createRecoveryPieces(
-        account: 'konto',
+        account: key.id,
         seed: seed,
         password: 'krotkie',
         helpers: 6,
@@ -121,6 +137,182 @@ void main() {
       ),
       throwsArgumentError,
     );
+  });
+
+  test('the seed is bound to the account its pieces name', () async {
+    final LedgerKeyPair mine = await LedgerKeyPair.generate();
+    final LedgerKeyPair other = await LedgerKeyPair.generate();
+    final List<RecoveryPiece> pieces = await createRecoveryPieces(
+      account: mine.id,
+      seed: mine.seed,
+      password: _password,
+      helpers: 5,
+      now: 1,
+      cost: _light,
+    );
+    List<Map<String, dynamic>> halves(
+      List<RecoveryPiece> from, {
+      String? account,
+      String prefix = 'h',
+    }) => <Map<String, dynamic>>[
+      for (int i = 0; i < from.length; i++)
+        <String, dynamic>{
+          ...from[i].emergency,
+          'account': ?account,
+          'from': '$prefix$i',
+        },
+    ];
+
+    // Named and checked.
+    final RecoveredAccount got = (await recoverWithoutPassword(
+      halves(pieces.take(4).toList(), account: mine.id),
+    )).single;
+    expect(got.account, mine.id);
+    expect(got.seed, mine.seed);
+    expect(got.claimed, isTrue);
+    expect(got.helpers, <String>{'h0', 'h1', 'h2', 'h3'});
+    expect(got.fingerprint, accountFingerprint(mine.id));
+
+    // Halves that say they are another account's key are not taken.
+    expect(
+      await recoverWithoutPassword(
+        halves(pieces.take(4).toList(), account: other.id),
+      ),
+      isEmpty,
+    );
+
+    // Older helpers name no account: the account is computed, not claimed.
+    final RecoveredAccount legacy = (await recoverWithoutPassword(
+      halves(pieces.take(4).toList()),
+    )).single;
+    expect(legacy.account, mine.id);
+    expect(legacy.claimed, isFalse);
+
+    // Old and new helpers of the same copy work together; a fake half
+    // naming the account does not count as a helper.
+    final List<Map<String, dynamic>> mixed = <Map<String, dynamic>>[
+      ...halves(pieces.take(1).toList(), account: mine.id),
+      ...halves(pieces.skip(1).take(4).toList(), prefix: 'old'),
+      <String, dynamic>{
+        ...pieces[0].emergency,
+        'share': b64(randomBytes(33)),
+        'account': mine.id,
+        'from': 'fake',
+      },
+    ];
+    final RecoveredAccount both = (await recoverWithoutPassword(mixed)).single;
+    expect(both.claimed, isTrue);
+    expect(both.helpers, hasLength(5));
+    expect(both.helpers.contains('fake'), isFalse);
+
+    // A full set for another account shows up as a second account.
+    final List<RecoveryPiece> foreign = await createRecoveryPieces(
+      account: other.id,
+      seed: other.seed,
+      password: _password,
+      helpers: 4,
+      now: 1,
+      cost: _light,
+    );
+    final List<Map<String, dynamic>> all = <Map<String, dynamic>>[
+      ...halves(pieces.take(4).toList(), account: mine.id),
+      ...halves(foreign, account: other.id, prefix: 'x'),
+    ];
+    expect(
+      (await recoverWithoutPassword(
+        all,
+      )).map((RecoveredAccount a) => a.account),
+      unorderedEquals(<String>[mine.id, other.id]),
+    );
+    expect(claimedRecoveryAccounts(all), <String>{mine.id, other.id});
+  });
+
+  test('received halves keep only known fields and accepted costs', () async {
+    final List<RecoveryPiece> pieces = await createRecoveryPieces(
+      account: (await LedgerKeyPair.generate()).id,
+      seed: randomBytes(32),
+      password: _password,
+      helpers: 4,
+      now: 1,
+    );
+    final Map<String, dynamic> normal = pieces.first.normal;
+    expect(recoveryHalfFields(normal, normal: true), isNotNull);
+    expect(
+      recoveryHalfFields(<String, dynamic>{
+        ...normal,
+        'cost': const PasswordCost().toJson(),
+      }, normal: true),
+      isNotNull,
+      reason: 'older pieces used the default cost',
+    );
+    expect(
+      recoveryHalfFields(<String, dynamic>{
+        ...normal,
+        'cost': const PasswordCost(memoryKiB: 262144, iterations: 10).toJson(),
+      }, normal: true),
+      isNull,
+    );
+    expect(
+      recoveryHalfFields(<String, dynamic>{
+        ...pieces.first.emergency,
+        'share': 'xx',
+      }, normal: false),
+      isNull,
+    );
+    final Map<String, dynamic>? kept = recoveryHalfFields(<String, dynamic>{
+      ...pieces.first.emergency,
+      'from': 'someone',
+      'extra': List<int>.filled(1000, 1),
+    }, normal: false);
+    expect(kept!.keys, unorderedEquals(<String>['box', 'share']));
+  });
+
+  test('account fingerprints are 16 digits and differ per account', () async {
+    final String a = (await LedgerKeyPair.generate()).id;
+    final String b = (await LedgerKeyPair.generate()).id;
+    expect(
+      accountFingerprint(a),
+      matches(RegExp(r'^\d{4} \d{4} \d{4} \d{4}$')),
+    );
+    expect(accountFingerprint(a), accountFingerprint(a));
+    expect(accountFingerprint(a), isNot(accountFingerprint(b)));
+  });
+
+  test('a recovery begun before the update goes on', () async {
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    final List<RecoveryPiece> pieces = await createRecoveryPieces(
+      account: (await LedgerKeyPair.generate()).id,
+      seed: randomBytes(32),
+      password: _password,
+      helpers: 4,
+      now: 1,
+      cost: _light,
+    );
+    await disk.write(
+      'recovery/received',
+      Uint8List.fromList(
+        utf8.encode(
+          jsonEncode(<String, dynamic>{
+            'normal': <Object?>[],
+            'emergency': <Object?>[
+              <String, dynamic>{...pieces[0].emergency, 'from': '200::b1'},
+              <String, dynamic>{'box': 'zle', 'share': 'xx', 'from': '200::b2'},
+            ],
+          }),
+        ),
+      ),
+    );
+    final RecoveryService s = RecoveryService(
+      transport: MemorySignalTransport(),
+      disk: disk,
+      isFriend: (_) => false,
+      clock: () => 5,
+      tickInterval: const Duration(hours: 1),
+    );
+    addTearDown(s.stop);
+    await s.start();
+    expect(s.collecting, isTrue);
+    expect(s.receivedCount(RecoveryKind.emergency), 1);
   });
 
   test('with a password the account key is stored only wrapped', () async {
@@ -169,6 +361,7 @@ void main() {
         isFriend: (String a) => friends.contains(a),
         clock: () => now,
         tickInterval: const Duration(hours: 1),
+        acceptedCosts: _lightCosts,
       );
       addTearDown(s.stop);
       await s.start();
@@ -187,12 +380,12 @@ void main() {
     });
 
     test('helpers keep pieces and release them after the delay', () async {
-      final Uint8List seed = randomBytes(32);
+      final LedgerKeyPair key = await LedgerKeyPair.generate();
       await services[owner]!.distribute(
         helpers,
         await createRecoveryPieces(
-          account: 'konto',
-          seed: seed,
+          account: key.id,
+          seed: key.seed,
           password: _password,
           helpers: 6,
           now: now,
@@ -202,7 +395,10 @@ void main() {
       await _settle();
       expect(services[owner]!.acks, hasLength(6));
       expect(services[helpers[0]]!.heldFor, <String>[owner]);
+      expect(services[helpers[0]]!.heldAccount(owner), key.id);
 
+      final RecoveryService f = services[fresh]!;
+      await f.beginRecovery();
       for (final String h in helpers.take(2)) {
         await services[h]!.startHelping(owner, fresh);
       }
@@ -213,19 +409,103 @@ void main() {
         await services[h]!.tick();
       }
       await _settle();
-      expect(services[fresh]!.receivedCount(RecoveryKind.normal), 0);
+      expect(f.receivedCount(RecoveryKind.normal), 0);
 
       now += kNormalDelay.inMilliseconds;
       for (final String h in helpers.take(2)) {
         await services[h]!.tick();
       }
       await _settle();
-      final RecoveryService f = services[fresh]!;
       expect(f.receivedCount(RecoveryKind.normal), 2);
+      // The helpers name the account the piece is for.
       expect(
-        await recoverWithPassword(f.received(RecoveryKind.normal), _password),
-        seed,
+        f
+            .received(RecoveryKind.normal)
+            .map((Map<String, dynamic> h) => h['account']),
+        <String>[key.id, key.id],
       );
+      final RecoveredAccount got = (await recoverWithPassword(
+        f.received(RecoveryKind.normal),
+        _password,
+        acceptedCosts: _lightCosts,
+      )).single;
+      expect(got.seed, key.seed);
+      expect(got.account, key.id);
+      expect(got.claimed, isTrue);
+      expect(got.helpers, helpers.take(2).toSet());
+
+      await f.endRecovery();
+      expect(f.collecting, isFalse);
+      expect(f.receivedCount(RecoveryKind.normal), 0);
+    });
+
+    test('a new device takes pieces only while recovering, one per sender, '
+        'at the costs the app writes', () async {
+      final String stranger = PeerShareCodec.normalizeAddress('200::66');
+      await make(stranger, const <String>{});
+      final LedgerKeyPair key = await LedgerKeyPair.generate();
+      final List<RecoveryPiece> pieces = await createRecoveryPieces(
+        account: key.id,
+        seed: key.seed,
+        password: _password,
+        helpers: 4,
+        now: now,
+        cost: _light,
+      );
+      final RecoveryService f = services[fresh]!;
+      Future<void> send(
+        Map<String, dynamic> half, {
+        RecoveryKind kind = RecoveryKind.emergency,
+        Object? account,
+      }) async {
+        await nodes[stranger]!.send(
+          remoteAddress: fresh,
+          payload: <String, dynamic>{
+            'type': RecoveryMessages.piece,
+            'kind': kind.name,
+            'half': half,
+            'account': ?account,
+          },
+        );
+        await _settle();
+      }
+
+      expect(f.collecting, isFalse);
+      await send(pieces[0].emergency, account: key.id);
+      expect(f.receivedCount(RecoveryKind.emergency), 0, reason: 'not started');
+
+      await f.beginRecovery();
+      expect(f.collecting, isTrue);
+      await send(pieces[0].emergency, account: key.id);
+      await send(pieces[1].emergency, account: key.id);
+      expect(f.receivedCount(RecoveryKind.emergency), 1, reason: 'one each');
+      expect(f.received(RecoveryKind.emergency).single['from'], stranger);
+      expect(f.received(RecoveryKind.emergency).single['account'], key.id);
+
+      await send(<String, dynamic>{
+        ...pieces[0].normal,
+        'cost': const PasswordCost(memoryKiB: 262144, iterations: 10).toJson(),
+      }, kind: RecoveryKind.normal);
+      await send(pieces[0].normal, kind: RecoveryKind.normal, account: 'konto');
+      expect(f.receivedCount(RecoveryKind.normal), 0);
+      // Older helpers send no account: still taken.
+      await send(pieces[0].normal, kind: RecoveryKind.normal);
+      expect(f.receivedCount(RecoveryKind.normal), 1);
+      expect(
+        f.received(RecoveryKind.normal).single.containsKey('account'),
+        isFalse,
+      );
+
+      await f.endRecovery();
+      expect(f.receivedCount(RecoveryKind.emergency), 0);
+      await send(pieces[2].emergency, account: key.id);
+      expect(f.receivedCount(RecoveryKind.emergency), 0, reason: 'ended');
+
+      await f.beginRecovery();
+      now += RecoveryService.collectWindow.inMilliseconds;
+      expect(f.collecting, isFalse);
+      await send(pieces[2].emergency, account: key.id);
+      expect(f.receivedCount(RecoveryKind.emergency), 0, reason: 'expired');
     });
 
     test('the owner stops a release from the old device', () async {
@@ -319,6 +599,86 @@ void main() {
     await tester.runAsync(() => _settle());
     await tester.pump();
     expect(find.textContaining('co najmniej 4 znajomych'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.runAsync(() => _settle());
+  });
+  testWidgets('the screen shows whose account the pieces open before '
+      'taking it', (WidgetTester tester) async {
+    final MemorySignalTransport transport = MemorySignalTransport();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          socialHubAutoHydrateProvider.overrideWithValue(false),
+          signalTransportProvider.overrideWithValue(transport),
+          ledgerNodeEnabledProvider.overrideWithValue(true),
+          ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+        ],
+        child: const MaterialApp(home: AccountRecoveryScreen()),
+      ),
+    );
+    Future<void> waitFor(bool Function() done) async {
+      for (int i = 0; i < 40 && !done(); i++) {
+        await tester.runAsync(() => _settle());
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
+
+    Future<void> tapKey(String key) async {
+      final Finder f = find.byKey(Key(key));
+      await tester.ensureVisible(f);
+      await tester.pump();
+      await tester.tap(f);
+    }
+
+    final Finder start = find.byKey(const Key('recovery-start'));
+    await waitFor(() => start.evaluate().isNotEmpty);
+    expect(find.byKey(const Key('recovery-recover-emergency')), findsNothing);
+    await tapKey('recovery-start');
+    final Finder collecting = find.byKey(const Key('recovery-collecting'));
+    await waitFor(() => collecting.evaluate().isNotEmpty);
+    expect(collecting, findsOneWidget);
+
+    late LedgerKeyPair key;
+    await tester.runAsync(() async {
+      key = await LedgerKeyPair.generate();
+      final List<RecoveryPiece> pieces = await createRecoveryPieces(
+        account: key.id,
+        seed: key.seed,
+        password: _password,
+        helpers: 4,
+        now: 1,
+        cost: _light,
+      );
+      await transport.start();
+      for (int i = 0; i < 4; i++) {
+        await transport.injectIncoming(
+          from: '200::b${i + 1}',
+          payload: <String, dynamic>{
+            'type': RecoveryMessages.piece,
+            'kind': RecoveryKind.emergency.name,
+            'half': pieces[i].emergency,
+            'account': key.id,
+          },
+        );
+      }
+      await _settle();
+    });
+    final Finder recover = find.byKey(const Key('recovery-recover-emergency'));
+    await waitFor(
+      () => tester.widget<OutlinedButton>(recover).onPressed != null,
+    );
+    await tapKey('recovery-recover-emergency');
+    final Finder fingerprint = find.byKey(const Key('recovery-fingerprint-0'));
+    await waitFor(() => fingerprint.evaluate().isNotEmpty);
+
+    expect(
+      tester.widget<SelectableText>(fingerprint).data,
+      accountFingerprint(key.id),
+    );
+    expect(find.text('Klucze od 4 różnych osób'), findsOneWidget);
+    expect(find.byKey(const Key('recovery-adopt-0')), findsOneWidget);
+    expect(find.byKey(const Key('recovery-mixed-accounts')), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(() => _settle());

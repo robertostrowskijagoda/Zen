@@ -10,10 +10,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/core/utils/mark_of_the_web.dart';
 import 'package:zen/src/core/utils/safe_file_name.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
@@ -33,6 +35,7 @@ import 'package:zen/src/features/chat/voice_message_recorder.dart';
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/media/media_vault.dart';
+import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
@@ -176,6 +179,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final bool isCallActive =
         activeCall != null && activeCall.status == CallSessionStatus.active;
     final bool hasAnyActiveCall = activeCall != null;
+    // Messages the person reported are hidden behind a line (§21.4).
+    final HiddenByMe hiddenByMe = ref.watch(hiddenByMeProvider);
     final bool hasMessages = messages.asData?.value.isNotEmpty ?? false;
     final int messageCount = messages.asData?.value.length ?? 0;
     final int disappearSeconds = ref.watch(
@@ -235,7 +240,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: <Widget>[
                             Text(
-                              'pisze...',
+                              t('pisze...'),
                               style: TextStyle(
                                 color: zen.accent,
                                 fontSize: 12.5,
@@ -261,8 +266,8 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                   conversationSubtitle.isNotEmpty
                                       ? conversationSubtitle
                                       : (friend?.isOnline == true
-                                            ? 'online'
-                                            : 'offline'),
+                                            ? t('online')
+                                            : t('offline')),
                                 ].join(' · '),
                                 key: const Key('conversation-subtitle'),
                                 maxLines: 1,
@@ -311,9 +316,12 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   dimension: 8,
                   dotSize: 4,
                 ),
-                label: const Text(
-                  'Wróć do rozmowy',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                label: Text(
+                  t('Wróć do rozmowy'),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             )
@@ -323,7 +331,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               children: <Widget>[
                 IconButton(
                   key: const Key('conversation-audio-button'),
-                  tooltip: 'Rozmowa audio',
+                  tooltip: t('Rozmowa audio'),
                   onPressed: canInviteToCall
                       ? () => _inviteToCall(CallInviteKind.audio)
                       : null,
@@ -340,7 +348,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                 const SizedBox(width: 16),
                 IconButton(
                   key: const Key('conversation-video-button'),
-                  tooltip: 'Rozmowa wideo',
+                  tooltip: t('Rozmowa wideo'),
                   onPressed: canInviteToCall
                       ? () => _inviteToCall(CallInviteKind.video)
                       : null,
@@ -373,7 +381,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     () => _socialHubController.rejectFriendRequest(
                       peerAddress: widget.peerAddress,
                     ),
-                    failurePrefix: 'Nie udało się odrzucić',
+                    failurePrefix: t('Nie udało się odrzucić'),
                   );
                   if (rejected) {
                     _popBackToFriends();
@@ -384,7 +392,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     () => _socialHubController.cancelOutgoingRequest(
                       peerAddress: widget.peerAddress,
                     ),
-                    failurePrefix: 'Nie udało się anulować',
+                    failurePrefix: t('Nie udało się anulować'),
                   );
                   if (cancelled) {
                     _popBackToFriends();
@@ -419,8 +427,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         friend?.address ?? widget.peerAddress,
                         seconds,
                       ),
-                      failurePrefix:
-                          'Nie udało się zmienić znikających wiadomości',
+                      failurePrefix: t(
+                        'Nie udało się zmienić znikających wiadomości',
+                      ),
                     );
                   }
                   return;
@@ -429,7 +438,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     () => _socialHubController.blockFriend(
                       peerAddress: widget.peerAddress,
                     ),
-                    failurePrefix: 'Nie udało się zablokować',
+                    failurePrefix: t('Nie udało się zablokować'),
                   );
                   return;
                 case _ConversationMenuAction.removeFriend:
@@ -437,7 +446,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     () => _socialHubController.removeFriend(
                       peerAddress: widget.peerAddress,
                     ),
-                    failurePrefix: 'Nie udało się usunąć znajomego',
+                    failurePrefix: t('Nie udało się usunąć znajomego'),
                   );
                   if (removed) {
                     _popBackToFriends();
@@ -448,7 +457,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     () => _socialHubController.unblockFriend(
                       peerAddress: widget.peerAddress,
                     ),
-                    failurePrefix: 'Nie udało się odblokować',
+                    failurePrefix: t('Nie udało się odblokować'),
                   );
                   return;
                 case _ConversationMenuAction.clearHistory:
@@ -460,7 +469,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                       context,
                       ref,
                       authorAddress: widget.peerAddress,
-                      header: 'Zgłoszenie osoby — $conversationTitle',
+                      header: t('Zgłoszenie osoby — {name}', {
+                        'name': conversationTitle,
+                      }),
                       hashContent: false,
                     );
                   }
@@ -504,7 +515,9 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Aktywna rozmowa: ${activeCall.displayName}',
+                            t('Aktywna rozmowa: {name}', {
+                              'name': activeCall.displayName,
+                            }),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -515,7 +528,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           ),
                         ),
                         Text(
-                          'Wróć do rozmowy',
+                          t('Wróć do rozmowy'),
                           style: TextStyle(
                             color: zen.success,
                             fontWeight: FontWeight.w700,
@@ -547,11 +560,13 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                           controller: _scrollController,
                           padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
                           children: <Widget>[
-                            const ZenEmpty(
+                            ZenEmpty(
                               icon: Icons.forum_outlined,
-                              title: 'Brak wiadomości',
-                              text:
-                                  'Zacznij rozmowę bez czekania na synchronizację tła.',
+                              title: t('Brak wiadomości'),
+                              text: t(
+                                'Zacznij rozmowę bez czekania na '
+                                'synchronizację tła.',
+                              ),
                             ),
                           ],
                         )
@@ -562,7 +577,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                             if (index == thread.length) {
                               return _TypingBubble(
                                 key: const Key('conversation-typing-bubble'),
-                                name: friend?.displayLabel ?? 'Kontakt',
+                                name: friend?.displayLabel ?? t('Kontakt'),
                               );
                             }
                             final ChatMessage message = thread[index];
@@ -584,23 +599,48 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                     ),
                                     millis: message.sentAtMillis,
                                   ),
-                                _MessageBubble(
-                                  message: message,
-                                  entranceDelay:
-                                      animateEntrance &&
-                                          fromEnd < _entranceStaggerLimit
-                                      ? Duration(milliseconds: 30 * fromEnd)
-                                      : null,
-                                  onReport: () => unawaited(
-                                    reportContent(
-                                      context,
-                                      ref,
-                                      authorAddress: widget.peerAddress,
-                                      text: message.text,
-                                      header: 'Wiadomość od $conversationTitle',
+                                if (hiddenByMe.hides(id: message.id))
+                                  HiddenContentPlaceholder(
+                                    key: Key(
+                                      'conversation-hidden-${message.id}',
+                                    ),
+                                    byMe: true,
+                                    compact: true,
+                                    onShow: () =>
+                                        showHiddenAnyway(ref, id: message.id),
+                                  )
+                                else
+                                  _MessageBubble(
+                                    message: message,
+                                    entranceDelay:
+                                        animateEntrance &&
+                                            fromEnd < _entranceStaggerLimit
+                                        ? Duration(milliseconds: 30 * fromEnd)
+                                        : null,
+                                    onReport: () => unawaited(
+                                      reportContent(
+                                        context,
+                                        ref,
+                                        authorAddress: widget.peerAddress,
+                                        text: message.text,
+                                        header: t('Wiadomość od {name}', {
+                                          'name': conversationTitle,
+                                        }),
+                                        contentId: message.id,
+                                        deleteLocal: () async {
+                                          await ref
+                                              .read(
+                                                socialHubControllerProvider
+                                                    .notifier,
+                                              )
+                                              .deleteMessageLocally(
+                                                key: widget.peerAddress,
+                                                messageId: message.id,
+                                              );
+                                        },
+                                      ),
                                     ),
                                   ),
-                                ),
                               ],
                             );
                           },
@@ -616,7 +656,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                 error: (Object error, StackTrace stackTrace) {
                   return Center(
                     child: Text(
-                      'Nie udało się wczytać rozmowy.',
+                      t('Nie udało się wczytać rozmowy.'),
                       style: TextStyle(color: zen.warning),
                     ),
                   );
@@ -660,7 +700,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Nie udało się wysłać wiadomości.')),
+        SnackBar(content: Text(t('Nie udało się wysłać wiadomości.'))),
       );
     }
   }
@@ -749,20 +789,33 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Wyczyść historię'),
+          title: Text(t('Wyczyść historię')),
           content: Text(
-            'Usuniesz ${preview.messageCount} wpisow z tej rozmowy.\n'
-            'Załączniki w historii: ${formatAttachmentSize(preview.attachmentBytes)}.',
+            tn(
+              preview.messageCount,
+              one:
+                  'Usuniesz {n} wpis z tej rozmowy.\n'
+                  'Załączniki w historii: {size}.',
+              few:
+                  'Usuniesz {n} wpisy z tej rozmowy.\n'
+                  'Załączniki w historii: {size}.',
+              many:
+                  'Usuniesz {n} wpisów z tej rozmowy.\n'
+                  'Załączniki w historii: {size}.',
+              args: <String, Object?>{
+                'size': formatAttachmentSize(preview.attachmentBytes),
+              },
+            ),
           ),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Anuluj'),
+              child: Text(t('Anuluj')),
             ),
             FilledButton(
               key: const Key('clear-history-confirm'),
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Usuń'),
+              child: Text(t('Usuń')),
             ),
           ],
         );
@@ -779,7 +832,14 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Usunięto ${preview.messageCount} wpisow z tej rozmowy.'),
+        content: Text(
+          tn(
+            preview.messageCount,
+            one: 'Usunięto {n} wpis z tej rozmowy.',
+            few: 'Usunięto {n} wpisy z tej rozmowy.',
+            many: 'Usunięto {n} wpisów z tej rozmowy.',
+          ),
+        ),
       ),
     );
   }
@@ -814,7 +874,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         peerAddress: widget.peerAddress,
         senderDisplayName: senderDisplayName,
       ),
-      failurePrefix: 'Nie udało się zaakceptować',
+      failurePrefix: t('Nie udało się zaakceptować'),
     );
   }
 

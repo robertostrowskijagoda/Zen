@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
@@ -15,10 +16,13 @@ import 'package:zen/src/features/dating/presentation/dating_profile_editor.dart'
 import 'package:zen/src/features/meet/location.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/presentation/safe_photo.dart';
+import 'package:zen/src/features/moderation/hidden_by_me.dart';
+import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_wallet.dart';
 import 'package:zen/src/features/pyramid/presentation/report_sheet.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
+import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -172,12 +176,12 @@ class _DatingPhotoPagerState extends State<DatingPhotoPager> {
 /// "Znacie się przez: Bob → Kasia" (§19.3).
 String datingWay(SeenProfile s) {
   if (s.introBy != null) {
-    return 'Przedstawia: ${s.introBy}';
+    return t('Przedstawia: {name}', {'name': s.introBy});
   }
   if (s.distance <= 1) {
-    return 'To ktoś z Twoich znajomych';
+    return t('To ktoś z Twoich znajomych');
   }
-  return 'Znacie się przez: ${s.path.join(' → ')}';
+  return t('Znacie się przez: {path}', {'path': s.path.join(' → ')});
 }
 
 /// "Randki przez znajomych" (§19).
@@ -186,7 +190,8 @@ class DatingScreen extends ConsumerStatefulWidget {
 
   static Future<void> open(BuildContext context) => Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (BuildContext context) => const DatingScreen(),
+      builder: (BuildContext context) =>
+          const SecureScreen(child: DatingScreen()),
     ),
   );
 
@@ -204,6 +209,9 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
   @override
   Widget build(BuildContext context) {
     final DatingService dating = ref.watch(datingServiceProvider);
+    // Profiles the person reported are left out of the lists (§21.4); the
+    // lists change when they are hidden or shown anyway.
+    ref.watch(hiddenByMeProvider);
     final ZenColors zen = ZenColors.of(context);
     final Color tone = datingTone(zen);
     return ListenableBuilder(
@@ -212,25 +220,27 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
         if (!dating.active) {
           return Scaffold(
             key: const Key('dating-screen'),
-            appBar: const ZenSectionBar(title: 'Randki'),
+            appBar: ZenSectionBar(title: t('Randki')),
             body: ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
               children: <Widget>[
                 ZenHero(
-                  title: 'Randki przez znajomych',
+                  title: t('Randki przez znajomych'),
                   icon: Icons.favorite_rounded,
                   tone: tone,
-                  text:
-                      'Tylko z ludźmi oddalonymi o 1–3 kroki znajomości — '
-                      'zawsze jest ktoś wspólny, kogo można zapytać.',
+                  text: t(
+                    'Tylko z ludźmi oddalonymi o 1–3 kroki znajomości — '
+                    'zawsze jest ktoś wspólny, kogo można zapytać.',
+                  ),
                 ),
                 ZenInfo(
                   icon: Icons.visibility_off_rounded,
                   tone: tone,
-                  title: 'Nikt nie wie, że randkujesz',
-                  text:
-                      'Twój telefon wysyła i przekazuje dalej takie same '
-                      'paczki, czy randki są włączone, czy nie.',
+                  title: t('Nikt nie wie, że randkujesz'),
+                  text: t(
+                    'Twój telefon wysyła i przekazuje dalej takie same '
+                    'paczki, czy randki są włączone, czy nie.',
+                  ),
                 ),
                 const SizedBox(height: 16),
                 FilledButton.icon(
@@ -244,8 +254,8 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
                   icon: const Icon(Icons.favorite_rounded),
                   label: Text(
                     dating.me.complete
-                        ? 'Włącz randki'
-                        : 'Załóż profil randkowy',
+                        ? t('Włącz randki')
+                        : t('Załóż profil randkowy'),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -259,10 +269,10 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
           child: Scaffold(
             key: const Key('dating-screen'),
             appBar: ZenSectionBar(
-              title: 'Randki',
+              title: t('Randki'),
               actions: <Widget>[
                 IconButton(
-                  tooltip: 'Mój profil randkowy',
+                  tooltip: t('Mój profil randkowy'),
                   icon: const Icon(Icons.account_circle_rounded),
                   onPressed: () => unawaited(DatingProfileEditor.open(context)),
                 ),
@@ -273,9 +283,15 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
                 unselectedLabelColor: zen.textSecondary,
                 labelStyle: const TextStyle(fontWeight: FontWeight.w700),
                 tabs: <Widget>[
-                  Tab(text: 'Nowe (${dating.toDecide.length})'),
-                  Tab(text: 'Pary (${dating.matches.length})'),
-                  const Tab(text: 'Więcej'),
+                  Tab(
+                    text: t('Nowe ({count})', {
+                      'count': dating.toDecide.length,
+                    }),
+                  ),
+                  Tab(
+                    text: t('Pary ({count})', {'count': dating.matches.length}),
+                  ),
+                  Tab(text: t('Więcej')),
                 ],
               ),
             ),
@@ -287,13 +303,25 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                   children: <Widget>[
                     _SafeDateCard(dating: dating),
+                    if (dating.hiddenProfiles.isNotEmpty) ...<Widget>[
+                      ZenSection(t('Ukryte po zgłoszeniu')),
+                      for (final SeenProfile s in dating.hiddenProfiles)
+                        HiddenContentPlaceholder(
+                          key: Key('dating-hidden-${s.profile.key}'),
+                          byMe: true,
+                          onShow: () =>
+                              showHiddenAnyway(ref, datingKey: s.profile.key),
+                        ),
+                    ],
                     if (dating.liked.isNotEmpty) ...<Widget>[
-                      const ZenSection('Czekasz na odpowiedź'),
+                      ZenSection(t('Czekasz na odpowiedź')),
                       for (final SeenProfile s in dating.liked)
                         _PersonRow(
                           photo: s.profile.photo,
                           title: '${s.profile.name}, ${s.profile.age}',
-                          subtitle: 'Dowiesz się tylko, jeśli też powie „Tak”.',
+                          subtitle: t(
+                            'Dowiesz się tylko, jeśli też powie „Tak”.',
+                          ),
                           trailing: Icon(
                             Icons.hourglass_top_rounded,
                             color: zen.textMuted,
@@ -438,7 +466,7 @@ class DatingQuote extends StatelessWidget {
                         TextSpan(text: '— ${by!}'),
                         if (signed)
                           TextSpan(
-                            text: '  ✓ podpisane',
+                            text: '  ${t('✓ podpisane')}',
                             style: TextStyle(color: zen.success),
                           ),
                       ],
@@ -477,10 +505,11 @@ class _NewProfiles extends StatelessWidget {
           child: ZenEmpty(
             icon: Icons.favorite_border_rounded,
             tone: datingTone(zen),
-            title: 'Na razie nikogo nowego',
-            text:
-                'Profile przychodzą od znajomych i ich znajomych — zwykle '
-                'w ciągu tygodnia.',
+            title: t('Na razie nikogo nowego'),
+            text: t(
+              'Profile przychodzą od znajomych i ich znajomych — zwykle '
+              'w ciągu tygodnia.',
+            ),
           ),
         ),
       );
@@ -506,12 +535,12 @@ Future<void> askDatingOpinion(
   SeenProfile s,
 ) async {
   final TextEditingController c = TextEditingController(
-    text: 'Co sądzisz o ${s.profile.name}?',
+    text: t('Co sądzisz o {name}?', {'name': s.profile.name}),
   );
   final bool? ok = await showDialog<bool>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
-      title: const Text('Zapytaj o opinię'),
+      title: Text(t('Zapytaj o opinię')),
       content: SizedBox(
         width: 400,
         child: SingleChildScrollView(
@@ -519,11 +548,12 @@ Future<void> askDatingOpinion(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              const ZenInfo(
+              ZenInfo(
                 icon: Icons.info_outline_rounded,
-                text:
-                    'Pytanie trafi do znajomego, od którego przyszedł profil. '
-                    'Uwaga: dowie się wtedy, że randkujesz.',
+                text: t(
+                  'Pytanie trafi do znajomego, od którego przyszedł profil. '
+                  'Uwaga: dowie się wtedy, że randkujesz.',
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -532,7 +562,7 @@ Future<void> askDatingOpinion(
                 maxLines: 3,
                 maxLength: 500,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(labelText: 'Pytanie'),
+                decoration: InputDecoration(labelText: t('Pytanie')),
               ),
             ],
           ),
@@ -541,12 +571,12 @@ Future<void> askDatingOpinion(
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Anuluj'),
+          child: Text(t('Anuluj')),
         ),
         FilledButton(
           key: const Key('dating-ask-send'),
           onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('Zapytaj'),
+          child: Text(t('Zapytaj')),
         ),
       ],
     ),
@@ -562,8 +592,8 @@ Future<void> askDatingOpinion(
       SnackBar(
         content: Text(
           sent
-              ? 'Pytanie poszło. Odpowiedź zobaczysz w zakładce „Więcej”.'
-              : 'Nie da się teraz zapytać.',
+              ? t('Pytanie poszło. Odpowiedź zobaczysz w zakładce „Więcej”.')
+              : t('Nie da się teraz zapytać.'),
         ),
       ),
     );
@@ -584,9 +614,7 @@ Future<void> introduceDatingProfile(
   ].where((SeenProfile o) => o.profile.key != s.profile.key).toList();
   if (others.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Nie znasz jeszcze nikogo innego w randkach.'),
-      ),
+      SnackBar(content: Text(t('Nie znasz jeszcze nikogo innego w randkach.'))),
     );
     return;
   }
@@ -599,7 +627,7 @@ Future<void> introduceDatingProfile(
         final ZenColors zen = ZenColors.of(context);
         final Color tone = datingTone(zen);
         return AlertDialog(
-          title: Text('Przedstaw ${s.profile.name} komuś'),
+          title: Text(t('Przedstaw {name} komuś', {'name': s.profile.name})),
           content: SizedBox(
             width: 400,
             child: ListView(
@@ -632,9 +660,9 @@ Future<void> introduceDatingProfile(
                   controller: note,
                   maxLength: 300,
                   textCapitalization: TextCapitalization.sentences,
-                  decoration: const InputDecoration(
-                    labelText: 'Dlaczego?',
-                    hintText: 'Myślę, że się polubicie',
+                  decoration: InputDecoration(
+                    labelText: t('Dlaczego?'),
+                    hintText: t('Myślę, że się polubicie'),
                   ),
                 ),
               ],
@@ -643,11 +671,11 @@ Future<void> introduceDatingProfile(
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Anuluj'),
+              child: Text(t('Anuluj')),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Przedstaw'),
+              child: Text(t('Przedstaw')),
             ),
           ],
         );
@@ -663,7 +691,9 @@ Future<void> introduceDatingProfile(
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            sent ? 'Wysłane do obojga.' : 'Nie da się teraz do nich dotrzeć.',
+            sent
+                ? t('Wysłane do obojga.')
+                : t('Nie da się teraz do nich dotrzeć.'),
           ),
         ),
       );
@@ -687,10 +717,11 @@ class _Matches extends StatelessWidget {
           child: ZenEmpty(
             icon: Icons.favorite_rounded,
             tone: tone,
-            title: 'Jeszcze bez par',
-            text:
-                'Para powstaje, gdy oboje powiecie „Tak”. „Nie” nikt nigdy '
-                'nie zobaczy.',
+            title: t('Jeszcze bez par'),
+            text: t(
+              'Para powstaje, gdy oboje powiecie „Tak”. „Nie” nikt nigdy '
+              'nie zobaczy.',
+            ),
           ),
         ),
       );
@@ -706,7 +737,7 @@ class _Matches extends StatelessWidget {
                 photo: s.profile.photo,
                 title: '${s.profile.name}, ${s.profile.age}',
                 subtitle: chat.isEmpty
-                    ? 'Napisz pierwszy(-a)!'
+                    ? t('Napisz pierwszy(-a)!')
                     : chat.last.text,
                 subtitleColor: chat.isEmpty ? tone : null,
                 trailing: ZenIconBadge(
@@ -734,7 +765,7 @@ class DatingProfileScreen extends ConsumerWidget {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (BuildContext context) =>
-              DatingProfileScreen(profileKey: key),
+              SecureScreen(child: DatingProfileScreen(profileKey: key)),
         ),
       );
 
@@ -754,7 +785,7 @@ class DatingProfileScreen extends ConsumerWidget {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text('Podziękuj: ${s.introBy ?? 'swat'}'),
+        title: Text(t('Podziękuj: {name}', {'name': s.introBy ?? t('swat')})),
         content: SizedBox(
           width: 400,
           child: SingleChildScrollView(
@@ -762,11 +793,12 @@ class DatingProfileScreen extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                const ZenInfo(
+                ZenInfo(
                   icon: Icons.volunteer_activism_rounded,
-                  text:
-                      'Przelew w walucie piramidy. W tytule będzie tylko '
-                      '„Podziękowanie” — nikt nie dowie się, za co.',
+                  text: t(
+                    'Przelew w walucie piramidy. W tytule będzie tylko '
+                    '„Podziękowanie” — nikt nie dowie się, za co.',
+                  ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -776,9 +808,11 @@ class DatingProfileScreen extends ConsumerWidget {
                     decimal: true,
                   ),
                   decoration: InputDecoration(
-                    labelText: 'Kwota',
+                    labelText: t('Kwota'),
                     prefixIcon: const Icon(Icons.toll_rounded),
-                    helperText: 'Masz: ${formatMoney(balance)}',
+                    helperText: t('Masz: {amount}', {
+                      'amount': formatMoney(balance),
+                    }),
                   ),
                 ),
               ],
@@ -788,11 +822,11 @@ class DatingProfileScreen extends ConsumerWidget {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Wyślij'),
+            child: Text(t('Wyślij')),
           ),
         ],
       ),
@@ -817,10 +851,13 @@ class DatingProfileScreen extends ConsumerWidget {
         SnackBar(
           content: Text(
             sent
-                ? 'Wysłane. Dziękujecie swatowi 💐'
+                ? t('Wysłane. Dziękujecie swatowi 💐')
                 : value > balance
-                ? 'Za mało środków.'
-                : 'Nie udało się wysłać (może czeka jeszcze poprzedni przelew).',
+                ? t('Za mało środków.')
+                : t(
+                    'Nie udało się wysłać (może czeka jeszcze poprzedni '
+                    'przelew).',
+                  ),
           ),
         ),
       );
@@ -855,7 +892,15 @@ class DatingProfileScreen extends ConsumerWidget {
                       ref.read(pyramidServiceProvider),
                       datingKey: p.key,
                       evidence: '${p.name}, ${p.age}: ${p.about}',
+                      // The profile and its chat go from this phone.
+                      deleteLocal: () => dating.forget(p.key),
                     );
+                    // Reported, so hidden (or deleted): not shown any more.
+                    if (context.mounted &&
+                        (ref.read(hiddenByMeProvider).hides(datingKey: p.key) ||
+                            dating.profile(p.key) == null)) {
+                      Navigator.of(context).pop();
+                    }
                     return;
                   }
                   if (v == 'block') {
@@ -865,23 +910,22 @@ class DatingProfileScreen extends ConsumerWidget {
                     }
                   }
                 }()),
-                itemBuilder: (BuildContext context) =>
-                    const <PopupMenuEntry<String>>[
-                      PopupMenuItem<String>(
-                        value: 'block',
-                        child: ListTile(
-                          leading: Icon(Icons.block_rounded),
-                          title: Text('Zablokuj'),
-                        ),
-                      ),
-                      PopupMenuItem<String>(
-                        value: 'report',
-                        child: ListTile(
-                          leading: Icon(Icons.flag_rounded),
-                          title: Text('Zgłoś (np. osoba niepełnoletnia)'),
-                        ),
-                      ),
-                    ],
+                itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                  PopupMenuItem<String>(
+                    value: 'block',
+                    child: ListTile(
+                      leading: const Icon(Icons.block_rounded),
+                      title: Text(t('Zablokuj')),
+                    ),
+                  ),
+                  PopupMenuItem<String>(
+                    value: 'report',
+                    child: ListTile(
+                      leading: const Icon(Icons.flag_rounded),
+                      title: Text(t('Zgłoś (np. osoba niepełnoletnia)')),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -921,7 +965,7 @@ class DatingProfileScreen extends ConsumerWidget {
                   ),
                   if (match)
                     ZenPill(
-                      text: 'Para',
+                      text: t('Para'),
                       tone: zen.success,
                       icon: Icons.favorite_rounded,
                       filled: true,
@@ -939,7 +983,7 @@ class DatingProfileScreen extends ConsumerWidget {
                 DatingQuote(text: note, tone: tone),
               ],
               if (p.about.isNotEmpty) ...<Widget>[
-                const ZenSection('O mnie'),
+                ZenSection(t('O mnie')),
                 Text(
                   p.about,
                   style: TextStyle(
@@ -950,7 +994,7 @@ class DatingProfileScreen extends ConsumerWidget {
                 ),
               ],
               if (p.lookingFor.isNotEmpty) ...<Widget>[
-                const ZenSection('Czego szukam'),
+                ZenSection(t('Czego szukam')),
                 Text(
                   p.lookingFor,
                   style: TextStyle(
@@ -961,7 +1005,7 @@ class DatingProfileScreen extends ConsumerWidget {
                 ),
               ],
               if (p.vouches.isNotEmpty) ...<Widget>[
-                const ZenSection('Znajomi o mnie'),
+                ZenSection(t('Znajomi o mnie')),
                 for (final DatingVouch v in p.vouches)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4),
@@ -984,7 +1028,7 @@ class DatingProfileScreen extends ConsumerWidget {
                   onPressed: () =>
                       unawaited(DatingChatScreen.open(context, p.key)),
                   icon: const Icon(Icons.chat_rounded),
-                  label: const Text('Napisz'),
+                  label: Text(t('Napisz')),
                 )
               else
                 Row(
@@ -999,7 +1043,9 @@ class DatingProfileScreen extends ConsumerWidget {
                             : () => unawaited(dating.decide(p.key, false)),
                         icon: const Icon(Icons.close_rounded),
                         label: Text(
-                          decided == false ? 'Powiedziałeś(-aś) „Nie”' : 'Nie',
+                          decided == false
+                              ? t('Powiedziałeś(-aś) „Nie”')
+                              : t('Nie'),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           textAlign: TextAlign.center,
@@ -1019,7 +1065,9 @@ class DatingProfileScreen extends ConsumerWidget {
                             : () => unawaited(dating.decide(p.key, true)),
                         icon: const Icon(Icons.favorite_rounded),
                         label: Text(
-                          decided == true ? 'Powiedziałeś(-aś) „Tak”' : 'Tak',
+                          decided == true
+                              ? t('Powiedziałeś(-aś) „Tak”')
+                              : t('Tak'),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           textAlign: TextAlign.center,
@@ -1032,7 +1080,7 @@ class DatingProfileScreen extends ConsumerWidget {
                 const SizedBox(height: 10),
                 Center(
                   child: ZenPill(
-                    text: 'Podziękowano swatowi',
+                    text: t('Podziękowano swatowi'),
                     tone: zen.success,
                     icon: Icons.volunteer_activism_rounded,
                   ),
@@ -1047,7 +1095,7 @@ class DatingProfileScreen extends ConsumerWidget {
                   onPressed: () => unawaited(_thank(context, ref, dating, s)),
                   icon: const Icon(Icons.volunteer_activism_rounded),
                   label: Text(
-                    'Podziękuj swatowi (${s.introBy})',
+                    t('Podziękuj swatowi ({name})', {'name': s.introBy}),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1063,13 +1111,13 @@ class DatingProfileScreen extends ConsumerWidget {
                       onPressed: () =>
                           unawaited(askDatingOpinion(context, dating, s)),
                       icon: const Icon(Icons.forum_rounded),
-                      label: const Text('Zapytaj o opinię'),
+                      label: Text(t('Zapytaj o opinię')),
                     ),
                   OutlinedButton.icon(
                     onPressed: () =>
                         unawaited(introduceDatingProfile(context, dating, s)),
                     icon: const Icon(Icons.people_alt_rounded),
-                    label: const Text('Swatuj'),
+                    label: Text(t('Swatuj')),
                   ),
                 ],
               ),
@@ -1090,7 +1138,8 @@ class DatingChatScreen extends ConsumerStatefulWidget {
   static Future<void> open(BuildContext context, String key) =>
       Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (BuildContext context) => DatingChatScreen(profileKey: key),
+          builder: (BuildContext context) =>
+              SecureScreen(child: DatingChatScreen(profileKey: key)),
         ),
       );
 
@@ -1136,7 +1185,7 @@ class _DatingChatScreenState extends ConsumerState<DatingChatScreen> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    s?.profile.name ?? 'Randki',
+                    s?.profile.name ?? t('Randki'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1145,7 +1194,7 @@ class _DatingChatScreenState extends ConsumerState<DatingChatScreen> {
             ),
             actions: <Widget>[
               IconButton(
-                tooltip: 'Profil',
+                tooltip: t('Profil'),
                 icon: const Icon(Icons.person_rounded),
                 onPressed: () => unawaited(
                   DatingProfileScreen.open(context, widget.profileKey),
@@ -1162,18 +1211,19 @@ class _DatingChatScreenState extends ConsumerState<DatingChatScreen> {
                     ZenInfo(
                       icon: Icons.lock_rounded,
                       tone: tone,
-                      text:
-                          'Wiadomości idą przez znajomych, zaszyfrowane — nikt '
-                          'po drodze ich nie przeczyta. Mogą dochodzić '
-                          'z opóźnieniem. Gdy się poznacie, dodajcie się do '
-                          'znajomych.',
+                      text: t(
+                        'Wiadomości idą przez znajomych, zaszyfrowane — nikt '
+                        'po drodze ich nie przeczyta. Mogą dochodzić '
+                        'z opóźnieniem. Gdy się poznacie, dodajcie się do '
+                        'znajomych.',
+                      ),
                     ),
                     if (lines.isEmpty)
                       ZenEmpty(
                         icon: Icons.waving_hand_rounded,
                         tone: tone,
-                        title: 'Zacznijcie rozmowę',
-                        text: 'Napisz pierwszy(-a)!',
+                        title: t('Zacznijcie rozmowę'),
+                        text: t('Napisz pierwszy(-a)!'),
                       ),
                     const SizedBox(height: 8),
                     for (final DatingLine l in lines)
@@ -1237,16 +1287,14 @@ class _DatingChatScreenState extends ConsumerState<DatingChatScreen> {
                             maxLines: 4,
                             enableIMEPersonalizedLearning: false,
                             textCapitalization: TextCapitalization.sentences,
-                            decoration: const InputDecoration(
-                              hintText: 'Napisz…',
-                            ),
+                            decoration: InputDecoration(hintText: t('Napisz…')),
                             onSubmitted: (_) => unawaited(_send(dating)),
                           ),
                         ),
                         const SizedBox(width: 8),
                         IconButton.filled(
                           key: const Key('dating-chat-send'),
-                          tooltip: 'Wyślij',
+                          tooltip: t('Wyślij'),
                           style: IconButton.styleFrom(
                             backgroundColor: tone,
                             foregroundColor: onTone,
@@ -1288,20 +1336,20 @@ class _FriendCorner extends ConsumerWidget {
             maxLines: 4,
             maxLength: 2000,
             textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              labelText: 'Twoja opinia',
-              hintText: 'Szczerze, w kilku zdaniach',
+            decoration: InputDecoration(
+              labelText: t('Twoja opinia'),
+              hintText: t('Szczerze, w kilku zdaniach'),
             ),
           ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(c.text),
-            child: const Text('Odpowiedz'),
+            child: Text(t('Odpowiedz')),
           ),
         ],
       ),
@@ -1317,7 +1365,7 @@ class _FriendCorner extends ConsumerWidget {
     final String? text = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text('Kilka słów o: $name'),
+        title: Text(t('Kilka słów o: {name}', {'name': name})),
         content: SizedBox(
           width: 400,
           child: TextField(
@@ -1326,20 +1374,20 @@ class _FriendCorner extends ConsumerWidget {
             maxLines: 3,
             maxLength: 300,
             textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              labelText: 'Co o niej / nim powiesz?',
-              hintText: 'Super gość, gotuje genialnie…',
+            decoration: InputDecoration(
+              labelText: t('Co o niej / nim powiesz?'),
+              hintText: t('Super gość, gotuje genialnie…'),
             ),
           ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(c.text),
-            child: const Text('Wyślij'),
+            child: Text(t('Wyślij')),
           ),
         ],
       ),
@@ -1355,7 +1403,7 @@ class _FriendCorner extends ConsumerWidget {
     final SocialHubState social = watchSocialPeople(ref);
     String name(String address) {
       final FriendProfile? f = social.friendByAddress(address);
-      return f == null ? 'Znajomy' : social.nameFor(f);
+      return f == null ? t('Znajomy') : social.nameFor(f);
     }
 
     final ZenColors zen = ZenColors.of(context);
@@ -1368,14 +1416,14 @@ class _FriendCorner extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        if (watching.isNotEmpty) const ZenSection('Czuwasz'),
+        if (watching.isNotEmpty) ZenSection(t('Czuwasz')),
         for (final SafeDate d in watching)
           Builder(
             builder: (BuildContext context) {
               final bool alarmed = d.alarmedAt != null;
-              final Color t = alarmed ? zen.danger : zen.success;
+              final Color cardTone = alarmed ? zen.danger : zen.success;
               return ZenCard(
-                tone: t,
+                tone: cardTone,
                 padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
                 child: Row(
                   children: <Widget>[
@@ -1383,7 +1431,7 @@ class _FriendCorner extends ConsumerWidget {
                       icon: alarmed
                           ? Icons.warning_amber_rounded
                           : Icons.shield_moon_rounded,
-                      tone: t,
+                      tone: cardTone,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -1391,7 +1439,9 @@ class _FriendCorner extends ConsumerWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Text(
-                            '${name(d.friend)} jest na randce',
+                            t('{name} jest na randce', {
+                              'name': name(d.friend),
+                            }),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -1403,10 +1453,14 @@ class _FriendCorner extends ConsumerWidget {
                           const SizedBox(height: 3),
                           Text(
                             <String>[
-                              'Ma dać znać do ${_clock(d.until)}',
+                              t('Ma dać znać do {time}', {
+                                'time': _clock(d.until),
+                              }),
                               if (d.note.isNotEmpty) d.note,
                               if (d.locatedAt != null)
-                                'Położenie z ${_clock(d.locatedAt!)}',
+                                t('Położenie z {time}', {
+                                  'time': _clock(d.locatedAt!),
+                                }),
                             ].join(' · '),
                             style: TextStyle(
                               color: zen.textSecondary,
@@ -1419,8 +1473,8 @@ class _FriendCorner extends ConsumerWidget {
                     ),
                     if (d.lat != null)
                       IconButton(
-                        tooltip: 'Mapa',
-                        color: t,
+                        tooltip: t('Mapa'),
+                        color: cardTone,
                         icon: const Icon(Icons.map_rounded),
                         onPressed: () => unawaited(openMap(d.lat!, d.lon!)),
                       ),
@@ -1430,14 +1484,14 @@ class _FriendCorner extends ConsumerWidget {
             },
           ),
         if (asks.isNotEmpty) ...<Widget>[
-          const ZenSection('Znajomi pytają o opinię'),
+          ZenSection(t('Znajomi pytają o opinię')),
           for (final OpinionAsk a in asks)
             _PersonRow(
               photo: a.photo,
               title: '${name(a.friend)}: ${a.question}',
               subtitle: a.answer == null
-                  ? 'Dotknij, żeby odpowiedzieć'
-                  : 'Twoja odpowiedź: ${a.answer}',
+                  ? t('Dotknij, żeby odpowiedzieć')
+                  : t('Twoja odpowiedź: {answer}', {'answer': a.answer}),
               subtitleColor: a.answer == null ? tone : null,
               trailing: Icon(
                 Icons.reply_rounded,
@@ -1448,15 +1502,17 @@ class _FriendCorner extends ConsumerWidget {
             ),
         ],
         if (dating.vouchRequests.isNotEmpty) ...<Widget>[
-          const ZenSection('Proszą o kilka słów'),
+          ZenSection(t('Proszą o kilka słów')),
           for (final MapEntry<String, String> r in dating.vouchRequests.entries)
             ZenTile(
               icon: Icons.edit_note_rounded,
               tone: tone,
               title: name(r.value),
-              subtitle: 'Prosi o kilka słów do profilu. Dotknij, żeby napisać.',
+              subtitle: t(
+                'Prosi o kilka słów do profilu. Dotknij, żeby napisać.',
+              ),
               trailing: IconButton(
-                tooltip: 'Odrzuć',
+                tooltip: t('Odrzuć'),
                 icon: const Icon(Icons.close_rounded),
                 onPressed: () => unawaited(dating.dismissVouchRequest(r.key)),
               ),
@@ -1464,12 +1520,15 @@ class _FriendCorner extends ConsumerWidget {
             ),
         ],
         if (mine.isNotEmpty) ...<Widget>[
-          const ZenSection('Twoje pytania o opinię'),
+          ZenSection(t('Twoje pytania o opinię')),
           for (final OpinionAsk a in mine)
             _PersonRow(
               photo: a.photo,
-              title: '${name(a.friend)} o ${a.name}',
-              subtitle: a.answer ?? 'Czekasz na odpowiedź',
+              title: t('{name} o {about}', {
+                'name': name(a.friend),
+                'about': a.name,
+              }),
+              subtitle: a.answer ?? t('Czekasz na odpowiedź'),
               subtitleColor: a.answer == null ? zen.textMuted : null,
             ),
         ],
@@ -1494,9 +1553,9 @@ class _SafeDateCard extends ConsumerWidget {
     final List<String> close = names.closeFriends();
     final List<String> friends = close.isNotEmpty ? close : names.friends();
     if (friends.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Najpierw dodaj znajomych.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t('Najpierw dodaj znajomych.'))));
       return;
     }
     String friend = friends.first;
@@ -1508,7 +1567,7 @@ class _SafeDateCard extends ConsumerWidget {
         builder: (BuildContext context, StateSetter set) {
           final ZenColors zen = ZenColors.of(context);
           return AlertDialog(
-            title: const Text('Idę na randkę'),
+            title: Text(t('Idę na randkę')),
             content: SizedBox(
               width: 400,
               child: SingleChildScrollView(
@@ -1517,9 +1576,12 @@ class _SafeDateCard extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     Text(
-                      'Wybrany przyjaciel zobaczy, gdzie jesteś, do czasu, aż '
-                      'potwierdzisz „Wszystko OK”. Jeśli nie potwierdzisz na czas, '
-                      'dostanie przypomnienie, a 15 minut później alarm.',
+                      t(
+                        'Wybrany przyjaciel zobaczy, gdzie jesteś, do czasu, '
+                        'aż potwierdzisz „Wszystko OK”. Jeśli nie potwierdzisz '
+                        'na czas, dostanie przypomnienie, a 15 minut później '
+                        'alarm.',
+                      ),
                       style: TextStyle(
                         color: zen.textSecondary,
                         fontSize: 14,
@@ -1530,9 +1592,9 @@ class _SafeDateCard extends ConsumerWidget {
                     DropdownButtonFormField<String>(
                       initialValue: friend,
                       isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Kto czuwa',
-                        prefixIcon: Icon(Icons.shield_rounded),
+                      decoration: InputDecoration(
+                        labelText: t('Kto czuwa'),
+                        prefixIcon: const Icon(Icons.shield_rounded),
                       ),
                       items: <DropdownMenuItem<String>>[
                         for (final String f in friends)
@@ -1548,7 +1610,10 @@ class _SafeDateCard extends ConsumerWidget {
                       onChanged: (String? v) => set(() => friend = v ?? friend),
                     ),
                     const SizedBox(height: 16),
-                    Text('DAM ZNAĆ ZA', style: zen.label(color: zen.textMuted)),
+                    Text(
+                      t('DAM ZNAĆ ZA'),
+                      style: zen.label(color: zen.textMuted),
+                    ),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 6,
@@ -1556,7 +1621,7 @@ class _SafeDateCard extends ConsumerWidget {
                       children: <Widget>[
                         for (final int h in <int>[1, 2, 3, 4, 6, 8, 12])
                           ChoiceChip(
-                            label: Text('$h h'),
+                            label: Text(t('{hours} h', {'hours': h})),
                             selected: hours == h,
                             onSelected: (_) => set(() => hours = h),
                           ),
@@ -1567,10 +1632,10 @@ class _SafeDateCard extends ConsumerWidget {
                       controller: note,
                       maxLength: 200,
                       textCapitalization: TextCapitalization.sentences,
-                      decoration: const InputDecoration(
-                        labelText: 'Gdzie i z kim (nie trzeba)',
-                        hintText: 'Kawiarnia na Starym Mieście, Ola',
-                        prefixIcon: Icon(Icons.place_rounded),
+                      decoration: InputDecoration(
+                        labelText: t('Gdzie i z kim (nie trzeba)'),
+                        hintText: t('Kawiarnia na Starym Mieście, Ola'),
+                        prefixIcon: const Icon(Icons.place_rounded),
                       ),
                     ),
                   ],
@@ -1580,11 +1645,11 @@ class _SafeDateCard extends ConsumerWidget {
             actions: <Widget>[
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Anuluj'),
+                child: Text(t('Anuluj')),
               ),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Start'),
+                child: Text(t('Start')),
               ),
             ],
           );
@@ -1626,7 +1691,7 @@ class _SafeDateCard extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        'Bezpieczna randka',
+                        t('Bezpieczna randka'),
                         style: TextStyle(
                           color: zen.textPrimary,
                           fontSize: 16,
@@ -1635,8 +1700,10 @@ class _SafeDateCard extends ConsumerWidget {
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        'Przyjaciel będzie wiedział, gdzie jesteś, dopóki nie '
-                        'dasz znać, że wszystko OK.',
+                        t(
+                          'Przyjaciel będzie wiedział, gdzie jesteś, dopóki '
+                          'nie dasz znać, że wszystko OK.',
+                        ),
                         style: TextStyle(
                           color: zen.textSecondary,
                           fontSize: 13.5,
@@ -1653,7 +1720,7 @@ class _SafeDateCard extends ConsumerWidget {
               key: const Key('dating-safe-start'),
               onPressed: () => unawaited(_start(context, ref)),
               icon: const Icon(Icons.shield_rounded),
-              label: const Text('Idę na randkę'),
+              label: Text(t('Idę na randkę')),
             ),
           ],
         ),
@@ -1677,7 +1744,9 @@ class _SafeDateCard extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      '${MeetHostNames(ref).nameOf(d.friend)} czuwa',
+                      t('{name} czuwa', {
+                        'name': MeetHostNames(ref).nameOf(d.friend),
+                      }),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -1688,7 +1757,7 @@ class _SafeDateCard extends ConsumerWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      'Daj znać do ${_clock(d.until)}.',
+                      t('Daj znać do {time}.', {'time': _clock(d.until)}),
                       style: TextStyle(
                         color: zen.textSecondary,
                         fontSize: 13.5,
@@ -1712,12 +1781,12 @@ class _SafeDateCard extends ConsumerWidget {
                 ),
                 onPressed: () => unawaited(dating.safeOk()),
                 icon: const Icon(Icons.check_rounded),
-                label: const Text('Wszystko OK'),
+                label: Text(t('Wszystko OK')),
               ),
               OutlinedButton(
                 onPressed: () =>
                     unawaited(dating.extendSafeDate(const Duration(hours: 1))),
-                child: const Text('+1 h'),
+                child: Text(t('+1 h')),
               ),
               OutlinedButton.icon(
                 onPressed: () => unawaited(() async {
@@ -1727,7 +1796,7 @@ class _SafeDateCard extends ConsumerWidget {
                   }
                 }()),
                 icon: const Icon(Icons.my_location_rounded),
-                label: const Text('Wyślij położenie'),
+                label: Text(t('Wyślij położenie')),
               ),
             ],
           ),

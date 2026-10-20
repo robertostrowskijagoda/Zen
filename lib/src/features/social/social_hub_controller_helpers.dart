@@ -34,8 +34,8 @@ SocialHubState _applySignal(
             .copyWith(
               isOnline: true,
               lastPresenceAtMillis: receivedAtMillis,
-              lastMessagePreview: 'Połączenie gotowe. Możesz pisać od razu.',
-              lastActivityLabel: 'Teraz',
+              lastMessagePreview: t('Połączenie gotowe. Możesz pisać od razu.'),
+              lastActivityLabel: t('Teraz'),
             );
         _putFriend(friends, _withAppRetentionDefaults(mutual, appSettings));
         return current.copyWith(friends: friends);
@@ -101,8 +101,8 @@ SocialHubState _applySignal(
           .copyWith(
             isOnline: true,
             lastPresenceAtMillis: receivedAtMillis,
-            lastMessagePreview: 'Połączenie gotowe. Możesz pisać od razu.',
-            lastActivityLabel: 'Teraz',
+            lastMessagePreview: t('Połączenie gotowe. Możesz pisać od razu.'),
+            lastActivityLabel: t('Teraz'),
           );
       final FriendProfile resolved = _withAppRetentionDefaults(
         updated,
@@ -176,10 +176,10 @@ SocialHubState _applySignal(
             isTyping: false,
             lastPresenceAtMillis: receivedAtMillis,
             lastMessagePreview: _clipText(
-              signal.content ?? 'Nowa wiadomość',
+              signal.content ?? t('Nowa wiadomość'),
               kMaxStoredPreviewChars,
             ),
-            lastActivityLabel: 'Teraz',
+            lastActivityLabel: t('Teraz'),
             unreadCount: isConversationOpen ? 0 : currentFriend.unreadCount + 1,
           ),
         );
@@ -199,24 +199,15 @@ SocialHubState _applySignal(
       }
       final GroupProfile? existingGroup = current.groups[groupId];
       if (existingGroup != null) {
-        // Only people already in the group may extend it; anyone else who
-        // learned the id cannot smuggle members in.
-        if (!groupHasMember(existingGroup, signal.sender) &&
-            !PeerShareCodec.addressesEqual(
-              existingGroup.createdById,
-              signal.sender,
-            )) {
-          return current;
-        }
-        // Already a member of this group! Merge any new members, never re-add invite to inbox.
-        final List<String> updatedMembers = cappedGroupMembers(
-          normalizedGroupMembers(<String>[
-            ...existingGroup.memberAddresses,
-            signal.sender,
-            ...?signal.memberAddresses,
-          ]),
+        // Already a member of this group: merge what the sender may add (see
+        // `_groupMembersAfterInvite`), never re-add the invite to the inbox.
+        // Anyone outside the group who learned the id adds nothing.
+        final List<String>? updatedMembers = _groupMembersAfterInvite(
+          existingGroup,
+          signal,
         );
-        if (updatedMembers.length == existingGroup.memberAddresses.length) {
+        if (updatedMembers == null ||
+            updatedMembers.length == existingGroup.memberAddresses.length) {
           return current;
         }
         final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
@@ -257,13 +248,16 @@ SocialHubState _applySignal(
         id: groupId,
         name: signal.groupName?.trim().isNotEmpty == true
             ? signal.groupName!.trim()
-            : 'Grupa od ${friends[signal.sender]?.displayLabel ?? 'znajomego'}',
+            : switch (friends[signal.sender]?.displayLabel) {
+                final String name => t('Grupa od {name}', {'name': name}),
+                null => t('Grupa od znajomego'),
+              },
         description: signal.content ?? '',
         createdById: signal.sender,
         createdAtMillis: receivedAtMillis,
         memberAddresses: inviteMembers,
-        lastActivityLabel: 'Teraz',
-        lastMessagePreview: 'Zaproszono Cię do grupy.',
+        lastActivityLabel: t('Teraz'),
+        lastMessagePreview: t('Zaproszono Cię do grupy.'),
         isInvitePending: true,
         receivedInviteIds: <String>[?signal.inviteId],
         memberNames: <String, String>{
@@ -298,10 +292,10 @@ SocialHubState _applySignal(
         final String? senderName = signal.displayName?.trim();
         groups[groupId] = existing.copyWith(
           lastMessagePreview: _clipText(
-            signal.content ?? 'Nowa wiadomość grupowa',
+            signal.content ?? t('Nowa wiadomość grupowa'),
             kMaxStoredPreviewChars,
           ),
-          lastActivityLabel: 'Teraz',
+          lastActivityLabel: t('Teraz'),
           unreadCount: isGroupOpen ? 0 : existing.unreadCount + 1,
           memberNames: senderName == null || senderName.isEmpty
               ? null
@@ -636,8 +630,8 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.friendRequest => InboxEntry(
       id: 'friend-request-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.friendRequest,
-      title: 'Nowe zaproszenie od $label',
-      body: signal.content ?? 'Chce dodać Cię do znajomych.',
+      title: t('Nowe zaproszenie od {name}', {'name': label}),
+      body: signal.content ?? t('Chce dodać Cię do znajomych.'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildInboxRouteKey(),
       peerAddress: signal.sender,
@@ -645,8 +639,8 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.friendAccept => InboxEntry(
       id: 'friend-accept-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.friendAccepted,
-      title: '$label zaakceptował(a) zaproszenie',
-      body: 'Możecie już pisać i dzwonić.',
+      title: t('{name} zaakceptował(a) zaproszenie', {'name': label}),
+      body: t('Możecie już pisać i dzwonić.'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
         peerAddress: signal.sender,
@@ -657,8 +651,8 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.friendReject => InboxEntry(
       id: 'friend-reject-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.friendRejected,
-      title: '$label odrzucił(a) zaproszenie',
-      body: 'Zaproszenie nie zostało przyjęte.',
+      title: t('{name} odrzucił(a) zaproszenie', {'name': label}),
+      body: t('Zaproszenie nie zostało przyjęte.'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildInboxRouteKey(),
       peerAddress: signal.sender,
@@ -666,8 +660,8 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.friendCancel => InboxEntry(
       id: 'friend-cancel-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.friendCancelled,
-      title: '$label wycofał(a) zaproszenie',
-      body: 'Zaproszenie nie jest już aktualne.',
+      title: t('{name} wycofał(a) zaproszenie', {'name': label}),
+      body: t('Zaproszenie nie jest już aktualne.'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildInboxRouteKey(),
       peerAddress: signal.sender,
@@ -675,8 +669,8 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.friendRemove => InboxEntry(
       id: 'friend-remove-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.friendRemoved,
-      title: '$label usunął(-ęła) Cię ze znajomych',
-      body: 'Nie możecie już do siebie pisać.',
+      title: t('{name} usunął(-ęła) Cię ze znajomych', {'name': label}),
+      body: t('Nie możecie już do siebie pisać.'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildInboxRouteKey(),
       peerAddress: signal.sender,
@@ -684,8 +678,8 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.transferCancel => InboxEntry(
       id: 'transfer-cancel-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.transferCancelled,
-      title: 'Przesyłanie pliku anulowane',
-      body: 'Nadawca przerwał wysyłanie pliku.',
+      title: t('Przesyłanie pliku anulowane'),
+      body: t('Nadawca przerwał wysyłanie pliku.'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildInboxRouteKey(),
       peerAddress: signal.sender,
@@ -693,8 +687,8 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.message => InboxEntry(
       id: 'message-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: 'Nowa wiadomość od $label',
-      body: signal.content ?? 'Masz nową wiadomość do przeczytania.',
+      title: t('Nowa wiadomość od {name}', {'name': label}),
+      body: signal.content ?? t('Masz nową wiadomość do przeczytania.'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
         peerAddress: signal.sender,
@@ -705,8 +699,10 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.callInvite => InboxEntry(
       id: 'call-invite-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.callInvite,
-      title: 'Połączenie od $label',
-      body: 'Przychodzące połączenie ${_callKindLabel(signal.content)}.',
+      title: t('Połączenie od {name}', {'name': label}),
+      body: t('Przychodzące połączenie {kind}.', {
+        'kind': _callKindLabel(signal.content),
+      }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildCallRouteKey(peerAddress: signal.sender, title: label),
       peerAddress: signal.sender,
@@ -714,8 +710,10 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.callOffer => InboxEntry(
       id: 'call-offer-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.callInvite,
-      title: 'Połączenie od $label',
-      body: 'Przychodzące połączenie ${_callKindLabel(signal.content)}.',
+      title: t('Połączenie od {name}', {'name': label}),
+      body: t('Przychodzące połączenie {kind}.', {
+        'kind': _callKindLabel(signal.content),
+      }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildCallRouteKey(peerAddress: signal.sender, title: label),
       peerAddress: signal.sender,
@@ -723,8 +721,10 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.callAnswer => InboxEntry(
       id: 'call-answer-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: '$label odebrał(a) rozmowę',
-      body: 'Połączenie ${_callKindLabel(signal.content)} jest już aktywne.',
+      title: t('{name} odebrał(a) rozmowę', {'name': label}),
+      body: t('Połączenie {kind} jest już aktywne.', {
+        'kind': _callKindLabel(signal.content),
+      }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
         peerAddress: signal.sender,
@@ -735,8 +735,10 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.callAccept => InboxEntry(
       id: 'call-accept-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: '$label odebrał(a) rozmowę',
-      body: 'Połączenie ${_callKindLabel(signal.content)} jest już aktywne.',
+      title: t('{name} odebrał(a) rozmowę', {'name': label}),
+      body: t('Połączenie {kind} jest już aktywne.', {
+        'kind': _callKindLabel(signal.content),
+      }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
         peerAddress: signal.sender,
@@ -747,8 +749,10 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.callDecline => InboxEntry(
       id: 'call-decline-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: '$label odrzucił(a) rozmowę',
-      body: 'Sesja ${_callKindLabel(signal.content)} została zakończona.',
+      title: t('{name} odrzucił(a) rozmowę', {'name': label}),
+      body: t('Sesja {kind} została zakończona.', {
+        'kind': _callKindLabel(signal.content),
+      }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
         peerAddress: signal.sender,
@@ -759,9 +763,10 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.callBusy => InboxEntry(
       id: 'call-busy-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: '$label jest zajęty(a)',
-      body:
-          'Rozmowa ${_callKindLabel(signal.content)} nie mogła się rozpocząć.',
+      title: t('{name} jest zajęty(a)', {'name': label}),
+      body: t('Rozmowa {kind} nie mogła się rozpocząć.', {
+        'kind': _callKindLabel(signal.content),
+      }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
         peerAddress: signal.sender,
@@ -772,8 +777,10 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.callEnd => InboxEntry(
       id: 'call-end-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: '$label zakończył(a) rozmowę',
-      body: 'Sesja ${_callKindLabel(signal.content)} została zamknięta.',
+      title: t('{name} zakończył(a) rozmowę', {'name': label}),
+      body: t('Sesja {kind} została zamknięta.', {
+        'kind': _callKindLabel(signal.content),
+      }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
         peerAddress: signal.sender,
@@ -784,8 +791,10 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.groupInvite => InboxEntry(
       id: 'group-invite-${signal.groupId ?? signal.sender}',
       type: InboxEntryType.groupInvite,
-      title: 'Zaproszenie do grupy: ${signal.groupName ?? "Nowa grupa"}',
-      body: '$label zaprasza Cię do grupy.',
+      title: t('Zaproszenie do grupy: {group}', {
+        'group': signal.groupName ?? t('Nowa grupa'),
+      }),
+      body: t('{name} zaprasza Cię do grupy.', {'name': label}),
       createdAtMillis: receivedAtMillis,
       routeKey: buildGroupRouteKey(
         groupId: signal.groupId ?? 'grp-${signal.sender}',
@@ -796,8 +805,8 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.groupMessage => InboxEntry(
       id: 'group-message-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: '${signal.groupName ?? "Grupa"}: $label',
-      body: signal.content ?? 'Nowa wiadomość w grupie.',
+      title: '${signal.groupName ?? t('Grupa')}: $label',
+      body: signal.content ?? t('Nowa wiadomość w grupie.'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildGroupRouteKey(
         groupId: signal.groupId ?? 'grp-${signal.sender}',
@@ -808,8 +817,10 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.groupCallInvite => InboxEntry(
       id: 'group-call-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.callInvite,
-      title: 'Połączenie grupowe: ${signal.groupName ?? "Grupa"}',
-      body: 'Trwa połączenie grupowe.',
+      title: t('Połączenie grupowe: {group}', {
+        'group': signal.groupName ?? t('Grupa'),
+      }),
+      body: t('Trwa połączenie grupowe.'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildGroupRouteKey(
         groupId: signal.groupId ?? 'grp-${signal.sender}',
@@ -842,8 +853,8 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.unknown => InboxEntry(
       id: 'background-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: 'Nowe zdarzenie',
-      body: signal.content ?? 'Nowy wpis od $label.',
+      title: t('Nowe zdarzenie'),
+      body: signal.content ?? t('Nowy wpis od {name}.', {'name': label}),
       createdAtMillis: receivedAtMillis,
       routeKey: null,
       peerAddress: signal.sender,
@@ -1012,27 +1023,27 @@ RuntimeSystemNotification _systemNotificationFromEntry({
               signal.content != null &&
               signal.content!.trim().isNotEmpty
           ? signal.content!.trim()
-          : 'Nowa wiadomość';
+          : t('Nowa wiadomość');
     case ZenSignalType.groupMessage:
       title = (signal.groupName != null && signal.groupName!.trim().isNotEmpty)
           ? signal.groupName!.trim()
-          : 'Wiadomość grupowa';
+          : t('Wiadomość grupowa');
       body =
           !hideContent &&
               signal.content != null &&
               signal.content!.trim().isNotEmpty
           ? '$senderLabel: ${signal.content!.trim()}'
-          : '$senderLabel wysłał(a) wiadomość';
+          : t('{name} wysłał(a) wiadomość', {'name': senderLabel});
     case ZenSignalType.callInvite:
     case ZenSignalType.callOffer:
       title = senderLabel;
       final String kind = _callKindLabel(signal.content);
-      body = 'Przychodzące połączenie $kind...';
+      body = t('Przychodzące połączenie {kind}...', {'kind': kind});
     case ZenSignalType.groupCallInvite:
       title = (signal.groupName != null && signal.groupName!.trim().isNotEmpty)
           ? signal.groupName!.trim()
-          : 'Połączenie grupowe';
-      body = 'Trwa połączenie grupowe.';
+          : t('Połączenie grupowe');
+      body = t('Trwa połączenie grupowe.');
     default:
       title = entry.title;
       body = entry.body;
@@ -1139,9 +1150,11 @@ RuntimeSystemNotification _missedCallSystemNotification({
 }) {
   return RuntimeSystemNotification(
     id: 'call-missed-$createdAtMillis-${session.peerAddress}',
-    title: 'Nieodebrane połączenie',
-    body:
-        '${session.displayName} — połączenie ${session.kindLabel} bez odpowiedzi.',
+    title: t('Nieodebrane połączenie'),
+    body: t('{name} — połączenie {kind} bez odpowiedzi.', {
+      'name': session.displayName,
+      'kind': _callKindWord(session.kind),
+    }),
     createdAtMillis: createdAtMillis,
     routeKey: buildCallRouteKey(
       peerAddress: session.peerAddress,
@@ -1340,7 +1353,7 @@ String _activityLabelForMillis(int sentAtMillis) {
   final DateTime sentAt = DateTime.fromMillisecondsSinceEpoch(sentAtMillis);
   final Duration delta = now.difference(sentAt);
   if (delta < const Duration(minutes: 1)) {
-    return 'Teraz';
+    return t('Teraz');
   }
   if (delta < const Duration(days: 1) &&
       now.day == sentAt.day &&
@@ -1352,7 +1365,7 @@ String _activityLabelForMillis(int sentAtMillis) {
   if (yesterday.day == sentAt.day &&
       yesterday.month == sentAt.month &&
       yesterday.year == sentAt.year) {
-    return 'Wczoraj';
+    return t('Wczoraj');
   }
   return '${sentAt.day.toString().padLeft(2, '0')}.${sentAt.month.toString().padLeft(2, '0')}';
 }
@@ -1366,15 +1379,15 @@ String _presenceLastSeenLabel({
       : nowMillis - lastSeenAtMillis;
   final Duration delta = Duration(milliseconds: deltaMillis);
   if (delta < const Duration(minutes: 1)) {
-    return 'Przed chwila';
+    return t('Przed chwila');
   }
   if (delta < const Duration(hours: 1)) {
-    return '${delta.inMinutes} min temu';
+    return t('{count} min temu', {'count': delta.inMinutes});
   }
   if (delta < const Duration(days: 1)) {
-    return '${delta.inHours} h temu';
+    return t('{count} h temu', {'count': delta.inHours});
   }
-  return '${delta.inDays} d temu';
+  return t('{count} d temu', {'count': delta.inDays});
 }
 
 List<InboxEntry> _removeEntriesForPeer(
@@ -1653,7 +1666,12 @@ bool _shouldPreferLocalOutgoingCall(CallSession call, String incomingCallId) {
 }
 
 String _callKindLabel(String? rawKind) {
-  return rawKind == CallInviteKind.video.name ? 'wideo' : 'audio';
+  return _callKindWord(_callKind(rawKind));
+}
+
+/// "wideo" or "audio", as it is put into the call texts.
+String _callKindWord(CallInviteKind kind) {
+  return kind == CallInviteKind.video ? t('wideo') : t('audio');
 }
 
 CallInviteKind _callKind(String? rawKind) {
@@ -1712,6 +1730,53 @@ bool groupHasMember(GroupProfile group, String address) {
   }
   return group.memberAddresses.any(
     (String member) => PeerShareCodec.addressesEqual(member, address),
+  );
+}
+
+/// The member list of [group] - a group this device already has - after a
+/// `group_invite` (an invitation or a member-list sync) from its sender, or
+/// null when that signal may not change it.
+///
+/// The creator, as this device recorded it (whoever brought this device
+/// in), speaks for the group: its list is merged as it comes. Any other
+/// member brings in at most one address per signal: adding someone in the
+/// app adds one person, and the sync that follows names exactly one address
+/// the others have not seen yet. A list with more unknown addresses from an
+/// ordinary member is no addition anyone made in the app - it could pull
+/// any number of strangers into everyone's group traffic and presence - so
+/// it changes nothing. Neither does anything from outside the group.
+/// [selfAddress] (this device; may be unknown) never counts as unknown.
+List<String>? _groupMembersAfterInvite(
+  GroupProfile group,
+  ZenSignal signal, {
+  String selfAddress = '',
+}) {
+  final bool fromCreator = PeerShareCodec.addressesEqual(
+    group.createdById,
+    signal.sender,
+  );
+  if (!fromCreator && !groupHasMember(group, signal.sender)) {
+    return null;
+  }
+  final List<String> incoming = normalizedGroupMembers(<String>[
+    signal.sender,
+    ...?signal.memberAddresses,
+  ]);
+  if (!fromCreator) {
+    final int unknown = incoming
+        .where(
+          (String address) =>
+              !groupHasMember(group, address) &&
+              (selfAddress.isEmpty ||
+                  !PeerShareCodec.addressesEqual(address, selfAddress)),
+        )
+        .length;
+    if (unknown > 1) {
+      return null;
+    }
+  }
+  return cappedGroupMembers(
+    normalizedGroupMembers(<String>[...group.memberAddresses, ...incoming]),
   );
 }
 

@@ -36,7 +36,7 @@ class _StatusBar extends ConsumerWidget {
                     Row(
                       children: <Widget>[
                         Text(
-                          'Łączę',
+                          t('Łączę'),
                           style: TextStyle(
                             color: zen.textPrimary,
                             fontSize: 13,
@@ -63,7 +63,12 @@ class _StatusBar extends ConsumerWidget {
                       glowRadius: 0,
                       glowAlpha: 0,
                       child: Text(
-                        '$unreadCount nowe',
+                        tn(
+                          unreadCount,
+                          one: '{n} nowa',
+                          few: '{n} nowe',
+                          many: '{n} nowych',
+                        ),
                         style: zen.mono(
                           color: zen.textPrimary,
                           size: 10,
@@ -84,7 +89,7 @@ class _StatusBar extends ConsumerWidget {
                       Icons.tune_rounded,
                       size: 18,
                       color: zen.textSecondary,
-                      semanticLabel: 'Ustawienia',
+                      semanticLabel: t('Ustawienia'),
                     ),
                   ),
                 ],
@@ -176,6 +181,11 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
     final List<InboxEntry> inbox = ref.watch(
       socialHubControllerProvider.select((SocialHubState state) => state.inbox),
     );
+    final bool socialDataUnreadable = ref.watch(
+      socialHubControllerProvider.select(
+        (SocialHubState state) => state.snapshotUnreadable,
+      ),
+    );
     // The lists are made from the maps here: a select returning a fresh
     // list would rebuild this page on every change of the whole state.
     final SocialHubState people = watchSocialPeople(ref);
@@ -250,7 +260,7 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
     final bool plainMessenger = !ref.watch(ledgerNodeEnabledProvider);
     return Scaffold(
       appBar: ZenSectionBar(
-        title: 'Skrzynka',
+        title: t('Skrzynka'),
         actions: <Widget>[
           // With the rail, the code lives in its "Zaproś" tab.
           if (plainMessenger)
@@ -260,7 +270,7 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                 key: const Key('chats-my-code'),
                 onPressed: () => _openInviteTab(context, ref),
                 icon: const Icon(Icons.qr_code_2_rounded, size: 18),
-                label: const Text('Mój kod'),
+                label: Text(t('Mój kod')),
               ),
             ),
         ],
@@ -283,7 +293,7 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                         onChanged: (_) => setState(() {}),
                         textInputAction: TextInputAction.search,
                         decoration: InputDecoration(
-                          hintText: 'Szukaj rozmowy',
+                          hintText: t('Szukaj rozmowy'),
                           prefixIcon: const Icon(
                             Icons.search_rounded,
                             size: 20,
@@ -291,7 +301,7 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                           suffixIcon: _searchController.text.isEmpty
                               ? null
                               : IconButton(
-                                  tooltip: 'Wyczyść',
+                                  tooltip: t('Wyczyść'),
                                   icon: const Icon(
                                     Icons.close_rounded,
                                     size: 18,
@@ -311,14 +321,14 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                           spacing: 8,
                           children: <Widget>[
                             _FilterChip(
-                              label: 'Wszystkie',
+                              label: t('Wszystkie'),
                               isSelected: _selectedFilter == _ChatFilter.all,
                               onTap: () => setState(
                                 () => _selectedFilter = _ChatFilter.all,
                               ),
                             ),
                             _FilterChip(
-                              label: 'Nieprzeczytane',
+                              label: t('Nieprzeczytane'),
                               isSelected: _selectedFilter == _ChatFilter.unread,
                               highlight: unreadChatsCount > 0,
                               onTap: () => setState(
@@ -326,7 +336,7 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                               ),
                             ),
                             _FilterChip(
-                              label: 'Online',
+                              label: t('Online'),
                               isSelected: _selectedFilter == _ChatFilter.online,
                               onTap: () => setState(
                                 () => _selectedFilter = _ChatFilter.online,
@@ -343,6 +353,20 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
                     child: _RuntimeErrorNotice(
                       message: shellState.errorMessage!,
+                    ),
+                  ),
+                if (socialDataUnreadable)
+                  Padding(
+                    key: const Key('social-data-unreadable-notice'),
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                    child: _RuntimeErrorNotice(
+                      message: t(
+                        'Nie udało się odczytać zapisanej listy znajomych, '
+                        'grup i rozmów. Dane na urządzeniu zostają nietknięte, '
+                        'a do czasu ich odczytania Zen niczego nad nimi nie '
+                        'zapisuje i nie odpowiada automatycznie znajomym. '
+                        'Spróbuj uruchomić aplikację ponownie.',
+                      ),
                     ),
                   ),
                 if (backgroundAlerts.isNotEmpty)
@@ -371,7 +395,9 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  'Nowe (${actionableInbox.length})',
+                                  t('Nowe ({count})', {
+                                    'count': actionableInbox.length,
+                                  }),
                                   style: zen.label(color: zen.accent),
                                 ),
                               ),
@@ -394,7 +420,7 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                                   Icons.clear_all_rounded,
                                   size: 16,
                                 ),
-                                label: const Text('Wyczyść'),
+                                label: Text(t('Wyczyść')),
                               ),
                             ],
                           ),
@@ -412,25 +438,25 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 ),
                 if (groups.isNotEmpty) ...<Widget>[
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: ZenSection('Grupy', top: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: ZenSection(t('Grupy'), top: 12),
                   ),
                   for (final GroupProfile group in groups)
                     _GroupCard(group: group),
                 ],
                 if (pendingConversations.isNotEmpty) ...<Widget>[
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: ZenSection('Oczekujące zaproszenia', top: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: ZenSection(t('Oczekujące zaproszenia'), top: 12),
                   ),
                   for (final ConversationPreview conversation
                       in pendingConversations)
                     _ConversationCard(conversation: conversation),
                 ],
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: ZenSection('Rozmowy', top: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: ZenSection(t('Rozmowy'), top: 12),
                 ),
                 AnimatedSwitcher(
                   duration: ZenMotion.enabled
@@ -445,12 +471,14 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                           ),
                           filter: _selectedFilter,
                           message: _selectedFilter == _ChatFilter.unread
-                              ? 'Wszystko przeczytane.'
+                              ? t('Wszystko przeczytane.')
                               : _selectedFilter == _ChatFilter.online
-                              ? 'Nikt ze znajomych nie jest teraz online.'
+                              ? t('Nikt ze znajomych nie jest teraz online.')
                               : _searchController.text.isEmpty
                               ? null
-                              : 'Brak wyników dla „${_searchController.text}”.',
+                              : t('Brak wyników dla „{query}”.', {
+                                  'query': _searchController.text,
+                                }),
                           onShowCode: () => _openInviteTab(context, ref),
                         )
                       : Column(
@@ -540,15 +568,16 @@ class _EmptyChats extends StatelessWidget {
     return ZenEmpty(
       key: const Key('chats-empty-welcome'),
       icon: Icons.forum_outlined,
-      title: 'Nikogo tu jeszcze nie ma',
-      text:
-          'Pokaż znajomemu swój kod albo dodaj kogoś po jego kodzie. '
-          'Rozmowy pojawią się tutaj.',
+      title: t('Nikogo tu jeszcze nie ma'),
+      text: t(
+        'Pokaż znajomemu swój kod albo dodaj kogoś po jego kodzie. '
+        'Rozmowy pojawią się tutaj.',
+      ),
       action: FilledButton.icon(
         key: const Key('chats-empty-show-code'),
         onPressed: onShowCode,
         icon: const Icon(Icons.qr_code_2_rounded, size: 18),
-        label: const Text('Zaproś znajomych'),
+        label: Text(t('Zaproś znajomych')),
       ),
     );
   }
@@ -620,7 +649,7 @@ class _SettingsScreen extends ConsumerWidget {
     );
     return Scaffold(
       key: const Key('profile-page'),
-      appBar: const ZenSectionBar(title: 'Ustawienia'),
+      appBar: ZenSectionBar(title: t('Ustawienia')),
       body: SafeArea(
         top: false,
         child: ListView(
@@ -630,24 +659,25 @@ class _SettingsScreen extends ConsumerWidget {
             // Your profile is edited on the profile tab, not here (§9).
             const _QuickLockPanel(),
             _SettingsGroup(
-              title: 'Prywatność i bezpieczeństwo',
+              title: t('Prywatność i bezpieczeństwo'),
               tiles: <Widget>[
                 _SettingsNavTile(
                   key: const Key('settings-nav-security'),
                   icon: Icons.shield_outlined,
-                  title: 'Bezpieczeństwo',
-                  subtitle: 'Hasło, blokada aplikacji, szyfrowanie danych',
-                  pageTitle: 'Bezpieczeństwo',
+                  title: t('Bezpieczeństwo'),
+                  subtitle: t('Hasło, blokada aplikacji, szyfrowanie danych'),
+                  pageTitle: t('Bezpieczeństwo'),
                   pageChildren: const <Widget>[_SettingsSecuritySection()],
                 ),
                 _SettingsSwitchTile(
                   key: const Key('settings-hide-notification-content'),
                   icon: Icons.notifications_off_outlined,
                   toneIndex: 1,
-                  title: 'Powiadomienia bez treści',
-                  subtitle:
-                      'Tylko „Nowa wiadomość” — treść nie trafia do historii '
-                      'powiadomień systemu.',
+                  title: t('Powiadomienia bez treści'),
+                  subtitle: t(
+                    'Tylko „Nowa wiadomość” — treść nie trafia do historii '
+                    'powiadomień systemu.',
+                  ),
                   value: settings.hideNotificationContent,
                   onChanged: (bool value) => unawaited(
                     ref
@@ -660,8 +690,10 @@ class _SettingsScreen extends ConsumerWidget {
                     key: const Key('settings-nav-account'),
                     icon: Icons.key_outlined,
                     toneIndex: 2,
-                    title: 'Konto i odzyskiwanie',
-                    subtitle: 'Hasło konta, krąg odzyskiwania, nowe urządzenie',
+                    title: t('Konto i odzyskiwanie'),
+                    subtitle: t(
+                      'Hasło konta, krąg odzyskiwania, nowe urządzenie',
+                    ),
                     onTap: () => unawaited(AccountRecoveryScreen.open(context)),
                   ),
                 if (ref.watch(ledgerNodeEnabledProvider))
@@ -669,26 +701,29 @@ class _SettingsScreen extends ConsumerWidget {
                     key: const Key('settings-nav-devices'),
                     icon: Icons.devices_rounded,
                     toneIndex: 3,
-                    title: 'Urządzenia',
-                    subtitle:
-                        'Konto na kilku urządzeniach, odłączanie '
-                        'zgubionego',
+                    title: t('Urządzenia'),
+                    subtitle: t(
+                      'Konto na kilku urządzeniach, odłączanie '
+                      'zgubionego',
+                    ),
                     onTap: () => unawaited(AccountDevicesScreen.open(context)),
                   ),
                 _SettingsNavTile(
                   key: const Key('settings-blocked-button'),
                   icon: Icons.block_outlined,
                   toneIndex: 4,
-                  title: 'Zablokowani',
+                  title: t('Zablokowani'),
                   subtitle: blockedCount == 0
-                      ? 'Nikogo nie blokujesz'
-                      : 'Zablokowane osoby: $blockedCount',
+                      ? t('Nikogo nie blokujesz')
+                      : t('Zablokowane osoby: {count}', {
+                          'count': blockedCount,
+                        }),
                   onTap: () => _openBlockedFriendsScreen(context),
                 ),
               ],
             ),
             _SettingsGroup(
-              title: 'Wiadomości i połączenia',
+              title: t('Wiadomości i połączenia'),
               tiles: <Widget>[
                 const _RelayNavTile(),
                 if (ref.watch(ledgerNodeEnabledProvider))
@@ -696,29 +731,30 @@ class _SettingsScreen extends ConsumerWidget {
                     key: const Key('settings-nav-recordings'),
                     icon: Icons.fiber_manual_record_outlined,
                     toneIndex: 6,
-                    title: 'Nagrania rozmów',
-                    subtitle: 'Zaszyfrowane na tym urządzeniu',
+                    title: t('Nagrania rozmów'),
+                    subtitle: t('Zaszyfrowane na tym urządzeniu'),
                     onTap: () => unawaited(CallRecordingsScreen.open(context)),
                   ),
                 _SettingsNavTile(
                   key: const Key('settings-nav-gifs'),
                   icon: Icons.gif_box_outlined,
                   toneIndex: 7,
-                  title: 'GIF-y',
+                  title: t('GIF-y'),
                   subtitle: settings.usesOwnGifKey
-                      ? 'Własny klucz API'
-                      : 'Domyślny klucz aplikacji',
-                  pageTitle: 'GIF-y',
+                      ? t('Własny klucz API')
+                      : t('Domyślny klucz aplikacji'),
+                  pageTitle: t('GIF-y'),
                   pageChildren: const <Widget>[_GifKeySection()],
                 ),
                 _SettingsSwitchTile(
                   key: const Key('settings-auto-media'),
                   icon: Icons.download_for_offline_outlined,
                   toneIndex: 1,
-                  title: 'Pobieraj zdjęcia i filmy',
-                  subtitle:
-                      'Media z postów pobierają się same. Wyłącz, żeby '
-                      'oszczędzać transfer.',
+                  title: t('Pobieraj zdjęcia i filmy'),
+                  subtitle: t(
+                    'Media z postów pobierają się same. Wyłącz, żeby '
+                    'oszczędzać transfer.',
+                  ),
                   value: settings.autoDownloadMedia,
                   onChanged: (bool value) => unawaited(
                     ref
@@ -727,14 +763,16 @@ class _SettingsScreen extends ConsumerWidget {
                   ),
                 ),
                 if (Platform.isAndroid)
-                  const _SettingsNavTile(
-                    key: Key('settings-nav-delivery'),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-delivery'),
                     icon: Icons.notifications_active_outlined,
                     toneIndex: 3,
-                    title: 'Powiadomienia i praca w tle',
-                    subtitle: 'Uprawnienia, dostarczanie w tle, ekran połączeń',
-                    pageTitle: 'Powiadomienia i praca w tle',
-                    pageChildren: <Widget>[
+                    title: t('Powiadomienia i praca w tle'),
+                    subtitle: t(
+                      'Uprawnienia, dostarczanie w tle, ekran połączeń',
+                    ),
+                    pageTitle: t('Powiadomienia i praca w tle'),
+                    pageChildren: const <Widget>[
                       _BackgroundDeliverySection(),
                       SizedBox(height: 12),
                       _BatteryOptimizationSection(),
@@ -745,60 +783,83 @@ class _SettingsScreen extends ConsumerWidget {
               ],
             ),
             _SettingsGroup(
-              title: 'Aplikacja',
+              title: t('Aplikacja'),
               tiles: <Widget>[
                 // §25.2: the same steps as on the first start.
                 _SettingsNavTile(
                   key: const Key('settings-nav-permissions'),
                   icon: Icons.verified_user_outlined,
                   toneIndex: 1,
-                  title: 'Uprawnienia i Bluetooth',
+                  title: t('Uprawnienia i Bluetooth'),
                   subtitle: Platform.isAndroid
-                      ? 'Powiadomienia, Bluetooth, praca w tle, mikrofon'
-                      : 'Powiadomienia, mikrofon i kamera',
+                      ? t('Powiadomienia, Bluetooth, praca w tle, mikrofon')
+                      : t('Powiadomienia, mikrofon i kamera'),
                   onTap: () => unawaited(PermissionsScreen.open(context)),
                 ),
                 _SettingsNavTile(
                   key: const Key('settings-nav-appearance'),
                   icon: Icons.palette_outlined,
                   toneIndex: 2,
-                  title: 'Wygląd',
-                  subtitle: 'Motyw: ${settings.themeMode.label}',
-                  pageTitle: 'Wygląd',
+                  title: t('Wygląd'),
+                  subtitle: t('Motyw: {theme}', {
+                    'theme': settings.themeMode.label,
+                  }),
+                  pageTitle: t('Wygląd'),
                   pageChildren: const <Widget>[_AppearanceSection()],
+                ),
+                _SettingsNavTile(
+                  key: const ValueKey<String>('settings-language-tile'),
+                  icon: Icons.translate_rounded,
+                  toneIndex: 3,
+                  title: t('Język'),
+                  subtitle: ZenI18n.language.nativeName,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (BuildContext context) => const LanguageScreen(),
+                    ),
+                  ),
                 ),
                 _SettingsNavTile(
                   key: const Key('settings-nav-data'),
                   icon: Icons.storage_outlined,
                   toneIndex: 4,
-                  title: 'Dane i pamięć',
+                  title: t('Dane i pamięć'),
                   subtitle: settings.autoCleanupDays == 0
-                      ? 'Limit zdarzeń: ${settings.inboxLimitLabel}'
-                      : 'Limit zdarzeń: ${settings.inboxLimitLabel} · '
-                            'czyszczenie po ${settings.autoCleanupDays} dn.',
-                  pageTitle: 'Dane i pamięć',
+                      ? t('Limit zdarzeń: {limit}', {
+                          'limit': settings.inboxLimitLabel,
+                        })
+                      : t(
+                          'Limit zdarzeń: {limit} · czyszczenie po {days} dn.',
+                          {
+                            'limit': settings.inboxLimitLabel,
+                            'days': settings.autoCleanupDays,
+                          },
+                        ),
+                  pageTitle: t('Dane i pamięć'),
                   pageChildren: const <Widget>[_DataSection()],
                 ),
                 _SettingsNavTile(
                   key: const Key('settings-nav-updates'),
                   icon: Icons.system_update_alt_rounded,
                   toneIndex: 5,
-                  title: 'Aktualizacje i Podaj dalej',
-                  subtitle: 'Wersja $kAppVersion · nowe wersje od znajomych',
+                  title: t('Aktualizacje i Podaj dalej'),
+                  subtitle: t('Wersja {version} · nowe wersje od znajomych', {
+                    'version': kAppVersion,
+                  }),
                   onTap: () => unawaited(UpdatesScreen.open(context)),
                 ),
               ],
             ),
             _SettingsGroup(
-              title: 'Zaawansowane',
+              title: t('Zaawansowane'),
               tiles: <Widget>[
                 _SettingsNavTile(
                   key: const Key('settings-nav-network'),
                   icon: Icons.hub_outlined,
                   toneIndex: 6,
-                  title: 'Sieć i usługa',
+                  title: t('Sieć i usługa'),
                   subtitle: state.connectionLabel,
-                  pageTitle: 'Sieć i usługa',
+                  pageTitle: t('Sieć i usługa'),
                   pageChildren: const <Widget>[
                     _LiveTechInfoSection(),
                     _BridgeHostSection(),
@@ -808,8 +869,8 @@ class _SettingsScreen extends ConsumerWidget {
                   key: const Key('settings-nav-diagnostics'),
                   icon: Icons.receipt_long_outlined,
                   toneIndex: 7,
-                  title: 'Diagnostyka',
-                  subtitle: 'Dziennik zdarzeń do zgłaszania błędów',
+                  title: t('Diagnostyka'),
+                  subtitle: t('Dziennik zdarzeń do zgłaszania błędów'),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
                       builder: (BuildContext context) =>
@@ -820,10 +881,10 @@ class _SettingsScreen extends ConsumerWidget {
                 _SettingsNavTile(
                   key: const Key('settings-nav-reset'),
                   icon: Icons.delete_forever_outlined,
-                  title: 'Usuń wszystkie dane',
-                  subtitle: 'Znajomi, rozmowy i klucze z tego urządzenia',
+                  title: t('Usuń wszystkie dane'),
+                  subtitle: t('Znajomi, rozmowy i klucze z tego urządzenia'),
                   danger: true,
-                  pageTitle: 'Usuń wszystkie dane',
+                  pageTitle: t('Usuń wszystkie dane'),
                   pageChildren: const <Widget>[_ResetDataPanel()],
                 ),
               ],
@@ -1076,29 +1137,36 @@ class _RelayNavTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final RelayEngine? engine = ref.watch(relayEngineProvider);
     if (engine == null) {
-      return const _SettingsNavTile(
-        key: Key('settings-relay-button'),
+      return _SettingsNavTile(
+        key: const Key('settings-relay-button'),
         icon: Icons.markunread_mailbox_outlined,
         toneIndex: 5,
-        title: 'Skrzynki offline',
-        subtitle: 'Znajomi, którzy przechowają Twoje wiadomości',
-        pageTitle: 'Skrzynki offline',
-        pageChildren: <Widget>[_RelayMailboxPanel()],
+        title: t('Skrzynki offline'),
+        subtitle: t('Znajomi, którzy przechowają Twoje wiadomości'),
+        pageTitle: t('Skrzynki offline'),
+        pageChildren: const <Widget>[_RelayMailboxPanel()],
       );
     }
     return ValueListenableBuilder<RelayOverview>(
       valueListenable: engine.overview,
       builder: (BuildContext context, RelayOverview overview, Widget? _) {
+        final String mailboxes = tn(
+          overview.relays.length,
+          one: '{n} skrzynka',
+          few: '{n} skrzynki',
+          many: '{n} skrzynek',
+        );
+        final String mode = overview.isAutomatic
+            ? t('wybór automatyczny')
+            : t('wybór ręczny');
         return _SettingsNavTile(
           key: const Key('settings-relay-button'),
           icon: Icons.markunread_mailbox_outlined,
           toneIndex: 5,
-          title: 'Skrzynki offline',
+          title: t('Skrzynki offline'),
           subtitle: overview.relays.isEmpty
-              ? 'Dodaj znajomych, żeby wiadomości mogły na Ciebie czekać'
-              : '${overview.relays.length} '
-                    '${_mailboxNoun(overview.relays.length)} · '
-                    '${overview.isAutomatic ? 'wybór automatyczny' : 'wybór ręczny'}',
+              ? t('Dodaj znajomych, żeby wiadomości mogły na Ciebie czekać')
+              : '$mailboxes · $mode',
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
               builder: (BuildContext context) => const _RelayMailboxScreen(),
@@ -1151,7 +1219,7 @@ class _BridgeHostSection extends ConsumerWidget {
                     .setBridgeEnabled(value),
               ),
               title: Text(
-                'Pomagaj innym się łączyć',
+                t('Pomagaj innym się łączyć'),
                 style: TextStyle(
                   color: zen.textPrimary,
                   fontSize: 15.5,
@@ -1159,9 +1227,11 @@ class _BridgeHostSection extends ConsumerWidget {
                 ),
               ),
               subtitle: Text(
-                'Ten komputer przekazuje zaszyfrowany ruch sieci Zen, gdy '
-                'jest włączony — dzięki temu telefony znajomych łatwiej się '
-                'łączą. Nie widzi treści.',
+                t(
+                  'Ten komputer przekazuje zaszyfrowany ruch sieci Zen, gdy '
+                  'jest włączony — dzięki temu telefony znajomych łatwiej się '
+                  'łączą. Nie widzi treści.',
+                ),
                 style: TextStyle(
                   color: zen.textSecondary,
                   fontSize: 13.5,
@@ -1240,7 +1310,7 @@ class _BridgeHostStatusCard extends StatelessWidget {
                 ),
                 IconButton(
                   key: const Key('settings-bridge-retry'),
-                  tooltip: 'Sprawdź teraz',
+                  tooltip: t('Sprawdź teraz'),
                   visualDensity: VisualDensity.compact,
                   onPressed: status.state == BridgeHostState.checking
                       ? null
@@ -1311,7 +1381,7 @@ class _QuickLockPanel extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          'Blokada aplikacji',
+                          t('Blokada aplikacji'),
                           style: zen.display(
                             color: zen.textPrimary,
                             size: 19,
@@ -1322,8 +1392,8 @@ class _QuickLockPanel extends ConsumerWidget {
                         const SizedBox(height: 4),
                         Text(
                           canLock
-                              ? 'Jedno kliknięcie blokuje dostęp natychmiast.'
-                              : 'Ustaw hasło, aby włączyć szybką blokadę.',
+                              ? t('Jedno kliknięcie blokuje dostęp natychmiast.')
+                              : t('Ustaw hasło, aby włączyć szybką blokadę.'),
                           style: TextStyle(
                             color: zen.textSecondary,
                             fontSize: 13.5,
@@ -1348,8 +1418,8 @@ class _QuickLockPanel extends ConsumerWidget {
                   }
                   final String? password = await _showPasswordDialog(
                     context,
-                    title: 'Ustaw hasło szyfrowania',
-                    actionLabel: 'Ustaw hasło',
+                    title: t('Ustaw hasło szyfrowania'),
+                    actionLabel: t('Ustaw hasło'),
                   );
                   if (password == null) {
                     return;
@@ -1368,7 +1438,7 @@ class _QuickLockPanel extends ConsumerWidget {
                   canLock ? Icons.lock_rounded : Icons.password_rounded,
                   size: 18,
                 ),
-                label: Text(canLock ? 'Zablokuj teraz' : 'Ustaw hasło'),
+                label: Text(canLock ? t('Zablokuj teraz') : t('Ustaw hasło')),
               ),
             ],
           ),
@@ -1410,7 +1480,7 @@ class _GifKeySectionState extends ConsumerState<_GifKeySection> {
     final String key = AppSettings.normalizeGifApiKey(raw);
     if (key.isEmpty) {
       setState(() {
-        _error = 'To nie wygląda na klucz API (litery, cyfry, - _ .).';
+        _error = t('To nie wygląda na klucz API (litery, cyfry, - _ .).');
         _info = null;
       });
       return;
@@ -1428,9 +1498,10 @@ class _GifKeySectionState extends ConsumerState<_GifKeySection> {
           .loadFeatured()
           .timeout(const Duration(seconds: 15));
     } catch (_) {
-      error =
-          'Klipy nie przyjął tego klucza albo brak internetu. '
-          'Nic nie zmieniono.';
+      error = t(
+        'Klipy nie przyjął tego klucza albo brak internetu. '
+        'Nic nie zmieniono.',
+      );
     }
     if (!mounted) {
       return;
@@ -1445,7 +1516,7 @@ class _GifKeySectionState extends ConsumerState<_GifKeySection> {
       _checking = false;
       _error = error;
       _info = error == null
-          ? 'Zapisano. GIF-y idą teraz z Twojego klucza.'
+          ? t('Zapisano. GIF-y idą teraz z Twojego klucza.')
           : null;
     });
   }
@@ -1458,7 +1529,7 @@ class _GifKeySectionState extends ConsumerState<_GifKeySection> {
     _field.clear();
     setState(() {
       _error = null;
-      _info = 'Przywrócono domyślny klucz aplikacji.';
+      _info = t('Przywrócono domyślny klucz aplikacji.');
     });
   }
 
@@ -1477,16 +1548,18 @@ class _GifKeySectionState extends ConsumerState<_GifKeySection> {
           _PanelHeader(
             icon: Icons.gif_box_outlined,
             tone: tone,
-            title: 'Klucz API do GIF-ów',
+            title: t('Klucz API do GIF-ów'),
             pill: ZenPill(
-              text: ownKey ? 'Własny klucz' : 'Klucz domyślny',
+              text: ownKey ? t('Własny klucz') : t('Klucz domyślny'),
               tone: ownKey ? zen.success : tone,
               icon: ownKey ? Icons.check_rounded : Icons.auto_awesome_rounded,
             ),
             caption: ownKey
-                ? 'Używasz własnego klucza Klipy.'
-                : 'Działa domyślny klucz aplikacji. Możesz podpiąć własny '
-                      'klucz Klipy (klipy.com), jeśli domyślny się wyczerpie.',
+                ? t('Używasz własnego klucza Klipy.')
+                : t(
+                    'Działa domyślny klucz aplikacji. Możesz podpiąć własny '
+                    'klucz Klipy (klipy.com), jeśli domyślny się wyczerpie.',
+                  ),
           ),
           const SizedBox(height: 16),
           TextField(
@@ -1496,11 +1569,11 @@ class _GifKeySectionState extends ConsumerState<_GifKeySection> {
             autocorrect: false,
             enableSuggestions: false,
             maxLength: AppSettings.maximumGifApiKeyLength,
-            decoration: const InputDecoration(
-              labelText: 'Własny klucz Klipy',
-              hintText: 'Wklej klucz z klipy.com',
-              helperText: 'Zostaw puste, żeby używać klucza domyślnego.',
-              prefixIcon: Icon(Icons.vpn_key_outlined),
+            decoration: InputDecoration(
+              labelText: t('Własny klucz Klipy'),
+              hintText: t('Wklej klucz z klipy.com'),
+              helperText: t('Zostaw puste, żeby używać klucza domyślnego.'),
+              prefixIcon: const Icon(Icons.vpn_key_outlined),
               counterText: '',
             ),
             onSubmitted: (_) => _save(),
@@ -1565,14 +1638,14 @@ class _GifKeySectionState extends ConsumerState<_GifKeySection> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.check_rounded),
-                label: Text(_checking ? 'Sprawdzam…' : 'Zapisz'),
+                label: Text(_checking ? t('Sprawdzam…') : t('Zapisz')),
               ),
               if (ownKey)
                 OutlinedButton.icon(
                   key: const Key('settings-gif-key-default'),
                   onPressed: _checking ? null : _useDefault,
                   icon: const Icon(Icons.restart_alt_rounded, size: 18),
-                  label: const Text('Wróć do domyślnego'),
+                  label: Text(t('Wróć do domyślnego')),
                 ),
             ],
           ),
@@ -1597,7 +1670,7 @@ class _AppearanceSection extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          const _SectionIntro(title: 'Tryb'),
+          _SectionIntro(title: t('Tryb')),
           const SizedBox(height: 10),
           Wrap(
             key: const Key('settings-theme-mode-segmented'),
@@ -1621,8 +1694,10 @@ class _AppearanceSection extends ConsumerWidget {
           ),
           const SizedBox(height: 20),
           _SectionIntro(
-            title: 'Kolor',
-            caption: 'Akcent całej aplikacji: ${settings.accentTheme.label}.',
+            title: t('Kolor'),
+            caption: t('Akcent całej aplikacji: {accent}.', {
+              'accent': settings.accentTheme.label,
+            }),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -1745,19 +1820,23 @@ class _DataSectionState extends ConsumerState<_DataSection> {
           _PanelHeader(
             icon: Icons.storage_outlined,
             tone: tone,
-            title: 'Dane i pamięć',
-            caption:
-                'Domyślne wartości dla nowych rozmów. Każda rozmowa może je '
-                'nadpisać lokalnie.',
+            title: t('Dane i pamięć'),
+            caption: t(
+              'Domyślne wartości dla nowych rozmów. Każda rozmowa może je '
+              'nadpisać lokalnie.',
+            ),
           ),
           const SizedBox(height: 12),
           SwitchListTile.adaptive(
             key: const Key('settings-inbox-unlimited-switch'),
             value: settings.inboxUnlimited,
             contentPadding: EdgeInsets.zero,
-            title: const Text('Bez limitu zdarzeń'),
+            title: Text(t('Bez limitu zdarzeń')),
             subtitle: Text(
-              'Wyłączenie limitu zostawia 0 jako spójną wartość "nigdy nie czyść".',
+              t(
+                'Wyłączenie limitu zostawia 0 jako spójną wartość '
+                '"nigdy nie czyść".',
+              ),
               style: TextStyle(color: zen.textSecondary, height: 1.35),
             ),
             onChanged: (bool value) {
@@ -1781,7 +1860,9 @@ class _DataSectionState extends ConsumerState<_DataSection> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          'Limit zdarzeń: ${settings.inboxLimitLabel}',
+                          t('Limit zdarzeń: {limit}', {
+                            'limit': settings.inboxLimitLabel,
+                          }),
                           key: const Key('settings-inbox-limit-label'),
                           style: TextStyle(
                             color: zen.textPrimary,
@@ -1820,12 +1901,12 @@ class _DataSectionState extends ConsumerState<_DataSection> {
             inputFormatters: <TextInputFormatter>[
               FilteringTextInputFormatter.digitsOnly,
             ],
-            decoration: const InputDecoration(
-              labelText: 'Auto-czyszczenie po ilu dniach',
-              hintText: 'np. 30',
-              helperText: '0 = nigdy',
-              prefixIcon: Icon(Icons.auto_delete_outlined),
-              suffixText: 'dni',
+            decoration: InputDecoration(
+              labelText: t('Auto-czyszczenie po ilu dniach'),
+              hintText: t('np. 30'),
+              helperText: t('0 = nigdy'),
+              prefixIcon: const Icon(Icons.auto_delete_outlined),
+              suffixText: t('dni'),
             ),
             onChanged: (String value) {
               controller.setAutoCleanupDays(int.tryParse(value) ?? 0);
@@ -1847,20 +1928,22 @@ class _TechInfoSection extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final Color accent = _shellStatusAccent(zen, state);
     final List<Widget> metricTiles = <Widget>[
-      _MetricTile(label: 'Połączeni', value: '${state.peers}', toneIndex: 0),
+      _MetricTile(label: t('Połączeni'), value: '${state.peers}', toneIndex: 0),
       _MetricTile(
-        label: 'W zasięgu',
+        label: t('W zasięgu'),
         value: '${state.peerPoolCount}',
         toneIndex: 2,
       ),
       _MetricTile(
-        label: 'Trasy',
+        label: t('Trasy'),
         value: '${state.routingEntries}',
         toneIndex: 4,
       ),
       _MetricTile(
-        label: 'Ping',
-        value: state.latencyMs > 0 ? '${state.latencyMs} ms' : '—',
+        label: t('Ping'),
+        value: state.latencyMs > 0
+            ? t('{ms} ms', {'ms': state.latencyMs})
+            : '—',
         toneIndex: 6,
       ),
     ];
@@ -1881,7 +1964,7 @@ class _TechInfoSection extends StatelessWidget {
             size: 42,
           ),
           title: Text(
-            'Info techniczne',
+            t('Info techniczne'),
             style: TextStyle(
               color: zen.textPrimary,
               fontSize: 16,
@@ -1976,7 +2059,7 @@ class _BackgroundAlertsBannerState
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Powiadomienia (${alerts.length})',
+                  t('Powiadomienia ({count})', {'count': alerts.length}),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -1999,7 +2082,7 @@ class _BackgroundAlertsBannerState
                       ? Icons.expand_more_rounded
                       : Icons.expand_less_rounded,
                 ),
-                tooltip: _collapsed ? 'Rozwiń' : 'Zwiń',
+                tooltip: _collapsed ? t('Rozwiń') : t('Zwiń'),
               ),
               IconButton(
                 key: const Key('background-alert-clear-button'),
@@ -2010,7 +2093,7 @@ class _BackgroundAlertsBannerState
                       .clearBackgroundAlerts();
                 },
                 icon: const Icon(Icons.close_rounded),
-                tooltip: 'Wyczyść powiadomienia',
+                tooltip: t('Wyczyść powiadomienia'),
               ),
             ],
           ),
@@ -2051,7 +2134,7 @@ class _BackgroundAlertsBannerState
                 size: 18,
               ),
               label: Text(
-                launchIntent?.actionLabel ?? 'Otwórz',
+                launchIntent?.actionLabel ?? t('Otwórz'),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -2075,8 +2158,8 @@ class _AddFriendCallout extends StatelessWidget {
             key: const Key('open-add-friend-sheet-button'),
             onPressed: () => showAddFriendSheet(context),
             icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
-            label: const Text(
-              'Znajomy',
+            label: Text(
+              t('Znajomy'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -2088,8 +2171,8 @@ class _AddFriendCallout extends StatelessWidget {
             key: const Key('open-create-group-sheet-button'),
             onPressed: () => CreateGroupSheet.show(context),
             icon: const Icon(Icons.group_add_rounded, size: 18),
-            label: const Text(
-              'Grupa',
+            label: Text(
+              t('Grupa'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -2201,13 +2284,20 @@ class _GroupCardState extends ConsumerState<_GroupCard> {
               ),
               name: group.name,
               nameBadge: callRunning
-                  ? _StatusPill(label: 'Trwa rozmowa', tone: zen.success)
+                  ? _StatusPill(label: t('Trwa rozmowa'), tone: zen.success)
                   : null,
-              meta: callRunning ? null : '${group.memberCount} os.',
+              meta: callRunning
+                  ? null
+                  : t('{count} os.', {'count': group.memberCount}),
               preview: Text(
                 group.lastMessagePreview?.trim().isNotEmpty == true
                     ? group.lastMessagePreview!
-                    : 'Grupa (${group.memberCount} osób)',
+                    : tn(
+                        group.memberCount,
+                        one: 'Grupa ({n} osoba)',
+                        few: 'Grupa ({n} osoby)',
+                        many: 'Grupa ({n} osób)',
+                      ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -2281,7 +2371,12 @@ void _showGroupActionSheet(
                         ),
                         const SizedBox(height: 6),
                         ZenPill(
-                          text: '${group.memberCount} uczestników',
+                          text: tn(
+                            group.memberCount,
+                            one: '{n} uczestnik',
+                            few: '{n} uczestników',
+                            many: '{n} uczestników',
+                          ),
                           tone: _groupTone(zen, group),
                           icon: Icons.people_alt_outlined,
                         ),
@@ -2295,7 +2390,7 @@ void _showGroupActionSheet(
               const SizedBox(height: 8),
               _SheetAction(
                 icon: Icons.chat_bubble_outline_rounded,
-                label: 'Otwórz grupę',
+                label: t('Otwórz grupę'),
                 tone: zen.accent,
                 onTap: () {
                   Navigator.of(sheetContext).pop();
@@ -2312,7 +2407,7 @@ void _showGroupActionSheet(
               ),
               _SheetAction(
                 icon: Icons.group_remove_outlined,
-                label: 'Opuść i usuń grupę',
+                label: t('Opuść i usuń grupę'),
                 tone: zen.danger,
                 danger: true,
                 onTap: () async {
@@ -2326,15 +2421,19 @@ void _showGroupActionSheet(
                           color: zen.danger,
                           size: 30,
                         ),
-                        title: const Text('Opuścić grupę?'),
+                        title: Text(t('Opuścić grupę?')),
                         content: Text(
-                          'Czy na pewno chcesz opuścić i usunąć grupę ${group.name}?',
+                          t(
+                            'Czy na pewno chcesz opuścić i usunąć grupę '
+                            '{group}?',
+                            {'group': group.name},
+                          ),
                         ),
                         actions: <Widget>[
                           TextButton(
                             onPressed: () =>
                                 Navigator.of(dialogContext).pop(false),
-                            child: const Text('Anuluj'),
+                            child: Text(t('Anuluj')),
                           ),
                           FilledButton(
                             style: FilledButton.styleFrom(
@@ -2345,7 +2444,7 @@ void _showGroupActionSheet(
                             ),
                             onPressed: () =>
                                 Navigator.of(dialogContext).pop(true),
-                            child: const Text('Usuń grupę'),
+                            child: Text(t('Usuń grupę')),
                           ),
                         ],
                       );
@@ -2405,7 +2504,7 @@ class _LocalCodePanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Text(
-              'Twój kod',
+              t('Twój kod'),
               textAlign: TextAlign.center,
               style: zen.display(
                 color: zen.textPrimary,
@@ -2415,7 +2514,7 @@ class _LocalCodePanel extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Niech znajomy zeskanuje go aparatem',
+              t('Niech znajomy zeskanuje go aparatem'),
               textAlign: TextAlign.center,
               style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
             ),
@@ -2452,7 +2551,7 @@ class _LocalCodePanel extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Text(
-              'Kod zaproszenia',
+              t('Kod zaproszenia'),
               textAlign: TextAlign.center,
               style: zen.label(color: zen.textMuted),
             ),
@@ -2493,11 +2592,11 @@ class _LocalCodePanel extends StatelessWidget {
                   return;
                 }
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Kod został skopiowany.')),
+                  SnackBar(content: Text(t('Kod został skopiowany.'))),
                 );
               },
               icon: const Icon(Icons.copy_rounded, size: 18),
-              label: const Text('Kopiuj kod'),
+              label: Text(t('Kopiuj kod')),
             ),
           ],
         ),
@@ -2535,7 +2634,7 @@ class _MyCodeScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: ZenSectionBar(
-        title: Navigator.of(context).canPop() ? 'Mój kod' : 'Zaproś',
+        title: Navigator.of(context).canPop() ? t('Mój kod') : t('Zaproś'),
       ),
       body: SafeArea(
         top: false,
@@ -2569,16 +2668,16 @@ class _MyCodeScreen extends ConsumerWidget {
               key: const Key('invite-add-friend'),
               icon: Icons.person_add_alt_1_rounded,
               tone: zen.accentSecondary,
-              title: 'Mam czyjś kod',
-              subtitle: 'Dodaj znajomego — wklej jego kod albo zeskanuj QR',
+              title: t('Mam czyjś kod'),
+              subtitle: t('Dodaj znajomego — wklej jego kod albo zeskanuj QR'),
               onTap: () => showAddFriendSheet(context),
             ),
             ZenTile(
               key: const Key('invite-share-app'),
               icon: Icons.install_mobile_rounded,
               tone: zen.success,
-              title: 'Znajomy nie ma Zen?',
-              subtitle: 'Podaj dalej: aplikacja z ręki do ręki, bez sklepu',
+              title: t('Znajomy nie ma Zen?'),
+              subtitle: t('Podaj dalej: aplikacja z ręki do ręki, bez sklepu'),
               onTap: () => unawaited(ShareAppScreen.open(context)),
             ),
             if (!kIsWeb && Platform.isAndroid)
@@ -2586,20 +2685,22 @@ class _MyCodeScreen extends ConsumerWidget {
                 key: const Key('invite-open-links'),
                 icon: Icons.qr_code_scanner_rounded,
                 tone: zenTone(zen, 3),
-                title: 'Kody Zen prosto do aplikacji',
-                subtitle:
-                    'Włącz „Otwieraj obsługiwane linki”: kod zeskanowany '
-                    'aparatem otworzy się od razu w Zen',
+                title: t('Kody Zen prosto do aplikacji'),
+                subtitle: t(
+                  'Włącz „Otwieraj obsługiwane linki”: kod zeskanowany '
+                  'aparatem otworzy się od razu w Zen',
+                ),
                 onTap: () => unawaited(openLinkHandlingSettings()),
               ),
             const SizedBox(height: 4),
-            const ZenInfo(
-              title: 'Jak to działa',
+            ZenInfo(
+              title: t('Jak to działa'),
               icon: Icons.help_outline_rounded,
-              text:
-                  'Nie ma rejestracji ani serwera. Ten kod to Twój adres w '
-                  'sieci — pokaż go albo skopiuj. Kto go wklei, może wysłać '
-                  'Ci zaproszenie. Kod jest tylko na tym urządzeniu.',
+              text: t(
+                'Nie ma rejestracji ani serwera. Ten kod to Twój adres w '
+                'sieci — pokaż go albo skopiuj. Kto go wklei, może wysłać '
+                'Ci zaproszenie. Kod jest tylko na tym urządzeniu.',
+              ),
             ),
           ],
         ),
@@ -2658,7 +2759,7 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      'OTRZYMANO ZAPROSZENIE',
+                      t('OTRZYMANO ZAPROSZENIE'),
                       style: zen.label(color: zen.accent),
                     ),
                     const SizedBox(height: 3),
@@ -2711,21 +2812,21 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
                           .rejectFriendRequest(peerAddress: peerAddress);
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Odrzucono zaproszenie.'),
-                          ),
+                          SnackBar(content: Text(t('Odrzucono zaproszenie.'))),
                         );
                       }
                     } catch (e) {
                       if (context.mounted) {
-                        ScaffoldMessenger.of(
-                          context,
-                        ).showSnackBar(SnackBar(content: Text('Błąd: $e')));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(t('Błąd: {error}', {'error': e})),
+                          ),
+                        );
                       }
                     }
                   },
-                  child: const Text(
-                    'Odrzuć',
+                  child: Text(
+                    t('Odrzuć'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -2747,20 +2848,28 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text('Zaakceptowano znajomego: $title'),
+                            content: Text(
+                              t('Zaakceptowano znajomego: {name}', {
+                                'name': title,
+                              }),
+                            ),
                           ),
                         );
                       }
                     } catch (error) {
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Błąd akceptacji: $error')),
+                          SnackBar(
+                            content: Text(
+                              t('Błąd akceptacji: {error}', {'error': error}),
+                            ),
+                          ),
                         );
                       }
                     }
                   },
-                  child: const Text(
-                    'Akceptuj',
+                  child: Text(
+                    t('Akceptuj'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -2814,7 +2923,7 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Skopiowano dziennik do schowka.')),
+      SnackBar(content: Text(t('Skopiowano dziennik do schowka.'))),
     );
   }
 
@@ -2829,19 +2938,19 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
     final String? contents = _contents;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Dziennik diagnostyczny'),
+        title: Text(t('Dziennik diagnostyczny')),
         actions: <Widget>[
           IconButton(
             key: const Key('diagnostics-reload'),
             onPressed: _reload,
             icon: const Icon(Icons.refresh_rounded),
-            tooltip: 'Odśwież',
+            tooltip: t('Odśwież'),
           ),
           IconButton(
             key: const Key('diagnostics-clear'),
             onPressed: contents == null ? null : _clear,
             icon: const Icon(Icons.delete_outline_rounded),
-            tooltip: 'Wyczyść',
+            tooltip: t('Wyczyść'),
           ),
         ],
       ),
@@ -2849,7 +2958,7 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
         key: const Key('diagnostics-copy'),
         onPressed: contents == null || contents.isEmpty ? null : _copy,
         icon: const Icon(Icons.copy_all_rounded),
-        label: const Text('Kopiuj'),
+        label: Text(t('Kopiuj')),
       ),
       body: SafeArea(
         top: false,
@@ -2865,8 +2974,10 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
                 child: SingleChildScrollView(
                   child: ZenEmpty(
                     icon: Icons.receipt_long_outlined,
-                    title: 'Dziennik jest pusty.',
-                    text: 'Gdy coś się wydarzy w tle, wpisy pojawią się tutaj.',
+                    title: t('Dziennik jest pusty.'),
+                    text: t(
+                      'Gdy coś się wydarzy w tle, wpisy pojawią się tutaj.',
+                    ),
                     tone: zenTone(zen, 7),
                   ),
                 ),
@@ -2981,14 +3092,21 @@ class _BackgroundDeliverySectionState
                   ? Icons.verified_user_outlined
                   : Icons.notifications_paused_outlined,
               tone: granted ? zen.success : zen.warning,
-              title: 'Uprawnienia i praca w tle',
+              title: t('Uprawnienia i praca w tle'),
               pill: _StatusPill(
-                label: granted ? 'Wszystkie aktywne' : 'Wymaga uprawnień',
+                label: granted ? t('Wszystkie aktywne') : t('Wymaga uprawnień'),
                 tone: granted ? zen.success : zen.warning,
               ),
               caption: granted
-                  ? 'Aplikacja ma komplet uprawnień (praca w tle, powiadomienia, mikrofon, kamera, okno rozmowy).'
-                  : 'Aby nie przegapić połączeń i wiadomości oraz móc korzystać z rozmów i pływającego okna połączeń, zezwól na wszystkie uprawnienia.',
+                  ? t(
+                      'Aplikacja ma komplet uprawnień (praca w tle, '
+                      'powiadomienia, mikrofon, kamera, okno rozmowy).',
+                    )
+                  : t(
+                      'Aby nie przegapić połączeń i wiadomości oraz móc '
+                      'korzystać z rozmów i pływającego okna połączeń, '
+                      'zezwól na wszystkie uprawnienia.',
+                    ),
             ),
             if (!granted) ...<Widget>[
               const SizedBox(height: 14),
@@ -2996,7 +3114,7 @@ class _BackgroundDeliverySectionState
                 key: const Key('settings-background-delivery-request'),
                 onPressed: _requestInFlight ? null : _request,
                 icon: const Icon(Icons.verified_user_outlined, size: 18),
-                label: const Text('Zezwól na wszystko'),
+                label: Text(t('Zezwól na wszystko')),
               ),
             ],
           ],
@@ -3087,24 +3205,26 @@ class _BatteryOptimizationSectionState
                   ? Icons.battery_alert_rounded
                   : Icons.battery_charging_full_rounded,
               tone: exempt == null ? null : tone,
-              title: 'Oszczędzanie baterii',
+              title: t('Oszczędzanie baterii'),
               pill: exempt == null
                   ? null
                   : _StatusPill(
                       label: exempt
-                          ? 'Zen bez ograniczeń'
-                          : 'Zen jest usypiany',
+                          ? t('Zen bez ograniczeń')
+                          : t('Zen jest usypiany'),
                       tone: tone,
                     ),
               caption: switch (exempt) {
-                null => 'Sprawdzam, czy Android może usypiać Zen…',
-                false =>
+                null => t('Sprawdzam, czy Android może usypiać Zen…'),
+                false => t(
                   'Android może usypiać Zen przy zgaszonym ekranie. '
-                      'Wiadomości, połączenia i alarmy dotrą wtedy dopiero po '
-                      'otwarciu aplikacji.',
-                true =>
+                  'Wiadomości, połączenia i alarmy dotrą wtedy dopiero po '
+                  'otwarciu aplikacji.',
+                ),
+                true => t(
                   'Android nie usypia Zen, więc wiadomości, połączenia i '
-                      'alarmy docierają także przy zgaszonym ekranie.',
+                  'alarmy docierają także przy zgaszonym ekranie.',
+                ),
               },
             ),
             if (exempt == false) ...<Widget>[
@@ -3115,21 +3235,22 @@ class _BatteryOptimizationSectionState
                     ? null
                     : () => unawaited(_request()),
                 icon: const Icon(Icons.battery_saver_outlined, size: 18),
-                label: const Text('Wyłącz optymalizację baterii'),
+                label: Text(t('Wyłącz optymalizację baterii')),
               ),
             ],
             const SizedBox(height: 12),
             ZenInfo(
               icon: Icons.phone_android_rounded,
               tone: zen.warning,
-              title: 'Telefony mają też własne „zabójce baterii”',
-              text:
-                  'Xiaomi, Samsung, Huawei czy OnePlus potrafią zamknąć Zen '
-                  'mimo tego ustawienia. Samsung: Ustawienia → Bateria → '
-                  'Limity użycia w tle — Zen nie może być na liście „Uśpione '
-                  'aplikacje” ani „Głęboko uśpione aplikacje”. Xiaomi: w '
-                  'ustawieniach aplikacji włącz „Autostart” i ustaw '
-                  'oszczędzanie baterii na „Bez ograniczeń”.',
+              title: t('Telefony mają też własne „zabójce baterii”'),
+              text: t(
+                'Xiaomi, Samsung, Huawei czy OnePlus potrafią zamknąć Zen '
+                'mimo tego ustawienia. Samsung: Ustawienia → Bateria → '
+                'Limity użycia w tle — Zen nie może być na liście „Uśpione '
+                'aplikacje” ani „Głęboko uśpione aplikacje”. Xiaomi: w '
+                'ustawieniach aplikacji włącz „Autostart” i ustaw '
+                'oszczędzanie baterii na „Bez ograniczeń”.',
+              ),
             ),
             const SizedBox(height: 4),
             Align(
@@ -3138,7 +3259,7 @@ class _BatteryOptimizationSectionState
                 key: const Key('settings-battery-app-settings'),
                 onPressed: () => unawaited(openAndroidAppSettings()),
                 icon: const Icon(Icons.settings_outlined, size: 18),
-                label: const Text('Otwórz ustawienia aplikacji'),
+                label: Text(t('Otwórz ustawienia aplikacji')),
               ),
             ),
           ],
@@ -3212,19 +3333,20 @@ class _FullScreenCallSectionState extends State<_FullScreenCallSection> {
             _PanelHeader(
               icon: Icons.phone_locked_outlined,
               tone: zen.warning,
-              title: 'Połączenia na ekranie blokady',
-              pill: _StatusPill(label: 'Ograniczone', tone: zen.warning),
-              caption:
-                  'System nie pozwala Zen otwierać pełnoekranowego powiadomienia o '
-                  'rozmowie. Połączenie przychodzące pojawi się tylko jako zwykłe '
-                  'powiadomienie i łatwo je przegapić przy zablokowanym ekranie.',
+              title: t('Połączenia na ekranie blokady'),
+              pill: _StatusPill(label: t('Ograniczone'), tone: zen.warning),
+              caption: t(
+                'System nie pozwala Zen otwierać pełnoekranowego powiadomienia o '
+                'rozmowie. Połączenie przychodzące pojawi się tylko jako zwykłe '
+                'powiadomienie i łatwo je przegapić przy zablokowanym ekranie.',
+              ),
             ),
             const SizedBox(height: 14),
             FilledButton.icon(
               key: const Key('settings-full-screen-call-request'),
               onPressed: _requestInFlight ? null : _request,
               icon: const Icon(Icons.ring_volume_outlined, size: 18),
-              label: const Text('Zezwól na pełny ekran'),
+              label: Text(t('Zezwól na pełny ekran')),
             ),
           ],
         ),
@@ -3252,7 +3374,7 @@ class _BlockedFriendsScreen extends ConsumerWidget {
     ).blockedFriends;
     return Scaffold(
       key: const Key('blocked-friends-screen'),
-      appBar: AppBar(title: const Text('Zablokowani użytkownicy')),
+      appBar: AppBar(title: Text(t('Zablokowani użytkownicy'))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: <Widget>[
@@ -3260,16 +3382,19 @@ class _BlockedFriendsScreen extends ConsumerWidget {
             ZenEmpty(
               icon: Icons.verified_user_outlined,
               tone: zen.success,
-              title: 'Brak zablokowanych użytkowników.',
-              text:
-                  'Osoby, które zablokujesz, trafią tutaj. Możesz je w każdej '
-                  'chwili odblokować.',
+              title: t('Brak zablokowanych użytkowników.'),
+              text: t(
+                'Osoby, które zablokujesz, trafią tutaj. Możesz je w każdej '
+                'chwili odblokować.',
+              ),
             )
           else ...<Widget>[
             ZenInfo(
               icon: Icons.block_rounded,
               tone: zen.danger,
-              text: 'Zablokowane osoby nie mogą do Ciebie pisać ani dzwonić.',
+              text: t(
+                'Zablokowane osoby nie mogą do Ciebie pisać ani dzwonić.',
+              ),
             ),
             const SizedBox(height: 6),
             for (final FriendProfile friend in blockedFriends)
@@ -3339,7 +3464,7 @@ class _BlockedFriendRow extends ConsumerWidget {
                   .read(socialHubControllerProvider.notifier)
                   .unblockFriend(peerAddress: friend.address);
             },
-            child: const Text('Odblokuj'),
+            child: Text(t('Odblokuj')),
           ),
         ],
       ),
@@ -3395,18 +3520,24 @@ class _ResetDataPanelState extends ConsumerState<_ResetDataPanel>
     final String actionLabel;
     final String helperLabel;
     if (_running) {
-      actionLabel = 'Resetowanie...';
-      helperLabel = 'Czyszczenie lokalnych danych jest w toku.';
+      actionLabel = t('Resetowanie...');
+      helperLabel = t('Czyszczenie lokalnych danych jest w toku.');
     } else if (_holdController.isAnimating || _holdController.value > 0) {
       final int elapsedSeconds = (_holdController.value * 10).floor();
       final int remainingSeconds = (10 - elapsedSeconds).clamp(1, 10);
-      actionLabel = 'Trzymaj jeszcze $remainingSeconds s';
-      helperLabel =
-          'Trzymaj bez przerwy przez pełne 10 sekund, zanim pojawi się potwierdzenie.';
+      actionLabel = t('Trzymaj jeszcze {seconds} s', {
+        'seconds': remainingSeconds,
+      });
+      helperLabel = t(
+        'Trzymaj bez przerwy przez pełne 10 sekund, zanim pojawi się '
+        'potwierdzenie.',
+      );
     } else {
-      actionLabel = 'Przytrzymaj 10 s, aby zresetować dane';
-      helperLabel =
-          'Dopiero po pełnym 10-sekundowym przytrzymaniu pojawi się dodatkowe potwierdzenie.';
+      actionLabel = t('Przytrzymaj 10 s, aby zresetować dane');
+      helperLabel = t(
+        'Dopiero po pełnym 10-sekundowym przytrzymaniu pojawi się dodatkowe '
+        'potwierdzenie.',
+      );
     }
     return _Panel(
       accentTone: zen.danger,
@@ -3416,9 +3547,11 @@ class _ResetDataPanelState extends ConsumerState<_ResetDataPanel>
           _PanelHeader(
             icon: Icons.delete_forever_outlined,
             tone: zen.danger,
-            title: 'Reset danych',
-            caption:
-                'Usuwa lokalne rozmowy, zaproszenia, ustawienia i zapisane klucze blokady, a potem uruchamia aplikację od czystego stanu.',
+            title: t('Reset danych'),
+            caption: t(
+              'Usuwa lokalne rozmowy, zaproszenia, ustawienia i zapisane '
+              'klucze blokady, a potem uruchamia aplikację od czystego stanu.',
+            ),
           ),
           const SizedBox(height: 16),
           ClipRRect(
@@ -3553,15 +3686,19 @@ class _ResetDataPanelState extends ConsumerState<_ResetDataPanel>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Dane zostały zresetowane.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t('Dane zostały zresetowane.'))));
     } catch (error) {
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Reset danych nie udał się: $error')),
+        SnackBar(
+          content: Text(
+            t('Reset danych nie udał się: {error}', {'error': error}),
+          ),
+        ),
       );
     } finally {
       if (mounted) {
@@ -3583,14 +3720,17 @@ class _ResetDataPanelState extends ConsumerState<_ResetDataPanel>
             color: ZenColors.of(context).danger,
             size: 32,
           ),
-          title: const Text('Reset danych'),
-          content: const Text(
-            'To usunie wszystkie lokalne dane aplikacji i zapisane zabezpieczenia. Kontynuować?',
+          title: Text(t('Reset danych')),
+          content: Text(
+            t(
+              'To usunie wszystkie lokalne dane aplikacji i zapisane '
+              'zabezpieczenia. Kontynuować?',
+            ),
           ),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Anuluj'),
+              child: Text(t('Anuluj')),
             ),
             FilledButton(
               style: FilledButton.styleFrom(
@@ -3600,7 +3740,7 @@ class _ResetDataPanelState extends ConsumerState<_ResetDataPanel>
                 ),
               ),
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Resetuj'),
+              child: Text(t('Resetuj')),
             ),
           ],
         );
@@ -3639,15 +3779,15 @@ Future<void> showAddFriendSheet(
     SnackBar(
       content: Text(
         result.nickname.isEmpty
-            ? 'Zaproszenie wysłane.'
-            : 'Zaproszenie do ${result.nickname} wysłane.',
+            ? t('Zaproszenie wysłane.')
+            : t('Zaproszenie do {name} wysłane.', {'name': result.nickname}),
       ),
     ),
   );
   _openConversationScreen(
     context,
     peerAddress: result.target.address,
-    title: 'Kontakt Zen',
+    title: t('Kontakt Zen'),
   );
 }
 
@@ -3751,25 +3891,25 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
           .localAddress;
       if (localAddress.isNotEmpty &&
           PeerShareCodec.addressesEqual(target.address, localAddress)) {
-        throw const FormatException('Nie możesz dodać samego siebie.');
+        throw FormatException(t('Nie możesz dodać samego siebie.'));
       }
       final FriendProfile? existing = ref
           .read(socialHubControllerProvider)
           .friendByAddress(target.address);
       if (existing?.status == FriendRelationshipStatus.accepted) {
-        throw const FormatException('Ten peer jest już na liście znajomych.');
+        throw FormatException(t('Ten peer jest już na liście znajomych.'));
       }
       if (existing?.status == FriendRelationshipStatus.pendingOutgoing) {
-        throw const FormatException('Zaproszenie do tego peera już czeka.');
+        throw FormatException(t('Zaproszenie do tego peera już czeka.'));
       }
       if (existing?.status == FriendRelationshipStatus.pendingIncoming) {
-        throw const FormatException(
-          'Masz już oczekujące zaproszenie od tego peera.',
+        throw FormatException(
+          t('Masz już oczekujące zaproszenie od tego peera.'),
         );
       }
       if (existing?.status == FriendRelationshipStatus.blocked) {
-        throw const FormatException(
-          'Ten kontakt jest zablokowany. Odblokuj go w ustawieniach.',
+        throw FormatException(
+          t('Ten kontakt jest zablokowany. Odblokuj go w ustawieniach.'),
         );
       }
       final String nickname = sanitizeFriendNickname(_nicknameController.text);
@@ -3808,7 +3948,9 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
         return;
       }
       setState(() {
-        _errorText = 'Nie udało się wysłać zaproszenia: $error';
+        _errorText = t('Nie udało się wysłać zaproszenia: {error}', {
+          'error': error,
+        });
       });
     } finally {
       if (mounted) {
@@ -3857,7 +3999,7 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Text(
-                            'Dodaj znajomego',
+                            t('Dodaj znajomego'),
                             style: zen.display(
                               color: zen.textPrimary,
                               size: 22,
@@ -3867,7 +4009,7 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Wklej kod znajomego albo zeskanuj jego QR.',
+                            t('Wklej kod znajomego albo zeskanuj jego QR.'),
                             style: TextStyle(
                               color: zen.textSecondary,
                               fontSize: 13.5,
@@ -3904,9 +4046,11 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
                     }
                   },
                   decoration: InputDecoration(
-                    labelText: 'Kod lub zaproszenie',
+                    labelText: t('Kod lub zaproszenie'),
                     hintText: 'XXXXX-XXXXX-…',
-                    helperText: 'Wielkie litery i myślniki ustawiają się same.',
+                    helperText: t(
+                      'Wielkie litery i myślniki ustawiają się same.',
+                    ),
                     errorText: _errorText,
                     errorMaxLines: 3,
                     prefixIcon: const Icon(Icons.qr_code_2_rounded),
@@ -3918,12 +4062,12 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
                             key: const Key('add-friend-scan-button'),
                             onPressed: _submitting ? null : _scanTarget,
                             icon: const Icon(Icons.qr_code_scanner_rounded),
-                            tooltip: 'Skanuj QR',
+                            tooltip: t('Skanuj QR'),
                           ),
                         IconButton(
                           onPressed: _submitting ? null : _pasteTarget,
                           icon: const Icon(Icons.content_paste_rounded),
-                          tooltip: 'Wklej ze schowka',
+                          tooltip: t('Wklej ze schowka'),
                         ),
                         const SizedBox(width: 4),
                       ],
@@ -3936,14 +4080,15 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
                   controller: _nicknameController,
                   maxLength: kMaxFriendNickname,
                   textCapitalization: TextCapitalization.sentences,
-                  decoration: const InputDecoration(
-                    labelText: 'Pseudonim (opcjonalnie)',
-                    hintText: 'np. Kasia z pracy',
-                    helperText:
-                        'Nazwa przyjdzie z profilu tej osoby. Pseudonim '
-                        'widzisz tylko Ty, pod jej nazwą.',
+                  decoration: InputDecoration(
+                    labelText: t('Pseudonim (opcjonalnie)'),
+                    hintText: t('np. Kasia z pracy'),
+                    helperText: t(
+                      'Nazwa przyjdzie z profilu tej osoby. Pseudonim '
+                      'widzisz tylko Ty, pod jej nazwą.',
+                    ),
                     helperMaxLines: 3,
-                    prefixIcon: Icon(Icons.badge_outlined),
+                    prefixIcon: const Icon(Icons.badge_outlined),
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -3954,8 +4099,10 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
                   maxLines: 4,
                   textCapitalization: TextCapitalization.sentences,
                   decoration: InputDecoration(
-                    labelText: 'Notatka startowa',
-                    hintText: 'Opcjonalna wiadomość dołączona do zaproszenia',
+                    labelText: t('Notatka startowa'),
+                    hintText: t(
+                      'Opcjonalna wiadomość dołączona do zaproszenia',
+                    ),
                     hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: zen.textMuted.withValues(alpha: 0.75),
                       fontStyle: FontStyle.italic,
@@ -3977,14 +4124,16 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.send_rounded, size: 18),
-                  label: Text(_submitting ? 'Wysyłanie' : 'Wyślij zaproszenie'),
+                  label: Text(
+                    _submitting ? t('Wysyłanie') : t('Wyślij zaproszenie'),
+                  ),
                 ),
                 const SizedBox(height: 6),
                 TextButton(
                   onPressed: _submitting
                       ? null
                       : () => Navigator.of(context).pop(),
-                  child: const Text('Anuluj'),
+                  child: Text(t('Anuluj')),
                 ),
               ],
             ),

@@ -554,8 +554,15 @@ void main() {
 
   group('group members who are not friends', () {
     /// Alice and bob share a group but are not friends; the helpers are
-    /// everyone's friends and hold mail as usual.
-    Future<_SimMesh> groupMesh({bool bobShares = true}) async {
+    /// everyone's friends and hold mail as usual. Sharing mailboxes with group
+    /// members is opt-in, so it is switched on here for whoever [aliceShares] /
+    /// [bobShares] say; [onSend] sees every datagram from the very start.
+    Future<_SimMesh> groupMesh({
+      bool aliceShares = true,
+      bool bobShares = true,
+      void Function(String from, String to, Map<String, dynamic> payload)?
+      onSend,
+    }) async {
       final _SimMesh mesh = _SimMesh();
       mesh.add(alice);
       mesh.add(bob);
@@ -569,8 +576,17 @@ void main() {
       mesh.nodes[bob]!
         ..friends.remove(alice)
         ..groupMates.add(alice);
-      if (!bobShares) {
-        await mesh.nodes[bob]!.engine.setShareWithGroups(false);
+      if (aliceShares) {
+        await mesh.nodes[alice]!.engine.setShareWithGroups(true);
+      }
+      if (bobShares) {
+        await mesh.nodes[bob]!.engine.setShareWithGroups(true);
+      }
+      if (onSend != null) {
+        mesh.interceptor = (String from, String to, Map<String, dynamic> p) {
+          onSend(from, to, p);
+          return p;
+        };
       }
       for (final _SimNode node in mesh.nodes.values) {
         await node.engine.activate();
@@ -651,6 +667,124 @@ void main() {
         expect((await mesh.nodes[relay]!.state()).mailbox[bob], isNull);
       },
     );
+
+    test('by default the mailboxes are announced to friends only, never to '
+        'group members who are not friends', () async {
+      final List<String> toGroupMate = <String>[];
+      final _SimMesh mesh = await groupMesh(
+        aliceShares: false,
+        bobShares: false,
+        onSend: (String from, String to, Map<String, dynamic> p) {
+          if (p['type'] == 'rly_announce' &&
+              <String>{from, to}.containsAll(<String>[alice, bob])) {
+            toGroupMate.add('$from>$to');
+          }
+        },
+      );
+      // Long enough for every retry of an unconfirmed announcement.
+      await mesh.advance(const Duration(minutes: 5));
+      await mesh.advance(const Duration(minutes: 5));
+
+      expect(toGroupMate, isEmpty);
+      for (final String who in <String>[alice, bob]) {
+        final RelayState state = await mesh.nodes[who]!.state();
+        expect(state.shareWithGroups, isFalse, reason: who);
+        expect(
+          mesh.nodes[who]!.engine.overview.value.shareWithGroups,
+          isFalse,
+          reason: who,
+        );
+        expect(
+          state.peers.keys,
+          everyElement(isIn(helpers)),
+          reason: '$who learned mailboxes of group mates',
+        );
+      }
+      // Friends are told as ever.
+      for (final String helper in helpers) {
+        expect(
+          (await mesh.nodes[helper]!.state()).peers[bob]?.relays,
+          (await mesh.nodes[bob]!.state()).currentRelays,
+          reason: helper,
+        );
+      }
+      expect((await mesh.nodes[bob]!.state()).currentRelays, hasLength(6));
+    });
+
+    test('opting in later shares the mailboxes with group members, and '
+        'opting out stops it again', () async {
+      final _SimMesh mesh = await groupMesh(
+        aliceShares: false,
+        bobShares: false,
+      );
+      expect((await mesh.nodes[alice]!.state()).peers[bob], isNull);
+
+      await mesh.nodes[alice]!.engine.setShareWithGroups(true);
+      await mesh.nodes[bob]!.engine.setShareWithGroups(true);
+      await mesh.advance(const Duration(seconds: 6));
+      final List<String> shared =
+          (await mesh.nodes[bob]!.state()).currentRelays;
+      expect((await mesh.nodes[alice]!.state()).peers[bob]?.relays, shared);
+      expect(
+        (await mesh.nodes[bob]!.state()).announcedVersions,
+        contains(alice),
+      );
+
+      // Off again: a new relay set no longer reaches the group mate, and its
+      // confirmation is forgotten.
+      await mesh.nodes[bob]!.engine.setShareWithGroups(false);
+      await mesh.nodes[bob]!.engine.setManualRelays(<String>[helpers[0]]);
+      await mesh.advance(const Duration(minutes: 5));
+      expect((await mesh.nodes[alice]!.state()).peers[bob]?.relays, shared);
+      expect(
+        (await mesh.nodes[bob]!.state()).announcedVersions,
+        isNot(contains(alice)),
+      );
+      // Friends did learn it.
+      expect(
+        (await mesh.nodes[helpers[1]]!.state()).peers[bob]?.relays,
+        <String>[helpers[0]],
+      );
+    });
+
+    test('a stored "on" from before the setting was opt-in is switched off '
+        'once, and a later choice sticks', () async {
+      final _SimMesh mesh = _SimMesh();
+      final _SimNode node = mesh.add(bob);
+      final _LegacyRelayStore store = _LegacyRelayStore(
+        jsonEncode(<String, dynamic>{'v': 1, 'swg': true}),
+      );
+      RelayEngine engineOver(_LegacyRelayStore s) => RelayEngine(
+        store: s,
+        peers: node,
+        send: (String to, Map<String, dynamic> payload) async {},
+        clock: () => mesh.now,
+      );
+
+      RelayEngine engine = engineOver(store);
+      await engine.activate();
+      expect(engine.overview.value.shareWithGroups, isFalse);
+      expect(
+        (jsonDecode(store.raw) as Map<String, dynamic>)['sv'],
+        kRelaySettingsVersion,
+      );
+
+      await engine.setShareWithGroups(true);
+      engine.deactivate();
+      engine = engineOver(store);
+      await engine.activate();
+      expect(
+        engine.overview.value.shareWithGroups,
+        isTrue,
+        reason: 'the migration does not run again over the new choice',
+      );
+
+      await engine.setShareWithGroups(false);
+      engine.deactivate();
+      engine = engineOver(store);
+      await engine.activate();
+      expect(engine.overview.value.shareWithGroups, isFalse);
+    });
   });
 
   test('a flooding sender only ever pushes out its own mail', () async {
@@ -1140,6 +1274,198 @@ void main() {
       },
     );
   });
+
+  group('delivery news for the chat', () {
+    /// A chat message too big for the mailboxes (the limit is 48 KB).
+    Map<String, dynamic> bigMessage(String id) => <String, dynamic>{
+      'type': 'message',
+      'msgId': id,
+      'text': 'x' * (49 * 1024),
+    };
+
+    test('a message nobody acknowledged is reported expired, once, after the '
+        'retention window', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final RelayEngine engine = mesh.nodes[alice]!.engine;
+      await mesh.goOffline(bob);
+      await engine.submit(bob, _text('znika'));
+      await mesh.advance(const Duration(seconds: 5)); // mailboxes got a copy
+      await mesh.advance(const Duration(days: 13));
+      expect(engine.deliveryReportCount.value, 0);
+      expect(await engine.takeDeliveryReports(), isEmpty);
+
+      await mesh.advance(const Duration(days: 2));
+      expect((await mesh.nodes[alice]!.state()).outbox, isEmpty);
+      expect(engine.deliveryReportCount.value, 1);
+      final List<RelayDeliveryReport> reports = await engine
+          .takeDeliveryReports();
+      expect(reports, hasLength(1));
+      expect(reports.single.status, RelayDeliveryStatus.expired);
+      expect(reports.single.messageId, 'm-znika');
+      expect(reports.single.recipient, bob);
+      expect(engine.deliveryReportCount.value, 0);
+      expect(await engine.takeDeliveryReports(), isEmpty);
+    });
+
+    test('an expiry survives a restart until the chat takes it, and is not '
+        'handed out by an engine that does not own the node', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      await mesh.goOffline(bob);
+      await mesh.nodes[alice]!.engine.submit(bob, _text('po restarcie'));
+      await mesh.advance(const Duration(days: 15));
+      expect(
+        (await mesh.nodes[alice]!.state()).deliveryReports.single.messageId,
+        'm-po restarcie',
+      );
+
+      mesh.nodes[alice]!.restart();
+      final RelayEngine restarted = mesh.nodes[alice]!.engine;
+      expect(await restarted.takeDeliveryReports(), isEmpty);
+      expect(
+        (await mesh.nodes[alice]!.state()).deliveryReports,
+        hasLength(1),
+        reason: 'not taken by an engine that is not the writer',
+      );
+
+      await restarted.activate();
+      expect(restarted.deliveryReportCount.value, 1);
+      final List<RelayDeliveryReport> reports = await restarted
+          .takeDeliveryReports();
+      expect(reports.single.status, RelayDeliveryStatus.expired);
+      expect(reports.single.messageId, 'm-po restarcie');
+      expect((await mesh.nodes[alice]!.state()).deliveryReports, isEmpty);
+    });
+
+    test('delivered messages and other payload types leave no report', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final RelayEngine engine = mesh.nodes[alice]!.engine;
+      await engine.submit(bob, _text('doszła'));
+      await mesh.settle();
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['doszła']);
+
+      // `msgId` of a receipt names the *other* side's message: never reported.
+      await mesh.goOffline(bob);
+      await engine.submit(bob, <String, dynamic>{
+        'type': 'message_ack',
+        'msgId': 'm-cudza',
+      });
+      await engine.submit(bob, <String, dynamic>{
+        'type': 'group_message',
+        'groupId': 'g',
+        'msgId': 'gm-1',
+      });
+      await mesh.advance(const Duration(days: 15));
+      expect((await mesh.nodes[alice]!.state()).outbox, isEmpty);
+      expect(await engine.takeDeliveryReports(), isEmpty);
+    });
+
+    test('a message too large for the mailboxes is reported as direct-only '
+        'once they would have had a copy, not as failed', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final RelayEngine engine = mesh.nodes[alice]!.engine;
+      await mesh.goOffline(bob);
+      await engine.submit(bob, bigMessage('big-1'));
+      await mesh.advance(const Duration(seconds: 1));
+      expect(await engine.takeDeliveryReports(), isEmpty);
+
+      await mesh.advance(const Duration(seconds: 5));
+      final List<RelayDeliveryReport> reports = await engine
+          .takeDeliveryReports();
+      expect(reports, hasLength(1));
+      expect(reports.single.status, RelayDeliveryStatus.directOnly);
+      expect(reports.single.messageId, 'big-1');
+      expect(reports.single.recipient, bob);
+      for (final String helper in helpers) {
+        expect(
+          (await mesh.nodes[helper]!.state()).mailbox[bob],
+          isNull,
+          reason: '$helper must not hold what is too large',
+        );
+      }
+      expect((await mesh.nodes[alice]!.state()).outbox, hasLength(1));
+
+      // Said once, not on every tick.
+      await mesh.advance(const Duration(minutes: 1));
+      expect(await engine.takeDeliveryReports(), isEmpty);
+
+      // It is still retried and arrives when both are online.
+      await mesh.goOnline(bob);
+      await mesh.advance(const Duration(minutes: 3));
+      expect(mesh.nodes[bob]!.receivedTexts, hasLength(1));
+      expect((await mesh.nodes[alice]!.state()).outbox, isEmpty);
+      expect(await engine.takeDeliveryReports(), isEmpty);
+    });
+
+    test('a large message that is acknowledged first is not reported, and a '
+        'pending report is withdrawn when it arrives', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final RelayEngine engine = mesh.nodes[alice]!.engine;
+      await engine.submit(bob, bigMessage('big-2'));
+      await mesh.settle(); // bob is online: received and acknowledged
+      await mesh.advance(const Duration(seconds: 10));
+      expect(mesh.nodes[bob]!.receivedTexts, hasLength(1));
+      expect(await engine.takeDeliveryReports(), isEmpty);
+
+      await mesh.goOffline(bob);
+      await engine.submit(bob, bigMessage('big-3'));
+      await mesh.advance(const Duration(seconds: 6));
+      expect(engine.deliveryReportCount.value, 1);
+
+      await mesh.goOnline(bob);
+      await mesh.advance(const Duration(minutes: 3));
+      expect(mesh.nodes[bob]!.receivedTexts, hasLength(2));
+      expect(engine.deliveryReportCount.value, 0);
+      expect(await engine.takeDeliveryReports(), isEmpty);
+    });
+
+    test('the chat is told about the newest expiries when there are too '
+        'many', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final RelayEngine engine = mesh.nodes[alice]!.engine;
+      // Nobody known to the relay layer: queued, never handed to a mailbox.
+      final String stranger = _addr('200::dead');
+      for (int i = 0; i < 205; i++) {
+        await engine.submit(stranger, <String, dynamic>{
+          'type': 'message',
+          'msgId': 'c-$i',
+          'text': '$i',
+        });
+      }
+      await mesh.advance(const Duration(days: 15));
+      final List<RelayDeliveryReport> reports = await engine
+          .takeDeliveryReports();
+      expect(reports, hasLength(200));
+      expect(
+        reports.map((RelayDeliveryReport r) => r.messageId).toSet(),
+        containsAll(<String>['c-204', 'c-5']),
+      );
+      expect(
+        reports.map((RelayDeliveryReport r) => r.messageId),
+        isNot(contains('c-4')),
+      );
+      expect(
+        reports.every(
+          (RelayDeliveryReport r) => r.status == RelayDeliveryStatus.expired,
+        ),
+        isTrue,
+      );
+    });
+  });
+}
+
+/// A store that starts from a document written by an older app version.
+final class _LegacyRelayStore implements RelayStateStore {
+  _LegacyRelayStore(this.raw);
+
+  String raw;
+
+  @override
+  Future<RelayState> load() async => RelayState.fromJsonString(raw);
+
+  @override
+  Future<void> save(RelayState state) async {
+    raw = state.toJsonString();
+  }
 }
 
 Map<String, dynamic> _fakeEnvelope({

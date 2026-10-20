@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
@@ -27,7 +28,7 @@ class AccountDevicesScreen extends ConsumerStatefulWidget {
   static Future<void> open(BuildContext context) async {
     if (!await confirmSensitiveAccess(
           context,
-          reason: 'Urządzenia konta są chronione. Potwierdź, że to Ty.',
+          reason: t('Urządzenia konta są chronione. Potwierdź, że to Ty.'),
         ) ||
         !context.mounted) {
       return;
@@ -86,7 +87,7 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
     }
     final bool ok = await node.identity.unlock(password);
     if (!ok && mounted) {
-      setState(() => _message = 'Złe hasło konta.');
+      setState(() => _message = t('Złe hasło konta.'));
     }
     return ok;
   }
@@ -95,17 +96,19 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
     final bool? sure = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
-        title: Text('Odłączyć „${device.name}”?'),
-        content: const Text(
-          'To urządzenie przestanie należeć do konta: nie dostanie '
-          'wiadomości ani nowych wpisów, a to, co by na nim napisano od '
-          'teraz, wszyscy odrzucą. Zrób to, gdy urządzenie zginęło albo '
-          'zostało skradzione. Tego nie da się cofnąć.',
+        title: Text(t('Odłączyć „{name}”?', {'name': device.name})),
+        content: Text(
+          t(
+            'To urządzenie przestanie należeć do konta: nie dostanie '
+            'wiadomości ani nowych wpisów, a to, co by na nim napisano od '
+            'teraz, wszyscy odrzucą. Zrób to, gdy urządzenie zginęło albo '
+            'zostało skradzione. Tego nie da się cofnąć.',
+          ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialog).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             key: const Key('device-unlink-confirm'),
@@ -113,20 +116,20 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
               backgroundColor: Theme.of(dialog).colorScheme.error,
             ),
             onPressed: () => Navigator.of(dialog).pop(true),
-            child: const Text('Odłącz'),
+            child: Text(t('Odłącz')),
           ),
         ],
       ),
     );
-    if (sure != true || !await _unlock('Odłączenie urządzenia')) {
+    if (sure != true || !await _unlock(t('Odłączenie urządzenia'))) {
       return;
     }
     setState(() => _busy = true);
     try {
       await _node!.unlinkDevice(device.device);
-      _message = '„${device.name}” jest odłączone.';
+      _message = t('„{name}” jest odłączone.', {'name': device.name});
     } on Object catch (error) {
-      _message = 'Nie udało się: $error';
+      _message = t('Nie udało się: {error}', {'error': error});
     } finally {
       _node!.identity.lock();
       if (mounted) {
@@ -145,7 +148,7 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
     final ZenColors zen = ZenColors.of(context);
     return Scaffold(
       key: const Key('account-devices-screen'),
-      appBar: AppBar(title: const Text('Urządzenia')),
+      appBar: AppBar(title: Text(t('Urządzenia'))),
       body: !ready
           ? const _Starting()
           : ListView(
@@ -160,22 +163,24 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
                   ZenInfo(
                     icon: Icons.warning_amber_rounded,
                     tone: zen.danger,
-                    title: 'To urządzenie zostało odłączone od konta',
-                    text:
-                        'Zrobiło to inne urządzenie tego konta. Nic, co '
-                        'tu napiszesz, nie zostanie przyjęte.',
+                    title: t('To urządzenie zostało odłączone od konta'),
+                    text: t(
+                      'Zrobiło to inne urządzenie tego konta. Nic, co '
+                      'tu napiszesz, nie zostanie przyjęte.',
+                    ),
                   ),
                 ZenHero(
-                  title: 'Jedno konto, wiele urządzeń',
+                  title: t('Jedno konto, wiele urządzeń'),
                   icon: Icons.devices_rounded,
                   tone: zenTone(zen, 7),
-                  text:
-                      'Twoje konto może działać na kilku urządzeniach naraz. '
-                      'Znajomi widzą je jako jedną osobę: wiadomości i '
-                      'połączenia trafiają na każde, a znajomi i grupy są '
-                      'wszędzie takie same.',
+                  text: t(
+                    'Twoje konto może działać na kilku urządzeniach naraz. '
+                    'Znajomi widzą je jako jedną osobę: wiadomości i '
+                    'połączenia trafiają na każde, a znajomi i grupy są '
+                    'wszędzie takie same.',
+                  ),
                 ),
-                const ZenSection('Twoje urządzenia', top: 12),
+                ZenSection(t('Twoje urządzenia'), top: 12),
                 for (final AccountDevice d in node.ownDevices)
                   ZenTile(
                     key: Key('device-${d.device}'),
@@ -185,10 +190,10 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
                     tone: d.isThis ? zen.accent : zenTone(zen, 7),
                     title: d.name,
                     subtitle: d.isThis
-                        ? 'To urządzenie'
+                        ? t('To urządzenie')
                         : d.address == null
-                        ? 'Jeszcze się nie odezwało'
-                        : 'Podłączone',
+                        ? t('Jeszcze się nie odezwało')
+                        : t('Podłączone'),
                     trailing: d.isThis
                         ? const SizedBox.shrink()
                         : TextButton(
@@ -203,7 +208,7 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
                             onPressed: _busy
                                 ? null
                                 : () => unawaited(_unlink(d)),
-                            child: const Text('Odłącz'),
+                            child: Text(t('Odłącz')),
                           ),
                   ),
                 const SizedBox(height: 20),
@@ -222,7 +227,7 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
                           ),
                         ),
                   icon: const Icon(Icons.add_link_rounded),
-                  label: const Text('Podłącz nowe urządzenie'),
+                  label: Text(t('Podłącz nowe urządzenie')),
                 ),
                 const SizedBox(height: 10),
                 OutlinedButton.icon(
@@ -238,8 +243,8 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
                     ),
                   ),
                   icon: const Icon(Icons.login_rounded),
-                  label: const Text(
-                    'To nowe urządzenie: dołącz do konta',
+                  label: Text(
+                    t('To nowe urządzenie: dołącz do konta'),
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -266,7 +271,7 @@ class _Starting extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           Text(
-            'Konto się uruchamia…',
+            t('Konto się uruchamia…'),
             style: TextStyle(color: zen.textSecondary, fontSize: 14.5),
           ),
         ],
@@ -362,21 +367,21 @@ Future<String?> askAccountPassword(BuildContext context, String title) async {
         obscureText: true,
         autofocus: true,
         enableIMEPersonalizedLearning: false,
-        decoration: const InputDecoration(
-          labelText: 'Hasło konta',
-          prefixIcon: Icon(Icons.lock_outline_rounded),
+        decoration: InputDecoration(
+          labelText: t('Hasło konta'),
+          prefixIcon: const Icon(Icons.lock_outline_rounded),
         ),
         onSubmitted: (String v) => Navigator.of(dialog).pop(v),
       ),
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(dialog).pop(),
-          child: const Text('Anuluj'),
+          child: Text(t('Anuluj')),
         ),
         FilledButton(
           key: const Key('account-password-ok'),
           onPressed: () => Navigator.of(dialog).pop(controller.text),
-          child: const Text('Dalej'),
+          child: Text(t('Dalej')),
         ),
       ],
     ),
@@ -473,7 +478,7 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
     final LedgerNode? node = ref.read(ledgerNodeProvider);
     final String me = ref.read(runtimeNodeSnapshotProvider).localAddress;
     if (node == null || PeerShareCodec.addressesEqual(address, me)) {
-      setState(() => _message = 'To jest kod tego urządzenia.');
+      setState(() => _message = t('To jest kod tego urządzenia.'));
       return;
     }
     await _sender?.dispose();
@@ -484,7 +489,7 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
     _sender = sender;
     setState(() {
       _busy = true;
-      _message = 'Łączę się z nowym urządzeniem…';
+      _message = t('Łączę się z nowym urządzeniem…');
       _digits = null;
     });
     try {
@@ -509,20 +514,20 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
     if (node.identity.accountKey == null) {
       final String? password = await askAccountPassword(
         context,
-        'Podłączenie urządzenia',
+        t('Podłączenie urządzenia'),
       );
       if (password == null) {
         return;
       }
       if (!await node.identity.unlock(password)) {
-        setState(() => _message = 'Złe hasło konta.');
+        setState(() => _message = t('Złe hasło konta.'));
         return;
       }
     }
     final LedgerKeyPair key = node.identity.accountKey!;
     setState(() {
       _busy = true;
-      _message = 'Wysyłam konto…';
+      _message = t('Wysyłam konto…');
     });
     try {
       final String me = ref.read(runtimeNodeSnapshotProvider).localAddress;
@@ -533,9 +538,10 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
       );
       setState(() {
         _done = true;
-        _message =
-            'Gotowe. Nowe urządzenie za chwilę dostanie Twoich znajomych '
-            'i grupy.';
+        _message = t(
+          'Gotowe. Nowe urządzenie za chwilę dostanie Twoich znajomych '
+          'i grupy.',
+        );
       });
     } on Object catch (error) {
       logZenWarning('Podłączenie urządzenia: $error');
@@ -554,18 +560,19 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Podłącz nowe urządzenie')),
+      appBar: AppBar(title: Text(t('Podłącz nowe urządzenie'))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: <Widget>[
           ZenHero(
-            title: 'Przenieś konto na nowe urządzenie',
+            title: t('Przenieś konto na nowe urządzenie'),
             icon: Icons.add_link_rounded,
             tone: zenTone(zen, 7),
-            text:
-                'Na nowym urządzeniu otwórz Ustawienia → Urządzenia → „To nowe '
-                'urządzenie: dołącz do konta”. Pokaże kod. Zeskanuj go albo '
-                'przepisz tutaj.',
+            text: t(
+              'Na nowym urządzeniu otwórz Ustawienia → Urządzenia → „To nowe '
+              'urządzenie: dołącz do konta”. Pokaże kod. Zeskanuj go albo '
+              'przepisz tutaj.',
+            ),
           ),
           const SizedBox(height: 8),
           TextField(
@@ -573,11 +580,11 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
             controller: _code,
             enabled: !_done,
             decoration: InputDecoration(
-              labelText: 'Kod nowego urządzenia',
-              hintText: 'Zeskanuj albo wpisz kod',
+              labelText: t('Kod nowego urządzenia'),
+              hintText: t('Zeskanuj albo wpisz kod'),
               prefixIcon: const Icon(Icons.key_rounded),
               suffixIcon: IconButton(
-                tooltip: 'Zeskanuj kod QR',
+                tooltip: t('Zeskanuj kod QR'),
                 onPressed: _done ? null : () => unawaited(_scan()),
                 icon: const Icon(Icons.qr_code_scanner_rounded),
               ),
@@ -592,12 +599,12 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
               ),
               onPressed: _busy ? null : () => unawaited(_connect()),
               icon: const Icon(Icons.link_rounded),
-              label: const Text('Połącz'),
+              label: Text(t('Połącz')),
             ),
           if (_digits != null && !_done) ...<Widget>[
             const SizedBox(height: 12),
             Text(
-              'Czy na nowym urządzeniu widać dokładnie te cyfry?',
+              t('Czy na nowym urządzeniu widać dokładnie te cyfry?'),
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: zen.textPrimary,
@@ -613,8 +620,8 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
               ),
               onPressed: _busy ? null : () => unawaited(_send()),
               icon: const Icon(Icons.check_rounded),
-              label: const Text(
-                'Tak, te same — wyślij konto',
+              label: Text(
+                t('Tak, te same — wyślij konto'),
                 textAlign: TextAlign.center,
               ),
             ),
@@ -626,11 +633,12 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
                   ? null
                   : () => setState(() {
                       _digits = null;
-                      _message =
-                          'Cyfry się różniły — nic nie zostało wysłane. '
-                          'Spróbuj jeszcze raz.';
+                      _message = t(
+                        'Cyfry się różniły — nic nie zostało wysłane. '
+                        'Spróbuj jeszcze raz.',
+                      );
                     }),
-              child: const Text('Nie, są inne'),
+              child: Text(t('Nie, są inne')),
             ),
           ],
           if (_message != null)
@@ -658,8 +666,7 @@ class _LinkReceiveScreen extends ConsumerStatefulWidget {
 
 class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
   late final AccountLinkReceiver _receiver;
-  String? _digits;
-  LinkedAccount? _account;
+  StreamSubscription<void>? _offers;
   String? _message;
   bool _done = false;
 
@@ -668,37 +675,30 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
     super.initState();
     _receiver = AccountLinkReceiver(transport: ref.read(meshTransportProvider))
       ..start();
-    unawaited(
-      _receiver.digits.then((String d) {
-        if (mounted) {
-          setState(() => _digits = d);
-        }
-      }),
-    );
-    unawaited(
-      _receiver.account.then((LinkedAccount a) {
-        if (mounted) {
-          setState(() => _account = a);
-        }
-      }),
-    );
+    // Every greeting device shows its own digits: a stranger who greets
+    // first cannot block the real one (S-14).
+    _offers = _receiver.changes.listen((_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
   }
 
   @override
   void dispose() {
+    unawaited(_offers?.cancel());
     unawaited(_receiver.dispose());
     super.dispose();
   }
 
-  Future<void> _take() async {
-    final LinkedAccount? got = _account;
+  Future<void> _take(LinkedAccount got) async {
     final LedgerNode? node = ref.read(ledgerNodeProvider);
-    if (got == null || node == null) {
+    if (node == null) {
       return;
     }
     final LedgerKeyPair key = await LedgerKeyPair.fromSeed(got.seed);
     if (key.id != got.account) {
-      setState(() => _message = 'Otrzymany klucz nie pasuje do konta.');
+      setState(() => _message = t('Otrzymany klucz nie pasuje do konta.'));
       return;
     }
     await node.rememberDeviceAddresses(got.siblings);
@@ -707,17 +707,19 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
       got.seed,
       deviceName: thisDeviceName,
     );
-    await _receiver.confirm();
+    await _receiver.confirm(got);
     setState(() {
       _done = true;
-      _message =
-          'To urządzenie należy teraz do Twojego konta. Uruchom aplikację '
-          'ponownie — znajomi i grupy pojawią się po chwili.';
+      _message = t(
+        'To urządzenie należy teraz do Twojego konta. Uruchom aplikację '
+        'ponownie — znajomi i grupy pojawią się po chwili.',
+      );
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    final List<AccountLinkOffer> offers = _receiver.offers;
     final String me = ref.watch(
       runtimeNodeSnapshotProvider.select(
         (RuntimeTransportSnapshot s) => s.localAddress,
@@ -728,30 +730,32 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
     );
     final ZenColors zen = ZenColors.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Dołącz do konta')),
+      appBar: AppBar(title: Text(t('Dołącz do konta'))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: <Widget>[
           ZenHero(
-            title: 'Dołącz to urządzenie',
+            title: t('Dołącz to urządzenie'),
             icon: Icons.login_rounded,
             tone: zenTone(zen, 7),
-            text:
-                'Na urządzeniu, które już ma Twoje konto, otwórz Ustawienia → '
-                'Urządzenia → „Podłącz nowe urządzenie” i zeskanuj ten kod '
-                '(albo go przepisz).',
+            text: t(
+              'Na urządzeniu, które już ma Twoje konto, otwórz Ustawienia → '
+              'Urządzenia → „Podłącz nowe urządzenie” i zeskanuj ten kod '
+              '(albo go przepisz).',
+            ),
           ),
           ZenInfo(
             icon: Icons.warning_amber_rounded,
             tone: zen.warning,
-            text:
-                'Uwaga: jeśli to urządzenie miało już swoje konto, przejdzie na '
-                'konto z drugiego urządzenia, a dotychczasowe przestanie być '
-                'używane.',
+            text: t(
+              'Uwaga: jeśli to urządzenie miało już swoje konto, przejdzie na '
+              'konto z drugiego urządzenia, a dotychczasowe przestanie być '
+              'używane.',
+            ),
           ),
           const SizedBox(height: 12),
           if (profile == null)
-            const _Waiting('Czekam na połączenie z siecią…')
+            _Waiting(t('Czekam na połączenie z siecią…'))
           else
             ZenCard(
               padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
@@ -771,7 +775,7 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
                   ),
                   const SizedBox(height: 14),
                   Text(
-                    'KOD TEGO URZĄDZENIA',
+                    t('KOD TEGO URZĄDZENIA'),
                     style: zen.label(color: zen.textMuted),
                   ),
                   const SizedBox(height: 4),
@@ -790,11 +794,11 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
               ),
             ),
           const SizedBox(height: 16),
-          if (_digits == null)
-            const _Waiting('Czekam na drugie urządzenie…')
+          if (offers.isEmpty)
+            _Waiting(t('Czekam na drugie urządzenie…'))
           else if (!_done) ...<Widget>[
             Text(
-              'Sprawdź, czy drugie urządzenie pokazuje te same cyfry:',
+              t('Sprawdź, czy drugie urządzenie pokazuje te same cyfry:'),
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: zen.textPrimary,
@@ -802,22 +806,35 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
                 fontWeight: FontWeight.w700,
               ),
             ),
-            _digitsBox(context, _digits!),
-            if (_account == null)
-              const _Waiting('Potwierdź je na drugim urządzeniu.')
-            else
-              FilledButton.icon(
-                key: const Key('link-take'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(52),
-                ),
-                onPressed: () => unawaited(_take()),
-                icon: const Icon(Icons.check_rounded),
-                label: const Text(
-                  'Cyfry były te same — dołącz do konta',
-                  textAlign: TextAlign.center,
+            if (offers.length > 1)
+              ZenInfo(
+                key: const Key('link-several'),
+                icon: Icons.warning_amber_rounded,
+                tone: zen.warning,
+                text: t(
+                  'Łączy się więcej niż jedno urządzenie. Dołącz tylko '
+                  'tam, gdzie cyfry są takie same jak na Twoim drugim '
+                  'urządzeniu.',
                 ),
               ),
+            for (int i = 0; i < offers.length; i++) ...<Widget>[
+              _digitsBox(context, offers[i].digits),
+              if (offers[i].account == null)
+                _Waiting(t('Potwierdź je na drugim urządzeniu.'))
+              else
+                FilledButton.icon(
+                  key: Key(i == 0 ? 'link-take' : 'link-take-$i'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                  ),
+                  onPressed: () => unawaited(_take(offers[i].account!)),
+                  icon: const Icon(Icons.check_rounded),
+                  label: Text(
+                    t('Cyfry były te same — dołącz do konta'),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+            ],
           ],
           if (_message != null)
             Padding(

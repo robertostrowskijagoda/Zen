@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
@@ -54,5 +55,36 @@ void main() {
     expect(entries.single.previewUrl, 'https://example.com/cat-preview.gif');
     expect(entries.single.sendUrl, 'https://example.com/cat.gif');
     expect(entries.single.label, 'Kot macha lapa');
+  });
+
+  group('Klipy requests use the app language', () {
+    tearDown(ZenI18n.debugReset);
+
+    test('Polish by default (the source language)', () {
+      const KlipyGifCatalog catalog = KlipyGifCatalog(apiKey: 'k');
+      expect(catalog.featuredUri().queryParameters['locale'], 'pl_PL');
+      expect(catalog.searchUri('kot').queryParameters['locale'], 'pl_PL');
+    });
+
+    test('follows the language the app speaks', () {
+      const KlipyGifCatalog catalog = KlipyGifCatalog(apiKey: 'k');
+      ZenI18n.debugUse('en', const <String, Object?>{});
+      expect(catalog.featuredUri().queryParameters['locale'], 'en_US');
+      ZenI18n.debugUse('de', const <String, Object?>{});
+      final Uri search = catalog.searchUri('katze');
+      expect(search.queryParameters['locale'], 'de_DE');
+      expect(search.queryParameters['q'], 'katze');
+    });
+
+    test('every language Zen speaks maps to a locale', () {
+      for (final ZenLanguage language in kZenLanguages) {
+        expect(
+          klipyLocaleFor(language.code),
+          matches(RegExp('^${language.code}_[A-Z]{2}\$')),
+          reason: language.code,
+        );
+      }
+      expect(klipyLocaleFor('xx'), 'en_US');
+    });
   });
 }

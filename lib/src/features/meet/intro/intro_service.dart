@@ -2,8 +2,12 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/core/ledger/ledger_codec.dart';
+import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
@@ -98,6 +102,59 @@ String introText(Object? value, int max) {
   return cut.trim();
 }
 
+/// The mark on an introduction or a letter that came without the asker's
+/// signature (from an older app): the middle friend could have changed it.
+String introUnverifiedLabel() =>
+    t('Niezweryfikowane — pośrednik mógł zmienić treść');
+
+/// What the asker signs with their device key (S-17): the case, their own
+/// address, the one it is for, the words and their own name. The middle
+/// friend passes the signature on with the case and cannot change any of
+/// it without the signature failing.
+Uint8List introSignedBytes({
+  required String id,
+  required IntroKind kind,
+  required String asker,
+  required String target,
+  required String text,
+  required String name,
+}) => canonicalJsonBytes(<String, dynamic>{
+  't': 'zen_intro_v1',
+  'id': id,
+  'k': kind.name,
+  'a': asker,
+  'y': target,
+  'txt': text,
+  'n': name,
+});
+
+/// The asker's signature as it travels (`sg` in a frame): the device
+/// certificate (`d`), the signature (`s`), the asker's own address (`a`),
+/// the target (`y`) and the asker's own name (`n`). `null` for anything
+/// malformed.
+Map<String, dynamic>? introProofFromJson(Object? json) {
+  if (json is! Map) {
+    return null;
+  }
+  final DeviceCertificate? cert = DeviceCertificate.fromJson(json['d']);
+  final Object? s = json['s'];
+  final Object? a = json['a'];
+  final Object? y = json['y'];
+  final Object? n = json['n'];
+  if (cert == null ||
+      s is! String ||
+      s.length > 200 ||
+      a is! String ||
+      !_introAddress.hasMatch(a) ||
+      y is! String ||
+      !_introAddress.hasMatch(y) ||
+      n is! String ||
+      n.length > 200) {
+    return null;
+  }
+  return <String, dynamic>{'d': cert.toJson(), 's': s, 'a': a, 'y': y, 'n': n};
+}
+
 /// What a case is about (§24.1).
 enum IntroKind {
   /// X asks F to introduce them to Y.
@@ -167,6 +224,8 @@ final class IntroCase {
     this.status = IntroStatus.open,
     int? changedAt,
     this.befriendDue = false,
+    this.proof,
+    this.signed = false,
   }) : changedAt = changedAt ?? at;
 
   final String id;
@@ -202,6 +261,16 @@ final class IntroCase {
   /// app was away).
   bool befriendDue;
 
+  /// The asker's signature ([introProofFromJson]) the middle friend keeps
+  /// to pass on with the case.
+  final Map<String, dynamic>? proof;
+
+  /// For this person (target): the asker's signature checked out, so the
+  /// words, the kind and the asker's address and name are theirs. `false`
+  /// for a case from an older app (no signature) or under an address the
+  /// signature does not cover: shown as unverified.
+  final bool signed;
+
   bool get isOpen => status == IntroStatus.open;
 
   /// Waits for this person's decision.
@@ -228,6 +297,8 @@ final class IntroCase {
     's': status.name,
     'ch': changedAt,
     if (befriendDue) 'bf': true,
+    if (proof != null) 'sg': proof,
+    if (signed) 'sd': true,
   };
 
   static String _address(Object? v) =>
@@ -271,6 +342,8 @@ final class IntroCase {
       status: status,
       changedAt: ch is int ? ch : at,
       befriendDue: json['bf'] == true,
+      proof: introProofFromJson(json['sg']),
+      signed: json['sd'] == true,
     );
   }
 }
@@ -337,6 +410,10 @@ final class IntroService extends ChangeNotifier {
   /// The store could not be read: nothing is written until it can.
   bool _diskUnreadable = false;
   Future<void>? _loading;
+
+  /// This installation's ledger identity (device key and certificate) for
+  /// signing what this person asks; read from the store when first needed.
+  LedgerIdentity? _identity;
 
   int get now => _now();
 
@@ -571,14 +648,110 @@ final class IntroService extends ChangeNotifier {
     );
     _cases[c.id] = c;
     await _save();
+    final Map<String, dynamic>? proof = await _sign(c);
     await _send(f, <String, dynamic>{
       'type': IntroTypes.ask,
       'id': c.id,
       'k': kind.name,
       'a': y,
       if (text.isNotEmpty) 't': text,
+      'sg': ?proof,
     });
     return c;
+  }
+
+  /// This person's signature on [c] ([introSignedBytes]) with the device
+  /// key, for the one it is for to check; `null` before the ledger made
+  /// the keys (the case then goes unsigned, as from an older app).
+  Future<Map<String, dynamic>?> _sign(IntroCase c) async {
+    final String own = host.ownAddress();
+    if (own.isEmpty) {
+      return null;
+    }
+    try {
+      final LedgerIdentity? me = _identity ??= await LedgerIdentity.read(disk);
+      if (me == null) {
+        return null;
+      }
+      final String asker = _n(own);
+      final String name = sanitizePeerName(host.ownName());
+      final Uint8List sig = await me.deviceKey.sign(
+        introSignedBytes(
+          id: c.id,
+          kind: c.kind,
+          asker: asker,
+          target: c.target,
+          text: c.text,
+          name: name,
+        ),
+      );
+      return <String, dynamic>{
+        'd': me.certificate.toJson(),
+        's': b64(sig),
+        'a': asker,
+        'y': c.target,
+        'n': name,
+      };
+    } on Object catch (error, stack) {
+      logZenError('Przedstawienia: podpis', error, stack);
+      return null;
+    }
+  }
+
+  /// Checks the asker's signature ([proof], as the middle friend passed it
+  /// on) over what came, with the asker's own name:
+  ///  - `true`: signed by the device in its certificate, for this very
+  ///    case, its words, from [asker] to this person;
+  ///  - `false` (dropped): malformed, not matching what came, or signed
+  ///    for someone else;
+  ///  - `null` (shown as unverified): no signature (an older app on the
+  ///    way), or a sound one from another address than [asker] — the
+  ///    middle friend knows the asker by the address of another of their
+  ///    devices (§6), which this phone cannot tell from a swapped one.
+  Future<({bool? valid, String name})> _checkSigned(
+    Object? proof, {
+    required String id,
+    required IntroKind kind,
+    required String asker,
+    required String text,
+  }) async {
+    if (proof == null) {
+      return (valid: null, name: '');
+    }
+    final Map<String, dynamic>? p = introProofFromJson(proof);
+    if (p == null) {
+      return (valid: false, name: '');
+    }
+    final String signedAsker = p['a'] as String;
+    final String target = p['y'] as String;
+    final String own = host.ownAddress();
+    if (own.isNotEmpty && !PeerShareCodec.addressesEqual(own, target)) {
+      // Signed for someone else: passed on to the wrong person.
+      return (valid: false, name: '');
+    }
+    final DeviceCertificate cert = DeviceCertificate.fromJson(p['d'])!;
+    final String name = p['n'] as String;
+    final bool sound =
+        await cert.verify() &&
+        await verifyLedgerSignature(
+          publicKey: cert.device,
+          message: introSignedBytes(
+            id: id,
+            kind: kind,
+            asker: signedAsker,
+            target: target,
+            text: text,
+            name: name,
+          ),
+          signature: p['s'] as String,
+        );
+    if (!sound) {
+      return (valid: false, name: '');
+    }
+    if (!PeerShareCodec.addressesEqual(signedAsker, asker)) {
+      return (valid: null, name: '');
+    }
+    return (valid: true, name: name);
   }
 
   /// Asks [friend] to see their friend list. Returns the case (the one
@@ -754,7 +927,9 @@ final class IntroService extends ChangeNotifier {
       await f.befriend(
         asked ? c.target : c.asker,
         name: asked ? c.targetName : c.askerName,
-        note: 'Poznaliśmy się przez: ${host.nameOf(c.middle)}',
+        note: t('Poznaliśmy się przez: {name}', {
+          'name': host.nameOf(c.middle),
+        }),
       );
       c.befriendDue = false;
       await _save();
@@ -854,6 +1029,8 @@ final class IntroService extends ChangeNotifier {
       asker: from,
       target: target,
       text: text,
+      // Passed on as it came: only the one it is for can check it.
+      proof: introProofFromJson(p['sg']),
     );
     if (kind == IntroKind.letter) {
       if (!_relayLetters || !_letterAllowed(from)) {
@@ -882,8 +1059,9 @@ final class IntroService extends ChangeNotifier {
     await _save();
     await _tell(
       '$id-ask',
-      '${host.nameOf(from)} prosi o przedstawienie',
-      'Komu: ${host.nameOf(target)}${text.isEmpty ? '' : ' — $text'}',
+      t('{name} prosi o przedstawienie', {'name': host.nameOf(from)}),
+      t('Komu: {name}', {'name': host.nameOf(target)}) +
+          (text.isEmpty ? '' : ' — $text'),
     );
   }
 
@@ -922,8 +1100,10 @@ final class IntroService extends ChangeNotifier {
         await _save();
         await _tell(
           '$id-list',
-          '${host.nameOf(from)} prosi o Twoją listę znajomych',
-          'Zdecyduj w Skrzynce. Zgodę możesz potem cofnąć.',
+          t('{name} prosi o Twoją listę znajomych', {
+            'name': host.nameOf(from),
+          }),
+          t('Zdecyduj w Skrzynce. Zgodę możesz potem cofnąć.'),
         );
     }
   }
@@ -969,37 +1149,69 @@ final class IntroService extends ChangeNotifier {
         !_take(_forwardsFrom, from, kIntroForwardsPerFriendPerDay)) {
       return;
     }
+    // The asker's signature (S-17): the middle friend may not change the
+    // words, the address or the name. A case without one comes from an
+    // older app and is shown marked as unverified; a broken one is dropped.
+    final ({bool? valid, String name}) check = await _checkSigned(
+      p['sg'],
+      id: id,
+      kind: kind,
+      asker: asker,
+      text: text,
+    );
+    if (check.valid == false || _cases.containsKey(id)) {
+      if (check.valid == false) {
+        logZenWarning('Przedstawienia: podpis nadawcy się nie zgadza');
+      }
+      return;
+    }
+    final bool signed = check.valid == true;
     final Object? n = p['n'];
-    final String name = sanitizePeerName(n is String ? n : null);
+    final String signedName = sanitizePeerName(check.name);
+    final String name = signedName.isNotEmpty
+        ? signedName
+        : sanitizePeerName(n is String ? n : null);
     final IntroCase c = IntroCase(
       id: id,
       kind: kind,
       role: IntroRole.target,
       at: _now(),
       asker: asker,
-      askerName: name.isEmpty ? 'Ktoś' : name,
+      askerName: name.isEmpty ? t('Ktoś') : name,
       middle: from,
       text: text,
       note: kind == IntroKind.intro
           ? introText(p['m'], kIntroNoteMaxChars)
           : '',
+      signed: signed,
     );
     _cases[id] = c;
     await _save();
     final String via = host.nameOf(from);
+    final String body;
+    final String title;
     if (kind == IntroKind.intro) {
-      await _tell(
-        '$id-fwd',
-        '$via przedstawia Ci: ${c.askerName}',
-        c.note.isNotEmpty
-            ? c.note
-            : c.text.isNotEmpty
-            ? c.text
-            : 'Przyjmij albo odrzuć w Skrzynce.',
-      );
+      title = t('{via} przedstawia Ci: {name}', {
+        'via': via,
+        'name': c.askerName,
+      });
+      body = c.note.isNotEmpty
+          ? c.note
+          : c.text.isNotEmpty
+          ? c.text
+          : t('Przyjmij albo odrzuć w Skrzynce.');
     } else {
-      await _tell('$id-fwd', 'List od: ${c.askerName} (przez: $via)', c.text);
+      title = t('List od: {name} (przez: {via})', {
+        'name': c.askerName,
+        'via': via,
+      });
+      body = c.text;
     }
+    await _tell(
+      '$id-fwd',
+      title,
+      signed ? body : '${introUnverifiedLabel()}\n$body',
+    );
   }
 
   /// Y (a friend) answers what this person (F) passed on.
@@ -1025,9 +1237,11 @@ final class IntroService extends ChangeNotifier {
     if (c.kind == IntroKind.intro) {
       await _tell(
         '${c.id}-done',
-        'Przedstawienie przyjęte',
-        '${host.nameOf(from)} i ${host.nameOf(c.asker)} zapraszają się do '
-            'znajomych.',
+        t('Przedstawienie przyjęte'),
+        t('{name} i {other} zapraszają się do znajomych.', {
+          'name': host.nameOf(from),
+          'other': host.nameOf(c.asker),
+        }),
       );
     }
   }
@@ -1049,25 +1263,32 @@ final class IntroService extends ChangeNotifier {
         }
         c.status = IntroStatus.forwarded;
         title = c.kind == IntroKind.letter
-            ? 'List poszedł dalej'
-            : 'Prośba przekazana';
-        body = 'Przez: $via. Teraz decyduje: ${c.targetName}.';
+            ? t('List poszedł dalej')
+            : t('Prośba przekazana');
+        body = t('Przez: {via}. Teraz decyduje: {name}.', {
+          'via': via,
+          'name': c.targetName,
+        });
       case 'no':
         if (c.status != IntroStatus.open) {
           return;
         }
         c.status = IntroStatus.declined;
         title = switch (c.kind) {
-          IntroKind.list => 'Lista znajomych niedostępna',
-          IntroKind.intro => 'Bez przedstawienia',
-          IntroKind.letter => 'List nie poszedł',
+          IntroKind.list => t('Lista znajomych niedostępna'),
+          IntroKind.intro => t('Bez przedstawienia'),
+          IntroKind.letter => t('List nie poszedł'),
         };
         body = switch (c.kind) {
-          IntroKind.list => '$via nie pokazuje teraz swojej listy.',
-          IntroKind.intro => '$via nie przekaże tej prośby.',
-          IntroKind.letter =>
-            '$via nie przekazuje teraz listów albo skończył się limit '
-                'na ten tydzień.',
+          IntroKind.list => t('{via} nie pokazuje teraz swojej listy.', {
+            'via': via,
+          }),
+          IntroKind.intro => t('{via} nie przekaże tej prośby.', {'via': via}),
+          IntroKind.letter => t(
+            '{via} nie przekazuje teraz listów albo skończył się limit '
+            'na ten tydzień.',
+            {'via': via},
+          ),
         };
       case 'ok':
         if (!c.isPending) {
@@ -1076,11 +1297,11 @@ final class IntroService extends ChangeNotifier {
         c.status = IntroStatus.accepted;
         c.befriendDue = c.kind != IntroKind.list;
         title = c.kind == IntroKind.list
-            ? 'Widzisz listę znajomych: $via'
-            : 'Możecie się poznać: ${c.targetName}';
+            ? t('Widzisz listę znajomych: {via}', {'via': via})
+            : t('Możecie się poznać: {name}', {'name': c.targetName});
         body = c.kind == IntroKind.list
-            ? 'Ta lista pojawi się w Twoim grafie.'
-            : 'Zaproszenie do znajomych idzie samo.';
+            ? t('Ta lista pojawi się w Twoim grafie.')
+            : t('Zaproszenie do znajomych idzie samo.');
       default:
         return;
     }
@@ -1099,6 +1320,8 @@ final class IntroService extends ChangeNotifier {
     'n': host.nameOf(c.asker),
     if (c.text.isNotEmpty) 't': c.text,
     if (c.note.isNotEmpty) 'm': c.note,
+    // X's signature over all of it but this person's note (S-17).
+    if (c.proof != null) 'sg': c.proof,
   });
 
   Future<void> _result(String to, String id, String status) => _send(

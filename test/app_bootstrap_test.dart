@@ -107,4 +107,78 @@ void main() {
     expect(result.appSecurityService.isReady, isTrue);
     expect(result.stores.appSettingsStore, same(store));
   });
+
+  group('zenStartupGatesRequired (S-20)', () {
+    const Map<String, String> underTest = <String, String>{
+      'FLUTTER_TEST': 'true',
+    };
+    const Map<String, String> plain = <String, String>{'PATH': '/usr/bin'};
+
+    test('a release build always asks, even with FLUTTER_TEST set', () {
+      expect(
+        zenStartupGatesRequired(
+          environment: underTest,
+          hasTestProfile: false,
+          releaseMode: true,
+          debugMode: false,
+        ),
+        isTrue,
+      );
+      expect(
+        zenStartupGatesRequired(
+          environment: underTest,
+          hasTestProfile: true,
+          releaseMode: true,
+          debugMode: false,
+        ),
+        isTrue,
+      );
+    });
+
+    test('flutter test in a debug build skips the gates', () {
+      expect(
+        zenStartupGatesRequired(
+          environment: underTest,
+          hasTestProfile: false,
+          releaseMode: false,
+          debugMode: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('a test profile skips them only in a debug build', () {
+      expect(
+        zenStartupGatesRequired(
+          environment: plain,
+          hasTestProfile: true,
+          releaseMode: false,
+          debugMode: true,
+        ),
+        isFalse,
+      );
+      // A profile build (neither debug nor release) is a real install.
+      expect(
+        zenStartupGatesRequired(
+          environment: plain,
+          hasTestProfile: true,
+          releaseMode: false,
+          debugMode: false,
+        ),
+        isTrue,
+      );
+    });
+
+    test('a normal start asks', () {
+      expect(
+        zenStartupGatesRequired(
+          environment: plain,
+          hasTestProfile: false,
+          releaseMode: false,
+          debugMode: true,
+        ),
+        isTrue,
+      );
+    });
+  });
 }

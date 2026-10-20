@@ -14,7 +14,6 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/plan/plan_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
-import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -171,10 +170,15 @@ final class _RuntimeSignalBridgeState
     final String from = PeerShareCodec.normalizeAddress(frame.from);
     final String type = frame.payload['type'] as String? ?? '';
     final SignalTransport? transport = _transport;
+    final SocialHubController hub = ref.read(
+      socialHubControllerProvider.notifier,
+    );
     if ((type == 'ping' || type == 'pong') &&
-        !ref.read(socialHubControllerProvider.notifier).isHydrated) {
-      // The friends are not read yet (locked app): every friend would look
-      // like a stranger and get a `friend_remove`. Presence just waits.
+        (!hub.isHydrated ||
+            ref.read(socialHubControllerProvider).snapshotUnreadable)) {
+      // The friends are not known: not read yet (locked app), or the stored
+      // list could not be read at all. Every friend would look like a
+      // stranger here, so presence waits - no answer, nothing recorded.
       return;
     }
     // Presence traffic is friend-gated: never reveal our state to, or accept
@@ -187,21 +191,10 @@ final class _RuntimeSignalBridgeState
         return;
       }
       if (!isAcceptedFriend && !isGroupMember) {
-        final FriendProfile? profile = ref
-            .read(socialHubControllerProvider)
-            .friendByAddress(from);
-        final FriendRelationshipStatus status =
-            profile?.status ?? FriendRelationshipStatus.none;
-        if (status == FriendRelationshipStatus.none) {
-          await transport.send(
-            remoteAddress: from,
-            payload: const <String, dynamic>{
-              'type': 'friend_remove',
-              // A reflex reply to a stranger: never queued or retried.
-              kSendOnceKey: true,
-            },
-          );
-        }
+        // No answer at all to a peer we do not know: any reply would confirm
+        // that this device is online at this address. (An automatic
+        // `friend_remove` used to go back, which also ended real friendships
+        // whenever this side had only lost its friend list.)
         return;
       }
       await transport.send(
@@ -216,31 +209,23 @@ final class _RuntimeSignalBridgeState
     }
     if (type == 'pong') {
       if (!isAcceptedFriend && !isGroupMember) {
-        final FriendProfile? profile = ref
-            .read(socialHubControllerProvider)
-            .friendByAddress(from);
-        final FriendRelationshipStatus status =
-            profile?.status ?? FriendRelationshipStatus.none;
-        if (status == FriendRelationshipStatus.none && transport != null) {
-          await transport.send(
-            remoteAddress: from,
-            payload: const <String, dynamic>{
-              'type': 'friend_remove',
-              // A reflex reply to a stranger: never queued or retried.
-              kSendOnceKey: true,
-            },
-          );
-        }
+        // Not taken, and not answered either (see the ping above).
         return;
       }
-      await ref
-          .read(socialHubControllerProvider.notifier)
-          .updatePeerPresence(
-            peerAddress: from,
-            isForeground:
-                (frame.payload['state'] as String? ?? '') == 'foreground',
-            observedAtMillis: frame.receivedAtMillis,
-          );
+      await hub.updatePeerPresence(
+        peerAddress: from,
+        isForeground: (frame.payload['state'] as String? ?? '') == 'foreground',
+        observedAtMillis: frame.receivedAtMillis,
+      );
+      return;
+    }
+    if (isUnconfirmedFriendRemovePayload(frame.payload)) {
+      // An older peer's automatic reply, not a person's decision: it must
+      // not end the friendship here.
+      await hub.receiveUnconfirmedFriendRemove(
+        from,
+        receivedAtMillis: frame.receivedAtMillis,
+      );
       return;
     }
     final ZenSignal? signal = zenSignalFromTransportPayload(
@@ -250,9 +235,7 @@ final class _RuntimeSignalBridgeState
     if (signal == null) {
       return;
     }
-    await ref
-        .read(socialHubControllerProvider.notifier)
-        .receiveSignal(signal, receivedAtMillis: frame.receivedAtMillis);
+    await hub.receiveSignal(signal, receivedAtMillis: frame.receivedAtMillis);
   }
 
   bool _isAcceptedFriendAddress(String address) {

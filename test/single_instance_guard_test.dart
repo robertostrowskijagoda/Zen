@@ -88,4 +88,86 @@ void main() {
       },
     );
   });
+
+  group('zombie cleanup (S-15)', () {
+    const String own = r'C:\Users\Ala\AppData\Local\Zen\zen.exe';
+
+    test('only other copies of this executable run by this user', () {
+      const String listing =
+          '\uFEFFME|PC\\ala\r\n'
+          '100|PC\\ala|C:\\Users\\Ala\\AppData\\Local\\Zen\\zen.exe\r\n'
+          // This very process.
+          '200|PC\\ala|C:\\Users\\Ala\\AppData\\Local\\Zen\\zen.exe\r\n'
+          // Another program that is also called zen.exe.
+          '300|PC\\ala|C:\\Tools\\zen.exe\r\n'
+          // Another user's Zen (same install path).
+          '400|PC\\bob|C:\\Users\\Ala\\AppData\\Local\\Zen\\zen.exe\r\n'
+          // Windows would not tell the owner or the path.
+          '500||C:\\Users\\Ala\\AppData\\Local\\Zen\\zen.exe\r\n'
+          '600|PC\\ala|\r\n'
+          // Same file, other spelling.
+          '700|pc\\ALA|\\\\?\\c:/users/ala/appdata/local/zen/ZEN.EXE\r\n'
+          'garbage line\r\n';
+      expect(
+        ZenSingleInstance.zombiePids(listing, ownPid: 200, ownExecutable: own),
+        <int>[100, 700],
+      );
+    });
+
+    test('nothing is ended when this user is unknown', () {
+      const String noOwner =
+          'ME|\n'
+          '100|\\|C:\\Users\\Ala\\AppData\\Local\\Zen\\zen.exe\n';
+      expect(
+        ZenSingleInstance.zombiePids(noOwner, ownPid: 1, ownExecutable: own),
+        isEmpty,
+      );
+      const String noMe =
+          '100|PC\\ala|C:\\Users\\Ala\\AppData\\Local\\Zen\\zen.exe\n';
+      expect(
+        ZenSingleInstance.zombiePids(noMe, ownPid: 1, ownExecutable: own),
+        isEmpty,
+      );
+      expect(
+        ZenSingleInstance.zombiePids('', ownPid: 1, ownExecutable: own),
+        isEmpty,
+      );
+    });
+
+    test('the listing script takes only a plain executable name', () {
+      final String? script = ZenSingleInstance.processListingScript('zen.exe');
+      expect(script, isNotNull);
+      expect(script, contains("Name='zen.exe'"));
+      expect(script, isNot(contains('@EXE@')));
+      expect(ZenSingleInstance.processListingScript("zen'.exe"), isNull);
+      expect(ZenSingleInstance.processListingScript(r'..\zen.exe'), isNull);
+      expect(ZenSingleInstance.processListingScript(''), isNull);
+    });
+
+    test('system tools come from %SystemRoot%\\System32', () {
+      expect(
+        ZenSingleInstance.windowsSystem32(const <String, String>{
+          'SystemRoot': r'D:\Windows',
+        }),
+        r'D:\Windows\System32',
+      );
+      expect(
+        ZenSingleInstance.windowsSystem32(const <String, String>{}),
+        r'C:\Windows\System32',
+      );
+      // Not an absolute local path: the default.
+      expect(
+        ZenSingleInstance.windowsSystem32(const <String, String>{
+          'SystemRoot': r'.\evil',
+        }),
+        r'C:\Windows\System32',
+      );
+      expect(
+        ZenSingleInstance.windowsSystem32(const <String, String>{
+          'SystemRoot': r'\\server\share',
+        }),
+        r'C:\Windows\System32',
+      );
+    });
+  });
 }

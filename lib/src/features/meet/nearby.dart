@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby_crypto.dart';
@@ -19,60 +20,64 @@ const String kNearbyMessageType = 'nearby_msg';
 
 String _hex(List<int> b) => nearbyHex(b);
 
-const List<String> _adjectives = <String>[
-  'Zielony',
-  'Rudy',
-  'Cichy',
-  'Szybki',
-  'Mądry',
-  'Wesoły',
-  'Śmiały',
-  'Złoty',
-  'Srebrny',
-  'Nocny',
-  'Leśny',
-  'Spokojny',
-  'Dziki',
-  'Bystry',
-  'Senny',
-  'Błękitny',
+List<String> get _adjectives => <String>[
+  t('Zielony'),
+  t('Rudy'),
+  t('Cichy'),
+  t('Szybki'),
+  t('Mądry'),
+  t('Wesoły'),
+  t('Śmiały'),
+  t('Złoty'),
+  t('Srebrny'),
+  t('Nocny'),
+  t('Leśny'),
+  t('Spokojny'),
+  t('Dziki'),
+  t('Bystry'),
+  t('Senny'),
+  t('Błękitny'),
 ];
 
-const List<String> _animals = <String>[
-  'Lis',
-  'Jeż',
-  'Borsuk',
-  'Wilk',
-  'Sokół',
-  'Kos',
-  'Dzik',
-  'Bóbr',
-  'Żuraw',
-  'Łoś',
-  'Rys',
-  'Orzeł',
-  'Szop',
-  'Kruk',
-  'Puszczyk',
-  'Delfin',
+List<String> get _animals => <String>[
+  t('Lis'),
+  t('Jeż'),
+  t('Borsuk'),
+  t('Wilk'),
+  t('Sokół'),
+  t('Kos'),
+  t('Dzik'),
+  t('Bóbr'),
+  t('Żuraw'),
+  t('Łoś'),
+  t('Rys'),
+  t('Orzeł'),
+  t('Szop'),
+  t('Kruk'),
+  t('Puszczyk'),
+  t('Delfin'),
 ];
 
 /// A friendly name for a stranger's token ("Zielony Lis").
 String nearbyPseudonym(List<int> token) {
   final List<int> h = crypto.sha256.convert(token).bytes;
-  return '${_adjectives[h[0] % _adjectives.length]} '
-      '${_animals[h[1] % _animals.length]}';
+  final List<String> adjectives = _adjectives;
+  final List<String> animals = _animals;
+  return t('{adjective} {animal}', {
+    'adjective': adjectives[h[0] % adjectives.length],
+    'animal': animals[h[1] % animals.length],
+  });
 }
 
 /// How close, from the signal strength.
 String nearbyDistance(int rssi) {
   if (rssi >= -60) {
-    return 'blisko';
+    return t('blisko');
   }
   if (rssi >= -80) {
-    return 'w pokoju';
+    return t('w pokoju');
   }
-  return 'dalej';
+  return t('dalej');
 }
 
 /// The Bluetooth radio (native in the app, a fake in tests).
@@ -164,6 +169,12 @@ final class ChannelNearbyRadio implements NearbyRadio {
   /// The background service answers alarm waves from now on (or no
   /// longer): the app then leaves them to it, so an alarm rings once.
   Future<void> setAlarmReceiver(bool on) => _call<void>('setAlarmReceiver', on);
+
+  /// Friends' nearby secrets: the radio side checks an alarm wave's
+  /// signature with them before counting it, so a flood of other waves
+  /// cannot crowd a friend's alarm out (§16.3).
+  Future<void> setAlarmKeys(List<String> secrets) =>
+      _call<void>('setAlarmKeys', secrets);
 }
 
 /// Someone whose phone is nearby right now.
@@ -257,6 +268,9 @@ final class NearbyService extends ChangeNotifier {
   final Set<String> _blocked = <String>{};
   Map<String, String> _friendTokens = <String, String>{};
   int _tokensEpoch = -1;
+
+  /// The friends' secrets last handed to the radio ([_pushAlarmKeys]).
+  String? _alarmKeysGiven;
   int _advertisedEpoch = -1;
   bool visible = false;
   bool scanning = false;
@@ -318,8 +332,8 @@ final class NearbyService extends ChangeNotifier {
   }
 
   String get myPseudonym {
-    final String t = myToken;
-    return t.isEmpty ? 'Ktoś obok' : nearbyPseudonym(_unhex(t));
+    final String token = myToken;
+    return token.isEmpty ? t('Ktoś obok') : nearbyPseudonym(_unhex(token));
   }
 
   void _refreshFriendTokens() {
@@ -339,6 +353,28 @@ final class NearbyService extends ChangeNotifier {
       }
     });
     _friendTokens = map;
+    _pushAlarmKeys();
+  }
+
+  /// Hands friends' nearby secrets to the native radio (when they changed),
+  /// which checks a friend's signed alarm wave before its limits for
+  /// strangers apply.
+  void _pushAlarmKeys() {
+    final NearbyRadio r = radio;
+    if (r is! ChannelNearbyRadio) {
+      return;
+    }
+    final List<String> secrets =
+        meet.book.friendNearbySecrets.values.toSet().toList()..sort();
+    final String given = secrets.join('\n');
+    if (given == _alarmKeysGiven) {
+      return;
+    }
+    _alarmKeysGiven = given;
+    unawaitedLogged(
+      r.setAlarmKeys(secrets),
+      context: 'W pobliżu: klucze alarmu',
+    );
   }
 
   /// Friends' secrets changed (a new friend, a renewed secret).

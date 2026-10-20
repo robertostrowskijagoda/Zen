@@ -6,6 +6,7 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/location.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
+import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
@@ -30,6 +31,9 @@ final Provider<DatingService> datingServiceProvider = Provider<DatingService>((
               .bannedDatingKeys(DateTime.now().millisecondsSinceEpoch)
               .contains(key);
     },
+    // Profiles this person reported are hidden from them (§21.4).
+    isHiddenByMe: (String key) =>
+        ref.read(hiddenByMeProvider).hides(datingKey: key),
     // "Podziękuj swatowi" (§19.3): only inside one pyramid.
     pyramidKey: () {
       final PyramidService pyramid = ref.read(pyramidServiceProvider);

@@ -1,3 +1,5 @@
+import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart' show contentHash;
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -6,7 +8,11 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 const int kReportEvidenceMax = 2000;
 
 /// Placeholder shown instead of a post whose content the pyramid banned.
-const String kHiddenByPyramidLabel = 'Treść ukryta decyzją piramidy';
+String get kHiddenByPyramidLabel => t('Treść ukryta decyzją piramidy');
+
+/// Placeholder shown instead of content the person hid after reporting it
+/// (§21.4).
+String get kHiddenByMeLabel => t('Ukryte po Twoim zgłoszeniu');
 
 /// The pyramid key of the member whose device has [address], or '' when
 /// nobody in [members] uses it.
@@ -43,10 +49,16 @@ bool isContentBanned(Set<String> banned, String text) =>
     banned.isNotEmpty && text.isNotEmpty && banned.contains(contentHash(text));
 
 /// Whether a post with [text] (id [id]) is hidden behind the placeholder:
-/// banned, and not revealed by a tap ([revealed] holds such ids).
+/// banned by the pyramid, or hidden by this person after a report ([mine]),
+/// and not revealed by a tap ([revealed] holds such ids; what was shown
+/// anyway is in [mine] itself).
 bool isContentHidden(
   Set<String> banned,
   String text, {
   String id = '',
   Set<String> revealed = const <String>{},
-}) => !revealed.contains(id) && isContentBanned(banned, text);
+  HiddenByMe? mine,
+}) =>
+    !revealed.contains(id) &&
+    (isContentBanned(banned, text) ||
+        (mine?.hides(id: id, text: text) ?? false));

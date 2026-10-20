@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/app_data_reset.dart';
 import 'package:zen/src/app/app_version.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
@@ -54,8 +55,10 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/device_integrity.dart';
+import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/settings/presentation/language_screen.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -118,38 +121,42 @@ final class AppShellState {
   bool get isConnecting => serviceRunning && !isConnected;
 
   String get healthLabel => switch (health) {
-    ServiceHealth.active => 'Aktywny',
-    ServiceHealth.syncing => 'Synchronizacja',
-    ServiceHealth.stopped => 'Zatrzymany',
-    ServiceHealth.failed => 'Błąd',
+    ServiceHealth.active => t('Aktywny'),
+    ServiceHealth.syncing => t('Synchronizacja'),
+    ServiceHealth.stopped => t('Zatrzymany'),
+    ServiceHealth.failed => t('Błąd'),
   };
 
   String get connectionLabel {
     if (health == ServiceHealth.failed || health == ServiceHealth.stopped) {
-      return 'Brak sieci';
+      return t('Brak sieci');
     }
     if (isConnected) {
-      return 'Połączono';
+      return t('Połączono');
     }
-    return 'Łączę...';
+    return t('Łączę...');
   }
 
   String get healthSummary => switch (health) {
     ServiceHealth.active =>
       isConnected
-          ? 'Połączenie działa — widzisz innych w sieci.'
-          : 'Serwis działa i szuka połączeń z siecią.',
-    ServiceHealth.syncing =>
+          ? t('Połączenie działa — widzisz innych w sieci.')
+          : t('Serwis działa i szuka połączeń z siecią.'),
+    ServiceHealth.syncing => t(
       'Serwis odbudowuje trasę i odświeża stan połączeń.',
-    ServiceHealth.stopped => 'Sieć jest wstrzymana do ponownego uruchomienia.',
-    ServiceHealth.failed =>
+    ),
+    ServiceHealth.stopped => t(
+      'Sieć jest wstrzymana do ponownego uruchomienia.',
+    ),
+    ServiceHealth.failed => t(
       'Sieć nie wystartowała. Sprawdź szczegóły i uruchom ją ponownie.',
+    ),
   };
 
   String get throughputLabel => '${throughputMbps.toStringAsFixed(1)} MB/s';
 
   String get toggleLabel =>
-      serviceRunning ? 'Zatrzymaj serwis' : 'Uruchom serwis';
+      serviceRunning ? t('Zatrzymaj serwis') : t('Uruchom serwis');
 
   AppShellState copyWith({
     ServiceHealth? health,
@@ -276,7 +283,10 @@ class AppShellScreen extends ConsumerWidget {
           children: <Widget>[
             _CallFeedbackHost(),
             _StatusBar(),
-            Expanded(child: _ChatsPage(key: Key('chats-page'))),
+            // The chat list shows the last messages (S-9).
+            Expanded(
+              child: SecureScreen(child: _ChatsPage(key: Key('chats-page'))),
+            ),
           ],
         ),
       ),

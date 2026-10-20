@@ -1,8 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/security/app_security_crypto.dart';
@@ -26,11 +28,12 @@ const int kMinAppPasswordLength = 8;
 
 /// Why biometric unlock is weaker than the password (shown wherever it can
 /// be turned on).
-const String kBiometricRiskText =
-    'Odcisk palca albo twarz da się wymusić — ktoś może przyłożyć Twój palec, '
-    'gdy śpisz, albo skierować telefon na Twoją twarz — a Zen otworzy też '
-    'każdy odcisk zapisany w tym telefonie, także cudzy. Jeśli chronisz się '
-    'przed kimś bliskim albo przed przeszukaniem, zostań przy samym haśle.';
+String get kBiometricRiskText => t(
+  'Odcisk palca albo twarz da się wymusić — ktoś może przyłożyć Twój palec, '
+  'gdy śpisz, albo skierować telefon na Twoją twarz — a Zen otworzy też '
+  'każdy odcisk zapisany w tym telefonie, także cudzy. Jeśli chronisz się '
+  'przed kimś bliskim albo przed przeszukaniem, zostań przy samym haśle.',
+);
 
 List buildAppSecurityProviderOverrides({required AppSecurityService service}) {
   return [appSecurityServiceProvider.overrideWithValue(service)];
@@ -80,12 +83,12 @@ const String appSecurityGifApiKeyStorageKey = 'zen_rewrite_gif_api_key';
 const int appSecurityMasterKeyLengthBytes = 32;
 
 /// Message when the main password would be the same as the panic password.
-const String kAppPasswordEqualsPanicMessage =
-    'Hasło aplikacji musi różnić się od hasła panic.';
+String get kAppPasswordEqualsPanicMessage =>
+    t('Hasło aplikacji musi różnić się od hasła panic.');
 
 /// Message when the panic password would be the same as the main password.
-const String kPanicPasswordEqualsMainMessage =
-    'Hasło panic musi różnić się od głównego hasła.';
+String get kPanicPasswordEqualsMainMessage =>
+    t('Hasło panic musi różnić się od głównego hasła.');
 
 /// The main and the panic password must never be the same: the panic one
 /// wipes everything when typed on the lock screen.
@@ -137,11 +140,21 @@ abstract class AppSecurityCredentialsStore {
   Future<void> delete(String key);
 }
 
-final class SecureStorageCredentialsStore
-    implements AppSecurityCredentialsStore {
-  const SecureStorageCredentialsStore([
-    this._storage = const FlutterSecureStorage(),
-  ]);
+/// What [SecureStorageCredentialsStore] needs of the system's secret store
+/// (a seam for tests).
+abstract interface class SecureKeyValueBackend {
+  Future<String?> read(String key);
+
+  Future<void> write(String key, String value);
+
+  Future<void> delete(String key);
+
+  Future<Map<String, String>> readAll();
+}
+
+/// [SecureKeyValueBackend] over `flutter_secure_storage`.
+final class FlutterSecureStorageBackend implements SecureKeyValueBackend {
+  const FlutterSecureStorageBackend(this._storage);
 
   final FlutterSecureStorage _storage;
 
@@ -149,12 +162,224 @@ final class SecureStorageCredentialsStore
   Future<String?> read(String key) => _storage.read(key: key);
 
   @override
-  Future<void> write(String key, String value) {
-    return _storage.write(key: key, value: value);
-  }
+  Future<void> write(String key, String value) =>
+      _storage.write(key: key, value: value);
 
   @override
   Future<void> delete(String key) => _storage.delete(key: key);
+
+  @override
+  Future<Map<String, String>> readAll() => _storage.readAll();
+}
+
+/// iOS / macOS keychain items: readable once the device has been unlocked
+/// after a restart (the background work needs them with the screen locked)
+/// and never moved to another device — left out of iCloud Keychain and of
+/// a backup restored elsewhere (S-7). The plugin's default
+/// (`kSecAttrAccessibleWhenUnlocked`) travels with encrypted backups, and
+/// without a password the master key itself is in the keychain.
+const KeychainAccessibility kZenKeychainAccessibility =
+    KeychainAccessibility.first_unlock_this_device;
+
+/// The keychain as Zen opens it now.
+const FlutterSecureStorage _zenKeychain = FlutterSecureStorage(
+  iOptions: IOSOptions(accessibility: kZenKeychainAccessibility),
+  // macOS: the login keychain. The data protection keychain (the plugin's
+  // default) needs a team-signed app; Zen for Mac is signed ad hoc. The
+  // login keychain is never synced to iCloud Keychain and takes no notice
+  // of the accessibility; it is set anyway, in case that ever changes.
+  mOptions: MacOsOptions(
+    accessibility: kZenKeychainAccessibility,
+    usesDataProtectionKeychain: false,
+  ),
+);
+
+/// The keychain as Zen opened it before [kZenKeychainAccessibility]: the
+/// plugin's default accessibility. Only to find, move and delete items
+/// written then.
+const FlutterSecureStorage _earlierZenKeychain = FlutterSecureStorage(
+  mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+);
+
+final class SecureStorageCredentialsStore
+    implements AppSecurityCredentialsStore {
+  const SecureStorageCredentialsStore([
+    this._keychain = const FlutterSecureStorageBackend(_zenKeychain),
+    this._earlierKeychain = const FlutterSecureStorageBackend(
+      _earlierZenKeychain,
+    ),
+  ]);
+
+  final SecureKeyValueBackend _keychain;
+  final SecureKeyValueBackend _earlierKeychain;
+
+  /// Set once every item of an iOS keychain has been rewritten with
+  /// [kZenKeychainAccessibility].
+  static const String keychainMovedMarkerKey =
+      'zen_rewrite_keychain_this_device_only';
+
+  /// The one move of the items written before (iOS), shared by every
+  /// store of this isolate; the other calls wait for it.
+  static Future<void>? _keychainMove;
+
+  /// For tests: forget that the move ran in this isolate.
+  @visibleForTesting
+  static void debugForgetKeychainMove() {
+    _keychainMove = null;
+  }
+
+  static bool get _onIos =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
+  static bool get _onMacOs =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+
+  @override
+  Future<String?> read(String key) async {
+    await _moved();
+    final String? value = await _keychain.read(key);
+    if (value != null || !(_onIos || _onMacOs)) {
+      return value;
+    }
+    // In case the plugin looks items up by their accessibility too: one
+    // written before is found with the earlier one, and moved.
+    final String? earlier = await _earlierKeychain.read(key);
+    if (earlier != null) {
+      try {
+        await _write(key, earlier);
+      } on PlatformException catch (error, stackTrace) {
+        logZenError('Moving a keychain item failed', error, stackTrace);
+      }
+    }
+    return earlier;
+  }
+
+  @override
+  Future<void> write(String key, String value) async {
+    await _moved();
+    await _write(key, value);
+  }
+
+  @override
+  Future<void> delete(String key) async {
+    await _moved();
+    await _keychain.delete(key);
+    if (_onIos || _onMacOs) {
+      // A copy with the earlier accessibility must not come back through
+      // [read] (a wipe deletes the keys this way).
+      await _earlierKeychain.delete(key);
+    }
+  }
+
+  Future<void> _write(String key, String value) async {
+    try {
+      await _keychain.write(key, value);
+    } on PlatformException catch (error) {
+      if (_onMacOs) {
+        // macOS: before updating, the plugin also looks in the data
+        // protection keychain, which an app signed ad hoc may not open; it
+        // then adds the entry again and fails on the duplicate. Replace it.
+        await _replace(key, value);
+        return;
+      }
+      if (_onIos && _isStaleKeychainItem(error)) {
+        // iOS: an item written with the earlier accessibility the plugin
+        // did not match by the new one (it then fails on the duplicate, or
+        // on the update). Nothing else deletes before writing: a write
+        // refused for another reason (a locked phone) keeps the old value.
+        await _replace(key, value);
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  /// Deletes [key] (of either accessibility) and writes it again. Should
+  /// the new attributes be refused, the value goes in with the earlier
+  /// ones rather than be lost: on macOS Zen keeps working whatever the
+  /// keychain makes of them, on iOS the next write tries again.
+  Future<void> _replace(String key, String value) async {
+    await _keychain.delete(key);
+    await _earlierKeychain.delete(key);
+    try {
+      await _keychain.write(key, value);
+    } on PlatformException catch (error, stackTrace) {
+      logZenError(
+        'Writing a keychain item with the new attributes failed',
+        error,
+        stackTrace,
+      );
+      await _earlierKeychain.write(key, value);
+    }
+  }
+
+  /// "The specified item already exists" (-25299) or "could not be found"
+  /// (-25300): what the plugin answers for an item it did not match.
+  static bool _isStaleKeychainItem(PlatformException error) {
+    final String text = '${error.code} ${error.message} ${error.details}';
+    return text.contains('-25299') || text.contains('-25300');
+  }
+
+  Future<void> _moved() {
+    if (!_onIos) {
+      return Future<void>.value();
+    }
+    return _keychainMove ??= _moveToThisDevice();
+  }
+
+  /// iOS, once: every item written before gets [kZenKeychainAccessibility]
+  /// (written again with the same value), then the marker is set. A
+  /// failure is tried again at the next start; the items stay readable
+  /// meanwhile.
+  Future<void> _moveToThisDevice() async {
+    try {
+      if (await _keychain.read(keychainMovedMarkerKey) == '1') {
+        return;
+      }
+      await _restoreCutShortMove();
+      final Map<String, String> items = await _earlierKeychain.readAll();
+      for (final MapEntry<String, String> item in items.entries) {
+        if (item.key == keychainMovedMarkerKey ||
+            item.key.startsWith(_movingCopyPrefix)) {
+          continue;
+        }
+        // Added anew, not updated (an update may keep the attributes), so
+        // deleted first: a copy under another name holds the value until
+        // it is back (the wrapped master key must never be lost).
+        final String copy = '$_movingCopyPrefix${item.key}';
+        await _keychain.write(copy, item.value);
+        await _replace(item.key, item.value);
+        await _keychain.delete(copy);
+      }
+      await _keychain.write(keychainMovedMarkerKey, '1');
+    } on Object catch (error, stackTrace) {
+      logZenError(
+        'Moving keychain items to this device only failed',
+        error,
+        stackTrace,
+      );
+    }
+  }
+
+  /// The copies [_moveToThisDevice] keeps while it moves an item.
+  static const String _movingCopyPrefix = 'zen_rewrite_keychain_moving:';
+
+  /// After a move cut short (the app killed between deleting an item and
+  /// adding it again): the item comes back from its copy.
+  Future<void> _restoreCutShortMove() async {
+    final Map<String, String> items = await _keychain.readAll();
+    for (final MapEntry<String, String> item in items.entries) {
+      if (!item.key.startsWith(_movingCopyPrefix)) {
+        continue;
+      }
+      final String key = item.key.substring(_movingCopyPrefix.length);
+      if (await _keychain.read(key) == null &&
+          await _earlierKeychain.read(key) == null) {
+        await _keychain.write(key, item.value);
+      }
+      await _keychain.delete(item.key);
+    }
+  }
 }
 
 final class MemorySecurityCredentialsStore
@@ -455,7 +680,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     // The same password as the panic one would wipe everything on the next
     // unlock.
     if (await matchesPanicPassword(password)) {
-      throw const AppPasswordConflictException(kAppPasswordEqualsPanicMessage);
+      throw AppPasswordConflictException(kAppPasswordEqualsPanicMessage);
     }
     final Uint8List salt = randomSecurityBytes(32);
     final Uint8List derivedKey = await derivePasswordKey(
@@ -561,7 +786,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
       throw ArgumentError.value(password, 'password', 'Must not be empty.');
     }
     if (await verifyPassword(password)) {
-      throw const AppPasswordConflictException(kPanicPasswordEqualsMainMessage);
+      throw AppPasswordConflictException(kPanicPasswordEqualsMainMessage);
     }
     final Uint8List salt = randomSecurityBytes(32);
     final Uint8List derivedKey = await derivePasswordKey(
@@ -733,7 +958,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
 
   @override
   Future<bool> unlockWithBiometrics() async {
-    final Uint8List? masterKey = await _openSealedMasterKey('Odblokuj Zen');
+    final Uint8List? masterKey = await _openSealedMasterKey(t('Odblokuj Zen'));
     if (masterKey == null) {
       return false;
     }

@@ -29,6 +29,89 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
 
 void main() {
+  test('headless background coordinator answers no stranger and keeps a friend '
+      'on an automatic friend_remove', () async {
+    final MemorySignalTransport transport = MemorySignalTransport();
+    final NoopCallMediaSessionController callMedia =
+        NoopCallMediaSessionController();
+    const LifecycleSnapshot background = LifecycleSnapshot(
+      visibility: AppVisibilityState.background,
+      generation: 1,
+      capturedAtMillis: 0,
+    );
+    final ProviderContainer container = ProviderContainer(
+      overrides: [
+        signalTransportProvider.overrideWithValue(transport),
+        runtimeSystemNotificationServiceProvider.overrideWithValue(
+          MemoryRuntimeSystemNotificationService(),
+        ),
+        appSecurityServiceProvider.overrideWithValue(
+          MemoryAppSecurityService(),
+        ),
+        appSettingsStoreProvider.overrideWithValue(MemoryAppSettingsStore()),
+        signalQueueStoreProvider.overrideWithValue(MemorySignalQueueStore()),
+        socialSnapshotStoreProvider.overrideWithValue(
+          MemorySocialSnapshotStore(
+            SocialHubState.empty(lifecycle: background).copyWith(
+              friends: const <String, FriendProfile>{
+                'ada.ygg': FriendProfile(
+                  address: 'ada.ygg',
+                  displayName: 'Ada',
+                  status: FriendRelationshipStatus.accepted,
+                ),
+              },
+            ),
+          ),
+        ),
+        messageTimelineStoreProvider.overrideWithValue(
+          MemoryMessageTimelineStore(),
+        ),
+        attachmentTransferStoreProvider.overrideWithValue(
+          MemoryAttachmentTransferStore(),
+        ),
+        callMediaSessionControllerProvider.overrideWithValue(callMedia),
+        socialHubAutoHydrateProvider.overrideWithValue(false),
+        socialHubSeedProvider.overrideWithValue(
+          SocialHubState.empty(lifecycle: background),
+        ),
+      ],
+    );
+    final HeadlessBackgroundRuntimeCoordinator coordinator =
+        HeadlessBackgroundRuntimeCoordinator(
+          environment: BackgroundRuntimeEnvironment(
+            container: container,
+            transport: transport,
+            callMediaController: callMedia,
+          ),
+        );
+    addTearDown(() async {
+      await coordinator.dispose();
+    });
+
+    await coordinator.start();
+    transport.sentSignals.clear();
+    await transport.injectIncoming(
+      from: 'stranger.ygg',
+      payload: const <String, dynamic>{'type': 'ping'},
+    );
+    await transport.injectIncoming(
+      from: 'ada.ygg',
+      payload: const <String, dynamic>{'type': 'friend_remove'},
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect(
+      transport.sentSignals.where(
+        (entry) => entry.remoteAddress == 'stranger.ygg',
+      ),
+      isEmpty,
+    );
+    expect(
+      container.read(socialHubControllerProvider).friends['ada.ygg']?.status,
+      FriendRelationshipStatus.accepted,
+    );
+  });
+
   test(
     'headless background coordinator routes transport frames into background notifications',
     () async {

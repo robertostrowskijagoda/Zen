@@ -79,9 +79,11 @@ abstract final class ZenSingleInstance {
     // The port is taken. Probing the owner.
     final bool ownedByZen = await _requestActivationFromRunningInstance(port);
     if (!ownedByZen && Platform.isWindows && port == lockPort) {
-      // The port was busy, but whatever was on the port did NOT answer the Zen handshake.
-      // Clean up any unresponsive zombie processes and retry binding.
-      _cleanupZombieProcesses();
+      // The port was busy, but whatever was on the port did NOT complete
+      // the Zen handshake (or answered without a window). Only hung copies
+      // of this very executable run by this user are ended (S-15): never
+      // somebody else's process that happens to share the name.
+      await _cleanupZombieProcesses();
       await Future<void>.delayed(const Duration(milliseconds: 300));
       try {
         final ServerSocket server = await ServerSocket.bind(
@@ -109,7 +111,119 @@ abstract final class ZenSingleInstance {
         );
       }
     }
+    if (!ownedByZen) {
+      logZenWarning(
+        'Single instance lock port is held by something that is not a '
+        'running Zen of this user; starting without the single-instance '
+        'guarantee',
+      );
+    }
     return !ownedByZen;
+  }
+
+  static const String _listingScript = r'''
+$ErrorActionPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+function Get-ZenOwner($p) {
+  $o = Invoke-CimMethod -InputObject $p -MethodName GetOwner
+  if ($o -and $o.ReturnValue -eq 0 -and $o.User) { return "$($o.Domain)\$($o.User)" }
+  return ''
+}
+$me = Get-CimInstance Win32_Process -Filter "ProcessId=$PID"
+"ME|$(Get-ZenOwner $me)"
+Get-CimInstance Win32_Process -Filter "Name='@EXE@'" | ForEach-Object {
+  "$($_.ProcessId)|$(Get-ZenOwner $_)|$($_.ExecutablePath)"
+}
+''';
+
+  /// The PowerShell script that lists running copies of [exeName] for
+  /// [zombiePids]: first `ME|<domain>\<user>` (the owner of the script's own
+  /// process, i.e. this user), then `<pid>|<domain>\<user>|<path>` per
+  /// process. An owner or path Windows will not tell (another user's
+  /// process without elevation) comes out empty. `null` for a name that
+  /// does not look like a plain file name (nothing is listed then).
+  @visibleForTesting
+  static String? processListingScript(String exeName) {
+    if (!RegExp(r'^[A-Za-z0-9_][A-Za-z0-9_. -]{0,63}$').hasMatch(exeName)) {
+      return null;
+    }
+    return _listingScript.replaceAll('@EXE@', exeName);
+  }
+
+  /// The processes a launch that found the lock port held may end, read
+  /// from the output of [processListingScript]: only other processes
+  /// ([ownPid] excluded) run from exactly [ownExecutable] by the same user
+  /// as this one. Anything unknown (no owner, no path, no `ME` line) is
+  /// left alone.
+  @visibleForTesting
+  static List<int> zombiePids(
+    String listing, {
+    required int ownPid,
+    required String ownExecutable,
+  }) {
+    final List<List<String>> rows = <List<String>>[];
+    for (final String raw in const LineSplitter().convert(listing)) {
+      final String line = raw.replaceAll('\uFEFF', '').trim();
+      if (line.isNotEmpty) {
+        rows.add(line.split('|').map((String part) => part.trim()).toList());
+      }
+    }
+    String me = '';
+    for (final List<String> row in rows) {
+      if (row.length == 2 && row[0] == 'ME') {
+        me = row[1];
+      }
+    }
+    if (!_isKnownOwner(me)) {
+      return const <int>[];
+    }
+    final String exe = _normalizeWindowsPath(ownExecutable);
+    if (exe.isEmpty) {
+      return const <int>[];
+    }
+    final List<int> pids = <int>[];
+    for (final List<String> row in rows) {
+      if (row.length != 3) {
+        continue;
+      }
+      final int? id = int.tryParse(row[0]);
+      if (id == null ||
+          id <= 0 ||
+          id == ownPid ||
+          !_isKnownOwner(row[1]) ||
+          row[1].toLowerCase() != me.toLowerCase() ||
+          _normalizeWindowsPath(row[2]) != exe ||
+          pids.contains(id)) {
+        continue;
+      }
+      pids.add(id);
+    }
+    return pids;
+  }
+
+  static bool _isKnownOwner(String owner) {
+    final int slash = owner.lastIndexOf(r'\');
+    return owner.isNotEmpty && slash < owner.length - 1;
+  }
+
+  static String _normalizeWindowsPath(String path) {
+    String p = path.trim().replaceAll('/', r'\');
+    if (p.startsWith(r'\\?\')) {
+      p = p.substring(4);
+    }
+    return p.toLowerCase();
+  }
+
+  /// `%SystemRoot%\System32` from [environment] (`C:\Windows\System32` when
+  /// it is missing or not an absolute local path): system tools are run by
+  /// full path, never looked up on `PATH`.
+  @visibleForTesting
+  static String windowsSystem32(Map<String, String> environment) {
+    final String root =
+        (environment['SystemRoot'] ?? environment['SYSTEMROOT'] ?? '').trim();
+    final bool usable = RegExp(r'^[A-Za-z]:\\[^"<>|?*]*$').hasMatch(root);
+    final String base = usable ? root : r'C:\Windows';
+    return base.endsWith(r'\') ? '${base}System32' : '$base\\System32';
   }
 
   /// Releases the lock. Called on shutdown; also used by tests.
@@ -267,17 +381,86 @@ bool _bringExistingWindowToForeground() {
   return false;
 }
 
-void _cleanupZombieProcesses() {
+/// Ends hung copies of this very executable run by this user (they hold the
+/// lock port without answering). Never anything else: a process that only
+/// shares the name, or another user's Zen, is left alone (S-15). System
+/// tools are run by their full path in `%SystemRoot%\System32`.
+Future<void> _cleanupZombieProcesses() async {
   if (!Platform.isWindows) return;
   try {
-    Process.runSync('taskkill', <String>[
+    final String own = Platform.resolvedExecutable;
+    final String? script = ZenSingleInstance.processListingScript(
+      own.split(RegExp(r'[\\/]')).last,
+    );
+    if (script == null) {
+      return;
+    }
+    final String system32 = ZenSingleInstance.windowsSystem32(
+      Platform.environment,
+    );
+    final String? listing = await _runForOutput(
+      '$system32\\WindowsPowerShell\\v1.0\\powershell.exe',
+      <String>[
+        '-NoProfile',
+        '-NonInteractive',
+        '-EncodedCommand',
+        _encodePowerShell(script),
+      ],
+    );
+    if (listing == null) {
+      logZenWarning('Single instance: could not list running Zen processes');
+      return;
+    }
+    final List<int> pids = ZenSingleInstance.zombiePids(
+      listing,
+      ownPid: pid,
+      ownExecutable: own,
+    );
+    if (pids.isEmpty) {
+      return;
+    }
+    logZenWarning(
+      'Single instance: ending ${pids.length} hung Zen process(es)',
+    );
+    await _runForOutput('$system32\\taskkill.exe', <String>[
       '/F',
-      '/FI',
-      'PID ne $pid',
-      '/IM',
-      'zen.exe',
+      for (final int id in pids) ...<String>['/PID', '$id'],
     ]);
-  } catch (e) {
-    debugPrint('[ZEN] Cleanup zombie processes error: $e');
+  } catch (error, stackTrace) {
+    logZenError('Cleaning up hung Zen processes failed', error, stackTrace);
+  }
+}
+
+/// `-EncodedCommand` form of [script] (base64 of UTF-16LE): no quoting of
+/// the command line can change what PowerShell runs.
+String _encodePowerShell(String script) {
+  final List<int> bytes = <int>[];
+  for (final int unit in script.codeUnits) {
+    bytes
+      ..add(unit & 0xff)
+      ..add(unit >> 8);
+  }
+  return base64.encode(bytes);
+}
+
+/// Runs [executable] and returns what it printed when it ended well within
+/// [timeout] (`null` otherwise; a process still running is killed).
+Future<String?> _runForOutput(
+  String executable,
+  List<String> arguments, {
+  Duration timeout = const Duration(seconds: 15),
+}) async {
+  final Process process = await Process.start(executable, arguments);
+  final Future<String> output = process.stdout
+      .transform(const Utf8Decoder(allowMalformed: true))
+      .join();
+  unawaited(process.stderr.drain<void>());
+  try {
+    final int code = await process.exitCode.timeout(timeout);
+    final String text = await output;
+    return code == 0 ? text : null;
+  } on TimeoutException {
+    process.kill();
+    return null;
   }
 }

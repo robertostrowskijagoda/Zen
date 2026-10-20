@@ -57,6 +57,77 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     return initialState;
   }
 
+  bool _relayReportsWatched = false;
+
+  /// Takes the mailbox layer's delivery news (`RelayEngine.takeDeliveryReports`)
+  /// into the chats: a message that expired unacknowledged in the queue is
+  /// marked failed, one too large for mailboxes goes back to "sending" (it
+  /// only arrives while both devices are online).
+  void _watchRelayDeliveryReports() {
+    if (_relayReportsWatched) {
+      return;
+    }
+    final RelayEngine? engine = ref.read(relayEngineProvider);
+    if (engine == null) {
+      return;
+    }
+    _relayReportsWatched = true;
+    void onChange() {
+      if (engine.deliveryReportCount.value > 0 && ref.mounted) {
+        unawaitedLogged(
+          _drainRelayDeliveryReports(engine),
+          context: 'Applying mailbox delivery reports failed',
+        );
+      }
+    }
+
+    engine.deliveryReportCount.addListener(onChange);
+    ref.onDispose(() => engine.deliveryReportCount.removeListener(onChange));
+    onChange();
+  }
+
+  Future<void> _drainRelayDeliveryReports(RelayEngine engine) async {
+    final List<RelayDeliveryReport> reports = await engine
+        .takeDeliveryReports();
+    for (final RelayDeliveryReport report in reports) {
+      if (_controllerDisposed || !ref.mounted) {
+        return;
+      }
+      String peer = report.recipient;
+      for (final String address in state.friends.keys) {
+        if (PeerShareCodec.addressesEqual(address, report.recipient)) {
+          peer = address;
+          break;
+        }
+      }
+      final List<ChatMessage> thread = await _messageTimelineStore.load(peer);
+      final int index = thread.indexWhere(
+        (ChatMessage m) => m.id == report.messageId,
+      );
+      if (index < 0) {
+        continue;
+      }
+      final ChatMessageDeliveryState current = thread[index].deliveryState;
+      // A delivered message stays delivered (its ack may beat the report).
+      if (current != ChatMessageDeliveryState.sending &&
+          current != ChatMessageDeliveryState.sent) {
+        continue;
+      }
+      final ChatMessageDeliveryState next = switch (report.status) {
+        RelayDeliveryStatus.expired => ChatMessageDeliveryState.failed,
+        RelayDeliveryStatus.directOnly => ChatMessageDeliveryState.sending,
+      };
+      if (next == current) {
+        continue;
+      }
+      await _updateMessageDeliveryState(
+        peerAddress: peer,
+        messageId: report.messageId,
+        deliveryState: next,
+      );
+    }
+  }
+
   Future<void> setLifecycle(LifecycleSnapshot snapshot) {
     return _enqueueStateWork(() => _setLifecycle(snapshot));
   }
@@ -108,6 +179,21 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
   /// already equals the in-memory one.
   Future<void> _adoptSnapshotWrittenInBackground() async {
     if (!_hydrationCompleted) {
+      return;
+    }
+    if (state.snapshotUnreadable) {
+      // Still on a stand-in for a snapshot that could not be read: the way
+      // back is the full read, which may succeed now (a passing storage
+      // error). Failing again changes nothing.
+      try {
+        await _hydrateFromStore();
+      } on Object catch (error, stackTrace) {
+        logZenError(
+          'Re-reading the unreadable snapshot failed',
+          error,
+          stackTrace,
+        );
+      }
       return;
     }
     final SocialHubState? persisted;
@@ -191,13 +277,33 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         _hydrateOnUnlock();
         return;
       }
-      // Any other failure has to release the writers, or nothing could ever
-      // be saved again for the rest of the session.
+      if (!_snapshotLoaded && !_controllerDisposed && ref.mounted) {
+        // Unlocked, and still neither the snapshot nor its backup reads
+        // back. The empty seed is not "no friends": treated as such, every
+        // friend's ping would look like a stranger's, and the first save
+        // would bury the snapshot under it. Marked, so that saving stays
+        // paused, presence and reflexes stay quiet, and the user is told.
+        logZenWarning(
+          'Social snapshot unreadable: friends and groups are not loaded.',
+        );
+        state = state.copyWith(snapshotUnreadable: true);
+      }
+      // The writers are released all the same (nothing may wait forever);
+      // while the state is marked unreadable, saving does nothing.
       _markHydrationSettled();
       rethrow;
     }
+    _snapshotLoaded = true;
     _markHydrationSettled();
-    if (_controllerDisposed || !ref.mounted || persisted == null) {
+    if (_controllerDisposed || !ref.mounted) {
+      return;
+    }
+    _watchRelayDeliveryReports();
+    if (persisted == null) {
+      if (state.snapshotUnreadable) {
+        // A later read found nothing stored at all: nothing left to protect.
+        state = state.copyWith(snapshotUnreadable: false);
+      }
       return;
     }
     state = _withTrimmedInbox(
@@ -348,6 +454,130 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
     });
   }
 
+  /// A `friend_remove` from [sender] that did not come through reliable
+  /// delivery (see [isUnconfirmedFriendRemovePayload]).
+  ///
+  /// That is the automatic reply older versions give every peer they do not
+  /// recognise - also when it is them who lost the friend list (an
+  /// unreadable snapshot, a new phone, an account device not synced yet).
+  /// Taken at its word it ended the friendship and wiped the conversation
+  /// here, on every friend's phone at once. So nothing is removed: the
+  /// friendship, its settings and the conversation stay exactly as they are,
+  /// and the conversation says (at most once a day) that the friend's app
+  /// did not recognise this device. Should they really have removed the
+  /// user, their own decision still arrives reliably and is applied by
+  /// [receiveSignal].
+  Future<void> receiveUnconfirmedFriendRemove(
+    String sender, {
+    int? receivedAtMillis,
+  }) {
+    return _enqueueStateWork(() async {
+      if (!_hydrationCompleted) {
+        await _hydrationSettled.future;
+        if (_controllerDisposed || !ref.mounted) {
+          return;
+        }
+      }
+      if (state.snapshotUnreadable) {
+        // Nobody is known here right now; there is nothing to keep or note.
+        return;
+      }
+      final FriendProfile? friend = state.friendByAddress(sender);
+      if (friend == null ||
+          friend.status != FriendRelationshipStatus.accepted) {
+        // Pending invitations and blocks stay as they are, too.
+        return;
+      }
+      final int now = receivedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
+      final int? notedAt = _unconfirmedRemoveNotedAt[friend.address];
+      if (notedAt != null &&
+          (now - notedAt).abs() < const Duration(days: 1).inMilliseconds) {
+        // They answer every ping this way; once is enough.
+        return;
+      }
+      _unconfirmedRemoveNotedAt[friend.address] = now;
+      logZenWarning(
+        'An automatic friend_remove from a friend was not applied; the '
+        'friendship stays.',
+      );
+      final String note = t(
+        '{name} nie rozpoznaje teraz tego urządzenia — może utracił(a) dane '
+        'albo zmienił(a) telefon. Znajomość i rozmowa zostają bez zmian.',
+        {'name': state.nameFor(friend)},
+      );
+      await _appendSystemMessage(
+        peerAddress: friend.address,
+        text: note,
+        timestamp: now,
+      );
+      if (_controllerDisposed || !ref.mounted) {
+        return;
+      }
+      final FriendProfile? current = state.friendByAddress(friend.address);
+      if (current == null) {
+        return;
+      }
+      final Map<String, FriendProfile> friends = Map<String, FriendProfile>.of(
+        state.friends,
+      );
+      _putFriend(
+        friends,
+        current.copyWith(
+          lastMessagePreview: note,
+          lastActivityLabel: t('Teraz'),
+        ),
+      );
+      state = state.copyWith(friends: friends);
+      await _persistState();
+    });
+  }
+
+  /// Shows in the group's chat whom an ordinary member (not the creator)
+  /// brought in, so a member list never grows behind everyone's back.
+  Future<void> _noteGroupMembersAdded({
+    required GroupProfile before,
+    required List<String> after,
+    required ZenSignal signal,
+    required String localAddress,
+    required int timestamp,
+  }) async {
+    final List<String> newcomers = <String>[
+      for (final String address in after)
+        if (!groupHasMember(before, address) &&
+            (localAddress.isEmpty ||
+                !PeerShareCodec.addressesEqual(address, localAddress)))
+          address,
+    ];
+    if (newcomers.isEmpty || !ref.mounted) {
+      return;
+    }
+    final String names = newcomers
+        .map((String address) {
+          final FriendProfile? friend = state.friendByAddress(address);
+          return _resolvedPeerLabel(
+            address: address,
+            knownName: friend != null
+                ? state.nameFor(friend)
+                : state.peerProfileOf(address)?.name,
+          );
+        })
+        .join(', ');
+    await _messageTimelineStore.append(
+      'group:${before.id}',
+      ChatMessage(
+        id: 'system-added-$timestamp-${newcomers.first}',
+        sender: 'system',
+        text: t('{name} dodał(a) do grupy: {members}.', {
+          'name': _labelFor(signal, friends: state.friends),
+          'members': names,
+        }),
+        sentAtMillis: timestamp,
+        direction: ChatMessageDirection.system,
+      ),
+    );
+    _bumpTimelineRevision();
+  }
+
   Future<void> _handleIncomingSignal(
     ZenSignal signal, {
     int? receivedAtMillis,
@@ -370,28 +600,11 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       signal = _unsolicitedAcceptAsRequest(signal);
     }
     if (!_isSignalAllowedFromPeer(state, signal)) {
-      final FriendProfile? profile = state.friendByAddress(signal.sender);
-      final FriendRelationshipStatus status =
-          profile?.status ?? FriendRelationshipStatus.none;
-      if (status == FriendRelationshipStatus.none &&
-          !_isGroupCallSignalType(signal.type) &&
-          signal.type != ZenSignalType.groupMessage &&
-          signal.type != ZenSignalType.groupLeave &&
-          signal.type != ZenSignalType.groupInviteAck &&
-          signal.type != ZenSignalType.unknown &&
-          signal.type != ZenSignalType.friendRemove &&
-          signal.type != ZenSignalType.friendReject &&
-          signal.type != ZenSignalType.friendCancel) {
-        unawaited(
-          _sendFriendLifecycleSignal(
-            peerAddress: signal.sender,
-            payload: const <String, dynamic>{
-              'type': 'friend_remove',
-              kSendOnceKey: true,
-            },
-          ),
-        );
-      }
+      // Dropped without a word. This used to answer a peer it did not know
+      // with an automatic `friend_remove`: that told anyone probing an
+      // address that the device is online right there, and - whenever this
+      // side had only lost its friend list (an unreadable snapshot, a new
+      // device) - ended real friendships on the other phones.
       return;
     }
     // Invitations are the one thing anyone may send. Beyond the caps on what
@@ -453,21 +666,26 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         );
         if (state.groups.containsKey(gid)) {
           final GroupProfile existing = state.groups[gid]!;
-          if (!groupHasMember(existing, signal.sender) &&
-              !PeerShareCodec.addressesEqual(
-                existing.createdById,
-                signal.sender,
-              )) {
+          final bool fromCreator = PeerShareCodec.addressesEqual(
+            existing.createdById,
+            signal.sender,
+          );
+          if (!groupHasMember(existing, signal.sender) && !fromCreator) {
             // Only people already in the group may extend it.
             return;
           }
-          final List<String> updatedMembers = cappedGroupMembers(
-            normalizedGroupMembers(<String>[
-              ...existing.memberAddresses,
-              signal.sender,
-              ...?signal.memberAddresses,
-            ]),
-          );
+          final String localAddr = ref
+              .read(runtimeNodeSnapshotProvider)
+              .localAddress;
+          // Only the creator may extend the list freely; any other member
+          // brings in one person at a time (see `_groupMembersAfterInvite`).
+          final List<String> updatedMembers =
+              _groupMembersAfterInvite(
+                existing,
+                signal,
+                selfAddress: localAddr,
+              ) ??
+              existing.memberAddresses;
           final String? inviteId = signal.inviteId;
           final bool newInvitation =
               existing.isInvitePending &&
@@ -485,6 +703,15 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
             );
             state = state.copyWith(groups: groups);
             await _persistState();
+            if (!fromCreator && !existing.isInvitePending) {
+              await _noteGroupMembersAdded(
+                before: existing,
+                after: updatedMembers,
+                signal: signal,
+                localAddress: localAddr,
+                timestamp: timestamp,
+              );
+            }
           }
           return;
         }

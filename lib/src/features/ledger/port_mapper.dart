@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/utils/windows_system_paths.dart';
 
 /// A port the home router forwards to this computer (§5.1): what lets
 /// other people's apps connect to it, so it can be a bridge.
@@ -499,7 +500,7 @@ typedef GatewayLookup = Future<List<InternetAddress>> Function();
 Future<List<InternetAddress>> systemGateways() async {
   try {
     if (Platform.isWindows) {
-      final ProcessResult r = await Process.run('route', <String>[
+      final ProcessResult r = await Process.run(windowsRoutePath(), <String>[
         'print',
         '-4',
         '0.0.0.0',

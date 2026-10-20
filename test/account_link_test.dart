@@ -146,7 +146,8 @@ void main() {
     addTearDown(sender.dispose);
     final String digits = await sender.start();
     expect(await receiver.digits, digits);
-    expect(receiver.peer, old.address);
+    expect(receiver.offers.single.peer, old.address);
+    expect(receiver.offers.single.digits, digits);
   });
 
   test('a reveal from anyone but the greeting device is ignored', () async {
@@ -193,6 +194,114 @@ void main() {
     );
     await _settle();
     expect(fresh.sentSignals, isEmpty);
-    expect(receiver.peer, isNull);
+    expect(receiver.peers, isEmpty);
   });
+
+  test('a stranger who greets first does not block the real device', () async {
+    final _Wire stranger = await wire('200::66');
+    final _Wire old = await wire('200::1');
+    final _Wire fresh = await wire('200::2');
+    final AccountLinkReceiver receiver = AccountLinkReceiver(transport: fresh)
+      ..start();
+    addTearDown(receiver.dispose);
+
+    // The stranger runs the protocol first and shows its digits.
+    final AccountLinkSender intruder = AccountLinkSender(
+      transport: stranger,
+      target: fresh.address,
+    );
+    addTearDown(intruder.dispose);
+    final String strangerDigits = await intruder.start();
+    await _settle();
+
+    // The real device still links; both attempts show their own digits.
+    final AccountLinkSender sender = AccountLinkSender(
+      transport: old,
+      target: fresh.address,
+    );
+    addTearDown(sender.dispose);
+    final String digits = await sender.start();
+    await _settle();
+    expect(receiver.offers.map((AccountLinkOffer o) => o.digits), <String>[
+      strangerDigits,
+      digits,
+    ]);
+    final Uint8List seed = randomBytes(32);
+    final Future<void> sent = sender.send(
+      seed: seed,
+      account: 'konto',
+      siblings: <String>[old.address],
+    );
+    await _settle();
+    final AccountLinkOffer real = receiver.offers.singleWhere(
+      (AccountLinkOffer o) => o.peer == old.address,
+    );
+    expect(real.digits, digits);
+    expect(real.account!.seed, seed);
+    expect(real.account!.account, 'konto');
+    await receiver.confirm(real.account);
+    await sent;
+    // The stranger was not told anything was taken.
+    expect(
+      fresh.sentSignals
+          .where((s) => s.payload['type'] == kLinkDoneType)
+          .map((s) => s.remoteAddress),
+      <String>[old.address],
+    );
+  });
+
+  test(
+    'a new greeting starts the attempt over; attempts are bounded',
+    () async {
+      final _Wire fresh = await wire('200::2');
+      final AccountLinkReceiver receiver = AccountLinkReceiver(transport: fresh)
+        ..start();
+      addTearDown(receiver.dispose);
+      Future<void> hello(_Wire from) async {
+        await from.send(
+          remoteAddress: fresh.address,
+          payload: <String, dynamic>{
+            'type': kLinkHelloType,
+            'v': kLinkProtocolVersion,
+            'c': b64(
+              await linkCommitment(
+                await _publicKey(await X25519().newKeyPair()),
+              ),
+            ),
+          },
+        );
+        await _settle();
+      }
+
+      final List<_Wire> others = <_Wire>[
+        for (int i = 1; i <= AccountLinkReceiver.maxSessions + 1; i++)
+          await wire('200::7$i'),
+      ];
+      await hello(others.first);
+      await hello(others.first);
+      expect(receiver.peers, <String>[others.first.address]);
+      expect(
+        fresh.sentSignals.where((s) => s.payload['type'] == kLinkKeyType),
+        hasLength(2),
+        reason: 'each greeting gets a fresh key',
+      );
+      for (final _Wire o in others.skip(1)) {
+        await hello(o);
+      }
+      expect(receiver.peers, hasLength(AccountLinkReceiver.maxSessions));
+      expect(receiver.peers.contains(others.first.address), isFalse);
+      expect(receiver.peers.last, others.last.address);
+
+      // The real device greeting now still gets an answer.
+      final _Wire old = await wire('200::1');
+      final AccountLinkSender sender = AccountLinkSender(
+        transport: old,
+        target: fresh.address,
+      );
+      addTearDown(sender.dispose);
+      final String digits = await sender.start();
+      await _settle();
+      expect(receiver.offers.single.digits, digits);
+    },
+  );
 }

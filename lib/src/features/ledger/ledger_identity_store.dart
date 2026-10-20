@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
@@ -86,6 +87,11 @@ final class LedgerIdentity {
   static Future<bool> exists(LedgerDisk disk) async =>
       await _load(disk) != null;
 
+  /// The saved identity, or `null` when there is none yet. Never creates
+  /// one (only the ledger node does), e.g. for signing with the device key
+  /// outside the ledger (§24.1 introductions).
+  static Future<LedgerIdentity?> read(LedgerDisk disk) => _load(disk);
+
   static Future<LedgerIdentity> loadOrCreate(
     LedgerDisk disk, {
     String deviceName = 'Urządzenie',
@@ -153,7 +159,7 @@ final class LedgerIdentity {
   }) async {
     final LedgerKeyPair? key = _accountKey;
     if (key == null) {
-      throw StateError('Najpierw odblokuj konto starym hasłem.');
+      throw StateError(t('Najpierw odblokuj konto starym hasłem.'));
     }
     _wrapped = await PasswordWrappedSeed.wrap(key.seed, password, cost: cost);
     await _save(disk);

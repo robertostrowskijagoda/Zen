@@ -3,6 +3,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
+import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/core/utils/safe_file_name.dart';
 
 /// Protection against media that is not what it claims to be (§19).
 ///
@@ -87,7 +89,7 @@ Future<GuardedMedia> guardIncomingMedia(
       return _asFile(
         bytes,
         name,
-        'To nie był obraz, więc zapisano go jako plik.',
+        t('To nie był obraz, więc zapisano go jako plik.'),
       );
     case MediaKind.video:
       if (actual == MediaKind.video && looksLikeSafeContainer(bytes)) {
@@ -101,7 +103,7 @@ Future<GuardedMedia> guardIncomingMedia(
       return _asFile(
         bytes,
         name,
-        'To nie był film, więc zapisano go jako plik.',
+        t('To nie był film, więc zapisano go jako plik.'),
       );
     case MediaKind.audio:
       if ((actual == MediaKind.audio || actual == MediaKind.video) &&
@@ -116,7 +118,7 @@ Future<GuardedMedia> guardIncomingMedia(
       return _asFile(
         bytes,
         name,
-        'To nie było nagranie, więc zapisano je jako plik.',
+        t('To nie było nagranie, więc zapisano je jako plik.'),
       );
     case MediaKind.file:
       return _asFile(bytes, name, null, mimeType: mimeType);
@@ -367,28 +369,61 @@ bool looksExecutable(Uint8List bytes) {
 
 const Set<String> _riskyExtensions = <String>{
   // Windows
-  'exe', 'com', 'scr', 'pif', 'bat', 'cmd', 'msi', 'msp', 'msc', 'dll',
-  'cpl', 'sys', 'drv', 'ocx', 'lnk', 'url', 'scf', 'inf', 'reg', 'hta',
-  'chm', 'gadget', 'application', 'appref-ms', 'appx', 'appxbundle',
-  'msix', 'msixbundle', 'ps1', 'psm1', 'psd1', 'vbs', 'vbe', 'js', 'jse',
-  'wsf', 'wsh', 'ws', 'jar', 'iso', 'img', 'vhd', 'vhdx', 'xll',
+  'exe', 'com', 'scr', 'pif', 'bat', 'cmd', 'msi', 'msp', 'mst', 'msc',
+  'dll', 'cpl', 'sys', 'drv', 'ocx', 'lnk', 'url', 'scf', 'inf', 'reg',
+  'hta', 'htc', 'chm', 'hlp', 'gadget', 'application', 'xbap', 'website',
+  'appref-ms', 'settingcontent-ms', 'library-ms', 'search-ms',
+  'searchconnector-ms', 'appx', 'appxbundle', 'msix', 'msixbundle',
+  'ps1', 'ps1xml', 'ps2', 'ps2xml', 'psc1', 'psc2', 'psm1', 'psd1',
+  'msh', 'msh1', 'msh2', 'mshxml', 'msh1xml', 'msh2xml', 'vb', 'vbs',
+  'vbe', 'js', 'jse', 'wsf', 'wsh', 'ws', 'wsc', 'sct', 'job', 'jar',
+  'jnlp', 'iso', 'img', 'vhd', 'vhdx', 'xll', 'iqy', 'cab', 'diagcab',
+  'diagcfg', 'diagpkg', 'theme', 'themepack', 'shb', 'shs',
   // Office documents with macros
   'docm', 'dotm', 'xlsm', 'xltm', 'xlam', 'pptm', 'potm', 'ppam', 'sldm',
   // Android
   'apk', 'apks', 'xapk', 'apkm', 'aab', 'dex',
-  // macOS / Linux
-  'app', 'dmg', 'pkg', 'command', 'sh', 'bash', 'zsh', 'run',
-  'deb', 'rpm', 'appimage', 'desktop', 'py', 'pyw', 'pl', 'rb',
+  // macOS / iOS / Linux
+  'app', 'dmg', 'pkg', 'mpkg', 'command', 'sh', 'bash', 'zsh', 'csh',
+  'ksh', 'fish', 'run', 'deb', 'rpm', 'appimage', 'snap', 'flatpak',
+  'flatpakref', 'desktop', 'workflow', 'action', 'scpt', 'scptd',
+  'applescript', 'terminal', 'osx', 'ipa', 'py', 'pyw', 'pyc', 'pyz',
+  'pyzw', 'pl', 'rb',
 };
 
 /// Whether [fileName] ends in an extension that runs something.
+///
+/// The name is read the way the system will: Windows drops dots and spaces
+/// at the end (`faktura.exe.`, `skrypt.ps1 ` run as `.exe` and `.ps1`), and
+/// invisible characters (zero-width spaces, direction marks) never count.
+/// Only the last extension matters, so a double extension that dresses a
+/// program up as a document (`zdjecie.jpg.exe`) is risky too. A name with an
+/// alternate data stream (`plik.exe:strumien`) is taken for the file the
+/// stream hangs on. Compared case-insensitively.
 bool hasRiskyExtension(String fileName) {
-  final String name = fileName.trim().toLowerCase();
-  final int dot = name.lastIndexOf('.');
-  if (dot < 0 || dot == name.length - 1) {
+  final String name = fileName
+      .replaceAll(_invisibleInName, '')
+      .trim()
+      .toLowerCase();
+  if (_endsInRiskyExtension(name)) {
+    return true;
+  }
+  final int colon = name.indexOf(':');
+  return colon > 0 && _endsInRiskyExtension(name.substring(0, colon));
+}
+
+final RegExp _invisibleInName = RegExp(
+  r'[\u0000-\u001f\u007f-\u009f\u00AD\u200B-\u200F\u202A-\u202E'
+  r'\u2060-\u2064\u2066-\u2069\uFEFF]',
+);
+
+bool _endsInRiskyExtension(String name) {
+  final String trimmed = trimNameEnd(name);
+  final int dot = trimmed.lastIndexOf('.');
+  if (dot < 0 || dot == trimmed.length - 1) {
     return false;
   }
-  return _riskyExtensions.contains(name.substring(dot + 1));
+  return _riskyExtensions.contains(trimmed.substring(dot + 1));
 }
 
 String _cleanName(String? raw, MediaKind declared) {
@@ -398,7 +433,8 @@ String _cleanName(String? raw, MediaKind declared) {
     RegExp(r'[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]'),
     '',
   );
-  name = name.replaceAll(RegExp(r'^\.+'), '');
+  // Windows drops dots and spaces at the end: "faktura.exe." is "faktura.exe".
+  name = trimNameEnd(name.replaceAll(RegExp(r'^\.+'), ''));
   if (name.isEmpty) {
     name = switch (declared) {
       MediaKind.image => 'zdjecie.jpg',

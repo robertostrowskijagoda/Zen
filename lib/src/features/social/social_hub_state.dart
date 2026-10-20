@@ -67,6 +67,7 @@ final class SocialHubState {
     this.peerProfiles = const <String, PeerPublicProfile>{},
     this.profileSentVersion = 0,
     this.disappearingTimers = const <String, int>{},
+    this.snapshotUnreadable = false,
   });
 
   factory SocialHubState.empty({
@@ -193,6 +194,16 @@ final class SocialHubState {
   /// address or `group:<id>`) → seconds a message lives. Absent = off.
   final Map<String, int> disappearingTimers;
 
+  /// True while the stored snapshot (friends, groups, inbox) could not be
+  /// read back - neither the file nor its backup - although the app is
+  /// unlocked: this state is a stand-in, not the user's data.
+  ///
+  /// It is not "no friends". While it is set nothing is saved over the
+  /// snapshot (a later read, or the next start, may still succeed), peers
+  /// get no automatic answers that could end a friendship, and the app says
+  /// what happened. Never stored: it describes this run only.
+  final bool snapshotUnreadable;
+
   /// Seconds messages in conversation [key] live (0 = they stay).
   int disappearSecondsFor(String key) {
     final int? direct = disappearingTimers[key];
@@ -270,6 +281,7 @@ final class SocialHubState {
     Map<String, PeerPublicProfile>? peerProfiles,
     int? profileSentVersion,
     Map<String, int>? disappearingTimers,
+    bool? snapshotUnreadable,
   }) {
     return SocialHubState(
       lifecycle: lifecycle ?? this.lifecycle,
@@ -294,6 +306,7 @@ final class SocialHubState {
       peerProfiles: peerProfiles ?? this.peerProfiles,
       profileSentVersion: profileSentVersion ?? this.profileSentVersion,
       disappearingTimers: disappearingTimers ?? this.disappearingTimers,
+      snapshotUnreadable: snapshotUnreadable ?? this.snapshotUnreadable,
     );
   }
 

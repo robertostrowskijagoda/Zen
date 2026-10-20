@@ -218,7 +218,7 @@ void main() {
 
     await _openSettingsPage(tester, 'settings-nav-security');
     expect(find.byKey(const Key('settings-security-section')), findsOneWidget);
-    await tester.pageBack();
+    await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
@@ -442,7 +442,7 @@ void main() {
     await tester.tap(find.text('Ciemny'));
     await tester.pumpAndSettle();
     expect((await settingsStore.load())!.themeMode, AppThemeMode.dark);
-    await tester.pageBack();
+    await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
 
     await _openSettingsPage(tester, 'settings-nav-data');
@@ -1335,7 +1335,7 @@ void main() {
 
     expect(find.textContaining('Czekasz na akceptację'), findsOneWidget);
 
-    await tester.pageBack();
+    await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
 
     expect(find.byKey(Key('conversation-card-$peerAddress')), findsOneWidget);
@@ -1406,7 +1406,7 @@ void main() {
 
     expect(find.textContaining('Czekasz na akceptację'), findsOneWidget);
 
-    await tester.pageBack();
+    await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
 
     expect(find.byKey(Key('conversation-card-$peerAddress')), findsOneWidget);
@@ -1548,7 +1548,7 @@ void main() {
     expect(find.text('Wchodze za minute.'), findsOneWidget);
     expect(find.byIcon(Icons.done_all_rounded), findsOneWidget);
 
-    await tester.pageBack();
+    await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('conversation-unread-ada.ygg')), findsNothing);
@@ -1740,6 +1740,11 @@ void main() {
     await tester.tap(find.byKey(const Key('conversation-gif-button')));
     await tester.pumpAndSettle();
     expect(find.text('Wybierz GIF'), findsOneWidget);
+    // GIF search is a third-party connection, and the picker says so.
+    expect(
+      find.text('Wyszukiwanie GIF-ów łączy się z klipy.com.'),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byKey(const Key('conversation-gif-tile-0')));
     await tester.pumpAndSettle();
@@ -2141,7 +2146,7 @@ void main() {
       reason: 'under the name in the header',
     );
 
-    await tester.pageBack();
+    await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
 
     expect(find.text('Ada'), findsWidgets);
@@ -2193,7 +2198,7 @@ void main() {
       find.textContaining('Retencja: 7 dni • Limit: 4 MB'),
       findsOneWidget,
     );
-    await tester.pageBack();
+    await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
   });
 
@@ -2233,7 +2238,7 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.pageBack();
+    await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
 
     expect(
@@ -2266,7 +2271,7 @@ void main() {
 
     expect(find.textContaining('Relacja zablokowana'), findsOneWidget);
 
-    await tester.pageBack();
+    await tester.tap(find.byType(BackButton).last);
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('conversation-card-ada.ygg')), findsNothing);

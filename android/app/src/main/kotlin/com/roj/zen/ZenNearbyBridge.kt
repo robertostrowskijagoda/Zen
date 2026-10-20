@@ -28,6 +28,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Base64
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -35,8 +36,12 @@ import androidx.fragment.app.FragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.security.MessageDigest
 import java.util.UUID
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * People nearby over Bluetooth LE (§15), without any plugin:
@@ -47,7 +52,10 @@ import java.util.UUID
  *    can "wave" (leave a short hello with their mesh address) without
  *    either side learning the other's account. Anyone can write to it (no
  *    pairing), so waves are limited per phone here and checked in Dart
- *    (an alarm wave rings only when a friend signed it, §16.3).
+ *    (an alarm wave rings only when a friend signed it, §16.3). An alarm
+ *    wave signed with a friend's nearby secret (handed over by Dart) is
+ *    checked here too and counted apart, so a flood of other waves from
+ *    changing addresses cannot crowd it out.
  *
  * Advertising is low power, so it can stay on all the time; scanning costs
  * more and runs only while someone asks for it. When Bluetooth is switched
@@ -83,6 +91,9 @@ object ZenNearbyBridge {
 
         /** The background service answers alarm waves while the app is away. */
         var alarmReceiver = false
+
+        /** Friends' nearby secrets (base64url) this engine knows (§16.3). */
+        var alarmKeys: List<String> = emptyList()
     }
 
     private val clients = ArrayList<Client>()
@@ -108,6 +119,27 @@ object ZenNearbyBridge {
     private const val MAX_WAVES_PER_PHONE = 6
     private const val MAX_WAVES = 40
 
+    /**
+     * Alarm waves whose friend signature checked out (main thread): their
+     * own budget, apart from [MAX_WAVES], and each one is let through once
+     * per [WAVE_WINDOW_MS] (a recorded wave played back from many addresses
+     * costs nothing more).
+     */
+    private val verifiedWaves = ArrayDeque<Pair<Long, String>>()
+    private const val MAX_VERIFIED_WAVES = 60
+
+    /** Must match `kAlarmWaveVersion`, `kAlarmWaveFreshFor`, `kNearbyEpoch` in Dart. */
+    private const val ALARM_WAVE_VERSION = 5
+    private const val ALARM_WAVE_FRESH_MS = 10 * 60_000L
+    private const val NEARBY_EPOCH_MS = 15 * 60_000L
+    private const val MAX_ALARM_KEYS = 4096
+    private val ALARM_ID = Regex("^[0-9A-Za-z_-]{1,40}$")
+    private val HEX32 = Regex("^[0-9a-f]{32}$")
+
+    /** Friends' tokens (hex) around [tokenKeysEpoch] → the secret that made them. */
+    private var tokenKeys: Map<String, ByteArray> = emptyMap()
+    private var tokenKeysEpoch = Long.MIN_VALUE
+
     /** The app's engine: permission requests go through its Activity. */
     fun register(engine: FlutterEngine, activity: FragmentActivity) {
         attach(engine, activity.applicationContext, activity)
@@ -126,6 +158,7 @@ object ZenNearbyBridge {
         if (!clients.removeAll { it.engine === engine }) {
             return
         }
+        tokenKeysEpoch = Long.MIN_VALUE
         val context = appContext ?: return
         try {
             applyAdvertising(context)
@@ -139,6 +172,7 @@ object ZenNearbyBridge {
         appContext = context
         watchBluetoothState(context)
         clients.removeAll { it.engine === engine }
+        tokenKeysEpoch = Long.MIN_VALUE
         val client = Client(engine, activity)
         clients.add(client)
         val messenger = engine.dartExecutor.binaryMessenger
@@ -196,6 +230,17 @@ object ZenNearbyBridge {
                     }
                     "setAlarmReceiver" -> {
                         client.alarmReceiver = call.arguments as? Boolean ?: false
+                        result.success(null)
+                    }
+                    "setAlarmKeys" -> {
+                        val keys = (call.arguments as? List<*>)
+                            ?.filterIsInstance<String>()
+                            ?.filter { it.length <= 64 }
+                            ?.distinct()
+                            ?.take(MAX_ALARM_KEYS)
+                            ?: emptyList()
+                        client.alarmKeys = keys
+                        tokenKeysEpoch = Long.MIN_VALUE
                         result.success(null)
                     }
                     "wave" -> {
@@ -620,11 +665,141 @@ object ZenNearbyBridge {
     }
 
     /**
+     * Whether an alarm wave whose friend signature checked out ([mac]) is
+     * taken now: [MAX_VERIFIED_WAVES] per minute, apart from everything
+     * else. `null`: that budget is spent (the wave may still go through the
+     * one for anyone); `false`: this very wave went through within the
+     * window already (played back), so it is dropped. Main thread only.
+     */
+    private fun allowVerifiedWave(mac: String): Boolean? {
+        val now = SystemClock.elapsedRealtime()
+        while (verifiedWaves.isNotEmpty() && now - verifiedWaves.first().first > WAVE_WINDOW_MS) {
+            verifiedWaves.removeFirst()
+        }
+        if (verifiedWaves.any { it.second == mac }) {
+            return false
+        }
+        if (verifiedWaves.size >= MAX_VERIFIED_WAVES) {
+            return null
+        }
+        verifiedWaves.addLast(now to mac)
+        return true
+    }
+
+    private fun hmac(key: ByteArray, text: String): ByteArray {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(key, "HmacSHA256"))
+        return mac.doFinal(text.toByteArray(Charsets.UTF_8))
+    }
+
+    private fun hex(bytes: ByteArray): String {
+        val out = StringBuilder(bytes.size * 2)
+        for (b in bytes) {
+            val v = b.toInt() and 0xFF
+            out.append("0123456789abcdef"[v ushr 4]).append("0123456789abcdef"[v and 0x0F])
+        }
+        return out.toString()
+    }
+
+    /**
+     * Friends' tokens for the epochs around now (as Dart's `nearbyToken`:
+     * HMAC-SHA256(secret, "zen-nearby|<epoch>"), first 16 bytes), rebuilt
+     * when the epoch or the keys change. A fresh wave's epoch is one of
+     * these (it is dated within [ALARM_WAVE_FRESH_MS] of now).
+     */
+    private fun friendTokens(): Map<String, ByteArray> {
+        val epoch = System.currentTimeMillis() / NEARBY_EPOCH_MS
+        if (epoch == tokenKeysEpoch) {
+            return tokenKeys
+        }
+        val map = HashMap<String, ByteArray>()
+        for (secret in clients.flatMap { it.alarmKeys }.distinct()) {
+            val key = try {
+                Base64.decode(secret, Base64.URL_SAFE or Base64.NO_WRAP)
+            } catch (_: IllegalArgumentException) {
+                continue
+            }
+            if (key.isEmpty()) {
+                continue
+            }
+            for (e in epoch - 1..epoch + 1) {
+                map[hex(hmac(key, "zen-nearby|$e").copyOf(16))] = key
+            }
+        }
+        tokenKeys = map
+        tokenKeysEpoch = epoch
+        return map
+    }
+
+    /**
+     * The signature of [data] when it is a fresh alarm wave signed with the
+     * nearby secret of a friend some engine knows (the same check as Dart's
+     * `AlarmWave.verify`), else `null`. Dart checks it again (and who the
+     * friend is) before anything rings; this only decides which budget the
+     * wave is counted against.
+     */
+    private fun verifiedAlarmMac(data: ByteArray): String? {
+        if (data.isEmpty() || data[0] != '{'.code.toByte()) {
+            return null
+        }
+        val keys = friendTokens()
+        if (keys.isEmpty()) {
+            return null
+        }
+        try {
+            val json = JSONObject(String(data, Charsets.UTF_8))
+            if (json.opt("v") != ALARM_WAVE_VERSION) {
+                return null
+            }
+            val id = json.opt("id") as? String ?: return null
+            val at = when (val raw = json.opt("at")) {
+                is Int -> raw.toLong()
+                is Long -> raw
+                else -> return null
+            }
+            val ended = when (val end = json.opt("end")) {
+                null, JSONObject.NULL -> false
+                is Boolean -> end
+                else -> return null
+            }
+            val token = json.opt("t") as? String ?: return null
+            val mac = json.opt("m") as? String ?: return null
+            if (!ALARM_ID.matches(id) || !HEX32.matches(token) || !HEX32.matches(mac)) {
+                return null
+            }
+            if (Math.abs(System.currentTimeMillis() - at) > ALARM_WAVE_FRESH_MS) {
+                return null
+            }
+            val key = keys[token] ?: return null
+            val expected = hex(
+                hmac(
+                    key,
+                    "zen-nearby-alarm|$ALARM_WAVE_VERSION|$id|$at|${if (ended) 1 else 0}|$token",
+                ).copyOf(16),
+            )
+            val same = MessageDigest.isEqual(
+                expected.toByteArray(Charsets.US_ASCII),
+                mac.toByteArray(Charsets.US_ASCII),
+            )
+            return if (same) mac else null
+        } catch (_: Exception) {
+            return null
+        }
+    }
+
+    /**
      * Every engine gets the wave; "elsewhere" tells it that the other engine
-     * answers alarm waves, so an alarm rings once (§16.3).
+     * answers alarm waves, so an alarm rings once (§16.3). A friend's signed
+     * alarm wave is checked first and counted apart ([allowVerifiedWave]);
+     * anything else goes through the limits per phone and in all.
      */
     private fun dispatchWave(device: String, data: ByteArray) {
-        if (!allowWave(device)) {
+        val mac = verifiedAlarmMac(data)
+        val verified = if (mac == null) null else allowVerifiedWave(mac)
+        if (verified == false) {
+            return // the same signed wave went through a moment ago
+        }
+        if (verified == null && !allowWave(device)) {
             Log.w(TAG, "Too many waves: one dropped")
             return
         }

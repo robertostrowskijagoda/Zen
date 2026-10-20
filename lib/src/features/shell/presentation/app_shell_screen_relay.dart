@@ -14,16 +14,23 @@ class _RelayMailboxPanel extends ConsumerWidget {
     return ValueListenableBuilder<RelayOverview>(
       valueListenable: engine.overview,
       builder: (BuildContext context, RelayOverview overview, Widget? _) {
+        final String mailboxes = tn(
+          overview.relays.length,
+          one: '{n} skrzynka',
+          few: '{n} skrzynki',
+          many: '{n} skrzynek',
+        );
+        final String mode = overview.isAutomatic
+            ? t('wybór automatyczny')
+            : t('wybór ręczny');
         final String subtitle = overview.relays.isEmpty
-            ? 'Dodaj znajomych, żeby wiadomości mogły na Ciebie czekać.'
-            : '${overview.relays.length} '
-                  '${_mailboxNoun(overview.relays.length)} · '
-                  '${overview.isAutomatic ? 'wybór automatyczny' : 'wybór ręczny'}';
+            ? t('Dodaj znajomych, żeby wiadomości mogły na Ciebie czekać.')
+            : '$mailboxes · $mode';
         return ZenTile(
           key: const Key('settings-relay-button'),
           icon: Icons.markunread_mailbox_outlined,
           tone: zenTone(zen, 5),
-          title: 'Skrzynki offline',
+          title: t('Skrzynki offline'),
           subtitle: subtitle,
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
@@ -36,17 +43,6 @@ class _RelayMailboxPanel extends ConsumerWidget {
   }
 }
 
-String _mailboxNoun(int count) {
-  if (count == 1) {
-    return 'skrzynka';
-  }
-  final int mod10 = count % 10;
-  final int mod100 = count % 100;
-  return mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
-      ? 'skrzynki'
-      : 'skrzynek';
-}
-
 class _RelayMailboxScreen extends ConsumerWidget {
   const _RelayMailboxScreen();
 
@@ -57,7 +53,7 @@ class _RelayMailboxScreen extends ConsumerWidget {
     final List<FriendProfile> friends = watchSocialPeople(ref).acceptedFriends;
     return Scaffold(
       key: const Key('relay-settings-screen'),
-      appBar: AppBar(title: const Text('Skrzynki offline')),
+      appBar: AppBar(title: Text(t('Skrzynki offline'))),
       body: engine == null
           ? const SizedBox.shrink()
           : ValueListenableBuilder<RelayOverview>(
@@ -72,7 +68,11 @@ class _RelayMailboxScreen extends ConsumerWidget {
                       return;
                     }
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Nie udało się zapisać: $error')),
+                      SnackBar(
+                        content: Text(
+                          t('Nie udało się zapisać: {error}', {'error': error}),
+                        ),
+                      ),
                     );
                   }
                 }
@@ -81,17 +81,18 @@ class _RelayMailboxScreen extends ConsumerWidget {
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                   children: <Widget>[
                     ZenHero(
-                      title: 'Wiadomości poczekają na Ciebie',
+                      title: t('Wiadomości poczekają na Ciebie'),
                       icon: Icons.markunread_mailbox_outlined,
                       tone: zenTone(zen, 5),
-                      text:
-                          'Kiedy jesteś offline, wiadomości do Ciebie czekają '
-                          'u wybranych znajomych. Są zaszyfrowane Twoim '
-                          'kluczem — znajomi przechowują je, ale nie mogą ich '
-                          'przeczytać. Gdy wrócisz, odbierasz wszystko '
-                          'od pierwszej skrzynki, która jest dostępna.',
+                      text: t(
+                        'Kiedy jesteś offline, wiadomości do Ciebie czekają '
+                        'u wybranych znajomych. Są zaszyfrowane Twoim '
+                        'kluczem — znajomi przechowują je, ale nie mogą ich '
+                        'przeczytać. Gdy wrócisz, odbierasz wszystko '
+                        'od pierwszej skrzynki, która jest dostępna.',
+                      ),
                     ),
-                    const ZenSection('Wybór skrzynek', top: 16),
+                    ZenSection(t('Wybór skrzynek'), top: 16),
                     ZenGroup(
                       children: <Widget>[
                         SwitchListTile.adaptive(
@@ -101,9 +102,11 @@ class _RelayMailboxScreen extends ConsumerWidget {
                             tone: zenTone(zen, 5),
                             size: 40,
                           ),
-                          title: const Text('Wybieraj automatycznie'),
+                          title: Text(t('Wybieraj automatycznie')),
                           subtitle: Text(
-                            'Najaktywniejsi znajomi, maksymalnie $max.',
+                            t('Najaktywniejsi znajomi, maksymalnie {max}.', {
+                              'max': max,
+                            }),
                             style: TextStyle(color: zen.textSecondary),
                           ),
                           value: overview.isAutomatic,
@@ -115,18 +118,24 @@ class _RelayMailboxScreen extends ConsumerWidget {
                     ),
                     ZenSection(
                       overview.isAutomatic
-                          ? 'Aktualne skrzynki'
-                          : 'Wybierz do $max znajomych',
+                          ? t('Aktualne skrzynki')
+                          : tn(
+                              max,
+                              one: 'Wybierz do {n} znajomego',
+                              few: 'Wybierz do {n} znajomych',
+                              many: 'Wybierz do {n} znajomych',
+                            ),
                       top: 16,
                     ),
                     if (friends.isEmpty)
                       ZenEmpty(
                         icon: Icons.group_outlined,
                         tone: zen.textMuted,
-                        title: 'Nie masz jeszcze znajomych.',
-                        text:
-                            'Skrzynki prowadzą znajomi — dodaj kogoś, '
-                            'a pojawi się tutaj.',
+                        title: t('Nie masz jeszcze znajomych.'),
+                        text: t(
+                          'Skrzynki prowadzą znajomi — dodaj kogoś, '
+                          'a pojawi się tutaj.',
+                        ),
                       )
                     else
                       ZenGroup(
@@ -157,7 +166,18 @@ class _RelayMailboxScreen extends ConsumerWidget {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text(
-                                          'Możesz wybrać najwyżej $max skrzynek.',
+                                          tn(
+                                            max,
+                                            one:
+                                                'Możesz wybrać najwyżej {n} '
+                                                'skrzynkę.',
+                                            few:
+                                                'Możesz wybrać najwyżej {n} '
+                                                'skrzynki.',
+                                            many:
+                                                'Możesz wybrać najwyżej {n} '
+                                                'skrzynek.',
+                                          ),
                                         ),
                                       ),
                                     );
@@ -170,7 +190,7 @@ class _RelayMailboxScreen extends ConsumerWidget {
                             ),
                         ],
                       ),
-                    const ZenSection('Grupy', top: 16),
+                    ZenSection(t('Grupy'), top: 16),
                     ZenGroup(
                       children: <Widget>[
                         SwitchListTile.adaptive(
@@ -180,16 +200,28 @@ class _RelayMailboxScreen extends ConsumerWidget {
                             tone: zenTone(zen, 2),
                             size: 40,
                           ),
-                          title: const Text('Skrzynki także dla grup'),
+                          title: Text(t('Ujawniaj skrzynki członkom grup')),
                           subtitle: Text(
                             overview.shareWithGroups
-                                ? 'Osoby z Twoich grup, których nie masz w '
-                                      'znajomych, mogą zostawiać Ci wiadomości '
-                                      'grupowe w skrzynkach. Widzą wtedy, '
-                                      'którzy znajomi je prowadzą.'
-                                : 'Wiadomości grupowe od osób spoza '
-                                      'znajomych dotrą tylko, gdy jesteś '
-                                      'online.',
+                                ? t(
+                                    'Członkowie Twoich grup, których nie masz '
+                                    'w znajomych, dostają Twój klucz oraz '
+                                    'adresy znajomych, którzy prowadzą Twoje '
+                                    'skrzynki (do {max}). Dzięki temu mogą '
+                                    'zostawiać Ci wiadomości grupowe, gdy '
+                                    'jesteś offline — ale widzą, którzy '
+                                    'znajomi są Twoimi skrzynkami.',
+                                    {'max': max},
+                                  )
+                                : t(
+                                    'Tylko znajomi znają Twoje skrzynki. '
+                                    'Członkowie grup spoza znajomych nie '
+                                    'dostają ani Twojego klucza, ani adresów '
+                                    'skrzynek, więc ich wiadomości grupowe '
+                                    'dotrą do Ciebie tylko wtedy, gdy oboje '
+                                    'jesteście online. Wyłączenie nie cofa '
+                                    'tego, co już od Ciebie dostali.',
+                                  ),
                             style: TextStyle(
                               color: zen.textSecondary,
                               height: 1.35,
@@ -201,28 +233,29 @@ class _RelayMailboxScreen extends ConsumerWidget {
                         ),
                       ],
                     ),
-                    const ZenSection('Stan', top: 16),
+                    ZenSection(t('Stan'), top: 16),
                     ZenGroup(
                       children: <Widget>[
                         _RelayStatRow(
                           icon: Icons.outbox_outlined,
                           tone: zenTone(zen, 0),
-                          label: 'Czeka na doręczenie',
+                          label: t('Czeka na doręczenie'),
                           value: '${overview.outboxCount}',
                         ),
                         _RelayStatRow(
                           icon: Icons.inventory_2_outlined,
                           tone: zenTone(zen, 3),
-                          label: 'Przechowujesz dla znajomych',
-                          value:
-                              '${overview.heldEnvelopeCount} '
-                              '(${overview.heldForPeerCount} os.)',
+                          label: t('Przechowujesz dla znajomych'),
+                          value: t('{count} ({people} os.)', {
+                            'count': overview.heldEnvelopeCount,
+                            'people': overview.heldForPeerCount,
+                          }),
                         ),
                         if (overview.publicKeyFingerprint.isNotEmpty)
                           _RelayStatRow(
                             icon: Icons.fingerprint_rounded,
                             tone: zenTone(zen, 6),
-                            label: 'Odcisk klucza',
+                            label: t('Odcisk klucza'),
                             value: overview.publicKeyFingerprint,
                             mono: true,
                           ),
@@ -262,7 +295,7 @@ class _RelayFriendTile extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
       ),
       subtitle: Text(
-        friend.isOnline ? 'online' : friend.lastActivityLabel,
+        friend.isOnline ? t('online') : friend.lastActivityLabel,
         style: TextStyle(
           color: friend.isOnline ? zen.success : zen.textSecondary,
         ),

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -17,6 +18,7 @@ import 'package:zen/src/features/chat/disappearing_messages.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/disappearing_timer_dialog.dart';
+import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -117,21 +119,23 @@ class _GroupConversationScreenState
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
-        title: const Text('Opuścić grupę?'),
-        content: const Text(
-          'Przestaniesz dostawać wiadomości z tej grupy, a pozostali '
-          'zobaczą, że wyszedłeś.',
+        title: Text(t('Opuścić grupę?')),
+        content: Text(
+          t(
+            'Przestaniesz dostawać wiadomości z tej grupy, a pozostali '
+            'zobaczą, że wyszedłeś.',
+          ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             key: const Key('group-leave-confirm'),
             style: FilledButton.styleFrom(backgroundColor: zen.danger),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Opuść'),
+            child: Text(t('Opuść')),
           ),
         ],
       ),
@@ -158,7 +162,11 @@ class _GroupConversationScreenState
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Błąd wysyłania wiadomości: $error')),
+          SnackBar(
+            content: Text(
+              t('Błąd wysyłania wiadomości: {error}', {'error': error}),
+            ),
+          ),
         );
       }
     }
@@ -209,9 +217,7 @@ class _GroupConversationScreenState
 
     if (acceptedFriends.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Wszyscy Twoi znajomi są już w tej grupie.'),
-        ),
+        SnackBar(content: Text(t('Wszyscy Twoi znajomi są już w tej grupie.'))),
       );
       return;
     }
@@ -223,7 +229,7 @@ class _GroupConversationScreenState
       context: context,
       builder: (BuildContext dialogContext) {
         return AlertDialog(
-          title: const Text('Dodaj znajomego do grupy'),
+          title: Text(t('Dodaj znajomego do grupy')),
           content: SizedBox(
             width: double.maxFinite,
             child: ListView.builder(
@@ -246,7 +252,9 @@ class _GroupConversationScreenState
                       messenger.showSnackBar(
                         SnackBar(
                           content: Text(
-                            'Dodano ${friend.displayLabel} do grupy.',
+                            t('Dodano {name} do grupy.', {
+                              'name': friend.displayLabel,
+                            }),
                           ),
                         ),
                       );
@@ -259,7 +267,7 @@ class _GroupConversationScreenState
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Anuluj'),
+              child: Text(t('Anuluj')),
             ),
           ],
         );
@@ -297,6 +305,8 @@ class _GroupConversationScreenState
         (SocialHubState state) => state.friends,
       ),
     );
+    // Messages the person reported are hidden behind a line (§21.4).
+    final HiddenByMe hiddenByMe = ref.watch(hiddenByMeProvider);
     final AsyncValue<List<ChatMessage>> messagesAsync = ref.watch(
       groupMessagesProvider(widget.groupId),
     );
@@ -347,7 +357,12 @@ class _GroupConversationScreenState
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '$memberCount uczestników',
+                    tn(
+                      memberCount,
+                      one: '{n} uczestnik',
+                      few: '{n} uczestników',
+                      many: '{n} uczestników',
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -368,7 +383,7 @@ class _GroupConversationScreenState
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 IconButton(
-                  tooltip: 'Połączenie audio',
+                  tooltip: t('Połączenie audio'),
                   style: IconButton.styleFrom(
                     minimumSize: const Size(40, 40),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -382,7 +397,7 @@ class _GroupConversationScreenState
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  tooltip: 'Połączenie wideo',
+                  tooltip: t('Połączenie wideo'),
                   style: IconButton.styleFrom(
                     minimumSize: const Size(40, 40),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -410,13 +425,13 @@ class _GroupConversationScreenState
                 }
               },
               itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-                const PopupMenuItem<String>(
+                PopupMenuItem<String>(
                   value: 'add_member',
                   child: Row(
                     children: <Widget>[
-                      Icon(Icons.person_add_rounded, size: 18),
-                      SizedBox(width: 8),
-                      Text('Dodaj członka'),
+                      const Icon(Icons.person_add_rounded, size: 18),
+                      const SizedBox(width: 8),
+                      Text(t('Dodaj członka')),
                     ],
                   ),
                 ),
@@ -429,7 +444,15 @@ class _GroupConversationScreenState
                       const SizedBox(width: 8),
                       Flexible(
                         child: Text(
-                          'Znikające wiadomości: ${disappearLabel(ref.read(socialHubControllerProvider).disappearSecondsFor('group:${widget.groupId}'))}',
+                          t('Znikające wiadomości: {label}', {
+                            'label': disappearLabel(
+                              ref
+                                  .read(socialHubControllerProvider)
+                                  .disappearSecondsFor(
+                                    'group:${widget.groupId}',
+                                  ),
+                            ),
+                          }),
                         ),
                       ),
                     ],
@@ -441,7 +464,10 @@ class _GroupConversationScreenState
                     children: <Widget>[
                       Icon(Icons.logout_rounded, size: 18, color: zen.danger),
                       const SizedBox(width: 8),
-                      Text('Opuść grupę', style: TextStyle(color: zen.danger)),
+                      Text(
+                        t('Opuść grupę'),
+                        style: TextStyle(color: zen.danger),
+                      ),
                     ],
                   ),
                 ),
@@ -474,8 +500,9 @@ class _GroupConversationScreenState
           Expanded(
             child: messagesAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
-              error: (Object err, _) =>
-                  Center(child: Text('Błąd ładowania: $err')),
+              error: (Object err, _) => Center(
+                child: Text(t('Błąd ładowania: {error}', {'error': err})),
+              ),
               data: (List<ChatMessage> messages) {
                 final bool animateEntrance =
                     !_messageEntrancePlayed && messages.isNotEmpty;
@@ -487,10 +514,10 @@ class _GroupConversationScreenState
                     child: SingleChildScrollView(
                       child: ZenEmpty(
                         icon: Icons.forum_outlined,
-                        title: 'Brak wiadomości w tej grupie',
+                        title: t('Brak wiadomości w tej grupie'),
                         text: isMember
-                            ? 'Napisz pierwszą wiadomość do uczestników grupy.'
-                            : 'Tu pojawią się wiadomości grupy.',
+                            ? t('Napisz pierwszą wiadomość do uczestników grupy.')
+                            : t('Tu pojawią się wiadomości grupy.'),
                       ),
                     ),
                   );
@@ -536,15 +563,23 @@ class _GroupConversationScreenState
                       );
                     }
                     final bool isSelf = msg.isOutgoing || msg.sender == 'self';
+                    if (!isSelf && hiddenByMe.hides(id: msg.id)) {
+                      return HiddenContentPlaceholder(
+                        key: Key('group-hidden-${msg.id}'),
+                        byMe: true,
+                        compact: true,
+                        onShow: () => showHiddenAnyway(ref, id: msg.id),
+                      );
+                    }
                     final String senderName = isSelf
-                        ? 'Ty'
+                        ? t('Ty')
                         : friends[msg.sender]?.displayLabel ??
                               ref
                                   .read(socialHubControllerProvider)
                                   .friendByAddress(msg.sender)
                                   ?.displayLabel ??
                               group?.memberNames[msg.sender] ??
-                              'Uczestnik';
+                              t('Uczestnik');
 
                     final Color senderTone = zenTone(
                       zen,
@@ -623,8 +658,25 @@ class _GroupConversationScreenState
                                         ref,
                                         authorAddress: msg.sender,
                                         text: msg.text,
-                                        header:
-                                            'Wiadomość w grupie ${widget.groupName} — $senderName',
+                                        header: t(
+                                          'Wiadomość w grupie {group} — {name}',
+                                          {
+                                            'group': widget.groupName,
+                                            'name': senderName,
+                                          },
+                                        ),
+                                        contentId: msg.id,
+                                        deleteLocal: () async {
+                                          await ref
+                                              .read(
+                                                socialHubControllerProvider
+                                                    .notifier,
+                                              )
+                                              .deleteMessageLocally(
+                                                key: 'group:${widget.groupId}',
+                                                messageId: msg.id,
+                                              );
+                                        },
                                       ),
                                     ),
                             ),
@@ -656,8 +708,8 @@ class _GroupConversationScreenState
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
                 child: Text(
                   group == null
-                      ? 'Nie jesteś już w tej grupie.'
-                      : 'Dołącz do grupy, żeby pisać.',
+                      ? t('Nie jesteś już w tej grupie.')
+                      : t('Dołącz do grupy, żeby pisać.'),
                   key: const Key('group-chat-readonly-note'),
                   textAlign: TextAlign.center,
                   style: TextStyle(color: zen.textSecondary),
@@ -695,7 +747,7 @@ class _GroupConversationScreenState
                               height: 1.35,
                             ),
                             decoration: InputDecoration(
-                              hintText: 'Napisz wiadomość do grupy...',
+                              hintText: t('Napisz wiadomość do grupy...'),
                               hintStyle: TextStyle(
                                 color: zen.textMuted,
                                 fontSize: 14.5,
@@ -781,7 +833,7 @@ class _PendingInviteBanner extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Zaproszenie do grupy',
+                  t('Zaproszenie do grupy'),
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 15,
@@ -793,7 +845,9 @@ class _PendingInviteBanner extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Możesz przejrzeć rozmowę. Pisać i dzwonić możesz po dołączeniu.',
+            t(
+              'Możesz przejrzeć rozmowę. Pisać i dzwonić możesz po dołączeniu.',
+            ),
             style: TextStyle(
               color: zen.textSecondary,
               fontSize: 13.5,
@@ -807,7 +861,7 @@ class _PendingInviteBanner extends StatelessWidget {
                 child: OutlinedButton(
                   key: const Key('group-invite-decline'),
                   onPressed: onDecline,
-                  child: const Text('Odrzuć'),
+                  child: Text(t('Odrzuć')),
                 ),
               ),
               const SizedBox(width: 10),
@@ -815,7 +869,7 @@ class _PendingInviteBanner extends StatelessWidget {
                 child: FilledButton(
                   key: const Key('group-invite-join'),
                   onPressed: onJoin,
-                  child: const Text('Dołącz'),
+                  child: Text(t('Dołącz')),
                 ),
               ),
             ],
@@ -855,8 +909,10 @@ class _RunningCallBanner extends StatelessWidget {
               Expanded(
                 child: Text(
                   inCall
-                      ? 'Jesteś w połączeniu grupowym'
-                      : 'Trwa połączenie grupowe · $headcount os.',
+                      ? t('Jesteś w połączeniu grupowym')
+                      : t('Trwa połączenie grupowe · {count} os.', {
+                          'count': headcount,
+                        }),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -881,7 +937,7 @@ class _RunningCallBanner extends StatelessWidget {
                   inCall ? Icons.open_in_full_rounded : Icons.call_rounded,
                   size: 18,
                 ),
-                label: Text(inCall ? 'Wróć' : 'Dołącz'),
+                label: Text(inCall ? t('Wróć') : t('Dołącz')),
               ),
             ],
           ),

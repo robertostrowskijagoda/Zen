@@ -161,6 +161,102 @@ void main() {
       expect(hasRiskyExtension('bez-rozszerzenia'), isFalse);
     });
 
+    test('dots and spaces at the end do not hide a program', () {
+      // Windows drops them: these open as .exe, .ps1 and .bat.
+      expect(hasRiskyExtension('faktura.exe.'), isTrue);
+      expect(hasRiskyExtension('faktura.exe...'), isTrue);
+      expect(hasRiskyExtension('skrypt.ps1 '), isTrue);
+      expect(hasRiskyExtension('skrypt.ps1  .  '), isTrue);
+      expect(hasRiskyExtension('plik.bat. .'), isTrue);
+      expect(hasRiskyExtension('plik.EXE.'), isTrue);
+      expect(hasRiskyExtension('plik.exe\u00A0'), isTrue);
+      // Invisible characters never count, at the end or inside.
+      expect(hasRiskyExtension('plik.exe\u200B'), isTrue);
+      expect(hasRiskyExtension('plik.e\u200Bxe'), isTrue);
+      expect(hasRiskyExtension('plik.exe\u202E'), isTrue);
+      // The same dots after a harmless extension stay harmless.
+      expect(hasRiskyExtension('faktura.pdf.'), isFalse);
+      expect(hasRiskyExtension('faktura.pdf '), isFalse);
+      expect(hasRiskyExtension('...'), isFalse);
+      expect(hasRiskyExtension(''), isFalse);
+    });
+
+    test('only the last extension decides, a double one is no disguise', () {
+      expect(hasRiskyExtension('zdjecie.jpg.exe'), isTrue);
+      expect(hasRiskyExtension('faktura.pdf.exe.'), isTrue);
+      expect(hasRiskyExtension('film.mp4.scr'), isTrue);
+      expect(hasRiskyExtension('raport.docx.js'), isTrue);
+      expect(hasRiskyExtension('program.exe.txt'), isFalse);
+      expect(hasRiskyExtension('archiwum.tar.gz'), isFalse);
+    });
+
+    test('an alternate data stream is taken for its file', () {
+      expect(hasRiskyExtension('plik.exe:strumien'), isTrue);
+      expect(hasRiskyExtension('plik.exe::\$DATA'), isTrue);
+      expect(hasRiskyExtension('plik.txt:strumien'), isFalse);
+      expect(hasRiskyExtension('Notatki: spotkanie.txt'), isFalse);
+    });
+
+    test('the list of risky extensions covers what the system runs', () {
+      for (final String ext in <String>[
+        'jnlp',
+        'appref-ms',
+        'settingcontent-ms',
+        'library-ms',
+        'url',
+        'desktop',
+        'command',
+        'app',
+        'pkg',
+        'dmg',
+        'deb',
+        'rpm',
+        'AppImage',
+        'sh',
+        'msi',
+        'lnk',
+        'vbs',
+        'ps1',
+        'hta',
+        'jar',
+      ]) {
+        expect(hasRiskyExtension('plik.$ext'), isTrue, reason: ext);
+      }
+      for (final String ext in <String>[
+        'pdf',
+        'jpg',
+        'png',
+        'txt',
+        'docx',
+        'xlsx',
+        'zip',
+        'mp4',
+        'mp3',
+        'csv',
+      ]) {
+        expect(hasRiskyExtension('plik.$ext'), isFalse, reason: ext);
+      }
+    });
+
+    test('a file named with trailing dots is stored without them', () async {
+      final GuardedMedia g = await guardIncomingMedia(
+        Uint8List.fromList('MZ'.codeUnits),
+        declared: MediaKind.file,
+        fileName: 'faktura.exe. .',
+      );
+      expect(g.fileName, 'faktura.exe');
+      expect(g.risky, isTrue);
+
+      // Without a program inside, the name alone gives it away.
+      final GuardedMedia byName = await guardIncomingMedia(
+        Uint8List.fromList('echo'.codeUnits),
+        declared: MediaKind.file,
+        fileName: 'skrypt.cmd ',
+      );
+      expect(byName.risky, isTrue);
+      expect(byName.mimeType, 'application/octet-stream');
+    });
+
     test('a direction mark cannot dress a program up as a photo', () async {
       // Shown as "zdjecieexe.jpg", really "zdjecie\u202Egpj.exe".
       final GuardedMedia g = await guardIncomingMedia(

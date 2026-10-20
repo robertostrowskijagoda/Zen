@@ -271,6 +271,93 @@ final class RelayOutboxEntry {
   }
 }
 
+/// What the relay layer can tell the chat about a queued chat message that is
+/// not (or no longer) on its way the way the sender may assume.
+enum RelayDeliveryStatus {
+  /// Too large for friends' mailboxes (`RelayConfig.maxRelayablePayloadBytes`):
+  /// it only reaches the recipient while both devices are online at the same
+  /// time. Still being retried, so not a failure — but not "sent and safe"
+  /// either.
+  directOnly,
+
+  /// Nobody acknowledged it within `RelayConfig.messageTtl` (14 days) and it
+  /// was dropped from the queue: it will not be delivered any more.
+  expired,
+}
+
+/// One piece of delivery news about a queued chat message, kept in the stored
+/// state until the chat layer has taken it over (see
+/// `RelayEngine.takeDeliveryReports`), so it survives restarts and the hand-off
+/// between the UI isolate and the Android background service.
+@immutable
+final class RelayDeliveryReport {
+  const RelayDeliveryReport({
+    required this.rid,
+    required this.recipient,
+    required this.messageId,
+    required this.status,
+    required this.atMillis,
+  });
+
+  /// The reliable id (`_rid`) of the queued payload.
+  final String rid;
+
+  /// Canonical address the message was addressed to (the chat's peer).
+  final String recipient;
+
+  /// The chat message id (`msgId` of the payload).
+  final String messageId;
+  final RelayDeliveryStatus status;
+  final int atMillis;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'rid': rid,
+    'to': recipient,
+    'mid': messageId,
+    's': status.name,
+    'at': atMillis,
+  };
+
+  static RelayDeliveryReport? fromJson(Object? json) {
+    if (json is! Map) {
+      return null;
+    }
+    final Object? rid = json['rid'];
+    final Object? recipient = json['to'];
+    final Object? messageId = json['mid'];
+    final RelayDeliveryStatus? status = json['s'] is String
+        ? RelayDeliveryStatus.values.asNameMap()[json['s'] as String]
+        : null;
+    if (rid is! String ||
+        rid.isEmpty ||
+        recipient is! String ||
+        recipient.isEmpty ||
+        messageId is! String ||
+        messageId.isEmpty ||
+        status == null) {
+      return null;
+    }
+    return RelayDeliveryReport(
+      rid: rid,
+      recipient: recipient,
+      messageId: messageId,
+      status: status,
+      atMillis: (json['at'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// Version of the stored *settings* (as opposed to the delivery data) in
+/// [RelayState]. Bumped whenever a setting's default changes in a way that has
+/// to reach devices that already stored the old default.
+///
+/// * (absent) — states written before the version existed. They stored
+///   `shareWithGroups` as `true` by default, and a stored `true` cannot be told
+///   apart from "never touched".
+/// * 2 — `shareWithGroups` is off by default and, from here on, a stored value
+///   is the person's own choice.
+const int kRelaySettingsVersion = 2;
+
 /// Everything the relay layer persists for this device.
 final class RelayState {
   RelayState({
@@ -286,7 +373,8 @@ final class RelayState {
     Map<String, int>? seen,
     this.seenFloorMillis = 0,
     Map<String, int>? seenFloors,
-    this.shareWithGroups = true,
+    this.shareWithGroups = false,
+    List<RelayDeliveryReport>? deliveryReports,
   }) : peers = peers ?? <String, RelayPeerInfo>{},
        seenFloors = seenFloors ?? <String, int>{},
        currentRelays = currentRelays ?? <String>[],
@@ -294,7 +382,8 @@ final class RelayState {
        outbox = outbox ?? <String, RelayOutboxEntry>{},
        mailbox = mailbox ?? <String, Map<String, Map<String, dynamic>>>{},
        tombstones = tombstones ?? <String, int>{},
-       seen = seen ?? <String, int>{};
+       seen = seen ?? <String, int>{},
+       deliveryReports = deliveryReports ?? <RelayDeliveryReport>[];
 
   RelayIdentity? identity;
 
@@ -334,15 +423,24 @@ final class RelayState {
   /// can only ever refuse its own old copies, never everybody's mail.
   final Map<String, int> seenFloors;
 
-  /// Whether group members (not only friends) learn this device's key and
-  /// mailboxes. Revealing the mailboxes means revealing which six friends
-  /// hold them, so it is a user choice; on by default so group messages reach
-  /// offline members.
+  /// Whether group members who are not friends learn this device's key and
+  /// mailboxes. Revealing the mailboxes means revealing which friends hold
+  /// them (part of the trust graph), so it is the person's explicit opt-in and
+  /// off by default: only friends ever get the mailbox addresses unless this
+  /// is switched on. Group messages to someone offline then wait in mailboxes
+  /// only for members who are friends (or who also opted in).
   bool shareWithGroups;
+
+  /// Delivery news for the chat layer that it has not taken over yet, oldest
+  /// first (see [RelayDeliveryReport]).
+  final List<RelayDeliveryReport> deliveryReports;
 
   String toJsonString({bool includeMailbox = true}) =>
       jsonEncode(<String, dynamic>{
         'v': 1,
+        // Settings version (see [kRelaySettingsVersion]): lets a loader tell
+        // a `swg` the person chose from the old default.
+        'sv': kRelaySettingsVersion,
         if (identity != null) 'id': identity!.toJson(),
         'peers': peers.values.map((RelayPeerInfo p) => p.toJson()).toList(),
         if (manualRelays != null) 'manual': manualRelays,
@@ -358,6 +456,10 @@ final class RelayState {
         if (seenFloorMillis > 0) 'sfl': seenFloorMillis,
         if (seenFloors.isNotEmpty) 'sfls': seenFloors,
         'swg': shareWithGroups,
+        if (deliveryReports.isNotEmpty)
+          'rep': deliveryReports
+              .map((RelayDeliveryReport r) => r.toJson())
+              .toList(),
       });
 
   static RelayState fromJsonString(String raw) {
@@ -400,6 +502,26 @@ final class RelayState {
         }
       });
     }
+    final List<RelayDeliveryReport> reports = <RelayDeliveryReport>[];
+    final Object? rawReports = decoded['rep'];
+    if (rawReports is List) {
+      for (final Object? item in rawReports) {
+        final RelayDeliveryReport? report = RelayDeliveryReport.fromJson(item);
+        if (report != null) {
+          reports.add(report);
+        }
+      }
+    }
+    // One-time migration (S-5). Before `sv` existed `shareWithGroups` was on by
+    // default and always written out, so a stored `true` could be the untouched
+    // default as well as a deliberate choice, and announcing mailboxes to
+    // strangers in groups must not stay on for people who never decided it.
+    // Everything stored without (or with an older) `sv` therefore loads as
+    // "off"; the next save writes the current `sv`, from then on `swg` is the
+    // person's own choice again and survives restarts — so this runs once, and
+    // they can switch it back on.
+    final bool storedChoiceIsTheirs =
+        ((decoded['sv'] as num?)?.toInt() ?? 0) >= kRelaySettingsVersion;
     final Object? manual = decoded['manual'];
     return RelayState(
       identity: RelayIdentity.fromJson(decoded['id']),
@@ -414,7 +536,8 @@ final class RelayState {
       seen: _intMap(decoded['seen']),
       seenFloorMillis: (decoded['sfl'] as num?)?.toInt() ?? 0,
       seenFloors: _intMap(decoded['sfls']),
-      shareWithGroups: decoded['swg'] != false,
+      shareWithGroups: storedChoiceIsTheirs && decoded['swg'] == true,
+      deliveryReports: reports,
     );
   }
 }

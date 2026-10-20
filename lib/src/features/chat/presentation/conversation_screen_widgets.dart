@@ -25,15 +25,15 @@ String _conversationSubtitle({
 
 String? _conversationRelationshipStatusLabel(FriendProfile? friend) {
   return switch (friend?.status) {
-    FriendRelationshipStatus.pendingIncoming => 'Zaproszenie oczekuje',
-    FriendRelationshipStatus.pendingOutgoing => 'Czekasz na akceptację',
-    FriendRelationshipStatus.blocked => 'Relacja zablokowana',
+    FriendRelationshipStatus.pendingIncoming => t('Zaproszenie oczekuje'),
+    FriendRelationshipStatus.pendingOutgoing => t('Czekasz na akceptację'),
+    FriendRelationshipStatus.blocked => t('Relacja zablokowana'),
     FriendRelationshipStatus.none => null,
     // No relationship at all (a chat opened from a link, for one): say so,
     // so nothing on screen passes them off as someone the user knows.
-    null => 'Nieznajomy',
+    null => t('Nieznajomy'),
     FriendRelationshipStatus.accepted =>
-      friend?.isOnline == true ? 'Aktywny teraz' : 'Offline',
+      friend?.isOnline == true ? t('Aktywny teraz') : t('Offline'),
   };
 }
 
@@ -57,10 +57,10 @@ class _DaySeparator extends StatelessWidget {
     final DateTime day = DateTime(date.year, date.month, date.day);
     final int diff = today.difference(day).inDays;
     if (diff == 0) {
-      return 'Dziś';
+      return t('Dziś');
     }
     if (diff == 1) {
-      return 'Wczoraj';
+      return t('Wczoraj');
     }
     final String d = date.day.toString().padLeft(2, '0');
     final String m = date.month.toString().padLeft(2, '0');
@@ -119,7 +119,7 @@ class _TypingBubble extends StatelessWidget {
             children: <Widget>[
               Flexible(
                 child: Text(
-                  '$name pisze',
+                  t('{name} pisze', {'name': name}),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -152,7 +152,7 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
     items.add(
       PopupMenuItem<_ConversationMenuAction>(
         enabled: false,
-        child: Text('Status: $statusLabel'),
+        child: Text(t('Status: {status}', {'status': statusLabel})),
       ),
     );
   }
@@ -161,7 +161,10 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
       PopupMenuItem<_ConversationMenuAction>(
         enabled: false,
         child: Text(
-          'Retencja: ${_cleanupSummary(friend!)} • Limit: ${_storageLimitSummary(friend)}',
+          t('Retencja: {cleanup} • Limit: {limit}', <String, Object?>{
+            'cleanup': _cleanupSummary(friend!),
+            'limit': _storageLimitSummary(friend),
+          }),
         ),
       ),
     );
@@ -170,7 +173,7 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
     items.add(
       PopupMenuItem<_ConversationMenuAction>(
         enabled: false,
-        child: Text('Wpisy w rozmowie: $messageCount'),
+        child: Text(t('Wpisy w rozmowie: {count}', {'count': messageCount})),
       ),
     );
   }
@@ -180,56 +183,58 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
   switch (friend?.status) {
     case FriendRelationshipStatus.pendingIncoming:
       items.addAll(<PopupMenuEntry<_ConversationMenuAction>>[
-        const PopupMenuItem<_ConversationMenuAction>(
+        PopupMenuItem<_ConversationMenuAction>(
           value: _ConversationMenuAction.acceptRequest,
-          child: Text('Akceptuj'),
+          child: Text(t('Akceptuj')),
         ),
-        const PopupMenuItem<_ConversationMenuAction>(
+        PopupMenuItem<_ConversationMenuAction>(
           value: _ConversationMenuAction.rejectRequest,
-          child: Text('Odrzuc'),
+          child: Text(t('Odrzuc')),
         ),
       ]);
       break;
     case FriendRelationshipStatus.pendingOutgoing:
       items.add(
-        const PopupMenuItem<_ConversationMenuAction>(
+        PopupMenuItem<_ConversationMenuAction>(
           value: _ConversationMenuAction.cancelRequest,
-          child: Text('Anuluj zaproszenie'),
+          child: Text(t('Anuluj zaproszenie')),
         ),
       );
       break;
     case FriendRelationshipStatus.accepted:
       items.addAll(<PopupMenuEntry<_ConversationMenuAction>>[
-        const PopupMenuItem<_ConversationMenuAction>(
+        PopupMenuItem<_ConversationMenuAction>(
           value: _ConversationMenuAction.setNickname,
-          child: Text('Pseudonim'),
+          child: Text(t('Pseudonim')),
         ),
-        const PopupMenuItem<_ConversationMenuAction>(
+        PopupMenuItem<_ConversationMenuAction>(
           value: _ConversationMenuAction.retentionSettings,
-          child: Text('Retencja rozmowy'),
+          child: Text(t('Retencja rozmowy')),
         ),
         PopupMenuItem<_ConversationMenuAction>(
           key: const Key('conversation-disappearing-menu'),
           value: _ConversationMenuAction.disappearingMessages,
           child: Text(
-            'Znikające wiadomości: ${disappearLabel(disappearSeconds)}',
+            t('Znikające wiadomości: {label}', {
+              'label': disappearLabel(disappearSeconds),
+            }),
           ),
         ),
-        const PopupMenuItem<_ConversationMenuAction>(
+        PopupMenuItem<_ConversationMenuAction>(
           value: _ConversationMenuAction.blockFriend,
-          child: Text('Zablokuj'),
+          child: Text(t('Zablokuj')),
         ),
-        const PopupMenuItem<_ConversationMenuAction>(
+        PopupMenuItem<_ConversationMenuAction>(
           value: _ConversationMenuAction.removeFriend,
-          child: Text('Usuń znajomego'),
+          child: Text(t('Usuń znajomego')),
         ),
       ]);
       break;
     case FriendRelationshipStatus.blocked:
       items.add(
-        const PopupMenuItem<_ConversationMenuAction>(
+        PopupMenuItem<_ConversationMenuAction>(
           value: _ConversationMenuAction.unblockFriend,
-          child: Text('Odblokuj'),
+          child: Text(t('Odblokuj')),
         ),
       );
       break;
@@ -242,9 +247,9 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
       items.add(const PopupMenuDivider());
     }
     items.add(
-      const PopupMenuItem<_ConversationMenuAction>(
+      PopupMenuItem<_ConversationMenuAction>(
         value: _ConversationMenuAction.clearHistory,
-        child: Text('Wyczyść historię'),
+        child: Text(t('Wyczyść historię')),
       ),
     );
   }
@@ -253,17 +258,17 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
     items.add(const PopupMenuDivider());
   }
   items.add(
-    const PopupMenuItem<_ConversationMenuAction>(
-      key: Key('conversation-menu-report'),
+    PopupMenuItem<_ConversationMenuAction>(
+      key: const Key('conversation-menu-report'),
       value: _ConversationMenuAction.reportPerson,
-      child: Text('Zgłoś osobę'),
+      child: Text(t('Zgłoś osobę')),
     ),
   );
   if (items.isEmpty) {
     items.add(
-      const PopupMenuItem<_ConversationMenuAction>(
+      PopupMenuItem<_ConversationMenuAction>(
         enabled: false,
-        child: Text('Brak akcji'),
+        child: Text(t('Brak akcji')),
       ),
     );
   }
@@ -535,8 +540,11 @@ class _ImageAttachmentContent extends StatelessWidget {
         (message.fileName?.toLowerCase().endsWith('.gif') ?? false);
     final Widget image =
         message.gifUrl != null && isAllowedRemoteMediaUrl(message.gifUrl)
-        ? ZenAnimatedImage(
-            url: message.gifUrl,
+        // A peer's GIF waits for a tap: fetching it on sight would tell the
+        // GIF host this device's IP address and when the chat was opened.
+        ? ZenRemoteGif(
+            url: message.gifUrl!,
+            chosenByUser: message.isOutgoing,
             width: double.infinity,
             height: 220,
             errorBuilder: _buildImageError,
@@ -662,7 +670,7 @@ class _FileAttachmentContent extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 message.attachmentSizeBytes == null
-                    ? 'Nieznany rozmiar'
+                    ? t('Nieznany rozmiar')
                     : formatAttachmentSize(message.attachmentSizeBytes!),
                 style: TextStyle(color: zen.textMuted, fontSize: 12),
               ),
@@ -673,7 +681,9 @@ class _FileAttachmentContent extends StatelessWidget {
                     : null,
                 icon: const Icon(Icons.download_rounded),
                 label: Text(
-                  message.hasAttachment ? 'Zapisz kopie' : 'Transfer w toku',
+                  message.hasAttachment
+                      ? t('Zapisz kopie')
+                      : t('Transfer w toku'),
                 ),
               ),
             ],
@@ -730,7 +740,7 @@ class _AttachmentStubContent extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 message.attachmentSizeBytes == null
-                    ? 'Transfer w toku'
+                    ? t('Transfer w toku')
                     : formatAttachmentSize(message.attachmentSizeBytes!),
                 style: TextStyle(color: zen.textMuted, fontSize: 12),
               ),
@@ -763,7 +773,10 @@ Future<void> _showNicknameDialog({
     if (!context.mounted) {
       return;
     }
-    _showActionError(context, 'Nie udało się zapisać pseudonimu: $error');
+    _showActionError(
+      context,
+      t('Nie udało się zapisać pseudonimu: {error}', {'error': error}),
+    );
   }
 }
 
@@ -774,85 +787,88 @@ Future<void> _showRetentionSettingsDialog({
 }) async {
   String cleanupDraft = '${friend.autoCleanupDays}';
   String limitDraft = '${friend.inboxLimitMb}';
-  final _RetentionSettingsDraft?
-  draft = await showDialog<_RetentionSettingsDraft>(
-    context: context,
-    builder: (BuildContext context) {
-      final ZenColors zen = ZenColors.of(context);
-      return AlertDialog(
-        title: const Text('Retencja rozmowy'),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                '0 = nigdy nie czyść i bez limitu danych. Te ustawienia działają tylko dla tej rozmowy.',
-                style: TextStyle(color: zen.textSecondary, height: 1.4),
+  final _RetentionSettingsDraft? draft =
+      await showDialog<_RetentionSettingsDraft>(
+        context: context,
+        builder: (BuildContext context) {
+          final ZenColors zen = ZenColors.of(context);
+          return AlertDialog(
+            title: Text(t('Retencja rozmowy')),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    t(
+                      '0 = nigdy nie czyść i bez limitu danych. Te ustawienia '
+                      'działają tylko dla tej rozmowy.',
+                    ),
+                    style: TextStyle(color: zen.textSecondary, height: 1.4),
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    key: const Key('retention-cleanup-field'),
+                    initialValue: cleanupDraft,
+                    autofocus: true,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: t('Auto-czyszczenie (dni)'),
+                    ),
+                    onChanged: (String value) {
+                      cleanupDraft = value;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    key: const Key('retention-limit-field'),
+                    initialValue: limitDraft,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: t('Limit danych rozmowy (MB)'),
+                    ),
+                    onChanged: (String value) {
+                      limitDraft = value;
+                    },
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                key: const Key('retention-cleanup-field'),
-                initialValue: cleanupDraft,
-                autofocus: true,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Auto-czyszczenie (dni)',
-                ),
-                onChanged: (String value) {
-                  cleanupDraft = value;
-                },
+            ),
+            actions: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(t('Anuluj')),
               ),
-              const SizedBox(height: 12),
-              TextFormField(
-                key: const Key('retention-limit-field'),
-                initialValue: limitDraft,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Limit danych rozmowy (MB)',
-                ),
-                onChanged: (String value) {
-                  limitDraft = value;
+              FilledButton(
+                key: const Key('retention-settings-save'),
+                onPressed: () {
+                  Navigator.of(context).pop(
+                    _RetentionSettingsDraft(
+                      autoCleanupDaysText: cleanupDraft,
+                      inboxLimitMbText: limitDraft,
+                    ),
+                  );
                 },
+                child: Text(t('Zapisz')),
               ),
             ],
-          ),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Anuluj'),
-          ),
-          FilledButton(
-            key: const Key('retention-settings-save'),
-            onPressed: () {
-              Navigator.of(context).pop(
-                _RetentionSettingsDraft(
-                  autoCleanupDaysText: cleanupDraft,
-                  inboxLimitMbText: limitDraft,
-                ),
-              );
-            },
-            child: const Text('Zapisz'),
-          ),
-        ],
+          );
+        },
       );
-    },
-  );
   if (draft == null || !context.mounted) {
     return;
   }
   final int? cleanupDays = int.tryParse(draft.autoCleanupDaysText.trim());
   final int? inboxLimitMb = int.tryParse(draft.inboxLimitMbText.trim());
   if (cleanupDays == null || cleanupDays < 0) {
-    _showActionError(context, 'Podaj poprawną liczbę dni (0 lub więcej).');
+    _showActionError(context, t('Podaj poprawną liczbę dni (0 lub więcej).'));
     return;
   }
   if (inboxLimitMb == null || inboxLimitMb < 0) {
     _showActionError(
       context,
-      'Podaj poprawny limit danych w MB (0 lub więcej).',
+      t('Podaj poprawny limit danych w MB (0 lub więcej).'),
     );
     return;
   }
@@ -871,14 +887,20 @@ Future<void> _showRetentionSettingsDialog({
     if (!context.mounted) {
       return;
     }
-    _showActionError(context, 'Nie udało się zapisać retencji: $error');
+    _showActionError(
+      context,
+      t('Nie udało się zapisać retencji: {error}', {'error': error}),
+    );
   }
 }
 
 String _cleanupSummary(FriendProfile friend) {
-  return friend.autoCleanupDays <= 0
-      ? '0 dni'
-      : '${friend.autoCleanupDays} dni';
+  return tn(
+    friend.autoCleanupDays <= 0 ? 0 : friend.autoCleanupDays,
+    one: '{n} dzień',
+    few: '{n} dni',
+    many: '{n} dni',
+  );
 }
 
 String _storageLimitSummary(FriendProfile friend) {

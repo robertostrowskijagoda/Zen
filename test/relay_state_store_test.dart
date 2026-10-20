@@ -1,9 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/features/relay/relay_crypto.dart';
+import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
 
@@ -87,6 +89,148 @@ void main() {
     state.mailbox.clear();
     await store.save(state);
     expect((await FileRelayStateStore(store: binary).load()).mailbox, isEmpty);
+  });
+
+  group('sharing mailboxes with group members', () {
+    Future<void> writeRaw(Object document) => binary.write(
+      'relay/state',
+      Uint8List.fromList(jsonEncode(document).codeUnits),
+    );
+
+    test('is off for a new state', () async {
+      expect(RelayState().shareWithGroups, isFalse);
+      expect(RelayState.fromJsonString('{}').shareWithGroups, isFalse);
+      expect(
+        (await FileRelayStateStore(store: binary).load()).shareWithGroups,
+        isFalse,
+      );
+      expect(const RelayOverview().shareWithGroups, isFalse);
+    });
+
+    test('a state stored before the settings version is switched off, '
+        'whatever it held', () async {
+      for (final Object? stored in <Object?>[true, false, null]) {
+        final RelayState loaded = RelayState.fromJsonString(
+          jsonEncode(<String, dynamic>{'v': 1, 'swg': ?stored}),
+        );
+        expect(loaded.shareWithGroups, isFalse, reason: 'swg: $stored');
+      }
+    });
+
+    test('the migration runs once: the next save records the version and '
+        'the person\'s later choice sticks', () async {
+      await writeRaw(<String, dynamic>{
+        'v': 1,
+        'swg': true,
+        'peers': <Object>[],
+        'cur': <String>['r1'],
+        'ver': 4,
+      });
+      final FileRelayStateStore store = FileRelayStateStore(store: binary);
+
+      RelayState state = await store.load();
+      expect(state.shareWithGroups, isFalse);
+      expect(state.relaySetVersion, 4, reason: 'nothing else is touched');
+      expect(state.currentRelays, <String>['r1']);
+      await store.save(state);
+
+      final Uint8List? written = await binary.read('relay/state');
+      expect(
+        (jsonDecode(utf8.decode(written!)) as Map<String, dynamic>)['sv'],
+        kRelaySettingsVersion,
+      );
+      state = await FileRelayStateStore(store: binary).load();
+      expect(state.shareWithGroups, isFalse);
+
+      // Opting in again is kept across restarts…
+      state.shareWithGroups = true;
+      await store.save(state);
+      state = await FileRelayStateStore(store: binary).load();
+      expect(state.shareWithGroups, isTrue);
+
+      // …and so is opting out.
+      state.shareWithGroups = false;
+      await store.save(state);
+      state = await FileRelayStateStore(store: binary).load();
+      expect(state.shareWithGroups, isFalse);
+    });
+
+    test('a deliberate choice written by this version round-trips', () {
+      final RelayState on = RelayState.fromJsonString(
+        RelayState(shareWithGroups: true).toJsonString(),
+      );
+      expect(on.shareWithGroups, isTrue);
+      final RelayState off = RelayState.fromJsonString(
+        RelayState().toJsonString(),
+      );
+      expect(off.shareWithGroups, isFalse);
+    });
+  });
+
+  group('delivery reports', () {
+    test('are stored with the state and read back in order', () async {
+      final RelayState state = RelayState(
+        deliveryReports: <RelayDeliveryReport>[
+          const RelayDeliveryReport(
+            rid: 'r1',
+            recipient: 'p',
+            messageId: 'm1',
+            status: RelayDeliveryStatus.directOnly,
+            atMillis: 10,
+          ),
+          const RelayDeliveryReport(
+            rid: 'r2',
+            recipient: 'q',
+            messageId: 'm2',
+            status: RelayDeliveryStatus.expired,
+            atMillis: 20,
+          ),
+        ],
+      );
+      await FileRelayStateStore(store: binary).save(state);
+      final RelayState loaded = await FileRelayStateStore(store: binary).load();
+
+      expect(
+        loaded.deliveryReports
+            .map((RelayDeliveryReport r) => r.toJson())
+            .toList(),
+        state.deliveryReports
+            .map((RelayDeliveryReport r) => r.toJson())
+            .toList(),
+      );
+      expect(loaded.deliveryReports.last.status, RelayDeliveryStatus.expired);
+      expect(loaded.deliveryReports.last.messageId, 'm2');
+      expect(loaded.deliveryReports.last.recipient, 'q');
+    });
+
+    test('a state without reports, or with garbage in their place, loads', () {
+      expect(RelayState.fromJsonString('{"v":1}').deliveryReports, isEmpty);
+      expect(
+        RelayState.fromJsonString('{"v":1,"rep":"nope"}').deliveryReports,
+        isEmpty,
+      );
+      final RelayState state = RelayState.fromJsonString(
+        jsonEncode(<String, dynamic>{
+          'v': 1,
+          'rep': <Object?>[
+            7,
+            <String, dynamic>{'rid': 'a', 'to': 'p', 'mid': 'm', 's': 'gone'},
+            <String, dynamic>{'rid': '', 'to': 'p', 'mid': 'm', 's': 'expired'},
+            <String, dynamic>{
+              'rid': 'b',
+              'to': 'p',
+              'mid': 'm',
+              's': 'expired',
+            },
+          ],
+        }),
+      );
+      expect(
+        state.deliveryReports.map((RelayDeliveryReport r) => r.rid).toList(),
+        <String>['b'],
+      );
+      expect(state.deliveryReports.single.atMillis, 0);
+    });
   });
 
   test('a corrupt file starts fresh instead of failing', () async {
