@@ -107,16 +107,6 @@ final class GuardedAppSettingsStore implements AppSettingsStore {
         }
         settings = guardedSettings;
       }
-      if (fromFile.gifApiKey.isNotEmpty && gifKey == null) {
-        // An older file: the key moves to secure storage now and leaves the
-        // file with the next save (loading never writes the file: the
-        // background isolate loads it too and must not race the app).
-        await _secrets.write(
-          appSecurityGifApiKeyStorageKey,
-          fromFile.gifApiKey,
-        );
-        return settings;
-      }
       return gifKey == null ? settings : settings.copyWith(gifApiKey: gifKey);
     } on Object catch (error, stackTrace) {
       logZenError('Reading the protected settings failed', error, stackTrace);

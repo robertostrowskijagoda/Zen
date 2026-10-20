@@ -8,6 +8,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
@@ -123,20 +124,12 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
             ZenInfo(
               icon: Icons.privacy_tip_outlined,
               // S5: say what really goes with the hello.
-              text: person.modern
-                  ? t(
-                      'Dostanie Twój pseudonim i tę wiadomość — bez imienia, '
-                      'konta i adresu w sieci. Adresy poznacie dopiero, gdy '
-                      'odpowie. Możesz napisać jedną wiadomość, dopóki nie '
-                      'odpowie.',
-                    )
-                  : t(
-                      'Ta osoba ma starszą wersję Zen: dostanie Twój '
-                      'pseudonim, tę wiadomość i Twój adres w sieci (bez '
-                      'imienia i profilu, ale po adresie da się Cię '
-                      'rozpoznać). Możesz napisać jedną wiadomość, dopóki '
-                      'nie odpowie.',
-                    ),
+              text: t(
+                'Dostanie Twój pseudonim i tę wiadomość — bez imienia, '
+                'konta i adresu w sieci. Adresy poznacie dopiero, gdy '
+                'odpowie. Możesz napisać jedną wiadomość, dopóki nie '
+                'odpowie.',
+              ),
             ),
             const SizedBox(height: 8),
             TextField(
@@ -450,7 +443,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
   ) {
     final String? friend = p.friend;
     if (friend != null) {
-      final bool met = meet.book.metAt(friend) != null;
+      final bool met = ref.read(ledgerNodeProvider)?.hasMet(friend) ?? false;
       return ZenTile(
         key: Key('nearby-friend-$friend'),
         icon: Icons.person_pin_circle_rounded,
@@ -474,7 +467,6 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
         t('czeka na odpowiedź')
       else if (talks.isNotEmpty)
         t('rozmawiacie'),
-      if (!p.modern) t('starsza wersja Zen'),
     ];
     return ZenTile(
       key: Key('nearby-stranger-${p.token}'),
@@ -533,7 +525,6 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
     await ref
         .read(socialHubControllerProvider.notifier)
         .sendFriendRequest(peerAddress: address, knownName: s.pseudonym);
-    await ref.read(meetServiceProvider).markMet(address);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -579,11 +570,6 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
                 'Odpowiedź pójdzie przez Bluetooth, więc ta osoba musi być '
                 'jeszcze obok. Dostanie z nią Twój adres w sieci (bez imienia '
                 'i profilu).',
-              )
-            : s.legacy && !s.startedByMe && !s.iAnswered
-            ? t(
-                'Ta osoba ma starszą wersję Zen. Odpowiedź pójdzie przez sieć '
-                'i pokaże jej Twój adres (bez imienia i profilu).',
               )
             : null;
         return Scaffold(

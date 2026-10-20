@@ -11,7 +11,6 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
-import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/meet/alarm_shortcut.dart';
 import 'package:zen/src/features/meet/alarm_sms.dart';
 import 'package:zen/src/features/meet/location.dart';
@@ -21,8 +20,6 @@ import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/nearby_keeper.dart';
 import 'package:zen/src/features/meet/presentation/alarm_audio.dart';
-import 'package:zen/src/features/neighbors/neighbors_providers.dart';
-import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 
 const Color _alarmRed = Color(0xFFD32F2F);
 
@@ -1417,9 +1414,10 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
   }
 }
 
-/// Opens a friend's new alarm on top of whatever is on screen, and re-reads
-/// what the background service received while the app was away (alarms,
-/// events, questions, circles, neighbours).
+/// Opens a friend's new alarm on top of whatever is on screen, and runs the
+/// alarm's duties while the app is up (the power-button shortcut, alarm
+/// waves nearby, following this person's own alarm). Starting the services
+/// and their minute duties is `ZenCore`'s job.
 class AlarmWatcher extends ConsumerStatefulWidget {
   const AlarmWatcher({required this.child, super.key});
 
@@ -1429,13 +1427,11 @@ class AlarmWatcher extends ConsumerStatefulWidget {
   ConsumerState<AlarmWatcher> createState() => _AlarmWatcherState();
 }
 
-class _AlarmWatcherState extends ConsumerState<AlarmWatcher>
-    with WidgetsBindingObserver {
+class _AlarmWatcherState extends ConsumerState<AlarmWatcher> {
   final Set<String> _shown = <String>{};
   MeetService? _service;
   NearbyService? _nearby;
   Timer? _minute;
-  int _minutes = 0;
 
   /// The power-button shortcut (§16.3) when it comes to the app.
   StreamSubscription<void>? _powerShortcut;
@@ -1467,7 +1463,6 @@ class _AlarmWatcherState extends ConsumerState<AlarmWatcher>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     final MeetService service = ref.read(meetServiceProvider);
     _service = service..addListener(_check);
     // Alarms to and from phones nearby go over Bluetooth (§16.3); the
@@ -1492,19 +1487,16 @@ class _AlarmWatcherState extends ConsumerState<AlarmWatcher>
     );
     _keeper = keeper;
     unawaitedLogged(keeper.start(), context: 'W pobliżu: rozglądanie');
-    // Dating deadlines and the weekly package (§19) run while the app does.
-    _minute = Timer.periodic(const Duration(minutes: 1), (_) {
-      _minutes++;
-      datingMinute(ref.read(datingServiceProvider), _minutes);
-      pyramidMinute(ref.read(pyramidServiceProvider), _minutes);
-      _followRaisedElsewhere();
-    });
+    // An alarm raised while the app was away is followed from here.
+    _minute = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _followRaisedElsewhere(),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) => _check());
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _service?.removeListener(_check);
     _service?.nearbyBroadcast = null;
     _nearby?.alarmWaveHandlers.remove(_onWave);
@@ -1558,21 +1550,6 @@ class _AlarmWatcherState extends ConsumerState<AlarmWatcher>
       return;
     }
     unawaitedLogged(followOwnAlarm(service), context: 'Alarm: położenie');
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      // The Android background service may have taken frames meanwhile.
-      unawaited(_service?.reload());
-      unawaited(ref.read(eventServiceProvider).load());
-      unawaited(ref.read(askServiceProvider).load());
-      unawaited(ref.read(tableServiceProvider).load());
-      unawaited(ref.read(circleServiceProvider).load());
-      unawaited(ref.read(neighborsServiceProvider).load());
-      unawaited(ref.read(datingServiceProvider).load());
-      unawaited(ref.read(pyramidServiceProvider).load());
-    }
   }
 
   void _check() {

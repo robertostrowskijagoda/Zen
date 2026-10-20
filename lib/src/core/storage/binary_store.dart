@@ -50,11 +50,7 @@ abstract interface class BinaryStoreNameKeySource {
 /// friend's address is part of the key). In a store whose protector is a
 /// [BinaryStoreNameKeySource] their files are named by a keyed hash
 /// (HMAC-SHA256 with a key derived from the data key) in
-/// [kHiddenNamesFolder]. `meet/list/` (a friend's friend list) and
-/// `ledger/` (logs named after the accounts in them) were once named by a
-/// plain SHA-256 of an address, which anyone who can read the folder can
-/// test a guess against; their old readable files are moved to the hidden
-/// names on first use. `transfers/` is not here: the attachment store
+/// [kHiddenNamesFolder]. `transfers/` is not here: the attachment store
 /// lists its folders
 /// (resuming uploads, per-friend limits, the stale sweep), so it names its
 /// keys with [FileBinaryStore.nameSegmentFor] instead.
@@ -669,42 +665,7 @@ final class FileBinaryStore {
         '$rootPath$separator$kHiddenNamesFolder$separator$name.zenbin',
       ),
     );
-    // The key is the same as before the name was hidden, so the sealed
-    // bytes stay valid: the old readable file is just moved.
-    if (readable.path != hidden.path) {
-      await (_legacyMoves[canonical] ??= _moveLegacy(readable, hidden)
-          .catchError((Object error) {
-            _legacyMoves.remove(canonical);
-            throw error;
-          }));
-    }
     return _StorePlace(canonicalKey: canonical, file: hidden);
-  }
-
-  /// Keys whose readable-name file was already moved to its hidden name
-  /// (or had none) in this run.
-  final Map<String, Future<void>> _legacyMoves = <String, Future<void>>{};
-
-  Future<void> _moveLegacy(File readable, File hidden) async {
-    for (final String suffix in const <String>['', '.bak']) {
-      final File old = File('${readable.path}$suffix');
-      if (!await old.exists()) {
-        continue;
-      }
-      final File target = File('${hidden.path}$suffix');
-      if (await target.exists()) {
-        // The hidden copy is the newer one; the readable one only leaks.
-        await old.delete();
-        continue;
-      }
-      await target.parent.create(recursive: true);
-      try {
-        await old.rename(target.path);
-      } on FileSystemException {
-        await old.copy(target.path);
-        await old.delete();
-      }
-    }
   }
 
   File _fileFor(String key) {

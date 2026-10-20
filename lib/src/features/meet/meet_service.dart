@@ -16,11 +16,7 @@ import 'package:zen/src/features/social/friend_display_name.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 export 'package:zen/src/features/meet/nearby_crypto.dart'
-    show
-        AlarmWave,
-        kAlarmPairWaveVersion,
-        kAlarmWaveFreshFor,
-        kAlarmWaveVersion;
+    show AlarmWave, kAlarmWaveFreshFor, kAlarmWaveVersion;
 
 /// Payload types of the meeting features on the mesh.
 abstract final class MeetTypes {
@@ -320,20 +316,11 @@ final class MeetService extends ChangeNotifier {
         case MeetTypes.request:
           await _onRequest(from, frame.payload);
         case MeetTypes.nearbyKey:
-          // `z`: the friend's keys for this phone alone (S6); `k`: the
-          // legacy secret shared with all their friends, all a 1.10.0
-          // friend sends (transition). Keys win over the legacy secret.
+          // `z`: the friend's keys for this phone alone (S6).
           final Object? z = frame.payload['z'];
-          final Object? k = frame.payload['k'];
-          final String? keep =
-              z is String && (FriendNearbyKey.parse(z)?.paired ?? false)
-              ? z
-              : k is String && k.length <= 64
-              ? k
-              : null;
-          if (keep != null) {
+          if (z is String && FriendNearbyKey.parse(z) != null) {
             await _update<void>(
-              (MeetBook b) => b.friendNearbySecrets[from] = keep,
+              (MeetBook b) => b.friendNearbySecrets[from] = z,
             );
           }
       }
@@ -408,9 +395,7 @@ final class MeetService extends ChangeNotifier {
               ? _book.friendListSent
               : emptyFriendListDigest,
         ),
-      if (_book.nearbySecret != null) 'mk': _secretDigest(_book.nearbySecret),
-      // What this friend holds of this phone's per-friend keys (S6); a
-      // 1.10.0 friend compares only `mk`.
+      // What this friend holds of this phone's per-friend keys (S6).
       if (nearbyKeysFor(friend) case final String keys)
         'mz': _secretDigest(keys),
       'ms': showsStatus ? mine.setAt : 0,
@@ -430,13 +415,10 @@ final class MeetService extends ChangeNotifier {
         mf != _short(_book.friendListDigests[friend] ?? '')) {
       want.add('l');
     }
-    // A friend with per-friend keys sends their digest (`mz`); a 1.10.0
-    // friend only the legacy one (`mk`).
     final Object? mz = payload['mz'];
-    final Object? mk = mz is String && mz.isNotEmpty ? mz : payload['mk'];
-    if (mk is String &&
-        mk.isNotEmpty &&
-        mk != _secretDigest(_book.friendNearbySecrets[friend])) {
+    if (mz is String &&
+        mz.isNotEmpty &&
+        mz != _secretDigest(_book.friendNearbySecrets[friend])) {
       want.add('k');
     }
     final Object? ms = payload['ms'];
@@ -846,7 +828,7 @@ final class MeetService extends ChangeNotifier {
     return close.isNotEmpty ? close : host.friends();
   }
 
-  /// Both PINs are set (an older single PIN must be set up again).
+  /// Both PINs are set.
   bool get hasAlarmPin =>
       _book.alarmPinHash != null && _book.alarmPanicHash != null;
 
@@ -1146,16 +1128,14 @@ final class MeetService extends ChangeNotifier {
   // ---- alarm: Bluetooth nearby (§16.3) ----
 
   /// The wave that tells phones nearby about [alarm]: its id, the time and
-  /// whether it ended, with this phone's nearby token and a signature made
-  /// with the nearby secret ([AlarmWave]). Friends (who have the secret)
-  /// know whose it is and that it is real; nobody else learns who it is.
-  /// Without a secret yet it goes unsigned: phones around show only an
+  /// whether it ended. Unsigned, it makes phones around show only an
   /// unchecked note.
   ///
   /// With [to] (a friend who has this phone's per-friend keys) the wave is
-  /// signed with the key of that pair instead ([AlarmWave.buildPair], S6):
-  /// only that friend can check it. `NearbyService.waveAll` does the same
-  /// per phone, for friends recognised by their own per-friend keys.
+  /// signed with the key of that pair ([AlarmWave.buildPair], S6): only
+  /// that friend can check it and knows whose it is. `NearbyService.waveAll`
+  /// does the same per phone, for friends recognised by their own
+  /// per-friend keys.
   Map<String, dynamic> alarmWave(AlarmRecord alarm, {String? to}) {
     final String? private = _book.nearbyPrivate;
     if (to != null && private != null) {
@@ -1173,12 +1153,8 @@ final class MeetService extends ChangeNotifier {
     return _alarmWaveForAll(alarm);
   }
 
-  Map<String, dynamic> _alarmWaveForAll(AlarmRecord alarm) => AlarmWave.build(
-    id: alarm.id,
-    at: _now(),
-    ended: !alarm.isActive,
-    secret: _book.nearbySecret,
-  );
+  Map<String, dynamic> _alarmWaveForAll(AlarmRecord alarm) =>
+      AlarmWave.build(id: alarm.id, at: _now(), ended: !alarm.isActive);
 
   Future<int> _waveNearby(AlarmRecord alarm) async {
     final Future<int> Function(Map<String, dynamic>)? send = nearbyBroadcast;
@@ -1440,18 +1416,6 @@ final class MeetService extends ChangeNotifier {
 
   // ---- nearby keys ----
 
-  /// This person's nearby secret, made on first use.
-  Future<String> nearbySecret() async {
-    final String? had = _book.nearbySecret;
-    if (had != null) {
-      return had;
-    }
-    final String made = base64Url.encode(
-      List<int>.generate(32, (_) => _random.nextInt(256)),
-    );
-    return _update<String>((MeetBook b) => b.nearbySecret ??= made);
-  }
-
   /// This person's private nearby key (S6), made on first use; never sent.
   Future<String> nearbyPrivateKey() async {
     final String? had = _book.nearbyPrivate;
@@ -1477,27 +1441,21 @@ final class MeetService extends ChangeNotifier {
   }
 
   /// Gives [friend] what recognises this phone: their own per-friend keys
-  /// (`z`), and the legacy secret for a 1.10.0 friend (`k`, transition).
+  /// (`z`).
   Future<void> shareNearbySecret(String friend) async {
-    final String legacy = await nearbySecret();
     await nearbyPrivateKey();
     await _send(friend, <String, dynamic>{
       'type': MeetTypes.nearbyKey,
-      'k': legacy,
       if (nearbyKeysFor(friend) case final String keys) 'z': keys,
     });
     await _update<void>((MeetBook b) => b.nearbyGivenTo.add(_key(friend)));
   }
 
-  /// New secret (after removing a friend: they can no longer recognise
-  /// this phone), given to the remaining friends.
+  /// New keys (after removing a friend: they can no longer recognise this
+  /// phone), given to the remaining friends.
   Future<void> rotateNearbySecret() async {
-    final String made = base64Url.encode(
-      List<int>.generate(32, (_) => _random.nextInt(256)),
-    );
     final String private = newNearbyPrivateKey(_random);
     await _update<void>((MeetBook b) {
-      b.nearbySecret = made;
       b.nearbyPrivate = private;
       b.nearbyGivenTo.clear();
     });
@@ -1632,9 +1590,6 @@ final class MeetService extends ChangeNotifier {
   /// The short look around every few minutes (§15).
   Future<void> setNearbyBackgroundScan(bool on) =>
       _update<void>((MeetBook b) => b.nearbyBackgroundScan = on);
-
-  Future<void> markMet(String friend) =>
-      _update<void>((MeetBook b) => b.markMet(friend, _now()));
 
   Future<void> _send(String to, Map<String, dynamic> payload) async {
     try {

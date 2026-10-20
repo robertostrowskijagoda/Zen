@@ -12,7 +12,13 @@ const List<String> kZenCaps = <String>[
   'group_call1',
   'disappear1',
   'meet1',
+  // Passes on ledger spaces of kinds it does not know to friends that also
+  // say so (A17).
+  kForwardSpacesCap,
 ];
+
+/// The capability that says a build passes on ledger spaces it does not know.
+const String kForwardSpacesCap = 'spaces1';
 
 /// Most capability names taken from one peer.
 const int kMaxPeerCaps = 32;
@@ -58,23 +64,26 @@ final class PeerVersion {
       return null;
     }
     final Object? build = payload['build'];
-    final Object? caps = payload['caps'];
     return PeerVersion(
       version: ver,
       build: build is int && build >= 0 && build < 1 << 31 ? build : null,
-      caps: caps is List
-          ? caps
-                .whereType<String>()
-                .where(
-                  (String c) =>
-                      c.length <= kMaxPeerCapLength && _capPattern.hasMatch(c),
-                )
-                .take(kMaxPeerCaps)
-                .toList(growable: false)
-          : const <String>[],
+      caps: capsFromPayload(payload['caps']),
     );
   }
 }
+
+/// The valid capability names in a peer's `caps` (anything else, and names
+/// past [kMaxPeerCaps], is dropped).
+List<String> capsFromPayload(Object? caps) => caps is List
+    ? caps
+          .whereType<String>()
+          .where(
+            (String c) =>
+                c.length <= kMaxPeerCapLength && _capPattern.hasMatch(c),
+          )
+          .take(kMaxPeerCaps)
+          .toList(growable: false)
+    : const <String>[];
 
 /// True for `major.minor.patch` (each 1-4 digits).
 bool isValidAppVersion(String version) => _versionPattern.hasMatch(version);

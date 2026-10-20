@@ -528,25 +528,20 @@ final class MeetBook {
   /// but tells friends the person is being forced.
   String? alarmPanicHash;
 
-  /// This person's secret for being recognised nearby by friends (§15).
-  String? nearbySecret;
-
-  /// Friends' nearby secrets (address → secret).
+  /// Friends' nearby keys (address → what they gave,
+  /// [FriendNearbyKey.parse]).
   final Map<String, String> friendNearbySecrets = <String, String>{};
 
-  /// Friends who have this person's current [nearbySecret].
+  /// Friends who have this person's current nearby keys.
   final Set<String> nearbyGivenTo = <String>{};
 
-  /// This person's private nearby key (S6): never sent; friends get only
-  /// what comes from it, one set per friend ([NearbyOwnKeys.materialFor]).
-  /// [nearbySecret] stays for 1.10.0 friends (transition).
+  /// This person's private nearby key (§15, S6): never sent; friends get
+  /// only what comes from it, one set per friend
+  /// ([NearbyOwnKeys.materialFor]).
   String? nearbyPrivate;
 
   /// Addresses blocked in "W pobliżu" (§15), normalised.
   final Set<String> nearbyBlocked = <String>{};
-
-  /// Friends met in person (address → first time).
-  final Map<String, int> metInPerson = <String, int>{};
 
   /// Whether this phone shows itself to people nearby (§15, on by default).
   bool nearbyVisible = true;
@@ -698,12 +693,6 @@ final class MeetBook {
     return true;
   }
 
-  void markMet(String address, int at) {
-    metInPerson.putIfAbsent(_key(address), () => at);
-  }
-
-  int? metAt(String address) => metInPerson[_key(address)];
-
   Map<String, dynamic> toJson() => <String, dynamic>{
     'v': 1,
     if (myIntent != null) 'my': myIntent!.toJson(),
@@ -717,18 +706,12 @@ final class MeetBook {
     if (alarmPinHash != null) 'pin': alarmPinHash,
     if (alarmPinSalt != null) 'pinSalt': alarmPinSalt,
     if (alarmPanicHash != null) 'panic': alarmPanicHash,
-    if (nearbySecret != null) 'ns': nearbySecret,
     'fns': friendNearbySecrets,
     'given': nearbyGivenTo.toList(),
     if (nearbyPrivate != null) 'np': nearbyPrivate,
     if (nearbyBlocked.isNotEmpty) 'nb': nearbyBlocked.toList(),
-    'met': metInPerson,
     if (!nearbyVisible) 'hidden': true,
-    // The audience by name; the older flags stay for older versions (no
-    // flag there meant everyone).
     'la': friendListAudience.name,
-    if (friendListAudience == FriendListAudience.nobody) 'noList': true,
-    if (friendListAudience == FriendListAudience.onRequest) 'listAsk': true,
     if (friendListAllowed.isNotEmpty) 'listOk': friendListAllowed.toList(),
     if (alarmRecordAudio) 'alarmAudio': true,
     if (alarmNearby) 'alarmNearby': true,
@@ -771,7 +754,6 @@ final class MeetBook {
     book.alarmPanicHash = json['panic'] is String
         ? json['panic'] as String
         : null;
-    book.nearbySecret = json['ns'] is String ? json['ns'] as String : null;
     book.nearbyPrivate = json['np'] is String ? json['np'] as String : null;
     final Object? nb = json['nb'];
     if (nb is List) {
@@ -786,15 +768,8 @@ final class MeetBook {
       }
     }
     book.nearbyVisible = json['hidden'] != true;
-    // A book from before 'la' without a flag never had a choice that
-    // differs from the old default, so it gets the new one (§8).
     book.friendListAudience =
-        FriendListAudience.byName(json['la']) ??
-        (json['listAsk'] == true
-            ? FriendListAudience.onRequest
-            : json['noList'] == true
-            ? FriendListAudience.nobody
-            : FriendListAudience.friends);
+        FriendListAudience.byName(json['la']) ?? FriendListAudience.friends;
     final Object? listOk = json['listOk'];
     if (listOk is List) {
       book.friendListAllowed.addAll(
@@ -829,14 +804,6 @@ final class MeetBook {
     final Object? given = json['given'];
     if (given is List) {
       book.nearbyGivenTo.addAll(given.whereType<String>());
-    }
-    final Object? met = json['met'];
-    if (met is Map) {
-      for (final MapEntry<dynamic, dynamic> e in met.entries) {
-        if (e.key is String && e.value is int) {
-          book.metInPerson[e.key as String] = e.value as int;
-        }
-      }
     }
     return book;
   }

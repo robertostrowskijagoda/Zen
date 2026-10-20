@@ -1069,7 +1069,6 @@ class EventScreen extends ConsumerWidget {
           knownName: g.name,
           message: t('Poznaliśmy się na: {title}', {'title': e.title}),
         );
-    await ref.read(meetServiceProvider).markMet(g.address);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

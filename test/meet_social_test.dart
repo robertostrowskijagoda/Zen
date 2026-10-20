@@ -88,12 +88,43 @@ final class _Host implements EventHost {
   Future<void> notify(RuntimeSystemNotification n) async => shown.add(n);
 }
 
+/// [from]'s answer to question [questionId], signed with [id] the way the
+/// app does ([askAnswerSignedBytes]).
+Future<Map<String, dynamic>> _signedAnswer(
+  LedgerIdentity id,
+  _Host from,
+  String questionId,
+  String text,
+) async {
+  final List<int> sig = await id.deviceKey.sign(
+    askAnswerSignedBytes(
+      id: questionId,
+      answerer: from.address,
+      name: from.name,
+      text: text,
+    ),
+  );
+  return <String, dynamic>{
+    'type': AskTypes.answer,
+    'id': questionId,
+    't': text,
+    'p': <String>[from.name],
+    'sg': <String, dynamic>{
+      'd': id.certificate.toJson(),
+      's': b64(sig),
+      'a': from.address,
+    },
+  };
+}
+
 void main() {
   test('Zapytaj sieć: answers come back the same way, with the path', () async {
     final Map<String, _Host> net = <String, _Host>{};
     final _Host kasia = _Host(net, 'k1', <String>['b2']);
     final _Host bartek = _Host(net, 'b2', <String>['k1', 'c3']);
     final _Host celina = _Host(net, 'c3', <String>['b2']);
+    await LedgerIdentity.loadOrCreate(celina.ask.disk);
+    await LedgerIdentity.loadOrCreate(bartek.ask.disk);
 
     final Question q = (await kasia.ask.ask('Dobry dentysta w Gdańsku?'))!;
     expect(bartek.ask.fromOthers.single.text, q.text);
@@ -313,25 +344,39 @@ void main() {
     final Map<String, _Host> net = <String, _Host>{};
     final _Host kasia = _Host(net, 'k1', <String>['b2']);
     final _Host bartek = _Host(net, 'b2', <String>['k1']);
+    final LedgerIdentity id = await LedgerIdentity.loadOrCreate(
+      bartek.ask.disk,
+    );
     final Question q = (await kasia.ask.ask('Dobry dentysta w Gdańsku?'))!;
     // A friend added later never got the question.
     final _Host nowy = _Host(net, 'n9', <String>['k1']);
     kasia.friendList.add(nowy.address);
-    Map<String, dynamic> answer(String text) => <String, dynamic>{
-      'type': AskTypes.answer,
-      'id': q.id,
-      't': text,
-      'p': <String>['X' * 500],
-    };
-    await nowy.send(kasia.address, answer('reklama'));
+    final LedgerIdentity nowyId = await LedgerIdentity.loadOrCreate(
+      nowy.ask.disk,
+    );
+    await nowy.send(
+      kasia.address,
+      await _signedAnswer(nowyId, nowy, q.id, 'reklama'),
+    );
     expect(kasia.ask.mine.single.answers, isEmpty);
 
-    await bartek.send(kasia.address, answer('d' * 5000));
+    // Too long: dropped, even signed.
+    await bartek.send(
+      kasia.address,
+      await _signedAnswer(id, bartek, q.id, 'd' * 5000),
+    );
+    expect(kasia.ask.mine.single.answers, isEmpty);
+    await bartek.send(
+      kasia.address,
+      await _signedAnswer(id, bartek, q.id, 'd' * kAnswerMaxChars),
+    );
     final AskAnswer got = kasia.ask.mine.single.answers.single;
     expect(got.text, hasLength(kAnswerMaxChars));
-    expect(got.path.single, hasLength(60));
     for (int i = 0; i < kAnswersFromFriendPerQuestion + 10; i++) {
-      await bartek.send(kasia.address, answer('odpowiedź $i'));
+      await bartek.send(
+        kasia.address,
+        await _signedAnswer(id, bartek, q.id, 'odpowiedź $i'),
+      );
     }
     expect(
       kasia.ask.mine.single.answers,
@@ -410,7 +455,7 @@ void main() {
 
   group('Zapytaj sieć: answers are signed by the answerer', () {
     test('a signed answer comes back through a middle friend and checks '
-        'out; an unsigned one is kept but marked', () async {
+        'out; without keys nothing is sent', () async {
       final Map<String, _Host> net = <String, _Host>{};
       final _Host kasia = _Host(net, 'k1', <String>['b2']);
       final _Host bartek = _Host(net, 'b2', <String>['k1', 'c3']);
@@ -424,37 +469,36 @@ void main() {
       await bartek.ask.answer(q.id, 'Kowalska');
       final List<AskAnswer> got = kasia.ask.mine.single.answers;
       expect(got, hasLength(2));
-      expect(got.every((AskAnswer a) => a.signed), isTrue);
       expect(got.first.path, <String>['c3', 'b2']);
       expect(got.first.pyramidKey, 'kk');
 
-      // It stays checked across a restart and a tip.
+      // It survives a restart and a tip.
       final AskAnswer back = AskAnswer.fromJson(
         jsonDecode(jsonEncode(got.first.withTip(100).toJson())),
       )!;
-      expect(back.signed, isTrue);
+      expect(back.tipped, 100);
+      expect(back.text, 'dr Nowak');
 
-      // Nobody signs without keys: kept, but marked.
+      // Nobody signs without keys: such an answer is not sent.
       final _Host ola = _Host(net, 'o5', <String>['k1']);
       kasia.friendList.add(ola.address);
       final Question q2 = (await kasia.ask.ask('Hydraulik?'))!;
       await ola.ask.answer(q2.id, 'Pan Zenek');
-      final AskAnswer plain = kasia.ask.mine
-          .firstWhere((Question x) => x.id == q2.id)
-          .answers
-          .single;
-      expect(plain.signed, isFalse);
-      expect(plain.text, 'Pan Zenek');
-      expect(askUnsignedLabel(), contains('Niepodpisana'));
-
-      // Old stored answers have no flag: unsigned.
       expect(
-        AskAnswer.fromJson(<String, dynamic>{
-          't': 'x',
-          'at': 1,
-          'f': bartek.address,
-        })!.signed,
-        isFalse,
+        kasia.ask.mine.firstWhere((Question x) => x.id == q2.id).answers,
+        isEmpty,
+      );
+
+      // An answer that arrives without a signature is dropped.
+      await ola.send(kasia.address, <String, dynamic>{
+        'type': AskTypes.answer,
+        'id': q2.id,
+        't': 'Pan Zenek',
+        'p': <String>['o5'],
+      });
+      expect(
+        kasia.ask.mine.firstWhere((Question x) => x.id == q2.id).answers,
+        isEmpty,
       );
     });
 
@@ -504,7 +548,7 @@ void main() {
 
       // The genuine one.
       await bartek.send(kasia.address, await frame());
-      expect(kasia.ask.question(q.id)!.answers.single.signed, isTrue);
+      expect(kasia.ask.question(q.id)!.answers, hasLength(1));
 
       Future<void> expectDropped(Map<String, dynamic> f) async {
         final int before = kasia.ask.question(q.id)!.answers.length;
@@ -524,15 +568,8 @@ void main() {
           ..['sg'] = <String, dynamic>{'s': 'x', 'a': bartek.address},
       );
 
-      // Sound, but under another address than the friend who answered:
-      // kept, shown marked (it may be another device of theirs).
-      await bartek.send(
-        kasia.address,
-        await frame(signedAddress: addr('f7'), text: 'inna'),
-      );
-      final AskAnswer odd = kasia.ask.question(q.id)!.answers.last;
-      expect(odd.text, 'inna');
-      expect(odd.signed, isFalse);
+      // Sound, but under another address than the friend who answered.
+      await expectDropped(await frame(signedAddress: addr('f7'), text: 'inna'));
     });
   });
 }

@@ -12,13 +12,22 @@ import 'package:zen/src/features/meet/friend_levels.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 
 /// After adding someone met in person (a scanned QR, "W pobliżu", an
-/// event), asks how close they are (§8). "Znajomy" stays when skipped.
-/// Returns the level chosen, or `null` when skipped.
+/// event): signs the "met in person" attestation (§6.2) and asks how close
+/// they are (§8). "Znajomy" stays when skipped. Returns the level chosen,
+/// or `null` when skipped.
 Future<FriendLevel?> showMetLevelPrompt(
   BuildContext context, {
   required String address,
   String name = '',
 }) async {
+  final ProviderContainer container = ProviderScope.containerOf(
+    context,
+    listen: false,
+  );
+  final LedgerNode? ledger = container.read(ledgerNodeProvider);
+  if (ledger != null) {
+    unawaitedLogged(ledger.attestMet(address), context: 'Spotkani osobiście');
+  }
   final FriendLevel? level = await showDialog<FriendLevel>(
     context: context,
     builder: (BuildContext context) => MetLevelDialog(name: name),
@@ -26,10 +35,6 @@ Future<FriendLevel?> showMetLevelPrompt(
   if (level == null || !context.mounted) {
     return null;
   }
-  final ProviderContainer container = ProviderScope.containerOf(
-    context,
-    listen: false,
-  );
   final LedgerNode? node = container.read(ledgerNodeProvider);
   if (node != null) {
     unawaitedLogged(

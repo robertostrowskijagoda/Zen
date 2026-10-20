@@ -20,7 +20,7 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 
 /// Levels of acquaintance (§8, §16.2, §7, §26.1): what a weak acquaintance
 /// gets, who may invite to groups, who keeps the mailboxes and recovery
-/// pieces, and the age gate's answer.
+/// pieces.
 final String weak = PeerShareCodec.normalizeAddress('200::a1');
 final String mid = PeerShareCodec.normalizeAddress('200::b2');
 final String close = PeerShareCodec.normalizeAddress('200::c3');
@@ -182,29 +182,16 @@ void main() {
         MeetBook.fromJson(friends.toJson()).friendListAudience,
         FriendListAudience.friends,
       );
-      // Books written by 1.10 (no 'la').
       expect(
         MeetBook.fromJson(<String, dynamic>{'v': 1}).friendListAudience,
         FriendListAudience.friends,
       );
-      expect(
-        MeetBook.fromJson(<String, dynamic>{
-          'v': 1,
-          'listAsk': true,
-        }).friendListAudience,
-        FriendListAudience.onRequest,
-      );
-      expect(
-        MeetBook.fromJson(<String, dynamic>{
-          'v': 1,
-          'noList': true,
-        }).friendListAudience,
-        FriendListAudience.nobody,
-      );
-      // An older app still reads "nobody" from the old flag.
       final MeetBook nobody = MeetBook()
         ..friendListAudience = FriendListAudience.nobody;
-      expect(nobody.toJson()['noList'], isTrue);
+      expect(
+        MeetBook.fromJson(nobody.toJson()).friendListAudience,
+        FriendListAudience.nobody,
+      );
     });
   });
 
@@ -399,52 +386,6 @@ void main() {
       final RelayState state = await store.load();
       expect(state.currentRelays, hasLength(6));
       expect(state.currentRelays.first, close);
-    });
-  });
-
-  group('age gate (§26.1, §27)', () {
-    test('an 18+ confirmation or a date old enough lets in', () {
-      final DateTime now = DateTime(2026, 10, 20);
-      expect(const AppSettings().ageAnswered, isFalse);
-      expect(const AppSettings().isAdultAt(now), isFalse);
-      expect(const AppSettings(adultConfirmed: true).isAdultAt(now), isTrue);
-      AppSettings born(DateTime d) =>
-          AppSettings(birthDateMillis: d.millisecondsSinceEpoch);
-      expect(born(DateTime(2008, 10, 20)).isAdultAt(now), isTrue);
-      expect(born(DateTime(2008, 10, 21)).isAdultAt(now), isFalse);
-      expect(born(DateTime(2008, 10, 21)).ageAnswered, isTrue);
-      expect(
-        AppSettings.ageOn(DateTime(2000, 2, 29), DateTime(2018, 2, 28)),
-        17,
-      );
-      expect(
-        AppSettings.ageOn(DateTime(2000, 2, 29), DateTime(2018, 3, 1)),
-        18,
-      );
-    });
-
-    test('the answer is kept on this device', () async {
-      final ProviderContainer c = ProviderContainer(
-        overrides: [
-          appSettingsHydrationEnabledProvider.overrideWithValue(false),
-        ],
-      );
-      addTearDown(c.dispose);
-      final AppSettingsController settings = c.read(
-        appSettingsControllerProvider.notifier,
-      );
-      await settings.setAgeGate(birth: DateTime(2010, 5, 1, 13, 30));
-      AppSettings s = c.read(appSettingsControllerProvider);
-      expect(s.birthDateMillis, DateTime(2010, 5, 1).millisecondsSinceEpoch);
-      expect(s.isAdultAt(DateTime(2026, 10, 20)), isFalse);
-      final AppSettings back = AppSettings.fromJson(s.toJson());
-      expect(back.birthDateMillis, s.birthDateMillis);
-
-      await settings.setAgeGate(adult: true);
-      s = c.read(appSettingsControllerProvider);
-      expect(s.birthDateMillis, 0);
-      expect(s.adultConfirmed, isTrue);
-      expect(AppSettings.fromJson(s.toJson()).adultConfirmed, isTrue);
     });
   });
 }

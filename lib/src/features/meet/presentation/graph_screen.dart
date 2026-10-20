@@ -393,6 +393,10 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
     super.dispose();
   }
 
+  /// A signed "met in person" attestation of this account (§6.2).
+  bool _met(String address) =>
+      ref.read(ledgerNodeProvider)?.hasMet(address) ?? false;
+
   Color _colorFor(MeetService meet, GraphNode n, ZenColors zen) {
     final IntentStatus? s = meet.book.intentOf(n.address, meet.now);
     return switch (s?.kind) {
@@ -563,7 +567,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                   ),
                 ],
               ),
-              if (s != null || meet.book.metAt(n.address) != null) ...<Widget>[
+              if (s != null || _met(n.address)) ...<Widget>[
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 6,
@@ -574,7 +578,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                         text: '${s.shownEmoji} ${s.shownLabel}',
                         tone: _intentTone(zen, s.kind),
                       ),
-                    if (meet.book.metAt(n.address) != null)
+                    if (_met(n.address))
                       ZenPill(
                         text: t('spotkani osobiście'),
                         tone: zen.success,
@@ -1041,8 +1045,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                                     nodes: nodes,
                                     colorOf: (GraphNode n) =>
                                         _colorFor(meet, n, zen),
-                                    met: (GraphNode n) =>
-                                        meet.book.metAt(n.address) != null,
+                                    met: (GraphNode n) => _met(n.address),
                                     line: zen.outline,
                                     guide: zen.outlineSoft,
                                     me: zen.accent,

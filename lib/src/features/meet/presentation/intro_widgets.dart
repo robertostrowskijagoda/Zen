@@ -17,7 +17,6 @@ import 'package:zen/src/features/pyramid/presentation/wallet_screen.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
-import 'package:zen/src/features/settings/presentation/age_gate.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -192,29 +191,6 @@ class _IntroCard extends StatelessWidget {
               ),
             ],
           ),
-          // Not confirmed by the asker's signature (an older app, or an
-          // address it does not cover): the middle friend could have
-          // changed it (S-17).
-          if (c.role == IntroRole.target && !c.signed) ...<Widget>[
-            const SizedBox(height: 8),
-            Row(
-              key: Key('intro-unverified-${c.id}'),
-              children: <Widget>[
-                Icon(Icons.gpp_maybe_rounded, size: 16, color: zen.warning),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    introUnverifiedLabel(),
-                    style: TextStyle(
-                      color: zen.warning,
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
           if (c.note.isNotEmpty) ...<Widget>[
             const SizedBox(height: 10),
             Text('„${c.note}” — $via', style: quote),
@@ -809,7 +785,7 @@ Future<void> askIntroduction(
                       nav.push(
                         MaterialPageRoute<void>(
                           builder: (BuildContext context) =>
-                              const AgeGate(child: WalletScreen()),
+                              const WalletScreen(),
                         ),
                       ),
                     );

@@ -122,48 +122,29 @@ void main() {
     expect(await readOwnProfileImage('${support.path}/missing.jpg'), isNull);
   });
 
-  test('a profile saved by an older version is moved at start', () async {
-    final Uint8List photo = _bytes(2000, 5);
-    final File avatar = plain('avatar_3.jpg', photo);
-    final MemoryUserProfileStore store = MemoryUserProfileStore();
-    await store.save(UserProfile(displayName: 'Ada', avatarPath: avatar.path));
-    final ProviderContainer container = ProviderContainer(
-      overrides: [
-        userProfileStoreProvider.overrideWithValue(store),
-        profileImageSealerProvider.overrideWithValue(
-          (String path) => sealProfileImageFile(vault, path),
-        ),
-      ],
-    );
-    addTearDown(container.dispose);
-    container.read(userProfileControllerProvider);
-    for (
-      int i = 0;
-      i < 100 &&
-          !isMediaVaultPath(
-            container.read(userProfileControllerProvider).avatarPath,
-          );
-      i++
-    ) {
-      await Future<void>.delayed(const Duration(milliseconds: 10));
-    }
-    final UserProfile now = container.read(userProfileControllerProvider);
-    expect(isMediaVaultPath(now.avatarPath), isTrue);
-    expect(avatar.existsSync(), isFalse);
-    expect(isMediaVaultPath((await store.load())!.avatarPath), isTrue);
-    expect(await readOwnProfileImage(now.avatarPath), photo);
-
-    // A new photo from the editor is sealed when the profile is saved.
-    final File next = plain('avatar_4.jpg', _bytes(1500, 6));
-    await container
-        .read(userProfileControllerProvider.notifier)
-        .updateProfile(avatarPath: next.path);
-    expect(
-      isMediaVaultPath(
-        container.read(userProfileControllerProvider).avatarPath,
-      ),
-      isTrue,
-    );
-    expect(next.existsSync(), isFalse);
-  });
+  test(
+    'a new photo from the editor is sealed when the profile is saved',
+    () async {
+      final MemoryUserProfileStore store = MemoryUserProfileStore();
+      final ProviderContainer container = ProviderContainer(
+        overrides: [
+          userProfileStoreProvider.overrideWithValue(store),
+          profileImageSealerProvider.overrideWithValue(
+            (String path) => sealProfileImageFile(vault, path),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      final Uint8List photo = _bytes(1500, 6);
+      final File next = plain('avatar_4.jpg', photo);
+      await container
+          .read(userProfileControllerProvider.notifier)
+          .updateProfile(avatarPath: next.path);
+      final UserProfile now = container.read(userProfileControllerProvider);
+      expect(isMediaVaultPath(now.avatarPath), isTrue);
+      expect(next.existsSync(), isFalse);
+      expect(isMediaVaultPath((await store.load())!.avatarPath), isTrue);
+      expect(await readOwnProfileImage(now.avatarPath), photo);
+    },
+  );
 }

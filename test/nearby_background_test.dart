@@ -121,9 +121,13 @@ final class _Phone implements MeetHost {
       ownAddress: () => address,
       sendMesh: send,
       frames: const Stream<SignalTransportFrame>.empty(),
+      onMet: (String friend) async => met.add(friend),
       now: () => clock,
     );
   }
+
+  /// Friends this phone signed "met in person" for (§6.2).
+  final List<String> met = <String>[];
 
   final _Net net;
   final String address;
@@ -179,9 +183,6 @@ final class _Phone implements MeetHost {
       dismissed.add(slotKey);
 }
 
-String _hex(List<int> b) =>
-    b.map((int x) => x.toRadixString(16).padLeft(2, '0')).join();
-
 Future<void> _settle() async {
   for (int i = 0; i < 20; i++) {
     await Future<void>.delayed(Duration.zero);
@@ -223,15 +224,13 @@ void main() {
 
     final AlarmRecord alarm = await ania.meet.raiseAlarm(note: 'pomocy');
     expect(bob.meet.book.alarm(alarm.id), isNull);
-    final String aniaToken = _hex(
-      nearbyToken(ania.meet.book.nearbySecret!, nearbyEpoch(ania.clock)),
-    );
-    // The wave for everyone carries her legacy token and signature; Bob,
-    // who has her keys for him alone, gets one signed for the pair (S6).
-    expect(ania.meet.alarmWave(alarm)['t'], aniaToken);
+    // The wave for everyone is unsigned; Bob, who has her keys for him
+    // alone, gets one signed for the pair (S6).
+    expect(ania.meet.alarmWave(alarm), isNot(contains('t')));
     final Map<String, dynamic> wave = ania.meet.alarmWave(alarm, to: 'bob');
-    expect(wave['v'], kAlarmPairWaveVersion);
+    expect(wave['v'], kAlarmWaveVersion);
     expect(wave['m'], isA<String>());
+    final String aniaToken = wave['t'] as String;
     bob.radio.hear(wave, device: 'mac-ania');
     await _settle();
     await keeper.pendingWave;
@@ -249,7 +248,7 @@ void main() {
     await keeper.pendingWave;
     expect(bob.shown, hasLength(1));
 
-    // Someone who saw her beacon knows her token, not her secret: a wave
+    // Someone who saw her wave knows her token, not her key: a wave
     // with a made-up signature never rings, it is a quiet unchecked note.
     bob.radio.hear(<String, dynamic>{
       'v': kAlarmWaveVersion,
@@ -456,10 +455,9 @@ void main() {
     await ania.meet.setAlarmPin('1234', '9999');
     await ania.meet.setAlarmPowerButton(true);
     await ania.meet.setAlarmNearby(true);
-    final String secret = await ania.meet.nearbySecret();
     ania.radio.around.add(<Object?, Object?>{
       'type': 'seen',
-      'token': Uint8List.fromList(List<int>.generate(16, (int i) => i + 1)),
+      'token': Uint8List.fromList(List<int>.generate(20, (int i) => i + 1)),
       'rssi': -60,
       'device': 'mac-obcy',
     });
@@ -477,15 +475,10 @@ void main() {
     expect(device, 'mac-obcy');
     expect(wave['v'], kAlarmWaveVersion);
     expect(wave['id'], ania.meet.book.ownActiveAlarm!.id);
-    // A stranger gets the wave for everyone: her legacy token.
-    expect(wave['t'], _hex(nearbyToken(secret, nearbyEpoch(ania.clock))));
+    // A stranger gets the wave for everyone: unsigned.
+    expect(wave, isNot(contains('t')));
     expect(wave['at'], ania.clock);
-    expect(AlarmWave.parse(wave)!.verify(secret), isTrue);
-    expect(
-      AlarmWave.parse(wave)!.verify(base64Url.encode(List<int>.filled(32, 1))),
-      isFalse,
-      reason: 'another secret does not check it',
-    );
+    expect(AlarmWave.parse(wave)!.signed, isFalse);
     expect(
       ania.radio.scanning,
       isFalse,
@@ -541,7 +534,7 @@ void main() {
     expect(bob.radio.lowPower, isTrue);
     expect(bob.radio.scanning, isFalse, reason: 'only a short look');
     expect(bob.nearby.scanning, isFalse);
-    expect(bob.meet.book.metAt('ania'), isNotNull);
+    expect(bob.met, contains('ania'));
 
     // "W pobliżu" opened during a look around: its scan stays on.
     bob.clock += kNearbyLookEvery.inMilliseconds;

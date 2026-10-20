@@ -6,10 +6,9 @@ import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/meet/presentation/met_level_prompt.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
-import 'package:zen/src/features/settings/presentation/age_gate.dart';
 import 'package:zen/src/features/settings/presentation/group_invite_tile.dart';
 
-/// The screens of the levels of acquaintance and the age gate (§8, §27).
+/// The screens of the levels of acquaintance (§8).
 Widget _app(ProviderContainer container, Widget home) =>
     UncontrolledProviderScope(
       container: container,
@@ -27,47 +26,7 @@ ProviderContainer _container([AppSettings settings = const AppSettings()]) {
   return c;
 }
 
-DateTime _today() => DateTime(2026, 10, 20);
-
 void main() {
-  testWidgets('the age gate asks once, then shows the section', (
-    WidgetTester tester,
-  ) async {
-    final ProviderContainer c = _container();
-    await tester.pumpWidget(
-      _app(c, const AgeGate(now: _today, child: Text('randki'))),
-    );
-    expect(find.byKey(const Key('age-gate-ask')), findsOneWidget);
-    expect(find.text('randki'), findsNothing);
-
-    await tester.tap(find.byKey(const Key('age-gate-adult')));
-    await tester.pumpAndSettle();
-    expect(find.text('randki'), findsOneWidget);
-    expect(c.read(appSettingsControllerProvider).adultConfirmed, isTrue);
-  });
-
-  testWidgets('under 18 the section stays closed', (WidgetTester tester) async {
-    final ProviderContainer c = _container(
-      AppSettings(birthDateMillis: DateTime(2012, 3, 4).millisecondsSinceEpoch),
-    );
-    await tester.pumpWidget(
-      _app(c, const AgeGate(now: _today, child: Text('randki'))),
-    );
-    expect(find.byKey(const Key('age-gate-minor')), findsOneWidget);
-    expect(find.text('randki'), findsNothing);
-  });
-
-  testWidgets('an adult date of birth opens it', (WidgetTester tester) async {
-    final ProviderContainer c = _container(
-      AppSettings(birthDateMillis: DateTime(1990, 3, 4).millisecondsSinceEpoch),
-    );
-    await tester.pumpWidget(
-      _app(c, const AgeGate(now: _today, child: Text('randki'))),
-    );
-    expect(find.byKey(const Key('age-gate')), findsNothing);
-    expect(find.text('randki'), findsOneWidget);
-  });
-
   testWidgets('met in person: the level picked comes back, skip keeps it', (
     WidgetTester tester,
   ) async {

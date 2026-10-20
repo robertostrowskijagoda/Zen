@@ -288,6 +288,10 @@ final Provider<NearbyService> nearbyServiceProvider = Provider<NearbyService>((
     sendMesh: (String to, Map<String, dynamic> payload) =>
         transport.send(remoteAddress: to, payload: payload),
     frames: transport.frames,
+    // A friend right here: a signed "met in person" (§6.2).
+    onMet: (String friend) async {
+      await ref.read(ledgerNodeProvider)?.attestMet(friend);
+    },
   );
   void onMeet() => nearby.friendsChanged();
   meet.addListener(onMeet);

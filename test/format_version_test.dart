@@ -19,16 +19,9 @@ void main() {
       });
       expect(withFormatVersion(<String, Object?>{'v': 3})['v'], 3);
     });
-
-    test('a file without v (or with garbage) is version 1', () {
-      expect(storedFormatVersion(<String, Object?>{}), 1);
-      expect(storedFormatVersion(<String, Object?>{'v': 'x'}), 1);
-      expect(storedFormatVersion(<String, Object?>{'v': 0}), 1);
-      expect(storedFormatVersion(<String, Object?>{'v': 2}), 2);
-    });
   });
 
-  group('stores write v: 1 and still read files without it', () {
+  group('stores write v: 1', () {
     late Directory dir;
     late FileBinaryStore files;
 
@@ -46,19 +39,12 @@ void main() {
         jsonDecode(utf8.decode((await files.read(key))!))
             as Map<String, dynamic>;
 
-    Future<void> put(String key, Map<String, Object?> json) =>
-        files.write(key, Uint8List.fromList(utf8.encode(jsonEncode(json))));
-
     test('settings', () async {
       final FileAppSettingsStore store = FileAppSettingsStore(store: files);
       await store.save(const AppSettings(themeMode: AppThemeMode.dark));
       final Map<String, dynamic> json = await stored('settings/app');
       expect(json['v'], 1);
       expect(json['themeMode'], 'dark');
-
-      // As 1.10.0 wrote it: no v.
-      await put('settings/app', <String, Object?>{'themeMode': 'light'});
-      expect((await store.load())!.themeMode, AppThemeMode.light);
     });
 
     test('profile', () async {
@@ -67,9 +53,6 @@ void main() {
       final Map<String, dynamic> json = await stored('user_profile');
       expect(json['v'], 1);
       expect((await store.load())!.displayName, 'Ada');
-
-      await put('user_profile', <String, Object?>{'displayName': 'Bob'});
-      expect((await store.load())!.displayName, 'Bob');
     });
   });
 }

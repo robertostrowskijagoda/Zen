@@ -20,9 +20,7 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 // the hello the follower's device sends anyway (to fetch the public
 // posts): it carries the newest signed `follow` entry for that address.
 // The followed device checks the signature and keeps a list of followers
-// (who stopped greeting for [kFollowerTtl] drops off). Older versions keep
-// following through `ledger/following` only and ignore the notice; their
-// follows are written as entries the first time this version starts.
+// (who stopped greeting for [kFollowerTtl] drops off).
 
 /// Entry kind of a follow (or, with `on: 0`, of stopping it).
 const String kFollowKind = 'follow';
@@ -164,7 +162,7 @@ final class FollowLedger {
   /// Fires when followers (or blocked followers) change.
   Stream<void> get changes => _changes.stream;
 
-  /// Done once the saved followers are read and old follows recorded.
+  /// Done once the saved followers and follow entries are read.
   Future<void> get ready => _ready ?? Future<void>.value();
 
   void _attach() {
@@ -178,7 +176,7 @@ final class FollowLedger {
     await _load();
     _latest.addAll(latestFollows(node.entriesOf(spaceKind: 'acts')));
     _added = node.store.added.listen(_onAdded);
-    await _recordOldFollows();
+    await _applyFollowEntries();
   }
 
   Future<void> dispose() async {
@@ -246,18 +244,8 @@ final class FollowLedger {
     _latest[address] = e;
   }
 
-  /// Follows made by an older version (only in `ledger/following`) get
-  /// their entry; follows another own device made are taken over.
-  Future<void> _recordOldFollows() async {
-    for (final String address in node.followedAddresses.toList()) {
-      if (!_latest.containsKey(address)) {
-        try {
-          await _write(address, on: true);
-        } on Object catch (error, stackTrace) {
-          logZenError('Recording a follow failed', error, stackTrace);
-        }
-      }
-    }
+  /// Follows another own device made are taken over.
+  Future<void> _applyFollowEntries() async {
     for (final MapEntry<String, LogEntry> f in _latest.entries.toList()) {
       if (f.value.body['on'] == 1 &&
           !node.isFollowing(f.key) &&

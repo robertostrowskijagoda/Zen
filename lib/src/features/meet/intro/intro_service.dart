@@ -102,11 +102,6 @@ String introText(Object? value, int max) {
   return cut.trim();
 }
 
-/// The mark on an introduction or a letter that came without the asker's
-/// signature (from an older app): the middle friend could have changed it.
-String introUnverifiedLabel() =>
-    t('Niezweryfikowane — pośrednik mógł zmienić treść');
-
 /// What the asker signs with their device key (S-17): the case, their own
 /// address, the one it is for, the words and their own name. The middle
 /// friend passes the signature on with the case and cannot change any of
@@ -225,7 +220,6 @@ final class IntroCase {
     int? changedAt,
     this.befriendDue = false,
     this.proof,
-    this.signed = false,
   }) : changedAt = changedAt ?? at;
 
   final String id;
@@ -265,12 +259,6 @@ final class IntroCase {
   /// to pass on with the case.
   final Map<String, dynamic>? proof;
 
-  /// For this person (target): the asker's signature checked out, so the
-  /// words, the kind and the asker's address and name are theirs. `false`
-  /// for a case from an older app (no signature) or under an address the
-  /// signature does not cover: shown as unverified.
-  final bool signed;
-
   bool get isOpen => status == IntroStatus.open;
 
   /// Waits for this person's decision.
@@ -298,7 +286,6 @@ final class IntroCase {
     'ch': changedAt,
     if (befriendDue) 'bf': true,
     if (proof != null) 'sg': proof,
-    if (signed) 'sd': true,
   };
 
   static String _address(Object? v) =>
@@ -343,7 +330,6 @@ final class IntroCase {
       changedAt: ch is int ? ch : at,
       befriendDue: json['bf'] == true,
       proof: introProofFromJson(json['sg']),
-      signed: json['sd'] == true,
     );
   }
 }
@@ -646,23 +632,27 @@ final class IntroService extends ChangeNotifier {
       targetName: sanitizePeerName(targetName),
       text: text,
     );
+    // A case nobody can check is not sent.
+    final Map<String, dynamic>? proof = await _sign(c);
+    if (proof == null) {
+      return null;
+    }
     _cases[c.id] = c;
     await _save();
-    final Map<String, dynamic>? proof = await _sign(c);
     await _send(f, <String, dynamic>{
       'type': IntroTypes.ask,
       'id': c.id,
       'k': kind.name,
       'a': y,
       if (text.isNotEmpty) 't': text,
-      'sg': ?proof,
+      'sg': proof,
     });
     return c;
   }
 
   /// This person's signature on [c] ([introSignedBytes]) with the device
   /// key, for the one it is for to check; `null` before the ledger made
-  /// the keys (the case then goes unsigned, as from an older app).
+  /// the keys.
   Future<Map<String, dynamic>?> _sign(IntroCase c) async {
     final String own = host.ownAddress();
     if (own.isEmpty) {
@@ -700,24 +690,17 @@ final class IntroService extends ChangeNotifier {
 
   /// Checks the asker's signature ([proof], as the middle friend passed it
   /// on) over what came, with the asker's own name:
-  ///  - `true`: signed by the device in its certificate, for this very
+  ///  - `valid`: signed by the device in its certificate, for this very
   ///    case, its words, from [asker] to this person;
-  ///  - `false` (dropped): malformed, not matching what came, or signed
-  ///    for someone else;
-  ///  - `null` (shown as unverified): no signature (an older app on the
-  ///    way), or a sound one from another address than [asker] — the
-  ///    middle friend knows the asker by the address of another of their
-  ///    devices (§6), which this phone cannot tell from a swapped one.
-  Future<({bool? valid, String name})> _checkSigned(
+  ///  - not valid (dropped): missing, malformed, not matching what came,
+  ///    signed for someone else or by another address than [asker].
+  Future<({bool valid, String name})> _checkSigned(
     Object? proof, {
     required String id,
     required IntroKind kind,
     required String asker,
     required String text,
   }) async {
-    if (proof == null) {
-      return (valid: null, name: '');
-    }
     final Map<String, dynamic>? p = introProofFromJson(proof);
     if (p == null) {
       return (valid: false, name: '');
@@ -749,7 +732,7 @@ final class IntroService extends ChangeNotifier {
       return (valid: false, name: '');
     }
     if (!PeerShareCodec.addressesEqual(signedAsker, asker)) {
-      return (valid: null, name: '');
+      return (valid: false, name: '');
     }
     return (valid: true, name: name);
   }
@@ -1013,10 +996,12 @@ final class IntroService extends ChangeNotifier {
       p['t'],
       kind == IntroKind.letter ? kLetterMaxChars : kIntroNoteMaxChars,
     );
+    final Map<String, dynamic>? proof = introProofFromJson(p['sg']);
     if (target.isEmpty ||
         target == from ||
         _isSelf(target) ||
         !host.isFriend(target) ||
+        proof == null ||
         (kind == IntroKind.letter && text.isEmpty)) {
       await _result(from, id, 'no');
       return;
@@ -1030,7 +1015,7 @@ final class IntroService extends ChangeNotifier {
       target: target,
       text: text,
       // Passed on as it came: only the one it is for can check it.
-      proof: introProofFromJson(p['sg']),
+      proof: proof,
     );
     if (kind == IntroKind.letter) {
       if (!_relayLetters || !_letterAllowed(from)) {
@@ -1151,22 +1136,20 @@ final class IntroService extends ChangeNotifier {
       return;
     }
     // The asker's signature (S-17): the middle friend may not change the
-    // words, the address or the name. A case without one comes from an
-    // older app and is shown marked as unverified; a broken one is dropped.
-    final ({bool? valid, String name}) check = await _checkSigned(
+    // words, the address or the name. A case without a good one is dropped.
+    final ({bool valid, String name}) check = await _checkSigned(
       p['sg'],
       id: id,
       kind: kind,
       asker: asker,
       text: text,
     );
-    if (check.valid == false || _cases.containsKey(id)) {
-      if (check.valid == false) {
+    if (!check.valid || _cases.containsKey(id)) {
+      if (!check.valid) {
         logZenWarning('Przedstawienia: podpis nadawcy się nie zgadza');
       }
       return;
     }
-    final bool signed = check.valid == true;
     final Object? n = p['n'];
     final String signedName = sanitizePeerName(check.name);
     final String name = signedName.isNotEmpty
@@ -1184,7 +1167,6 @@ final class IntroService extends ChangeNotifier {
       note: kind == IntroKind.intro
           ? introText(p['m'], kIntroNoteMaxChars)
           : '',
-      signed: signed,
     );
     _cases[id] = c;
     await _save();
@@ -1208,11 +1190,7 @@ final class IntroService extends ChangeNotifier {
       });
       body = c.text;
     }
-    await _tell(
-      '$id-fwd',
-      title,
-      signed ? body : '${introUnverifiedLabel()}\n$body',
-    );
+    await _tell('$id-fwd', title, body);
   }
 
   /// Y (a friend) answers what this person (F) passed on.

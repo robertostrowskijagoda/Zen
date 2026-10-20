@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/moderation/content_moderation.dart';
-import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
 PyrMember _member(String key, String addr) => PyrMember(
@@ -41,11 +40,11 @@ void main() {
 
   test('banned content is hidden until revealed', () {
     const String bad = 'Kup tanio!!!';
-    final Set<String> banned = <String>{contentHash(bad)};
-    expect(isContentBanned(banned, bad), isTrue);
-    expect(isContentBanned(banned, 'Dzień dobry'), isFalse);
-    expect(isContentBanned(const <String>{}, bad), isFalse);
-    expect(isContentBanned(banned, ''), isFalse);
+    final Set<String> banned = <String>{'p1'};
+    expect(isContentBanned(banned, id: 'p1'), isTrue);
+    expect(isContentBanned(banned, id: 'p2'), isFalse);
+    expect(isContentBanned(const <String>{}, id: 'p1'), isFalse);
+    expect(isContentBanned(banned), isFalse);
     expect(isContentHidden(banned, bad, id: 'p1'), isTrue);
     expect(
       isContentHidden(banned, bad, id: 'p1', revealed: <String>{'p1'}),
@@ -53,22 +52,20 @@ void main() {
     );
     expect(
       isContentHidden(banned, bad, id: 'p2', revealed: <String>{'p1'}),
-      isTrue,
+      isFalse,
     );
     expect(isContentHidden(banned, 'Dzień dobry', id: 'p3'), isFalse);
   });
 
   test('a ban of an entry holds whatever its text (S36)', () {
     const String bad = 'Kup tanio!!!';
-    // The entry is banned by id; the hash only matches the exact text.
-    final Set<String> banned = <String>{'entry-1', contentHash(bad)};
-    // One space added: another hash, but still the banned entry.
-    expect(isContentBanned(banned, '$bad ', id: 'entry-1'), isTrue);
+    final Set<String> banned = <String>{'entry-1'};
+    // One space added: still the banned entry.
+    expect(isContentBanned(banned, id: 'entry-1'), isTrue);
     expect(isContentHidden(banned, '$bad ', id: 'entry-1'), isTrue);
-    // Without the id, only the exact text (a 1.10.0 ban) is caught.
-    expect(isContentBanned(banned, '$bad '), isFalse);
-    expect(isContentBanned(banned, bad), isTrue);
-    expect(isContentBanned(banned, 'Dzień dobry', id: 'entry-2'), isFalse);
+    // Without the id nothing is caught.
+    expect(isContentHidden(banned, bad), isFalse);
+    expect(isContentBanned(banned, id: 'entry-2'), isFalse);
   });
 
   testWidgets('a message menu offers "Zgłoś" only with a report action', (

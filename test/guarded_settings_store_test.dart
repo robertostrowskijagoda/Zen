@@ -58,14 +58,9 @@ void main() {
     expect(loaded.lockMode, AppLockMode.appClose);
   });
 
-  test('an older settings file is adopted and its GIF key leaves the '
-      'file', () async {
+  test('a settings file without a protected copy is adopted', () async {
     final MemoryAppSettingsStore file = MemoryAppSettingsStore(
-      const AppSettings(
-        lockMode: AppLockMode.appClose,
-        secureScreens: false,
-        gifApiKey: 'staryKlucz',
-      ),
+      const AppSettings(lockMode: AppLockMode.appClose, secureScreens: false),
     );
     final MemorySecurityCredentialsStore secrets =
         MemorySecurityCredentialsStore();
@@ -78,14 +73,7 @@ void main() {
     // The user's own choices are kept as they were.
     expect(loaded.lockMode, AppLockMode.appClose);
     expect(loaded.secureScreens, isFalse);
-    expect(loaded.gifApiKey, 'staryKlucz');
-    expect(await secrets.read(appSecurityGifApiKeyStorageKey), 'staryKlucz');
     expect(await secrets.read(appSecurityGuardedSettingsStorageKey), isNotNull);
-
-    // The next save takes the key out of the file.
-    await store.save(loaded);
-    expect((await file.load())!.gifApiKey, isEmpty);
-    expect((await store.load())!.gifApiKey, 'staryKlucz');
   });
 
   test('secure storage failing never stops the settings', () async {
