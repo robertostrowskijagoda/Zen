@@ -46,20 +46,21 @@ val zenAbis: List<String> = (project.findProperty("target-platform") as String?)
 // allow together with abiFilters.
 val zenSplitPerAbi = project.hasProperty("split-per-abi")
 
-// Distribution flavors (STAN D12):
-//   direct - the full app (self-update, "Podaj dalej" with the APK);
-//   store  - Google Play / Galaxy Store: no REQUEST_INSTALL_PACKAGES
-//            (src/store/AndroidManifest.xml), and Dart hides self-update
-//            and APK sharing (appFlavor == "store",
-//            lib/src/features/update/store_build.dart).
-//   flutter build appbundle --release --flavor store   (Play)
-//   flutter build apk --release --flavor store         (Galaxy Store)
+// Distribution flavors (docs/STATUS.md):
+//   full         - the full app (self-update, "Podaj dalej" with the APK);
+//   appStoreOnly - Google Play / Galaxy Store ONLY, never to be sideloaded:
+//                  no REQUEST_INSTALL_PACKAGES (src/appStoreOnly/
+//                  AndroidManifest.xml), the label "Zen (sklep)", and Dart
+//                  hides self-update and APK sharing (appFlavor ==
+//                  "appStoreOnly", lib/src/features/update/store_build.dart).
+//   flutter build appbundle --release --flavor appStoreOnly   (Play)
+//   flutter build apk --release --flavor appStoreOnly         (Galaxy Store)
 // The flavors exist only when a flavored task is asked for (or with
 // -Pzen.flavors=true, e.g. for Android Studio), so plain `flutter build apk`
-// and `flutter run` still build the direct app as app-release.apk.
+// and `flutter run` still build the full app as app-release.apk.
 val zenFlavors: Boolean =
     (project.findProperty("zen.flavors") as String?)?.toBoolean() == true ||
-        Regex("(direct|store)(debug|profile|release)").containsMatchIn(
+        Regex("(full|appstoreonly)(debug|profile|release)").containsMatchIn(
             gradle.startParameter.taskNames.joinToString(" ").lowercase(),
         )
 
@@ -104,11 +105,11 @@ android {
     if (zenFlavors) {
         flavorDimensions += "distribution"
         productFlavors {
-            create("direct") {
+            create("full") {
                 dimension = "distribution"
                 isDefault = true
             }
-            create("store") {
+            create("appStoreOnly") {
                 dimension = "distribution"
             }
         }
@@ -170,6 +171,26 @@ android {
 
 flutter {
     source = "../.."
+}
+
+// The appStoreOnly files carry their purpose in the name (Flutter looks for
+// its own app-appStoreOnly-release.* names, so they are copied, not renamed):
+// build/app/outputs/app-store-only/Zen-APP-STORE-ONLY-do-not-install-manually.{aab,apk}
+val appStoreOnlyName = "Zen-APP-STORE-ONLY-do-not-install-manually"
+if (zenFlavors) {
+    for ((task, source, extension) in listOf(
+        Triple("bundleAppStoreOnlyRelease", "bundle/appStoreOnlyRelease", "aab"),
+        Triple("assembleAppStoreOnlyRelease", "apk/appStoreOnly/release", "apk"),
+    )) {
+        val copy = tasks.register<Copy>("copy${task.replaceFirstChar { it.uppercase() }}Output") {
+            from(layout.buildDirectory.dir("outputs/$source")) {
+                include("*.$extension")
+                rename { "$appStoreOnlyName.$extension" }
+            }
+            into(layout.buildDirectory.dir("outputs/app-store-only"))
+        }
+        tasks.matching { it.name == task }.configureEach { finalizedBy(copy) }
+    }
 }
 
 // Go bridge (native/yggdrasil_bridge): checked before every build and
