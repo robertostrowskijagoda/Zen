@@ -142,6 +142,17 @@ Future<void> _resumeAppFromBackground(WidgetTester tester) async {
   await tester.pump();
 }
 
+/// Unmounts the app and disposes [container] inside the test body: the
+/// services' timers are cancelled on dispose, and a tear-down runs only
+/// after the pending-timer check.
+Future<void> _disposeUncontrolled(
+  WidgetTester tester,
+  ProviderContainer container,
+) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  container.dispose();
+}
+
 void main() {
   testWidgets('shows the unified shell with the chats tab by default', (
     WidgetTester tester,
@@ -1091,7 +1102,6 @@ void main() {
         ),
       ],
     );
-    addTearDown(container.dispose);
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
@@ -1115,6 +1125,7 @@ void main() {
     expect(callMedia.mutedValue, isTrue);
     expect(callMedia.speakerOnValue, isTrue);
     expect(callMedia.cameraEnabledValue, isFalse);
+    await _disposeUncontrolled(tester, container);
   });
 
   testWidgets('conversation call card can open call surface and return', (
@@ -1801,8 +1812,6 @@ void main() {
         ),
       ],
     );
-    addTearDown(container.dispose);
-
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
@@ -1838,6 +1847,7 @@ void main() {
       container.read(socialHubControllerProvider).activeCall?.status,
       CallSessionStatus.ringing,
     );
+    await _disposeUncontrolled(tester, container);
   });
 
   testWidgets('conversation call buttons keep a gap between audio and video', (
