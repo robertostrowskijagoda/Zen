@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
+import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
@@ -23,6 +24,17 @@ final Provider<PyramidService> pyramidServiceProvider =
         // the ledger the level is unknown and only friendship counts.
         friendLevelOf: (String a) =>
             ref.read(ledgerNodeProvider)?.levelOf(a) ?? FriendLevel.friend,
+        // Signed "met in person" attestations (§6.2) count for referenda
+        // (§20.6).
+        metInPerson: () =>
+            ref.read(ledgerNodeProvider)?.metAddresses() ?? const <String>[],
+        // The account's other devices share the pyramid key (§6.1).
+        otherDevices: () {
+          final LedgerNode? node = ref.read(ledgerNodeProvider);
+          return node != null && node.isReady
+              ? node.siblingAddresses
+              : const <String>[];
+        },
       );
       unawaitedLogged(
         pyramid.load().then((_) => pyramid.greet()),
@@ -41,8 +53,8 @@ final Provider<PyramidService> pyramidServiceProvider =
       return pyramid;
     });
 
-/// The pyramid's minute (called by a widget's timer): duties every 5
-/// minutes, hello to friends every 3 hours.
+/// The pyramid's minute (`ZenCore`'s minute, while the app runs): duties
+/// every 5 minutes, hello to friends every 3 hours.
 void pyramidMinute(PyramidService pyramid, int minute) {
   if (minute % 5 == 0) {
     unawaitedLogged(pyramid.duties(), context: 'Piramida: obowiązki');

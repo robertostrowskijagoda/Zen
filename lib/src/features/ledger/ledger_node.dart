@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
@@ -18,6 +19,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
+import 'package:zen/src/features/ledger/met_attestation.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -248,6 +250,16 @@ final class LedgerNode {
   static const String _followingKey = 'ledger/following';
   static const String _keyringKey = 'ledger/audience';
   static const String _levelsKey = 'ledger/levels';
+  static const String _metPendingKey = 'ledger/met_pending';
+
+  /// People met in person whose account is not known yet (a friend request
+  /// not answered): normalised address → when they met. The attestation is
+  /// signed once their hello tells the account (§6.2).
+  final Map<String, int> _metPending = <String, int>{};
+
+  /// How long a meeting waits for the other's account, and how many wait.
+  static const int _metPendingMs = 30 * 24 * 3600 * 1000;
+  static const int _maxMetPending = 200;
 
   /// Audience keys: ours (every generation) and those friends gave us.
   final AudienceKeyring keyring = AudienceKeyring();
@@ -389,12 +401,51 @@ final class LedgerNode {
               // Own entries are signed by own devices: whoever brings them
               // back (a seed while recovering) cannot have forged them.
               (_isSeed(peer) && _ownSpaces.contains(space)),
-    // Chat copies never leave this account's own devices; nor does a space
-    // of a kind this build does not know (kept for a newer build, §1.6):
-    // its rules for who may read it are not known here.
+    // Chat copies never leave this account's own devices. A space of a kind
+    // this build does not know (kept for a newer build, §1.6) goes only to
+    // friends that said they pass such spaces on too (`spaces1`): its rules
+    // for who may read it are not known here.
     servesTo: (String peer, String space) =>
-        (isKnownSpace(space) && !space.startsWith('own/')) || _isSibling(peer),
+        (isKnownSpace(space) && !space.startsWith('own/')) ||
+        _isSibling(peer) ||
+        _forwardsUnknown(peer, space),
+    forwardsFrom: _takesUnknownFrom,
   );
+
+  /// Capabilities friends named in their hello (what they said, nothing
+  /// that guards privacy depends on more than "may get a space we hold").
+  final Map<String, List<String>> _peerCaps = <String, List<String>>{};
+
+  bool _friendHasCap(String peer, String cap) =>
+      _isFriend(peer) &&
+      (_peerCaps[PeerShareCodec.normalizeAddress(peer)]?.contains(cap) ??
+          false);
+
+  /// Whether unknown-kind [space] may be given to [peer].
+  bool _forwardsUnknown(String peer, String space) =>
+      !isKnownSpace(space) &&
+      defaultSpacePolicy(space) != null &&
+      _friendHasCap(peer, kForwardSpacesCap);
+
+  /// Whether unknown-kind [space] may be taken from [peer] to pass on, with
+  /// the same per-log cap as spaces kept for their owner and a cap on how
+  /// many such spaces are kept.
+  bool _takesUnknownFrom(String peer, String space) {
+    if (!_forwardsUnknown(peer, space)) {
+      return false;
+    }
+    if (store.holdsSpace(space)) {
+      return true;
+    }
+    int held = 0;
+    for (final String s in store.spaces) {
+      if (!isKnownSpace(s) && ++held >= kMaxUnknownSpaces) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   late final LedgerIdentity identity;
   late final LedgerAuthor author;
 
@@ -536,6 +587,7 @@ final class LedgerNode {
     await _loadBridges();
     await _loadDevices();
     await _loadOwnApplied();
+    await _loadMetPending();
     await identity.rememberSelfKey(disk);
     for (final String kind in kAccountSpaceKinds) {
       replicator.subscribe(accountSpace(kind, account));
@@ -815,6 +867,99 @@ final class LedgerNode {
         .map(PeerShareCodec.normalizeAddress),
     ..._liveDeviceAddresses(),
   };
+
+  // ---- "met in person" (§6.2) ----
+
+  /// Accounts [ofAccount] (default: this one) attested as met in person
+  /// (none until the ledger is loaded).
+  Set<String> metAccounts({String? ofAccount}) => _ready
+      ? metAccountsIn(entriesOf(spaceKind: 'acts', ofAccount: ofAccount))
+      : <String>{};
+
+  /// Accounts met in person by this account or by a friend (signed
+  /// attestations in their `acts`): who counts as verified (§11).
+  Set<String> metByCircle() => <String>{
+    ...metAccounts(),
+    for (final String friend in _accounts.values.toSet())
+      ...metAccounts(ofAccount: friend),
+  };
+
+  /// Whether this account attested [address] as met in person (or will,
+  /// once their account is known).
+  bool hasMet(String address) {
+    final String normalized = PeerShareCodec.normalizeAddress(address);
+    if (_metPending.containsKey(normalized)) {
+      return true;
+    }
+    final String? acc = accountOfAddress(normalized);
+    return acc != null && metAccounts().contains(acc);
+  }
+
+  /// Addresses of the accounts this account attested as met in person.
+  List<String> metAddresses() => <String>[
+    for (final String acc in metAccounts()) ...addressesOfAccount(acc),
+  ];
+
+  /// This account met [address] in person just now (a scanned QR, "W
+  /// pobliżu", "Poznaliśmy się" at an event): signs the attestation into
+  /// `acts`, where friends get it. Waits for the account when it is not
+  /// known yet (a friend request on its way).
+  Future<void> attestMet(String address) async {
+    await start();
+    final String normalized = PeerShareCodec.normalizeAddress(address);
+    if (normalized.isEmpty || normalized == _ownAddress) {
+      return;
+    }
+    final String? acc = accountOfAddress(normalized);
+    if (acc != null) {
+      await _attest(acc, _clock.wallMillis());
+      return;
+    }
+    _metPending.putIfAbsent(normalized, _clock.wallMillis);
+    while (_metPending.length > _maxMetPending) {
+      _metPending.remove(_metPending.keys.first);
+    }
+    await _saveMetPending();
+  }
+
+  Future<void> _attestPending(String normalized, String acc) async {
+    final int? at = _metPending.remove(normalized);
+    await _saveMetPending();
+    if (at != null && _clock.wallMillis() - at <= _metPendingMs) {
+      await _attest(acc, at);
+    }
+  }
+
+  Future<void> _attest(String acc, int at) async {
+    if (acc == account || metAccounts().contains(acc)) {
+      return;
+    }
+    await publish(kMetKind, metBody(acc, at), spaceKind: 'acts');
+  }
+
+  Future<void> _loadMetPending() async {
+    final Uint8List? raw = await disk.read(_metPendingKey);
+    if (raw == null) {
+      return;
+    }
+    try {
+      final Object? json = jsonDecode(utf8.decode(raw));
+      if (json is Map) {
+        json.forEach((Object? k, Object? v) {
+          if (k is String && v is int) {
+            _metPending[k] = v;
+          }
+        });
+      }
+    } on FormatException {
+      logZenWarning('Lista spotkań osobiście jest uszkodzona.');
+    }
+  }
+
+  Future<void> _saveMetPending() => disk.write(
+    _metPendingKey,
+    Uint8List.fromList(utf8.encode(jsonEncode(_metPending))),
+  );
 
   // ---- several devices per account (§6) ----
 
@@ -1501,6 +1646,7 @@ final class LedgerNode {
       final Uint8List proof = await identity.deviceKey.sign(_proofBytes(me));
       _send(friend, <String, dynamic>{
         ...?helloExtras?.call(normalized),
+        if (_isFriend(friend)) 'caps': kZenCaps,
         'type': kLedgerHelloType,
         'cert': identity.certificate.toJson(),
         'p': <String, dynamic>{'f': me, 's': b64(proof)},
@@ -1887,7 +2033,17 @@ final class LedgerNode {
     if (cert.account != account) {
       _followAccount(cert.account);
     }
-    replicator.syncWith(from);
+    if (_metPending.containsKey(normalized)) {
+      await _attestPending(normalized, cert.account);
+    }
+    _peerCaps[normalized] = capsFromPayload(frame.payload['caps']);
+    replicator.syncWith(
+      from,
+      extra: <String>[
+        for (final String s in store.spaces)
+          if (_forwardsUnknown(from, s)) s,
+      ],
+    );
     // They may hold photos or videos we could not get yet.
     replicator.offerSource(normalized);
     if (!_peerGreeted.isClosed) {

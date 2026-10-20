@@ -23,6 +23,7 @@ final class LedgerIdentity {
     required this.deviceKey,
     required this.certificate,
     required this.writer,
+    required this.pyramidSeed,
     PasswordWrappedSeed? wrapped,
     Uint8List? selfKey,
   }) : _accountKey = accountKey,
@@ -61,6 +62,23 @@ final class LedgerIdentity {
         .deriveKey(
           secretKey: SecretKey(accountSeed),
           info: utf8.encode('zen.self.v1'),
+          nonce: const <int>[],
+        );
+    return Uint8List.fromList(await key.extractBytes());
+  }
+
+  /// Seed of the pyramid identity key (§6.1, §6.4), derived from the
+  /// account key: every device of the account is the same person in the
+  /// pyramid, and a recovered account gets its place and wallet back. Kept
+  /// next to the device key, so it is at hand while the account key is
+  /// locked by the password.
+  final Uint8List pyramidSeed;
+
+  static Future<Uint8List> derivePyramidSeed(Uint8List accountSeed) async {
+    final SecretKey key = await Hkdf(hmac: Hmac.sha256(), outputLength: 32)
+        .deriveKey(
+          secretKey: SecretKey(accountSeed),
+          info: utf8.encode('zen.pyramid.v1'),
           nonce: const <int>[],
         );
     return Uint8List.fromList(await key.extractBytes());
@@ -144,6 +162,7 @@ final class LedgerIdentity {
       certificate: cert,
       writer: randomId(),
       selfKey: await deriveSelfKey(account.seed),
+      pyramidSeed: await derivePyramidSeed(account.seed),
     );
     await identity._save(disk);
     return identity;
@@ -203,6 +222,7 @@ final class LedgerIdentity {
             else ...<String, dynamic>{'acc': account, 'wrapped': w.toJson()},
             'device': b64(deviceKey.seed),
             if (_selfKey != null) 'self': b64(_selfKey!),
+            'pyr': b64(pyramidSeed),
             'cert': certificate.toJson(),
             'writer': writer,
           }),
@@ -252,6 +272,7 @@ final class LedgerIdentity {
         certificate: cert,
         writer: writer as String,
         selfKey: selfKey ?? await deriveSelfKey(accountSeed),
+        pyramidSeed: await derivePyramidSeed(accountSeed),
       );
     }
     if (json['v'] == _wrappedVersion) {
@@ -259,7 +280,11 @@ final class LedgerIdentity {
       final PasswordWrappedSeed? w = PasswordWrappedSeed.fromJson(
         json['wrapped'],
       );
-      if (acc is! String || w == null || cert.account != acc) {
+      final Uint8List? pyramidSeed = unb64(json['pyr'], length: 32);
+      if (acc is! String ||
+          w == null ||
+          cert.account != acc ||
+          pyramidSeed == null) {
         return null;
       }
       return LedgerIdentity._(
@@ -270,6 +295,7 @@ final class LedgerIdentity {
         writer: writer as String,
         wrapped: w,
         selfKey: selfKey,
+        pyramidSeed: pyramidSeed,
       );
     }
     return null;

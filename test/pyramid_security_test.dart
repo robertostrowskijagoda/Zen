@@ -44,6 +44,24 @@ Map<String, dynamic> member(
   String nat = 'PL',
 }) => <String, dynamic>{'k': k.id, 'n': name, 'nat': nat, 'dc': 'x'};
 
+/// Each member met in person by the two after them (§6.2), so all six may
+/// vote in referenda (§20.6).
+Future<List<PyramidRecord>> metRecords(
+  String py,
+  List<LedgerKeyPair> k,
+  int at,
+) async => <PyramidRecord>[
+  for (int i = 0; i < k.length; i++)
+    for (int j = 1; j <= 2; j++)
+      await rec(
+        PyrT.met,
+        py,
+        at + i * 2 + j,
+        <LedgerKeyPair>[k[(i + j) % k.length]],
+        <String, dynamic>{'k': k[i].id},
+      ),
+];
+
 /// S on top, A and B under S, A1 and A2 under A, B1 under B.
 final class Six {
   Six._(this.s, this.a, this.b, this.a1, this.a2, this.b1, this.records);
@@ -109,6 +127,7 @@ final class Six {
         <LedgerKeyPair>[k[2], k[5]],
         <String, dynamic>{'head': k[2].id, 'm': member(k[5], 'B1')},
       ),
+      ...await metRecords(py, k, t0 + 10),
     ]);
   }
 
@@ -800,7 +819,7 @@ void main() {
       int at,
       LedgerKeyPair by,
       String via,
-      String hash,
+      String eid,
     ) => rec(
       PyrT.ban,
       w.py,
@@ -809,7 +828,7 @@ void main() {
       <String, dynamic>{
         'target': '',
         'kind': 'content',
-        'hash': hash,
+        'eid': eid,
         'reason': '',
         'via': via,
       },
@@ -860,7 +879,7 @@ void main() {
       ]);
       expect(st.delegations.keys.toSet(), <String>{d1.id, d2.id});
       expect(st.rejected[unlimitedSub.id], 'szerzej niż własna delegacja');
-      expect(st.bannedContent(at + 3 * h), <String>{'h1'});
+      expect(st.bannedEntries(at + 3 * h), <String>{'h1'});
       expect(st.rejected[ban2.id], isNotNull);
     });
 
@@ -877,7 +896,7 @@ void main() {
       final PyramidRecord ban = await contentBan(at + 2 * h, w.b1, d.id, 'h1');
       final PyramidState st = w.fold(<PyramidRecord>[d, leave, ban]);
       expect(st.rejected[ban.id], isNotNull);
-      expect(st.bannedContent(at + 3 * h), isEmpty);
+      expect(st.bannedEntries(at + 3 * h), isEmpty);
     });
 
     test('a branch delegate reaches only its branch', () async {
@@ -951,7 +970,7 @@ void main() {
           backdated,
           after,
         ]);
-        expect(st.bannedContent(at + 4 * h), <String>{'h1'});
+        expect(st.bannedEntries(at + 4 * h), <String>{'h1'});
         expect(st.rejected[backdated.id], contains('cofnięcia'));
         expect(st.rejected[after.id], isNotNull);
         expect(st.actsOf(d.id), <String>{ban1.id});

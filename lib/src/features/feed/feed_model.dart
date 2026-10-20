@@ -258,6 +258,7 @@ final class FeedLiker {
     required this.account,
     required this.name,
     this.friend = false,
+    this.verified = false,
   });
 
   final String account;
@@ -265,6 +266,29 @@ final class FeedLiker {
 
   /// This account or a friend (shown first: "Lubią to: Bob, Kasia…").
   final bool friend;
+
+  /// Met in person by this account or one of its friends (a signed
+  /// attestation, §6.2): "w tym N zweryfikowanych" (§11).
+  final bool verified;
+
+  FeedLiker withVerified(bool on) => on == verified
+      ? this
+      : FeedLiker(account: account, name: name, friend: friend, verified: on);
+}
+
+/// "w tym 830 zweryfikowanych" (§11): how many of those who like [post]
+/// were met in person by this account or its friends; `null` for none.
+String? verifiedSummary(FeedPost post) {
+  final int n = post.verifiedLikes;
+  if (n <= 0) {
+    return null;
+  }
+  return tn(
+    n,
+    one: 'w tym {n} zweryfikowana',
+    few: 'w tym {n} zweryfikowane',
+    many: 'w tym {n} zweryfikowanych',
+  );
 }
 
 /// "Lubią to: Ty, Bob i 1 284 inne osoby" (§11): up to two names of
@@ -366,6 +390,9 @@ final class FeedPost {
   /// How many like it in all: at least [likers], more when a bundle said
   /// there are more than it carried (§11).
   int get likeTotal => _likeTotal ?? likers.length;
+
+  /// How many of [likes] are verified ([FeedLiker.verified]).
+  int get verifiedLikes => likes.where((FeedLiker l) => l.verified).length;
 
   /// How many comments in all (the same way).
   int get commentTotal => _commentTotal ?? comments.length;
@@ -860,6 +887,8 @@ List<FeedPost> buildFeed(
   // The author's say over the thread (§11): their signed entries (when
   // this device reads their acts) and what their bundles passed on.
   final Map<String, ThreadModeration> signed = <String, ThreadModeration>{};
+  // Met in person by this account or a friend (§6.2): "verified" (§11).
+  final Set<String> verified = node.metByCircle();
   final List<FeedPost> result = <FeedPost>[];
   for (final FeedPost p in posts) {
     final ThreadModeration own = signed[p.account] ??= authorModeration(
@@ -876,7 +905,7 @@ List<FeedPost> buildFeed(
           l.account,
           relayed: relayedLikes.contains('${p.id}\n${l.account}'),
         ))
-          l,
+          l.withVerified(verified.contains(l.account)),
     ];
     // This account first, then friends, then everyone else.
     final List<FeedLiker> ordered = <FeedLiker>[

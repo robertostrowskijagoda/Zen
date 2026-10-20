@@ -1790,10 +1790,6 @@ class PyramidWallet extends StatelessWidget {
                       // Above the rolling limit only by a referendum of the
                       // whole pyramid (§23.4).
                       final bool over = amount > s.params.emitLimit - emitted;
-                      if (over && s.params.rules < 2) {
-                        snack(context, t('To więcej niż limit 30 dni.'));
-                        return;
-                      }
                       if (over &&
                           !await confirm(
                             context,

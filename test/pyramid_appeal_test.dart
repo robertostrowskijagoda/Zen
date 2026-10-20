@@ -10,7 +10,7 @@ void main() {
       'ban', () async {
     final PyramidWorld w = await PyramidWorld.six();
     final String b1 = w['B1'].myKey!;
-    await w['S'].ban(target: b1, kind: 'content', hash: 'h', reason: 'spam');
+    await w['S'].ban(target: b1, kind: 'content', entryId: 'h', reason: 'spam');
     await w.net.run();
     await w.approve('B', PyrT.ban);
     final PyramidState st = w['B1'].state!;

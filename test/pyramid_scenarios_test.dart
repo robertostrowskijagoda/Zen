@@ -183,6 +183,8 @@ void main() {
       final SimPhone b2 = w.add('B2');
       await w.join(w.net['B'], b2, nat: 'DE');
       await w.sync();
+      // Votes count from members met in person by 2 others (§20.6).
+      await w.meetAll();
       final PyramidService s = w['S'];
 
       // New rules need at least 72 h of voting (§21.7); asked for 1 h, the

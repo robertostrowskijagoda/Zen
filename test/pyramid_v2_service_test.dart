@@ -63,7 +63,6 @@ void main() {
           birthYear: 1980,
           gender: 'm',
         );
-    expect(w['S'].state!.params.rules, kPyrRules);
     final SimPhone z = w.add('Z');
     w.net.befriend(s, z);
     await w.pyr(z).load();
@@ -94,6 +93,42 @@ void main() {
     await w['S'].approve(p.record.id);
     await w.net.run();
     expect(w['S'].state!.isMember(w['Z'].myKey!), isTrue);
+  });
+
+  test('the birth year is optional: joining works without it, but there is '
+      'no badge (§20.2a)', () async {
+    final PyramidWorld w = PyramidWorld();
+    final SimPhone s = w.add(
+      'S',
+      friendLevelOf: (String a) => FriendLevel.friend,
+    );
+    await w.pyr(s).load();
+    await w
+        .pyr(s)
+        .createPyramid(name: 'Ruch', myName: 'S', nat: 'PL', gender: 'm');
+    final SimPhone z = w.add('Z');
+    w.net.befriend(s, z);
+    await w.pyr(z).load();
+    await w
+        .pyr(z)
+        .askToJoin(
+          invite: w['S'].inviteCode()!,
+          myName: 'Z',
+          nat: 'PL',
+          gender: 'k',
+        );
+    await w.net.run();
+    final PyrProposal p = w['S'].proposals.values.single;
+    expect(w['S'].admitProblem(p), isNull);
+    await w['S'].approve(p.record.id);
+    await w.net.run();
+    expect(w['S'].state!.isMember(w['Z'].myKey!), isTrue);
+
+    // Nothing to show: no badge, and no age in the anonymous numbers.
+    expect(await w['Z'].showBadge(true), isNull);
+    expect(await w['S'].showBadge(true), isNull);
+    expect(w['S'].state!.badges, isEmpty);
+    expect(w['Z'].state!.badges, isEmpty);
   });
 
   test('a report climbs level by level to the top (§21.4)', () async {
@@ -143,7 +178,6 @@ void main() {
         reason: 'spam',
         target: w['B1'].myKey!,
         evidence: 'Kup tanio!!!',
-        contentHash: contentHash('Kup tanio!!!'),
         entryId: post.id,
         entry: post.toJson(),
       );
@@ -171,8 +205,6 @@ void main() {
       final PyramidState st = w['A2'].state!;
       final int now = w.net.now;
       expect(st.bannedEntries(now), contains(post.id));
-      // The hash stays for 1.10.0 phones.
-      expect(st.bannedContent(now), contains(contentHash('Kup tanio!!!')));
     },
   );
 
