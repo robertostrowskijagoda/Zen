@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The languages Zen speaks (kZenLanguages in
+     lib/src/app/i18n/zen_i18n.dart, same order), offered under
+     Settings > Apps > Zen > Language on Android 13+. The app follows that
+     choice (it is the first of the system's locales) when no language is
+     chosen in Zen itself. Chinese is Simplified (zh-Hans), the script Zen
+     speaks. -->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="pl" />
+    <locale android:name="id" />
+    <locale android:name="cs" />
+    <locale android:name="de" />
+    <locale android:name="en" />
+    <locale android:name="es" />
+    <locale android:name="fr" />
+    <locale android:name="it" />
+    <locale android:name="hu" />
+    <locale android:name="nl" />
+    <locale android:name="pt" />
+    <locale android:name="ro" />
+    <locale android:name="vi" />
+    <locale android:name="tr" />
+    <locale android:name="ru" />
+    <locale android:name="uk" />
+    <locale android:name="ar" />
+    <locale android:name="hi" />
+    <locale android:name="zh-Hans" />
+    <locale android:name="ja" />
+    <locale android:name="ko" />
+</locale-config>

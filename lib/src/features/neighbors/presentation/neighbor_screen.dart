@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/neighbors/flat_model.dart';
@@ -68,7 +69,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Text(
-                  'Ile osób przyjdzie?',
+                  t('Ile osób przyjdzie?'),
                   style: TextStyle(color: zen.textSecondary, fontSize: 14),
                 ),
                 const SizedBox(height: 12),
@@ -76,7 +77,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
                     IconButton.filledTonal(
-                      tooltip: 'Mniej',
+                      tooltip: t('Mniej'),
                       onPressed: count > 1 ? () => set(() => count--) : null,
                       icon: const Icon(Icons.remove_rounded),
                     ),
@@ -91,7 +92,12 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                               style: zen.display(color: tone, size: 34),
                             ),
                             Text(
-                              count == 1 ? 'osoba' : 'osoby',
+                              tn(
+                                count,
+                                one: 'osoba',
+                                few: 'osoby',
+                                many: 'osób',
+                              ),
                               style: TextStyle(
                                 color: zen.textMuted,
                                 fontSize: 13,
@@ -102,7 +108,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                       ),
                     ),
                     IconButton.filledTonal(
-                      tooltip: 'Więcej',
+                      tooltip: t('Więcej'),
                       onPressed: count < 20 ? () => set(() => count++) : null,
                       icon: const Icon(Icons.add_rounded),
                     ),
@@ -114,16 +120,16 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
               if (current > 0)
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(0),
-                  child: const Text('Nie przyjdziemy'),
+                  child: Text(t('Nie przyjdziemy')),
                 ),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Anuluj'),
+                child: Text(t('Anuluj')),
               ),
               FilledButton(
                 key: const Key('flat-signup-ok'),
                 onPressed: () => Navigator.of(context).pop(count),
-                child: const Text('Przyjdziemy'),
+                child: Text(t('Przyjdziemy')),
               ),
             ],
           );
@@ -142,20 +148,25 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
       context: context,
       builder: (BuildContext context) => AlertDialog(
         icon: const Icon(Icons.badge_rounded),
-        title: Text('Pokazać Twój profil „${f.profile.name}”?'),
-        content: const Text(
-          'Zobaczą Twoje imię z Zen i będą mogli zaprosić Cię do znajomych. '
-          'Pozostali domownicy pozostaną ukryci — każdy decyduje sam za siebie.',
+        title: Text(
+          t('Pokazać Twój profil „{name}”?', {'name': f.profile.name}),
+        ),
+        content: Text(
+          t(
+            'Zobaczą Twoje imię z Zen i będą mogli zaprosić Cię do znajomych. '
+            'Pozostali domownicy pozostaną ukryci — każdy decyduje sam za '
+            'siebie.',
+          ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             key: const Key('flat-reveal-ok'),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Pokaż'),
+            child: Text(t('Pokaż')),
           ),
         ],
       ),
@@ -169,8 +180,10 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
         SnackBar(
           content: Text(
             sent
-                ? 'Wysłane. „${f.profile.name}” zobaczą Twój profil.'
-                : 'Nie udało się.',
+                ? t('Wysłane. „{name}” zobaczą Twój profil.', {
+                    'name': f.profile.name,
+                  })
+                : t('Nie udało się.'),
           ),
         ),
       );
@@ -183,16 +196,16 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
     final String? text = await scanOrPaste(
       context,
       ref,
-      title: 'Nowy kod z ich drzwi',
+      title: t('Nowy kod z ich drzwi'),
     );
     if (text == null || !mounted) {
       return;
     }
     final FlatDoorCode? code = FlatDoorCode.parse(text);
     if (code == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('To nie jest kod mieszkania.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t('To nie jest kod mieszkania.'))));
       return;
     }
     await _service.scanDoor(code);
@@ -218,11 +231,13 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
         .sendFriendRequest(
           peerAddress: r.address,
           knownName: r.name,
-          message: 'Sąsiedzi: ${f.profile.label}',
+          message: t('Sąsiedzi: {name}', {'name': f.profile.label}),
         );
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Zaproszenie do ${r.name} wysłane.')),
+        SnackBar(
+          content: Text(t('Zaproszenie do {name} wysłane.', {'name': r.name})),
+        ),
       );
     }
   }
@@ -241,14 +256,14 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
               Icons.person_remove_rounded,
               color: ZenColors.of(context).danger,
             ),
-            title: Text('Usunąć „${f.profile.label}”?'),
-            content: const Text(
-              'Znikną z Waszej listy sąsiadów razem z wiadomościami.',
+            title: Text(t('Usunąć „{name}”?', {'name': f.profile.label})),
+            content: Text(
+              t('Znikną z Waszej listy sąsiadów razem z wiadomościami.'),
             ),
             actions: <Widget>[
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Anuluj'),
+                child: Text(t('Anuluj')),
               ),
               FilledButton(
                 style: FilledButton.styleFrom(
@@ -258,7 +273,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                   ),
                 ),
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Usuń'),
+                child: Text(t('Usuń')),
               ),
             ],
           ),
@@ -308,8 +323,8 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                       leading: const Icon(Icons.badge_rounded),
                       title: Text(
                         _service.revealedTo(f.key)
-                            ? 'Pokaż mój profil jeszcze raz'
-                            : 'Pokaż mój profil',
+                            ? t('Pokaż mój profil jeszcze raz')
+                            : t('Pokaż mój profil'),
                       ),
                     ),
                   ),
@@ -323,16 +338,16 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                       ),
                       title: Text(
                         f.following
-                            ? 'Wycisz nowości'
-                            : 'Powiadamiaj o nowościach',
+                            ? t('Wycisz nowości')
+                            : t('Powiadamiaj o nowościach'),
                       ),
                     ),
                   ),
-                  const PopupMenuItem<String>(
+                  PopupMenuItem<String>(
                     value: 'remove',
                     child: ListTile(
-                      leading: Icon(Icons.person_remove_rounded),
-                      title: Text('Usuń z sąsiadów'),
+                      leading: const Icon(Icons.person_remove_rounded),
+                      title: Text(t('Usuń z sąsiadów')),
                     ),
                   ),
                 ],
@@ -406,7 +421,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                             Align(
                               alignment: Alignment.centerLeft,
                               child: ZenPill(
-                                text: 'Wyciszeni',
+                                text: t('Wyciszeni'),
                                 tone: zen.textMuted,
                                 icon: Icons.notifications_off_rounded,
                               ),
@@ -447,11 +462,17 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        'Odłączyli jeden telefon, ale przyszły dwie '
-                                        'różne wersje (domowników: '
-                                        '${p.members.length} i ${rival.members.length}). '
-                                        'Zapytajcie ich osobiście i zeskanujcie nowy '
-                                        'kod z ich drzwi — zostanie ten właściwy.',
+                                        t(
+                                          'Odłączyli jeden telefon, ale przyszły '
+                                          'dwie różne wersje (domowników: '
+                                          '{count} i {otherCount}). Zapytajcie '
+                                          'ich osobiście i zeskanujcie nowy kod '
+                                          'z ich drzwi — zostanie ten właściwy.',
+                                          <String, Object?>{
+                                            'count': p.members.length,
+                                            'otherCount': rival.members.length,
+                                          },
+                                        ),
                                         style: TextStyle(
                                           color: zen.textSecondary,
                                           fontSize: 13.5,
@@ -473,7 +494,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                                   key: const Key('flat-key-keep'),
                                   onPressed: () =>
                                       unawaited(_service.keepCurrentKey(f.key)),
-                                  child: const Text('Zostaw tę wersję'),
+                                  child: Text(t('Zostaw tę wersję')),
                                 ),
                                 FilledButton.tonalIcon(
                                   key: const Key('flat-key-scan'),
@@ -482,7 +503,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                                     Icons.qr_code_scanner_rounded,
                                     size: 18,
                                   ),
-                                  label: const Text('Zeskanuj ich kod'),
+                                  label: Text(t('Zeskanuj ich kod')),
                                 ),
                               ],
                             ),
@@ -490,15 +511,16 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                         ),
                       ),
                     if (_service.revealsFrom(f.key).isNotEmpty) ...<Widget>[
-                      const ZenSection('Pokazali swoje profile'),
+                      ZenSection(t('Pokazali swoje profile')),
                       for (final FlatReveal r in _service.revealsFrom(f.key))
                         ZenTile(
                           key: Key('flat-reveal-${r.name}'),
                           icon: Icons.badge_rounded,
                           tone: tone,
                           title: r.name,
-                          subtitle:
-                              'Mieszka tu — możesz zaprosić do znajomych.',
+                          subtitle: t(
+                            'Mieszka tu — możesz zaprosić do znajomych.',
+                          ),
                           onTap: () => unawaited(_invite(f, r)),
                           trailing: Icon(
                             Icons.person_add_alt_1_rounded,
@@ -507,7 +529,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                         ),
                     ],
                     if (invites.isNotEmpty) ...<Widget>[
-                      const ZenSection('Zapraszają'),
+                      ZenSection(t('Zapraszają')),
                       for (final FlatItem i in invites)
                         Builder(
                           builder: (BuildContext context) {
@@ -518,7 +540,10 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                               meta: <String>[
                                 if (i.at != null) flatDate(i.at!),
                                 if (i.seats > 0)
-                                  'miejsca: ${i.taken}/${i.seats}',
+                                  t('miejsca: {taken}/{seats}', {
+                                    'taken': i.taken,
+                                    'seats': i.seats,
+                                  }),
                               ].join(' · '),
                               below: Wrap(
                                 spacing: 8,
@@ -528,7 +553,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                                 children: <Widget>[
                                   if (mine > 0)
                                     ZenPill(
-                                      text: 'Wy: $mine',
+                                      text: t('Wy: {count}', {'count': mine}),
                                       tone: zen.success,
                                       icon: Icons.check_rounded,
                                     ),
@@ -538,10 +563,10 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                                         : () => unawaited(_signUp(i, mine)),
                                     child: Text(
                                       mine > 0
-                                          ? 'Zmień'
+                                          ? t('Zmień')
                                           : i.isFull
-                                          ? 'Brak miejsc'
-                                          : 'Przyjdziemy',
+                                          ? t('Brak miejsc')
+                                          : t('Przyjdziemy'),
                                     ),
                                   ),
                                 ],
@@ -551,22 +576,24 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                         ),
                     ],
                     if (offers.isNotEmpty) ...<Widget>[
-                      const ZenSection('Oferują'),
+                      ZenSection(t('Oferują')),
                       for (final FlatItem i in offers)
                         FlatItemCard(kind: FlatItemKind.offer, text: i.text),
                     ],
                     if (needs.isNotEmpty) ...<Widget>[
-                      const ZenSection('Potrzebują'),
+                      ZenSection(t('Potrzebują')),
                       for (final FlatItem i in needs)
                         FlatItemCard(kind: FlatItemKind.need, text: i.text),
                     ],
-                    const ZenSection('Wiadomości'),
+                    ZenSection(t('Wiadomości')),
                     if (messages.isEmpty)
                       ZenInfo(
                         icon: Icons.forum_rounded,
                         tone: tone,
-                        text:
-                            'Napiszcie coś do siebie — odpisze ktokolwiek z domowników.',
+                        text: t(
+                          'Napiszcie coś do siebie — odpisze ktokolwiek z '
+                          'domowników.',
+                        ),
                       ),
                     for (final FlatMessage m in messages)
                       Align(
@@ -648,7 +675,9 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                             maxLines: 4,
                             textCapitalization: TextCapitalization.sentences,
                             decoration: InputDecoration(
-                              hintText: 'Napisz do „${p.name}”',
+                              hintText: t('Napisz do „{name}”', {
+                                'name': p.name,
+                              }),
                             ),
                             onSubmitted: (_) => unawaited(_send()),
                           ),
@@ -656,7 +685,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                         const SizedBox(width: 8),
                         IconButton.filled(
                           key: const Key('neighbor-send'),
-                          tooltip: 'Wyślij',
+                          tooltip: t('Wyślij'),
                           style: IconButton.styleFrom(
                             backgroundColor: tone,
                             foregroundColor: onTone,

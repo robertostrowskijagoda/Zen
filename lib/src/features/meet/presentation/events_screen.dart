@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
@@ -32,17 +33,21 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 
 String eventDate(int millis) {
   final DateTime d = DateTime.fromMillisecondsSinceEpoch(millis);
-  const List<String> days = <String>[
-    'pon.',
-    'wt.',
-    'śr.',
-    'czw.',
-    'pt.',
-    'sob.',
-    'niedz.',
+  final List<String> days = <String>[
+    t('pon.'),
+    t('wt.'),
+    t('śr.'),
+    t('czw.'),
+    t('pt.'),
+    t('sob.'),
+    t('niedz.'),
   ];
   String two(int v) => v.toString().padLeft(2, '0');
-  return '${days[d.weekday - 1]} ${d.day}.${two(d.month)} o ${two(d.hour)}:${two(d.minute)}';
+  return t('{weekday} {date} o {time}', {
+    'weekday': days[d.weekday - 1],
+    'date': '${d.day}.${two(d.month)}',
+    'time': '${two(d.hour)}:${two(d.minute)}',
+  });
 }
 
 /// "Wydarzenia" (§17): mine and the ones I am invited to.
@@ -72,7 +77,7 @@ class _EventsScreenState extends ConsumerState<EventsScreen> {
     final EventService events = ref.watch(eventServiceProvider);
     return Scaffold(
       key: const Key('events-screen'),
-      appBar: AppBar(title: const Text('Wydarzenia')),
+      appBar: AppBar(title: Text(t('Wydarzenia'))),
       floatingActionButton: FloatingActionButton.extended(
         key: const Key('events-new'),
         onPressed: () => unawaited(
@@ -83,7 +88,7 @@ class _EventsScreenState extends ConsumerState<EventsScreen> {
           ),
         ),
         icon: const Icon(Icons.add_rounded),
-        label: const Text('Nowe'),
+        label: Text(t('Nowe')),
       ),
       body: ListenableBuilder(
         listenable: events,
@@ -101,13 +106,14 @@ class _EventsScreenState extends ConsumerState<EventsScreen> {
               .toList();
           if (list.isEmpty && past.isEmpty) {
             return ListView(
-              children: const <Widget>[
+              children: <Widget>[
                 ZenEmpty(
                   icon: Icons.celebration_rounded,
-                  title: 'Nie ma jeszcze wydarzeń',
-                  text:
-                      'Zorganizuj coś — zaproszenie trafi tylko do ludzi '
-                      'połączonych z Tobą przez znajomych.',
+                  title: t('Nie ma jeszcze wydarzeń'),
+                  text: t(
+                    'Zorganizuj coś — zaproszenie trafi tylko do ludzi '
+                    'połączonych z Tobą przez znajomych.',
+                  ),
                 ),
               ],
             );
@@ -120,19 +126,23 @@ class _EventsScreenState extends ConsumerState<EventsScreen> {
                   key: Key('event-${e.id}'),
                   event: e,
                   status: e.isMine
-                      ? 'Organizujesz · gości: ${e.goingCount}'
-                      : events.myGuest(e)?.status.label ?? 'Zaproszenie',
+                      ? t('Organizujesz · gości: {count}', {
+                          'count': e.goingCount,
+                        })
+                      : events.myGuest(e)?.status.label ?? t('Zaproszenie'),
                   onTap: () => unawaited(EventScreen.open(context, e.id)),
                 ),
               if (past.isNotEmpty) ...<Widget>[
-                ZenSection('Minione', top: list.isEmpty ? 4 : 20),
+                ZenSection(t('Minione'), top: list.isEmpty ? 4 : 20),
                 for (final MeetEvent e in past)
                   _EventCard(
                     key: Key('event-${e.id}'),
                     event: e,
                     status: events.photos(e.id).isEmpty
-                        ? 'Już było'
-                        : 'Już było · zdjęcia: ${events.photos(e.id).length}',
+                        ? t('Już było')
+                        : t('Już było · zdjęcia: {count}', {
+                            'count': events.photos(e.id).length,
+                          }),
                     onTap: () => unawaited(EventScreen.open(context, e.id)),
                   ),
               ],
@@ -161,19 +171,19 @@ class _EventCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final DateTime d = DateTime.fromMillisecondsSinceEpoch(event.startsAt);
-    const List<String> months = <String>[
-      'sty',
-      'lut',
-      'mar',
-      'kwi',
-      'maj',
-      'cze',
-      'lip',
-      'sie',
-      'wrz',
-      'paź',
-      'lis',
-      'gru',
+    final List<String> months = <String>[
+      t('sty'),
+      t('lut'),
+      t('mar'),
+      t('kwi'),
+      t('maj'),
+      t('cze'),
+      t('lip'),
+      t('sie'),
+      t('wrz'),
+      t('paź'),
+      t('lis'),
+      t('gru'),
     ];
     final Color tone = event.cancelled
         ? zen.textMuted
@@ -242,7 +252,7 @@ class _EventCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 ZenPill(
-                  text: event.cancelled ? 'Odwołane' : status,
+                  text: event.cancelled ? t('Odwołane') : status,
                   tone: event.cancelled ? zen.danger : tone,
                 ),
               ],
@@ -342,7 +352,7 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
     final List<FriendProfile> friends = social.acceptedFriends;
     final ZenColors zen = ZenColors.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Nowe wydarzenie')),
+      appBar: AppBar(title: Text(t('Nowe wydarzenie'))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: <Widget>[
@@ -351,12 +361,12 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
             controller: _title,
             maxLength: 100,
             textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              labelText: 'Nazwa',
-              hintText: 'np. Grill u mnie w sobotę',
+            decoration: InputDecoration(
+              labelText: t('Nazwa'),
+              hintText: t('np. Grill u mnie w sobotę'),
             ),
           ),
-          const ZenSection('Rodzaj', top: 4),
+          ZenSection(t('Rodzaj'), top: 4),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -374,22 +384,24 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
           ),
           if (_kind != EventKind.table)
             ZenInfo(
-              title: 'Chcesz poznać nowych ludzi?',
+              title: t('Chcesz poznać nowych ludzi?'),
               icon: Icons.dinner_dining_rounded,
-              text:
-                  'Stół na sześć to kolacja, na którą aplikacja sama zaprasza '
-                  '5 osób: znajomych Twoich znajomych, którzy też chcą tak '
-                  'poznawać ludzi. Każdy przy stole jest połączony z Tobą przez '
-                  'kogoś, kogo znasz — nikt nie jest zupełnie obcy.',
+              text: t(
+                'Stół na sześć to kolacja, na którą aplikacja sama zaprasza '
+                '5 osób: znajomych Twoich znajomych, którzy też chcą tak '
+                'poznawać ludzi. Każdy przy stole jest połączony z Tobą przez '
+                'kogoś, kogo znasz — nikt nie jest zupełnie obcy.',
+              ),
               tone: zenTone(zen, 3),
             )
           else
-            const ZenInfo(
-              title: 'Stół na sześć',
+            ZenInfo(
+              title: t('Stół na sześć'),
               icon: Icons.dinner_dining_rounded,
-              text:
-                  'Kolacja dla 6 osób: Ty i 5 gości, których aplikacja dobiera '
-                  'sama spośród znajomych Twoich znajomych.',
+              text: t(
+                'Kolacja dla 6 osób: Ty i 5 gości, których aplikacja dobiera '
+                'sama spośród znajomych Twoich znajomych.',
+              ),
             ),
           if (_kind != EventKind.table)
             Align(
@@ -398,10 +410,10 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
                 key: const Key('event-open-table'),
                 onPressed: () => unawaited(TableScreen.open(context)),
                 icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-                label: const Text('Załóż Stół na sześć'),
+                label: Text(t('Załóż Stół na sześć')),
               ),
             ),
-          const ZenSection('Kiedy i gdzie', top: 12),
+          ZenSection(t('Kiedy i gdzie'), top: 12),
           ZenGroup(
             children: <Widget>[
               ListTile(
@@ -416,9 +428,9 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
           TextField(
             controller: _place,
             maxLength: 200,
-            decoration: const InputDecoration(
-              labelText: 'Gdzie',
-              prefixIcon: Icon(Icons.place_outlined),
+            decoration: InputDecoration(
+              labelText: t('Gdzie'),
+              prefixIcon: const Icon(Icons.place_outlined),
             ),
           ),
           TextField(
@@ -427,9 +439,9 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
             maxLines: 5,
             maxLength: 2000,
             textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(labelText: 'Opis (nie trzeba)'),
+            decoration: InputDecoration(labelText: t('Opis (nie trzeba)')),
           ),
-          const ZenSection('Kto może przyjść', top: 4),
+          ZenSection(t('Kto może przyjść'), top: 4),
           Wrap(
             key: const Key('event-reach'),
             spacing: 8,
@@ -447,12 +459,16 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
           const SizedBox(height: 6),
           Text(
             switch (_reach) {
-              EventReach.selected => 'Tylko osoby, które zaznaczysz niżej.',
-              EventReach.friends => 'Wszyscy Twoi znajomi.',
-              EventReach.friendsOfFriends =>
-                'Twoi znajomi i ich znajomi. Na liście gości zobaczysz, kto kogo przyprowadził.',
-              EventReach.twoSteps =>
-                'Znajomi, ich znajomi i znajomi tamtych. Każdy gość jest połączony z Tobą łańcuchem znajomych.',
+              EventReach.selected => t('Tylko osoby, które zaznaczysz niżej.'),
+              EventReach.friends => t('Wszyscy Twoi znajomi.'),
+              EventReach.friendsOfFriends => t(
+                'Twoi znajomi i ich znajomi. Na liście gości zobaczysz, kto '
+                'kogo przyprowadził.',
+              ),
+              EventReach.twoSteps => t(
+                'Znajomi, ich znajomi i znajomi tamtych. Każdy gość jest '
+                'połączony z Tobą łańcuchem znajomych.',
+              ),
             },
             style: TextStyle(
               color: zen.textSecondary,
@@ -464,10 +480,10 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
           TextField(
             controller: _capacity,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Ile osób najwyżej',
-              helperText: 'Razem z Tobą. Puste = bez limitu.',
-              prefixIcon: Icon(Icons.groups_2_outlined),
+            decoration: InputDecoration(
+              labelText: t('Ile osób najwyżej'),
+              helperText: t('Razem z Tobą. Puste = bez limitu.'),
+              prefixIcon: const Icon(Icons.groups_2_outlined),
             ),
           ),
           const SizedBox(height: 8),
@@ -475,17 +491,20 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
             children: <Widget>[
               SwitchListTile(
                 value: _plusOne,
-                title: const Text('Goście mogą prosić o „+1”'),
-                subtitle: const Text('O każdej osobie decydujesz Ty.'),
+                title: Text(t('Goście mogą prosić o „+1”')),
+                subtitle: Text(t('O każdej osobie decydujesz Ty.')),
                 onChanged: (bool v) => setState(() => _plusOne = v),
               ),
             ],
           ),
           if (_reach == EventReach.selected) ...<Widget>[
-            ZenSection('Kogo zapraszasz (${_invite.length})', top: 16),
+            ZenSection(
+              t('Kogo zapraszasz ({count})', {'count': _invite.length}),
+              top: 16,
+            ),
             if (friends.isEmpty)
               Text(
-                'Nie masz jeszcze znajomych w aplikacji.',
+                t('Nie masz jeszcze znajomych w aplikacji.'),
                 style: TextStyle(color: zen.textSecondary),
               )
             else
@@ -517,7 +536,7 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
                 ? null
                 : () => unawaited(_create()),
             icon: const Icon(Icons.send_rounded),
-            label: const Text('Zaproś'),
+            label: Text(t('Zaproś')),
           ),
         ],
       ),
@@ -558,10 +577,10 @@ class EventScreen extends ConsumerWidget {
         if (e == null) {
           return Scaffold(
             appBar: AppBar(),
-            body: const Center(
+            body: Center(
               child: ZenEmpty(
                 icon: Icons.event_busy_rounded,
-                title: 'Nie ma tego wydarzenia.',
+                title: t('Nie ma tego wydarzenia.'),
               ),
             ),
           );
@@ -583,12 +602,12 @@ class EventScreen extends ConsumerWidget {
         final EventTicket? ticket = events.ticket(e.id);
         final bool past = e.startsAt < events.now;
         String nameOf(String a) => a == me
-            ? 'Ty'
+            ? t('Ty')
             : myFriends.contains(a)
             ? meet.host.nameOf(a)
             : (e.guest(a)?.name.isNotEmpty ?? false)
             ? e.guest(a)!.name
-            : 'ktoś';
+            : t('ktoś');
         final ZenColors zen = ZenColors.of(context);
         final Color tone = e.cancelled
             ? zen.textMuted
@@ -601,7 +620,7 @@ class EventScreen extends ConsumerWidget {
               .skip(1)
               .map(nameOf)
               .toList();
-          return c.isEmpty ? '' : 'przez ${c.join(' ← ')}';
+          return c.isEmpty ? '' : t('przez {chain}', {'chain': c.join(' ← ')});
         }
 
         return Scaffold(
@@ -618,14 +637,14 @@ class EventScreen extends ConsumerWidget {
                     }
                   },
                   itemBuilder: (BuildContext context) =>
-                      const <PopupMenuEntry<String>>[
+                      <PopupMenuEntry<String>>[
                         PopupMenuItem<String>(
                           value: 'scan',
-                          child: Text('Sprawdzaj bilety'),
+                          child: Text(t('Sprawdzaj bilety')),
                         ),
                         PopupMenuItem<String>(
                           value: 'cancel',
-                          child: Text('Odwołaj wydarzenie'),
+                          child: Text(t('Odwołaj wydarzenie')),
                         ),
                       ],
                 ),
@@ -638,8 +657,8 @@ class EventScreen extends ConsumerWidget {
                 ZenInfo(
                   icon: Icons.event_busy_rounded,
                   tone: zen.danger,
-                  title: 'Wydarzenie odwołane',
-                  text: 'Organizator odwołał to spotkanie.',
+                  title: t('Wydarzenie odwołane'),
+                  text: t('Organizator odwołał to spotkanie.'),
                 ),
               Container(
                 margin: const EdgeInsets.only(bottom: 8),
@@ -699,7 +718,7 @@ class EventScreen extends ConsumerWidget {
                         ),
                         if (past && !e.cancelled)
                           ZenPill(
-                            text: 'Już było',
+                            text: t('Już było'),
                             tone: zen.textMuted,
                             icon: Icons.history_rounded,
                           ),
@@ -714,7 +733,9 @@ class EventScreen extends ConsumerWidget {
                       _EventFact(icon: Icons.place_outlined, text: e.place),
                     _EventFact(
                       icon: Icons.person_outline_rounded,
-                      text: 'organizuje ${e.isMine ? 'Ty' : e.organizerName}',
+                      text: t('organizuje {name}', {
+                        'name': e.isMine ? t('Ty') : e.organizerName,
+                      }),
                     ),
                   ],
                 ),
@@ -739,15 +760,31 @@ class EventScreen extends ConsumerWidget {
                           '$knownTotal',
                           style: zen.display(color: tone, size: 32),
                         ),
-                        Text('znasz', style: zen.label(color: zen.textMuted)),
+                        Text(
+                          t('znasz'),
+                          style: zen.label(color: zen.textMuted),
+                        ),
                       ],
                     ),
                     const SizedBox(width: 16),
                     Expanded(
                       child: Text(
-                        'Będzie ${going.length + 1} '
-                        '${e.capacity > 0 ? 'z ${e.capacity} ' : ''}'
-                        'osób, znasz $knownTotal.',
+                        e.capacity > 0
+                            ? t(
+                                'Będzie {count} z {capacity} osób, znasz {known}.',
+                                {
+                                  'count': going.length + 1,
+                                  'capacity': e.capacity,
+                                  'known': knownTotal,
+                                },
+                              )
+                            : tn(
+                                going.length + 1,
+                                one: 'Będzie {n} osoba, znasz {known}.',
+                                few: 'Będą {n} osoby, znasz {known}.',
+                                many: 'Będzie {n} osób, znasz {known}.',
+                                args: {'known': knownTotal},
+                              ),
                         key: const Key('event-known'),
                         style: TextStyle(
                           color: zen.textPrimary,
@@ -761,7 +798,7 @@ class EventScreen extends ConsumerWidget {
                 ),
               ),
               if (!e.isMine && !e.cancelled && !past) ...<Widget>[
-                const ZenSection('Twoja odpowiedź'),
+                ZenSection(t('Twoja odpowiedź')),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -790,7 +827,7 @@ class EventScreen extends ConsumerWidget {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: ZenPill(
-                      text: 'Brak miejsc.',
+                      text: t('Brak miejsc.'),
                       tone: zen.warning,
                       icon: Icons.event_seat_rounded,
                     ),
@@ -805,7 +842,7 @@ class EventScreen extends ConsumerWidget {
                       key: const Key('event-plus1'),
                       onPressed: () => unawaited(_askPlusOne(context, ref, e)),
                       icon: const Icon(Icons.person_add_alt_1_rounded),
-                      label: const Text('Chcę kogoś przyprowadzić'),
+                      label: Text(t('Chcę kogoś przyprowadzić')),
                     ),
                   ),
                 ],
@@ -813,14 +850,14 @@ class EventScreen extends ConsumerWidget {
               if (ticket != null &&
                   mine?.status == GuestStatus.going &&
                   !e.cancelled) ...<Widget>[
-                const ZenSection('Twój bilet'),
+                ZenSection(t('Twój bilet')),
                 ZenCard(
                   tone: tone,
                   padding: const EdgeInsets.all(18),
                   child: Column(
                     children: <Widget>[
                       Text(
-                        'Pokaż przy wejściu',
+                        t('Pokaż przy wejściu'),
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: zen.textSecondary,
@@ -848,14 +885,16 @@ class EventScreen extends ConsumerWidget {
                       if (events.ticketPinned(e.id)) ...<Widget>[
                         ZenPill(
                           key: const Key('event-ticket-pinned'),
-                          text: 'Przypięty do tego telefonu',
+                          text: t('Przypięty do tego telefonu'),
                           tone: zen.success,
                           icon: Icons.lock_rounded,
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Kod zmienia się co 20 s — zrzut ekranu nikogo '
-                          'innego nie wpuści.',
+                          t(
+                            'Kod zmienia się co 20 s — zrzut ekranu nikogo '
+                            'innego nie wpuści.',
+                          ),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: zen.textSecondary,
@@ -865,7 +904,7 @@ class EventScreen extends ConsumerWidget {
                         ),
                       ] else ...<Widget>[
                         ZenPill(
-                          text: 'Bilet bez przypięcia',
+                          text: t('Bilet bez przypięcia'),
                           tone: zen.warning,
                           icon: Icons.lock_open_rounded,
                         ),
@@ -875,7 +914,7 @@ class EventScreen extends ConsumerWidget {
                           onPressed: () =>
                               unawaited(events.rsvp(e.id, GuestStatus.going)),
                           icon: const Icon(Icons.push_pin_outlined),
-                          label: const Text('Przypnij do tego telefonu'),
+                          label: Text(t('Przypnij do tego telefonu')),
                         ),
                       ],
                     ],
@@ -883,11 +922,11 @@ class EventScreen extends ConsumerWidget {
                 ),
               ],
               _AfterEvent(events: events, event: e, tone: tone),
-              ZenSection('Goście (${e.guests.length})'),
+              ZenSection(t('Goście ({count})', {'count': e.guests.length})),
               if (e.guests.isEmpty)
                 ZenCard(
                   child: Text(
-                    'Jeszcze nikt nie odpowiedział.',
+                    t('Jeszcze nikt nie odpowiedział.'),
                     style: TextStyle(color: zen.textSecondary),
                   ),
                 )
@@ -919,11 +958,12 @@ class EventScreen extends ConsumerWidget {
                                   GuestStatus.declined => zen.textMuted,
                                   _ => zen.textSecondary,
                                 },
-                          name: g.address == me ? 'Ty' : g.name,
+                          name: g.address == me ? t('Ty') : g.name,
                           details: <String>[
                             g.status.label,
                             if (chain(g).isNotEmpty) chain(g),
-                            if (g.plusOnes > 0) '+${g.plusOnes} bez pytania',
+                            if (g.plusOnes > 0)
+                              t('+{count} bez pytania', {'count': g.plusOnes}),
                           ].join(' · '),
                           trailing: e.isMine
                               ? _organizerActions(context, events, e, g)
@@ -947,7 +987,7 @@ class EventScreen extends ConsumerWidget {
                                     Icons.handshake_outlined,
                                     size: 18,
                                   ),
-                                  label: const Text('Poznaliśmy się'),
+                                  label: Text(t('Poznaliśmy się')),
                                 )
                               : null,
                         ),
@@ -973,13 +1013,13 @@ class EventScreen extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           IconButton.filledTonal(
-            tooltip: 'Zgoda',
+            tooltip: t('Zgoda'),
             icon: const Icon(Icons.check_rounded),
             onPressed: () =>
                 unawaited(events.decidePlusOne(e.id, g.address, true)),
           ),
           IconButton(
-            tooltip: 'Nie',
+            tooltip: t('Nie'),
             icon: const Icon(Icons.close_rounded),
             onPressed: () =>
                 unawaited(events.decidePlusOne(e.id, g.address, false)),
@@ -988,7 +1028,7 @@ class EventScreen extends ConsumerWidget {
       );
     }
     return PopupMenuButton<int>(
-      tooltip: '„+1” bez pytania',
+      tooltip: t('„+1” bez pytania'),
       icon: const Icon(Icons.more_vert_rounded),
       onSelected: (int v) {
         if (v < 0) {
@@ -999,8 +1039,11 @@ class EventScreen extends ConsumerWidget {
       },
       itemBuilder: (BuildContext context) => <PopupMenuEntry<int>>[
         for (final int n in <int>[0, 1, 2])
-          PopupMenuItem<int>(value: n, child: Text('„+$n” bez pytania')),
-        const PopupMenuItem<int>(value: -1, child: Text('Usuń z listy')),
+          PopupMenuItem<int>(
+            value: n,
+            child: Text(t('„+{count}” bez pytania', {'count': n})),
+          ),
+        PopupMenuItem<int>(value: -1, child: Text(t('Usuń z listy'))),
       ],
     );
   }
@@ -1014,7 +1057,7 @@ class EventScreen extends ConsumerWidget {
     final FriendProfile? picked = await showDialog<FriendProfile>(
       context: context,
       builder: (BuildContext context) => SimpleDialog(
-        title: const Text('Kogo chcesz przyprowadzić?'),
+        title: Text(t('Kogo chcesz przyprowadzić?')),
         children: <Widget>[
           for (final FriendProfile f in social.acceptedFriends)
             if (e.guest(f.address) == null)
@@ -1030,7 +1073,7 @@ class EventScreen extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Zapytano organizatora.')));
+        ).showSnackBar(SnackBar(content: Text(t('Zapytano organizatora.'))));
       }
     }
   }
@@ -1046,12 +1089,14 @@ class EventScreen extends ConsumerWidget {
         .sendFriendRequest(
           peerAddress: g.address,
           knownName: g.name,
-          message: 'Poznaliśmy się na: ${e.title}',
+          message: t('Poznaliśmy się na: {title}', {'title': e.title}),
         );
     await ref.read(meetServiceProvider).markMet(g.address);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Zaproszenie do ${g.name} wysłane.')),
+        SnackBar(
+          content: Text(t('Zaproszenie do {name} wysłane.', {'name': g.name})),
+        ),
       );
     }
   }
@@ -1068,19 +1113,27 @@ class EventScreen extends ConsumerWidget {
     }
     final String text = switch (result) {
       CheckIn.ok => '✓ ${g!.name}',
-      CheckIn.already => '${g!.name} już wszedł(-ła) — bilet użyty',
-      CheckIn.notGoing => 'Ta osoba nie potwierdziła udziału',
-      CheckIn.otherEvent => 'Bilet na inne wydarzenie',
-      CheckIn.invalid => '✗ Nieważny bilet',
-      CheckIn.expired => '✗ Kod nieaktualny — to zrzut ekranu albo stara kopia',
-      CheckIn.replayed => '✗ Ten kod już był użyty',
+      CheckIn.already => t('{name} już wszedł(-ła) — bilet użyty', {
+        'name': g!.name,
+      }),
+      CheckIn.notGoing => t('Ta osoba nie potwierdziła udziału'),
+      CheckIn.otherEvent => t('Bilet na inne wydarzenie'),
+      CheckIn.invalid => t('✗ Nieważny bilet'),
+      CheckIn.expired => t(
+        '✗ Kod nieaktualny — to zrzut ekranu albo stara kopia',
+      ),
+      CheckIn.replayed => t('✗ Ten kod już był użyty'),
     };
     final List<String> notes = <String>[
       if (g != null && g.broughtBy != null)
-        'Przyprowadzona przez: ${e.guest(g.broughtBy!)?.name ?? '?'}',
+        t('Przyprowadzona przez: {name}', {
+          'name': e.guest(g.broughtBy!)?.name ?? '?',
+        }),
       if (result == CheckIn.expired)
-        'Poproś o pokazanie biletu na żywo w aplikacji: kod na telefonie '
-            'gościa zmienia się co 20 s.',
+        t(
+          'Poproś o pokazanie biletu na żywo w aplikacji: kod na telefonie '
+          'gościa zmienia się co 20 s.',
+        ),
     ];
     await showDialog<void>(
       context: context,
@@ -1090,7 +1143,7 @@ class EventScreen extends ConsumerWidget {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
+            child: Text(t('OK')),
           ),
         ],
       ),
@@ -1312,9 +1365,7 @@ class _AfterEvent extends ConsumerWidget {
             .length;
     if (room <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Dodano już wszystkie Twoje zdjęcia (20).'),
-        ),
+        SnackBar(content: Text(t('Dodano już wszystkie Twoje zdjęcia (20).'))),
       );
       return;
     }
@@ -1339,8 +1390,15 @@ class _AfterEvent extends ConsumerWidget {
         SnackBar(
           content: Text(
             bad == 0
-                ? 'Dodano zdjęcia: $added. Zobaczą je goście, którzy byli.'
-                : 'Dodano: $added, nie udało się: $bad (nieobsługiwany format?).',
+                ? t(
+                    'Dodano zdjęcia: {count}. Zobaczą je goście, którzy byli.',
+                    {'count': added},
+                  )
+                : t(
+                    'Dodano: {added}, nie udało się: {failed} '
+                    '(nieobsługiwany format?).',
+                    {'added': added, 'failed': bad},
+                  ),
           ),
         ),
       );
@@ -1366,7 +1424,7 @@ class _AfterEvent extends ConsumerWidget {
     final String? text = await showDialog<String>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
-        title: const Text('Karta wdzięczności'),
+        title: Text(t('Karta wdzięczności')),
         content: TextField(
           key: const Key('event-thanks-field'),
           controller: field,
@@ -1376,21 +1434,21 @@ class _AfterEvent extends ConsumerWidget {
           maxLines: 4,
           textCapitalization: TextCapitalization.sentences,
           decoration: InputDecoration(
-            labelText: 'Za co dziękujesz?',
-            hintText: 'Np. „Najlepsza kolacja w tym roku!”',
-            helperText: 'Dostanie ją ${event.organizerName}.',
+            labelText: t('Za co dziękujesz?'),
+            hintText: t('Np. „Najlepsza kolacja w tym roku!”'),
+            helperText: t('Dostanie ją {name}.', {'name': event.organizerName}),
             prefixIcon: const Icon(Icons.volunteer_activism_outlined),
           ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialog).pop(),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             key: const Key('event-thanks-send'),
             onPressed: () => Navigator.of(dialog).pop(field.text),
-            child: const Text('Wyślij'),
+            child: Text(t('Wyślij')),
           ),
         ],
       ),
@@ -1414,7 +1472,10 @@ class _AfterEvent extends ConsumerWidget {
               nowMillis: DateTime.now().millisecondsSinceEpoch,
             ) >
             0) {
-          final String card = 'Za „${event.title}”: ${text.trim()}';
+          final String card = t('Za „{title}”: {text}', {
+            'title': event.title,
+            'text': text.trim(),
+          });
           await node.publish(
             kThanksKind,
             thanksBody(
@@ -1435,8 +1496,8 @@ class _AfterEvent extends ConsumerWidget {
         SnackBar(
           content: Text(
             sent
-                ? 'Karta wysłana do ${event.organizerName}.'
-                : 'Nie udało się wysłać.',
+                ? t('Karta wysłana do {name}.', {'name': event.organizerName})
+                : t('Nie udało się wysłać.'),
           ),
         ),
       );
@@ -1454,28 +1515,30 @@ class _AfterEvent extends ConsumerWidget {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
-        title: const Text('Napiwek dla gospodarza'),
+        title: Text(t('Napiwek dla gospodarza')),
         content: TextField(
           key: const Key('event-tip-amount'),
           controller: amount,
           autofocus: true,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: InputDecoration(
-            labelText: 'Kwota',
+            labelText: t('Kwota'),
             hintText: '0,00',
-            helperText: 'Na koncie: ${formatMoney(s.balanceOf(me))}',
+            helperText: t('Na koncie: {amount}', {
+              'amount': formatMoney(s.balanceOf(me)),
+            }),
             prefixIcon: const Icon(Icons.payments_outlined),
           ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialog).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             key: const Key('event-tip-send'),
             onPressed: () => Navigator.of(dialog).pop(true),
-            child: const Text('Daj napiwek'),
+            child: Text(t('Daj napiwek')),
           ),
         ],
       ),
@@ -1489,7 +1552,7 @@ class _AfterEvent extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Za mało na koncie.')));
+        ).showSnackBar(SnackBar(content: Text(t('Za mało na koncie.'))));
       }
       return;
     }
@@ -1499,15 +1562,17 @@ class _AfterEvent extends ConsumerWidget {
     final PyramidRecord? order = await pyr.pay(
       to,
       value,
-      memo: 'Napiwek: ${event.title}',
+      memo: t('Napiwek: {title}', {'title': event.title}),
     );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             order == null
-                ? 'Nie można teraz (poprzedni przelew jeszcze czeka?).'
-                : 'Napiwek ${formatMoney(value)} poszedł do skarbników piramidy.',
+                ? t('Nie można teraz (poprzedni przelew jeszcze czeka?).')
+                : t('Napiwek {amount} poszedł do skarbników piramidy.', {
+                    'amount': formatMoney(value),
+                  }),
           ),
         ),
       );
@@ -1541,18 +1606,19 @@ class _AfterEvent extends ConsumerWidget {
       children: <Widget>[
         if (photos.isNotEmpty || canAdd) ...<Widget>[
           ZenSection(
-            'Wspólny album (${photos.length})',
-            action: canAdd ? 'Dodaj' : null,
+            t('Wspólny album ({count})', {'count': photos.length}),
+            action: canAdd ? t('Dodaj') : null,
             onAction: canAdd ? () => unawaited(_addPhotos(context)) : null,
           ),
           if (photos.isEmpty)
             ZenInfo(
               icon: Icons.photo_library_rounded,
               tone: tone,
-              title: 'Album tylko dla gości',
-              text:
-                  'Dodajcie zdjęcia z wydarzenia. Zobaczą je tylko ci, '
-                  'którzy byli — nikt spoza listy gości.',
+              title: t('Album tylko dla gości'),
+              text: t(
+                'Dodajcie zdjęcia z wydarzenia. Zobaczą je tylko ci, '
+                'którzy byli — nikt spoza listy gości.',
+              ),
             )
           else
             GridView.count(
@@ -1578,7 +1644,7 @@ class _AfterEvent extends ConsumerWidget {
             ),
         ],
         if (canThank || canTip) ...<Widget>[
-          const ZenSection('Dla gospodarza'),
+          ZenSection(t('Dla gospodarza')),
           if (mine != null)
             ZenCard(
               tone: zen.success,
@@ -1615,7 +1681,7 @@ class _AfterEvent extends ConsumerWidget {
                   onPressed: () => unawaited(_thank(context, ref)),
                   icon: const Icon(Icons.volunteer_activism_outlined),
                   label: Text(
-                    mine == null ? 'Karta wdzięczności' : 'Zmień kartę',
+                    mine == null ? t('Karta wdzięczności') : t('Zmień kartę'),
                   ),
                 ),
               if (canTip)
@@ -1624,13 +1690,15 @@ class _AfterEvent extends ConsumerWidget {
                   onPressed: () =>
                       unawaited(_tip(context, pyr, ps!, host, me!)),
                   icon: const Icon(Icons.payments_outlined),
-                  label: const Text('Napiwek dla gospodarza'),
+                  label: Text(t('Napiwek dla gospodarza')),
                 ),
             ],
           ),
         ],
         if (cards.isNotEmpty) ...<Widget>[
-          ZenSection('Karty wdzięczności (${cards.length})'),
+          ZenSection(
+            t('Karty wdzięczności ({count})', {'count': cards.length}),
+          ),
           for (final EventThanks c in cards)
             ZenCard(
               tone: zen.success,
@@ -1648,7 +1716,7 @@ class _AfterEvent extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          c.byName.isEmpty ? 'Gość' : c.byName,
+                          c.byName.isEmpty ? t('Gość') : c.byName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -1704,6 +1772,7 @@ class _PhotoViewerState extends State<_PhotoViewer> {
   @override
   Widget build(BuildContext context) {
     final EventPhoto p = widget.photos[_at];
+    final String by = p.byName.isEmpty ? t('Gość') : p.byName;
     return Stack(
       children: <Widget>[
         PageView.builder(
@@ -1725,7 +1794,7 @@ class _PhotoViewerState extends State<_PhotoViewer> {
             child: Row(
               children: <Widget>[
                 IconButton(
-                  tooltip: 'Zamknij',
+                  tooltip: t('Zamknij'),
                   color: Colors.white,
                   onPressed: () => Navigator.of(context).pop(),
                   icon: const Icon(Icons.close_rounded),
@@ -1733,7 +1802,7 @@ class _PhotoViewerState extends State<_PhotoViewer> {
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
-                    '${p.byName.isEmpty ? 'Gość' : p.byName} · ${_at + 1}/${widget.photos.length}',
+                    '$by · ${_at + 1}/${widget.photos.length}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(

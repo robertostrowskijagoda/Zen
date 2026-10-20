@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/runtime/zstd_frame_guard.dart';
@@ -81,7 +82,11 @@ final class ChatAttachmentTransportCodec {
       return transportBytes;
     }
     if (encoding != 'zstd') {
-      throw FormatException('Nieobsługiwane kodowanie załącznika: $encoding');
+      throw FormatException(
+        t('Nieobsługiwane kodowanie załącznika: {encoding}', {
+          'encoding': encoding,
+        }),
+      );
     }
     // A peer controls these bytes: a few kilobytes of crafted zstd could
     // otherwise expand to gigabytes. No real attachment is larger than what
@@ -94,10 +99,10 @@ final class ChatAttachmentTransportCodec {
         decompress: _zstandard.decompress,
       );
     } on FormatException {
-      throw const FormatException('Nie udało się rozpakować załącznika.');
+      throw FormatException(t('Nie udało się rozpakować załącznika.'));
     }
     if (decoded.isEmpty) {
-      throw const FormatException('Nie udało się rozpakować załącznika.');
+      throw FormatException(t('Nie udało się rozpakować załącznika.'));
     }
     return decoded;
   }

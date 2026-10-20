@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
@@ -33,21 +34,33 @@ class CallSessionCard extends StatelessWidget {
     final bool incomingRinging =
         session.status == CallSessionStatus.ringing && session.isIncoming;
     final bool active = session.status == CallSessionStatus.active;
+    final bool video = session.kind == CallInviteKind.video;
     final String title = switch (session.status) {
       CallSessionStatus.ringing when session.isIncoming =>
-        'Przychodząca rozmowa ${session.kindLabel}',
-      CallSessionStatus.ringing => 'Dzwonienie (${session.kindLabel})...',
-      CallSessionStatus.connecting => 'Łączenie...',
-      CallSessionStatus.active => 'Rozmowa ${session.kindLabel} trwa',
+        video
+            ? t('Przychodząca rozmowa wideo')
+            : t('Przychodząca rozmowa audio'),
+      CallSessionStatus.ringing =>
+        video ? t('Dzwonienie (wideo)...') : t('Dzwonienie (audio)...'),
+      CallSessionStatus.connecting => t('Łączenie...'),
+      CallSessionStatus.active =>
+        video ? t('Rozmowa wideo trwa') : t('Rozmowa audio trwa'),
     };
     final String body = switch (session.status) {
-      CallSessionStatus.ringing when session.isIncoming =>
-        '${session.displayName} czeka na odbiór.',
-      CallSessionStatus.ringing =>
-        'Czekasz, aż ${session.displayName} odbierze połączenie.',
-      CallSessionStatus.connecting => 'Nawiązywanie bezpiecznego połączenia...',
-      CallSessionStatus.active =>
-        'Sesja z ${session.displayName} jest już aktywna.',
+      CallSessionStatus.ringing when session.isIncoming => t(
+        '{name} czeka na odbiór.',
+        {'name': session.displayName},
+      ),
+      CallSessionStatus.ringing => t(
+        'Czekasz, aż {name} odbierze połączenie.',
+        {'name': session.displayName},
+      ),
+      CallSessionStatus.connecting => t(
+        'Nawiązywanie bezpiecznego połączenia...',
+      ),
+      CallSessionStatus.active => t('Sesja z {name} jest już aktywna.', {
+        'name': session.displayName,
+      }),
     };
 
     return ZenFadeSlide(
@@ -127,7 +140,7 @@ class CallSessionCard extends StatelessWidget {
                                   key: const Key('call-surface-button'),
                                   onPressed: onOpenSurface,
                                   icon: const Icon(Icons.fullscreen_rounded),
-                                  label: const Text('Pełny ekran'),
+                                  label: Text(t('Pełny ekran')),
                                 ),
                               ],
                         onAccept: onAccept,

@@ -268,9 +268,13 @@ final class RuntimeNodeSession {
 }
 
 /// Platforms that ship the Go bridge (a DLL, a .so, or linked into the iOS
-/// app).
+/// and macOS app).
 bool get _hasNativeBridge =>
-    Platform.isWindows || Platform.isAndroid || Platform.isIOS;
+    Platform.isWindows ||
+    Platform.isAndroid ||
+    Platform.isIOS ||
+    Platform.isLinux ||
+    Platform.isMacOS;
 
 RuntimeNodeRuntime buildDefaultRuntimeNodeRuntime({
   RuntimeSignalBootstrapConfig? config,

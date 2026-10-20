@@ -1,7 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_language_controller.dart';
+import 'package:zen/src/app/i18n/zen_locales.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/calls/presentation/call_compact_layer.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/calls/presentation/incoming_call_layer.dart';
@@ -27,12 +31,58 @@ final GlobalKey<NavigatorState> zenRootNavigatorKey = GlobalKey<NavigatorState>(
   debugLabel: 'zenRootNavigator',
 );
 
-class ZenRewriteApp extends ConsumerWidget {
+class ZenRewriteApp extends ConsumerStatefulWidget {
   const ZenRewriteApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ZenRewriteApp> createState() => _ZenRewriteAppState();
+}
+
+class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeLocales(List<Locale>? locales) {
+    // With no language chosen in Zen, it follows the system (on Android 13+
+    // also the language picked for Zen in the system settings).
+    unawaitedLogged(
+      ref.read(zenLanguageControllerProvider.notifier).followSystem(locales),
+      context: 'Following the system language failed',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final AppSettings settings = ref.watch(appSettingsControllerProvider);
+    final String languageCode = ref.watch(
+      zenLanguageControllerProvider.select(
+        (ZenLanguageState language) => language.code,
+      ),
+    );
+    // Every text comes from t(), read while building: a new language
+    // rebuilds every widget in place, so the state and the open screens
+    // (the language screen itself) stay as they are.
+    ref.listen<String>(
+      zenLanguageControllerProvider.select(
+        (ZenLanguageState language) => language.code,
+      ),
+      (String? previous, String next) {
+        if (previous != next) {
+          rebuildAllZenElements();
+        }
+      },
+    );
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Zen',
@@ -40,6 +90,11 @@ class ZenRewriteApp extends ConsumerWidget {
       theme: ZenTheme.light(settings.accentTheme),
       darkTheme: ZenTheme.dark(settings.accentTheme),
       themeMode: settings.themeMode.materialThemeMode,
+      // Material's own texts (tooltips, pickers, text selection) and the
+      // layout direction follow Zen's language.
+      locale: zenLocaleOf(languageCode),
+      supportedLocales: zenSupportedLocales,
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       builder: (BuildContext context, Widget? child) {
         // Above the root Navigator and security gate on purpose: a pushed route
         // or the PIN lock screen must never hide an incoming call.
@@ -86,11 +141,17 @@ class _DesktopViewportFrame extends StatelessWidget {
 
   static const double _desktopContentMaxWidth = 430;
 
+  static const Set<TargetPlatform> _desktops = <TargetPlatform>{
+    TargetPlatform.windows,
+    TargetPlatform.linux,
+    TargetPlatform.macOS,
+  };
+
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.windows) {
+    if (kIsWeb || !_desktops.contains(defaultTargetPlatform)) {
       return child;
     }
     return ColoredBox(

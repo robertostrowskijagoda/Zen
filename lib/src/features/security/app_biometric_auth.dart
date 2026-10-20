@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 
 final Provider<AppBiometricAuthenticator> appBiometricAuthenticatorProvider =
@@ -47,7 +48,7 @@ final class PlatformAppBiometricAuthenticator
   Future<bool> authenticate() async {
     try {
       return await _localAuthentication.authenticate(
-        localizedReason: 'Odblokuj aplikacje Zen',
+        localizedReason: t('Odblokuj aplikacje Zen'),
         options: Platform.isWindows
             ? const AuthenticationOptions(stickyAuth: false)
             : const AuthenticationOptions(

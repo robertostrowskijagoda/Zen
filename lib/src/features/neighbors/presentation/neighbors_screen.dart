@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
@@ -166,20 +167,20 @@ Future<String?> scanOrPaste(
           autofocus: true,
           maxLines: 3,
           minLines: 1,
-          decoration: const InputDecoration(
-            labelText: 'Wklej kod (zen-flat:… lub zen-home:…)',
-            prefixIcon: Icon(Icons.content_paste_rounded),
+          decoration: InputDecoration(
+            labelText: t('Wklej kod (zen-flat:… lub zen-home:…)'),
+            prefixIcon: const Icon(Icons.content_paste_rounded),
           ),
         ),
       ),
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Anuluj'),
+          child: Text(t('Anuluj')),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(c.text.trim()),
-          child: const Text('Dalej'),
+          child: Text(t('Dalej')),
         ),
       ],
     ),
@@ -204,7 +205,7 @@ class NeighborsScreen extends ConsumerWidget {
     final NeighborsService service = ref.watch(neighborsServiceProvider);
     return Scaffold(
       key: const Key('neighbors-screen'),
-      appBar: const ZenSectionBar(title: 'Sąsiedzi'),
+      appBar: ZenSectionBar(title: t('Sąsiedzi')),
       body: ListenableBuilder(
         listenable: service,
         builder: (BuildContext context, Widget? _) {
@@ -248,7 +249,7 @@ class _Joining extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Text(
-              'Czekam na telefon domownika…',
+              t('Czekam na telefon domownika…'),
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: zen.textPrimary,
@@ -258,7 +259,7 @@ class _Joining extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              'Musi być włączony i w sieci.',
+              t('Musi być włączony i w sieci.'),
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: zen.textSecondary,
@@ -269,7 +270,7 @@ class _Joining extends StatelessWidget {
             const SizedBox(height: 16),
             TextButton(
               onPressed: () => unawaited(service.leaveFlat()),
-              child: const Text('Anuluj'),
+              child: Text(t('Anuluj')),
             ),
           ],
         ),
@@ -304,7 +305,7 @@ class _NoFlatState extends ConsumerState<_NoFlat> {
     if (_name.text.trim().isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Wpisz, kim jesteście.')));
+      ).showSnackBar(SnackBar(content: Text(t('Wpisz, kim jesteście.'))));
       return;
     }
     final FlatProfile? p = await widget.service.createFlat(
@@ -314,7 +315,7 @@ class _NoFlatState extends ConsumerState<_NoFlat> {
     );
     if (p == null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Najpierw połącz się z siecią.')),
+        SnackBar(content: Text(t('Najpierw połącz się z siecią.'))),
       );
     }
   }
@@ -323,16 +324,16 @@ class _NoFlatState extends ConsumerState<_NoFlat> {
     final String? text = await scanOrPaste(
       context,
       ref,
-      title: 'Kod domownika',
+      title: t('Kod domownika'),
     );
     if (text == null || !mounted) {
       return;
     }
     final FlatHomeCode? code = FlatHomeCode.parse(text);
     if (code == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('To nie jest kod domownika.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t('To nie jest kod domownika.'))));
       return;
     }
     await widget.service.joinFlat(code);
@@ -346,34 +347,36 @@ class _NoFlatState extends ConsumerState<_NoFlat> {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: <Widget>[
         ZenHero(
-          title: 'Wasze mieszkanie',
+          title: t('Wasze mieszkanie'),
           icon: Icons.home_rounded,
           tone: tone,
-          text:
-              'Profil sąsiedzki należy do Was — rodziny, pary, '
-              'współlokatorów — w mieszkaniu, w którym teraz mieszkacie: '
-              '„Nowakowie · m. 12”. Zapraszacie na kawę czy grilla, '
-              'oferujecie pomoc, piszecie do siebie.',
+          text: t(
+            'Profil sąsiedzki należy do Was — rodziny, pary, '
+            'współlokatorów — w mieszkaniu, w którym teraz mieszkacie: '
+            '„Nowakowie · m. 12”. Zapraszacie na kawę czy grilla, '
+            'oferujecie pomoc, piszecie do siebie.',
+          ),
         ),
         ZenInfo(
           icon: Icons.lock_rounded,
           tone: tone,
-          title: 'Konta zostają prywatne',
-          text:
-              'Sąsiedzi nie widzą Waszych kont, dopóki sami się nie '
-              'poznacie. Gdy się wyprowadzicie, nowi lokatorzy założą własny '
-              'profil od zera.',
+          title: t('Konta zostają prywatne'),
+          text: t(
+            'Sąsiedzi nie widzą Waszych kont, dopóki sami się nie '
+            'poznacie. Gdy się wyprowadzicie, nowi lokatorzy założą własny '
+            'profil od zera.',
+          ),
         ),
-        const ZenSection('Załóż profil'),
+        ZenSection(t('Załóż profil')),
         TextField(
           key: const Key('flat-name'),
           controller: _name,
           maxLength: 60,
           textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            labelText: 'Kim jesteście?',
-            hintText: 'Nowakowie / Ania i Tomek',
-            prefixIcon: Icon(Icons.family_restroom_rounded),
+          decoration: InputDecoration(
+            labelText: t('Kim jesteście?'),
+            hintText: t('Nowakowie / Ania i Tomek'),
+            prefixIcon: const Icon(Icons.family_restroom_rounded),
           ),
         ),
         const SizedBox(height: 4),
@@ -381,10 +384,10 @@ class _NoFlatState extends ConsumerState<_NoFlat> {
           key: const Key('flat-place'),
           controller: _place,
           maxLength: 80,
-          decoration: const InputDecoration(
-            labelText: 'Gdzie mieszkacie? (nie trzeba)',
-            hintText: 'm. 12, 3 piętro',
-            prefixIcon: Icon(Icons.apartment_rounded),
+          decoration: InputDecoration(
+            labelText: t('Gdzie mieszkacie? (nie trzeba)'),
+            hintText: t('m. 12, 3 piętro'),
+            prefixIcon: const Icon(Icons.apartment_rounded),
           ),
         ),
         const SizedBox(height: 4),
@@ -395,9 +398,9 @@ class _NoFlatState extends ConsumerState<_NoFlat> {
           maxLines: 3,
           maxLength: 1000,
           textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(
-            labelText: 'O nas (nie trzeba)',
-            hintText: 'Mamy małe dziecko, prosimy o ciszę po 20…',
+          decoration: InputDecoration(
+            labelText: t('O nas (nie trzeba)'),
+            hintText: t('Mamy małe dziecko, prosimy o ciszę po 20…'),
           ),
         ),
         const SizedBox(height: 8),
@@ -406,9 +409,9 @@ class _NoFlatState extends ConsumerState<_NoFlat> {
           style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
           onPressed: () => unawaited(_create()),
           icon: const Icon(Icons.home_rounded),
-          label: const Text('Załóż profil'),
+          label: Text(t('Załóż profil')),
         ),
-        const ZenSection('Albo dołącz', top: 28),
+        ZenSection(t('Albo dołącz'), top: 28),
         ZenCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -422,7 +425,7 @@ class _NoFlatState extends ConsumerState<_NoFlat> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          'Ktoś z domowników już go założył?',
+                          t('Ktoś z domowników już go założył?'),
                           style: TextStyle(
                             color: zen.textPrimary,
                             fontSize: 15,
@@ -431,7 +434,10 @@ class _NoFlatState extends ConsumerState<_NoFlat> {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          'Zeskanuj kod z jego telefonu (Domownicy → Pokaż kod).',
+                          t(
+                            'Zeskanuj kod z jego telefonu (Domownicy → Pokaż '
+                            'kod).',
+                          ),
                           style: TextStyle(
                             color: zen.textSecondary,
                             fontSize: 13.5,
@@ -448,7 +454,7 @@ class _NoFlatState extends ConsumerState<_NoFlat> {
                 key: const Key('flat-join'),
                 onPressed: () => unawaited(_join()),
                 icon: const Icon(Icons.qr_code_scanner_rounded),
-                label: const Text('Dołącz — zeskanuj kod'),
+                label: Text(t('Dołącz — zeskanuj kod')),
               ),
             ],
           ),
@@ -520,15 +526,19 @@ class _FlatHome extends ConsumerWidget {
   final NeighborsService service;
 
   Future<void> _scan(BuildContext context, WidgetRef ref) async {
-    final String? text = await scanOrPaste(context, ref, title: 'Kod z drzwi');
+    final String? text = await scanOrPaste(
+      context,
+      ref,
+      title: t('Kod z drzwi'),
+    );
     if (text == null || !context.mounted) {
       return;
     }
     final FlatDoorCode? code = FlatDoorCode.parse(text);
     if (code == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('To nie jest kod mieszkania.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t('To nie jest kod mieszkania.'))));
       return;
     }
     await _knock(context, code);
@@ -542,12 +552,15 @@ class _FlatHome extends ConsumerWidget {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(switch (r) {
-          FlatScan.sent =>
-            'Pukamy do „${code.name}”… Profil pojawi się, gdy '
-                'ich telefon odpowie.',
-          FlatScan.own => 'To Wasz własny kod.',
-          FlatScan.noFlat => 'Najpierw załóż profil mieszkania.',
-          FlatScan.alreadyNeighbor => '„${code.name}” już są na liście.',
+          FlatScan.sent => t(
+            'Pukamy do „{name}”… Profil pojawi się, gdy ich telefon odpowie.',
+            <String, Object?>{'name': code.name},
+          ),
+          FlatScan.own => t('To Wasz własny kod.'),
+          FlatScan.noFlat => t('Najpierw załóż profil mieszkania.'),
+          FlatScan.alreadyNeighbor => t('„{name}” już są na liście.', {
+            'name': code.name,
+          }),
         }),
       ),
     );
@@ -561,7 +574,7 @@ class _FlatHome extends ConsumerWidget {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('Nasz profil sąsiedzki'),
+        title: Text(t('Nasz profil sąsiedzki')),
         content: SizedBox(
           width: 400,
           child: SingleChildScrollView(
@@ -572,18 +585,18 @@ class _FlatHome extends ConsumerWidget {
                   controller: name,
                   maxLength: 60,
                   textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Kim jesteście?',
-                    prefixIcon: Icon(Icons.family_restroom_rounded),
+                  decoration: InputDecoration(
+                    labelText: t('Kim jesteście?'),
+                    prefixIcon: const Icon(Icons.family_restroom_rounded),
                   ),
                 ),
                 const SizedBox(height: 4),
                 TextField(
                   controller: place,
                   maxLength: 80,
-                  decoration: const InputDecoration(
-                    labelText: 'Gdzie (np. m. 12)',
-                    prefixIcon: Icon(Icons.apartment_rounded),
+                  decoration: InputDecoration(
+                    labelText: t('Gdzie (np. m. 12)'),
+                    prefixIcon: const Icon(Icons.apartment_rounded),
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -593,7 +606,7 @@ class _FlatHome extends ConsumerWidget {
                   maxLines: 4,
                   maxLength: 1000,
                   textCapitalization: TextCapitalization.sentences,
-                  decoration: const InputDecoration(labelText: 'O nas'),
+                  decoration: InputDecoration(labelText: t('O nas')),
                 ),
               ],
             ),
@@ -602,11 +615,11 @@ class _FlatHome extends ConsumerWidget {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Zapisz'),
+            child: Text(t('Zapisz')),
           ),
         ],
       ),
@@ -635,16 +648,14 @@ class _FlatHome extends ConsumerWidget {
             ListTile(
               key: const Key('flat-photo-pick'),
               leading: const Icon(Icons.photo_library_rounded),
-              title: Text(has ? 'Zmień zdjęcie' : 'Dodaj zdjęcie'),
-              subtitle: const Text(
-                'Zobaczą je sąsiedzi (małe, bez danych GPS).',
-              ),
+              title: Text(has ? t('Zmień zdjęcie') : t('Dodaj zdjęcie')),
+              subtitle: Text(t('Zobaczą je sąsiedzi (małe, bez danych GPS).')),
               onTap: () => Navigator.of(sheet).pop('pick'),
             ),
             if (has)
               ListTile(
                 leading: const Icon(Icons.delete_outline_rounded),
-                title: const Text('Usuń zdjęcie'),
+                title: Text(t('Usuń zdjęcie')),
                 onTap: () => Navigator.of(sheet).pop('remove'),
               ),
           ],
@@ -671,9 +682,7 @@ class _FlatHome extends ConsumerWidget {
     final bool ok = jpeg != null && await service.setPhoto(jpeg);
     if (!ok && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Tego zdjęcia nie da się użyć (format?).'),
-        ),
+        SnackBar(content: Text(t('Tego zdjęcia nie da się użyć (format?).'))),
       );
     }
   }
@@ -699,8 +708,13 @@ class _FlatHome extends ConsumerWidget {
         SnackBar(
           content: Text(
             sent == 0
-                ? 'Nikogo z Zen nie ma teraz w zasięgu Bluetooth.'
-                : 'Wysłane do $sent ${sent == 1 ? 'telefonu' : 'telefonów'} w pobliżu.',
+                ? t('Nikogo z Zen nie ma teraz w zasięgu Bluetooth.')
+                : tn(
+                    sent,
+                    one: 'Wysłane do {n} telefonu w pobliżu.',
+                    few: 'Wysłane do {n} telefonów w pobliżu.',
+                    many: 'Wysłane do {n} telefonów w pobliżu.',
+                  ),
           ),
         ),
       );
@@ -730,7 +744,7 @@ class _FlatHome extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Tooltip(
-                    message: 'Zdjęcie mieszkania',
+                    message: t('Zdjęcie mieszkania'),
                     child: InkWell(
                       key: const Key('flat-photo'),
                       borderRadius: BorderRadius.circular(16),
@@ -821,13 +835,17 @@ class _FlatHome extends ConsumerWidget {
                 runSpacing: 6,
                 children: <Widget>[
                   ZenPill(
-                    text:
-                        '$members ${members == 1 ? 'telefon' : 'telefony'} domowników',
+                    text: tn(
+                      members,
+                      one: '{n} telefon domowników',
+                      few: '{n} telefony domowników',
+                      many: '{n} telefonów domowników',
+                    ),
                     tone: tone,
                     icon: Icons.phone_android_rounded,
                   ),
                   ZenPill(
-                    text: 'Sąsiedzi: ${neighbors.length}',
+                    text: t('Sąsiedzi: {count}', {'count': neighbors.length}),
                     tone: tone,
                     icon: Icons.door_front_door_rounded,
                   ),
@@ -845,7 +863,7 @@ class _FlatHome extends ConsumerWidget {
                 child: _QuickAction(
                   key: const Key('flat-door'),
                   icon: Icons.qr_code_2_rounded,
-                  label: 'Kod na drzwi',
+                  label: t('Kod na drzwi'),
                   tone: tone,
                   onTap: () => unawaited(FlatDoorScreen.open(context)),
                 ),
@@ -855,7 +873,7 @@ class _FlatHome extends ConsumerWidget {
                 child: _QuickAction(
                   key: const Key('flat-scan'),
                   icon: Icons.qr_code_scanner_rounded,
-                  label: 'Zeskanuj drzwi',
+                  label: t('Zeskanuj drzwi'),
                   tone: zenTone(zen, 6),
                   onTap: () => unawaited(_scan(context, ref)),
                 ),
@@ -865,7 +883,7 @@ class _FlatHome extends ConsumerWidget {
                 child: _QuickAction(
                   key: const Key('flat-home'),
                   icon: Icons.family_restroom_rounded,
-                  label: 'Domownicy',
+                  label: t('Domownicy'),
                   tone: zenTone(zen, 3),
                   onTap: () => unawaited(FlatHomeScreen.open(context)),
                 ),
@@ -874,7 +892,7 @@ class _FlatHome extends ConsumerWidget {
           ),
         ),
         if (near.isNotEmpty) ...<Widget>[
-          const ZenSection('Zaproszenia w pobliżu'),
+          ZenSection(t('Zaproszenia w pobliżu')),
           for (final NearbyFlatInvite i in near)
             ZenCard(
               tone: tone,
@@ -905,7 +923,7 @@ class _FlatHome extends ConsumerWidget {
                             ),
                             const SizedBox(height: 3),
                             Text(
-                              'Usłyszane ${flatDate(i.at)}',
+                              t('Usłyszane {date}', {'date': flatDate(i.at)}),
                               style: TextStyle(
                                 color: zen.textSecondary,
                                 fontSize: 13,
@@ -924,7 +942,7 @@ class _FlatHome extends ConsumerWidget {
                     children: <Widget>[
                       TextButton(
                         onPressed: () => unawaited(service.dismissNearby(i)),
-                        child: const Text('Odrzuć'),
+                        child: Text(t('Odrzuć')),
                       ),
                       FilledButton.tonalIcon(
                         onPressed: () => unawaited(() async {
@@ -935,7 +953,7 @@ class _FlatHome extends ConsumerWidget {
                           Icons.person_add_alt_1_rounded,
                           size: 18,
                         ),
-                        label: const Text('Dodaj do sąsiadów'),
+                        label: Text(t('Dodaj do sąsiadów')),
                       ),
                     ],
                   ),
@@ -947,13 +965,13 @@ class _FlatHome extends ConsumerWidget {
           service: service,
           onWave: (FlatItem i) => unawaited(_waveNearby(context, ref, i)),
         ),
-        const ZenSection('Moi sąsiedzi'),
+        ZenSection(t('Moi sąsiedzi')),
         if (neighbors.isEmpty && service.pending.isEmpty)
           ZenEmpty(
             icon: Icons.door_front_door_rounded,
             tone: tone,
-            title: 'Jeszcze nikogo',
-            text: 'Powieś kod na drzwiach albo zeskanuj kod sąsiada.',
+            title: t('Jeszcze nikogo'),
+            text: t('Powieś kod na drzwiach albo zeskanuj kod sąsiada.'),
           ),
         for (final FlatDoorCode c in service.pending.values)
           ZenCard(
@@ -978,7 +996,7 @@ class _FlatHome extends ConsumerWidget {
                 Expanded(
                   child: _TwoLines(
                     title: c.name,
-                    subtitle: 'Czekam, aż ich telefon odpowie…',
+                    subtitle: t('Czekam, aż ich telefon odpowie…'),
                   ),
                 ),
               ],
@@ -999,7 +1017,9 @@ class _FlatHome extends ConsumerWidget {
                 Expanded(
                   child: _TwoLines(
                     title: s.value,
-                    subtitle: 'Ten kod jest już nieważny — wygenerowali nowy.',
+                    subtitle: t(
+                      'Ten kod jest już nieważny — wygenerowali nowy.',
+                    ),
                   ),
                 ),
               ],
@@ -1046,7 +1066,7 @@ class _FlatHome extends ConsumerWidget {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: ZenPill(
-                      text: 'Dwa różne nowe klucze — sprawdź',
+                      text: t('Dwa różne nowe klucze — sprawdź'),
                       tone: zen.warning,
                       icon: Icons.warning_amber_rounded,
                     ),
@@ -1064,7 +1084,7 @@ class _FlatHome extends ConsumerWidget {
                         Icons.person_add_alt_1_rounded,
                         size: 18,
                       ),
-                      label: const Text('Dodaj'),
+                      label: Text(t('Dodaj')),
                     ),
                   ),
                 ],
@@ -1079,13 +1099,13 @@ class _FlatHome extends ConsumerWidget {
     final int invites = f.profile.of(FlatItemKind.invite).length;
     final int offers = f.profile.of(FlatItemKind.offer).length;
     final List<String> parts = <String>[
-      if (invites > 0) 'zaproszenia: $invites',
-      if (offers > 0) 'oferty: $offers',
+      if (invites > 0) t('zaproszenia: {count}', {'count': invites}),
+      if (offers > 0) t('oferty: {count}', {'count': offers}),
       if (!f.weScanned)
-        'zeskanowali Wasz kod — dodaj, żeby dostawali Wasze zaproszenia',
-      if (!f.following) 'wyciszeni',
+        t('zeskanowali Wasz kod — dodaj, żeby dostawali Wasze zaproszenia'),
+      if (!f.following) t('wyciszeni'),
     ];
-    return parts.isEmpty ? 'sąsiedzi' : parts.join(' · ');
+    return parts.isEmpty ? t('sąsiedzi') : parts.join(' · ');
   }
 }
 
@@ -1168,7 +1188,7 @@ class _OwnItems extends StatelessWidget {
                   onPressed: () =>
                       unawaited(showAddFlatItem(context, service, kind)),
                   icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('Dodaj'),
+                  label: Text(t('Dodaj')),
                 ),
               ],
             ),
@@ -1204,13 +1224,13 @@ class _OwnItems extends StatelessWidget {
               trailing: <Widget>[
                 if (kind == FlatItemKind.invite)
                   IconButton(
-                    tooltip: 'Zaproś osoby w pobliżu (Bluetooth)',
+                    tooltip: t('Zaproś osoby w pobliżu (Bluetooth)'),
                     color: flatItemTone(zen, kind),
                     icon: const Icon(Icons.bluetooth_audio_rounded),
                     onPressed: () => onWave(i),
                   ),
                 IconButton(
-                  tooltip: 'Usuń',
+                  tooltip: t('Usuń'),
                   color: zen.textMuted,
                   icon: const Icon(Icons.delete_outline_rounded),
                   onPressed: () => unawaited(service.removeItem(i.id)),
@@ -1226,18 +1246,18 @@ class _OwnItems extends StatelessWidget {
       children: <Widget>[
         section(
           FlatItemKind.invite,
-          'Zapraszamy',
-          'Na kawę, grilla, planszówki…',
+          t('Zapraszamy'),
+          t('Na kawę, grilla, planszówki…'),
         ),
         section(
           FlatItemKind.offer,
-          'Oferujemy',
-          'Pożyczę drabinę, podleję kwiaty…',
+          t('Oferujemy'),
+          t('Pożyczę drabinę, podleję kwiaty…'),
         ),
         section(
           FlatItemKind.need,
-          'Potrzebujemy',
-          'Pomoc przy wnoszeniu, opieka nad kotem…',
+          t('Potrzebujemy'),
+          t('Pomoc przy wnoszeniu, opieka nad kotem…'),
         ),
       ],
     );
@@ -1247,9 +1267,9 @@ class _OwnItems extends StatelessWidget {
     final List<String> parts = <String>[
       if (i.at != null) flatDate(i.at!),
       if (i.seats > 0)
-        'miejsca: ${i.taken}/${i.seats}'
+        t('miejsca: {taken}/{seats}', {'taken': i.taken, 'seats': i.seats})
       else
-        'zapisani: ${i.taken}',
+        t('zapisani: {count}', {'count': i.taken}),
       if (signups.isNotEmpty)
         signups
             .map(
@@ -1282,9 +1302,9 @@ Future<void> showAddFlatItem(
         final ZenColors zen = ZenColors.of(context);
         return AlertDialog(
           title: Text(switch (kind) {
-            FlatItemKind.invite => 'Zaproszenie',
-            FlatItemKind.offer => 'Oferujemy',
-            FlatItemKind.need => 'Potrzebujemy',
+            FlatItemKind.invite => t('Zaproszenie'),
+            FlatItemKind.offer => t('Oferujemy'),
+            FlatItemKind.need => t('Potrzebujemy'),
           }),
           content: SizedBox(
             width: 400,
@@ -1293,7 +1313,7 @@ Future<void> showAddFlatItem(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  Text('POMYSŁY', style: zen.label(color: zen.textMuted)),
+                  Text(t('POMYSŁY'), style: zen.label(color: zen.textMuted)),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 6,
@@ -1315,9 +1335,9 @@ Future<void> showAddFlatItem(
                     minLines: 1,
                     maxLines: 2,
                     textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      labelText: 'Treść',
-                      hintText: 'Wybierz pomysł albo napisz swój',
+                    decoration: InputDecoration(
+                      labelText: t('Treść'),
+                      hintText: t('Wybierz pomysł albo napisz swój'),
                     ),
                   ),
                   if (kind == FlatItemKind.invite) ...<Widget>[
@@ -1326,7 +1346,7 @@ Future<void> showAddFlatItem(
                       icon: const Icon(Icons.event_rounded),
                       label: Text(
                         at == null
-                            ? 'Wybierz termin'
+                            ? t('Wybierz termin')
                             : flatDate(at!.millisecondsSinceEpoch),
                       ),
                       onPressed: () async {
@@ -1360,10 +1380,10 @@ Future<void> showAddFlatItem(
                       key: const Key('flat-item-seats'),
                       controller: seats,
                       keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Liczba miejsc',
-                        helperText: 'Puste = bez limitu',
-                        prefixIcon: Icon(Icons.event_seat_rounded),
+                      decoration: InputDecoration(
+                        labelText: t('Liczba miejsc'),
+                        helperText: t('Puste = bez limitu'),
+                        prefixIcon: const Icon(Icons.event_seat_rounded),
                       ),
                     ),
                   ],
@@ -1374,12 +1394,12 @@ Future<void> showAddFlatItem(
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Anuluj'),
+              child: Text(t('Anuluj')),
             ),
             FilledButton(
               key: const Key('flat-item-save'),
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Dodaj'),
+              child: Text(t('Dodaj')),
             ),
           ],
         );

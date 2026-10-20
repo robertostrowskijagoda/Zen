@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 
 /// "Podaj dalej" (§14.2): this device hands the app's installer to someone
@@ -170,20 +171,25 @@ final class ShareAppServer {
 
   String _page() {
     final String name = const HtmlEscape().convert(fileName);
+    // Translated texts go into the page as text, never as markup.
+    String text(String value) =>
+        const HtmlEscape(HtmlEscapeMode.element).convert(value);
+    final String lang = ZenI18n.code;
+    final String dir = ZenI18n.language.rtl ? ' dir="rtl"' : '';
     return '''<!doctype html>
-<html lang="pl"><head><meta charset="utf-8">
+<html lang="$lang"$dir><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Zen</title>
 <style>body{font-family:sans-serif;max-width:32rem;margin:2rem auto;padding:0 1rem;line-height:1.5}
 a.b{display:block;text-align:center;background:#2f6f5e;color:#fff;padding:1rem;border-radius:.6rem;text-decoration:none;font-size:1.2rem}</style>
 </head><body>
 <h1>Zen</h1>
-<p>Znajomy podaje Ci aplikację Zen bezpośrednio ze swojego telefonu.</p>
-<p><a class="b" href="$name">Pobierz $name</a></p>
+<p>${text(t('Znajomy podaje Ci aplikację Zen bezpośrednio ze swojego telefonu.'))}</p>
+<p><a class="b" href="$name">${text(t('Pobierz {file}', {'file': fileName}))}</a></p>
 <ol>
-<li>Pobierz plik i otwórz go.</li>
-<li>Jeśli telefon zapyta, zezwól przeglądarce na instalowanie aplikacji.</li>
-<li>Po instalacji otwórz Zen i dodaj znajomego jego kodem.</li>
+<li>${text(t('Pobierz plik i otwórz go.'))}</li>
+<li>${text(t('Jeśli telefon zapyta, zezwól przeglądarce na instalowanie aplikacji.'))}</li>
+<li>${text(t('Po instalacji otwórz Zen i dodaj znajomego jego kodem.'))}</li>
 </ol>
 </body></html>''';
   }

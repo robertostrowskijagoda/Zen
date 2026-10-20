@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/nearby_crypto.dart';
@@ -15,29 +16,42 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 enum IntentKind {
   /// Not the alarm (§16.3, danger, location, sound): "please, today" — a
   /// louder notification than [help].
-  urgent('🆘', 'Pilnie potrzebuję pomocy'),
-  help('🤝', 'Potrzebuję pomocy'),
-  canHelp('🙋', 'Mogę pomóc'),
-  talk('💬', 'Chcę pogadać'),
-  out('🍻', 'Chcę wyjść'),
-  walk('🚶', 'Idę na spacer'),
-  eat('🍽️', 'Chcę coś zjeść razem'),
-  play('🎲', 'Chcę pograć'),
-  dnd('🔕', 'Nie przeszkadzać'),
+  urgent('🆘'),
+  help('🤝'),
+  canHelp('🙋'),
+  talk('💬'),
+  out('🍻'),
+  walk('🚶'),
+  eat('🍽️'),
+  play('🎲'),
+  dnd('🔕'),
 
   /// Opt-in, only while dating is on (§16.2, §19); never shown to the
   /// people the dating profile is hidden from.
-  dating('💘', 'Randkuję'),
+  dating('💘'),
 
   /// The person's own words ([IntentStatus.note], required, short) and an
   /// emoji they picked ([IntentStatus.emoji]). An older app does not know
   /// it and shows no status.
-  custom('✨', 'Własny status');
+  custom('✨');
 
-  const IntentKind(this.emoji, this.label);
+  const IntentKind(this.emoji);
 
   final String emoji;
-  final String label;
+
+  String get label => switch (this) {
+    IntentKind.urgent => t('Pilnie potrzebuję pomocy'),
+    IntentKind.help => t('Potrzebuję pomocy'),
+    IntentKind.canHelp => t('Mogę pomóc'),
+    IntentKind.talk => t('Chcę pogadać'),
+    IntentKind.out => t('Chcę wyjść'),
+    IntentKind.walk => t('Idę na spacer'),
+    IntentKind.eat => t('Chcę coś zjeść razem'),
+    IntentKind.play => t('Chcę pograć'),
+    IntentKind.dnd => t('Nie przeszkadzać'),
+    IntentKind.dating => t('Randkuję'),
+    IntentKind.custom => t('Własny status'),
+  };
 
   static IntentKind? byName(Object? name) =>
       IntentKind.values.where((IntentKind k) => k.name == name).firstOrNull;
@@ -182,13 +196,15 @@ enum FriendListAudience {
 
 /// How a friend answered an alarm.
 enum AlarmResponse {
-  coming('Jadę'),
-  calling('Dzwonię'),
-  cant('Nie mogę');
+  coming,
+  calling,
+  cant;
 
-  const AlarmResponse(this.label);
-
-  final String label;
+  String get label => switch (this) {
+    AlarmResponse.coming => t('Jadę'),
+    AlarmResponse.calling => t('Dzwonię'),
+    AlarmResponse.cant => t('Nie mogę'),
+  };
 
   static AlarmResponse? byName(Object? name) => AlarmResponse.values
       .where((AlarmResponse r) => r.name == name)

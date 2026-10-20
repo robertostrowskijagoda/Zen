@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/app.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/calls/presentation/call_surface_screen.dart';
 import 'package:zen/src/features/groups/presentation/group_call_screen.dart';
 
@@ -14,7 +15,7 @@ Future<bool> runCallAction(
   } on FormatException catch (error) {
     message = error.message;
   } catch (error) {
-    message = 'Nie udało się obsłużyć rozmowy: $error';
+    message = t('Nie udało się obsłużyć rozmowy: {error}', {'error': error});
   }
   // The call overlays live above the root Navigator, so their own context may
   // not reach a messenger; fall back to the root one.

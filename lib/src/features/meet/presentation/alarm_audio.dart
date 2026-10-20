@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:video_player/video_player.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -234,7 +235,7 @@ class _AlarmClipTileState extends State<AlarmClipTile> {
       await _release();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Nie udało się odtworzyć nagrania.')),
+          SnackBar(content: Text(t('Nie udało się odtworzyć nagrania.'))),
         );
       }
     } finally {
@@ -253,7 +254,7 @@ class _AlarmClipTileState extends State<AlarmClipTile> {
       key: Key('alarm-clip-${widget.clip.n}'),
       icon: _playing ? Icons.graphic_eq_rounded : Icons.mic_rounded,
       tone: zen.danger,
-      title: 'Nagranie ${widget.clip.n + 1}',
+      title: t('Nagranie {number}', {'number': widget.clip.n + 1}),
       subtitle:
           '${two(at.hour)}:${two(at.minute)}'
           '${widget.clip.ms > 0 ? ' · ${_duration(widget.clip.ms)}' : ''}',

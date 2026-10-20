@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
@@ -137,10 +138,10 @@ class _CallCompactViewState extends ConsumerState<CallCompactView> {
 
   String _status(CallSession s) {
     if (s.status == CallSessionStatus.ringing) {
-      return 'Dzwonienie…';
+      return t('Dzwonienie…');
     }
     if (s.status != CallSessionStatus.active || s.startedAtMillis <= 0) {
-      return 'Łączenie…';
+      return t('Łączenie…');
     }
     final int seconds =
         ((DateTime.now().millisecondsSinceEpoch - s.startedAtMillis) ~/ 1000)
@@ -271,7 +272,7 @@ class _Who extends StatelessWidget {
           const SizedBox(width: 10),
           Flexible(
             child: Text(
-              name.isEmpty ? 'Rozmowa' : name,
+              name.isEmpty ? t('Rozmowa') : name,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -304,7 +305,7 @@ class _DesktopButtons extends ConsumerWidget {
         if (session.status == CallSessionStatus.active)
           IconButton.filledTonal(
             key: const Key('call-compact-mute'),
-            tooltip: session.isMuted ? 'Włącz mikrofon' : 'Wycisz',
+            tooltip: session.isMuted ? t('Włącz mikrofon') : t('Wycisz'),
             onPressed: () => unawaited(hub.toggleActiveCallMute()),
             icon: Icon(
               session.isMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
@@ -313,14 +314,14 @@ class _DesktopButtons extends ConsumerWidget {
         const SizedBox(width: 8),
         IconButton.filledTonal(
           key: const Key('call-compact-expand'),
-          tooltip: 'Wróć do pełnego okna',
+          tooltip: t('Wróć do pełnego okna'),
           onPressed: () => unawaited(CallCompactMode.instance.exitDesktop()),
           icon: const Icon(Icons.open_in_full_rounded),
         ),
         const SizedBox(width: 8),
         IconButton.filled(
           key: const Key('call-compact-hang-up'),
-          tooltip: 'Rozłącz',
+          tooltip: t('Rozłącz'),
           style: IconButton.styleFrom(
             backgroundColor: zen.danger,
             foregroundColor: ZenColors.foregroundFor(zen.danger),
@@ -353,7 +354,7 @@ class CallFloatOverAppsButton extends StatelessWidget {
     }
     return IconButton(
       key: const Key('call-float-over-apps'),
-      tooltip: 'Mini okno nad innymi aplikacjami',
+      tooltip: t('Mini okno nad innymi aplikacjami'),
       onPressed: () => unawaited(CallCompactMode.instance.enterDesktop()),
       icon: Icon(Icons.picture_in_picture_alt_rounded, color: color),
     );

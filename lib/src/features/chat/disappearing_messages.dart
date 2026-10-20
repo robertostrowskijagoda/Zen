@@ -1,3 +1,4 @@
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
@@ -11,18 +12,18 @@ const int kMaxDisappearSeconds = 28 * 86400;
 /// A timer as people say it.
 String disappearLabel(int seconds) {
   if (seconds <= 0) {
-    return 'wyłączone';
+    return t('wyłączone');
   }
   if (seconds % 86400 == 0) {
     final int days = seconds ~/ 86400;
-    return days == 1 ? '1 dzień' : '$days dni';
+    return tn(days, one: '{n} dzień', few: '{n} dni', many: '{n} dni');
   }
   if (seconds % 3600 == 0) {
     final int hours = seconds ~/ 3600;
-    return hours == 1 ? '1 godzina' : '$hours godz.';
+    return tn(hours, one: '{n} godzina', few: '{n} godz.', many: '{n} godz.');
   }
   final int minutes = (seconds / 60).ceil();
-  return '$minutes min';
+  return tn(minutes, one: '{n} min', few: '{n} min', many: '{n} min');
 }
 
 /// A timer received from someone else: clamped to what the app offers.

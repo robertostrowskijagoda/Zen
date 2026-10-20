@@ -3,15 +3,20 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/app.dart';
 import 'package:zen/src/app/app_bootstrap.dart';
 import 'package:zen/src/app/desktop_window_bridge.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/i18n/zen_language_preference.dart';
+import 'package:zen/src/app/i18n/zen_locales.dart';
 import 'package:zen/src/app/single_instance_guard.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/about/go_licenses.dart';
+import 'package:zen/src/features/media/unsupported_video_player.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 
 void main(List<String> args) {
@@ -22,6 +27,8 @@ void main(List<String> args) {
       _installGlobalErrorHandlers();
       // The Go bridge's licenses next to the Dart packages' ones.
       registerGoLicenses();
+      // Linux: video_player has no backend there; fail fast, not forever.
+      UnsupportedVideoPlayer.registerIfNeeded();
       // A second desktop instance cannot bind the runtime's peering port, so
       // it would run permanently offline. Hand the launch over to the instance
       // that is already running instead.
@@ -30,6 +37,8 @@ void main(List<String> args) {
         logZenMessage('Another Zen instance is already running — exiting.');
         exit(0);
       }
+      // Before the first text: the person's language (or the system's).
+      await loadZenLanguage();
       runApp(const _ZenBootstrapApp());
     },
     (Object error, StackTrace stackTrace) {
@@ -106,7 +115,7 @@ class _ZenBootstrapAppState extends State<_ZenBootstrapApp> {
                   title: 'Zen',
                   message: failure.message,
                   errorDetails: failure.details,
-                  actionLabel: 'Spróbuj ponownie',
+                  actionLabel: t('Spróbuj ponownie'),
                   showProgressIndicator: false,
                   onPressed: () {
                     setState(() {
@@ -115,9 +124,9 @@ class _ZenBootstrapAppState extends State<_ZenBootstrapApp> {
                   },
                 );
               }
-              return const _BootstrapSurface(
+              return _BootstrapSurface(
                 title: 'Zen',
-                message: 'Ładowanie danych i uruchamianie sieci…',
+                message: t('Ładowanie danych i uruchamianie sieci…'),
                 showProgressIndicator: true,
               );
             },
@@ -131,8 +140,10 @@ class _ZenBootstrapAppState extends State<_ZenBootstrapApp> {
     } on TimeoutException catch (error, stackTrace) {
       logZenError('App bootstrap timed out', error, stackTrace);
       throw ZenBootstrapException(
-        userMessage:
-            'Uruchamianie aplikacji trwa zbyt długo. Sprawdź uprawnienia i spróbuj ponownie.',
+        userMessage: t(
+          'Uruchamianie aplikacji trwa zbyt długo. Sprawdź uprawnienia '
+          'i spróbuj ponownie.',
+        ),
         details:
             'Bootstrap timeout after ${_bootstrapTimeout.inSeconds} seconds.',
       );
@@ -142,7 +153,7 @@ class _ZenBootstrapAppState extends State<_ZenBootstrapApp> {
     } catch (error, stackTrace) {
       logZenError('App bootstrap failed', error, stackTrace);
       throw ZenBootstrapException(
-        userMessage: 'Start aplikacji nie powiodl się.',
+        userMessage: t('Start aplikacji nie powiódł się.'),
         details: '$error',
       );
     }
@@ -156,8 +167,8 @@ class _ZenBootstrapAppState extends State<_ZenBootstrapApp> {
       );
     }
     return _BootstrapFailurePresentation(
-      message: 'Start aplikacji nie powiodl się.',
-      details: '${error ?? 'Nieznany błąd uruchamiania.'}',
+      message: t('Start aplikacji nie powiódł się.'),
+      details: error?.toString() ?? t('Nieznany błąd uruchamiania.'),
     );
   }
 }
@@ -186,6 +197,10 @@ class _BootstrapSurface extends StatelessWidget {
       title: 'Zen',
       theme: ZenTheme.light(),
       darkTheme: ZenTheme.dark(),
+      // The language loadZenLanguage() picked before runApp.
+      locale: zenLocaleOf(ZenI18n.code),
+      supportedLocales: zenSupportedLocales,
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       // A Builder: the colours come from the theme of this MaterialApp
       // (ZenColors.of falls back safely when the extension is missing).
       home: Builder(builder: _buildSplash),

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// "Dołączam" by default once this many people join (§17.6).
@@ -15,13 +16,15 @@ const Duration kPlanFadeAfter = Duration(hours: 6);
 
 /// Who sees a plan (§17.6).
 enum PlanReach {
-  close('Bliscy'),
-  friends('Znajomi'),
-  friendsOfFriends('Znajomi znajomych');
+  close,
+  friends,
+  friendsOfFriends;
 
-  const PlanReach(this.label);
-
-  final String label;
+  String get label => switch (this) {
+    PlanReach.close => t('Bliscy'),
+    PlanReach.friends => t('Znajomi'),
+    PlanReach.friendsOfFriends => t('Znajomi znajomych'),
+  };
 
   /// Unknown names fall back to the narrowest reach.
   static PlanReach byName(Object? n) =>
@@ -31,12 +34,13 @@ enum PlanReach {
 
 /// A friend's answer to a plan.
 enum PlanAnswerKind {
-  join('Dołączam'),
-  maybe('Może');
+  join,
+  maybe;
 
-  const PlanAnswerKind(this.label);
-
-  final String label;
+  String get label => switch (this) {
+    PlanAnswerKind.join => t('Dołączam'),
+    PlanAnswerKind.maybe => t('Może'),
+  };
 
   static PlanAnswerKind? byName(Object? n) => PlanAnswerKind.values
       .where((PlanAnswerKind k) => k.name == n)
@@ -245,14 +249,14 @@ final class WeekendPlan {
   }
 }
 
-const List<String> _weekdays = <String>[
-  'Poniedziałek',
-  'Wtorek',
-  'Środa',
-  'Czwartek',
-  'Piątek',
-  'Sobota',
-  'Niedziela',
+List<String> get _weekdays => <String>[
+  t('Poniedziałek'),
+  t('Wtorek'),
+  t('Środa'),
+  t('Czwartek'),
+  t('Piątek'),
+  t('Sobota'),
+  t('Niedziela'),
 ];
 
 /// When a plan is, said the short way: "Dziś, 18:00", "Jutro, 10:00",
@@ -272,10 +276,10 @@ String planWhen(int millis, int now) {
               24)
           .round();
   if (days == 0) {
-    return 'Dziś, $time';
+    return t('Dziś, {time}', {'time': time});
   }
   if (days == 1) {
-    return 'Jutro, $time';
+    return t('Jutro, {time}', {'time': time});
   }
   if (days > 1 && days < 7) {
     return '${_weekdays[d.weekday - 1]}, $time';

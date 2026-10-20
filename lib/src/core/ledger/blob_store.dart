@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 
 const int kBlobChunkSize = 256 * 1024;
@@ -173,7 +174,7 @@ final class BlobStore {
     String mime = 'application/octet-stream',
   }) async {
     if (bytes.length > kMaxBlobBytes) {
-      throw ArgumentError('Plik jest za duży.');
+      throw ArgumentError(t('Plik jest za duży.'));
     }
     final BlobManifest manifest = BlobManifest.describe(bytes, mime);
     for (int i = 0; i < manifest.chunks.length; i++) {

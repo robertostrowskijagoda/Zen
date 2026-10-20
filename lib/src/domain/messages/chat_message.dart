@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/copy_with_cast.dart';
 
 enum ChatMessageDirection { incoming, outgoing, system }
@@ -164,10 +165,10 @@ String chatMessageLabelForType(
               mimeType?.toLowerCase() == 'image/gif' ||
               (fileName?.toLowerCase().endsWith('.gif') ?? false))
           ? '🎞 GIF'
-          : '📷 Zdjęcie',
-    ChatMessageType.file => '📎 ${fileName ?? 'Plik'}',
-    ChatMessageType.voice => '🎤 Wiadomość głosowa',
-    ChatMessageType.video => '🎬 Wideo',
+          : t('📷 Zdjęcie'),
+    ChatMessageType.file => fileName == null ? t('📎 Plik') : '📎 $fileName',
+    ChatMessageType.voice => t('🎤 Wiadomość głosowa'),
+    ChatMessageType.video => t('🎬 Wideo'),
   };
 }
 

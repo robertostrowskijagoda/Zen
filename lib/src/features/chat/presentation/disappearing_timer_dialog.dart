@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/chat/disappearing_messages.dart';
 
 /// Picks the disappearing-messages timer of a conversation (§14.1 point
@@ -12,13 +13,15 @@ Future<int?> showDisappearingTimerDialog(
     builder: (BuildContext dialogContext) {
       return SimpleDialog(
         key: const Key('disappearing-timer-dialog'),
-        title: const Text('Znikające wiadomości'),
+        title: Text(t('Znikające wiadomości')),
         children: <Widget>[
-          const Padding(
-            padding: EdgeInsets.fromLTRB(24, 0, 24, 8),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
             child: Text(
-              'Nowe wiadomości znikną u wszystkich po wybranym czasie, razem '
-              'z plikami. Zmiana jest widoczna dla rozmówców.',
+              t(
+                'Nowe wiadomości znikną u wszystkich po wybranym czasie, razem '
+                'z plikami. Zmiana jest widoczna dla rozmówców.',
+              ),
             ),
           ),
           for (final int seconds in kDisappearChoices)
@@ -29,7 +32,9 @@ Future<int?> showDisappearingTimerDialog(
                     ? Icons.radio_button_checked_rounded
                     : Icons.radio_button_unchecked_rounded,
               ),
-              title: Text(seconds == 0 ? 'Wyłączone' : disappearLabel(seconds)),
+              title: Text(
+                seconds == 0 ? t('Wyłączone') : disappearLabel(seconds),
+              ),
               onTap: () => Navigator.of(dialogContext).pop(seconds),
             ),
         ],

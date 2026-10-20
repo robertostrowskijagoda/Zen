@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/dating/dating_model.dart';
 import 'package:zen/src/features/dating/presentation/dating_screen.dart';
@@ -212,9 +213,14 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
                           ),
                         Positioned.fill(
                           child: Semantics(
-                            label:
-                                '${top.profile.name}, ${top.profile.age}. '
-                                'Przesuń w prawo — Tak, w lewo — Nie.',
+                            label: t(
+                              '{name}, {age}. '
+                              'Przesuń w prawo — Tak, w lewo — Nie.',
+                              {
+                                'name': top.profile.name,
+                                'age': top.profile.age,
+                              },
+                            ),
                             child: GestureDetector(
                               key: Key('dating-card-${top.profile.name}'),
                               onHorizontalDragUpdate: _onDrag,
@@ -257,7 +263,7 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
                   child: _RoundAction(
                     buttonKey: const Key('dating-deck-no'),
                     icon: Icons.close_rounded,
-                    label: 'Nie',
+                    label: t('Nie'),
                     color: zen.danger,
                     size: 60,
                     onTap: () => unawaited(_decide(top, false)),
@@ -267,7 +273,7 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
                   child: _RoundAction(
                     buttonKey: const Key('dating-deck-match'),
                     icon: Icons.people_alt_rounded,
-                    label: 'Swatuj',
+                    label: t('Swatuj'),
                     color: zen.accent,
                     size: 46,
                     onTap: widget.onMatchmake == null
@@ -279,7 +285,7 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
                   child: _RoundAction(
                     buttonKey: const Key('dating-deck-ask'),
                     icon: Icons.forum_rounded,
-                    label: 'Zapytaj o opinię',
+                    label: t('Zapytaj o opinię'),
                     color: zen.accentSecondary,
                     size: 46,
                     onTap: widget.onAsk == null || top.friend == null
@@ -291,7 +297,7 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
                   child: _RoundAction(
                     buttonKey: const Key('dating-deck-yes'),
                     icon: Icons.favorite_rounded,
-                    label: 'Tak',
+                    label: t('Tak'),
                     color: tone,
                     size: 60,
                     filled: true,
@@ -490,7 +496,7 @@ class _DatingSwipeCardState extends State<DatingSwipeCard> {
                 top: 36,
                 left: 20,
                 child: _Stamp(
-                  text: 'TAK',
+                  text: t('TAK'),
                   color: zen.success,
                   angle: -0.25,
                   strength: stamp,
@@ -501,7 +507,7 @@ class _DatingSwipeCardState extends State<DatingSwipeCard> {
                 top: 36,
                 right: 20,
                 child: _Stamp(
-                  text: 'NIE',
+                  text: t('NIE'),
                   color: zen.danger,
                   angle: 0.25,
                   strength: -stamp,
@@ -513,7 +519,7 @@ class _DatingSwipeCardState extends State<DatingSwipeCard> {
                 bottom: 10,
                 child: IconButton(
                   key: const Key('dating-card-open'),
-                  tooltip: 'Cały profil',
+                  tooltip: t('Cały profil'),
                   style: IconButton.styleFrom(
                     backgroundColor: onText
                         ? tone.withValues(alpha: 0.16)
@@ -666,7 +672,7 @@ class _DescriptionPage extends StatelessWidget {
                   const SizedBox(height: 14),
                 ],
                 if (p.about.isNotEmpty) ...<Widget>[
-                  Text('O MNIE', style: zen.label(color: tone)),
+                  Text(t('O MNIE'), style: zen.label(color: tone)),
                   const SizedBox(height: 4),
                   Text(
                     p.about,
@@ -681,7 +687,7 @@ class _DescriptionPage extends StatelessWidget {
                   const SizedBox(height: 16),
                 ],
                 if (p.lookingFor.isNotEmpty) ...<Widget>[
-                  Text('SZUKAM', style: zen.label(color: tone)),
+                  Text(t('SZUKAM'), style: zen.label(color: tone)),
                   const SizedBox(height: 4),
                   Text(
                     p.lookingFor,
@@ -702,7 +708,7 @@ class _DescriptionPage extends StatelessWidget {
                 ],
                 if (empty)
                   Text(
-                    'Ta osoba nie napisała jeszcze nic o sobie.',
+                    t('Ta osoba nie napisała jeszcze nic o sobie.'),
                     style: TextStyle(color: zen.textMuted, fontSize: 14),
                   ),
                 if (p.photos.isNotEmpty) ...<Widget>[
@@ -717,7 +723,7 @@ class _DescriptionPage extends StatelessWidget {
                       const SizedBox(width: 6),
                       Flexible(
                         child: Text(
-                          'Stuknij z prawej strony, by zobaczyć zdjęcia',
+                          t('Stuknij z prawej strony, by zobaczyć zdjęcia'),
                           style: TextStyle(
                             color: zen.textMuted,
                             fontSize: 12.5,

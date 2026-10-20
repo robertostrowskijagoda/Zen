@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
@@ -20,20 +21,20 @@ class CallStateChips extends StatelessWidget {
           icon: session.isMuted
               ? Icons.mic_off_rounded
               : Icons.mic_none_rounded,
-          label: session.isMuted ? 'Wyciszony' : 'Mikrofon',
+          label: session.isMuted ? t('Wyciszony') : t('Mikrofon'),
         ),
         CallStateChip(
           icon: session.isSpeakerOn
               ? Icons.volume_up_rounded
               : Icons.hearing_rounded,
-          label: session.isSpeakerOn ? 'Głośnik' : 'Słuchawka',
+          label: session.isSpeakerOn ? t('Głośnik') : t('Słuchawka'),
         ),
         if (session.kind == CallInviteKind.video)
           CallStateChip(
             icon: session.isCameraEnabled
                 ? Icons.videocam_outlined
                 : Icons.videocam_off_outlined,
-            label: session.isCameraEnabled ? 'Kamera' : 'Kamera wył.',
+            label: session.isCameraEnabled ? t('Kamera') : t('Kamera wył.'),
           ),
       ],
     );
@@ -86,7 +87,7 @@ class CallActionBar extends StatelessWidget {
           _CallPrimaryButton(
             buttonKey: Key('$keyPrefix-decline-button'),
             icon: Icons.call_end_rounded,
-            label: 'Odrzuć',
+            label: t('Odrzuć'),
             color: zen.danger,
             labelColor: zen.textSecondary,
             onPressed: onDecline,
@@ -95,7 +96,7 @@ class CallActionBar extends StatelessWidget {
           _CallPrimaryButton(
             buttonKey: Key('$keyPrefix-accept-button'),
             icon: Icons.call_rounded,
-            label: 'Odbierz',
+            label: t('Odbierz'),
             color: zen.success,
             labelColor: zen.textSecondary,
             onPressed: onAccept,
@@ -108,7 +109,7 @@ class CallActionBar extends StatelessWidget {
             icon: session.isMuted
                 ? Icons.mic_off_rounded
                 : Icons.mic_none_rounded,
-            tooltip: session.isMuted ? 'Włącz mikrofon' : 'Wycisz',
+            tooltip: session.isMuted ? t('Włącz mikrofon') : t('Wycisz'),
             onPressed: onToggleMute,
           ),
         if (active)
@@ -119,7 +120,7 @@ class CallActionBar extends StatelessWidget {
             icon: session.isSpeakerOn
                 ? Icons.volume_up_rounded
                 : Icons.hearing_rounded,
-            tooltip: session.isSpeakerOn ? 'Głośnik' : 'Słuchawka',
+            tooltip: session.isSpeakerOn ? t('Głośnik') : t('Słuchawka'),
             onPressed: onToggleSpeaker,
           ),
         if (active)
@@ -130,7 +131,9 @@ class CallActionBar extends StatelessWidget {
             icon: session.isCameraEnabled
                 ? Icons.videocam_rounded
                 : Icons.videocam_off_rounded,
-            tooltip: session.isCameraEnabled ? 'Wyłącz kamerę' : 'Włącz kamerę',
+            tooltip: session.isCameraEnabled
+                ? t('Wyłącz kamerę')
+                : t('Włącz kamerę'),
             onPressed: onToggleCamera,
           ),
         if (active && session.isCameraEnabled && onSwitchCamera != null)
@@ -139,7 +142,7 @@ class CallActionBar extends StatelessWidget {
             zen: zen,
             active: false,
             icon: Icons.cameraswitch_rounded,
-            tooltip: 'Zmień kamerę',
+            tooltip: t('Zmień kamerę'),
             onPressed: onSwitchCamera,
           ),
         if (active && onOpenDevices != null)
@@ -148,7 +151,7 @@ class CallActionBar extends StatelessWidget {
             zen: zen,
             active: false,
             icon: Icons.devices_rounded,
-            tooltip: 'Urządzenia',
+            tooltip: t('Urządzenia'),
             onPressed: () async => onOpenDevices!.call(),
           ),
         if (!incomingRinging)
@@ -156,8 +159,8 @@ class CallActionBar extends StatelessWidget {
             buttonKey: Key('$keyPrefix-end-button'),
             icon: Icons.call_end_rounded,
             label: session.status == CallSessionStatus.active
-                ? 'Zakończ'
-                : 'Anuluj',
+                ? t('Zakończ')
+                : t('Anuluj'),
             color: zen.danger,
             labelColor: zen.textSecondary,
             onPressed: onEnd,
@@ -336,10 +339,13 @@ class CallDevicePickerSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (devices.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.fromLTRB(24, 8, 24, 32),
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
         child: Text(
-          'Brak wykrytych urządzeń. Włącz kamerę lub mikrofon i spróbuj ponownie.',
+          t(
+            'Brak wykrytych urządzeń. Włącz kamerę lub mikrofon i spróbuj '
+            'ponownie.',
+          ),
         ),
       );
     }
@@ -364,7 +370,7 @@ class CallDevicePickerSheet extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
           children: <Widget>[
             if (cameras.isNotEmpty) ...<Widget>[
-              const ZenSection('Kamera', top: 4),
+              ZenSection(t('Kamera'), top: 4),
               ...cameras.map(
                 (CallMediaDevice device) => ListTile(
                   leading: const Icon(Icons.videocam_outlined),
@@ -374,7 +380,7 @@ class CallDevicePickerSheet extends StatelessWidget {
               ),
             ],
             if (mics.isNotEmpty) ...<Widget>[
-              const ZenSection('Mikrofon', top: 12),
+              ZenSection(t('Mikrofon'), top: 12),
               ...mics.map(
                 (CallMediaDevice device) => ListTile(
                   leading: const Icon(Icons.mic_none_rounded),
@@ -384,7 +390,7 @@ class CallDevicePickerSheet extends StatelessWidget {
               ),
             ],
             if (speakers.isNotEmpty) ...<Widget>[
-              const ZenSection('Głośnik / słuchawka', top: 12),
+              ZenSection(t('Głośnik / słuchawka'), top: 12),
               ...speakers.map(
                 (CallMediaDevice device) => ListTile(
                   leading: const Icon(Icons.volume_up_outlined),

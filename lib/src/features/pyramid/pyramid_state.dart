@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/crypto/ring_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
@@ -602,10 +603,10 @@ const int kMaxAdHops = 5;
 
 /// Levels of acquaintance a price can depend on (§24), from the receiver's
 /// point of view.
-const Map<String, String> kPriceLevels = <String, String>{
-  'friend': 'Znajomi',
-  'fof': 'Znajomi znajomych',
-  'stranger': 'Obcy',
+Map<String, String> get kPriceLevels => <String, String>{
+  'friend': t('Znajomi'),
+  'fof': t('Znajomi znajomych'),
+  'stranger': t('Obcy'),
 };
 
 final class PyrAlarm {
@@ -1178,10 +1179,10 @@ final class PyramidState {
   }
 
   /// Things that happen by time: elections end, emissions take effect.
-  void _timedUpTo(int t) {
+  void _timedUpTo(int upTo) {
     final List<PyrElection> due =
         elections.values
-            .where((PyrElection e) => !e.closed && e.deadline <= t)
+            .where((PyrElection e) => !e.closed && e.deadline <= upTo)
             .toList()
           ..sort(
             (PyrElection a, PyrElection b) => a.deadline.compareTo(b.deadline),
@@ -1192,7 +1193,7 @@ final class PyramidState {
     final List<PyrEmission> ready =
         emissions.values
             .where(
-              (PyrEmission e) => !e.done && !e.vetoed && e.effectiveAt <= t,
+              (PyrEmission e) => !e.done && !e.vetoed && e.effectiveAt <= upTo,
             )
             .toList()
           ..sort(
@@ -1206,8 +1207,14 @@ final class PyramidState {
         PyrHistory(
           e.effectiveAt,
           e.group == null
-              ? 'Emisja ${pyrMoney(e.amount)} dla ${_name(e.to)}'
-              : 'Przeliczenie po połączeniu: ${pyrMoney(e.amount)} dla ${_name(e.to)}',
+              ? t('Emisja {amount} dla {name}', {
+                  'amount': pyrMoney(e.amount),
+                  'name': _name(e.to),
+                })
+              : t('Przeliczenie po połączeniu: {amount} dla {name}', {
+                  'amount': pyrMoney(e.amount),
+                  'name': _name(e.to),
+                }),
           e.id,
         ),
       );
@@ -1338,7 +1345,13 @@ final class PyramidState {
         members[m.key] = m;
         _place(m.key, '', r.id);
         termStart[1] = r.at;
-        history.add(PyrHistory(r.at, 'Powstała piramida „$name”', r.id));
+        history.add(
+          PyrHistory(
+            r.at,
+            t('Powstała piramida „{name}”', {'name': name}),
+            r.id,
+          ),
+        );
         return null;
       case PyrT.admit:
         final String headKey = r.str('head');
@@ -1366,7 +1379,14 @@ final class PyramidState {
         members[m.key] = m;
         _place(m.key, slot, r.id);
         history.add(
-          PyrHistory(r.at, '${_name(headKey)} przyjął(-ęła) ${m.name}', r.id),
+          PyrHistory(
+            r.at,
+            t('{head} przyjął(-ęła) {name}', {
+              'head': _name(headKey),
+              'name': m.name,
+            }),
+            r.id,
+          ),
         );
         return null;
       case PyrT.swap:
@@ -1402,7 +1422,11 @@ final class PyramidState {
           _termChange(r.at);
         }
         history.add(
-          PyrHistory(r.at, '${_name(k)} wyszedł(-ła) z piramidy', r.id),
+          PyrHistory(
+            r.at,
+            t('{name} wyszedł(-ła) z piramidy', {'name': _name(k)}),
+            r.id,
+          ),
         );
         return null;
       case PyrT.fill:
@@ -1439,7 +1463,7 @@ final class PyramidState {
         history.add(
           PyrHistory(
             r.at,
-            '${_name(up)} zajął(-ęła) wolne miejsce wyżej',
+            t('{name} zajął(-ęła) wolne miejsce wyżej', {'name': _name(up)}),
             r.id,
           ),
         );
@@ -1475,7 +1499,9 @@ final class PyramidState {
         history.add(
           PyrHistory(
             r.at,
-            '${_name(k)}: miejsce uznane za wolne (nieobecność)',
+            t('{name}: miejsce uznane za wolne (nieobecność)', {
+              'name': _name(k),
+            }),
             r.id,
           ),
         );
@@ -1498,7 +1524,7 @@ final class PyramidState {
         history.add(
           PyrHistory(
             r.at,
-            '${_name(k)} usunięty(-a) przez swoją komórkę',
+            t('{name} usunięty(-a) przez swoją komórkę', {'name': _name(k)}),
             r.id,
           ),
         );
@@ -1534,7 +1560,10 @@ final class PyramidState {
           history.add(
             PyrHistory(
               r.at,
-              '${_name(k)} przeszedł(-ła) z całą gałęzią pod ${_name(to)}',
+              t('{name} przeszedł(-ła) z całą gałęzią pod {head}', {
+                'name': _name(k),
+                'head': _name(to),
+              }),
               r.id,
             ),
           );
@@ -1546,7 +1575,14 @@ final class PyramidState {
           _termChange(r.at);
         }
         history.add(
-          PyrHistory(r.at, '${_name(k)} przeszedł(-ła) pod ${_name(to)}', r.id),
+          PyrHistory(
+            r.at,
+            t('{name} przeszedł(-ła) pod {head}', {
+              'name': _name(k),
+              'head': _name(to),
+            }),
+            r.id,
+          ),
         );
         return null;
       case PyrT.alive:
@@ -1588,7 +1624,10 @@ final class PyramidState {
         history.add(
           PyrHistory(
             r.at,
-            'Cofnięto delegację „${d.power}” dla ${_name(d.to)}',
+            t('Cofnięto delegację „{power}” dla {name}', {
+              'power': d.power,
+              'name': _name(d.to),
+            }),
             r.id,
           ),
         );
@@ -1605,7 +1644,11 @@ final class PyramidState {
         }
         ban.lifted = true;
         history.add(
-          PyrHistory(r.at, 'Uchylono ban dla ${_name(ban.target)}', r.id),
+          PyrHistory(
+            r.at,
+            t('Uchylono ban dla {name}', {'name': _name(ban.target)}),
+            r.id,
+          ),
         );
         return null;
       case PyrT.decision:
@@ -1712,7 +1755,11 @@ final class PyramidState {
         params.apply(ref.params);
         _natLead.clear();
         history.add(
-          PyrHistory(r.at, 'Nowe zasady (wersja ${params.version})', r.id),
+          PyrHistory(
+            r.at,
+            t('Nowe zasady (wersja {version})', {'version': params.version}),
+            r.id,
+          ),
         );
         return null;
       case PyrT.emit:
@@ -1783,8 +1830,12 @@ final class PyramidState {
           PyrHistory(
             r.at,
             e.group == null
-                ? 'Weto wobec emisji ${pyrMoney(e.amount)}'
-                : 'Weto wobec przeliczenia po połączeniu (${pyrMoney(stopped)})',
+                ? t('Weto wobec emisji {amount}', {
+                    'amount': pyrMoney(e.amount),
+                  })
+                : t('Weto wobec przeliczenia po połączeniu ({amount})', {
+                    'amount': pyrMoney(stopped),
+                  }),
             r.id,
           ),
         );
@@ -1893,7 +1944,7 @@ final class PyramidState {
           mergeCut = min(b['cut'] as int, r.at);
         }
         history.add(
-          PyrHistory(r.at, 'Piramida dołączona jako gałąź innej', r.id),
+          PyrHistory(r.at, t('Piramida dołączona jako gałąź innej'), r.id),
         );
         return null;
       case PyrT.offer:
@@ -2078,7 +2129,10 @@ final class PyramidState {
     history.add(
       PyrHistory(
         r.at,
-        '${_name(up)} zamienił(a) się miejscem z ${_name(head)}',
+        t('{name} zamienił(a) się miejscem z {head}', {
+          'name': _name(up),
+          'head': _name(head),
+        }),
         r.id,
       ),
     );
@@ -2131,7 +2185,7 @@ final class PyramidState {
         start: r.at,
       );
       history.add(
-        PyrHistory(r.at, 'Ktoś z komórki zażądał nowego głosowania', r.id),
+        PyrHistory(r.at, t('Ktoś z komórki zażądał nowego głosowania'), r.id),
       );
     }
     return null;
@@ -2179,7 +2233,9 @@ final class PyramidState {
     }
     e.winner = winner ?? e.head;
     if (winner == null || winner == e.head || occupant[e.cell] != e.head) {
-      history.add(PyrHistory(at, 'Głosowanie w komórce: szef zostaje', e.id));
+      history.add(
+        PyrHistory(at, t('Głosowanie w komórce: szef zostaje'), e.id),
+      );
       return;
     }
     final String? up = position[winner];
@@ -2197,7 +2253,11 @@ final class PyramidState {
       _termChange(at);
     }
     history.add(
-      PyrHistory(at, 'Głosowanie w komórce: nowy szef ${_name(winner)}', e.id),
+      PyrHistory(
+        at,
+        t('Głosowanie w komórce: nowy szef {name}', {'name': _name(winner)}),
+        e.id,
+      ),
     );
   }
 
@@ -2331,7 +2391,16 @@ final class PyramidState {
       parent: parent,
       at: r.at,
     );
-    history.add(PyrHistory(r.at, 'Delegacja „$power” dla ${_name(to)}', r.id));
+    history.add(
+      PyrHistory(
+        r.at,
+        t('Delegacja „{power}” dla {name}', {
+          'power': power,
+          'name': _name(to),
+        }),
+        r.id,
+      ),
+    );
     return null;
   }
 
@@ -2395,7 +2464,12 @@ final class PyramidState {
     history.add(
       PyrHistory(
         r.at,
-        'Ban ($kind) dla ${target.isEmpty ? 'treści' : _name(target)}',
+        target.isEmpty
+            ? t('Ban ({kind}) dla treści', {'kind': kind})
+            : t('Ban ({kind}) dla {name}', {
+                'kind': kind,
+                'name': _name(target),
+              }),
         r.id,
       ),
     );
@@ -2794,7 +2868,10 @@ final class PyramidState {
         id: partId,
         to: c.key,
         amount: c.value,
-        why: 'Przeliczenie po połączeniu (kurs ${rate.numer}:${rate.denom})',
+        why: t('Przeliczenie po połączeniu (kurs {numer}:{denom})', {
+          'numer': rate.numer,
+          'denom': rate.denom,
+        }),
         term: term,
         at: r.at,
         effectiveAt: r.at + params.emitDelayHours * 3600 * 1000,
@@ -2809,7 +2886,7 @@ final class PyramidState {
     history.add(
       PyrHistory(
         r.at,
-        'Dołączono piramidę jako gałąź pod ${_name(under)}',
+        t('Dołączono piramidę jako gałąź pod {name}', {'name': _name(under)}),
         r.id,
       ),
     );

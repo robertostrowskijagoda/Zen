@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 
 /// How long one confirmation opens the sensitive places.
@@ -127,7 +128,7 @@ class _ConfirmPasswordDialogState extends State<_ConfirmPasswordDialog> {
     }
     setState(() {
       _busy = false;
-      _error = 'Nieprawidłowe hasło.';
+      _error = t('Nieprawidłowe hasło.');
     });
   }
 
@@ -135,7 +136,7 @@ class _ConfirmPasswordDialogState extends State<_ConfirmPasswordDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       key: const Key('sensitive-access-dialog'),
-      title: const Text('Potwierdź, że to Ty'),
+      title: Text(t('Potwierdź, że to Ty')),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -152,7 +153,7 @@ class _ConfirmPasswordDialogState extends State<_ConfirmPasswordDialog> {
             enableIMEPersonalizedLearning: false,
             onSubmitted: (_) => _submit(),
             decoration: InputDecoration(
-              labelText: 'Hasło aplikacji',
+              labelText: t('Hasło aplikacji'),
               errorText: _error,
               suffixIcon: IconButton(
                 onPressed: () => setState(() => _obscure = !_obscure),
@@ -169,12 +170,12 @@ class _ConfirmPasswordDialogState extends State<_ConfirmPasswordDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: _busy ? null : () => Navigator.of(context).pop(false),
-          child: const Text('Anuluj'),
+          child: Text(t('Anuluj')),
         ),
         FilledButton(
           key: const Key('sensitive-access-confirm'),
           onPressed: _busy ? null : _submit,
-          child: const Text('Potwierdź'),
+          child: Text(t('Potwierdź')),
         ),
       ],
     );

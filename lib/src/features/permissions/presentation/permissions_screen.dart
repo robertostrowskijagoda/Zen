@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -24,7 +25,7 @@ class PermissionsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     key: const Key('permissions-screen'),
-    appBar: AppBar(title: const Text('Uprawnienia i Bluetooth')),
+    appBar: AppBar(title: Text(t('Uprawnienia i Bluetooth'))),
     body: const SafeArea(top: false, child: PermissionsPanel()),
   );
 }
@@ -209,15 +210,19 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
     final PermissionsSnapshot? s = _snapshot;
     final List<Widget> children = <Widget>[
       ZenHero(
-        title: 'Uprawnienia i Bluetooth',
+        title: t('Uprawnienia i Bluetooth'),
         icon: Icons.verified_user_outlined,
         text: widget.firstStart
-            ? 'Kilka zgód, żeby wiadomości, połączenia i alarm docierały '
-                  'zawsze, a znajomi obok mogli Cię rozpoznać. Każdą włączysz '
-                  'jednym przyciskiem. Bez nich Zen też działa — tylko '
-                  'słabiej.'
-            : 'Co Zen może na tym urządzeniu. Brak zgody niczego nie '
-                  'blokuje — mówi tylko, co nie zadziała.',
+            ? t(
+                'Kilka zgód, żeby wiadomości, połączenia i alarm docierały '
+                'zawsze, a znajomi obok mogli Cię rozpoznać. Każdą włączysz '
+                'jednym przyciskiem. Bez nich Zen też działa — tylko '
+                'słabiej.',
+              )
+            : t(
+                'Co Zen może na tym urządzeniu. Brak zgody niczego nie '
+                'blokuje — mówi tylko, co nie zadziała.',
+              ),
       ),
     ];
     if (s == null) {
@@ -232,8 +237,8 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
         ZenEmpty(
           icon: Icons.check_circle_outline_rounded,
           tone: zen.success,
-          title: 'Nic do ustawienia',
-          text: 'Na tym urządzeniu Zen nie potrzebuje dodatkowych zgód.',
+          title: t('Nic do ustawienia'),
+          text: t('Na tym urządzeniu Zen nie potrzebuje dodatkowych zgód.'),
         ),
       );
     } else {
@@ -257,12 +262,15 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
       }
       if (optional.isNotEmpty) {
         children
-          ..add(const ZenSection('Opcjonalnie'))
+          ..add(ZenSection(t('Opcjonalnie')))
           ..add(
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
               child: Text(
-                'Możesz zezwolić później — Zen zapyta przy pierwszym użyciu.',
+                t(
+                  'Możesz zezwolić później — Zen zapyta przy pierwszym '
+                  'użyciu.',
+                ),
                 style: TextStyle(color: zen.textMuted, fontSize: 13),
               ),
             ),
@@ -282,12 +290,14 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
           key: const Key('permissions-setup-done'),
           style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
           onPressed: _finishing ? null : () => unawaited(_finish()),
-          child: Text(ready ? 'Gotowe' : 'Dalej'),
+          child: Text(ready ? t('Gotowe') : t('Dalej')),
         ),
         const SizedBox(height: 10),
         Text(
-          'Wszystko zmienisz później w Ustawieniach → Uprawnienia i '
-          'Bluetooth.',
+          t(
+            'Wszystko zmienisz później w Ustawieniach → Uprawnienia i '
+            'Bluetooth.',
+          ),
           textAlign: TextAlign.center,
           style: TextStyle(color: zen.textMuted, fontSize: 12),
         ),
@@ -312,13 +322,15 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
         tone: _visible && s.bluetoothReady ? zen.success : zen.accent,
         size: 40,
       ),
-      title: const Text('Widoczny(-a) w pobliżu'),
+      title: Text(t('Widoczny(-a) w pobliżu')),
       subtitle: Text(
         s.bluetoothReady
-            ? 'Telefon cały czas oszczędnie nadaje zmienny znak. Znajomi '
-                  'obok Cię rozpoznają (spotkani osobiście, alarm), inni '
-                  'widzą tylko pseudonim.'
-            : 'Zacznie działać, gdy Bluetooth będzie włączony i dozwolony.',
+            ? t(
+                'Telefon cały czas oszczędnie nadaje zmienny znak. Znajomi '
+                'obok Cię rozpoznają (spotkani osobiście, alarm), inni '
+                'widzą tylko pseudonim.',
+              )
+            : t('Zacznie działać, gdy Bluetooth będzie włączony i dozwolony.'),
       ),
     ),
   );
@@ -335,16 +347,16 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
     final Widget trailing;
     if (granted == true) {
       trailing = ZenPill(
-        text: 'Gotowe',
+        text: t('Gotowe'),
         tone: zen.success,
         icon: Icons.check_rounded,
       );
     } else {
       final String label = granted == null || _toSettings(s, p)
-          ? 'Ustawienia'
+          ? t('Ustawienia')
           : p == ZenPermission.bluetoothOn
-          ? 'Włącz'
-          : 'Zezwól';
+          ? t('Włącz')
+          : t('Zezwól');
       final VoidCallback? onPressed = !enabled || _busy != null
           ? null
           : () => unawaited(_ask(p));
@@ -393,7 +405,7 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  enabled ? text : 'Najpierw zezwól na Bluetooth.',
+                  enabled ? text : t('Najpierw zezwól na Bluetooth.'),
                   style: TextStyle(
                     color: zen.textSecondary,
                     fontSize: 13,
@@ -417,52 +429,62 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
     return switch (p) {
       ZenPermission.notifications => (
         Icons.notifications_active_outlined,
-        'Powiadomienia',
+        t('Powiadomienia'),
         system
-            ? 'Sprawdź w ustawieniach Windows, czy Zen może je pokazywać.'
-            : 'Wiadomości, połączenia i alarm przyjaciela, także gdy Zen '
-                  'jest zamknięty.',
+            ? t('Sprawdź w ustawieniach Windows, czy Zen może je pokazywać.')
+            : t(
+                'Wiadomości, połączenia i alarm przyjaciela, także gdy Zen '
+                'jest zamknięty.',
+              ),
       ),
       ZenPermission.bluetooth => (
         Icons.bluetooth_rounded,
-        s.bluetoothNeedsLocation ? 'Bluetooth i lokalizacja' : 'Bluetooth',
+        s.bluetoothNeedsLocation ? t('Bluetooth i lokalizacja') : 'Bluetooth',
         s.bluetoothNeedsLocation
-            ? 'Na tym Androidzie Bluetooth wymaga zgody na lokalizację '
-                  '(i włączonej lokalizacji). Zen nie zapisuje, gdzie '
-                  'jesteś.'
-            : 'Znajomi obok i alarm do pobliża. Zen nie ustala z tego, '
-                  'gdzie jesteś.',
+            ? t(
+                'Na tym Androidzie Bluetooth wymaga zgody na lokalizację '
+                '(i włączonej lokalizacji). Zen nie zapisuje, gdzie '
+                'jesteś.',
+              )
+            : t(
+                'Znajomi obok i alarm do pobliża. Zen nie ustala z tego, '
+                'gdzie jesteś.',
+              ),
       ),
       ZenPermission.bluetoothOn => (
         Icons.bluetooth_connected_rounded,
-        'Włączony Bluetooth',
-        'Telefon pokazuje się znajomym obok i słyszy ich alarm.',
+        t('Włączony Bluetooth'),
+        t('Telefon pokazuje się znajomym obok i słyszy ich alarm.'),
       ),
       ZenPermission.fullScreen => (
         Icons.phone_locked_outlined,
-        'Alarm na pełnym ekranie',
-        'Alarm przyjaciela i połączenia pojawią się też na zablokowanym '
-            'ekranie.',
+        t('Alarm na pełnym ekranie'),
+        t(
+          'Alarm przyjaciela i połączenia pojawią się też na zablokowanym '
+          'ekranie.',
+        ),
       ),
       ZenPermission.battery => (
         Icons.battery_charging_full_rounded,
-        'Bez usypiania',
-        'Android nie usypia Zen, więc alarm i wiadomości dochodzą przy '
-            'zgaszonym ekranie.',
+        t('Bez usypiania'),
+        t(
+          'Android nie usypia Zen, więc alarm i wiadomości dochodzą przy '
+          'zgaszonym ekranie.',
+        ),
       ),
       ZenPermission.microphone => (
         Icons.mic_none_rounded,
-        'Mikrofon',
+        t('Mikrofon'),
         system
-            ? 'Do rozmów. Windows zapyta przy pierwszym użyciu.'
-            : 'Rozmowy, wiadomości głosowe i nagranie podczas alarmu.',
+            ? t('Do rozmów. Windows zapyta przy pierwszym użyciu.')
+            : t('Rozmowy, wiadomości głosowe i nagranie podczas alarmu.'),
       ),
       ZenPermission.camera => (
         Icons.photo_camera_outlined,
-        'Aparat',
+        t('Aparat'),
         system
-            ? 'Do rozmów wideo. Windows zapyta przy pierwszym użyciu.'
-            : 'Rozmowy wideo, zdjęcia i kody QR.',
+            ? t('Do rozmów wideo. Windows zapyta przy pierwszym użyciu.')
+            : t('Rozmowy wideo, zdjęcia i kody QR.'),
       ),
     };
   }

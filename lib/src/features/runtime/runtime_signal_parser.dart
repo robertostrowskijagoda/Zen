@@ -1,3 +1,4 @@
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/safe_file_name.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
@@ -83,7 +84,7 @@ ZenSignal? zenSignalFromTransportPayload({
         sender: sender,
         messageId: _readString(payload['msgId']),
         displayName: _readName(payload['senderName']),
-        content: _readString(payload['text']) ?? '📎 Załącznik',
+        content: _readString(payload['text']) ?? t('📎 Załącznik'),
         messageType: _readMessageType(payload['messageType']),
         fileName: safeFileName(_readString(payload['fileName'])),
         mimeType: _readString(payload['mimeType']),
@@ -100,7 +101,7 @@ ZenSignal? zenSignalFromTransportPayload({
         sender: sender,
         messageId: _readString(payload['msgId']),
         displayName: _readName(payload['senderName']),
-        content: _readString(payload['text']) ?? '📎 Załącznik',
+        content: _readString(payload['text']) ?? t('📎 Załącznik'),
         messageType: _readMessageType(payload['messageType']),
         fileName: safeFileName(_readString(payload['fileName'])),
         mimeType: _readString(payload['mimeType']),
@@ -137,7 +138,7 @@ ZenSignal? zenSignalFromTransportPayload({
         sender: sender,
         messageId: _readString(payload['msgId']),
         displayName: _readName(payload['senderName']),
-        content: text ?? '📎 Załącznik',
+        content: text ?? t('📎 Załącznik'),
         messageType: _readMessageType(payload['messageType']),
         attachmentData: attachmentData,
         attachmentEncoding: _readString(payload['attachmentEncoding']),
@@ -160,7 +161,7 @@ ZenSignal? zenSignalFromTransportPayload({
         type: ZenSignalType.transferOffer,
         sender: sender,
         messageId: _readString(payload['transferId']),
-        content: _readString(payload['text']) ?? '📎 Załącznik',
+        content: _readString(payload['text']) ?? t('📎 Załącznik'),
         messageType: _readMessageType(payload['messageType']),
         fileName: safeFileName(_readString(payload['fileName'])),
         mimeType: _readString(payload['mimeType']),

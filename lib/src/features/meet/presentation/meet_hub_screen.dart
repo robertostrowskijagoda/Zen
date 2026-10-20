@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
@@ -36,45 +37,45 @@ class MeetHubScreen extends ConsumerWidget {
     );
     return Scaffold(
       key: const Key('meet-hub'),
-      appBar: const ZenSectionBar(title: 'Spotkania'),
+      appBar: ZenSectionBar(title: t('Spotkania')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
         children: <Widget>[
-          const ZenSection('Na teraz', top: 4),
+          ZenSection(t('Na teraz'), top: 4),
           const IntentPanel(),
-          const ZenSection('Poznawaj ludzi przez ludzi'),
+          ZenSection(t('Poznawaj ludzi przez ludzi')),
           ZenTileGrid(
             children: <Widget>[
               tile(
                 'meet-events',
                 1,
                 Icons.celebration_rounded,
-                'Wydarzenia',
-                'Imprezy i spotkania tylko dla ludzi przez znajomych',
+                t('Wydarzenia'),
+                t('Imprezy i spotkania tylko dla ludzi przez znajomych'),
                 EventsScreen.open,
               ),
               tile(
                 'meet-table',
                 2,
                 Icons.dinner_dining_rounded,
-                'Stół na sześć',
-                'Kolacja ze znajomymi Twoich znajomych',
+                t('Stół na sześć'),
+                t('Kolacja ze znajomymi Twoich znajomych'),
                 TableScreen.open,
               ),
               tile(
                 'meet-circles',
                 3,
                 Icons.soup_kitchen_rounded,
-                'Kółka obiadowe',
-                'Gotujecie na zmianę, Zen pilnuje kolejki',
+                t('Kółka obiadowe'),
+                t('Gotujecie na zmianę, Zen pilnuje kolejki'),
                 CirclesScreen.open,
               ),
               tile(
                 'meet-plans',
                 5,
                 Icons.wb_sunny_rounded,
-                'Plan na weekend',
-                'Luźny plan — gdy zbierze się ekipa, robi się wydarzenie',
+                t('Plan na weekend'),
+                t('Luźny plan — gdy zbierze się ekipa, robi się wydarzenie'),
                 PlanScreen.open,
               ),
             ],

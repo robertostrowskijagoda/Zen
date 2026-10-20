@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/single_instance_guard.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -317,6 +318,12 @@ Future<String?> loadDesktopTrayIcon() async {
       (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS)) {
     return null;
   }
+  if (!Platform.isWindows) {
+    // Linux and macOS: system_tray takes the asset key and finds the file
+    // itself (data/flutter_assets on Linux, the app bundle on macOS). A PNG:
+    // not every Linux panel reads .ico files.
+    return 'assets/branding/tray_icon.png';
+  }
   try {
     final String executableDirectory = File(
       Platform.resolvedExecutable,
@@ -388,6 +395,12 @@ final class _PlatformDesktopWindowShellApi implements DesktopWindowShellApi {
 
   @override
   Future<void> hide() async {
+    if (Platform.isLinux) {
+      // A tray icon is not guaranteed on Linux (GNOME shows none without
+      // the AppIndicator extension): keep the window in the taskbar.
+      await windowManager.minimize();
+      return;
+    }
     await windowManager.hide();
     await windowManager.setSkipTaskbar(true);
   }
@@ -449,7 +462,16 @@ final class _PlatformDesktopWindowShellApi implements DesktopWindowShellApi {
       }
       return;
     }
-    await _tray.initSystemTray(title: title, iconPath: iconPath);
+    // Linux and macOS: the icon alone (a title would be drawn beside it in
+    // the panel or the menu bar). A tray the desktop refuses is an error,
+    // so closing the window does not hide Zen where nothing brings it back.
+    final bool shown = await _tray.initSystemTray(
+      iconPath: iconPath,
+      toolTip: title,
+    );
+    if (!shown) {
+      throw StateError('initSystemTray returned false');
+    }
   }
 
   @override
@@ -460,7 +482,7 @@ final class _PlatformDesktopWindowShellApi implements DesktopWindowShellApi {
     final Menu menu = Menu();
     await menu.buildFrom(<MenuItemBase>[
       MenuItemLabel(
-        label: 'Pokaż okno',
+        label: t('Pokaż okno'),
         onClicked: (_) {
           unawaitedLogged(
             onShowWindow(),
@@ -470,7 +492,7 @@ final class _PlatformDesktopWindowShellApi implements DesktopWindowShellApi {
       ),
       MenuSeparator(),
       MenuItemLabel(
-        label: 'Zamknij',
+        label: t('Zamknij'),
         onClicked: (_) {
           unawaitedLogged(
             onExitApp(),

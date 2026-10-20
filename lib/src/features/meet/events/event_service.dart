@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
@@ -1075,9 +1076,9 @@ final class EventService extends ChangeNotifier {
     if (had != null && had.isMine) {
       return; // our own event echoed back
     }
-    final int t = _now();
+    final int nowMs = _now();
     // Nothing that would never be cleaned up (far ahead), nothing long over.
-    if (got.startsAt > t + maxAhead || got.startsAt < t - _keepAfter) {
+    if (got.startsAt > nowMs + maxAhead || got.startsAt < nowMs - _keepAfter) {
       return;
     }
     final bool fromOrganizer = from == org;
@@ -1136,10 +1137,13 @@ final class EventService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'event-${got.id}',
-          title: 'Zaproszenie: ${got.title}',
+          title: t('Zaproszenie: {title}', {'title': got.title}),
           body: fromOrganizer
-              ? 'Od ${got.organizerName}.'
-              : '${got.organizerName}, przez ${host.nameOf(from)}.',
+              ? t('Od {name}.', {'name': got.organizerName})
+              : t('{name}, przez {via}.', {
+                  'name': got.organizerName,
+                  'via': host.nameOf(from),
+                }),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'event:${got.id}',
@@ -1149,8 +1153,8 @@ final class EventService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'event-cancel-${got.id}',
-          title: 'Odwołane: ${got.title}',
-          body: '${got.organizerName} odwołał(a) wydarzenie.',
+          title: t('Odwołane: {title}', {'title': got.title}),
+          body: t('{name} odwołał(a) wydarzenie.', {'name': got.organizerName}),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'event:${got.id}',
@@ -1329,10 +1333,16 @@ final class EventService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'event-rsvp-${e.id}-$from',
-          title: '${updated.name} będzie: ${e.title}',
-          body:
-              'Gości: ${e.goingCount + 1}'
-              '${e.capacity > 0 ? ' z ${e.capacity - 1}' : ''}.',
+          title: t('{name} będzie: {title}', {
+            'name': updated.name,
+            'title': e.title,
+          }),
+          body: e.capacity > 0
+              ? t('Gości: {count} z {capacity}.', {
+                  'count': e.goingCount + 1,
+                  'capacity': e.capacity - 1,
+                })
+              : t('Gości: {count}.', {'count': e.goingCount + 1}),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'event-rsvp:${e.id}',
@@ -1392,7 +1402,10 @@ final class EventService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'event-plus1-${e.id}-$a',
-          title: '${asker.name} chce przyprowadzić ${guest.name}',
+          title: t('{name} chce przyprowadzić {guest}', {
+            'name': asker.name,
+            'guest': guest.name,
+          }),
           body: e.title,
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
@@ -1542,9 +1555,10 @@ final class EventService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'event-photo-${e.id}-${photo.id}',
-        title: 'Nowe zdjęcie: ${e.title}',
-        body:
-            'Dodał(a) ${photo.byName.isEmpty ? 'ktoś z gości' : photo.byName}.',
+        title: t('Nowe zdjęcie: {title}', {'title': e.title}),
+        body: t('Dodał(a) {name}.', {
+          'name': photo.byName.isEmpty ? t('ktoś z gości') : photo.byName,
+        }),
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'event-album:${e.id}',
@@ -1599,13 +1613,13 @@ final class EventService extends ChangeNotifier {
         text.trim().isEmpty) {
       return;
     }
-    final String t = text.trim();
+    final String trimmed = text.trim();
     final EventThanks card = EventThanks(
       by: from,
       byName: g!.name,
-      text: t.length > EventThanks.maxChars
-          ? t.substring(0, EventThanks.maxChars)
-          : t,
+      text: trimmed.length > EventThanks.maxChars
+          ? trimmed.substring(0, EventThanks.maxChars)
+          : trimmed,
       at: _now(),
     );
     _thanks[e.id] = <EventThanks>[
@@ -1618,7 +1632,7 @@ final class EventService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'event-thanks-${e.id}-$from',
-        title: 'Karta wdzięczności: ${e.title}',
+        title: t('Karta wdzięczności: {title}', {'title': e.title}),
         body: '${card.byName}: ${card.text}',
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,

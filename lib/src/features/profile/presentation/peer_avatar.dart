@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
@@ -79,7 +80,9 @@ class _PeerProfileSheet extends ConsumerWidget {
     final FriendProfile? friend = state.friendByAddress(address);
     final PeerPublicProfile? peer = state.peerProfileOf(address);
     final String shownName = friend == null
-        ? (peer?.name.trim().isNotEmpty == true ? peer!.name.trim() : 'Kontakt')
+        ? (peer?.name.trim().isNotEmpty == true
+              ? peer!.name.trim()
+              : t('Kontakt'))
         : state.nameFor(friend);
     final String ownName = peer?.name.trim() ?? '';
     return SafeArea(
@@ -128,7 +131,7 @@ class _PeerProfileSheet extends ConsumerWidget {
             if (ownName.isNotEmpty && ownName != shownName) ...<Widget>[
               const SizedBox(height: 4),
               Text(
-                'Przedstawia się jako: $ownName',
+                t('Przedstawia się jako: {name}', {'name': ownName}),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: zen.textSecondary, fontSize: 13),
               ),
@@ -171,7 +174,7 @@ class _PeerProfileSheet extends ConsumerWidget {
             if (peer == null) ...<Widget>[
               const SizedBox(height: 12),
               Text(
-                'Ta osoba nie udostępniła jeszcze swojego profilu.',
+                t('Ta osoba nie udostępniła jeszcze swojego profilu.'),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: zen.textMuted, fontSize: 13),
               ),

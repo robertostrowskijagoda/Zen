@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
@@ -430,13 +431,13 @@ final class AskService extends ChangeNotifier {
         _now() - at > kQuestionLife.inMilliseconds) {
       return;
     }
-    final int t = _now();
+    final int nowMs = _now();
     final List<int> recent = (_received[from] ??= <int>[])
-      ..removeWhere((int x) => t - x > 24 * 3600 * 1000);
+      ..removeWhere((int x) => nowMs - x > 24 * 3600 * 1000);
     if (recent.length >= kQuestionsFromFriendPerDay) {
       return;
     }
-    recent.add(t);
+    recent.add(nowMs);
     final Object? via = p['via'];
     final Object? name = p['name'];
     final Question q = Question(
@@ -446,7 +447,7 @@ final class AskService extends ChangeNotifier {
           ? (name.length > 60 ? name.substring(0, 60) : name)
           : '',
       // A date far ahead would keep the question forever.
-      at: min(at, t + 10 * 60 * 1000),
+      at: min(at, nowMs + 10 * 60 * 1000),
       hops: hops.clamp(0, 1),
       from: from,
       via: via is List
@@ -462,8 +463,11 @@ final class AskService extends ChangeNotifier {
       RuntimeSystemNotification(
         id: 'ask-$id',
         title: q.via.isEmpty
-            ? '${host.nameOf(from)} pyta'
-            : '${q.askerName} pyta (przez ${host.nameOf(from)})',
+            ? t('{name} pyta', {'name': host.nameOf(from)})
+            : t('{name} pyta (przez {via})', {
+                'name': q.askerName,
+                'via': host.nameOf(from),
+              }),
         body: q.text,
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
@@ -516,7 +520,7 @@ final class AskService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'ask-answer-$id-${q.answers.length}',
-          title: 'Odpowiedź: ${q.text}',
+          title: t('Odpowiedź: {question}', {'question': q.text}),
           body: '${answerSource(names)}: $text',
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
@@ -554,10 +558,13 @@ final class AskService extends ChangeNotifier {
 /// from further away.
 String answerSource(List<String> path) {
   if (path.isEmpty) {
-    return 'ktoś';
+    return t('ktoś');
   }
   if (path.length == 1) {
     return path.first;
   }
-  return '${path.first}, znajomy(-a) ${path.last}';
+  return t('{name}, znajomy(-a) {friend}', {
+    'name': path.first,
+    'friend': path.last,
+  });
 }

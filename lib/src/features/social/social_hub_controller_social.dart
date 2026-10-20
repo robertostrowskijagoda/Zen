@@ -65,8 +65,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           current: current,
         )
         .copyWith(
-          lastMessagePreview: 'Zaproszenie oczekuje na odpowiedź.',
-          lastActivityLabel: 'Teraz',
+          lastMessagePreview: t('Zaproszenie oczekuje na odpowiedź.'),
+          lastActivityLabel: t('Teraz'),
         );
     _putFriend(
       friends,
@@ -83,17 +83,17 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     required int autoCleanupDays,
   }) async {
     if (inboxLimitMb < 0) {
-      throw const FormatException('Limit danych nie może być ujemny.');
+      throw FormatException(t('Limit danych nie może być ujemny.'));
     }
     if (autoCleanupDays < 0) {
-      throw const FormatException(
-        'Liczba dni auto-czyszczenia nie może być ujemna.',
+      throw FormatException(
+        t('Liczba dni auto-czyszczenia nie może być ujemna.'),
       );
     }
     final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
     final FriendProfile? current = state.friendByAddress(canonical);
     if (current == null) {
-      throw const FormatException('Nie znaleziono tej rozmowy.');
+      throw FormatException(t('Nie znaleziono tej rozmowy.'));
     }
 
     final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
@@ -144,8 +144,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         .copyWith(
           isOnline: true,
           lastPresenceAtMillis: DateTime.now().millisecondsSinceEpoch,
-          lastMessagePreview: 'Połączenie gotowe. Możesz pisać od razu.',
-          lastActivityLabel: 'Teraz',
+          lastMessagePreview: t('Połączenie gotowe. Możesz pisać od razu.'),
+          lastActivityLabel: t('Teraz'),
         );
     _putFriend(friends, _withAppRetentionDefaults(updated, _appSettings));
     final List<InboxEntry> nextInbox = _removeEntriesForPeer(
@@ -170,7 +170,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     );
     await _appendSystemMessage(
       peerAddress: peerAddress,
-      text: 'Połączenie z ${updated.displayLabel} jest gotowe.',
+      text: t('Połączenie z {name} jest gotowe.', {
+        'name': updated.displayLabel,
+      }),
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
     await _persistState();
@@ -304,7 +306,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     final String canonical = PeerShareCodec.normalizeAddress(peerAddress);
     final FriendProfile? current = state.friendByAddress(canonical);
     if (current == null) {
-      throw const FormatException('Znajomy nie został znaleziony.');
+      throw FormatException(t('Znajomy nie został znaleziony.'));
     }
     final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
       state.friends,
@@ -406,8 +408,11 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return;
     }
     if (state.activeCall != null) {
-      throw const FormatException(
-        'Zakończenie aktualnej rozmowy jest wymagane przed nowym połączeniem.',
+      throw FormatException(
+        t(
+          'Zakończenie aktualnej rozmowy jest wymagane przed nowym '
+          'połączeniem.',
+        ),
       );
     }
     final int timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -461,7 +466,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     await _appendSystemMessage(
       peerAddress: peerAddress,
-      text: 'Wysłano zaproszenie do rozmowy ${_callKindLabel(kind.name)}.',
+      text: t('Wysłano zaproszenie do rozmowy {kind}.', {
+        'kind': _callKindWord(kind),
+      }),
       timestamp: timestamp,
     );
   }
@@ -711,8 +718,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     await _appendSystemMessage(
       peerAddress: session.peerAddress,
       text: session.isIncoming
-          ? 'Nieodebrane połączenie ${session.kindLabel}.'
-          : 'Brak odpowiedzi na połączenie ${session.kindLabel}.',
+          ? t('Nieodebrane połączenie {kind}.', {
+              'kind': _callKindWord(session.kind),
+            })
+          : t('Brak odpowiedzi na połączenie {kind}.', {
+              'kind': _callKindWord(session.kind),
+            }),
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
     await _persistState();
@@ -781,8 +792,11 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     await _appendSystemMessage(
       peerAddress: session.peerAddress,
-      text:
-          'Nie udało się zestawić rozmowy ${session.kindLabel} — druga strona nie odpowiada.',
+      text: t(
+        'Nie udało się zestawić rozmowy {kind} — druga strona nie '
+        'odpowiada.',
+        {'kind': _callKindWord(session.kind)},
+      ),
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
     await _persistState();
@@ -836,7 +850,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         ChatMessage(
           id: 'grp-sys-$timestamp',
           sender: 'system',
-          text: 'Odrzucono połączenie grupowe (${session.kindLabel}).',
+          text: t('Odrzucono połączenie grupowe ({kind}).', {
+            'kind': _callKindWord(session.kind),
+          }),
           sentAtMillis: timestamp,
           direction: ChatMessageDirection.incoming,
           deliveryState: ChatMessageDeliveryState.delivered,
@@ -846,7 +862,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     } else {
       await _appendSystemMessage(
         peerAddress: peerAddress,
-        text: 'Odrzucono rozmowę ${session.kindLabel}.',
+        text: t('Odrzucono rozmowę {kind}.', {
+          'kind': _callKindWord(session.kind),
+        }),
         timestamp: DateTime.now().millisecondsSinceEpoch,
       );
     }
@@ -907,7 +925,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         ChatMessage(
           id: 'grp-sys-${DateTime.now().millisecondsSinceEpoch}',
           sender: 'system',
-          text: 'Zakończono połączenie grupowe (${session.kindLabel}).',
+          text: t('Zakończono połączenie grupowe ({kind}).', {
+            'kind': _callKindWord(session.kind),
+          }),
           sentAtMillis: DateTime.now().millisecondsSinceEpoch,
           direction: ChatMessageDirection.incoming,
           deliveryState: ChatMessageDeliveryState.delivered,
@@ -917,7 +937,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     } else {
       await _appendSystemMessage(
         peerAddress: peerAddress,
-        text: 'Zakończono rozmowę ${session.kindLabel}.',
+        text: t('Zakończono rozmowę {kind}.', {
+          'kind': _callKindWord(session.kind),
+        }),
         timestamp: DateTime.now().millisecondsSinceEpoch,
       );
     }
@@ -989,8 +1011,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
   }) async {
     final Map<String, dynamic>? description = offer.sessionDescription;
     if (description == null) {
-      throw const FormatException(
-        'Brakuje opisu sesji dla przychodzącej rozmowy.',
+      throw FormatException(
+        t('Brakuje opisu sesji dla przychodzącej rozmowy.'),
       );
     }
     _pendingOfferTimeoutTimer?.cancel();
@@ -1014,8 +1036,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           ChatMessage(
             id: 'grp-sys-${DateTime.now().millisecondsSinceEpoch}',
             sender: 'system',
-            text:
-                'Dołączono do połączenia grupowego (${_callKindLabel(offer.content)}).',
+            text: t('Dołączono do połączenia grupowego ({kind}).', {
+              'kind': _callKindLabel(offer.content),
+            }),
             sentAtMillis: DateTime.now().millisecondsSinceEpoch,
             direction: ChatMessageDirection.incoming,
             deliveryState: ChatMessageDeliveryState.delivered,
@@ -1025,7 +1048,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       } else {
         await _appendSystemMessage(
           peerAddress: session.peerAddress,
-          text: 'Odebrano rozmowę ${_callKindLabel(offer.content)}.',
+          text: t('Odebrano rozmowę {kind}.', {
+            'kind': _callKindLabel(offer.content),
+          }),
           timestamp: DateTime.now().millisecondsSinceEpoch,
         );
       }
@@ -1389,7 +1414,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     final int timestamp =
         observedAtMillis ?? DateTime.now().millisecondsSinceEpoch;
-    final String label = isForeground ? 'Teraz' : 'W tle';
+    final String label = isForeground ? t('Teraz') : t('W tle');
     _presenceSeenAt[PeerShareCodec.normalizeAddress(friend.address)] =
         timestamp;
     // Most pongs change nothing visible: the friend was online and still
@@ -1516,10 +1541,10 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         )
         .toList(growable: false);
     if (name.trim().isEmpty) {
-      throw const FormatException('Nadaj grupie nazwę.');
+      throw FormatException(t('Nadaj grupie nazwę.'));
     }
     if (invitees.isEmpty) {
-      throw const FormatException('Wybierz co najmniej jedną osobę.');
+      throw FormatException(t('Wybierz co najmniej jedną osobę.'));
     }
     final String groupId = 'group-$now-${invitees.length}';
     final GroupProfile group = GroupProfile(
@@ -1535,8 +1560,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           ...invitees,
         ]),
       ),
-      lastActivityLabel: 'Teraz',
-      lastMessagePreview: 'Utworzono grupę.',
+      lastActivityLabel: t('Teraz'),
+      lastMessagePreview: t('Utworzono grupę.'),
       // Everyone stays on this list until their device confirms the invite;
       // see [syncGroupInvitesToPeer].
       pendingInviteAddresses: invitees,
@@ -1592,7 +1617,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         ...current.pendingInviteIds,
         member: _newInviteId(),
       },
-      lastActivityLabel: 'Teraz',
+      lastActivityLabel: t('Teraz'),
     );
     final Map<String, GroupProfile> groups = Map<String, GroupProfile>.from(
       state.groups,
@@ -1655,14 +1680,14 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
           if (localAddr.isNotEmpty) localAddr,
           ...?memberAddresses,
         ]),
-        lastActivityLabel: 'Teraz',
-        lastMessagePreview: 'Dołączono do grupy.',
+        lastActivityLabel: t('Teraz'),
+        lastMessagePreview: t('Dołączono do grupy.'),
       );
     } else if (existing.isInvitePending) {
       groups[groupId] = existing.copyWith(
         isInvitePending: false,
-        lastMessagePreview: 'Dołączono do grupy.',
-        lastActivityLabel: 'Teraz',
+        lastMessagePreview: t('Dołączono do grupy.'),
+        lastActivityLabel: t('Teraz'),
       );
     }
     bool isInviteFor(InboxEntry entry) =>
@@ -1810,7 +1835,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       return;
     }
     if (group.isInvitePending) {
-      throw StateError('Najpierw dołącz do grupy.');
+      throw StateError(t('Najpierw dołącz do grupy.'));
     }
     final String trimmed = text.trim();
     final int timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -1834,7 +1859,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     );
     groups[groupId] = group.copyWith(
       lastMessagePreview: trimmed,
-      lastActivityLabel: 'Teraz',
+      lastActivityLabel: t('Teraz'),
     );
     state = state.copyWith(groups: groups);
     await _persistState();

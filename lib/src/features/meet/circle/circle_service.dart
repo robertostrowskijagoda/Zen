@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
@@ -585,14 +586,23 @@ final class CircleService extends ChangeNotifier {
       if (host.isFriend(from) && name is String && at is int) {
         final DateTime d = DateTime.fromMillisecondsSinceEpoch(at);
         String two(int v) => v.toString().padLeft(2, '0');
+        final Map<String, Object?> args = <String, Object?>{
+          'circle': name.length > 60 ? name.substring(0, 60) : name,
+          'date': '${two(d.day)}.${two(d.month)}',
+          'time': '${two(d.hour)}:00',
+        };
         await host.notify(
           RuntimeSystemNotification(
             id: 'circle-guest-$from-$at',
-            title: '${host.nameOf(from)} zaprasza Cię na obiad',
-            body:
-                '„${name.length > 60 ? name.substring(0, 60) : name}”, '
-                '${two(d.day)}.${two(d.month)} o ${two(d.hour)}:00'
-                '${cook is String && cook.isNotEmpty ? ' — gotuje ${cook.length > 60 ? cook.substring(0, 60) : cook}' : ''}.',
+            title: t('{name} zaprasza Cię na obiad', {
+              'name': host.nameOf(from),
+            }),
+            body: cook is String && cook.isNotEmpty
+                ? t('„{circle}”, {date} o {time} — gotuje {cook}.', {
+                    ...args,
+                    'cook': cook.length > 60 ? cook.substring(0, 60) : cook,
+                  })
+                : t('„{circle}”, {date} o {time}.', args),
             createdAtMillis: _now(),
             category: RuntimeSystemNotificationCategory.social,
             slotKey: 'circle-guest:$from',
@@ -610,7 +620,9 @@ final class CircleService extends ChangeNotifier {
         await host.notify(
           RuntimeSystemNotification(
             id: 'circle-swap-${c.id}-$from',
-            title: '${host.nameOf(from)} chce zamienić się kolejką',
+            title: t('{name} chce zamienić się kolejką', {
+              'name': host.nameOf(from),
+            }),
             body: c.name,
             createdAtMillis: _now(),
             category: RuntimeSystemNotificationCategory.social,
@@ -642,8 +654,8 @@ final class CircleService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'circle-${got.id}',
-          title: 'Nowe kółko obiadowe: ${got.name}',
-          body: 'Od ${host.nameOf(from)}.',
+          title: t('Nowe kółko obiadowe: {name}', {'name': got.name}),
+          body: t('Od {name}.', {'name': host.nameOf(from)}),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'circle:${got.id}',

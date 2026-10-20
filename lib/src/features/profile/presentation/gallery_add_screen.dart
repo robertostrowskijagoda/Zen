@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/feed/post_media.dart';
@@ -60,7 +61,10 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
 
   Future<void> _addPhotos() async {
     if (_room <= 0) {
-      setState(() => _error = 'Najwyżej $kMaxGalleryBatch naraz.');
+      setState(
+        () =>
+            _error = t('Najwyżej {count} naraz.', {'count': kMaxGalleryBatch}),
+      );
       return;
     }
     List<Uint8List> raw;
@@ -70,7 +74,10 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
               () => pickImageBytes(limit: _room > 1 ? _room : null))();
     } on Object catch (e) {
       if (mounted) {
-        setState(() => _error = 'Nie udało się otworzyć zdjęć: $e');
+        setState(
+          () =>
+              _error = t('Nie udało się otworzyć zdjęć: {error}', {'error': e}),
+        );
       }
       return;
     }
@@ -88,7 +95,7 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
         }
       } on ArgumentError {
         if (mounted) {
-          setState(() => _error = 'Ten plik nie jest zdjęciem.');
+          setState(() => _error = t('Ten plik nie jest zdjęciem.'));
         }
       } finally {
         if (mounted) {
@@ -100,7 +107,10 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
 
   Future<void> _addVideo() async {
     if (_room <= 0) {
-      setState(() => _error = 'Najwyżej $kMaxGalleryBatch naraz.');
+      setState(
+        () =>
+            _error = t('Najwyżej {count} naraz.', {'count': kMaxGalleryBatch}),
+      );
       return;
     }
     try {
@@ -114,7 +124,10 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
       }
     } on Object catch (e) {
       if (mounted) {
-        setState(() => _error = 'Nie udało się otworzyć filmu: $e');
+        setState(
+          () =>
+              _error = t('Nie udało się otworzyć filmu: {error}', {'error': e}),
+        );
       }
     }
   }
@@ -135,7 +148,7 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
       if (mounted) {
         setState(() {
           _saving = false;
-          _error = 'Nie udało się dodać: $e';
+          _error = t('Nie udało się dodać: {error}', {'error': e});
         });
       }
     }
@@ -148,7 +161,7 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
     return Scaffold(
       key: const Key('gallery-add-screen'),
       appBar: AppBar(
-        title: const Text('Dodaj do galerii'),
+        title: Text(t('Dodaj do galerii')),
         actions: <Widget>[
           Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -160,7 +173,7 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
                       dimension: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Dodaj'),
+                  : Text(t('Dodaj')),
             ),
           ),
         ],
@@ -169,15 +182,16 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: <Widget>[
           ZenHero(
-            title: 'Twoja galeria',
+            title: t('Twoja galeria'),
             icon: Icons.photo_library_rounded,
             tone: zenTone(zen, 2),
-            text:
-                'Zdjęcia i filmy w galerii profilu. Nie trafiają na '
-                'tablicę jako post. Widoczność możesz potem zmienić, '
-                'przytrzymując zdjęcie.',
+            text: t(
+              'Zdjęcia i filmy w galerii profilu. Nie trafiają na '
+              'tablicę jako post. Widoczność możesz potem zmienić, '
+              'przytrzymując zdjęcie.',
+            ),
           ),
-          const ZenSection('Kto zobaczy'),
+          ZenSection(t('Kto zobaczy')),
           Wrap(
             key: const Key('gallery-audience'),
             spacing: 8,
@@ -204,7 +218,7 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
               style: TextStyle(color: zen.textSecondary, fontSize: 13),
             ),
           ),
-          const ZenSection('Co dodać'),
+          ZenSection(t('Co dodać')),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -213,13 +227,13 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
                 key: const Key('gallery-pick-photos'),
                 onPressed: _saving ? null : () => unawaited(_addPhotos()),
                 icon: const Icon(Icons.add_photo_alternate_outlined),
-                label: const Text('Zdjęcia'),
+                label: Text(t('Zdjęcia')),
               ),
               FilledButton.tonalIcon(
                 key: const Key('gallery-pick-video'),
                 onPressed: _saving ? null : () => unawaited(_addVideo()),
                 icon: const Icon(Icons.video_library_outlined),
-                label: const Text('Film'),
+                label: Text(t('Film')),
               ),
             ],
           ),
@@ -234,10 +248,11 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
             ZenEmpty(
               icon: Icons.add_photo_alternate_outlined,
               tone: zenTone(zen, 2),
-              title: 'Nic jeszcze nie wybrano',
-              text:
-                  'Wybierz zdjęcia albo film — zobaczysz je tutaj, '
-                  'zanim je dodasz.',
+              title: t('Nic jeszcze nie wybrano'),
+              text: t(
+                'Wybierz zdjęcia albo film — zobaczysz je tutaj, '
+                'zanim je dodasz.',
+              ),
             )
           else
             GridView.count(
@@ -270,7 +285,7 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
                         child: IconButton.filledTonal(
                           key: Key('gallery-remove-$i'),
                           visualDensity: VisualDensity.compact,
-                          tooltip: 'Usuń',
+                          tooltip: t('Usuń'),
                           onPressed: _saving
                               ? null
                               : () => setState(() => _media.removeAt(i)),

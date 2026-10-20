@@ -37,8 +37,10 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
         canonical,
         value,
         note: value == 0
-            ? 'Wyłączono znikające wiadomości.'
-            : 'Włączono znikające wiadomości: ${disappearLabel(value)}.',
+            ? t('Wyłączono znikające wiadomości.')
+            : t('Włączono znikające wiadomości: {duration}.', {
+                'duration': disappearLabel(value),
+              }),
         timestamp: now,
       );
     });
@@ -149,8 +151,11 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
       key,
       seconds,
       note: seconds == 0
-          ? '$who wyłączył(a) znikające wiadomości.'
-          : '$who włączył(a) znikające wiadomości: ${disappearLabel(seconds)}.',
+          ? t('{name} wyłączył(a) znikające wiadomości.', {'name': who})
+          : t('{name} włączył(a) znikające wiadomości: {duration}.', {
+              'name': who,
+              'duration': disappearLabel(seconds),
+            }),
       timestamp: timestamp,
     );
   }
@@ -184,7 +189,7 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
       return named.trim();
     }
     final FriendProfile? friend = state.friendByAddress(address);
-    return friend != null ? state.nameFor(friend) : 'Ktoś z grupy';
+    return friend != null ? state.nameFor(friend) : t('Ktoś z grupy');
   }
 
   /// Another device of this account changed a timer: same here, quietly
@@ -214,9 +219,12 @@ mixin _SocialHubDisappearingMixin on _SocialHubControllerBase {
         key,
         seconds,
         note: seconds == 0
-            ? 'Wyłączono znikające wiadomości (na innym urządzeniu).'
-            : 'Włączono znikające wiadomości: ${disappearLabel(seconds)} '
-                  '(na innym urządzeniu).',
+            ? t('Wyłączono znikające wiadomości (na innym urządzeniu).')
+            : t(
+                'Włączono znikające wiadomości: {duration} '
+                '(na innym urządzeniu).',
+                {'duration': disappearLabel(seconds)},
+              ),
         timestamp: DateTime.now().millisecondsSinceEpoch,
       );
     });

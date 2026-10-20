@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
@@ -66,12 +67,12 @@ class PlanBoard extends StatelessWidget {
     final EventService? ev = events;
     return Scaffold(
       key: const Key('plan-screen'),
-      appBar: AppBar(title: const Text('Plan na weekend')),
+      appBar: AppBar(title: Text(t('Plan na weekend'))),
       floatingActionButton: FloatingActionButton.extended(
         key: const Key('plan-new'),
         onPressed: () => unawaited(showPlanSheet(context, plans)),
         icon: const Icon(Icons.add_rounded),
-        label: const Text('Nowy plan'),
+        label: Text(t('Nowy plan')),
       ),
       body: ListenableBuilder(
         listenable: ev == null
@@ -90,31 +91,33 @@ class PlanBoard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
             children: <Widget>[
               ZenHero(
-                title: 'Kto chętny?',
+                title: t('Kto chętny?'),
                 icon: Icons.wb_sunny_rounded,
                 tone: tone,
-                text:
-                    'Rzuć luźny plan. Gdy dołączy dość osób, sam zamieni się '
-                    'w wydarzenie z czatem. Bez chętnych zgaśnie po terminie.',
+                text: t(
+                  'Rzuć luźny plan. Gdy dołączy dość osób, sam zamieni się '
+                  'w wydarzenie z czatem. Bez chętnych zgaśnie po terminie.',
+                ),
               ),
               if (all.isEmpty)
                 ZenEmpty(
                   key: const Key('plan-empty'),
                   icon: Icons.wb_sunny_rounded,
                   tone: tone,
-                  title: 'Na razie żadnych planów',
-                  text:
-                      'Zaproponuj coś na weekend — znajomi odpowiedzą '
-                      '„Dołączam” albo „Może”.',
+                  title: t('Na razie żadnych planów'),
+                  text: t(
+                    'Zaproponuj coś na weekend — znajomi odpowiedzą '
+                    '„Dołączam” albo „Może”.',
+                  ),
                   action: FilledButton.icon(
                     key: const Key('plan-empty-new'),
                     onPressed: () => unawaited(showPlanSheet(context, plans)),
                     icon: const Icon(Icons.add_rounded),
-                    label: const Text('Zaproponuj plan'),
+                    label: Text(t('Zaproponuj plan')),
                   ),
                 ),
               if (mine.isNotEmpty) ...<Widget>[
-                const ZenSection('Twoje plany', top: 12),
+                ZenSection(t('Twoje plany'), top: 12),
                 for (final WeekendPlan p in mine)
                   PlanCard(
                     key: Key('plan-${p.id}'),
@@ -125,7 +128,7 @@ class PlanBoard extends StatelessWidget {
                   ),
               ],
               if (others.isNotEmpty) ...<Widget>[
-                const ZenSection('Od znajomych', top: 12),
+                ZenSection(t('Od znajomych'), top: 12),
                 for (final WeekendPlan p in others)
                   PlanCard(
                     key: Key('plan-${p.id}'),
@@ -163,16 +166,16 @@ class PlanCard extends StatelessWidget {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('Odwołać plan?'),
-        content: const Text('Znajomi zobaczą, że plan jest nieaktualny.'),
+        title: Text(t('Odwołać plan?')),
+        content: Text(t('Znajomi zobaczą, że plan jest nieaktualny.')),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Nie'),
+            child: Text(t('Nie')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Odwołaj'),
+            child: Text(t('Odwołaj')),
           ),
         ],
       ),
@@ -189,8 +192,8 @@ class PlanCard extends StatelessWidget {
       SnackBar(
         content: Text(
           made
-              ? 'Jest wydarzenie. Zaproszenia poszły.'
-              : 'Nie udało się zrobić wydarzenia.',
+              ? t('Jest wydarzenie. Zaproszenia poszły.')
+              : t('Nie udało się zrobić wydarzenia.'),
         ),
       ),
     );
@@ -204,10 +207,13 @@ class PlanCard extends StatelessWidget {
     final String me = PeerShareCodec.normalizeAddress(plans.host.ownAddress());
     final String? via = plans.viaOf(p.id);
     final String who = p.isMine
-        ? 'Twój plan'
+        ? t('Twój plan')
         : via == null
         ? p.organizerName
-        : '${p.organizerName}, przez ${plans.host.nameOf(via)}';
+        : t('{name}, przez {via}', {
+            'name': p.organizerName,
+            'via': plans.host.nameOf(via),
+          });
     final bool over = p.startsAt <= now;
     final String? eventId = p.eventId;
     final List<PlanAnswer> joined = p.joined;
@@ -307,7 +313,7 @@ class PlanCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Jest ekipa! Plan jest już wydarzeniem.',
+                    t('Jest ekipa! Plan jest już wydarzeniem.'),
                     style: TextStyle(
                       color: zen.textPrimary,
                       fontSize: 14,
@@ -322,7 +328,10 @@ class PlanCard extends StatelessWidget {
               children: <Widget>[
                 Expanded(
                   child: Text(
-                    'Chętnych: ${p.joinCount} z ${p.threshold}',
+                    t('Chętnych: {count} z {threshold}', {
+                      'count': p.joinCount,
+                      'threshold': p.threshold,
+                    }),
                     style: TextStyle(
                       color: tone,
                       fontSize: 14,
@@ -332,7 +341,7 @@ class PlanCard extends StatelessWidget {
                 ),
                 if (maybe.isNotEmpty)
                   Text(
-                    'może: ${maybe.length}',
+                    t('może: {count}', {'count': maybe.length}),
                     style: TextStyle(color: zen.textMuted, fontSize: 12.5),
                   ),
               ],
@@ -349,7 +358,12 @@ class PlanCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Wydarzenie powstanie przy ${p.threshold} chętnych.',
+              tn(
+                p.threshold,
+                one: 'Wydarzenie powstanie przy {n} chętnym.',
+                few: 'Wydarzenie powstanie przy {n} chętnych.',
+                many: 'Wydarzenie powstanie przy {n} chętnych.',
+              ),
               style: TextStyle(color: zen.textMuted, fontSize: 12.5),
             ),
           ],
@@ -357,8 +371,8 @@ class PlanCard extends StatelessWidget {
           if (joined.isEmpty && maybe.isEmpty)
             Text(
               p.isMine
-                  ? 'Nikt jeszcze nie odpowiedział.'
-                  : 'Nikt jeszcze nie odpowiedział — bądź pierwszy(-a)!',
+                  ? t('Nikt jeszcze nie odpowiedział.')
+                  : t('Nikt jeszcze nie odpowiedział — bądź pierwszy(-a)!'),
               style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
             )
           else
@@ -378,11 +392,11 @@ class PlanCard extends StatelessWidget {
               key: Key('plan-open-event-${p.id}'),
               onPressed: () => unawaited(EventScreen.open(context, eventId)),
               icon: const Icon(Icons.event_rounded),
-              label: const Text('Otwórz wydarzenie'),
+              label: Text(t('Otwórz wydarzenie')),
             )
           else if (p.isEvent && !p.isMine)
             Text(
-              'Zaproszenie przyjdzie od organizatora.',
+              t('Zaproszenie przyjdzie od organizatora.'),
               style: TextStyle(color: zen.textMuted, fontSize: 12.5),
             ),
           if (!p.isMine && !p.isEvent && !over)
@@ -397,14 +411,14 @@ class PlanCard extends StatelessWidget {
                     key: Key('plan-convert-${p.id}'),
                     onPressed: () => unawaited(_convert(context)),
                     icon: const Icon(Icons.celebration_rounded, size: 18),
-                    label: const Text('Zrób wydarzenie już teraz'),
+                    label: Text(t('Zrób wydarzenie już teraz')),
                   ),
                 TextButton.icon(
                   key: Key('plan-cancel-${p.id}'),
                   style: TextButton.styleFrom(foregroundColor: zen.danger),
                   onPressed: () => unawaited(_cancel(context)),
                   icon: const Icon(Icons.close_rounded, size: 18),
-                  label: const Text('Odwołaj'),
+                  label: Text(t('Odwołaj')),
                 ),
               ],
             ),
@@ -430,12 +444,12 @@ class _PersonChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final bool joined = answer.kind == PlanAnswerKind.join;
-    final String name = isMe ? 'Ty' : answer.name;
+    final String name = isMe ? t('Ty') : answer.name;
     final String label = <String>[
       name,
       if (answer.via != null && answer.viaName.isNotEmpty)
-        'przez ${answer.viaName}',
-      if (!joined) 'może',
+        t('przez {name}', {'name': answer.viaName}),
+      if (!joined) t('może'),
     ].join(' · ');
     return Container(
       padding: const EdgeInsets.fromLTRB(4, 4, 10, 4),
@@ -489,7 +503,7 @@ class _AnswerButtons extends StatelessWidget {
       final bool on = mine == kind;
       final Key buttonKey = Key('plan-${kind.name}-${plan.id}');
       final Widget label = Text(
-        on && kind == PlanAnswerKind.join ? 'Dołączasz' : kind.label,
+        on && kind == PlanAnswerKind.join ? t('Dołączasz') : kind.label,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       );
@@ -533,7 +547,7 @@ class _AnswerButtons extends StatelessWidget {
         if (mine != null) ...<Widget>[
           const SizedBox(height: 6),
           Text(
-            'Stuknij jeszcze raz, żeby się wycofać.',
+            t('Stuknij jeszcze raz, żeby się wycofać.'),
             textAlign: TextAlign.center,
             style: TextStyle(
               color: ZenColors.of(context).textMuted,
@@ -572,23 +586,23 @@ DateTime _defaultDay(DateTime now) {
 }
 
 String _dayLabel(DateTime day, DateTime now) {
-  const List<String> names = <String>[
-    'Pon.',
-    'Wt.',
-    'Śr.',
-    'Czw.',
-    'Pt.',
-    'Sobota',
-    'Niedziela',
+  final List<String> names = <String>[
+    t('Pon.'),
+    t('Wt.'),
+    t('Śr.'),
+    t('Czw.'),
+    t('Pt.'),
+    t('Sobota'),
+    t('Niedziela'),
   ];
   final int days =
       (day.difference(DateTime(now.year, now.month, now.day)).inHours / 24)
           .round();
   if (days == 0) {
-    return 'Dziś';
+    return t('Dziś');
   }
   if (days == 1) {
-    return 'Jutro';
+    return t('Jutro');
   }
   if (days > 1 && days < 7) {
     return names[day.weekday - 1];
@@ -679,7 +693,7 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Nowy plan',
+                      t('Nowy plan'),
                       style: zen.display(
                         color: zen.textPrimary,
                         size: 22,
@@ -697,13 +711,13 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
                 maxLength: kPlanMaxTitle,
                 textCapitalization: TextCapitalization.sentences,
                 onChanged: (_) => setSheet(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Co robimy?',
-                  hintText: 'np. Rower nad Wisłą',
-                  prefixIcon: Icon(Icons.edit_rounded),
+                decoration: InputDecoration(
+                  labelText: t('Co robimy?'),
+                  hintText: t('np. Rower nad Wisłą'),
+                  prefixIcon: const Icon(Icons.edit_rounded),
                 ),
               ),
-              const ZenSection('Kiedy', top: 4),
+              ZenSection(t('Kiedy'), top: 4),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -724,7 +738,7 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
                   ActionChip(
                     key: const Key('plan-day-other'),
                     avatar: const Icon(Icons.edit_calendar_rounded, size: 18),
-                    label: const Text('Inny dzień'),
+                    label: Text(t('Inny dzień')),
                     onPressed: () => unawaited(pickDay()),
                   ),
                 ],
@@ -736,13 +750,17 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
                   key: const Key('plan-time'),
                   onPressed: () => unawaited(pickTime()),
                   icon: const Icon(Icons.schedule_rounded),
-                  label: Text('Godzina ${two(time.hour)}:${two(time.minute)}'),
+                  label: Text(
+                    t('Godzina {time}', {
+                      'time': '${two(time.hour)}:${two(time.minute)}',
+                    }),
+                  ),
                 ),
               ),
               if (past) ...<Widget>[
                 const SizedBox(height: 6),
                 Text(
-                  'Ta godzina już minęła — wybierz późniejszą.',
+                  t('Ta godzina już minęła — wybierz późniejszą.'),
                   style: TextStyle(color: zen.danger, fontSize: 13),
                 ),
               ],
@@ -752,12 +770,12 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
                 controller: place,
                 maxLength: kPlanMaxPlace,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Gdzie (nie trzeba)',
-                  prefixIcon: Icon(Icons.place_outlined),
+                decoration: InputDecoration(
+                  labelText: t('Gdzie (nie trzeba)'),
+                  prefixIcon: const Icon(Icons.place_outlined),
                 ),
               ),
-              const ZenSection('Kto zobaczy', top: 4),
+              ZenSection(t('Kto zobaczy'), top: 4),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -774,11 +792,12 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
               const SizedBox(height: 6),
               Text(
                 switch (reach) {
-                  PlanReach.close => 'Tylko przyjaciele.',
-                  PlanReach.friends => 'Wszyscy Twoi znajomi.',
-                  PlanReach.friendsOfFriends =>
+                  PlanReach.close => t('Tylko przyjaciele.'),
+                  PlanReach.friends => t('Wszyscy Twoi znajomi.'),
+                  PlanReach.friendsOfFriends => t(
                     'Znajomi i ich znajomi. Każdy zobaczy, kto przez kogo '
-                        'dołącza.',
+                    'dołącza.',
+                  ),
                 },
                 style: TextStyle(
                   color: zen.textSecondary,
@@ -786,7 +805,7 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
                   height: 1.35,
                 ),
               ),
-              const ZenSection('Ilu chętnych do wydarzenia'),
+              ZenSection(t('Ilu chętnych do wydarzenia')),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -810,7 +829,7 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
                 ),
                 onPressed: ready ? () => unawaited(create()) : null,
                 icon: const Icon(Icons.send_rounded),
-                label: const Text('Zapytaj, kto chętny'),
+                label: Text(t('Zapytaj, kto chętny')),
               ),
             ],
           ),

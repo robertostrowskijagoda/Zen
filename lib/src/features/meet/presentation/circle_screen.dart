@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
@@ -35,7 +36,7 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
 
   Future<void> _create() async {
     final SocialHubState social = ref.read(socialHubControllerProvider);
-    final TextEditingController name = TextEditingController(text: 'Obiady');
+    final TextEditingController name = TextEditingController(text: t('Obiady'));
     final Set<String> chosen = <String>{};
     DateTime first = DateTime.now().add(const Duration(days: 7));
     TimeOfDay time = const TimeOfDay(hour: 19, minute: 0);
@@ -45,7 +46,7 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
         builder: (BuildContext context, StateSetter set) {
           final ZenColors zen = ZenColors.of(context);
           return AlertDialog(
-            title: const Text('Nowe kółko obiadowe'),
+            title: Text(t('Nowe kółko obiadowe')),
             content: SizedBox(
               width: 380,
               child: ListView(
@@ -54,10 +55,10 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                   TextField(
                     controller: name,
                     textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      labelText: 'Nazwa',
-                      hintText: 'np. Obiady czwartkowe',
-                      prefixIcon: Icon(Icons.soup_kitchen_rounded),
+                    decoration: InputDecoration(
+                      labelText: t('Nazwa'),
+                      hintText: t('np. Obiady czwartkowe'),
+                      prefixIcon: const Icon(Icons.soup_kitchen_rounded),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -96,7 +97,17 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: <Widget>[
                               Text(
-                                'Pierwszy obiad: ${eventDate(DateTime(first.year, first.month, first.day, time.hour, time.minute).millisecondsSinceEpoch)}',
+                                t('Pierwszy obiad: {date}', {
+                                  'date': eventDate(
+                                    DateTime(
+                                      first.year,
+                                      first.month,
+                                      first.day,
+                                      time.hour,
+                                      time.minute,
+                                    ).millisecondsSinceEpoch,
+                                  ),
+                                }),
                                 style: TextStyle(
                                   color: zen.textPrimary,
                                   fontWeight: FontWeight.w700,
@@ -105,7 +116,7 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                'Potem co tydzień, w ten sam dzień.',
+                                t('Potem co tydzień, w ten sam dzień.'),
                                 style: TextStyle(
                                   color: zen.textSecondary,
                                   fontSize: 12.5,
@@ -120,7 +131,7 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(4, 14, 0, 4),
                     child: Text(
-                      'KTO (4–8 OSÓB LUB PAR)',
+                      t('KTO (4–8 OSÓB LUB PAR)'),
                       style: zen.label(color: zen.textMuted),
                     ),
                   ),
@@ -128,7 +139,7 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                     Padding(
                       padding: const EdgeInsets.all(8),
                       child: Text(
-                        'Najpierw dodaj znajomych.',
+                        t('Najpierw dodaj znajomych.'),
                         style: TextStyle(
                           color: zen.textSecondary,
                           fontSize: 13.5,
@@ -158,11 +169,11 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
             actions: <Widget>[
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Anuluj'),
+                child: Text(t('Anuluj')),
               ),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Utwórz'),
+                child: Text(t('Utwórz')),
               ),
             ],
           );
@@ -177,7 +188,7 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
     final DinnerCircle c = await ref
         .read(circleServiceProvider)
         .create(
-          name: n.isEmpty ? 'Obiady' : n,
+          name: n.isEmpty ? t('Obiady') : n,
           friends: chosen.toList(),
           weekday: first.weekday,
           hour: time.hour,
@@ -194,11 +205,11 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
     final ZenColors zen = ZenColors.of(context);
     return Scaffold(
       key: const Key('circles-screen'),
-      appBar: AppBar(title: const Text('Kółka obiadowe')),
+      appBar: AppBar(title: Text(t('Kółka obiadowe'))),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => unawaited(_create()),
         icon: const Icon(Icons.add_rounded),
-        label: const Text('Nowe kółko'),
+        label: Text(t('Nowe kółko')),
       ),
       body: ListenableBuilder(
         listenable: circles,
@@ -207,28 +218,29 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
             children: <Widget>[
               ZenHero(
-                title: 'Gotujecie na zmianę',
+                title: t('Gotujecie na zmianę'),
                 icon: Icons.soup_kitchen_rounded,
                 tone: zenTone(zen, 3),
-                text:
-                    'Kółko to kilka osób, które na zmianę gotują dla siebie — '
-                    'np. „Obiady czwartkowe”. Zen układa kolejkę, przypomina, kto '
-                    'gotuje, zbiera alergie i listę, kto co przynosi.',
+                text: t(
+                  'Kółko to kilka osób, które na zmianę gotują dla siebie — '
+                  'np. „Obiady czwartkowe”. Zen układa kolejkę, przypomina, '
+                  'kto gotuje, zbiera alergie i listę, kto co przynosi.',
+                ),
               ),
               if (circles.circles.isEmpty)
                 ZenEmpty(
                   icon: Icons.ramen_dining_rounded,
                   tone: zenTone(zen, 3),
-                  title: 'Nie masz jeszcze kółka',
-                  text: 'Zaproś 4–8 znajomych i ustalcie dzień tygodnia.',
+                  title: t('Nie masz jeszcze kółka'),
+                  text: t('Zaproś 4–8 znajomych i ustalcie dzień tygodnia.'),
                   action: FilledButton.icon(
                     onPressed: () => unawaited(_create()),
                     icon: const Icon(Icons.add_rounded),
-                    label: const Text('Załóż kółko'),
+                    label: Text(t('Załóż kółko')),
                   ),
                 )
               else ...<Widget>[
-                const ZenSection('Twoje kółka'),
+                ZenSection(t('Twoje kółka')),
                 for (final DinnerCircle c in circles.circles)
                   ZenTile(
                     icon: Icons.soup_kitchen_rounded,
@@ -241,11 +253,24 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                       );
                       return s.isEmpty
                           ? ''
-                          : '${eventDate(s.first.$1.millisecondsSinceEpoch)} · gotuje '
-                                '${PeerShareCodec.addressesEqual(s.first.$2.address, ref.read(eventServiceProvider).host.ownAddress()) ? 'Ty' : s.first.$2.name}';
+                          : t('{date} · gotuje {name}', {
+                              'date': eventDate(
+                                s.first.$1.millisecondsSinceEpoch,
+                              ),
+                              'name':
+                                  PeerShareCodec.addressesEqual(
+                                    s.first.$2.address,
+                                    ref
+                                        .read(eventServiceProvider)
+                                        .host
+                                        .ownAddress(),
+                                  )
+                                  ? t('Ty')
+                                  : s.first.$2.name,
+                            });
                     }(),
                     badge: circles.swapRequests[c.id] != null
-                        ? 'zamiana'
+                        ? t('zamiana')
                         : null,
                     onTap: () => unawaited(CircleScreen.open(context, c.id)),
                   ),
@@ -289,11 +314,11 @@ class CircleScreen extends ConsumerWidget {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(c.text),
-            child: const Text('Zapisz'),
+            child: Text(t('Zapisz')),
           ),
         ],
       ),
@@ -318,7 +343,7 @@ class CircleScreen extends ConsumerWidget {
     final Object? picked = await showDialog<Object>(
       context: context,
       builder: (BuildContext context) => SimpleDialog(
-        title: const Text('Kogo przyprowadzisz?'),
+        title: Text(t('Kogo przyprowadzisz?')),
         children: <Widget>[
           for (final FriendProfile f in friends)
             SimpleDialogOption(
@@ -332,7 +357,7 @@ class CircleScreen extends ConsumerWidget {
           SimpleDialogOption(
             key: const Key('circle-guest-other'),
             onPressed: () => Navigator.of(context).pop('other'),
-            child: const Text('Ktoś inny — wpiszę imię'),
+            child: Text(t('Ktoś inny — wpiszę imię')),
           ),
         ],
       ),
@@ -346,7 +371,7 @@ class CircleScreen extends ConsumerWidget {
       name = social.nameFor(picked);
       address = picked.address;
     } else {
-      name = await _ask(context, 'Imię osoby, którą przyprowadzisz');
+      name = await _ask(context, t('Imię osoby, którą przyprowadzisz'));
     }
     if (name == null || name.trim().isEmpty) {
       return;
@@ -360,9 +385,13 @@ class CircleScreen extends ConsumerWidget {
           content: Text(
             ok
                 ? address != null
-                      ? 'Zapisane. $name dostanie zaproszenie.'
-                      : 'Zapisane — reszta kółka wie, że przyjdzie $name.'
-                : 'W tym miesiącu już kogoś przyprowadzasz.',
+                      ? t('Zapisane. {name} dostanie zaproszenie.', {
+                          'name': name,
+                        })
+                      : t('Zapisane — reszta kółka wie, że przyjdzie {name}.', {
+                          'name': name,
+                        })
+                : t('W tym miesiącu już kogoś przyprowadzasz.'),
           ),
         ),
       );
@@ -381,10 +410,10 @@ class CircleScreen extends ConsumerWidget {
         if (c == null) {
           return Scaffold(
             appBar: AppBar(),
-            body: const Center(
+            body: Center(
               child: ZenEmpty(
                 icon: Icons.no_meals_rounded,
-                title: 'Nie ma tego kółka.',
+                title: t('Nie ma tego kółka.'),
               ),
             ),
           );
@@ -406,7 +435,7 @@ class CircleScreen extends ConsumerWidget {
                 .where((CircleMember m) => m.address == a)
                 .firstOrNull
                 ?.name ??
-            'ktoś';
+            t('ktoś');
         return Scaffold(
           appBar: AppBar(title: Text(c.name)),
           body: ListView(
@@ -424,7 +453,9 @@ class CircleScreen extends ConsumerWidget {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              '${nameOf(circles.swapRequests[c.id]!)} chce zamienić się kolejką',
+                              t('{name} chce zamienić się kolejką', {
+                                'name': nameOf(circles.swapRequests[c.id]!),
+                              }),
                               style: TextStyle(
                                 color: zen.textPrimary,
                                 fontWeight: FontWeight.w700,
@@ -442,11 +473,11 @@ class CircleScreen extends ConsumerWidget {
                           FilledButton(
                             onPressed: () =>
                                 unawaited(circles.acceptSwap(c.id)),
-                            child: const Text('Zgoda'),
+                            child: Text(t('Zgoda')),
                           ),
                           OutlinedButton(
                             onPressed: () => circles.declineSwap(c.id),
-                            child: const Text('Nie'),
+                            child: Text(t('Nie')),
                           ),
                         ],
                       ),
@@ -454,13 +485,13 @@ class CircleScreen extends ConsumerWidget {
                   ),
                 ),
               ZenSection(
-                'Kolejka',
+                t('Kolejka'),
                 top: circles.swapRequests[c.id] != null ? 20 : 4,
               ),
               if (schedule.isEmpty)
                 ZenCard(
                   child: Text(
-                    'Brak zaplanowanych obiadów.',
+                    t('Brak zaplanowanych obiadów.'),
                     style: TextStyle(color: zen.textSecondary),
                   ),
                 )
@@ -480,7 +511,7 @@ class CircleScreen extends ConsumerWidget {
                         _ScheduleRow(
                           at: schedule[i].$1,
                           cook: schedule[i].$2.address == me
-                              ? 'Ty'
+                              ? t('Ty')
                               : schedule[i].$2.name,
                           mine: schedule[i].$2.address == me,
                           first: i == 0,
@@ -497,12 +528,14 @@ class CircleScreen extends ConsumerWidget {
                 ),
               if (next != null) ...<Widget>[
                 ZenSection(
-                  'Kto co przynosi · ${eventDate(next.millisecondsSinceEpoch)}',
-                  action: 'Dodaj',
+                  t('Kto co przynosi · {date}', {
+                    'date': eventDate(next.millisecondsSinceEpoch),
+                  }),
+                  action: t('Dodaj'),
                   onAction: () async {
                     final String? item = await _ask(
                       context,
-                      'Co trzeba przynieść?',
+                      t('Co trzeba przynieść?'),
                     );
                     if (item != null) {
                       await circles.addItem(c.id, next, item);
@@ -513,9 +546,10 @@ class CircleScreen extends ConsumerWidget {
                   ZenInfo(
                     icon: Icons.shopping_basket_rounded,
                     tone: tone,
-                    text:
-                        'Lista jest pusta. Dodaj, co trzeba przynieść — '
-                        'np. deser, wino, chleb.',
+                    text: t(
+                      'Lista jest pusta. Dodaj, co trzeba przynieść — '
+                      'np. deser, wino, chleb.',
+                    ),
                   )
                 else
                   ZenGroup(
@@ -526,9 +560,9 @@ class CircleScreen extends ConsumerWidget {
                           title: Text(i.key),
                           subtitle: Text(
                             i.value.isEmpty
-                                ? 'nikt jeszcze'
+                                ? t('nikt jeszcze')
                                 : i.value == me
-                                ? 'Ty'
+                                ? t('Ty')
                                 : nameOf(i.value),
                           ),
                           onChanged: i.value.isEmpty || i.value == me
@@ -540,16 +574,18 @@ class CircleScreen extends ConsumerWidget {
                     ],
                   ),
               ],
-              const ZenSection('Kółko otwarte'),
+              ZenSection(t('Kółko otwarte')),
               ZenGroup(
                 children: <Widget>[
                   SwitchListTile(
                     key: const Key('circle-open'),
                     value: c.open,
-                    title: const Text('Raz w miesiącu +1'),
-                    subtitle: const Text(
-                      'Każdy może raz w miesiącu przyprowadzić jedną osobę '
-                      'spoza kółka — tak poznajecie nowych ludzi.',
+                    title: Text(t('Raz w miesiącu +1')),
+                    subtitle: Text(
+                      t(
+                        'Każdy może raz w miesiącu przyprowadzić jedną osobę '
+                        'spoza kółka — tak poznajecie nowych ludzi.',
+                      ),
                     ),
                     onChanged: (bool v) => unawaited(circles.setOpen(c.id, v)),
                   ),
@@ -562,9 +598,10 @@ class CircleScreen extends ConsumerWidget {
                     icon: Icons.person_add_alt_1_rounded,
                     tone: tone,
                     title: g.name,
-                    subtitle:
-                        'Gość na ${eventDate(next.millisecondsSinceEpoch)} · '
-                        'przyprowadza ${by == me ? 'Ty' : nameOf(by)}',
+                    subtitle: t('Gość na {date} · przyprowadza {name}', {
+                      'date': eventDate(next.millisecondsSinceEpoch),
+                      'name': by == me ? t('Ty') : nameOf(by),
+                    }),
                   ),
                 if (myGuest != null)
                   ZenCard(
@@ -579,8 +616,16 @@ class CircleScreen extends ConsumerWidget {
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'W tym miesiącu przyprowadzasz: ${myGuest.name} '
-                            '(${myGuest.day.split('-').reversed.join('.')})',
+                            t(
+                              'W tym miesiącu przyprowadzasz: {name} ({date})',
+                              {
+                                'name': myGuest.name,
+                                'date': myGuest.day
+                                    .split('-')
+                                    .reversed
+                                    .join('.'),
+                              },
+                            ),
                             style: TextStyle(
                               color: zen.textPrimary,
                               fontSize: 14,
@@ -591,7 +636,7 @@ class CircleScreen extends ConsumerWidget {
                         TextButton(
                           onPressed: () =>
                               unawaited(circles.cancelGuest(c.id, next)),
-                          child: const Text('Odwołaj'),
+                          child: Text(t('Odwołaj')),
                         ),
                       ],
                     ),
@@ -607,7 +652,9 @@ class CircleScreen extends ConsumerWidget {
                             unawaited(_bringGuest(context, ref, c, next)),
                         icon: const Icon(Icons.person_add_alt_1_rounded),
                         label: Text(
-                          'Przyprowadzę kogoś · ${eventDate(next.millisecondsSinceEpoch)}',
+                          t('Przyprowadzę kogoś · {date}', {
+                            'date': eventDate(next.millisecondsSinceEpoch),
+                          }),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -615,7 +662,7 @@ class CircleScreen extends ConsumerWidget {
                     ),
                   ),
               ],
-              const ZenSection('Preferencje i alergie'),
+              ZenSection(t('Preferencje i alergie')),
               ZenGroup(
                 children: <Widget>[
                   for (final CircleMember m in c.members)
@@ -624,28 +671,28 @@ class CircleScreen extends ConsumerWidget {
                         backgroundColor: tone.withValues(alpha: 0.18),
                         foregroundColor: tone,
                         child: Text(
-                          _initial(m.address == me ? 'Ty' : m.name),
+                          _initial(m.address == me ? t('Ty') : m.name),
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                       ),
                       title: Text(
-                        m.address == me ? 'Ty' : m.name,
+                        m.address == me ? t('Ty') : m.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       subtitle: Text(c.prefs[m.address] ?? '—'),
                       trailing: m.address == me
                           ? IconButton(
-                              tooltip: 'Edytuj',
+                              tooltip: t('Edytuj'),
                               icon: const Icon(Icons.edit_rounded),
                               onPressed: () async {
-                                final String? t = await _ask(
+                                final String? prefs = await _ask(
                                   context,
-                                  'Twoje preferencje i alergie',
+                                  t('Twoje preferencje i alergie'),
                                   initial: c.prefs[me] ?? '',
                                 );
-                                if (t != null) {
-                                  await circles.setMyPrefs(c.id, t);
+                                if (prefs != null) {
+                                  await circles.setMyPrefs(c.id, prefs);
                                 }
                               },
                             )
@@ -713,7 +760,7 @@ class _ScheduleRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'gotuje $cook',
+                  t('gotuje {name}', {'name': cook}),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -732,7 +779,7 @@ class _ScheduleRow extends StatelessWidget {
                 minimumSize: const Size(0, 36),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
               ),
-              child: const Text('Zamień'),
+              child: Text(t('Zamień')),
             ),
         ],
       ),

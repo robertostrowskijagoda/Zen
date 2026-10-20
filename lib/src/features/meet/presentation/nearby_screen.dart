@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
@@ -114,15 +115,16 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
     final String? message = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text('Napisz do: ${person.pseudonym}'),
+        title: Text(t('Napisz do: {name}', {'name': person.pseudonym})),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            const ZenInfo(
+            ZenInfo(
               icon: Icons.privacy_tip_outlined,
-              text:
-                  'Dostanie Twój pseudonim i tę wiadomość — nie Twoje konto. '
-                  'Możesz napisać jedną wiadomość, dopóki nie odpowie.',
+              text: t(
+                'Dostanie Twój pseudonim i tę wiadomość — nie Twoje konto. '
+                'Możesz napisać jedną wiadomość, dopóki nie odpowie.',
+              ),
             ),
             const SizedBox(height: 8),
             TextField(
@@ -134,9 +136,9 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
               maxLines: 4,
               textCapitalization: TextCapitalization.sentences,
               enableIMEPersonalizedLearning: false,
-              decoration: const InputDecoration(
-                labelText: 'Wiadomość',
-                hintText: 'np. Cześć! Też tu jesteś?',
+              decoration: InputDecoration(
+                labelText: t('Wiadomość'),
+                hintText: t('np. Cześć! Też tu jesteś?'),
               ),
             ),
           ],
@@ -144,11 +146,11 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(text.text),
-            child: const Text('Wyślij'),
+            child: Text(t('Wyślij')),
           ),
         ],
       ),
@@ -163,8 +165,8 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
     }
     if (s == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Nie udało się — ta osoba mogła się oddalić.'),
+        SnackBar(
+          content: Text(t('Nie udało się — ta osoba mogła się oddalić.')),
         ),
       );
       return;
@@ -179,7 +181,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
     final Color tone = zenTone(zen, 0);
     return Scaffold(
       key: const Key('nearby-screen'),
-      appBar: const ZenSectionBar(title: 'Osoby w pobliżu'),
+      appBar: ZenSectionBar(title: t('Osoby w pobliżu')),
       body: ListenableBuilder(
         listenable: _nearby,
         builder: (BuildContext context, Widget? _) {
@@ -189,10 +191,11 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                 child: ZenEmpty(
                   icon: Icons.phone_android_rounded,
                   tone: tone,
-                  title: 'Tylko na Androidzie',
-                  text:
-                      'Osoby w pobliżu działają na telefonie z Androidem (Bluetooth). '
-                      'Na iPhonie i na komputerze ich nie ma.',
+                  title: t('Tylko na Androidzie'),
+                  text: t(
+                    'Osoby w pobliżu działają na telefonie z Androidem '
+                    '(Bluetooth). Na iPhonie i na komputerze ich nie ma.',
+                  ),
                 ),
               ),
             );
@@ -206,8 +209,8 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                 child: ZenEmpty(
                   icon: Icons.bluetooth_disabled_rounded,
                   tone: zen.warning,
-                  title: 'Brak Bluetooth LE',
-                  text: 'Ten telefon nie ma Bluetooth LE.',
+                  title: t('Brak Bluetooth LE'),
+                  text: t('Ten telefon nie ma Bluetooth LE.'),
                 ),
               ),
             );
@@ -218,12 +221,14 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
             children: <Widget>[
               ZenHero(
-                title: 'Ludzie obok Ciebie',
+                title: t('Ludzie obok Ciebie'),
                 icon: Icons.radar_rounded,
                 tone: tone,
-                text:
-                    'Zobacz, kto z Zen jest teraz blisko — znajomych z imieniem, '
-                    'resztę pod pseudonimem. Możesz napisać jedną wiadomość na start.',
+                text: t(
+                  'Zobacz, kto z Zen jest teraz blisko — znajomych z imieniem, '
+                  'resztę pod pseudonimem. Możesz napisać jedną wiadomość na '
+                  'start.',
+                ),
               ),
               if (_state['permitted'] != true)
                 ZenCard(
@@ -245,7 +250,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: <Widget>[
                                 Text(
-                                  'Zezwól na Bluetooth',
+                                  t('Zezwól na Bluetooth'),
                                   style: TextStyle(
                                     color: zen.textPrimary,
                                     fontWeight: FontWeight.w700,
@@ -254,8 +259,11 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                                 ),
                                 const SizedBox(height: 3),
                                 Text(
-                                  'Żeby widzieć ludzi obok i być widocznym. Zen nie używa '
-                                  'tego do ustalania, gdzie jesteś.',
+                                  t(
+                                    'Żeby widzieć ludzi obok i być widocznym. '
+                                    'Zen nie używa tego do ustalania, gdzie '
+                                    'jesteś.',
+                                  ),
                                   style: TextStyle(
                                     color: zen.textSecondary,
                                     fontSize: 13.5,
@@ -272,7 +280,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                         key: const Key('nearby-allow'),
                         onPressed: () => unawaited(_allow()),
                         icon: const Icon(Icons.check_rounded),
-                        label: const Text('Zezwól'),
+                        label: Text(t('Zezwól')),
                       ),
                     ],
                   ),
@@ -290,7 +298,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Włącz Bluetooth',
+                          t('Włącz Bluetooth'),
                           style: TextStyle(
                             color: zen.textPrimary,
                             fontWeight: FontWeight.w700,
@@ -302,7 +310,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                       FilledButton.tonal(
                         key: const Key('nearby-enable-bluetooth'),
                         onPressed: () => unawaited(_enableBluetooth()),
-                        child: const Text('Włącz'),
+                        child: Text(t('Włącz')),
                       ),
                     ],
                   ),
@@ -313,12 +321,15 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                   SwitchListTile(
                     key: const Key('nearby-visible'),
                     value: meet.book.nearbyVisible,
-                    title: const Text('Widoczny(-a) w pobliżu'),
+                    title: Text(t('Widoczny(-a) w pobliżu')),
                     subtitle: Text(
-                      'Znajomi widzą Cię z imieniem, inni jako „${_nearby.myPseudonym}” '
-                      '(zmienia się co 15 minut, więc nikt Cię nie wyśledzi). '
-                      'Telefon nadaje oszczędnie cały czas, także przy '
-                      'zamkniętym Zen.',
+                      t(
+                        'Znajomi widzą Cię z imieniem, inni jako „{name}” '
+                        '(zmienia się co 15 minut, więc nikt Cię nie wyśledzi). '
+                        'Telefon nadaje oszczędnie cały czas, także przy '
+                        'zamkniętym Zen.',
+                        {'name': _nearby.myPseudonym},
+                      ),
                     ),
                     onChanged: (bool v) => unawaited(_setVisible(v)),
                   ),
@@ -328,12 +339,14 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                     builder: (BuildContext context, Widget? _) => SwitchListTile(
                       key: const Key('nearby-background-scan'),
                       value: meet.book.nearbyBackgroundScan,
-                      title: const Text('Rozglądaj się też w tle'),
-                      subtitle: const Text(
-                        'Co 5 minut telefon na 10 sekund oszczędnie sprawdza, '
-                        'czy obok są znajomi, i zaznacza ich jako „spotkanych '
-                        'osobiście”. Działa też przy zamkniętym Zen. Pełne '
-                        'szukanie tylko na tym ekranie.',
+                      title: Text(t('Rozglądaj się też w tle')),
+                      subtitle: Text(
+                        t(
+                          'Co 5 minut telefon na 10 sekund oszczędnie sprawdza, '
+                          'czy obok są znajomi, i zaznacza ich jako „spotkanych '
+                          'osobiście”. Działa też przy zamkniętym Zen. Pełne '
+                          'szukanie tylko na tym ekranie.',
+                        ),
                       ),
                       onChanged: (bool v) =>
                           unawaited(meet.setNearbyBackgroundScan(v)),
@@ -347,19 +360,19 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                   children: <Widget>[
                     Expanded(
                       child: Text(
-                        'W POBLIŻU',
+                        t('W POBLIŻU'),
                         style: zen.label(color: zen.textMuted),
                       ),
                     ),
                     if (_nearby.scanning)
                       ZenPill(
-                        text: 'Szukam',
+                        text: t('Szukam'),
                         tone: zen.success,
                         icon: Icons.radar_rounded,
                       )
                     else
                       ZenPill(
-                        text: 'Nie szukam',
+                        text: t('Nie szukam'),
                         tone: zen.textMuted,
                         icon: Icons.pause_rounded,
                       ),
@@ -373,16 +386,16 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                       : Icons.bluetooth_searching_rounded,
                   tone: tone,
                   title: _nearby.scanning
-                      ? 'Nikogo jeszcze nie widać'
-                      : 'Nie szukam',
+                      ? t('Nikogo jeszcze nie widać')
+                      : t('Nie szukam'),
                   text: _nearby.scanning
-                      ? 'Szukam… Nikogo z Zen jeszcze nie widać.'
-                      : 'Nie szukam (brak Bluetooth albo zgody).',
+                      ? t('Szukam… Nikogo z Zen jeszcze nie widać.')
+                      : t('Nie szukam (brak Bluetooth albo zgody).'),
                 ),
               for (final NearbyPerson p in people)
                 _personTile(meet, p, zen, tone),
               if (sessions.isNotEmpty) ...<Widget>[
-                const ZenSection('Rozmowy z pobliża'),
+                ZenSection(t('Rozmowy z pobliża')),
                 for (final NearbySession s in sessions)
                   ZenTile(
                     icon: Icons.forum_rounded,
@@ -414,8 +427,11 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
         icon: Icons.person_pin_circle_rounded,
         tone: zen.success,
         title: meet.host.nameOf(friend),
-        subtitle:
-            '${nearbyDistance(p.rssi)}${met ? ' · spotkani osobiście' : ''}',
+        subtitle: met
+            ? t('{distance} · spotkani osobiście', {
+                'distance': nearbyDistance(p.rssi),
+              })
+            : nearbyDistance(p.rssi),
         trailing: met ? Icon(Icons.verified_rounded, color: zen.success) : null,
       );
     }
@@ -430,7 +446,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
           minimumSize: const Size(0, 38),
           padding: const EdgeInsets.symmetric(horizontal: 14),
         ),
-        child: const Text('Napisz'),
+        child: Text(t('Napisz')),
       ),
     );
   }
@@ -473,9 +489,12 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
     await ref.read(meetServiceProvider).markMet(address);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Wysłano zaproszenie. Po przyjęciu będziecie „spotkani osobiście”.',
+            t(
+              'Wysłano zaproszenie. Po przyjęciu będziecie „spotkani '
+              'osobiście”.',
+            ),
           ),
         ),
       );
@@ -493,10 +512,10 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
         if (s == null) {
           return Scaffold(
             appBar: AppBar(),
-            body: const Center(
+            body: Center(
               child: ZenEmpty(
                 icon: Icons.forum_outlined,
-                title: 'Rozmowa zamknięta.',
+                title: t('Rozmowa zamknięta.'),
               ),
             ),
           );
@@ -516,13 +535,13 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
                 },
                 itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
                   if (s.address != null)
-                    const PopupMenuItem<String>(
+                    PopupMenuItem<String>(
                       value: 'invite',
-                      child: Text('Zaproś do znajomych'),
+                      child: Text(t('Zaproś do znajomych')),
                     ),
-                  const PopupMenuItem<String>(
+                  PopupMenuItem<String>(
                     value: 'block',
-                    child: Text('Zablokuj'),
+                    child: Text(t('Zablokuj')),
                   ),
                 ],
               ),
@@ -584,14 +603,14 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
                           textCapitalization: TextCapitalization.sentences,
                           decoration: InputDecoration(
                             hintText: s.canSend
-                                ? 'Napisz…'
-                                : 'Poczekaj na odpowiedź',
+                                ? t('Napisz…')
+                                : t('Poczekaj na odpowiedź'),
                           ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       IconButton.filled(
-                        tooltip: 'Wyślij',
+                        tooltip: t('Wyślij'),
                         icon: const Icon(Icons.send_rounded),
                         onPressed: s.canSend
                             ? () async {

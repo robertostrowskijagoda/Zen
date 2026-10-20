@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 
 /// Where tool/go_licenses.dart puts the licenses of the Go modules compiled
@@ -96,10 +97,13 @@ Stream<LicenseEntry> _goModuleEntries(AssetBundle assets) async* {
     if (text == null) {
       continue;
     }
+    final String sourceLine = t('Kod źródłowy: {source}', <String, Object?>{
+      'source': entry.source,
+    });
     yield LicenseEntryWithLineBreaks(
       <String>[entry.module],
       '${entry.module} ${entry.version}\n\n'
-      'Kod źródłowy: ${entry.source}\n\n'
+      '$sourceLine\n\n'
       '$text',
     );
   }

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
@@ -145,7 +146,7 @@ final class LogEntry {
       'sig': b64(sig),
     });
     if (entry == null) {
-      throw ArgumentError('Nieprawidłowy wpis (za duży lub błędne pola).');
+      throw ArgumentError(t('Nieprawidłowy wpis (za duży lub błędne pola).'));
     }
     return entry;
   }

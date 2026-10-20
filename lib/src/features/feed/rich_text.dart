@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 
 /// Formatting in posts, Discord-style (§24): plain text with markers, so a
 /// post stays readable anywhere and nothing executes.
@@ -380,7 +381,7 @@ String plainText(String source) {
   for (final RichBlock b in parseBlocks(source)) {
     switch (b.type) {
       case RichBlockType.media:
-        parts.add('[zdjęcie]');
+        parts.add(t('[zdjęcie]'));
       case RichBlockType.code:
         parts.add(b.text);
       case _:

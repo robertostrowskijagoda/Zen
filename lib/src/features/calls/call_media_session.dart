@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/features/calls/call_media_devices.dart';
@@ -110,7 +111,7 @@ abstract class CallMediaSessionController extends ChangeNotifier {
       const <ScreenShareSource>[];
 
   Future<void> startScreenShare({String? sourceId}) async {
-    throw UnsupportedError('Udostępnianie ekranu nie jest tu dostępne.');
+    throw UnsupportedError(t('Udostępnianie ekranu nie jest tu dostępne.'));
   }
 
   Future<void> stopScreenShare() async {}
@@ -130,7 +131,7 @@ abstract class CallMediaSessionController extends ChangeNotifier {
   /// Starts recording the call into [path] and tells the other side.
   /// [label] names the recording (who the call is with).
   Future<void> startRecording(String path, {String label = ''}) async {
-    throw UnsupportedError('Nagrywanie nie jest tu dostępne.');
+    throw UnsupportedError(t('Nagrywanie nie jest tu dostępne.'));
   }
 
   /// Stops recording; returns the file path, or null when nothing ran.
@@ -211,7 +212,7 @@ final class WebRtcCallMediaSessionController
   Future<void> startRecording(String path, {String label = ''}) async {
     if (!canRecord) {
       throw UnsupportedError(
-        'Nagrywanie rozmów nie jest jeszcze dostępne na tym urządzeniu.',
+        t('Nagrywanie rozmów nie jest jeszcze dostępne na tym urządzeniu.'),
       );
     }
     if (_peerConnection == null || _recordingPath != null) {
@@ -365,7 +366,7 @@ final class WebRtcCallMediaSessionController
     final RTCPeerConnection? connection = _peerConnection;
     final MediaStream? localStream = _localStream;
     if (connection == null || localStream == null) {
-      throw StateError('Brak aktywnej rozmowy do udostępnienia ekranu.');
+      throw StateError(t('Brak aktywnej rozmowy do udostępnienia ekranu.'));
     }
     if (_screenStream != null) {
       return;
@@ -376,7 +377,7 @@ final class WebRtcCallMediaSessionController
       // before capture starts.
       final bool allowed = await Helper.requestCapturePermission();
       if (!allowed) {
-        throw StateError('Nie zezwolono na udostępnienie ekranu.');
+        throw StateError(t('Nie zezwolono na udostępnienie ekranu.'));
       }
       androidScreenCaptureActive.value = true;
       await androidPrepareScreenCapture?.call();
@@ -402,7 +403,7 @@ final class WebRtcCallMediaSessionController
     if (tracks.isEmpty) {
       await _disposeStream(screen);
       androidScreenCaptureActive.value = false;
-      throw StateError('Nie udało się przechwycić ekranu.');
+      throw StateError(t('Nie udało się przechwycić ekranu.'));
     }
     final MediaStreamTrack track = tracks.first;
     // Stopped from the system UI ("Zatrzymaj udostępnianie").
@@ -763,7 +764,7 @@ final class WebRtcCallMediaSessionController
   }) async {
     final RTCPeerConnection? connection = _peerConnection;
     if (connection == null) {
-      throw StateError('Brak aktywnej sesji do renegocjacji rozmowy.');
+      throw StateError(t('Brak aktywnej sesji do renegocjacji rozmowy.'));
     }
     try {
       await _setRemoteDescriptionPinned(remoteDescription);
@@ -846,7 +847,7 @@ final class WebRtcCallMediaSessionController
     final RTCPeerConnection? connection = _peerConnection;
     final MediaStream? localStream = _localStream;
     if (connection == null || localStream == null) {
-      throw StateError('Brak aktywnej rozmowy do sterowania kamera.');
+      throw StateError(t('Brak aktywnej rozmowy do sterowania kamera.'));
     }
     _localCameraWanted = enabled;
     if (!enabled) {
@@ -1289,7 +1290,7 @@ final class WebRtcCallMediaSessionController
   RTCPeerConnection _requireConnection() {
     final RTCPeerConnection? connection = _peerConnection;
     if (connection == null) {
-      throw StateError('Rozmowa została zamknięta w trakcie zestawiania.');
+      throw StateError(t('Rozmowa została zamknięta w trakcie zestawiania.'));
     }
     return connection;
   }
@@ -1303,7 +1304,7 @@ final class WebRtcCallMediaSessionController
   }) async {
     await close();
     if (_disposed) {
-      throw StateError('Kontroler rozmowy został już zamknięty.');
+      throw StateError(t('Kontroler rozmowy został już zamknięty.'));
     }
     _activeCallId = callId;
     _remoteAddress = remoteAddress;
@@ -1325,7 +1326,9 @@ final class WebRtcCallMediaSessionController
       remoteAddress: remoteAddress,
     );
     if ((_relayPort ?? 0) <= 0) {
-      throw StateError('Nie udało się uruchomić lokalnego relay dla rozmowy.');
+      throw StateError(
+        t('Nie udało się uruchomić lokalnego relay dla rozmowy.'),
+      );
     }
 
     final RTCPeerConnection connection = await createPeerConnection(
@@ -1344,7 +1347,7 @@ final class WebRtcCallMediaSessionController
           stackTrace,
         );
       }
-      throw StateError('Kontroler rozmowy został już zamknięty.');
+      throw StateError(t('Kontroler rozmowy został już zamknięty.'));
     }
     _peerConnection = connection;
     _relayMetadataReady = Completer<void>();
@@ -1587,7 +1590,7 @@ final class WebRtcCallMediaSessionController
       // The call was torn down while the capture prompt was up; releasing the
       // camera/microphone here is the only chance we get.
       await _disposeStream(localStream);
-      throw StateError('Rozmowa została zamknięta w trakcie zestawiania.');
+      throw StateError(t('Rozmowa została zamknięta w trakcie zestawiania.'));
     }
     _localStream = localStream;
     _safeSetRendererSrcObject(_localRenderer, localStream);
@@ -1818,7 +1821,7 @@ final class WebRtcCallMediaSessionController
   Future<void> _sendRenegotiationOffer(CallInviteKind kind) async {
     final RTCPeerConnection? connection = _peerConnection;
     if (connection == null) {
-      throw StateError('Brak aktywnej rozmowy do renegocjacji.');
+      throw StateError(t('Brak aktywnej rozmowy do renegocjacji.'));
     }
     await _pinLocalVideoDirection(sending: _localCameraWanted);
     final RTCSessionDescription offer = await connection.createOffer(
@@ -1871,7 +1874,7 @@ final class WebRtcCallMediaSessionController
     final String? remoteAddress = _remoteAddress;
     final String? callId = _activeCallId;
     if (remoteAddress == null || callId == null) {
-      throw StateError('Brak aktywnej sesji do wysłania sygnału rozmowy.');
+      throw StateError(t('Brak aktywnej sesji do wysłania sygnału rozmowy.'));
     }
     await transport.send(
       remoteAddress: remoteAddress,
@@ -1943,35 +1946,21 @@ final class WebRtcCallMediaSessionController
   ) async {
     final RTCPeerConnection? connection = _peerConnection;
     if (connection == null) {
-      throw StateError('Brak aktywnej sesji WebRTC.');
+      throw StateError(t('Brak aktywnej sesji WebRTC.'));
     }
     final RTCSessionDescription original = _descriptionFromMap(description);
-    final RTCSessionDescription pinned = _pinDescription(original);
-    try {
-      await connection.setRemoteDescription(pinned);
-    } catch (error, stackTrace) {
-      logZenError(
-        'Pinned remote description rejected, falling back',
-        error,
-        stackTrace,
-      );
-      await connection.setRemoteDescription(original);
-    }
+    // Never the peer's original SDP: its candidates carry LAN/public
+    // addresses, and ICE could then route the media around the mesh.
+    await applyRemoteSdpViaLocalRelay(
+      sdp: original.sdp ?? '',
+      type: original.type ?? 'offer',
+      relayPort: _relayPort ?? 0,
+      apply: (String value, String kind) =>
+          connection.setRemoteDescription(RTCSessionDescription(value, kind)),
+    );
     _remoteDescriptionSet = true;
     await _waitForRelayMetadata();
     await _ensureRelayCandidate();
-  }
-
-  RTCSessionDescription _pinDescription(RTCSessionDescription description) {
-    final int port = _relayPort ?? 0;
-    final String sdp = description.sdp ?? '';
-    if (port <= 0 || sdp.isEmpty) {
-      return description;
-    }
-    return RTCSessionDescription(
-      pinWebRtcSdpToLocalRelay(sdp, port),
-      description.type,
-    );
   }
 
   Map<String, dynamic> _descriptionToMap(RTCSessionDescription description) {
@@ -2300,6 +2289,91 @@ String pinWebRtcSdpToLocalRelay(String sdp, int port) {
     }
   }
   return rewritten.join(separator);
+}
+
+/// Removes every ICE candidate from a peer's SDP and blanks its connection
+/// addresses (`c=`, `a=rtcp:`), keeping ports, codecs, ICE credentials and
+/// fingerprints as they are — the shape WebRTC itself produces before it has
+/// gathered any candidate.
+///
+/// The fallback when the platform refuses the [pinWebRtcSdpToLocalRelay]
+/// form: the connection then knows no address of the peer at all, only the
+/// local relay candidates added afterwards, so media cannot leave the
+/// Yggdrasil mesh.
+String stripWebRtcSdpCandidates(String sdp) {
+  if (sdp.isEmpty) {
+    return sdp;
+  }
+  final String separator = sdp.contains('\r\n') ? '\r\n' : '\n';
+  final List<String> lines = sdp.split(RegExp(r'\r?\n'));
+  final List<String> stripped = <String>[];
+  for (final String raw in lines) {
+    final String line = raw.trimRight();
+    if (line.startsWith('a=candidate:') ||
+        line.startsWith('a=end-of-candidates') ||
+        line.startsWith('a=remote-candidates:')) {
+      continue;
+    }
+    if (line.startsWith('c=')) {
+      stripped.add('c=IN IP4 0.0.0.0');
+      continue;
+    }
+    if (line.startsWith('a=rtcp:')) {
+      final String port = line.substring('a=rtcp:'.length).split(' ').first;
+      stripped.add('a=rtcp:$port IN IP4 0.0.0.0');
+      continue;
+    }
+    stripped.add(line);
+  }
+  return stripped.join(separator);
+}
+
+/// Applies a peer's [sdp] so its media can only reach the local Yggdrasil
+/// relay on [relayPort].
+///
+/// First in the [pinWebRtcSdpToLocalRelay] form; when [apply] (the
+/// connection's `setRemoteDescription`) rejects that, once more with every
+/// peer candidate stripped ([stripWebRtcSdpCandidates]). The peer's original
+/// SDP — whose candidates carry its LAN/public addresses, so ICE could pair
+/// them and route the call around the mesh — is never applied: when the
+/// stripped form is refused too, this throws and the caller ends the call.
+Future<void> applyRemoteSdpViaLocalRelay({
+  required String sdp,
+  required String type,
+  required int relayPort,
+  required Future<void> Function(String sdp, String type) apply,
+  String label = 'call',
+}) async {
+  if (relayPort <= 0) {
+    // Pinning to port 0 would hand the original SDP through unchanged.
+    throw StateError(t('Nie udało się uruchomić lokalnego relay dla rozmowy.'));
+  }
+  try {
+    await apply(pinWebRtcSdpToLocalRelay(sdp, relayPort), type);
+    return;
+  } catch (error, stackTrace) {
+    logZenError(
+      'Pinned remote $label SDP ($type) rejected; retrying with the peer '
+      'candidates stripped, never with the original',
+      error,
+      stackTrace,
+    );
+  }
+  try {
+    await apply(stripWebRtcSdpCandidates(sdp), type);
+    logZenWarning(
+      'Remote $label SDP ($type) applied without peer candidates; only the '
+      'local relay candidates remain',
+    );
+  } catch (error, stackTrace) {
+    logZenError(
+      'Remote $label SDP ($type) rejected even without peer candidates; '
+      'ending instead of applying the original',
+      error,
+      stackTrace,
+    );
+    throw StateError(t('Nie udało się zestawić rozmowy przez lokalny relay.'));
+  }
 }
 
 Map<String, dynamic> _offerConstraints() {

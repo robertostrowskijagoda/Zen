@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -29,17 +30,25 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 
 /// What the graph shows. Filters without data in the app stay hidden.
 enum _GraphFilter {
-  all('Wszyscy', Icons.hub_rounded),
-  friends('Znajomi', Icons.people_alt_rounded),
-  far('Znajomi znajomych', Icons.person_search_rounded),
-  pyramid('Z mojej piramidy', kPyramidIcon),
-  status('Ze statusem', Icons.bolt_rounded),
-  nearby('W pobliżu', Icons.bluetooth_searching_rounded);
+  all(Icons.hub_rounded),
+  friends(Icons.people_alt_rounded),
+  far(Icons.person_search_rounded),
+  pyramid(kPyramidIcon),
+  status(Icons.bolt_rounded),
+  nearby(Icons.bluetooth_searching_rounded);
 
-  const _GraphFilter(this.label, this.icon);
+  const _GraphFilter(this.icon);
 
-  final String label;
   final IconData icon;
+
+  String get label => switch (this) {
+    _GraphFilter.all => t('Wszyscy'),
+    _GraphFilter.friends => t('Znajomi'),
+    _GraphFilter.far => t('Znajomi znajomych'),
+    _GraphFilter.pyramid => t('Z mojej piramidy'),
+    _GraphFilter.status => t('Ze statusem'),
+    _GraphFilter.nearby => t('W pobliżu'),
+  };
 }
 
 /// Friends of friends looked through when searching (drawn: far fewer).
@@ -104,7 +113,7 @@ List<GraphNode> buildGraph({
       } else if (fof.length < maxFriendsOfFriends || keep.contains(a)) {
         fof[a] = GraphNode(
           address: a,
-          name: name.isEmpty ? 'ktoś' : name,
+          name: name.isEmpty ? t('ktoś') : name,
           ring: 4,
           via: <String>[friend],
         );
@@ -221,10 +230,10 @@ List<GraphNode> searchGraph(
 }
 
 String _ringLabel(int ring) => switch (ring) {
-  1 => 'Przyjaciel(-ółka)',
-  2 => 'Znajomy(-a)',
-  3 => 'Słaby(-a) znajomy(-a)',
-  _ => 'Znajomy(-a) znajomych',
+  1 => t('Przyjaciel(-ółka)'),
+  2 => t('Znajomy(-a)'),
+  3 => t('Słaby(-a) znajomy(-a)'),
+  _ => t('Znajomy(-a) znajomych'),
 };
 
 /// "Graf" (§16.1): you in the middle, friends around by closeness, friends
@@ -299,7 +308,9 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
     }
     setState(() {});
     _snack(
-      c == null ? 'Nie można teraz poprosić.' : 'Poproszono o listę: $name.',
+      c == null
+          ? t('Nie można teraz poprosić.')
+          : t('Poproszono o listę: {name}.', {'name': name}),
     );
   }
 
@@ -403,7 +414,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                       ),
                     if (meet.book.metAt(n.address) != null)
                       ZenPill(
-                        text: 'spotkani osobiście',
+                        text: t('spotkani osobiście'),
                         tone: zen.success,
                         icon: Icons.verified_rounded,
                       ),
@@ -428,9 +439,9 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                   tone: zenTone(zen, 1),
                   title: mutual.isEmpty
                       ? null
-                      : (far ? 'Znacie się przez' : 'Wspólni znajomi'),
+                      : (far ? t('Znacie się przez') : t('Wspólni znajomi')),
                   text: mutual.isEmpty
-                      ? 'Brak wspólnych znajomych (albo ich nie pokazują).'
+                      ? t('Brak wspólnych znajomych (albo ich nie pokazują).')
                       : mutual.map(meet.host.nameOf).join(', '),
                 ),
               ],
@@ -438,9 +449,9 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                 ZenInfo(
                   icon: Icons.timeline_rounded,
                   tone: zen.accent,
-                  title: 'Najkrótsza droga',
+                  title: t('Najkrótsza droga'),
                   text: <String>[
-                    'Ty',
+                    t('Ty'),
                     for (final String a in path)
                       a == n.address ? n.name : meet.host.nameOf(a),
                   ].join(' → '),
@@ -465,7 +476,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                     );
                   },
                   icon: const Icon(Icons.chat_bubble_outline_rounded),
-                  label: const Text('Napisz'),
+                  label: Text(t('Napisz')),
                 ),
                 if (listMissing) ...<Widget>[
                   const SizedBox(height: 8),
@@ -477,8 +488,8 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                     icon: const Icon(Icons.visibility_rounded),
                     label: Text(
                       listAsked
-                          ? 'Prośba o listę wysłana'
-                          : 'Poproś o listę znajomych',
+                          ? t('Prośba o listę wysłana')
+                          : t('Poproś o listę znajomych'),
                     ),
                   ),
                 ],
@@ -504,8 +515,8 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                   icon: const Icon(Icons.waving_hand_rounded),
                   label: Text(
                     asked
-                        ? 'Prośba o przedstawienie wysłana'
-                        : 'Poproś o przedstawienie',
+                        ? t('Prośba o przedstawienie wysłana')
+                        : t('Poproś o przedstawienie'),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -524,7 +535,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                           ),
                         ),
                         icon: const Icon(Icons.mail_outline_rounded),
-                        label: const Text('Napisz list'),
+                        label: Text(t('Napisz list')),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -540,7 +551,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                           ),
                         ),
                         icon: const Icon(Icons.rate_review_rounded),
-                        label: const Text('Zapytaj o opinię'),
+                        label: Text(t('Zapytaj o opinię')),
                       ),
                     ),
                   ],
@@ -563,7 +574,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
     final LedgerNode? node = ref.watch(ledgerNodeProvider);
     return Scaffold(
       key: const Key('graph-screen'),
-      appBar: const ZenSectionBar(title: 'Graf znajomych'),
+      appBar: ZenSectionBar(title: t('Graf znajomych')),
       body: ListenableBuilder(
         listenable: Listenable.merge(<Listenable>[meet, nearby]),
         builder: (BuildContext context, Widget? _) => _content(
@@ -589,7 +600,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
     required LedgerNode? node,
   }) {
     final ZenColors zen = ZenColors.of(context);
-    final int t = meet.now;
+    final int nowMs = meet.now;
     FriendLevel levelOf(String a) => node?.levelOf(a) ?? FriendLevel.friend;
     final Set<String> near = <String>{
       for (final NearbyPerson p in nearby.people)
@@ -616,7 +627,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
     final List<String> path = selected == null
         ? const <String>[]
         : graphPath(friends: friendOrder, book: meet.book, target: selected);
-    bool hasStatus(GraphNode n) => meet.book.intentOf(n.address, t) != null;
+    bool hasStatus(GraphNode n) => meet.book.intentOf(n.address, nowMs) != null;
     bool shows(_GraphFilter f, GraphNode n) => switch (f) {
       _GraphFilter.all => true,
       _GraphFilter.friends => n.ring < 4,
@@ -703,12 +714,12 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                   onChanged: (_) => setState(() {}),
                   textInputAction: TextInputAction.search,
                   decoration: InputDecoration(
-                    hintText: 'Szukaj w grafie',
+                    hintText: t('Szukaj w grafie'),
                     prefixIcon: const Icon(Icons.search_rounded, size: 20),
                     suffixIcon: query.isEmpty
                         ? null
                         : IconButton(
-                            tooltip: 'Wyczyść',
+                            tooltip: t('Wyczyść'),
                             icon: const Icon(Icons.close_rounded, size: 18),
                             onPressed: () {
                               _search.clear();
@@ -725,7 +736,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                     ? Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Text(
-                          'Nikogo takiego w Twoim grafie.',
+                          t('Nikogo takiego w Twoim grafie.'),
                           style: TextStyle(color: zen.textSecondary),
                         ),
                       )
@@ -744,7 +755,11 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                               title: Text(h.name),
                               subtitle: Text(
                                 h.ring == 4
-                                    ? 'Przez: ${h.via.map(meet.host.nameOf).join(', ')}'
+                                    ? t('Przez: {names}', {
+                                        'names': h.via
+                                            .map(meet.host.nameOf)
+                                            .join(', '),
+                                      })
                                     : _ringLabel(h.ring),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -792,14 +807,15 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: all.isEmpty
-                    ? const Center(
+                    ? Center(
                         child: SingleChildScrollView(
                           child: ZenEmpty(
                             icon: Icons.hub_rounded,
-                            title: 'Tu będzie Twój graf',
-                            text:
-                                'Dodaj znajomych, a pojawią się wokół Ciebie — '
-                                'najbliżsi najbliżej środka.',
+                            title: t('Tu będzie Twój graf'),
+                            text: t(
+                              'Dodaj znajomych, a pojawią się wokół Ciebie — '
+                              'najbliżsi najbliżej środka.',
+                            ),
                           ),
                         ),
                       )
@@ -855,7 +871,10 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
                 child: Text(
-                  'Widać: ${nodes.length} z ${all.length}',
+                  t('Widać: {count} z {total}', {
+                    'count': nodes.length,
+                    'total': all.length,
+                  }),
                   key: const Key('graph-count'),
                   style: TextStyle(color: zen.textSecondary, fontSize: 13),
                 ),
@@ -870,11 +889,11 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                         key: const Key('graph-path'),
                         icon: Icons.timeline_rounded,
                         tone: zen.accent,
-                        title: 'Skąd znasz',
+                        title: t('Skąd znasz'),
                         text: path.isEmpty
-                            ? 'Tej osoby nie ma już na listach znajomych.'
+                            ? t('Tej osoby nie ma już na listach znajomych.')
                             : <String>[
-                                'Ty',
+                                t('Ty'),
                                 for (final String a in path)
                                   _nameOn(a, all, hits, meet),
                               ].join(' → '),
@@ -882,7 +901,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                     ),
                     IconButton(
                       key: const Key('graph-path-clear'),
-                      tooltip: 'Wyczyść',
+                      tooltip: t('Wyczyść'),
                       onPressed: () => setState(() => _selected = null),
                       icon: const Icon(Icons.close_rounded),
                     ),
@@ -898,45 +917,45 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                 children: <Widget>[
                   _LegendDot(
                     color: _intentTone(zen, IntentKind.urgent),
-                    label: 'pilne',
+                    label: t('pilne'),
                   ),
                   _LegendDot(
                     color: _intentTone(zen, IntentKind.talk),
-                    label: 'pogadać',
+                    label: t('pogadać'),
                   ),
                   _LegendDot(
                     color: _intentTone(zen, IntentKind.out),
-                    label: 'wyjść',
+                    label: t('wyjść'),
                   ),
                   _LegendDot(
                     color: _intentTone(zen, IntentKind.help),
-                    label: 'pomoc',
+                    label: t('pomoc'),
                   ),
                   _LegendDot(
                     color: _intentTone(zen, IntentKind.canHelp),
-                    label: 'może pomóc',
+                    label: t('może pomóc'),
                   ),
                   _LegendDot(
                     color: _intentTone(zen, IntentKind.dnd),
-                    label: 'nie przeszkadzać',
+                    label: t('nie przeszkadzać'),
                   ),
                   _LegendDot(
                     color: _intentTone(zen, IntentKind.dating),
-                    label: 'randkuje',
+                    label: t('randkuje'),
                   ),
                   _LegendDot(
                     color: _intentTone(zen, IntentKind.custom),
-                    label: 'własny status',
+                    label: t('własny status'),
                   ),
-                  _LegendDot(color: zen.accent, label: 'znajomi'),
+                  _LegendDot(color: zen.accent, label: t('znajomi')),
                   _LegendDot(
                     color: zen.textMuted,
-                    label: 'znajomi znajomych',
+                    label: t('znajomi znajomych'),
                     small: true,
                   ),
                   _LegendDot(
                     color: zen.textSecondary,
-                    label: 'spotkani',
+                    label: t('spotkani'),
                     ring: true,
                   ),
                 ],
@@ -948,9 +967,10 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                 child: ZenInfo(
                   icon: Icons.info_outline_rounded,
                   tone: zenTone(zen, 1),
-                  text:
-                      'Znajomi znajomych pojawią się, gdy znajomi pokażą Ci swoje '
-                      'listy znajomych.',
+                  text: t(
+                    'Znajomi znajomych pojawią się, gdy znajomi pokażą Ci '
+                    'swoje listy znajomych.',
+                  ),
                 ),
               )
             else if (all.any((GraphNode n) => n.ring == 4))
@@ -960,9 +980,10 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                   key: const Key('graph-far-hint'),
                   icon: Icons.waving_hand_rounded,
                   tone: zenTone(zen, 2),
-                  text:
-                      'Dotknij znajomego znajomych, żeby poprosić o '
-                      'przedstawienie, napisać list albo zapytać o opinię.',
+                  text: t(
+                    'Dotknij znajomego znajomych, żeby poprosić o '
+                    'przedstawienie, napisać list albo zapytać o opinię.',
+                  ),
                 ),
               ),
             _ListsDiagnostics(
@@ -983,9 +1004,11 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                 key: const Key('graph-ask'),
                 icon: Icons.help_center_rounded,
                 tone: zenTone(zen, 6),
-                title: 'Zapytaj sieć',
-                subtitle:
-                    'Dentysta, przyczepka, mieszkanie — zapytaj znajomych i ich znajomych.',
+                title: t('Zapytaj sieć'),
+                subtitle: t(
+                  'Dentysta, przyczepka, mieszkanie — zapytaj znajomych i ich '
+                  'znajomych.',
+                ),
                 onTap: () => unawaited(AskScreen.open(context)),
               ),
             ),
@@ -1060,12 +1083,20 @@ class _ListsDiagnostics extends StatelessWidget {
               color: zen.textSecondary,
             ),
             title: Text(
-              'Listy znajomych: od $have z ${friends.length} znajomych',
+              tn(
+                friends.length,
+                one: 'Listy znajomych: od {have} z {n} znajomego',
+                few: 'Listy znajomych: od {have} z {n} znajomych',
+                many: 'Listy znajomych: od {have} z {n} znajomych',
+                args: {'have': have},
+              ),
             ),
             subtitle: Text(
               missing.isEmpty
-                  ? 'Masz listy od wszystkich znajomych.'
-                  : 'Bez listy: ${missing.length}. Rozwiń, żeby zobaczyć kto.',
+                  ? t('Masz listy od wszystkich znajomych.')
+                  : t('Bez listy: {count}. Rozwiń, żeby zobaczyć kto.', {
+                      'count': missing.length,
+                    }),
             ),
             children: <Widget>[
               for (final FriendProfile f in missing) _missingRow(context, f),
@@ -1086,13 +1117,13 @@ class _ListsDiagnostics extends StatelessWidget {
       title: Text(name),
       subtitle: Text(
         meet.book.friendListDigests.containsKey(a)
-            ? 'Nie pokazuje listy'
-            : 'Lista jeszcze nie doszła',
+            ? t('Nie pokazuje listy')
+            : t('Lista jeszcze nie doszła'),
       ),
       trailing: TextButton(
         key: Key('graph-diag-ask-$a'),
         onPressed: asked ? null : () => onAsk(a, name),
-        child: Text(asked ? 'Poproszono' : 'Poproś'),
+        child: Text(asked ? t('Poproszono') : t('Poproś')),
       ),
     );
   }
@@ -1253,7 +1284,7 @@ class _GraphPainter extends CustomPainter {
     }
     canvas.drawCircle(c, 26, Paint()..color = me.withValues(alpha: 0.16));
     canvas.drawCircle(c, 17, Paint()..color = me);
-    _label(canvas, 'Ty', c, color: meText, center: true, bold: true);
+    _label(canvas, t('Ty'), c, color: meText, center: true, bold: true);
     for (final GraphNode n in nodes) {
       final Color col = colorOf(n);
       final double nr = n.ring == 4 ? 4.5 : 9;

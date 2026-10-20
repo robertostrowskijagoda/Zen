@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
 
@@ -56,7 +57,7 @@ class ScreenSourcePicker extends StatelessWidget {
       ),
     );
     return AlertDialog(
-      title: const Text('Co udostępnić?'),
+      title: Text(t('Co udostępnić?')),
       content: SizedBox(
         width: 560,
         child: SingleChildScrollView(
@@ -65,7 +66,7 @@ class ScreenSourcePicker extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               if (screens.isNotEmpty) ...<Widget>[
-                const ZenSection('Cały ekran', top: 0),
+                ZenSection(t('Cały ekran'), top: 0),
                 const SizedBox(height: 6),
                 Wrap(
                   children: <Widget>[
@@ -75,7 +76,7 @@ class ScreenSourcePicker extends StatelessWidget {
                 const SizedBox(height: 12),
               ],
               if (windows.isNotEmpty) ...<Widget>[
-                const ZenSection('Jedno okno', top: 0),
+                ZenSection(t('Jedno okno'), top: 0),
                 const SizedBox(height: 6),
                 Wrap(
                   children: <Widget>[
@@ -90,7 +91,7 @@ class ScreenSourcePicker extends StatelessWidget {
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Anuluj'),
+          child: Text(t('Anuluj')),
         ),
       ],
     );

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
@@ -102,10 +103,12 @@ class _FloatingCallChipState extends ConsumerState<_FloatingCallChip> {
 
   String _formattedDuration() {
     if (widget.session.status == CallSessionStatus.ringing) {
-      return widget.session.isIncoming ? 'Przychodzące...' : 'Dzwonienie...';
+      return widget.session.isIncoming
+          ? t('Przychodzące...')
+          : t('Dzwonienie...');
     }
     if (widget.session.status != CallSessionStatus.active) {
-      return 'Łączenie...';
+      return t('Łączenie...');
     }
     final int start = widget.session.startedAtMillis;
     if (start <= 0) {

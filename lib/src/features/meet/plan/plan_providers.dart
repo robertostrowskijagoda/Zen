@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -35,7 +36,7 @@ final Provider<PlanService> planServiceProvider = Provider<PlanService>((
         .read(socialHubControllerProvider.notifier)
         .createGroup(
           name: plan.title,
-          description: 'Plan na weekend',
+          description: t('Plan na weekend'),
           memberAddresses: members,
         );
   };

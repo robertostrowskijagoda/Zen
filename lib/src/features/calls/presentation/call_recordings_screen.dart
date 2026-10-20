@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/calls/call_recordings.dart';
@@ -24,7 +25,7 @@ class CallRecordingsScreen extends ConsumerStatefulWidget {
   static Future<void> open(BuildContext context) async {
     if (!await confirmSensitiveAccess(
           context,
-          reason: 'Nagrania rozmów są chronione. Potwierdź, że to Ty.',
+          reason: t('Nagrania rozmów są chronione. Potwierdź, że to Ty.'),
         ) ||
         !context.mounted) {
       return;
@@ -92,7 +93,7 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
       await showDialog<void>(
         context: context,
         builder: (BuildContext dialog) => AlertDialog(
-          title: Text('Rozmowa: ${rec.peer}'),
+          title: Text(t('Rozmowa: {name}', {'name': rec.peer})),
           content: rec.isAudioOnly
               // Sound only (recorded on a computer): nothing to look at.
               ? const SizedBox(
@@ -110,7 +111,7 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(dialog).pop(),
-              child: const Text('Zamknij'),
+              child: Text(t('Zamknij')),
             ),
           ],
         ),
@@ -132,7 +133,7 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
     String? target;
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       target = await FilePicker.platform.saveFile(
-        dialogTitle: 'Eksportuj nagranie',
+        dialogTitle: t('Eksportuj nagranie'),
         fileName: name,
       );
     } else {
@@ -153,7 +154,11 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
     await rememberExportedFile(target);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Zapisano bez szyfrowania: $target')),
+        SnackBar(
+          content: Text(
+            t('Zapisano bez szyfrowania: {path}', {'path': target}),
+          ),
+        ),
       );
     }
   }
@@ -162,16 +167,21 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
     final bool? sure = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
-        title: const Text('Usunąć nagranie?'),
-        content: Text('Rozmowa z: ${rec.peer}, ${_when(rec.millis)}.'),
+        title: Text(t('Usunąć nagranie?')),
+        content: Text(
+          t('Rozmowa z: {name}, {date}.', {
+            'name': rec.peer,
+            'date': _when(rec.millis),
+          }),
+        ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialog).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialog).pop(true),
-            child: const Text('Usuń'),
+            child: Text(t('Usuń')),
           ),
         ],
       ),
@@ -191,29 +201,31 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
     final List<CallRecording>? items = _items;
     return Scaffold(
       key: const Key('call-recordings-screen'),
-      appBar: AppBar(title: const Text('Nagrania rozmów')),
+      appBar: AppBar(title: Text(t('Nagrania rozmów'))),
       body: items == null
           ? const Center(child: CircularProgressIndicator())
           : items.isEmpty
-          ? const Center(
+          ? Center(
               child: SingleChildScrollView(
                 child: ZenEmpty(
                   icon: Icons.mic_none_rounded,
-                  title: 'Nie masz nagrań',
-                  text:
-                      'Nagrywanie włączysz w trakcie rozmowy; '
-                      'rozmówca zawsze widzi, że nagrywasz.',
+                  title: t('Nie masz nagrań'),
+                  text: t(
+                    'Nagrywanie włączysz w trakcie rozmowy; '
+                    'rozmówca zawsze widzi, że nagrywasz.',
+                  ),
                 ),
               ),
             )
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
               children: <Widget>[
-                const ZenInfo(
+                ZenInfo(
                   icon: Icons.lock_outline_rounded,
-                  text:
-                      'Nagrania są zaszyfrowane. Dotknij, aby odtworzyć; '
-                      'eksport zapisuje kopię bez szyfrowania.',
+                  text: t(
+                    'Nagrania są zaszyfrowane. Dotknij, aby odtworzyć; '
+                    'eksport zapisuje kopię bez szyfrowania.',
+                  ),
                 ),
                 const SizedBox(height: 6),
                 for (final CallRecording rec in items)
@@ -224,24 +236,26 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
                         : Icons.videocam_outlined,
                     tone: rec.isAudioOnly ? zenTone(zen, 2) : zenTone(zen, 5),
                     title: rec.peer,
-                    subtitle:
-                        '${_when(rec.millis)} · ${_size(rec.bytes)}'
-                        '${rec.isAudioOnly ? ' · dźwięk' : ''}',
+                    subtitle: <String>[
+                      _when(rec.millis),
+                      _size(rec.bytes),
+                      if (rec.isAudioOnly) t('dźwięk'),
+                    ].join(' · '),
                     onTap: () => unawaited(_play(rec)),
                     trailing: PopupMenuButton<String>(
-                      tooltip: 'Więcej',
+                      tooltip: t('Więcej'),
                       onSelected: (String v) => unawaited(
                         v == 'export' ? _export(rec) : _delete(rec),
                       ),
                       itemBuilder: (BuildContext context) =>
-                          const <PopupMenuEntry<String>>[
+                          <PopupMenuEntry<String>>[
                             PopupMenuItem<String>(
                               value: 'export',
-                              child: Text('Eksportuj'),
+                              child: Text(t('Eksportuj')),
                             ),
                             PopupMenuItem<String>(
                               value: 'delete',
-                              child: Text('Usuń'),
+                              child: Text(t('Usuń')),
                             ),
                           ],
                     ),

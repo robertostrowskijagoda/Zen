@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/security/app_biometric_auth.dart';
 
@@ -17,10 +18,13 @@ import 'package:zen/src/features/security/app_biometric_auth.dart';
 ///   Before unwrapping, the app asks Windows Hello who is there. Without a
 ///   TPM there is no biometric unlock (the old DPAPI fallback is gone: any
 ///   program of this Windows user could open it).
+/// * macOS: a P-256 key in the Secure Enclave that works only after Touch
+///   ID (macos/Runner/SecurityBridge.swift). Macs without Touch ID, and
+///   Linux, have no biometric unlock.
 ///
 /// The key never leaves the hardware, so a copy of the app's files is
-/// useless elsewhere. On Android the hardware itself refuses to unwrap
-/// without the person; on Windows the TPM key has no such policy, so a
+/// useless elsewhere. On Android and macOS the hardware itself refuses to
+/// unwrap without the person; on Windows the TPM key has no such policy, so a
 /// program already running as this Windows user could unwrap the sealed
 /// key while biometric unlock is on — which is why it is off there until
 /// the person turns it on ([enforcesUserPresence]).
@@ -54,7 +58,7 @@ PlatformKeyVault platformKeyVault({AppBiometricAuthenticator? authenticator}) {
   if (kIsWeb) {
     return const NoKeyVault();
   }
-  if (Platform.isAndroid) {
+  if (Platform.isAndroid || Platform.isMacOS) {
     return ChannelKeyVault();
   }
   if (Platform.isWindows) {
@@ -83,7 +87,7 @@ final class NoKeyVault implements PlatformKeyVault {
   bool get enforcesUserPresence => false;
 
   @override
-  Future<String> describe() async => 'brak';
+  Future<String> describe() async => t('brak');
 
   @override
   Future<Uint8List?> seal(Uint8List secret) async => null;
@@ -97,7 +101,7 @@ final class NoKeyVault implements PlatformKeyVault {
 }
 
 /// Talks to the native vault (`zen/keyvault`: available, describe, seal,
-/// open, wipe) in MainActivity / the Windows runner.
+/// open, wipe) in MainActivity / the Windows and macOS runners.
 final class ChannelKeyVault implements PlatformKeyVault {
   ChannelKeyVault({
     MethodChannel? channel,
@@ -132,7 +136,8 @@ final class ChannelKeyVault implements PlatformKeyVault {
       (await _alsoRequires?.call() ?? true);
 
   @override
-  Future<String> describe() async => await _call<String>('describe') ?? 'brak';
+  Future<String> describe() async =>
+      await _call<String>('describe') ?? t('brak');
 
   @override
   Future<Uint8List?> seal(Uint8List secret) async {

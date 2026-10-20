@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
@@ -106,7 +107,7 @@ abstract class GroupCallMedia extends ChangeNotifier {
       const <ScreenShareSource>[];
 
   Future<void> startScreenShare({String? sourceId}) async {
-    throw UnsupportedError('Udostępnianie ekranu nie jest tu dostępne.');
+    throw UnsupportedError(t('Udostępnianie ekranu nie jest tu dostępne.'));
   }
 
   Future<void> stopScreenShare() async {}
@@ -124,7 +125,7 @@ abstract class GroupCallMedia extends ChangeNotifier {
   /// Starts recording what this device hears into [path]; [label] names
   /// the recording (the group).
   Future<void> startRecording(String path, {String label = ''}) async {
-    throw UnsupportedError('Nagrywanie nie jest tu dostępne.');
+    throw UnsupportedError(t('Nagrywanie nie jest tu dostępne.'));
   }
 
   /// Stops recording; returns the file path, or null when nothing ran.

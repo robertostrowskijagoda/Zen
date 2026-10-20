@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 
 /// Text that can be copied from a long-press / right-click menu. Used for
@@ -28,23 +29,23 @@ class CopyableText extends StatelessWidget {
         Offset.zero & overlay.size,
       ),
       items: <PopupMenuEntry<String>>[
-        const PopupMenuItem<String>(
-          key: Key('bubble-copy'),
+        PopupMenuItem<String>(
+          key: const Key('bubble-copy'),
           value: 'copy',
           child: ListTile(
             dense: true,
-            leading: Icon(Icons.copy_rounded),
-            title: Text('Kopiuj'),
+            leading: const Icon(Icons.copy_rounded),
+            title: Text(t('Kopiuj')),
           ),
         ),
         if (onReport != null)
-          const PopupMenuItem<String>(
-            key: Key('bubble-report'),
+          PopupMenuItem<String>(
+            key: const Key('bubble-report'),
             value: 'report',
             child: ListTile(
               dense: true,
-              leading: Icon(Icons.flag_outlined),
-              title: Text('Zgłoś'),
+              leading: const Icon(Icons.flag_outlined),
+              title: Text(t('Zgłoś')),
             ),
           ),
       ],
