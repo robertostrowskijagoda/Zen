@@ -1,0 +1,10 @@
+# Flutter-related
+**/Flutter/ephemeral/
+**/Pods/
+
+# Xcode-related
+**/dgph
+**/xcuserdata/
+
+# Go bridge static library (native/yggdrasil_bridge/build_macos.sh)
+GoBridge/
