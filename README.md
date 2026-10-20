@@ -1,5 +1,3 @@
-🇵🇱 [Polska wersja](README.pl.md)
-
 <p align="center">
   <img src="assets/branding/logo.jpg" width="128" alt="Zen">
 </p>
@@ -67,7 +65,7 @@ shut down.
 - **People nearby** — over Bluetooth, even without internet, with per-friend keys so nobody can fake another friend's presence.
 - **Offline mailboxes** — photos, videos and files for a friend who is offline wait at their mailboxes (your mutual friends), encrypted, and arrive when they return.
 - **Pyramid** — grassroots voting, delegated trust, a common purse and points.
-- **Account safety** — account recovery through trusted friends or a paper backup of the key; friendship levels (weak friend / friend / close friend) that decide who sees your friend list, statuses and group invitations; an 18+ gate for dating and the pyramid.
+- **Account safety** — account recovery through trusted friends or a paper backup of the key; friendship levels (weak friend / friend / close friend) that decide who sees your friend list, statuses and group invitations.
 - **"Why is it not working?"** — a built-in diagnostic screen (network, background work, notifications, battery, clock, free space).
 - **21 languages** — Zen speaks the language of your phone or computer (English if it doesn't know it); change it in **Settings → Language**.
 - **Phone and computer** — Android (arm64, armv7, x86_64), iPhone, Windows (x64, ARM64), Linux (x64, arm64) and Mac; one account on several devices.
@@ -196,7 +194,7 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
 - **No fees, no rework.** Stores demand fees (the App Store — every year),
   agreement to their rules and a separate version of the app (without "Pass it on"
   and updates from friends), while Zen is made by one person, for free. A version
-  for the stores is planned (`docs/RELEASES.md`, point 6); the `store` flavor
+  for the stores is planned (`docs/RELEASES.md`, point 6); the `appStoreOnly` flavor
   for Google Play and Galaxy Store can already be built.
 - **Privacy.** Nobody, not even a store, knows you have Zen.
 
@@ -277,7 +275,7 @@ when its sources changed (details: `docs/RELEASES.md`, point 3.1).
 | System | You need | Command |
 |---|---|---|
 | Android (one APK: arm64-v8a, armeabi-v7a, x86_64) | Android Studio (SDK and NDK), JDK 17 | `flutter build apk --release` |
-| Android for a store (Google Play, Galaxy Store; no self-update) | as above | `flutter build appbundle --release --flavor store` |
+| Android for a store only (Google Play, Galaxy Store; no self-update; app name "Zen (sklep)", file `Zen-APP-STORE-ONLY-do-not-install-manually`; never sideload it) | as above | `flutter build appbundle --release --flavor appStoreOnly` |
 | Windows | Visual Studio 2022 ("Desktop development with C++"), gcc for Go (e.g. Strawberry Perl) | `flutter build windows --release` |
 | Windows on ARM (on an ARM64 computer) | as above, with ARM64 tools; for Go [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) instead of gcc | `flutter build windows --release` |
 | Linux | packages below | `flutter build linux --release` |
@@ -294,7 +292,8 @@ sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
 
 The finished Zen is in `build/linux/x64/release/bundle/` (the `zen` file with the folders
 `lib/` and `data/`; on ARM64 `build/linux/arm64/…`). The `.deb` package is made by
-`linux/packaging/build_deb.sh`. To work it needs a key service (GNOME Keyring or
+`linux/packaging/build_deb.sh`, the Flatpak by `linux/packaging/com.roj.zen.yml`
+(see `docs/RELEASES.md`). To work it needs a key service (GNOME Keyring or
 KWallet — the encryption key lives there), for the tray icon
 `libayatana-appindicator3-1` (in GNOME also the AppIndicator extensions) and for
 playback GStreamer with plugins.
