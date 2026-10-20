@@ -13,7 +13,9 @@ import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
+import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_decisions.dart';
+import 'package:zen/src/features/pyramid/presentation/pyramid_national.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_power.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_wallet.dart';
 import 'package:zen/src/features/pyramid/presentation/report_sheet.dart';
@@ -897,6 +899,12 @@ class _JoinViewState extends ConsumerState<_JoinView> {
             ),
           ),
         ],
+        // §22.2: the section of the profile's nationality, read-only, for
+        // everybody — members of the pyramid comment.
+        PyramidNationalEntry(
+          pyr: widget.pyr,
+          nationalities: ref.watch(userProfileControllerProvider).nationalities,
+        ),
       ],
     );
   }

@@ -86,6 +86,11 @@ final class PyramidWorld {
   /// Records per segment of each phone's record log.
   final int recordSegmentEntries;
 
+  /// The nationalities in each phone's profile (§9), by name: what the
+  /// phone itself and its friends see.
+  final Map<String, List<String>> profileNationalities =
+      <String, List<String>>{};
+
   /// A phone with the pyramid service, its data on [disk] (a fresh one in
   /// memory by default); [friendLevelOf] is its private friend levels.
   SimPhone add(
@@ -116,6 +121,9 @@ final class PyramidWorld {
         (reshared[name] ??= <Map<String, dynamic>>[]).add(post);
         return true;
       },
+      nationalitiesOf: (String a) =>
+          profileNationalities[net.byAddress[a]?.name] ?? const <String>[],
+      myNationalities: () => profileNationalities[name] ?? const <String>[],
     );
     p.services['pyr'] = s;
     p.attach(s.handle);

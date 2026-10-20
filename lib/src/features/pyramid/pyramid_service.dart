@@ -71,7 +71,12 @@ abstract final class PyramidTypes {
   /// §22.1a "Dotarło / przeczytało").
   static const String sum = 'pyr_sum';
 
+  /// National-section posts a member passes on to friends outside the
+  /// pyramid whose profile shows that nationality (§22.2, read-only).
+  static const String national = 'pyr_nat';
+
   static const Set<String> all = <String>{
+    national,
     sum,
     wantAll,
     fxKey,
@@ -158,6 +163,13 @@ const int kPyrFxRefundGraceMs = 60 * 60 * 1000;
 /// Political posts whose reach is counted (the newest, at most this old).
 const int kPyrReachPosts = 50;
 const int kPyrReachMaxAgeMs = 30 * 24 * 3600 * 1000;
+
+/// National-section posts read from outside the pyramid (§22.2): at most
+/// this many in one frame, this many kept per nationality (the newest),
+/// each record at most this big.
+const int kPyrNationalBatch = 20;
+const int kPyrNationalKept = 60;
+const int kPyrNationalPostBytes = 12 * 1024;
 
 /// A branch's anonymous statistics are shown only from this many people
 /// (fewer would point at somebody).
@@ -465,6 +477,101 @@ Map<String, String> get kReportReasons => <String, String>{
   'other': t('Inne'),
 };
 
+/// A national-section post as a reader outside the pyramid gets it
+/// (§22.2): the author's signed record, and what the member who passed it
+/// on sees of it in the pyramid — name, depth, branch, lead, pin, number of
+/// comments (their word, not signed).
+@immutable
+final class PyrNationalPost {
+  const PyrNationalPost({
+    required this.record,
+    required this.name,
+    required this.depth,
+    required this.branch,
+    required this.lead,
+    required this.pinned,
+    required this.comments,
+    this.from = '',
+  });
+
+  final PyramidRecord record;
+  final String name;
+  final int depth;
+
+  /// People in the author's branch.
+  final int branch;
+
+  /// The author leads the section.
+  final bool lead;
+  final bool pinned;
+  final int comments;
+
+  /// Who passed it on (an address); '' when this phone keeps the pyramid.
+  final String from;
+
+  String get id => record.id;
+  String get pyramid => record.pyramid;
+  String get nat => record.str('nat');
+  String get author => record.candidates.firstOrNull ?? '';
+  int get at => record.at;
+
+  /// The author's level when it was written, signed (0 is the head).
+  int get level => record.integer('lvl');
+
+  String get text {
+    final String s = record.str('text');
+    return s.length > 5000 ? String.fromCharCodes(s.runes.take(5000)) : s;
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'r': record.toJson(),
+    'm': <String, dynamic>{
+      'n': name,
+      'd': depth,
+      'b': branch,
+      'l': lead,
+      'p': pinned,
+      'c': comments,
+    },
+    if (from.isNotEmpty) 'f': from,
+  };
+
+  /// Parses one: null for anything but a national-section record with one
+  /// author who signed it, at most [kPyrNationalPostBytes]. The signature
+  /// itself is checked by the service. [from] replaces the stored sender.
+  static PyrNationalPost? fromJson(Object? json, {String? from}) {
+    if (json is! Map) {
+      return null;
+    }
+    final PyramidRecord? r = PyramidRecord.fromJson(json['r']);
+    if (r == null ||
+        r.type != PyrT.natPost ||
+        r.pyramid.isEmpty ||
+        r.str('nat').isEmpty ||
+        r.candidates.length != 1 ||
+        r.sigs.length != 1 ||
+        !r.sigs.containsKey(r.candidates.first) ||
+        r.signedBytes.length > kPyrNationalPostBytes) {
+      return null;
+    }
+    final Object? m = json['m'];
+    final Map<dynamic, dynamic> meta = m is Map ? m : const <String, Object>{};
+    int count(Object? v) => v is int && v >= 0 && v < 1 << 30 ? v : 0;
+    final Object? n = meta['n'];
+    final Object? f = json['f'];
+    return PyrNationalPost(
+      record: r,
+      name: n is String ? String.fromCharCodes(n.runes.take(40)) : '',
+      depth: count(meta['d']),
+      branch: count(meta['b']),
+      lead: meta['l'] == true,
+      pinned: meta['p'] == true,
+      comments: count(meta['c']),
+      from: from ?? (f is String ? f : ''),
+    );
+  }
+}
+
 /// The pyramid on this phone (§20–24, §28): keeps and spreads the signed
 /// records, folds them into the state, and does this person's part —
 /// co-signing, voting, counting the branch, signing payments as a
@@ -481,6 +588,8 @@ final class PyramidService extends ChangeNotifier {
     this.otherDevices,
     this.resharePost,
     this.ownPublicPosts,
+    this.nationalitiesOf,
+    this.myNationalities,
     int Function()? now,
     Random? random,
     this.tallyWait = const Duration(hours: 6),
@@ -533,6 +642,15 @@ final class PyramidService extends ChangeNotifier {
   /// they can order a reshare of (§24).
   final List<Map<String, dynamic>> Function()? ownPublicPosts;
 
+  /// The nationalities a friend's profile shows this device (§9), by
+  /// address: a member passes the section of those on to them (§22.2).
+  /// Null: nothing is passed on.
+  final List<String> Function(String address)? nationalitiesOf;
+
+  /// The nationalities in this person's own profile (§9): the national
+  /// sections it reads, member or not (§22.2).
+  final List<String> Function()? myNationalities;
+
   /// How long a cell head waits for the sums below before counting anyway.
   final Duration tallyWait;
   final int Function() _now;
@@ -547,6 +665,15 @@ final class PyramidService extends ChangeNotifier {
   /// Ring signatures already checked (their cache keys), so a restart does
   /// not redo minutes of curve arithmetic on a slow phone.
   static const String _keyRingOk = 'pyramid/ring-ok';
+
+  /// National-section posts friends passed on (§22.2), apart from the rest.
+  static const String _keyNational = 'pyramid/national';
+
+  /// National-section posts of pyramids this phone does not keep, passed
+  /// on by friends who are members (§22.2): id → post, at most
+  /// [kPyrNationalKept] per nationality of this person's profile.
+  final Map<String, PyrNationalPost> _nationalFeed =
+      <String, PyrNationalPost>{};
 
   /// The records: an append-only log in segments under `pyramid/records/`
   /// (a new record writes one segment, not all of them).
@@ -1022,6 +1149,25 @@ final class PyramidService extends ChangeNotifier {
         }
       }
       _readReports(reportsJson);
+      _nationalFeed.clear();
+      final List<int>? rawNational = await disk.read(_keyNational);
+      try {
+        final Object? national = rawNational == null
+            ? null
+            : jsonDecode(utf8.decode(rawNational));
+        if (national is List) {
+          // Signed when they came; the limits apply again.
+          for (final Object? item in national.take(4 * kPyrNationalKept)) {
+            final PyrNationalPost? p = PyrNationalPost.fromJson(item);
+            if (p != null) {
+              _nationalFeed[p.id] = p;
+            }
+          }
+        }
+      } on Object {
+        // Unreadable: friends pass them on again.
+        _nationalFeed.clear();
+      }
       _diskUnreadable = false;
       if (logged != null) {
         _records.clear();
@@ -1326,6 +1472,7 @@ final class PyramidService extends ChangeNotifier {
       for (final PyramidRecord x in added) {
         await _spread(x, except: from);
       }
+      await _passNational(added);
     }
     for (final PyramidRecord x in added) {
       if (x.type == PyrT.merge) {
@@ -1687,6 +1834,8 @@ final class PyramidService extends ChangeNotifier {
   /// Says hello to friends (on start, every few hours, to a new friend).
   Future<void> greet({Iterable<String>? to}) async {
     final List<String> pys = knownPyramids;
+    // A reader of a national section from outside (§22.2): what it has.
+    final Map<String, int> since = _nationalSince();
     for (final String f in to ?? host.friends()) {
       await _send(f, <String, dynamic>{
         'type': PyramidTypes.hello,
@@ -1694,6 +1843,7 @@ final class PyramidService extends ChangeNotifier {
           for (final String py in pys)
             <String, dynamic>{'id': py, 'd': _digest(py)},
         ],
+        if (since.isNotEmpty) 'nf': since,
       });
     }
   }
@@ -2412,6 +2562,22 @@ final class PyramidService extends ChangeNotifier {
       return propose(body, candidates: <String>[myKey!], need: 1);
     }
     return topDecision(body);
+  }
+
+  /// Revokes delegation [id] (2 of the top): from now on it, and every
+  /// delegation passed on from it, is worth nothing. What was done with it
+  /// so far stays; the revocation lists those acts, so one dated back
+  /// later does not count (§21.2).
+  Future<PyramidRecord?> revokeDelegation(String id) async {
+    final PyramidState? s = state;
+    if (s == null) {
+      return null;
+    }
+    return topDecision(<String, dynamic>{
+      't': PyrT.revoke,
+      'd': id,
+      'acts': s.actsOf(id).toList()..sort(),
+    });
   }
 
   Future<PyramidRecord?> ban({
@@ -4285,6 +4451,283 @@ final class PyramidService extends ChangeNotifier {
     );
   }
 
+  // ---- the national section read from outside (§22.2) ----
+
+  /// The nationalities in this person's profile (§9), as country codes.
+  List<String> get profileNationalities => <String>[
+    for (final String c in myNationalities?.call() ?? const <String>[])
+      if (c.trim().isNotEmpty) c.trim().toUpperCase(),
+  ];
+
+  /// The national section of [nat] as somebody who is not its member reads
+  /// it (§22.2, read-only): from the pyramids this phone keeps (one it is
+  /// joining, say) and what friends who are members of others passed on.
+  /// Pinned first, then the lead's, then by level, newest first in one.
+  List<PyrNationalPost> nationalSection(String nat) {
+    final Map<String, PyrNationalPost> out = <String, PyrNationalPost>{};
+    final Set<String> kept = knownPyramids.toSet();
+    final int t = _now();
+    for (final String py in kept) {
+      final PyramidState? s = _stateFor(py);
+      if (s == null || s.mergedInto != null) {
+        continue;
+      }
+      final Set<String> banned = s.bannedEntries(t);
+      for (final PyrPost p in s.natPosts.values) {
+        if (p.nat == nat && !banned.contains(p.id)) {
+          if (_nationalOf(s, p) case final PyrNationalPost x) {
+            out[x.id] = x;
+          }
+        }
+      }
+    }
+    // A pyramid kept here is read from its own records.
+    for (final PyrNationalPost p in _nationalFeed.values) {
+      if (p.nat == nat && !kept.contains(p.pyramid)) {
+        out.putIfAbsent(p.id, () => p);
+      }
+    }
+    return out.values.toList()..sort(_nationalOrder);
+  }
+
+  static int _nationalOrder(PyrNationalPost a, PyrNationalPost b) {
+    if (a.pinned != b.pinned) {
+      return a.pinned ? -1 : 1;
+    }
+    if (a.lead != b.lead) {
+      return a.lead ? -1 : 1;
+    }
+    return a.level != b.level
+        ? a.level.compareTo(b.level)
+        : b.at.compareTo(a.at);
+  }
+
+  /// Post [p] of [s] as a reader outside gets it, with what this phone sees
+  /// of it in the pyramid.
+  PyrNationalPost? _nationalOf(PyramidState s, PyrPost p) {
+    final PyramidRecord? r = _records[p.id];
+    final String nat = p.nat ?? '';
+    if (r == null || nat.isEmpty) {
+      return null;
+    }
+    final String? path = s.pathOf(p.author);
+    return PyrNationalPost(
+      record: r,
+      name: s.members[p.author]?.name ?? '',
+      depth: s.depth,
+      branch: path == null ? 0 : s.branchSize(path),
+      lead: s.nationalLead(nat) == p.author,
+      pinned: s.natPins[nat]?.containsKey(p.id) ?? false,
+      comments: p.comments.length,
+    );
+  }
+
+  /// Whether the friend at [address] is outside pyramid [s]: no member's
+  /// address, and it did not say it keeps the pyramid (it would sync it).
+  bool _outside(PyramidState s, String address) {
+    final String a = _n(address);
+    if (_peers[a]?.contains(s.id) ?? false) {
+      return false;
+    }
+    return !s.members.values.any((PyrMember m) => _n(m.addr) == a);
+  }
+
+  /// The nationalities [address]'s profile shows this device, as codes.
+  Set<String> _nationsOf(String address) => <String>{
+    for (final String c in nationalitiesOf?.call(address) ?? const <String>[])
+      c.trim().toUpperCase(),
+  };
+
+  /// Passes national-section posts just taken in on to friends outside the
+  /// pyramid whose profile shows that nationality (§22.2): one frame per
+  /// friend, the newest [kPyrNationalBatch] (a big sync passes on no
+  /// more). Members only: a reader outside passes nothing on.
+  Future<void> _passNational(List<PyramidRecord> added) async {
+    final String? me = myKey;
+    if (nationalitiesOf == null ||
+        me == null ||
+        !added.any((PyramidRecord x) => x.type == PyrT.natPost)) {
+      return;
+    }
+    final Map<String, List<PyrNationalPost>> to =
+        <String, List<PyrNationalPost>>{};
+    final List<String> friends = host.friends();
+    for (final PyramidRecord x in added) {
+      if (x.type != PyrT.natPost) {
+        continue;
+      }
+      final PyramidState? s = _stateFor(x.pyramid);
+      final PyrPost? p = s?.natPosts[x.id];
+      if (s == null || p == null || !s.isMember(me) || s.mergedInto != null) {
+        continue;
+      }
+      final PyrNationalPost? out = _nationalOf(s, p);
+      if (out == null ||
+          out.record.signedBytes.length > kPyrNationalPostBytes) {
+        continue;
+      }
+      for (final String f in friends) {
+        if (_outside(s, f) && _nationsOf(f).contains(out.nat)) {
+          (to[_n(f)] ??= <PyrNationalPost>[]).add(out);
+        }
+      }
+    }
+    for (final String f in to.keys.toList()..sort()) {
+      final List<PyrNationalPost> posts = to[f]!
+        ..sort((PyrNationalPost a, PyrNationalPost b) => b.at.compareTo(a.at));
+      await _send(f, <String, dynamic>{
+        'type': PyramidTypes.national,
+        'ps': <Map<String, dynamic>>[
+          for (final PyrNationalPost p in posts.take(kPyrNationalBatch))
+            p.toJson(),
+        ],
+      });
+    }
+  }
+
+  /// Sends the friend at [to], outside this person's pyramids, the posts
+  /// of the sections its profile shows that it lacks (§22.2): newer than
+  /// [since] (pyramid → newest it has), the newest [kPyrNationalBatch]
+  /// per pyramid.
+  Future<void> _catchUpNational(String to, Object? since) async {
+    final Set<String> nats = _nationsOf(to);
+    if (nats.isEmpty) {
+      return;
+    }
+    final int t = _now();
+    for (final PyramidState s in myPyramids) {
+      if (!_outside(s, to)) {
+        continue;
+      }
+      final Object? had = since is Map ? since[s.id] : null;
+      final int after = had is int ? had : 0;
+      final Set<String> banned = s.bannedEntries(t);
+      final List<PyrPost> posts =
+          s.natPosts.values
+              .where(
+                (PyrPost p) =>
+                    nats.contains(p.nat) &&
+                    p.at > after &&
+                    !banned.contains(p.id),
+              )
+              .toList()
+            ..sort((PyrPost a, PyrPost b) => b.at.compareTo(a.at));
+      final List<Map<String, dynamic>> out = <Map<String, dynamic>>[
+        for (final PyrPost p in posts.take(kPyrNationalBatch))
+          if (_nationalOf(s, p) case final PyrNationalPost x
+              when x.record.signedBytes.length <= kPyrNationalPostBytes)
+            x.toJson(),
+      ];
+      if (out.isNotEmpty) {
+        await _send(to, <String, dynamic>{
+          'type': PyramidTypes.national,
+          'ps': out,
+        });
+      }
+    }
+  }
+
+  /// The newest section post this phone has from each pyramid it does not
+  /// keep (in the hello: friends send only what is newer).
+  Map<String, int> _nationalSince() {
+    final Map<String, int> out = <String, int>{};
+    for (final PyrNationalPost p in _nationalFeed.values) {
+      if ((out[p.pyramid] ?? -1) < p.at) {
+        out[p.pyramid] = p.at;
+      }
+    }
+    return out;
+  }
+
+  /// Section posts a friend passed on: kept when the author's signature
+  /// holds, of a nationality in this person's profile, of a pyramid this
+  /// phone does not keep (that one is read from its records).
+  Future<void> _onNational(String from, Map<String, dynamic> p) async {
+    final Set<String> mine = profileNationalities.toSet();
+    final Object? list = p['ps'];
+    if (mine.isEmpty || list is! List) {
+      return;
+    }
+    final Set<String> kept = knownPyramids.toSet();
+    final int t = _now();
+    bool changed = false;
+    for (final Object? item in list.take(kPyrNationalBatch)) {
+      final PyrNationalPost? post = PyrNationalPost.fromJson(item, from: from);
+      if (post == null ||
+          !mine.contains(post.nat) ||
+          kept.contains(post.pyramid) ||
+          post.at > t + kPyrMaxSkewMs) {
+        continue;
+      }
+      final PyrNationalPost? had = _nationalFeed[post.id];
+      if (had == null && !await post.record.verifySigners()) {
+        continue;
+      }
+      // The same signed record: only what the friend sees of it changes.
+      final PyrNationalPost next = had == null
+          ? post
+          : PyrNationalPost(
+              record: had.record,
+              name: post.name,
+              depth: post.depth,
+              branch: post.branch,
+              lead: post.lead,
+              pinned: post.pinned,
+              comments: post.comments,
+              from: from,
+            );
+      if (had == null ||
+          jsonEncode(had.toJson()) != jsonEncode(next.toJson())) {
+        _nationalFeed[post.id] = next;
+        changed = true;
+      }
+    }
+    // Nationalities taken off the profile are not read any more.
+    final int before = _nationalFeed.length;
+    _nationalFeed.removeWhere(
+      (String _, PyrNationalPost x) => !mine.contains(x.nat),
+    );
+    changed = changed || _nationalFeed.length != before;
+    if (!changed) {
+      return;
+    }
+    _trimNational();
+    await _saveNational();
+    notifyListeners();
+  }
+
+  /// At most [kPyrNationalKept] per nationality, the newest.
+  void _trimNational() {
+    final Map<String, List<PyrNationalPost>> byNat =
+        <String, List<PyrNationalPost>>{};
+    for (final PyrNationalPost p in _nationalFeed.values) {
+      (byNat[p.nat] ??= <PyrNationalPost>[]).add(p);
+    }
+    for (final List<PyrNationalPost> list in byNat.values) {
+      if (list.length <= kPyrNationalKept) {
+        continue;
+      }
+      list.sort((PyrNationalPost a, PyrNationalPost b) => b.at.compareTo(a.at));
+      for (final PyrNationalPost p in list.skip(kPyrNationalKept)) {
+        _nationalFeed.remove(p.id);
+      }
+    }
+  }
+
+  Future<void> _saveNational() async {
+    if (_diskUnreadable) {
+      return;
+    }
+    await disk.write(
+      _keyNational,
+      utf8.encode(
+        jsonEncode(<Map<String, dynamic>>[
+          for (final PyrNationalPost p in _nationalFeed.values) p.toJson(),
+        ]),
+      ),
+    );
+  }
+
   // ---- anonymous sums up the tree (§20.2a, §22.1a) ----
 
   /// Notes that this person opened political posts [ids] ("przeczytało").
@@ -5068,6 +5511,7 @@ final class PyramidService extends ChangeNotifier {
       PyramidTypes.ids,
       PyramidTypes.want,
       PyramidTypes.wantAll,
+      PyramidTypes.national,
     };
     if (friendsOnly.contains(type) && !host.isFriend(from)) {
       return;
@@ -5139,6 +5583,8 @@ final class PyramidService extends ChangeNotifier {
         await _onFxKey(p);
       case PyramidTypes.sum:
         await _onSums(from, p);
+      case PyramidTypes.national:
+        await _onNational(from, p);
     }
   }
 
@@ -5184,6 +5630,8 @@ final class PyramidService extends ChangeNotifier {
     }
     _peers[from] = theirs;
     await _followMerge();
+    // A friend outside this person's pyramid reads its national section.
+    await _catchUpNational(from, p['nf']);
   }
 
   /// When this person's pyramid has joined another as a branch, gets that
@@ -5644,12 +6092,16 @@ final class PyramidService extends ChangeNotifier {
           );
         }
       case PyrT.revoke:
-        // Everything done through it falls with it (§21.2).
+        // From now on only; the acts it lists stay (§21.2).
+        final Object? known = r.body['acts'];
         out.add(
-          t('Delegacja {id} · unieważnia akty: {count}', {
-            'id': _short(r.str('d')),
-            'count': s?.actsOf(r.str('d')).length ?? 0,
-          }),
+          t(
+            'Delegacja {id} · od teraz nieważna, dotychczasowe akty zostają: {count}',
+            {
+              'id': _short(r.str('d')),
+              'count': known is List ? known.length : 0,
+            },
+          ),
         );
       case PyrT.ban:
         out.add(

@@ -9,6 +9,8 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
+import 'package:zen/src/features/profile/profile_fields.dart';
+import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/pyramid_device_sync.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 
@@ -44,6 +46,20 @@ final Provider<PyramidService> pyramidServiceProvider =
             reshareOrderedPost(ref.read(ledgerNodeProvider), post),
         ownPublicPosts: () =>
             ownPublicPostEntries(ref.read(ledgerNodeProvider)),
+        // National sections (§22.2): read by everyone whose profile shows
+        // the nationality, so members pass them on to such friends.
+        nationalitiesOf: (String address) {
+          final LedgerNode? node = ref.read(ledgerNodeProvider);
+          if (node == null || !node.isReady) {
+            return const <String>[];
+          }
+          final String? account = node.knownAccountOf(address);
+          return account == null
+              ? const <String>[]
+              : readProfile(node, account)?.nationalities ?? const <String>[];
+        },
+        myNationalities: () =>
+            ref.read(userProfileControllerProvider).nationalities,
       );
       // The same pyramid on every device of the account (§6.3).
       final LedgerNode? node = ref.read(ledgerNodeProvider);
