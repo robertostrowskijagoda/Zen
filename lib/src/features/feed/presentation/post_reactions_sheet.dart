@@ -7,23 +7,51 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
+import 'package:zen/src/features/feed/mini_profile_tag.dart';
+import 'package:zen/src/features/feed/presentation/reactor_avatar.dart';
 import 'package:zen/src/features/feed/thread_moderation.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 
 /// Who likes [post] (§11): you and your friends first, then the others;
-/// "i N innych osób" for those known only by number.
-Future<void> showPostLikers(BuildContext context, FeedPost post) =>
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (BuildContext context) => _LikersSheet(post: post),
-    );
+/// "i N innych osób" for those known only by number. With [node] a stranger
+/// shows the photo of their mini-profile, and with [mutualFriends] (account
+/// → how many friends you have in common) the line "N wspólnych znajomych"
+/// (§9).
+Future<void> showPostLikers(
+  BuildContext context,
+  FeedPost post, {
+  LedgerNode? node,
+  int Function(String account)? mutualFriends,
+}) => showModalBottomSheet<void>(
+  context: context,
+  showDragHandle: true,
+  isScrollControlled: true,
+  builder: (BuildContext context) =>
+      _LikersSheet(post: post, node: node, mutualFriends: mutualFriends),
+);
+
+/// The line under the name of someone who is not your friend: how many
+/// friends you share.
+Widget? mutualFriendsLine(
+  String account,
+  int Function(String account)? mutualFriends, {
+  Key? key,
+}) {
+  final String? text = mutualFriends == null
+      ? null
+      : mutualFriendsText(mutualFriends(account));
+  if (text == null) {
+    return null;
+  }
+  return Text(text, key: key, style: const TextStyle(fontSize: 12.5));
+}
 
 class _LikersSheet extends StatelessWidget {
-  const _LikersSheet({required this.post});
+  const _LikersSheet({required this.post, this.node, this.mutualFriends});
 
   final FeedPost post;
+  final LedgerNode? node;
+  final int Function(String account)? mutualFriends;
 
   @override
   Widget build(BuildContext context) {
@@ -52,8 +80,20 @@ class _LikersSheet extends StatelessWidget {
           for (final FeedLiker l in post.likes)
             ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-              leading: ZenBlobAvatar(name: l.name, size: 36, showStatus: false),
+              leading: ReactorAvatar(
+                node: node,
+                avatar: l.avatar,
+                name: l.name,
+                size: 36,
+              ),
               title: Text(l.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: l.friend
+                  ? null
+                  : mutualFriendsLine(
+                      l.account,
+                      mutualFriends,
+                      key: Key('post-liker-mutual-${l.account}'),
+                    ),
               trailing: l.friend
                   ? Icon(Icons.people_alt_rounded, size: 18, color: zen.accent)
                   : null,
@@ -86,12 +126,17 @@ Future<void> showPostComments(
   LedgerNode node,
   FeedPost post, {
   VoidCallback? onChanged,
+  int Function(String account)? mutualFriends,
 }) => showModalBottomSheet<void>(
   context: context,
   isScrollControlled: true,
   showDragHandle: true,
-  builder: (BuildContext context) =>
-      PostCommentsSheet(node: node, post: post, onChanged: onChanged),
+  builder: (BuildContext context) => PostCommentsSheet(
+    node: node,
+    post: post,
+    onChanged: onChanged,
+    mutualFriends: mutualFriends,
+  ),
 );
 
 class PostCommentsSheet extends StatefulWidget {
@@ -99,12 +144,17 @@ class PostCommentsSheet extends StatefulWidget {
     required this.node,
     required this.post,
     this.onChanged,
+    this.mutualFriends,
     super.key,
   });
 
   final LedgerNode node;
   final FeedPost post;
   final VoidCallback? onChanged;
+
+  /// Account → how many friends you have in common (§9), for the line under
+  /// the name of a commenter who is not your friend.
+  final int Function(String account)? mutualFriends;
 
   @override
   State<PostCommentsSheet> createState() => _PostCommentsSheetState();
@@ -196,7 +246,11 @@ class _PostCommentsSheetState extends State<PostCommentsSheet> {
   Future<void> _send() async {
     final Map<String, dynamic> body;
     try {
-      body = commentBody(widget.post.id, _field.text);
+      body = commentBody(
+        widget.post.id,
+        _field.text,
+        mini: ownMiniProfile(widget.node),
+      );
     } on ArgumentError catch (e) {
       setState(() => _error = e.message as String?);
       return;
@@ -266,6 +320,17 @@ class _PostCommentsSheetState extends State<PostCommentsSheet> {
             for (final FeedComment c in comments)
               _CommentRow(
                 comment: c,
+                node: widget.node,
+                mutual:
+                    c.account.isEmpty ||
+                        c.account == widget.node.account ||
+                        widget.node.friendAccounts.containsValue(c.account)
+                    ? null
+                    : mutualFriendsLine(
+                        c.account,
+                        widget.mutualFriends,
+                        key: Key('post-comment-mutual-${c.id}'),
+                      ),
                 hidden: _isHidden(c),
                 onHide: _mine ? () => unawaited(_setHidden(c, true)) : null,
                 onShow: _mine ? () => unawaited(_setHidden(c, false)) : null,
@@ -314,6 +379,8 @@ class _PostCommentsSheetState extends State<PostCommentsSheet> {
 class _CommentRow extends StatelessWidget {
   const _CommentRow({
     required this.comment,
+    required this.node,
+    required this.mutual,
     required this.hidden,
     this.onHide,
     this.onShow,
@@ -321,6 +388,11 @@ class _CommentRow extends StatelessWidget {
   });
 
   final FeedComment comment;
+  final LedgerNode node;
+
+  /// "N wspólnych znajomych" under the name, for someone who is not a
+  /// friend.
+  final Widget? mutual;
   final bool hidden;
   final VoidCallback? onHide;
   final VoidCallback? onShow;
@@ -338,10 +410,11 @@ class _CommentRow extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            ZenBlobAvatar(
+            ReactorAvatar(
+              node: node,
+              avatar: comment.avatar,
               name: comment.authorLabel,
               size: 34,
-              showStatus: false,
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -364,6 +437,11 @@ class _CommentRow extends StatelessWidget {
                         fontSize: 13.5,
                       ),
                     ),
+                    if (mutual != null)
+                      DefaultTextStyle.merge(
+                        style: TextStyle(color: zen.textMuted),
+                        child: mutual!,
+                      ),
                     const SizedBox(height: 3),
                     Text(
                       comment.text,

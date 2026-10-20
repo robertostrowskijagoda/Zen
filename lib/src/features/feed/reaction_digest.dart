@@ -12,6 +12,10 @@ import 'package:zen/src/features/feed/feed_model.dart';
 
 const String _seenKey = 'feed/seen_reactions';
 
+/// What was already announced as a system notification (§11), kept apart
+/// from what the bell on the wall has shown.
+const String kNotifiedReactionsKey = 'feed/notified_reactions';
+
 /// Posts remembered at most (the newest ones).
 const int _maxSeenPosts = 200;
 
@@ -52,14 +56,19 @@ final class ReactionNotice {
 /// What was seen of each own post: liker accounts (or names when the
 /// account is unknown) and comment ids.
 final class ReactionsSeen {
-  ReactionsSeen._(this._posts, {required bool fresh}) : _fresh = fresh;
+  ReactionsSeen._(this._posts, {required bool fresh, required String key})
+    : _fresh = fresh,
+      _key = key;
 
   /// Nothing seen yet: the first digest takes everything as seen, so a
   /// new version does not announce old reactions.
-  factory ReactionsSeen.empty() => ReactionsSeen._(
+  factory ReactionsSeen.empty({String key = _seenKey}) => ReactionsSeen._(
     <String, ({Set<String> likes, Set<String> comments})>{},
     fresh: true,
+    key: key,
   );
+
+  final String _key;
 
   final Map<String, ({Set<String> likes, Set<String> comments})> _posts;
 
@@ -68,15 +77,19 @@ final class ReactionsSeen {
   /// Nothing marked as seen yet.
   bool get fresh => _fresh;
 
-  static Future<ReactionsSeen> load(LedgerDisk disk) async {
-    final Uint8List? raw = await disk.read(_seenKey);
+  /// The seen set kept under [key] (the bell's by default).
+  static Future<ReactionsSeen> load(
+    LedgerDisk disk, {
+    String key = _seenKey,
+  }) async {
+    final Uint8List? raw = await disk.read(key);
     if (raw == null) {
-      return ReactionsSeen.empty();
+      return ReactionsSeen.empty(key: key);
     }
     try {
       final Object? json = jsonDecode(utf8.decode(raw));
       if (json is! Map) {
-        return ReactionsSeen.empty();
+        return ReactionsSeen.empty(key: key);
       }
       Set<String> strings(Object? v) => <String>{
         if (v is List)
@@ -93,14 +106,15 @@ final class ReactionsSeen {
               ),
         },
         fresh: false,
+        key: key,
       );
     } on FormatException {
-      return ReactionsSeen.empty();
+      return ReactionsSeen.empty(key: key);
     }
   }
 
   Future<void> save(LedgerDisk disk) => disk.write(
-    _seenKey,
+    _key,
     Uint8List.fromList(
       utf8.encode(
         jsonEncode(<String, dynamic>{

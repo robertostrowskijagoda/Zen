@@ -8,6 +8,7 @@ PyrMember _member(String key, String addr) => PyrMember(
   key: key,
   name: key,
   nat: 'PL',
+  birthYear: 1990,
   dataCommit: 'c',
   joinedAt: 0,
   addr: addr,

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
+import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/feed/reaction_relay.dart';
 import 'package:zen/src/features/feed/thread_moderation.dart';
@@ -222,6 +223,7 @@ final class FeedComment {
     this.authorAddress = '',
     this.account = '',
     this.hiddenByAuthor = false,
+    this.avatar,
   });
 
   final String id;
@@ -240,6 +242,10 @@ final class FeedComment {
   /// show it again.
   final bool hiddenByAuthor;
 
+  /// The writer's profile photo from their mini-profile (§9), when the
+  /// comment came with one.
+  final MediaRef? avatar;
+
   FeedComment hidden() => FeedComment(
     id: id,
     authorLabel: authorLabel,
@@ -248,6 +254,7 @@ final class FeedComment {
     authorAddress: authorAddress,
     account: account,
     hiddenByAuthor: true,
+    avatar: avatar,
   );
 }
 
@@ -259,25 +266,37 @@ final class FeedLiker {
     required this.name,
     this.friend = false,
     this.verified = false,
+    this.avatar,
   });
 
   final String account;
   final String name;
 
+  /// The liker's profile photo from their mini-profile (§9), when known.
+  final MediaRef? avatar;
+
   /// This account or a friend (shown first: "Lubią to: Bob, Kasia…").
   final bool friend;
 
-  /// Met in person by this account or one of its friends (a signed
-  /// attestation, §6.2): "w tym N zweryfikowanych" (§11).
+  /// In the pyramid, or met in person by this account or one of its
+  /// friends (a signed attestation, §6.2): "w tym N zweryfikowanych"
+  /// (§11).
   final bool verified;
 
   FeedLiker withVerified(bool on) => on == verified
       ? this
-      : FeedLiker(account: account, name: name, friend: friend, verified: on);
+      : FeedLiker(
+          account: account,
+          name: name,
+          friend: friend,
+          verified: on,
+          avatar: avatar,
+        );
 }
 
 /// "w tym 830 zweryfikowanych" (§11): how many of those who like [post]
-/// were met in person by this account or its friends; `null` for none.
+/// are in the pyramid or were met in person by this account or its
+/// friends; `null` for none.
 String? verifiedSummary(FeedPost post) {
   final int n = post.verifiedLikes;
   if (n <= 0) {
@@ -324,8 +343,13 @@ String? likeSummary(FeedPost post) {
   );
 }
 
-/// Body of a comment on [postId] (validated, trimmed).
-Map<String, dynamic> commentBody(String postId, String text) {
+/// Body of a comment on [postId] (validated, trimmed). With [mini] the
+/// writer's mini-profile goes along, signed with the comment (§9).
+Map<String, dynamic> commentBody(
+  String postId,
+  String text, {
+  MiniProfileTag? mini,
+}) {
   final String trimmed = text.trim();
   if (trimmed.isEmpty) {
     throw ArgumentError(t('Pusty komentarz.'));
@@ -340,7 +364,10 @@ Map<String, dynamic> commentBody(String postId, String text) {
       ),
     );
   }
-  return <String, dynamic>{'post': postId, 'text': trimmed};
+  return withMiniProfile(<String, dynamic>{
+    'post': postId,
+    'text': trimmed,
+  }, mini);
 }
 
 @immutable
@@ -452,9 +479,14 @@ final class FeedPost {
   );
 }
 
-/// Body of a like (or, with [on] false, of taking it back).
-Map<String, dynamic> likeBody(String postId, {bool on = true}) =>
-    <String, dynamic>{'post': postId, 'on': on ? 1 : 0};
+/// Body of a like (or, with [on] false, of taking it back). With [mini] the
+/// liker's mini-profile goes along, signed with the like (§9).
+Map<String, dynamic> likeBody(
+  String postId, {
+  bool on = true,
+  MiniProfileTag? mini,
+}) =>
+    withMiniProfile(<String, dynamic>{'post': postId, 'on': on ? 1 : 0}, mini);
 
 /// Post ids liked in one account's acts, latest entry per post winning.
 Set<String> likedPosts(Iterable<LogEntry> acts) {
@@ -639,10 +671,13 @@ FeedPost _edited(FeedPost post, Map<String, dynamic>? edit) {
 /// This account's posts and those of friends and followed accounts whose
 /// keys are known (plus, with [reshares], posts reshared by friends),
 /// newest first. [nameOf] turns a friend's mesh address into a display name.
+/// [pyramidAddresses] are the device addresses of the pyramid's members:
+/// their accounts count as verified (§11).
 List<FeedPost> buildFeed(
   LedgerNode node, {
   required String Function(String address) nameOf,
   ReshareCache? reshares,
+  Set<String> pyramidAddresses = const <String>{},
 }) {
   final Set<String> deleted = <String>{};
   final List<FeedPost> posts = _postsOf(
@@ -849,6 +884,7 @@ List<FeedPost> buildFeed(
           those[l.account] = FeedLiker(
             account: l.account,
             name: relayedLabel(l.name),
+            avatar: l.avatar,
           );
           relayedLikes.add('$post\n${l.account}');
         }
@@ -866,6 +902,7 @@ List<FeedPost> buildFeed(
             text: c.text,
             millis: c.millis,
             account: c.account,
+            avatar: c.avatar,
           ),
         );
       }
@@ -887,8 +924,13 @@ List<FeedPost> buildFeed(
   // The author's say over the thread (§11): their signed entries (when
   // this device reads their acts) and what their bundles passed on.
   final Map<String, ThreadModeration> signed = <String, ThreadModeration>{};
-  // Met in person by this account or a friend (§6.2): "verified" (§11).
-  final Set<String> verified = node.metByCircle();
+  // In the pyramid, or met in person by this account or a friend (§6.2):
+  // "verified" (§11).
+  final Set<String> verified = <String>{
+    ...node.metByCircle(),
+    for (final String address in pyramidAddresses)
+      ?node.accountOfAddress(address),
+  };
   final List<FeedPost> result = <FeedPost>[];
   for (final FeedPost p in posts) {
     final ThreadModeration own = signed[p.account] ??= authorModeration(

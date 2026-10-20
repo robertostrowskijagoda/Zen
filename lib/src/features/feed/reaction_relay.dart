@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
+import 'package:zen/src/features/feed/mini_profile_tag.dart';
+import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/feed/thread_moderation.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
@@ -51,21 +53,27 @@ const Set<String> kReactionRelayExtraKinds = <String>{
   kReactionsPageKind,
 };
 
-/// One liker or comment as a bundle carries it.
-typedef BundleLike = ({String account, String name});
+/// One liker or comment as a bundle carries it, with the writer's profile
+/// photo from their mini-profile (§9) when the bundle had room for it.
+typedef BundleLike = ({String account, String name, MediaRef? avatar});
 typedef BundleComment = ({
   String id,
   String account,
   String name,
   String text,
   int millis,
+  MediaRef? avatar,
 });
 
 List<BundleLike> _likesOf(Object? likes) => <BundleLike>[
   if (likes is List)
     for (final Object? l in likes.take(kMaxBundleLikers))
       if (l is Map && l['a'] is String && l['n'] is String)
-        (account: l['a'] as String, name: l['n'] as String),
+        (
+          account: l['a'] as String,
+          name: l['n'] as String,
+          avatar: mediaRefFromJson(l[kBundleAvatarKey]),
+        ),
 ];
 
 List<BundleComment> _commentsOf(Object? comments) => <BundleComment>[
@@ -85,6 +93,7 @@ List<BundleComment> _commentsOf(Object? comments) => <BundleComment>[
               ? (c['t'] as String).substring(0, kMaxCommentChars)
               : c['t'] as String,
           millis: c['at'] as int,
+          avatar: mediaRefFromJson(c[kBundleAvatarKey]),
         ),
 ];
 
@@ -232,6 +241,20 @@ Map<String, PostReactions> readBundles(Iterable<LogEntry> acts) {
   return out;
 }
 
+/// Body of the newest like entry for [postId] in [acts] (the mini-profile
+/// the liker attached to it is read from there).
+Map<String, dynamic>? _latestLikeBody(Iterable<LogEntry> acts, String postId) {
+  LogEntry? best;
+  for (final LogEntry e in acts) {
+    if (e.kind == kLikeKind &&
+        e.body['post'] == postId &&
+        (best == null || e.hlc > best.hlc)) {
+      best = e;
+    }
+  }
+  return best?.body;
+}
+
 String _nameFor(
   LedgerNode node,
   String address,
@@ -323,6 +346,8 @@ Future<int> relayReactions(
       author,
     )).merge(authors?.moderation ?? ThreadModeration.none);
     final Map<String, String> likes = <String, String>{};
+    final Map<String, Map<String, dynamic>> likeAvatars =
+        <String, Map<String, dynamic>>{};
     final Map<String, Map<String, dynamic>> comments =
         <String, Map<String, dynamic>>{};
     for (final (String, String, List<LogEntry>) member in circle) {
@@ -331,6 +356,14 @@ Future<int> relayReactions(
       }
       if (likedPosts(member.$3).contains(postId)) {
         likes[member.$1] = member.$2;
+        final Map<String, dynamic>? avatar = avatarJsonOf(
+          node,
+          member.$1,
+          _latestLikeBody(member.$3, postId),
+        );
+        if (avatar != null) {
+          likeAvatars[member.$1] = avatar;
+        }
       }
       for (final LogEntry e in member.$3) {
         final Object? text = e.body['text'];
@@ -339,12 +372,18 @@ Future<int> relayReactions(
             text is String &&
             text.trim().isNotEmpty &&
             !mod.hidesComment(postId, e.id)) {
+          final Map<String, dynamic>? avatar = avatarJsonOf(
+            node,
+            member.$1,
+            e.body,
+          );
           comments[e.id] = <String, dynamic>{
             'id': e.id,
             'a': member.$1,
             'n': member.$2,
             't': text,
             'at': e.hlc.millis,
+            kBundleAvatarKey: ?avatar,
           };
         }
       }
@@ -354,6 +393,9 @@ Future<int> relayReactions(
       for (final BundleLike l in authors.likes) {
         if (!mod.blocks(l.account)) {
           likes.putIfAbsent(l.account, () => l.name);
+          if (l.avatar != null) {
+            likeAvatars.putIfAbsent(l.account, () => mediaRefToJson(l.avatar!));
+          }
         }
       }
       for (final BundleComment c in authors.comments) {
@@ -368,6 +410,9 @@ Future<int> relayReactions(
             'n': c.name,
             't': c.text,
             'at': c.millis,
+            kBundleAvatarKey: ?(c.avatar == null
+                ? null
+                : mediaRefToJson(c.avatar!)),
           },
         );
       }
@@ -378,7 +423,11 @@ Future<int> relayReactions(
             (MapEntry<String, String> a, MapEntry<String, String> b) =>
                 a.key.compareTo(b.key),
           ))
-        <String, dynamic>{'a': l.key, 'n': l.value},
+        <String, dynamic>{
+          'a': l.key,
+          'n': l.value,
+          kBundleAvatarKey: ?likeAvatars[l.key],
+        },
     ];
     // Newest comments first into the pages (page 0 has the newest).
     final List<Map<String, dynamic>> newestFirst = comments.values.toList()
@@ -392,8 +441,20 @@ Future<int> relayReactions(
       kMaxBundlePages,
       math.max(1, math.max(likePages, commentPages)),
     );
-    List<Map<String, dynamic>> likesOn(int page) =>
-        likeList.skip(page * kMaxBundleLikers).take(kMaxBundleLikers).toList();
+    // Only the first photos of a page go along, so a page stays small.
+    List<Map<String, dynamic>> likesOn(int page) {
+      final List<Map<String, dynamic>> on = likeList
+          .skip(page * kMaxBundleLikers)
+          .take(kMaxBundleLikers)
+          .toList();
+      return <Map<String, dynamic>>[
+        for (int i = 0; i < on.length; i++)
+          i < kMaxBundleAvatars
+              ? on[i]
+              : (Map<String, dynamic>.of(on[i])..remove(kBundleAvatarKey)),
+      ];
+    }
+
     List<Map<String, dynamic>> commentsOn(int page) =>
         newestFirst
             .skip(page * kMaxBundleComments)

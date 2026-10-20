@@ -215,8 +215,10 @@ final class PrivacyRedactingNotificationService
   /// Ids (see the features' `notify` calls) of the posts whose title alone
   /// gives away what they are about: dating (`date-`), questions (`ask-`),
   /// events and the meet-ups like them (`event-`, `plan-`, `circle-`),
-  /// introductions (`intro-`) and the pyramid (`pyr-`).
+  /// introductions (`intro-`), the pyramid (`pyr-`) and reactions to your
+  /// posts (`react-`: the title names who liked or commented).
   static const List<String> _revealingTitleIdPrefixes = <String>[
+    'react-',
     'date-',
     'ask-',
     'event-',

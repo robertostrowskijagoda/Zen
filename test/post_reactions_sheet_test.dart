@@ -29,7 +29,11 @@ void main() {
         home: Builder(
           builder: (BuildContext context) => Scaffold(
             body: TextButton(
-              onPressed: () => showPostLikers(context, post),
+              onPressed: () => showPostLikers(
+                context,
+                post,
+                mutualFriends: (String account) => account == 'm' ? 3 : 7,
+              ),
               child: const Text('open'),
             ),
           ),
@@ -43,6 +47,10 @@ void main() {
     expect(find.text('Bob'), findsOneWidget);
     expect(find.text('Mama (przez Bob)'), findsOneWidget);
     expect(find.text('…i 1284 inne osoby'), findsOneWidget);
+    // Only someone who is not your friend gets the mutual friends line.
+    expect(find.text('3 wspólnych znajomych'), findsOneWidget);
+    expect(find.byKey(const Key('post-liker-mutual-m')), findsOneWidget);
+    expect(find.byKey(const Key('post-liker-mutual-b')), findsNothing);
   });
 
   test('summaries in Polish', () {

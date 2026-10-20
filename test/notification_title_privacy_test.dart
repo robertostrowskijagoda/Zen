@@ -48,6 +48,7 @@ void main() {
           post('circle-9', 'Nowe kółko obiadowe: Sąsiedzi'),
           post('intro-5', 'Ola chce Cię komuś przedstawić'),
           post('pyr-prop-2', 'Piramida: do podpisania'),
+          post('react-p1', 'Cela i 3 inne osoby polubili Twój post'),
           post(
             'date-msg-8',
             'Tomek',
@@ -100,10 +101,12 @@ void main() {
   });
 
   test('with the setting off nothing changes', () async {
-    final Map<String, RuntimeSystemNotification> byId = await shown(
-      <RuntimeSystemNotification>[post('date-safe-7', 'Kasia idzie na randkę')],
-      hide: false,
-    );
+    final Map<String, RuntimeSystemNotification> byId =
+        await shown(<RuntimeSystemNotification>[
+          post('date-safe-7', 'Kasia idzie na randkę'),
+          post('react-p1', 'Cela polubiła Twój post'),
+        ], hide: false);
+    expect(byId['react-p1']!.title, 'Cela polubiła Twój post');
     expect(byId['date-safe-7']!.title, 'Kasia idzie na randkę');
     expect(byId['date-safe-7']!.body, 'Tajna treść');
   });

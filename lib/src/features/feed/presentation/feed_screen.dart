@@ -16,7 +16,9 @@ import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/feed/feed_memo.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
+import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/feed/post_media.dart';
+import 'package:zen/src/features/feed/presentation/mutual_friends.dart';
 import 'package:zen/src/features/feed/presentation/post_editor_screen.dart';
 import 'package:zen/src/features/feed/presentation/post_reactions_sheet.dart';
 import 'package:zen/src/features/feed/presentation/reaction_notices.dart';
@@ -27,6 +29,7 @@ import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/media/audio_clip_player.dart';
+import 'package:zen/src/features/media/media_stream_server.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/moderation/content_moderation.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
@@ -39,6 +42,8 @@ import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
 import 'package:zen/src/features/profile/presentation/profile_screen.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart'
     show PyramidService;
+import 'package:zen/src/features/pyramid/pyramid_state.dart'
+    show PyrMember, PyramidState;
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -432,7 +437,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     try {
       await node.publish(
         kLikeKind,
-        likeBody(post.id, on: !post.likedByMe),
+        likeBody(post.id, on: !post.likedByMe, mini: ownMiniProfile(node)),
         spaceKind: 'acts',
       );
     } catch (e) {
@@ -593,7 +598,13 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                               onPressed: () async {
                                 final Map<String, dynamic> body;
                                 try {
-                                  body = commentBody(post.id, field.text);
+                                  body = commentBody(
+                                    post.id,
+                                    field.text,
+                                    mini: _node == null
+                                        ? null
+                                        : ownMiniProfile(_node!),
+                                  );
                                 } on ArgumentError catch (e) {
                                   setSheet(() => error = e.message as String?);
                                   return;
@@ -631,12 +642,30 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
 
   /// Who likes it: you and friends first (§11).
   void _showLikers(FeedPost post) {
-    unawaited(showPostLikers(context, post));
+    final LedgerNode? node = _node;
+    unawaited(
+      showPostLikers(
+        context,
+        post,
+        node: node,
+        mutualFriends: node == null ? null : mutualFriendsLookup(ref, node),
+      ),
+    );
   }
 
   String _nameOf(SocialHubState state, String address) {
     final FriendProfile? friend = state.friendByAddress(address);
     return friend == null ? address : state.nameFor(friend);
+  }
+
+  /// Device addresses of the pyramid's members: "verified" likes (§11).
+  Set<String> _pyramidAddresses() {
+    final PyramidState? s = _pyramid?.state;
+    return <String>{
+      if (s != null)
+        for (final PyrMember m in s.members.values)
+          if (s.isMember(m.key) && m.addr.isNotEmpty) m.addr,
+    };
   }
 
   /// Others' posts on the wall, built again only when needed ([FeedMemo]).
@@ -646,6 +675,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         revision: _feedRevision,
         nameOf: (String address) => _nameOf(social, address),
         reshares: _reshares,
+        pyramidAddresses: _pyramidAddresses(),
       );
 
   @override
@@ -1809,6 +1839,9 @@ class _PostVideoState extends State<PostVideo> {
   final VideoAutoplay _auto = VideoAutoplay.instance;
   VideoPlayerController? _player;
   File? _file;
+
+  /// Where the stream server plays the film while it downloads.
+  Uri? _streamUri;
   bool _loading = false;
   bool _muted = true;
   bool _userPaused = false;
@@ -1892,7 +1925,8 @@ class _PostVideoState extends State<PostVideo> {
       if (widget.entry != null && !widget.node.autoDownloadMedia()) {
         widget.node.downloadMedia(widget.entry!);
       }
-      if (mounted) {
+      // §10: a film plays while it downloads, once its first piece is here.
+      if (!await _stream() && mounted) {
         setState(() {
           _loading = false;
           _error = t('Film jeszcze się pobiera…');
@@ -1900,11 +1934,56 @@ class _PostVideoState extends State<PostVideo> {
       }
       return;
     }
+    // A random name in the temporary media folder (emptied at every
+    // start), deleted when the player goes.
+    final File f;
     try {
-      // A random name in the temporary media folder (emptied at every
-      // start), deleted when the player goes.
-      final File f = await writeTemporaryMedia(bytes, extension: '.mp4');
-      final VideoPlayerController p = VideoPlayerController.file(f);
+      f = await writeTemporaryMedia(bytes, extension: '.mp4');
+    } on Object catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = t('Nie udało się odtworzyć filmu: {error}', {'error': e});
+        });
+      }
+      return;
+    }
+    _file = f;
+    await _start(VideoPlayerController.file(f));
+  }
+
+  /// Plays the film from the phone's own stream server while the rest of
+  /// it downloads; false while not even its first piece is here.
+  Future<bool> _stream() async {
+    final Uint8List? head;
+    try {
+      head = await openStreamableStart(widget.node.blobs, widget.ref);
+    } on UnsafeMediaException {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = t('Nieprawidłowy plik filmu — nie otwarto go.');
+        });
+      }
+      return true;
+    }
+    if (head == null || !mounted) {
+      return false;
+    }
+    final Uri uri = await MediaStreamServer.instance.publish(
+      BlobMediaStream(widget.node.blobs, widget.ref),
+    );
+    _streamUri = uri;
+    await _start(VideoPlayerController.networkUrl(uri));
+    if (_player == null) {
+      _streamUri = null;
+      await MediaStreamServer.instance.withdraw(uri);
+    }
+    return true;
+  }
+
+  Future<void> _start(VideoPlayerController p) async {
+    try {
       await p.initialize();
       await p.setVolume(_muted ? 0 : 1);
       p.addListener(() {
@@ -1931,12 +2010,12 @@ class _PostVideoState extends State<PostVideo> {
       }
       setState(() {
         _player = p;
-        _file = f;
         _loading = false;
         _error = null;
       });
       _onTurn();
     } on Object catch (e) {
+      unawaited(p.dispose());
       if (mounted) {
         setState(() {
           _loading = false;
@@ -1981,6 +2060,10 @@ class _PostVideoState extends State<PostVideo> {
     final File? f = _file;
     if (f != null) {
       unawaited(f.delete().then((_) {}, onError: (Object _) {}));
+    }
+    final Uri? streamed = _streamUri;
+    if (streamed != null) {
+      unawaited(MediaStreamServer.instance.withdraw(streamed));
     }
     super.dispose();
   }
