@@ -210,7 +210,7 @@ class _SettingsSecuritySection extends ConsumerWidget {
                   ),
               ],
             ),
-            if (!kIsWeb && Platform.isAndroid) ...<Widget>[
+            if (!kIsWeb && Platform.isAndroid && !isStoreBuild) ...<Widget>[
               ZenSection(t('Kamuflaż'), top: 16),
               ZenGroup(
                 children: <Widget>[

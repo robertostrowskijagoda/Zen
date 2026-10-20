@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Texts of the native Android code (call screen, notifications, biometric
      prompt, installer). English here; values-<lang> hold the app's 21
-     languages and follow the system language. The app label is "Zen"
-     in every language and stays in AndroidManifest.xml. -->
+     languages and follow the system language. The launcher label
+     (launcher_label) is "Zen" in every language; the appStoreOnly flavor
+     overrides it in src/appStoreOnly/res. -->
 <resources>
+    <string name="launcher_label" translatable="false">Zen</string>
     <string name="call_kind_video">Video call</string>
     <string name="call_kind_audio">Audio call</string>
     <string name="call_subtitle_video">Video call invitation</string>

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/update/store_build.dart';
 
 /// Android: switches the launcher entry between Zen's own icon and name and
 /// a neutral "Notatki" one (§14.2, "Kamuflaż ikony"). Native side:
@@ -19,8 +20,11 @@ class LauncherDisguise {
   final MethodChannel _channel;
   final bool? _supported;
 
-  /// Only Android has launcher aliases.
-  bool get supported => _supported ?? (!kIsWeb && Platform.isAndroid);
+  /// Only Android has launcher aliases, and the store build has none: a
+  /// look-alike icon is deceptive under the store policies (the flavor's
+  /// manifest removes the alias).
+  bool get supported =>
+      _supported ?? (!kIsWeb && Platform.isAndroid && !isStoreBuild);
 
   /// Shows the neutral icon and name ([enabled]) or Zen's own. Returns `true`
   /// once the phone took the change; `false` where unsupported or on failure.

@@ -3,9 +3,11 @@
      over src/main/AndroidManifest.xml. Stores update the app themselves and
      do not allow it to install APKs: the permission is removed, and Dart
      hides self-update and APK sharing
-     (lib/src/features/update/store_build.dart). The label differs from the
-     normal "Zen", so a copy of this build that someone sideloads by mistake
-     is recognizable on the phone. -->
+     (lib/src/features/update/store_build.dart). The label (launcher_label,
+     src/appStoreOnly/res) differs from the normal "Zen", on the home screen
+     too, so a copy of this build that someone sideloads by mistake is
+     recognizable on the phone. The look-alike "Notatki" launcher alias is
+     removed: a disguised icon is deceptive under the store policies. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
@@ -13,7 +15,9 @@
         android:name="android.permission.REQUEST_INSTALL_PACKAGES"
         tools:node="remove" />
 
-    <application
-        android:label="Zen (sklep)"
-        tools:replace="android:label" />
+    <application>
+        <activity-alias
+            android:name=".LauncherDisguise"
+            tools:node="remove" />
+    </application>
 </manifest>

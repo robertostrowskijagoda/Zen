@@ -32,6 +32,7 @@ import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/presentation/call_recordings_screen.dart';
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
+import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
 import 'package:zen/src/features/dating/presentation/dating_screen.dart';
 import 'package:zen/src/features/feed/presentation/feed_screen.dart';
 import 'package:zen/src/features/groups/presentation/create_group_sheet.dart';
@@ -75,6 +76,7 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/update/presentation/friends_version_banner.dart';
 import 'package:zen/src/features/update/presentation/share_app_screen.dart';
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
+import 'package:zen/src/features/update/store_build.dart';
 
 part 'app_shell_screen_views.dart';
 part 'app_shell_screen_settings_security.dart';

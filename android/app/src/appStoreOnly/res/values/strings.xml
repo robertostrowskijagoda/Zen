@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The store build's launcher and app name: unmistakable on the home
+     screen too (a sideloaded copy is recognizable). -->
+<resources>
+    <string name="launcher_label" translatable="false">Zen (store)</string>
+</resources>
