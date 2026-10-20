@@ -3,6 +3,7 @@ import 'dart:ui' show Locale;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/date_symbol_data_local.dart' show initializeDateFormatting;
 import 'package:intl/intl.dart' show Intl;
 import 'package:zen/src/core/logging/zen_log.dart';
 
@@ -103,6 +104,13 @@ abstract final class ZenI18n {
     if (language == kZenSourceLanguage) {
       _use(language.code, const <String, Object?>{});
       return;
+    }
+    // The names of months and weekdays and the order of dates for
+    // ZenFormat (Polish is written by hand and needs none).
+    try {
+      await initializeDateFormatting(language.code);
+    } on Object catch (error) {
+      logZenWarning('Cannot load the dates of ${language.code}: $error');
     }
     try {
       // Not cached by the bundle: the decoded map below is what stays, the
