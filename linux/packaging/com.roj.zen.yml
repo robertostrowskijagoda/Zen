@@ -1,0 +1,56 @@
+# Flatpak of the ALREADY BUILT Linux bundle (not a from-source Flatpak):
+# the release workflow builds Zen-Linux-x64.tar.gz first, then this manifest
+# only unpacks it. Run by hand in a directory that holds this file, the
+# .desktop file, the AppStream file, Zen-Linux-x64.tar.gz and extra-lib/
+# (see the "flatpak" job in .github/workflows/release.yml):
+#
+#   flatpak-builder --user --install-deps-from=flathub --force-clean \
+#     --repo=repo build com.roj.zen.yml
+#   flatpak build-bundle repo Zen-Linux-x64.flatpak com.roj.zen
+#
+# The GNOME runtime is based on org.freedesktop.Platform and adds GTK 3,
+# which the Flutter Linux shell needs (the bare freedesktop runtime has no
+# GTK). libsecret and GStreamer are in it too; the tray's
+# libayatana-appindicator3 and its dependencies are not, so the workflow
+# copies them next to the bundle (extra-lib/).
+app-id: com.roj.zen
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: zen
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  # Camera (video calls) and GPU.
+  - --device=all
+  # The encryption key lives in the secret service (GNOME Keyring, KWallet).
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.kde.StatusNotifierWatcher
+modules:
+  - name: zen
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/zen /app/bin /app/lib
+      - cp -R . /app/zen/
+      - rm -f /app/zen/install-desktop-entry.sh
+      - ln -s /app/zen/zen /app/bin/zen
+      - cp -a extra-lib/. /app/lib/
+      - install -Dm644 data/app_icon.png /app/share/icons/hicolor/256x256/apps/com.roj.zen.png
+      - install -Dm644 com.roj.zen.desktop /app/share/applications/com.roj.zen.desktop
+      - install -Dm644 com.roj.zen.metainfo.xml /app/share/metainfo/com.roj.zen.metainfo.xml
+    sources:
+      # Unpacks into the build directory without the Zen/ folder.
+      - type: archive
+        path: Zen-Linux-x64.tar.gz
+        strip-components: 1
+      - type: file
+        path: com.roj.zen.desktop
+      - type: file
+        path: com.roj.zen.metainfo.xml
+      - type: dir
+        path: extra-lib
+        dest: extra-lib
