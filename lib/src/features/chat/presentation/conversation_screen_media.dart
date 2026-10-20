@@ -4,6 +4,9 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
   Widget _buildComposer(FriendProfile? friend) {
     final ZenColors zen = ZenColors.of(context);
     final bool canCompose = friend?.status == FriendRelationshipStatus.accepted;
+    // Someone who is not a friend: text only (§13, §24.1).
+    final bool canText =
+        canCompose || isStrangerConversation(friend, widget.peerAddress);
     final bool idle = !_isRecordingVoice && !_isRecordingBusy;
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 6, 10, 10),
@@ -18,7 +21,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                 icon: Icons.emoji_emotions_outlined,
                 tooltip: t('Emotikony'),
                 toneIndex: 0,
-                onPressed: canCompose && idle ? _pickEmoji : null,
+                onPressed: canText && idle ? _pickEmoji : null,
               ),
               const SizedBox(width: 6),
               _ComposerActionButton(
@@ -101,7 +104,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                             controller: _composerController,
                             // Keyboard must not learn what you write (§14.1).
                             enableIMEPersonalizedLearning: false,
-                            enabled: canCompose && !_isRecordingBusy,
+                            enabled: canText && !_isRecordingBusy,
                             minLines: 1,
                             maxLines: 6,
                             textCapitalization: TextCapitalization.sentences,
@@ -129,6 +132,8 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                               ),
                               hintText: canCompose
                                   ? t('Wiadomość…')
+                                  : canText
+                                  ? t('Wiadomość (tylko tekst)…')
                                   : t(
                                       'Rozmowa odblokuje się po akceptacji '
                                       'relacji',
@@ -147,7 +152,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                       ) {
                         final bool hasText = value.text.trim().isNotEmpty;
                         final VoidCallback? onPressed =
-                            !canCompose || _isRecordingBusy
+                            !canText || _isRecordingBusy
                             ? null
                             : _isRecordingVoice
                             ? _stopVoiceRecording

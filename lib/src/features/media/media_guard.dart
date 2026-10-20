@@ -402,6 +402,50 @@ bool looksLikeSafeContainer(Uint8List bytes) {
   return sniffMediaKind(bytes) == MediaKind.audio;
 }
 
+/// Whether a film that is still downloading may go to the player (§10),
+/// from its first bytes [head] and its whole [length]: a video, and for an
+/// MP4/MOV file the first box is `ftyp` and every top-level box that starts
+/// in [head] has a printable name and fits in [length]. What comes later is
+/// left to the player, which reads it as it arrives.
+bool looksLikeSafeStreamStart(Uint8List head, int length) {
+  if (sniffMediaKind(head) != MediaKind.video || head.length > length) {
+    return false;
+  }
+  if (_isoBrand(head) == null) {
+    return looksLikeSafeContainer(head);
+  }
+  final ByteData data = ByteData.sublistView(head);
+  int offset = 0;
+  int boxes = 0;
+  while (offset + 8 <= head.length) {
+    if (++boxes > 4096) {
+      return false;
+    }
+    for (int i = 4; i < 8; i++) {
+      final int c = head[offset + i];
+      if ((c < 0x20 || c > 0x7E) && c != 0xA9) {
+        return false;
+      }
+    }
+    int size = data.getUint32(offset);
+    int header = 8;
+    if (size == 1) {
+      if (offset + 16 > head.length || data.getUint32(offset + 8) != 0) {
+        return false;
+      }
+      size = data.getUint32(offset + 12);
+      header = 16;
+    } else if (size == 0) {
+      size = length - offset;
+    }
+    if (size < header || offset + size > length) {
+      return false;
+    }
+    offset += size;
+  }
+  return true;
+}
+
 bool _isoBoxesAddUp(Uint8List bytes) {
   final ByteData data = ByteData.sublistView(bytes);
   int offset = 0;

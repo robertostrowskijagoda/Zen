@@ -241,6 +241,19 @@ final class BlobStore {
     ];
   }
 
+  /// Piece [index] of blob [id], or `null` while it (or the manifest) has
+  /// not arrived: a film is played piece by piece while it downloads (§10).
+  Future<Uint8List?> chunkAt(String id, int index) async {
+    final BlobManifest? manifest = _manifests[id];
+    if (manifest == null ||
+        index < 0 ||
+        index >= manifest.chunks.length ||
+        !backend.has(manifest.chunks[index])) {
+      return null;
+    }
+    return backend.read(manifest.chunks[index]);
+  }
+
   bool isComplete(String id) =>
       _manifests.containsKey(id) && missingChunks(id).isEmpty;
 
