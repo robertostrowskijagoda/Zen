@@ -2,6 +2,43 @@
 
 ## 1.10.0 — 14.10.2026 (pierwsze publiczne wydanie)
 
+### Runda 2: języki, Linux i macOS, drugi audyt
+- **21 języków:** polski, angielski, niemiecki, francuski, hiszpański,
+  włoski, portugalski, niderlandzki, czeski, węgierski, rumuński, turecki,
+  rosyjski, ukraiński, arabski (od prawej do lewej), hindi, indonezyjski,
+  wietnamski, chiński, japoński, koreański. Zen sam wybiera język systemu
+  (gdy go nie zna — angielski); **Ustawienia → Język** zmienia go od razu,
+  bez restartu. Ten sam język ma ekran blokady i powiadomienia z usługi
+  w tle. Teksty w kodzie po polsku w `t()` / `tn()` (liczba mnoga według
+  języka), tłumaczenia w `assets/i18n/<kod>.json`; zgodność pilnują
+  `dart run tool/i18n.dart` i `test/i18n_test.dart`.
+- **Linux i macOS:** nowe pliki wydania `Zen-Linux-x64.tar.gz`,
+  `Zen-Linux-arm64.tar.gz` i `Zen-macOS.zip` (Apple Silicon i Intel, od
+  macOS 12), budowane w GitHub Actions, bez podpisu; `SHA256SUMS` liczone ze
+  wszystkich plików wydania (także `.ipa`). CI buduje i na chwilę uruchamia
+  Linuksa przy każdym pushu i pull requeście, macOS przy pushu na `main`.
+  Most Go buduje się sam (`build_linux.sh`, `build_macos.sh`). macOS: Touch
+  ID przez Secure Enclave, ochrona ekranu, bez piaskownicy; Linux: klucz
+  w GNOME Keyring / KWallet, zasobnik przez AppIndicator. Na obu bez
+  Bluetooth, nagrywania rozmów i aparatu; na Linuksie bez odtwarzania
+  głosówek i filmów. Niesprawdzone przed pierwszym przebiegiem CI.
+- **Poprawki z drugiego audytu bezpieczeństwa** (`docs/STAN.md` §4.2):
+  odzyskiwanie konta związane z kontem (S19), limity pamięci mostu (S20),
+  dowód adresu urządzeń (S21), ostrzeżenia o plikach (S22), skrzynki tylko
+  dla znajomych (S23), uszkodzone dane nie usuwają znajomych (B11),
+  prywatność powiadomień i ekranu (S27, S30), GIF-y po dotknięciu (S29),
+  przypięte akcje CI i klucz APK tylko dla tagów po zatwierdzeniu (S24),
+  `SECURITY.md` — jak zgłaszać podatności.
+- **„Zgłoś”:** zgłoszoną treść da się ukryć u siebie, od decyzji można się
+  odwołać przyciskiem, okno zgłoszenia nie obiecuje już „Usuń z mojego
+  urządzenia” (B13).
+- **Dokumentacja:** `docs/STAN.md` z drugim audytem, przeglądem
+  architektury, zgodnością kodu z planem i stanem dystrybucji; plan
+  (`docs/PROJEKT_APLIKACJI.md`, wersja 13) zgodny z kodem; `docs/WYDANIA.md`
+  z kanałami, wymaganiami sklepów, weryfikacją twórców Androida, iPhone'em,
+  kosztami i planem; README z językami, Linuksem i macOS oraz uczciwą
+  informacją o GIF-ach z klipy.com.
+
 ### Przed wydaniem: bezpieczeństwo, waluta, iPhone
 - **Pierwsze uruchomienie:** po haśle ekran „Uprawnienia i Bluetooth” —
   po kolei powiadomienia, Bluetooth (na Androidzie 11 i starszym
@@ -100,9 +137,10 @@
   jest tylko wtedy, gdy ją włączono.
 - **Ikony:** Tablica znów jako gazeta, Portfel jako znak dolara; piramida
   wszędzie tym samym rysunkiem (pasek, nagłówki, filtry grafu).
-- **Licencja:** PolyForm Strict 1.0.0 z dodatkowymi zezwoleniami — tylko
-  użycie niekomercyjne, autor i zbiórka muszą zostać, pull requesty mile
-  widziane, forki i przerobione wersje zakazane.
+- **Licencja:** PolyForm Strict 1.0.0 z dodatkowymi zezwoleniami — każdy,
+  także firma, może używać Zen do każdego celu; nie wolno go sprzedawać ani
+  dołączać do płatnych produktów; autor i zbiórka muszą zostać, pull requesty
+  mile widziane, forki i przerobione wersje zakazane.
 - Pakiet Dart nazywa się `zen`, wersja **1.10.0 (10)**.
 
 
@@ -332,7 +370,8 @@
   powiadomienie jest to samo co przy alarmie z sieci (u znajomych dzwoni),
   a każda fala dzwoni tylko raz, także gdy aplikacja działa w tle. Alarm
   podniesiony w tle (skrót, termin randki) też idzie falą.
-- **„Rozglądaj się też w tle”** (ekran „W pobliżu”, domyślnie włączone):
+- **„Rozglądaj się też w tle”** (ekran „W pobliżu”; przed wydaniem
+  domyślnie wyłączone — wyżej, „Bluetooth”):
   co 5 minut 10 sekund oszczędnego skanowania, tylko po to, żeby zaznaczyć
   znajomych w zasięgu jako „spotkanych osobiście” — w aplikacji i w usłudze
   w tle. Skanowanie z ekranu „W pobliżu” ma pierwszeństwo.
