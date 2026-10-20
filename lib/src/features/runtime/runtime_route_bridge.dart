@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
@@ -7,6 +9,9 @@ import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/groups/presentation/group_conversation_screen.dart';
+import 'package:zen/src/features/neighbors/flat_model.dart';
+import 'package:zen/src/features/neighbors/neighbors_providers.dart';
+import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -158,6 +163,21 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
             builder: (BuildContext context) =>
                 GroupConversationScreen(groupId: groupId, groupName: title),
           ),
+        );
+        break;
+      case RuntimeRouteTarget.flatDoor:
+        // A door sticker's link: the neighbours section, then the knock
+        // (asked first: the link can come from anywhere).
+        final FlatDoorCode? code = FlatDoorCode.parse(intent.rawInput ?? '');
+        if (code == null) {
+          break;
+        }
+        unawaited(NeighborsScreen.open(context));
+        await knockOnFlatDoor(
+          context,
+          ref.read(neighborsServiceProvider),
+          code,
+          ask: true,
         );
         break;
     }

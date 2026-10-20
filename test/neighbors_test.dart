@@ -68,8 +68,15 @@ final class _Phone implements EventHost {
   late NeighborsService service;
   int clock = 1000;
 
-  /// A dedicated door inbox, when the test gives the flat one.
-  String? inbox;
+  /// Whether this phone's door runs (it runs with the node, door_node.go).
+  bool doorUp = true;
+
+  /// The door's address: it follows the door key, as the bridge's does.
+  String? get inbox {
+    final String? key = service.doorKey;
+    return doorUp && key != null ? addr('d0:${key.substring(0, 4)}') : null;
+  }
+
   bool online = true;
   final List<RuntimeSystemNotification> shown = <RuntimeSystemNotification>[];
   final List<Map<String, dynamic>> sent = <Map<String, dynamic>>[];
@@ -77,8 +84,19 @@ final class _Phone implements EventHost {
   @override
   Future<void> send(String to, Map<String, dynamic> payload) async {
     sent.add(payload);
-    final _Phone? other = net[to];
+    _Phone? other = net[to];
+    bool door = false;
+    for (final _Phone p in net.values) {
+      if (other == null && p.inbox == to) {
+        other = p;
+        door = true;
+      }
+    }
     if (other == null || !other.online) {
+      return;
+    }
+    if (door && payload['type'] != FlatTypes.hello) {
+      // Like the bridge's door: knocks only.
       return;
     }
     await other.service.handle(
@@ -86,6 +104,7 @@ final class _Phone implements EventHost {
         from: address,
         payload: jsonDecode(jsonEncode(payload)) as Map<String, dynamic>,
         receivedAtMillis: 0,
+        door: door,
       ),
     );
   }
@@ -116,15 +135,13 @@ void main() {
       final FlatDoorCode code = FlatDoorCode(
         key: base64Url.encode(List<int>.filled(32, 7)),
         door: 'abc',
-        members: <String>[addr('a1'), addr('a2'), addr('a3'), addr('a4')],
+        inbox: addr('d1'),
         name: 'Nowakowie, m. 12',
       );
       final FlatDoorCode back = FlatDoorCode.parse(code.toQr())!;
       expect(back.key, code.key);
       expect(back.door, 'abc');
-      expect(back.members, hasLength(1), reason: 'one door address only');
-      expect(back.members.single, addr('a1'));
-      expect(back.isLegacy, isFalse);
+      expect(back.inbox, addr('d1'));
       expect(back.name, 'Nowakowie, m. 12');
       expect(
         FlatDoorCode.parse('https://example.org/m#${code.encode()}')!.name,
@@ -156,39 +173,36 @@ void main() {
         base64Url.normalize(qr.substring(FlatDoorCode.qrPrefix.length)),
       ),
     );
-    FlatDoorCode code = ania.service.doorCode!;
-    String raw = payload(code.toQr());
-    expect(jsonDecode(raw)['v'], 2);
-    expect((jsonDecode(raw)['a'] as List), hasLength(1));
+    final FlatDoorCode code = ania.service.doorCode!;
+    final String raw = payload(code.toQr());
+    expect(jsonDecode(raw)['v'], FlatDoorCode.currentVersion);
+    // Only the door's own address: no resident's.
+    expect(jsonDecode(raw)['a'], ania.inbox);
+    expect(code.inbox, isNot(ania.address));
+    expect(raw.contains(ania.address), isFalse, reason: 'resident not in QR');
     expect(raw.contains(ola.address), isFalse, reason: 'housemate not in QR');
     expect(code.toLink(), contains('/m#'));
     expect(FlatDoorCode.parse(code.toLink())!.key, code.key);
-    expect(code.dedicated, isFalse);
+    // The door key stays on its phone: the housemate runs a door of its
+    // own (one key never runs twice on the mesh), with the same token.
+    expect(ola.service.doorKey, isNot(ania.service.doorKey));
+    expect(ola.service.doorCode!.door, code.door);
 
-    // A dedicated inbox replaces every person's address.
-    ania.inbox = addr('d00');
-    code = ania.service.doorCode!;
-    raw = payload(code.toQr());
-    expect(raw.contains(ania.address), isFalse);
-    expect(raw.contains(ola.address), isFalse);
-    final FlatDoorCode back = FlatDoorCode.parse(code.toQr())!;
-    expect(back.members, <String>[addr('d00')]);
-    expect(back.dedicated, isTrue);
+    // No door running, no door QR (never a resident's address instead).
+    ania.doorUp = false;
+    expect(ania.service.doorCode, isNull);
+    ania.doorUp = true;
 
-    // Old stickers (no version, up to 3 residents) still decode and knock,
-    // but are never produced again.
-    ania.inbox = null;
-    final FlatDoorCode legacy = FlatDoorCode(
-      key: ania.service.profile!.key,
-      door: ania.service.door,
-      members: <String>[ania.address, ola.address],
-      name: 'Nowakowie, m. 12',
+    // A sticker without the current version is not read.
+    final Map<String, dynamic> noVersion =
+        jsonDecode(raw) as Map<String, dynamic>..remove('v');
+    expect(
+      FlatDoorCode.parse(
+        '${FlatDoorCode.qrPrefix}${base64Url.encode(utf8.encode(jsonEncode(noVersion))).replaceAll('=', '')}',
+      ),
+      isNull,
     );
-    final FlatDoorCode old = FlatDoorCode.parse(
-      '${FlatDoorCode.qrPrefix}${legacy.encodeLegacy()}',
-    )!;
-    expect(old.isLegacy, isTrue);
-    expect(old.members, <String>[ania.address, ola.address]);
+    final FlatDoorCode old = FlatDoorCode.parse(ania.service.doorCode!.toQr())!;
     await bartek.service.createFlat('Bartkowie');
     expect(await bartek.service.scanDoor(old), FlatScan.sent);
     expect(bartek.service.neighbors.single.profile.name, 'Nowakowie');
@@ -398,12 +412,50 @@ void main() {
     await eve.service.createFlat('Eve, m. 1');
 
     final FlatDoorCode old = ania.service.doorCode!;
+    final String? oldKey = ania.service.doorKey;
     await ania.service.newDoor();
+    // A new code is a new door: new key, new address.
+    expect(ania.service.doorKey, isNot(oldKey));
+    expect(ania.service.doorCode!.inbox, isNot(old.inbox));
     await dorota.service.scanDoor(old);
+    // The old door's address answers no more: nothing reaches Ania.
     expect(dorota.service.neighbors, isEmpty);
-    expect(dorota.service.pending, isEmpty);
-    expect(dorota.service.staleDoors.values.single, 'Nowakowie, m. 12');
+    expect(dorota.service.pending.keys, <String>[old.key]);
     expect(ania.service.neighbors, isEmpty);
+
+    // A knock at the live door with a wrong token gets no answer: one from
+    // Ania's phone would tell whose door it is.
+    final int before = ania.sent.length;
+    await dorota.service.scanDoor(
+      FlatDoorCode(
+        key: old.key,
+        door: 'guess',
+        inbox: ania.service.doorCode!.inbox,
+        name: old.name,
+      ),
+    );
+    expect(ania.sent.length, before);
+    expect(ania.service.neighbors, isEmpty);
+    expect(dorota.service.staleDoors, isEmpty);
+
+    // The door takes knocks only.
+    expect(
+      await ania.service.handle(
+        SignalTransportFrame(
+          from: eve.address,
+          payload: <String, dynamic>{
+            'type': FlatTypes.get,
+            'f': eve.service.profile!.key,
+            'to': ania.service.profile!.key,
+            'b': <String, dynamic>{},
+            's': 'AAAA',
+          },
+          receivedAtMillis: 0,
+          door: true,
+        ),
+      ),
+      isFalse,
+    );
 
     // Eve was never let in: her messages, sign-ups and profiles are dropped.
     final String ownKey = ania.service.profile!.key;
@@ -523,11 +575,12 @@ void main() {
     expect(bartek.shown.last.title, 'Nowakowie wyprowadzili się');
     expect(bartek.service.messagesWith(moved.key), isEmpty);
 
-    // The new tenants make their own profile; the old sticker leads nowhere.
+    // The new tenants make their own profile; the old sticker leads nowhere
+    // (its door's key is gone with the old code).
     await nowi.service.createFlat('Kowalscy', place: 'm. 12');
     await nowi.service.scanDoor(oldDoor);
     expect(nowi.service.neighbors, isEmpty);
-    expect(nowi.service.staleDoors, hasLength(1));
+    expect(ania.service.doorCode!.inbox, isNot(oldDoor.inbox));
     await bartek.service.scanDoor(nowi.service.doorCode!);
     expect(bartek.service.neighbors.single.profile.label, 'Kowalscy · m. 12');
   });
