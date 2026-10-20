@@ -1,0 +1,119 @@
+Zen
+Copyright (C) 2026 Robert Ostrowski-Jagoda
+https://github.com/robertostrowskijagoda/Zen
+
+SPDX-License-Identifier: GPL-3.0-only
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
+Software Foundation, version 3 of the License, together with the additional
+terms below, which section 7 of that License permits.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+more details.
+
+You should have received a copy of the GNU General Public License along
+with this program (the LICENSE file). If not, see
+<https://www.gnu.org/licenses/>.
+
+The copyright in Zen stays with Robert Ostrowski-Jagoda (the "Author"),
+and with each contributor for their own contribution. The GPL is a
+licence, not a transfer of copyright.
+
+
+==========================================================================
+       ADDITIONAL TERMS UNDER SECTION 7 OF THE GNU GPL VERSION 3
+==========================================================================
+
+These terms apply to the material whose copyright is held by the Author.
+They are additional terms of the kinds listed in section 7(b), 7(c) and
+7(e) of the GNU GPL version 3. Anyone who conveys Zen, or a work based on
+it, must keep this NOTICE file with the source code.
+
+1. Author Attribution Notice (section 7(b))
+
+   1.1 The "Author Attribution Notice" is:
+
+         Zen by Robert Ostrowski-Jagoda
+         Support the author: https://buycoffee.to/zen
+
+   1.2 Every copy of Zen, and of any work based on it, that you convey
+       must keep the Author Attribution Notice, legibly, among the
+       Appropriate Legal Notices displayed by the program's interactive
+       user interface (in Zen: the About screen, "O aplikacji", and the
+       "Licencje" page it opens), and in this NOTICE file.
+
+   1.3 You may add your own notices next to it (for example "modified by
+       ..."), but you must not remove, hide or alter it, or attribute it
+       to anyone else.
+
+   1.4 The donation address is part of the Author Attribution Notice: it
+       tells users where the original author accepts support. This term
+       does not require anyone to offer, process or keep working any
+       payment. A modified version may replace the donation line only
+       with this clearly marked notice:
+
+         Original author: Robert Ostrowski-Jagoda
+         The original author's page: https://github.com/robertostrowskijagoda/Zen
+
+       and a modified version may write "Based on Zen by Robert
+       Ostrowski-Jagoda" instead of "Zen by Robert Ostrowski-Jagoda".
+
+2. Marking modified versions (section 7(c))
+
+   2.1 A modified version must be marked as changed: besides the notices
+       that section 5(a) of the GPL requires in the source code, its About
+       screen (or equivalent place in the user interface) must state that
+       it is a modified version of Zen, who changed it and when.
+
+   2.2 A modified version must not be presented as the original Zen, as
+       an official release, or as endorsed by the Author - not in its name,
+       description, store listing, About screen, or update and release
+       information.
+
+3. Name and logo (section 7(e))
+
+   3.1 This licence grants no rights under trademark law to the name "Zen"
+       used as the name of this application, or to the Zen logo and app
+       icons (assets/branding/ and the platform icon files).
+
+   3.2 A modified version that you convey must use a different name and a
+       different icon, neither confusingly similar to Zen's. It may say
+       truthfully that it is based on Zen (see 1.4).
+
+   3.3 Permission from the Author (this widens, never narrows, your rights
+       under the GPL): the name and icon may be used for
+         (a) unmodified copies of official releases; and
+         (b) builds made from the unmodified source code of an official
+             release tag by software repositories and distributions (for
+             example F-Droid, IzzyOnDroid or a Linux distribution), with
+             only the changes needed to build and package them - build
+             scripts, the distributor's signing key, the built-in updater
+             turned off, non-free components removed - as long as the
+             Author Attribution Notice stays and the build is not
+             described as signed or released by the Author.
+
+
+==========================================================================
+                    CONTRIBUTIONS TO THE OFFICIAL REPOSITORY
+==========================================================================
+
+This is a condition for accepting a contribution, not a term of the
+licence of Zen. By submitting a contribution (a pull request, a patch or
+similar) to the official repository, you license it under GPL-3.0-only
+with the additional terms above, and you also grant the Author a free,
+non-exclusive, perpetual, worldwide licence to use, modify and distribute
+it as part of Zen, also under other licence terms (for example where a
+store's terms do not fit the GPL), and you confirm that you have the right
+to grant it. This never takes away the rights anyone has under the GPL.
+
+
+==========================================================================
+                          THIRD-PARTY COMPONENTS
+==========================================================================
+
+Libraries and fonts included in Zen keep their own licences: in the app
+under "O aplikacji -> Licencje", in LICENSES-GO.txt next to the desktop
+builds, and in assets/licenses/ in the source code.

@@ -65,7 +65,7 @@ sed 's|^Exec=.*|Exec=/opt/zen/zen %u|' "$here/com.roj.zen.desktop" \
 sed "s|<release version=\"[^\"]*\" date=\"[^\"]*\"/>|<release version=\"$version\" date=\"$date\"/>|" \
   "$here/com.roj.zen.metainfo.xml" > "$share/metainfo/com.roj.zen.metainfo.xml"
 cp "$bundle/data/app_icon.png" "$share/icons/hicolor/256x256/apps/com.roj.zen.png"
-cp "$project/LICENSE" "$share/doc/zen/copyright"
+cat "$project/NOTICE" "$project/LICENSE" > "$share/doc/zen/copyright"
 find "$share" -type f -exec chmod 0644 {} +
 
 # Libraries from the system (GTK, libsecret, GStreamer, the app indicator):

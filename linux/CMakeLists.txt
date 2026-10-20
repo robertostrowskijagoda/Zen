@@ -138,6 +138,11 @@ install(FILES "${YGGDRASIL_BRIDGE_DIR}/LICENSES-GO.txt"
   DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime
   OPTIONAL)
+# Zen's own licence (GPL-3.0-only) and its additional terms.
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../NOTICE"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)
 
 # The window icon (my_application.cc loads it from data/).
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/runner/resources/app_icon.png"

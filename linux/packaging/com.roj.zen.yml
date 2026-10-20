@@ -1,7 +1,8 @@
 # Flatpak of the ALREADY BUILT Linux bundle (not a from-source Flatpak):
 # the release workflow builds Zen-Linux-x64.tar.gz first, then this manifest
 # only unpacks it. Run by hand in a directory that holds this file, the
-# .desktop file, the AppStream file, Zen-Linux-x64.tar.gz and extra-lib/
+# .desktop file, the AppStream file, LICENSE, NOTICE (GPL-3.0-only with
+# additional terms), Zen-Linux-x64.tar.gz and extra-lib/
 # (see the "flatpak" job in .github/workflows/release.yml):
 #
 #   flatpak-builder --user --install-deps-from=flathub --force-clean \
@@ -30,6 +31,9 @@ finish-args:
   - --talk-name=org.freedesktop.secrets
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.kde.StatusNotifierWatcher
+  # Bluetooth links with friends nearby: BlueZ adverts and L2CAP sockets.
+  - --system-talk-name=org.bluez
+  - --allow=bluetooth
 modules:
   - name: zen
     buildsystem: simple
@@ -42,6 +46,7 @@ modules:
       - install -Dm644 data/app_icon.png /app/share/icons/hicolor/256x256/apps/com.roj.zen.png
       - install -Dm644 com.roj.zen.desktop /app/share/applications/com.roj.zen.desktop
       - install -Dm644 com.roj.zen.metainfo.xml /app/share/metainfo/com.roj.zen.metainfo.xml
+      - install -Dm644 -t /app/share/licenses/com.roj.zen LICENSE NOTICE
     sources:
       # Unpacks into the build directory without the Zen/ folder.
       - type: archive
@@ -51,6 +56,10 @@ modules:
         path: com.roj.zen.desktop
       - type: file
         path: com.roj.zen.metainfo.xml
+      - type: file
+        path: LICENSE
+      - type: file
+        path: NOTICE
       - type: dir
         path: extra-lib
         dest: extra-lib
