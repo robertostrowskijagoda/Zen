@@ -6,7 +6,8 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File build_if_changed.ps1 -Target windows [-Arch x64|arm64]
 #
 # The SHA-256 of the sources (*.go without tests, go.mod, go.sum and the
-# build script, plus the ABI or architecture) is kept next to each library as
+# build script, plus the ABI or architecture and `go version`, so a Go
+# release with security fixes rebuilds too) is kept next to each library as
 # <library>.sha256, so every Android ABI and Windows architecture is checked
 # and rebuilt on its own. Android ABIs: -Abis, else ZEN_ANDROID_ABIS (set by
 # Gradle from the ABIs it packages), else all. Without Go (or the NDK / a C
@@ -62,6 +63,21 @@ if ($Target -eq 'android') {
   }
 }
 
+# The Go that would build the library (go.mod may pick another toolchain,
+# so asked from the module folder); empty without Go.
+$goVersion = ''
+$goTool = Find-ZenGo
+if ($goTool) {
+  Push-Location $root
+  try {
+    $goVersion = "$(& $goTool.Exe version 2>$null)".Trim()
+  } catch {
+    $goVersion = ''
+  } finally {
+    Pop-Location
+  }
+}
+
 function Get-ZenSourceHash([string]$Salt) {
   $files = @(Get-ChildItem -Path $root -Filter '*.go' -File |
       Where-Object { $_.Name -notlike '*_test.go' } |
@@ -70,7 +86,7 @@ function Get-ZenSourceHash([string]$Salt) {
   $lines = @(foreach ($file in $files) {
       "$($file.Name) $((Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash)"
     })
-  $text = (($lines + $Salt) -join "`n")
+  $text = (($lines + $Salt + "go=$goVersion") -join "`n")
   $sha = [System.Security.Cryptography.SHA256]::Create()
   try {
     $digest = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($text))

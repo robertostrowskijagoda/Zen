@@ -17,6 +17,22 @@ abstract interface class NodeSignalBridge implements NativeSignalBridge {
 
   /// Adds a mesh peer (e.g. a bridge learnt from friends) at runtime.
   Map<String, dynamic> addPeer(int handle, String uri);
+
+  /// Runs the flat's door next to the node [handle]: a second node with its
+  /// own key ([seedHex], a 32-byte ed25519 seed as hex), peered to this one
+  /// over loopback, that only takes knocks (they come in through
+  /// [waitSignal] / [pollSignal] marked `door: true`). Another key replaces the door; the
+  /// same key keeps it. Returns `{running, address, publicKey, linked}`.
+  Map<String, dynamic> startDoorNode(int handle, String seedHex);
+
+  Map<String, dynamic> stopDoorNode(int handle);
+
+  /// `{running: false}`, or the running door as [startDoorNode] tells it.
+  Map<String, dynamic> getDoorNode(int handle);
+
+  /// Which Yggdrasil and Go the library was built with:
+  /// `{yggdrasil, go, os, arch}`.
+  Map<String, dynamic> getBuildInfo();
 }
 
 /// Absolute paths the Windows build looks for the bridge DLL at, in order.
@@ -131,7 +147,21 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
       _addPeer = library
           .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
             'YggAddPeer',
-          );
+          ),
+      _startDoorNode = library
+          .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
+            'YggStartDoorNode',
+          ),
+      _stopDoorNode = library
+          .lookupFunction<_NativeIntArgCall, _DartIntArgCall>(
+            'YggStopDoorNode',
+          ),
+      _getDoorNode = library.lookupFunction<_NativeIntArgCall, _DartIntArgCall>(
+        'YggGetDoorNodeJson',
+      ),
+      _getBuildInfo = library.lookupFunction<_NativeNoArgCall, _DartNoArgCall>(
+        'YggGetBuildInfoJson',
+      );
 
   final void Function(Pointer<Utf8>) _freeString;
   final Pointer<Utf8> Function() _generateConfig;
@@ -145,6 +175,10 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
   final Pointer<Utf8> Function(int, Pointer<Utf8>) _openRelay;
   final Pointer<Utf8> Function(int, Pointer<Utf8>) _closeRelay;
   final Pointer<Utf8> Function(int, Pointer<Utf8>) _addPeer;
+  final Pointer<Utf8> Function(int, Pointer<Utf8>) _startDoorNode;
+  final Pointer<Utf8> Function(int) _stopDoorNode;
+  final Pointer<Utf8> Function(int) _getDoorNode;
+  final Pointer<Utf8> Function() _getBuildInfo;
 
   static YggdrasilBridgeFfi load() {
     final DynamicLibrary library = _openLibrary();
@@ -295,6 +329,28 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
       malloc.free(nativeUri);
     }
   }
+
+  @override
+  Map<String, dynamic> startDoorNode(int handle, String seedHex) {
+    final Pointer<Utf8> nativeSeed = seedHex.toNativeUtf8();
+    try {
+      return _extractMap(_readEnvelope(_startDoorNode(handle, nativeSeed)));
+    } finally {
+      malloc.free(nativeSeed);
+    }
+  }
+
+  @override
+  Map<String, dynamic> stopDoorNode(int handle) =>
+      _extractMap(_readEnvelope(_stopDoorNode(handle)));
+
+  @override
+  Map<String, dynamic> getDoorNode(int handle) =>
+      _extractMap(_readEnvelope(_getDoorNode(handle)));
+
+  @override
+  Map<String, dynamic> getBuildInfo() =>
+      _extractMap(_readEnvelope(_getBuildInfo()));
 
   Map<String, dynamic> _readEnvelope(Pointer<Utf8> pointer) {
     final String response = _readString(pointer);

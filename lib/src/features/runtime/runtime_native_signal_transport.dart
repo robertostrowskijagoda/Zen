@@ -12,11 +12,12 @@ import 'package:zen/src/core/utils/copy_with_cast.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
+import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
 import 'package:zen/src/features/runtime/runtime_signal_codec.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/yggdrasil_bridge_ffi.dart';
 import 'package:zen/src/features/runtime/yggdrasil_signal_transport.dart';
-import 'package:zen/src/features/security/security_payload_protector.dart';
+import 'package:zen/src/features/runtime/yggdrasil_signal_waiter.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 typedef SignalTransportBootstrap = Future<SignalTransport> Function();
@@ -257,6 +258,8 @@ final class RuntimeNodeSession {
     required this.snapshot,
     this.refreshSnapshot,
     this.addPeer,
+    this.startDoor,
+    this.stopDoor,
   });
 
   final SignalTransport transport;
@@ -265,6 +268,11 @@ final class RuntimeNodeSession {
 
   /// Adds a mesh peer at runtime (bridges learnt from friends).
   final void Function(String uri)? addPeer;
+
+  /// Runs the flat's door with a key (hex seed) and returns its address
+  /// (§18.2, door_node.go in the bridge).
+  final String? Function(String seedHex)? startDoor;
+  final void Function()? stopDoor;
 }
 
 /// Platforms that ship the Go bridge (a DLL, a .so, or linked into the iOS
@@ -506,6 +514,51 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     }
   }
 
+  /// The key (hex seed) of the flat's door the neighbours section wants
+  /// running; kept so the door comes back after the node restarts.
+  String? _doorSeed;
+  String? _doorAddress;
+
+  /// The address of the flat's door (§18.2) while it runs: a node of its
+  /// own next to this one, so the door sticker carries no one's address.
+  String? get doorAddress => _doorAddress;
+
+  /// Runs the flat's door with the key [seedHex] (a new key is a new
+  /// door), or stops it with `null`. Safe to call before the node is up.
+  void setDoorKey(String? seedHex) {
+    if (seedHex == _doorSeed) {
+      return;
+    }
+    _doorSeed = seedHex;
+    _applyDoorNow();
+  }
+
+  void _applyDoorNow() {
+    final RuntimeNodeSession? session = _session;
+    final String? seed = _doorSeed;
+    String? address;
+    if (session != null) {
+      try {
+        if (seed == null) {
+          session.stopDoor?.call();
+        } else {
+          address = session.startDoor?.call(seed);
+        }
+      } on Object catch (error) {
+        logZenWarning('Drzwi mieszkania nie ruszyły: $error');
+      }
+    }
+    _setDoorAddress(address);
+  }
+
+  void _setDoorAddress(String? address) {
+    if (address == _doorAddress) {
+      return;
+    }
+    _doorAddress = address;
+    notifyListeners();
+  }
+
   void _addPeerNow(String uri) {
     final void Function(String uri)? add = _session?.addPeer;
     if (add == null) {
@@ -572,6 +625,15 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     });
   }
 
+  /// Restarts a running live node, so settings read at start (LAN
+  /// discovery) apply; does nothing in a preview or while stopped.
+  Future<void> restartIfRunning() async {
+    if (_previewMode || (_session == null && _starting == null)) {
+      return;
+    }
+    await restart();
+  }
+
   Future<void> restart() async {
     if (_previewMode) {
       _setSnapshot(RuntimeTransportSnapshot.syncing());
@@ -616,6 +678,8 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     _forwardingSubscription = null;
     final RuntimeNodeSession? session = _session;
     _session = null;
+    // The bridge stops the door with the node.
+    _doorAddress = null;
     if (session != null) {
       await session.transport.stop();
     }
@@ -717,6 +781,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
         for (final String uri in _extraPeers) {
           _addPeerNow(uri);
         }
+        _applyDoorNow();
         _setSnapshot(session.snapshot);
         _startSnapshotRefreshLoop(session, token);
         return;
@@ -893,7 +958,12 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
     bridge,
     config.nodeConfigProtector,
   );
-  final Map<String, dynamic> startResult = bridge.startNode(configJson);
+  final String? lanSecret = await _resolveLanDiscovery(config);
+  // Android hands Wi-Fi multicast only to holders of the lock.
+  await AndroidMulticastLock.setHeld(lanSecret != null);
+  final Map<String, dynamic> startResult = bridge.startNode(
+    applyLanDiscoveryToNodeConfig(configJson, lanSecret),
+  );
   final int handle = _readNodeHandle(startResult);
   final RuntimeTransportSnapshot initialSnapshot = _snapshotFromNodeInfo(
     startResult,
@@ -904,8 +974,12 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
         bridge: bridge,
         nodeHandle: handle,
         compressor: ZstdSignalPayloadCompressor(),
+        openWaiter: () => IsolateSignalWaiter.spawn(
+          nodeHandle: handle,
+          openBridge: YggdrasilBridgeFfi.load,
+        ),
         waitTimeout: config.waitTimeout,
-        maxIdleDelay: config.maxIdleDelay,
+        fallbackPollInterval: config.fallbackPollInterval,
       ),
       onStop: () async {
         bridge.stopNode(handle);
@@ -915,7 +989,59 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
     refreshSnapshot: () async =>
         _snapshotFromNodeInfo(bridge.getNodeInfo(handle)),
     addPeer: (String uri) => bridge.addPeer(handle, uri),
+    startDoor: (String seedHex) =>
+        bridge.startDoorNode(handle, seedHex)['address'] as String?,
+    stopDoor: () => bridge.stopDoorNode(handle),
   );
+}
+
+Future<String?> _resolveLanDiscovery(
+  RuntimeSignalBootstrapConfig config,
+) async {
+  final RuntimeLanDiscoveryResolver? resolve = config.lanDiscovery;
+  if (resolve == null) {
+    return null;
+  }
+  try {
+    return await resolve();
+  } on Object catch (error, stackTrace) {
+    logZenError('LAN discovery setting unreadable', error, stackTrace);
+    return null;
+  }
+}
+
+/// Which Yggdrasil and Go the bridge was built with (§5.2), for the
+/// technical info; `null` without a bridge (tests, previews).
+final Provider<RuntimeBridgeBuildInfo?> runtimeBridgeBuildInfoProvider =
+    Provider<RuntimeBridgeBuildInfo?>((Ref ref) {
+      if (!_hasNativeBridge) {
+        return null;
+      }
+      try {
+        return RuntimeBridgeBuildInfo.fromJson(
+          YggdrasilBridgeFfi.load().getBuildInfo(),
+        );
+      } on Object catch (error) {
+        logZenWarning('Bridge build info unavailable: $error');
+        return null;
+      }
+    });
+
+@immutable
+final class RuntimeBridgeBuildInfo {
+  const RuntimeBridgeBuildInfo({required this.yggdrasil, required this.go});
+
+  factory RuntimeBridgeBuildInfo.fromJson(Map<String, dynamic> json) =>
+      RuntimeBridgeBuildInfo(
+        yggdrasil: json['yggdrasil'] as String? ?? '',
+        go: json['go'] as String? ?? '',
+      );
+
+  /// Yggdrasil's version, e.g. `0.5.12`.
+  final String yggdrasil;
+
+  /// Go's version, e.g. `go1.26.1`.
+  final String go;
 }
 
 /// The storage key the node config is sealed for.
@@ -959,25 +1085,22 @@ Future<String> loadOrCreateNodeConfigJson({
   // overwritten.
   final File backup = File('${file.path}.bak');
   for (final File candidate in <File>[file, backup]) {
-    final ({String config, bool resealNeeded})? stored = await _readNodeConfig(
-      candidate,
-      protector,
-    );
+    final String? stored = await _readNodeConfig(candidate, protector);
     if (stored == null) {
       continue;
     }
     if (!identical(candidate, file)) {
       logZenWarning('Node config restored from its backup copy.');
     }
-    final bool rewriteFile = !identical(candidate, file) || stored.resealNeeded;
+    final bool rewriteFile = !identical(candidate, file);
     if (rewriteFile || !await _holdsCurrentSeal(backup, protector)) {
-      final Uint8List sealed = await _sealNodeConfig(stored.config, protector);
+      final Uint8List sealed = await _sealNodeConfig(stored, protector);
       if (rewriteFile) {
         await _writeAtomically(file, sealed);
       }
       await _writeAtomically(backup, sealed);
     }
-    return stored.config;
+    return stored;
   }
   if (await file.exists()) {
     // Neither copy opens (another device's key, a wiped key, damage): keep
@@ -1026,11 +1149,10 @@ Future<bool> _holdsCurrentSeal(
   }
 }
 
-/// The stored config in [file], and whether it has to be sealed again
-/// (an older envelope); null when it is missing, empty, unreadable or not
-/// sealed for its place (plaintext included). A locked app (no key yet)
+/// The stored config in [file]; null when it is missing, empty, unreadable
+/// or not sealed for its place (plaintext included). A locked app (no key yet)
 /// throws instead: nothing may be replaced then.
-Future<({String config, bool resealNeeded})?> _readNodeConfig(
+Future<String?> _readNodeConfig(
   File file,
   KeyedBinaryPayloadProtector? protector,
 ) async {
@@ -1042,25 +1164,15 @@ Future<({String config, bool resealNeeded})?> _readNodeConfig(
     if (stored.isEmpty) {
       return null;
     }
-    final Uint8List unsealed;
-    bool resealNeeded = false;
-    if (protector == null) {
-      unsealed = stored;
-    } else if (protector is EncryptedBinaryPayloadProtector &&
-        protector.isUnboundSeal(stored)) {
-      // Sealed by an older version without its storage key: opened once
-      // and sealed again, so the address survives the upgrade.
-      unsealed = await protector.unsealUnbound(stored);
-      resealNeeded = true;
-    } else {
-      unsealed = await protector.unsealFor(kNodeConfigStorageKey, stored);
-    }
+    final Uint8List unsealed = protector == null
+        ? stored
+        : await protector.unsealFor(kNodeConfigStorageKey, stored);
     final String savedConfig = utf8.decode(unsealed);
     if (savedConfig.trim().isEmpty) {
       return null;
     }
     jsonDecode(savedConfig);
-    return (config: savedConfig, resealNeeded: resealNeeded);
+    return savedConfig;
   } on StateError {
     // No key while the app is locked — wait for unlock instead of
     // burning the node identity.
@@ -1200,14 +1312,20 @@ final class RuntimeSignalBootstrapConfig {
   RuntimeSignalBootstrapConfig({
     this.waitTimeout = const Duration(seconds: 5),
     this.nodeConfigProtector,
-    this.maxIdleDelay = const Duration(milliseconds: 400),
+    this.fallbackPollInterval = const Duration(seconds: 1),
+    this.lanDiscovery,
   });
 
+  /// How long one blocking signal wait lasts before it is renewed (signals
+  /// arrive as they come; this only bounds one wait).
   Duration waitTimeout;
 
-  /// Adaptive idle-polling cap for the signal pump; background runtimes use
-  /// a longer cap so idle devices wake up rarely.
-  Duration maxIdleDelay;
+  /// Polling interval used only when the blocking signal wait fails.
+  Duration fallbackPollInterval;
+
+  /// LAN discovery for the next node start (§5.1 item 6); `null` keeps it
+  /// off.
+  RuntimeLanDiscoveryResolver? lanDiscovery;
 
   /// Seals the persisted Yggdrasil node config (which contains the node
   /// identity key) with the app master key, bound to its storage key.

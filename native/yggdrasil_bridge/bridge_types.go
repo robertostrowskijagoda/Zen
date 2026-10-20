@@ -49,6 +49,9 @@ type bridgeNode struct {
 	nudgeStopOnce      sync.Once
 	// Limits on the public peering port of a desktop bridge (peer_guard.go).
 	peerGuards []*peerListenGuard
+	// The flat's door, when the app runs one (door_node.go).
+	door   *doorNode
+	doorMu sync.Mutex
 }
 
 type configSummary struct {
@@ -69,6 +72,8 @@ type peerJSON struct {
 type signalMessage struct {
 	From    string `json:"from"`
 	Payload string `json:"payload"`
+	// It came to the flat's door, not to this node (door_node.go).
+	Door bool `json:"door,omitempty"`
 }
 
 type signalEnvelope struct {

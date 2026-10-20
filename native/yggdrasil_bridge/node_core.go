@@ -219,7 +219,7 @@ func (node *bridgeNode) stopPeerNudge() {
 }
 
 func (node *bridgeNode) hasUpPeer() bool {
-	for _, peer := range node.core.GetPeers() {
+	for _, peer := range node.meshPeers() {
 		if peer.Up {
 			return true
 		}
@@ -273,7 +273,7 @@ func currentSelectedPeer(node *bridgeNode, peers []peerJSON) (string, string, in
 
 func normalizeNodeState(handle int32, node *bridgeNode) map[string]any {
 	self := node.core.GetSelf()
-	peers := buildPeerJSON(node.core.GetPeers())
+	peers := buildPeerJSON(node.meshPeers())
 	subnet := node.core.Subnet()
 	cfg := node.configSnapshot()
 	// Never leak the node identity key across the FFI boundary; Dart only

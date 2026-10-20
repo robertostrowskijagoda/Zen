@@ -64,6 +64,8 @@ source_hash() {
       printf '%s %s\n' "$f" "$(sha256sum < "$f" | cut -d' ' -f1)"
     done
     printf 'platform=%s\n' "$platform"
+    # A Go release with security fixes rebuilds the library too.
+    printf 'go=%s\n' "$go_version"
   ) | sha256sum | cut -d' ' -f1
 }
 
@@ -81,6 +83,10 @@ find_go() {
   return 1
 }
 
+go_version=""
+if go_found=$(find_go); then
+  go_version=$(cd "$root" && "$go_found" version 2> /dev/null || true)
+fi
 hash=$(source_hash)
 if [ "$if_changed" = 1 ] && [ -f "$lib" ] && [ -f "$stamp" ] &&
   [ "$(cat "$stamp")" = "$hash" ]; then

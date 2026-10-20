@@ -69,6 +69,9 @@ type signalQueue struct {
 	sources map[signalSourceNet]*signalSourceUsage
 	// Holds a token while signals may be waiting; wakes one waiter.
 	ready chan struct{}
+	// Closed by close (the node stopped): wakes every waiter at once.
+	done   chan struct{}
+	closed bool
 }
 
 // push queues message from network, first dropping older signals as
@@ -134,13 +137,15 @@ func (q *signalQueue) tryPop() (signalMessage, bool) {
 }
 
 // wait takes the oldest queued signal, waiting up to timeout for one to
-// arrive (not at all when timeout <= 0).
+// arrive (not at all when timeout <= 0). Once the queue is closed it
+// returns at once.
 func (q *signalQueue) wait(timeout time.Duration) (signalMessage, bool) {
 	if message, ok := q.tryPop(); ok || timeout <= 0 {
 		return message, ok
 	}
 	q.mu.Lock()
 	ready := q.readyLocked()
+	done := q.doneLocked()
 	q.mu.Unlock()
 
 	timer := time.NewTimer(timeout)
@@ -153,10 +158,38 @@ func (q *signalQueue) wait(timeout time.Duration) (signalMessage, bool) {
 			if message, ok := q.tryPop(); ok {
 				return message, true
 			}
+		case <-done:
+			return signalMessage{}, false
 		case <-timer.C:
 			return q.tryPop()
 		}
 	}
+}
+
+// close wakes every waiter, now and later, so a thread blocked in
+// YggWaitSignal returns as soon as its node stops instead of at its timeout.
+func (q *signalQueue) close() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closed {
+		return
+	}
+	q.closed = true
+	close(q.doneLocked())
+}
+
+// isClosed tells whether close was called.
+func (q *signalQueue) isClosed() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.closed
+}
+
+func (q *signalQueue) doneLocked() chan struct{} {
+	if q.done == nil {
+		q.done = make(chan struct{})
+	}
+	return q.done
 }
 
 // stats reports the signals and bytes queued, in total and from network.

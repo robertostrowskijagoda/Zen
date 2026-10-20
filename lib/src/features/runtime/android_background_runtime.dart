@@ -37,9 +37,10 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/nearby_keeper.dart';
+import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
-import 'package:zen/src/features/runtime/runtime_signal_bridge.dart';
+import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -1237,11 +1238,14 @@ Future<BackgroundRuntimeEnvironment> buildHeadlessBackgroundRuntimeEnvironment(
       RuntimeSignalBootstrapConfig(
         waitTimeout: payload.settings.signalWaitTimeout,
         nodeConfigProtector: EncryptedBinaryPayloadProtector(security),
-        // Idle background polling backs off; the foreground service must not
-        // drain the battery while the mesh is quiet. The cap is also the worst
-        // case delay before an incoming call rings, so it stays low enough
-        // that the caller is still waiting when the notification lands.
-        maxIdleDelay: const Duration(seconds: 2),
+        // Signals wake the service as they arrive (a blocking wait in an
+        // isolate of its own); this slow poll runs only if that wait fails.
+        fallbackPollInterval: const Duration(seconds: 2),
+        // The same setting and account secret as the app (§5.1 item 6).
+        lanDiscovery: lanDiscoveryResolver(
+          loadSettings: appSettingsStore.load,
+          ledgerDisk: stores.ledgerDisk,
+        ),
       );
   final RuntimeNodeRuntime runtime = buildDefaultRuntimeNodeRuntime(
     config: runtimeConfig,
