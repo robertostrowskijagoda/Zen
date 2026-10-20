@@ -50,6 +50,7 @@ final class LedgerReplicator {
     required this.peers,
     this.acceptsFrom,
     this.servesTo,
+    this.forwardsFrom,
     this.maxEntriesPerMessage = 100,
     this.maxBytesPerMessage = 256 * 1024,
     this.maxMessagesPerMinute = 3000,
@@ -74,6 +75,14 @@ final class LedgerReplicator {
   /// Whether [peer] may get [space] (heads, entries) at all; everything
   /// when not set.
   final bool Function(String peer, String space)? servesTo;
+
+  /// Whether [peer] may hand us entries of [space] only to be passed on
+  /// (a space of a kind this build does not know, §1.6): such a space is
+  /// asked for and taken like a subscribed one, though not followed.
+  final bool Function(String peer, String space)? forwardsFrom;
+
+  bool _forwards(String peer, String space) =>
+      forwardsFrom?.call(peer, space) ?? false;
 
   bool _serves(String peer, String space) =>
       servesTo?.call(peer, space) ?? true;
@@ -241,7 +250,7 @@ final class LedgerReplicator {
         _sendEntries(peer, space, theyLack);
       }
       // What we lack: ask for it.
-      if (subscriptions.contains(space)) {
+      if (subscriptions.contains(space) || _forwards(peer, space)) {
         final Map<String, int> weLack = <String, int>{
           for (final MapEntry<String, int> t in their.entries)
             if ((mine[t.key] ?? 0) < t.value && !store.isForked(space, t.key))
@@ -312,8 +321,9 @@ final class LedgerReplicator {
     });
     for (final LogEntry entry in entries) {
       final bool allowed =
-          acceptsFrom?.call(peer, entry.space) ??
-          subscriptions.contains(entry.space);
+          (acceptsFrom?.call(peer, entry.space) ??
+              subscriptions.contains(entry.space)) ||
+          _forwards(peer, entry.space);
       if (!allowed) {
         continue;
       }

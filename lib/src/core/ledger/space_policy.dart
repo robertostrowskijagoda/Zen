@@ -48,6 +48,10 @@ const Set<String> kAccountSpaceKinds = <String>{
 /// the disk.
 const int kMaxUnknownSpaceEntries = 1000;
 
+/// Most spaces of unknown kinds one device keeps to hand on to friends: the
+/// per-log cap above times this is the most disk friends can make it use.
+const int kMaxUnknownSpaces = 256;
+
 /// A space kind a newer build may add: short, lower-case.
 final RegExp _spaceKindPattern = RegExp(r'^[a-z][a-z0-9_]{0,23}$');
 

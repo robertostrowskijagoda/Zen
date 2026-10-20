@@ -274,6 +274,13 @@ final class UpdateService extends ChangeNotifier {
         : signed.differencesFrom(buildInfo);
   }
 
+  /// The version of the newest maintainer-signed release that is newer than
+  /// this build and not vetoed (null while none is known or updates are off).
+  /// The book takes a release only when enough maintainers' signatures
+  /// verify, so a value here is a signed fact, not a friend's claim.
+  String? get signedNewerVersion =>
+      book.enabled ? book.candidate?.manifest.version : null;
+
   /// The newest trusted canary (null while none is known or updates are
   /// off).
   SignedCanary? get canary => book.enabled ? book.canary : null;

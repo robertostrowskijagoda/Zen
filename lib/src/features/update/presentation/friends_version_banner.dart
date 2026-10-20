@@ -9,6 +9,7 @@ import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
+import 'package:zen/src/features/update/update_service.dart';
 
 /// The newest Zen version an accepted friend named in a ping or pong, when
 /// it is newer than this build; `null` otherwise (A17).
@@ -26,14 +27,33 @@ final Provider<String?> friendsNewerVersionProvider = Provider<String?>(
       ref.watch(socialHubControllerProvider.select(newestFriendVersion)),
 );
 
-/// "Znajomi mają nowszą wersję Zen (1.11.0)": a quiet tile that leads to
-/// "Aktualizacje i Podaj dalej". Nothing shows while no friend is ahead.
+/// The newest maintainer-signed release newer than this build, when the
+/// signatures verified here (passed on by friends, but not taken on their
+/// word); `null` otherwise (A17).
+final Provider<String?> signedNewerVersionProvider = Provider<String?>((
+  Ref ref,
+) {
+  final UpdateService? service = ref.watch(updateServiceProvider);
+  if (service == null) {
+    return null;
+  }
+  void changed() => ref.invalidateSelf();
+  service.addListener(changed);
+  ref.onDispose(() => service.removeListener(changed));
+  return service.signedNewerVersion;
+});
+
+/// "Nowa oficjalna wersja 1.11.0 (podpisana)" when the maintainers' signature
+/// verified, else the soft hint "Znajomi mają nowszą wersję Zen (1.11.0)": a
+/// quiet tile that leads to "Aktualizacje i Podaj dalej". Nothing shows
+/// while neither is the case.
 class FriendsNewerVersionBanner extends ConsumerWidget {
   const FriendsNewerVersionBanner({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final String? version = ref.watch(friendsNewerVersionProvider);
+    final String? signed = ref.watch(signedNewerVersionProvider);
+    final String? version = signed ?? ref.watch(friendsNewerVersionProvider);
     if (version == null) {
       return const SizedBox.shrink();
     }
@@ -63,9 +83,13 @@ class FriendsNewerVersionBanner extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        t('Znajomi mają nowszą wersję Zen ({version})', {
-                          'version': version,
-                        }),
+                        signed != null
+                            ? t('Nowa oficjalna wersja {version} (podpisana)', {
+                                'version': version,
+                              })
+                            : t('Znajomi mają nowszą wersję Zen ({version})', {
+                                'version': version,
+                              }),
                         style: TextStyle(
                           color: zen.textPrimary,
                           fontSize: 14.5,

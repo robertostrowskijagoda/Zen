@@ -272,4 +272,50 @@ void main() {
     expect(b.store.headOf(_feed(a), a.author!.writer), 1);
     expect((await b.store.ingest(sent)).status, IngestStatus.duplicate);
   });
+
+  group('spaces of an unknown kind', () {
+    Future<(SimNet, SimNode, SimNode, SimNode)> chain({
+      required bool bPasses,
+    }) async {
+      final SimNet net = SimNet();
+      final SimNode a = net.add('a');
+      final SimNode b = net.add('b');
+      final SimNode c = net.add('c');
+      net.link('a', 'b');
+      net.link('b', 'c');
+      await a.becomeAuthor();
+      for (final SimNode n in <SimNode>[a, b, c]) {
+        n.servesTo = (String peer, String space) =>
+            isKnownSpace(space) || (n != b || bPasses);
+        n.forwardsFrom = (String peer, String space) =>
+            !isKnownSpace(space) && (n != b || bPasses);
+      }
+      return (net, a, b, c);
+    }
+
+    test('are passed on through friends that forward them', () async {
+      final (SimNet net, SimNode a, SimNode b, SimNode c) = await chain(
+        bPasses: true,
+      );
+      final String space = 'stories/${a.account}';
+      await a.author!.append(space, 'story', <String, dynamic>{'t': 1});
+      await net.pump();
+      await net.syncRounds(2);
+      expect(b.store.entries(space), hasLength(1));
+      expect(c.store.entries(space), hasLength(1));
+      expect(b.replicator.subscriptions, isNot(contains(space)));
+    });
+
+    test('stop at a friend that does not forward them', () async {
+      final (SimNet net, SimNode a, SimNode b, SimNode c) = await chain(
+        bPasses: false,
+      );
+      final String space = 'stories/${a.account}';
+      await a.author!.append(space, 'story', <String, dynamic>{'t': 1});
+      await net.pump();
+      await net.syncRounds(2);
+      expect(b.store.entries(space), isEmpty);
+      expect(c.store.entries(space), isEmpty);
+    });
+  });
 }
