@@ -300,6 +300,13 @@ void main() {
       ),
     );
     await _openProfileFromShell(tester);
+    // The settings list is lazy: the tile is built once scrolled to.
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('settings-nav-gifs')),
+      220,
+      scrollable: _profileScrollable(),
+    );
+    await tester.pump();
     expect(find.text('Domyślny klucz aplikacji'), findsOneWidget);
     await _openSettingsPage(tester, 'settings-nav-gifs');
 
@@ -475,7 +482,6 @@ void main() {
     (WidgetTester tester) async {
       final MemoryAppSettingsStore settingsStore = MemoryAppSettingsStore(
         const AppSettings(
-          encryptionEnabled: true,
           lockMode: AppLockMode.background,
           backgroundLockDelaySeconds: 9,
         ),
@@ -486,7 +492,6 @@ void main() {
       );
       await security.initialize(
         settings: const AppSettings(
-          encryptionEnabled: true,
           lockMode: AppLockMode.background,
           backgroundLockDelaySeconds: 9,
         ),
@@ -494,7 +499,6 @@ void main() {
       await security.setPassword('sekret12');
       await security.applySettings(
         const AppSettings(
-          encryptionEnabled: true,
           lockMode: AppLockMode.background,
           backgroundLockDelaySeconds: 9,
         ),
@@ -553,7 +557,6 @@ void main() {
   ) async {
     final MemoryAppSettingsStore settingsStore = MemoryAppSettingsStore(
       const AppSettings(
-        encryptionEnabled: true,
         lockMode: AppLockMode.background,
         backgroundLockDelaySeconds: 9,
       ),
@@ -565,7 +568,6 @@ void main() {
     );
     await security.initialize(
       settings: const AppSettings(
-        encryptionEnabled: true,
         lockMode: AppLockMode.background,
         backgroundLockDelaySeconds: 9,
       ),
@@ -574,7 +576,6 @@ void main() {
     await security.setBiometricUnlockEnabled(true);
     await security.applySettings(
       const AppSettings(
-        encryptionEnabled: true,
         lockMode: AppLockMode.background,
         backgroundLockDelaySeconds: 9,
       ),
@@ -618,7 +619,6 @@ void main() {
     WidgetTester tester,
   ) async {
     const AppSettings securitySettings = AppSettings(
-      encryptionEnabled: true,
       lockMode: AppLockMode.background,
       backgroundLockDelaySeconds: 9,
     );
@@ -673,7 +673,6 @@ void main() {
       }
     });
     const AppSettings securitySettings = AppSettings(
-      encryptionEnabled: true,
       lockMode: AppLockMode.background,
       backgroundLockDelaySeconds: 9,
     );
@@ -1404,8 +1403,9 @@ void main() {
     await tester.tap(find.byKey(const Key('submit-add-friend-button')));
     await tester.pumpAndSettle();
 
-    // Scanned in person: the app asks how close you are (§8).
-    expect(find.byKey(const Key('met-level-dialog')), findsOneWidget);
+    // Scanned in person: the app asks whether you met, and how close you
+    // are (§6.2, §8).
+    expect(find.text('Poznaliśmy się osobiście?'), findsOneWidget);
     await tester.tap(find.byKey(const Key('met-level-skip')));
     await tester.pumpAndSettle();
 
@@ -2645,7 +2645,6 @@ void main() {
     (WidgetTester tester) async {
       final MemoryAppSettingsStore settingsStore = MemoryAppSettingsStore(
         const AppSettings(
-          encryptionEnabled: true,
           lockMode: AppLockMode.background,
           backgroundLockDelaySeconds: 9,
         ),
@@ -2656,7 +2655,6 @@ void main() {
       );
       await security.initialize(
         settings: const AppSettings(
-          encryptionEnabled: true,
           lockMode: AppLockMode.background,
           backgroundLockDelaySeconds: 9,
         ),
@@ -2664,7 +2662,6 @@ void main() {
       await security.setPassword('sekret12');
       await security.applySettings(
         const AppSettings(
-          encryptionEnabled: true,
           lockMode: AppLockMode.background,
           backgroundLockDelaySeconds: 9,
         ),
@@ -3065,6 +3062,11 @@ void main() {
           (w.key! as ValueKey<String>).value.startsWith('qr-accept-'),
     );
     await tester.tap(accept);
+    await tester.pumpAndSettle();
+
+    // The side showing the code is asked about the meeting too (§6.2).
+    expect(find.text('Poznaliśmy się osobiście?'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('met-level-skip')));
     await tester.pumpAndSettle();
 
     expect(

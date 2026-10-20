@@ -278,9 +278,7 @@ void main() {
         await container.read(datingServiceProvider).saveMine((MyDating m) {
           m
             ..enabled = true
-            ..adult = true
             ..name = 'Robert'
-            ..age = 34
             ..gender = DatingGender.man
             ..about = 'Lubię góry, planszówki i gotowanie dla znajomych.'
             ..lookingFor = 'Kogoś do wspólnych wycieczek i rozmów do rana.';
