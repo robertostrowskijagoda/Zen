@@ -222,32 +222,12 @@ func signalInboxResponse(message signalMessage) *C.char {
 
 func waitSignalResponse(node *bridgeNode, timeout time.Duration) *C.char {
 	startPacketLoop(node)
-	if timeout <= 0 {
-		select {
-		case message := <-node.signalInbox:
-			return signalInboxResponse(message)
-		default:
-			return responseOK(map[string]any{"available": false})
-		}
-	}
-
-	timer := time.NewTimer(timeout)
-	defer func() {
-		if timer.Stop() {
-			return
-		}
-		select {
-		case <-timer.C:
-		default:
-		}
-	}()
-
-	select {
-	case message := <-node.signalInbox:
-		return signalInboxResponse(message)
-	case <-timer.C:
+	// Taking a signal releases its share of the inbox budget.
+	message, ok := node.signalInbox.wait(timeout)
+	if !ok {
 		return responseOK(map[string]any{"available": false})
 	}
+	return signalInboxResponse(message)
 }
 
 //export YggPollSignal

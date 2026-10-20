@@ -29,6 +29,7 @@ func startPacketLoop(node *bridgeNode) {
 
 		buffer := make([]byte, 64*1024)
 		consecutiveErrors := 0
+		var limiter signalRateLimiter
 		for {
 			count, err := node.iprwc.Read(buffer)
 			if err != nil {
@@ -63,21 +64,29 @@ func startPacketLoop(node *bridgeNode) {
 
 			switch port {
 			case yggSignalPort:
+				network := signalSourceNetOf(source)
+				if !limiter.allow(network, time.Now()) {
+					// Faster than any Zen peer sends: dropped before any
+					// parsing, until the source's budget refills.
+					debugf("[ZEN-GO] signal rate limit, dropping from=%s\n", source.String())
+					continue
+				}
 				debugf("[ZEN-GO] recv signal from=%s len=%d\n", source.String(), len(payload))
 				message, ok := node.reassembleSignal(source.String(), payload)
 				if !ok {
 					continue
 				}
 				debugf("[ZEN-GO] signal reassembled from=%s msgLen=%d\n", source.String(), len(message))
-				// Non-blocking send — drop the signal if inbox is full
-				// to avoid blocking relay (call audio/video) processing.
-				select {
-				case node.signalInbox <- signalMessage{
+				// Never blocks, so relay (call audio/video) processing is not
+				// held up; over budget, older signals of the heaviest source
+				// make room (signal_inbox.go).
+				dropped, queued := node.signalInbox.push(signalMessage{
 					From:    source.String(),
 					Payload: message,
-				}:
-				default:
-					fmt.Printf("[ZEN-GO] signalInbox full, dropping signal from=%s len=%d\n", source.String(), len(message))
+				}, network)
+				if dropped > 0 || !queued {
+					fmt.Printf("[ZEN-GO] signal inbox over budget, dropped %d queued signal(s), queued new=%v from=%s len=%d\n",
+						dropped, queued, source.String(), len(message))
 				}
 			case yggRelayPort:
 				node.handleRelayPacket(source, payload)
@@ -95,6 +104,11 @@ func sendSignal(node *bridgeNode, remoteAddress string, payload string) error {
 	destination := net.ParseIP(strings.TrimSpace(remoteAddress))
 	if destination == nil {
 		return fmt.Errorf("invalid remote yggdrasil address: %s", remoteAddress)
+	}
+	if len(payload) > maxSignalPayloadBytes {
+		// Receivers refuse anything larger (decodeSignalWire); the app
+		// never sends it (kRuntimeSignalMaxBytes).
+		return fmt.Errorf("signal payload is %d bytes, over the %d byte limit", len(payload), maxSignalPayloadBytes)
 	}
 
 	wirePayload := buildSignalWirePayload(payload)

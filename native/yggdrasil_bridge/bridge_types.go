@@ -27,13 +27,15 @@ type bridgeResponse struct {
 }
 
 type bridgeNode struct {
-	core           *core.Core
-	iprwc          *ipv6rwc.ReadWriteCloser
-	config         *config.NodeConfig
-	configMu       sync.RWMutex
-	multicast      *multicast.Multicast
-	logger         *log.Logger
-	signalInbox    chan signalMessage
+	core      *core.Core
+	iprwc     *ipv6rwc.ReadWriteCloser
+	config    *config.NodeConfig
+	configMu  sync.RWMutex
+	multicast *multicast.Multicast
+	logger    *log.Logger
+	// Decoded signals waiting for the app, within a byte budget
+	// (signal_inbox.go); the zero value is ready to use.
+	signalInbox    signalQueue
 	signalPartials map[string]*signalReassembly
 	// Bytes buffered in signalPartials; guarded by signalMu.
 	signalPartialBytes int
@@ -139,13 +141,24 @@ const (
 	leafHealthCheckInterval        = 20 * time.Second
 	peerProbeRefreshInterval       = 10 * time.Minute
 	signalChunkSize                = 1300
-	signalInboxCapacity            = 2048
-	signalTTL                      = 90 * time.Second
-	maxRelayBacklog                = 256
-	// Hard cap for a fully reassembled signal payload (post base64/zstd).
-	// Guards against decompression bombs crafted from many small chunks.
-	maxReassembledSignalBytes = 8 * 1024 * 1024
-	zstdMagicPrefix           = "ZSTD:"
+	// Most signals queued for the app at once (see signal_inbox.go).
+	signalInboxCapacity = 2048
+	signalTTL           = 90 * time.Second
+	maxRelayBacklog     = 256
+	// Largest signal text, after base64 and zstd. It is kRuntimeSignalMaxBytes
+	// in lib/src/features/runtime/runtime_signal_codec.dart, the most a Zen
+	// sender ever puts in one signal (the bridge compresses only when that
+	// makes the text shorter). Signals arrive from anyone on the mesh before
+	// the app knows whether the sender is a friend, so nothing larger is
+	// decoded or queued.
+	maxSignalPayloadBytes = 2 * 1024 * 1024
+	// A zstd signal may inflate to at most this many times its compressed
+	// size, or to minSignalDecompressionLimit if that is more (short,
+	// repetitive signals compress far better than 64:1 and are harmless).
+	// zstd turns a few bytes into megabytes otherwise.
+	maxSignalCompressionRatio   = 64
+	minSignalDecompressionLimit = 64 * 1024
+	zstdMagicPrefix             = "ZSTD:"
 )
 
 var (
@@ -153,7 +166,6 @@ var (
 	nextHandle       atomic.Int32
 	nextSignalPacket atomic.Int64
 	zstdEncoder      *zstd.Encoder
-	zstdDecoder      *zstd.Decoder
 	leafRetryBackoff = []time.Duration{
 		10 * time.Second,
 		30 * time.Second,
@@ -171,12 +183,8 @@ func init() {
 	if err != nil {
 		panic("zstd encoder init: " + err.Error())
 	}
-	// WithDecoderMaxMemory bounds the decompressed output of any payload we
-	// receive from the mesh, so a crafted stream cannot balloon memory.
-	zstdDecoder, err = zstd.NewReader(nil, zstd.WithDecoderMaxMemory(maxReassembledSignalBytes))
-	if err != nil {
-		panic("zstd decoder init: " + err.Error())
-	}
+	// Incoming signals are decompressed by decompressSignal, which bounds the
+	// output of each one (signal_reassembly.go).
 }
 
 func main() {}
