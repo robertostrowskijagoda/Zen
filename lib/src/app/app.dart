@@ -109,8 +109,8 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
       debugShowCheckedModeBanner: false,
       title: 'Zen',
       navigatorKey: zenRootNavigatorKey,
-      theme: ZenTheme.light(settings.accentTheme),
-      darkTheme: ZenTheme.dark(settings.accentTheme),
+      theme: ZenTheme.light(settings.accentTheme, settings.palette),
+      darkTheme: ZenTheme.dark(settings.accentTheme, settings.palette),
       themeMode: settings.themeMode.materialThemeMode,
       // Material's own texts (tooltips, pickers, text selection) and the
       // layout direction follow Zen's language.

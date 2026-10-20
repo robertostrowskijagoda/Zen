@@ -12,6 +12,11 @@ import 'package:flutter/material.dart';
 abstract final class ZenMotion {
   static bool enabled = _detectDefault();
 
+  /// Whether motion may play here: [enabled], and the system does not ask
+  /// for reduced motion (`MediaQuery.disableAnimations`).
+  static bool allowedIn(BuildContext context) =>
+      enabled && !(MediaQuery.maybeDisableAnimationsOf(context) ?? false);
+
   static bool _detectDefault() {
     if (kIsWeb) {
       return true;
@@ -739,7 +744,7 @@ class ZenFadeSlide extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!ZenMotion.enabled) {
+    if (!ZenMotion.allowedIn(context)) {
       return child;
     }
     final Widget entrance = _buildEntrance();

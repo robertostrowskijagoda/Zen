@@ -20,7 +20,7 @@ Color zenTone(ZenColors zen, int i) {
   return HSLColor.fromAHSL(
     1,
     (a.hue + offsets[i % offsets.length] + (i ~/ offsets.length) * 20) % 360,
-    0.85,
+    zen.toneSaturation,
     dark ? 0.68 : 0.45,
   ).toColor();
 }
@@ -42,13 +42,17 @@ class ZenIconBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final Color t = tone ?? zen.accent;
+    final double top = zen.gradient >= 1 ? 0.26 : 0.14 + 0.12 * zen.gradient;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(size * 0.32),
         gradient: LinearGradient(
-          colors: <Color>[t.withValues(alpha: 0.26), t.withValues(alpha: 0.10)],
+          colors: <Color>[
+            t.withValues(alpha: top),
+            t.withValues(alpha: 0.10),
+          ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -197,7 +201,12 @@ class ZenGridTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(22),
             border: Border.all(color: zen.outlineSoft),
             gradient: LinearGradient(
-              colors: <Color>[tone.withValues(alpha: 0.13), zen.surface],
+              colors: <Color>[
+                tone.withValues(
+                  alpha: zen.gradient >= 1 ? 0.13 : 0.04 + 0.09 * zen.gradient,
+                ),
+                zen.surface,
+              ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               stops: const <double>[0, 0.75],
@@ -342,22 +351,32 @@ class ZenHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final Color t = tone ?? zen.accent;
+    // The hero keeps a soft gradient in every palette; flat ones (Cisza)
+    // get an even tint instead.
+    final double g = zen.gradient;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(26),
         gradient: LinearGradient(
           colors: <Color>[
-            Color.alphaBlend(t.withValues(alpha: 0.30), zen.surface),
             Color.alphaBlend(
-              zen.accentSecondary.withValues(alpha: 0.10),
+              t.withValues(alpha: g >= 1 ? 0.30 : 0.12 + 0.18 * g),
+              zen.surface,
+            ),
+            Color.alphaBlend(
+              zen
+                  .gradientPartner(t, zen.accentSecondary)
+                  .withValues(alpha: 0.10),
               zen.surface,
             ),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        border: Border.all(color: t.withValues(alpha: 0.30)),
+        border: Border.all(
+          color: t.withValues(alpha: g >= 1 ? 0.30 : 0.18 + 0.12 * g),
+        ),
       ),
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
       child: Column(

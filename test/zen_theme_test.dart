@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/app/theme/zen_concept.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
@@ -72,6 +73,129 @@ void main() {
           );
         }
       }
+    });
+
+    test('every palette keeps its contrast in both modes', () {
+      double contrast(Color a, Color b) {
+        final double la = a.computeLuminance();
+        final double lb = b.computeLuminance();
+        final double lighter = la > lb ? la : lb;
+        final double darker = la > lb ? lb : la;
+        return (lighter + 0.05) / (darker + 0.05);
+      }
+
+      for (final AppPalette palette in AppPalette.values) {
+        for (final Brightness brightness in Brightness.values) {
+          final ZenColors colors = ZenColors.forPalette(
+            palette,
+            AppSettings.defaultAccentTheme,
+            brightness,
+          );
+          final String where = '$palette / $brightness';
+          expect(
+            ThemeData.estimateBrightnessForColor(colors.background),
+            brightness,
+            reason: '$where background',
+          );
+          expect(
+            contrast(colors.accent, colors.onAccent),
+            greaterThanOrEqualTo(4.5),
+            reason: '$where accent vs onAccent',
+          );
+          expect(
+            contrast(colors.accent, colors.surface),
+            greaterThanOrEqualTo(2.0),
+            reason: '$where accent vs surface',
+          );
+          expect(
+            contrast(colors.textPrimary, colors.background),
+            greaterThanOrEqualTo(4.5),
+            reason: '$where text vs background',
+          );
+          expect(
+            contrast(colors.textSecondary, colors.surface),
+            greaterThanOrEqualTo(3.0),
+            reason: '$where secondary text vs surface',
+          );
+          expect(colors.concept, palette != AppPalette.classic);
+          expect(
+            ZenTheme.dark(AppSettings.defaultAccentTheme, palette),
+            isA<ThemeData>(),
+          );
+          expect(
+            ZenTheme.light(AppSettings.defaultAccentTheme, palette),
+            isA<ThemeData>(),
+          );
+        }
+      }
+    });
+
+    test('Klasyczny stays the accent theme it was', () {
+      for (final Brightness brightness in Brightness.values) {
+        final ZenColors classic = ZenColors.forPalette(
+          AppPalette.classic,
+          AppAccentTheme.aurora,
+          brightness,
+        );
+        final ZenColors accent = ZenColors.resolve(
+          AppAccentTheme.aurora,
+          brightness,
+        );
+        expect(classic.accent, accent.accent);
+        expect(classic.background, accent.background);
+        expect(classic.concept, isFalse);
+        expect(classic.glow, 0);
+        expect(classic.gradient, 1);
+      }
+      final ThemeData theme = ZenTheme.dark();
+      expect(theme.splashFactory, InkRipple.splashFactory);
+      expect(theme.tabBarTheme.indicator, isNull);
+    });
+
+    testWidgets('only neon glows, and the pulse stands still in tests', (
+      WidgetTester tester,
+    ) async {
+      final ZenColors neon = ZenColors.forPalette(
+        AppPalette.neon,
+        AppSettings.defaultAccentTheme,
+        Brightness.dark,
+      );
+      expect(neon.neonGlow(neon.accent), isNotEmpty);
+      expect(
+        ZenColors.forPalette(
+          AppPalette.calm,
+          AppSettings.defaultAccentTheme,
+          Brightness.dark,
+        ).neonGlow(neon.accent),
+        isNull,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ZenTheme.dark(AppSettings.defaultAccentTheme, AppPalette.neon),
+          home: const Scaffold(
+            body: DefaultTabController(
+              length: 2,
+              child: Column(
+                children: <Widget>[
+                  TabBar(
+                    tabs: <Widget>[
+                      Tab(text: 'A'),
+                      Tab(text: 'B'),
+                    ],
+                  ),
+                  ZenSoftPulse(color: Colors.cyan, child: Text('3')),
+                  TextField(autofocus: true),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('B'));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('3'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('ZenMotion widgets build without error', (

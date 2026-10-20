@@ -1,5 +1,9 @@
+import 'dart:ui' show lerpDouble;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/theme/zen_concept.dart';
+import 'package:zen/src/app/theme/zen_palettes.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
 /// Faces bundled with the grayscale canvas: display for titles, grotesk for
@@ -38,8 +42,7 @@ final class ZenTypeface {
   final double titleTracking;
 }
 
-/// One pairing ships with the canvas. Older names stay as aliases so stored
-/// accent ids still resolve without pulling in a second look.
+/// One pairing ships with the canvas.
 abstract final class ZenTypefaces {
   static const ZenTypeface zen = ZenTypeface(
     label: 'Fredoka + Hanken + JetBrains',
@@ -47,15 +50,6 @@ abstract final class ZenTypefaces {
     mono: ZenText.monoFamily,
     display: ZenText.displayFamily,
   );
-
-  static const ZenTypeface terminal = zen;
-  static const ZenTypeface compact = zen;
-  static const ZenTypeface system = zen;
-  static const ZenTypeface editorial = zen;
-  static const ZenTypeface humanist = zen;
-  static const ZenTypeface rounded = zen;
-  static const ZenTypeface industrial = zen;
-  static const ZenTypeface grotesk = zen;
 }
 
 /// The canvas: deep, slightly tinted neutrals and one accent with two
@@ -83,6 +77,10 @@ final class ZenColors extends ThemeExtension<ZenColors> {
     required this.warning,
     required this.danger,
     required this.typeface,
+    this.concept = false,
+    this.glow = 0,
+    this.gradient = 1,
+    this.toneSaturation = 0.85,
   });
 
   final Color background;
@@ -105,6 +103,49 @@ final class ZenColors extends ThemeExtension<ZenColors> {
   final Color warning;
   final Color danger;
   final ZenTypeface typeface;
+
+  /// The calmer component style shared by the fixed palettes (everything
+  /// but Klasyczny): soft fade-and-rise page transitions, a highlight
+  /// instead of ink ripples, a rounded tab indicator, a breathing unread
+  /// badge.
+  final bool concept;
+
+  /// Strength of the neon glow (0 = none) on the active tab, the focused
+  /// field, the FAB, the section bar and unread badges.
+  final double glow;
+
+  /// How much of the accent gradients is kept: 1 = the full two-hue
+  /// gradients, 0 = flat tints.
+  final double gradient;
+
+  /// Saturation of the feature tones around the accent ([zenTone]).
+  final double toneSaturation;
+
+  /// A soft glow of [tone] behind an active element; null without glow.
+  List<BoxShadow>? neonGlow(Color tone, {double radius = 12}) {
+    if (glow <= 0) {
+      return null;
+    }
+    return <BoxShadow>[
+      BoxShadow(
+        color: tone.withValues(alpha: (0.5 * glow).clamp(0.0, 1.0)),
+        blurRadius: radius,
+        spreadRadius: -2,
+      ),
+    ];
+  }
+
+  /// The second stop of a two-hue gradient from [from] to [to], pulled back
+  /// to [from] as far as [gradient] asks (a flat tint at 0).
+  Color gradientPartner(Color from, Color to) {
+    if (gradient >= 1) {
+      return to;
+    }
+    if (gradient <= 0) {
+      return from;
+    }
+    return Color.lerp(from, to, gradient)!;
+  }
 
   /// Ink-faint labels from the canvas (`oklch(0.52 0 0)`).
   Color get inkFaint => textMuted;
@@ -162,6 +203,14 @@ final class ZenColors extends ThemeExtension<ZenColors> {
     );
   }
 
+  /// The colours of [palette] ([accent] picks the colour of
+  /// [AppPalette.classic]).
+  static ZenColors forPalette(
+    AppPalette palette,
+    AppAccentTheme accent,
+    Brightness brightness,
+  ) => ZenPalettes.resolve(palette, accent, brightness);
+
   static ZenColors of(BuildContext context) {
     return Theme.of(context).extension<ZenColors>() ??
         resolve(AppSettings.defaultAccentTheme, Brightness.dark);
@@ -210,10 +259,14 @@ final class ZenColors extends ThemeExtension<ZenColors> {
     double from = 0.22,
     double to = 0.06,
   }) {
+    // Flatter palettes pull both stops towards their middle.
+    final double mid = (from + to) / 2;
+    final double a = gradient >= 1 ? from : mid + (from - mid) * gradient;
+    final double b = gradient >= 1 ? to : mid + (to - mid) * gradient;
     return LinearGradient(
       colors: <Color>[
-        tone.withValues(alpha: from),
-        tone.withValues(alpha: to),
+        tone.withValues(alpha: a),
+        tone.withValues(alpha: b),
       ],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
@@ -249,7 +302,7 @@ final class ZenColors extends ThemeExtension<ZenColors> {
   }
 
   LinearGradient get accentGradient => LinearGradient(
-    colors: <Color>[accent, accentSecondary],
+    colors: <Color>[accent, gradientPartner(accent, accentSecondary)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -417,6 +470,10 @@ final class ZenColors extends ThemeExtension<ZenColors> {
     Color? warning,
     Color? danger,
     ZenTypeface? typeface,
+    bool? concept,
+    double? glow,
+    double? gradient,
+    double? toneSaturation,
   }) {
     return ZenColors(
       background: background ?? this.background,
@@ -439,6 +496,10 @@ final class ZenColors extends ThemeExtension<ZenColors> {
       warning: warning ?? this.warning,
       danger: danger ?? this.danger,
       typeface: typeface ?? this.typeface,
+      concept: concept ?? this.concept,
+      glow: glow ?? this.glow,
+      gradient: gradient ?? this.gradient,
+      toneSaturation: toneSaturation ?? this.toneSaturation,
     );
   }
 
@@ -468,6 +529,10 @@ final class ZenColors extends ThemeExtension<ZenColors> {
       warning: Color.lerp(warning, other.warning, t)!,
       danger: Color.lerp(danger, other.danger, t)!,
       typeface: t < 0.5 ? typeface : other.typeface,
+      concept: t < 0.5 ? concept : other.concept,
+      glow: lerpDouble(glow, other.glow, t)!,
+      gradient: lerpDouble(gradient, other.gradient, t)!,
+      toneSaturation: lerpDouble(toneSaturation, other.toneSaturation, t)!,
     );
   }
 }
@@ -502,14 +567,16 @@ TextTheme _trackedTextTheme(TextTheme base, ZenTypeface typeface) {
 abstract final class ZenTheme {
   static ThemeData dark([
     AppAccentTheme accent = AppSettings.defaultAccentTheme,
+    AppPalette palette = AppSettings.defaultPalette,
   ]) {
-    return _build(ZenColors.resolve(accent, Brightness.dark));
+    return _build(ZenColors.forPalette(palette, accent, Brightness.dark));
   }
 
   static ThemeData light([
     AppAccentTheme accent = AppSettings.defaultAccentTheme,
+    AppPalette palette = AppSettings.defaultPalette,
   ]) {
-    return _build(ZenColors.resolve(accent, Brightness.light));
+    return _build(ZenColors.forPalette(palette, accent, Brightness.light));
   }
 
   static ThemeData _build(ZenColors colors) {
@@ -545,6 +612,10 @@ abstract final class ZenTheme {
               outline: colors.outline,
               error: colors.danger,
               onError: colors.onAccent,
+              // Neon: elevation shadows (the FAB, menus) become a glow.
+              shadow: colors.glow > 0
+                  ? colors.accent.withValues(alpha: 0.55 * colors.glow)
+                  : null,
             );
 
     final ThemeData base = ThemeData(
@@ -554,7 +625,29 @@ abstract final class ZenTheme {
       canvasColor: colors.background,
       fontFamily: colors.typeface.sans,
       fontFamilyFallback: colors.typeface.sansFallback,
-      splashFactory: InkRipple.splashFactory,
+      // The fixed palettes: a quiet highlight instead of ink ripples.
+      splashFactory: colors.concept
+          ? NoSplash.splashFactory
+          : InkRipple.splashFactory,
+      highlightColor: colors.concept
+          ? colors.accent.withValues(alpha: isDark ? 0.10 : 0.08)
+          : null,
+      hoverColor: colors.concept
+          ? colors.textPrimary.withValues(alpha: 0.04)
+          : null,
+      focusColor: colors.concept ? colors.accent.withValues(alpha: 0.16) : null,
+      pageTransitionsTheme: colors.concept
+          ? const PageTransitionsTheme(
+              builders: <TargetPlatform, PageTransitionsBuilder>{
+                TargetPlatform.android: ZenSoftPageTransitionsBuilder(),
+                TargetPlatform.iOS: ZenSoftPageTransitionsBuilder(),
+                TargetPlatform.linux: ZenSoftPageTransitionsBuilder(),
+                TargetPlatform.macOS: ZenSoftPageTransitionsBuilder(),
+                TargetPlatform.windows: ZenSoftPageTransitionsBuilder(),
+                TargetPlatform.fuchsia: ZenSoftPageTransitionsBuilder(),
+              },
+            )
+          : null,
       visualDensity: compactUi ? VisualDensity.compact : VisualDensity.standard,
       materialTapTargetSize: compactUi
           ? MaterialTapTargetSize.shrinkWrap
@@ -649,10 +742,19 @@ abstract final class ZenTheme {
           borderRadius: BorderRadius.all(Radius.circular(fieldRadius)),
           borderSide: BorderSide(color: colors.outlineSoft),
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(fieldRadius)),
-          borderSide: BorderSide(color: colors.accent, width: 1.6),
-        ),
+        focusedBorder: colors.glow > 0
+            ? ZenGlowInputBorder(
+                borderRadius: const BorderRadius.all(
+                  Radius.circular(fieldRadius),
+                ),
+                borderSide: BorderSide(color: colors.accent, width: 1.4),
+                glowColor: colors.accent,
+                glow: colors.glow,
+              )
+            : OutlineInputBorder(
+                borderRadius: BorderRadius.all(Radius.circular(fieldRadius)),
+                borderSide: BorderSide(color: colors.accent, width: 1.6),
+              ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.all(Radius.circular(fieldRadius)),
           borderSide: BorderSide(color: colors.danger),
@@ -865,25 +967,53 @@ abstract final class ZenTheme {
           side: BorderSide(color: colors.outline),
         ),
       ),
-      floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: colors.accent,
-        foregroundColor: colors.onAccent,
-        elevation: 2,
-        focusElevation: 2,
-        hoverElevation: 3,
-        highlightElevation: 3,
-        extendedTextStyle: TextStyle(
-          fontFamily: colors.typeface.sans,
-          fontWeight: FontWeight.w700,
-          fontSize: 15,
-        ),
-        shape: const StadiumBorder(),
-      ),
+      floatingActionButtonTheme: colors.glow > 0
+          // Neon: a dark tube with a lit outline; its elevation shadow is
+          // the accent glow (see `shadow` above).
+          ? FloatingActionButtonThemeData(
+              backgroundColor: colors.surfaceRaised,
+              foregroundColor: colors.accent,
+              elevation: 6,
+              focusElevation: 8,
+              hoverElevation: 8,
+              highlightElevation: 4,
+              extendedTextStyle: TextStyle(
+                fontFamily: colors.typeface.sans,
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
+              ),
+              shape: StadiumBorder(
+                side: BorderSide(color: colors.accent, width: 1.4),
+              ),
+            )
+          : FloatingActionButtonThemeData(
+              backgroundColor: colors.accent,
+              foregroundColor: colors.onAccent,
+              elevation: colors.concept ? 0 : 2,
+              focusElevation: colors.concept ? 0 : 2,
+              hoverElevation: colors.concept ? 1 : 3,
+              highlightElevation: colors.concept ? 0 : 3,
+              extendedTextStyle: TextStyle(
+                fontFamily: colors.typeface.sans,
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
+              ),
+              shape: const StadiumBorder(),
+            ),
       tabBarTheme: TabBarThemeData(
         labelColor: colors.textPrimary,
         unselectedLabelColor: colors.textMuted,
         indicatorColor: colors.accent,
         indicatorSize: TabBarIndicatorSize.label,
+        // The fixed palettes: a rounded bar (lit for neon) that glides
+        // between the tabs, no ripple under the label.
+        indicator: colors.concept
+            ? ZenTabIndicator(color: colors.accent, glow: colors.glow)
+            : null,
+        splashFactory: colors.concept ? NoSplash.splashFactory : null,
+        overlayColor: colors.concept
+            ? const WidgetStatePropertyAll<Color>(Colors.transparent)
+            : null,
         dividerColor: colors.outlineSoft,
         labelStyle: TextStyle(
           fontFamily: colors.typeface.sans,
@@ -896,6 +1026,12 @@ abstract final class ZenTheme {
           fontSize: 14,
         ),
       ),
+      badgeTheme: colors.concept
+          ? BadgeThemeData(
+              backgroundColor: colors.accent,
+              textColor: colors.onAccent,
+            )
+          : null,
       dialogTheme: DialogThemeData(
         backgroundColor: colors.surface,
         surfaceTintColor: Colors.transparent,

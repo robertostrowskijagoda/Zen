@@ -33,6 +33,7 @@ void main() {
         backgroundLockDelaySeconds: 12,
         themeMode: AppThemeMode.dark,
         accentTheme: AppAccentTheme.aurora,
+        palette: AppPalette.forest,
         gifApiKey: 'my-own_key.123',
         autoDownloadMedia: false,
         hideNotificationContent: false,
@@ -50,6 +51,7 @@ void main() {
     expect(restored.backgroundLockDelaySeconds, 12);
     expect(restored.themeMode, AppThemeMode.dark);
     expect(restored.accentTheme, AppAccentTheme.aurora);
+    expect(restored.palette, AppPalette.forest);
     expect(restored.gifApiKey, 'my-own_key.123');
     expect(restored.autoDownloadMedia, isFalse);
     expect(restored.hideNotificationContent, isFalse);
@@ -88,6 +90,7 @@ void main() {
       expect(loaded.lockMode, AppSettings.defaultLockMode);
       expect(loaded.bridgeEnabled, isTrue);
       expect(loaded.accentTheme, AppSettings.defaultAccentTheme);
+      expect(loaded.palette, AppPalette.classic);
     },
   );
 

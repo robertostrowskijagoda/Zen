@@ -94,11 +94,15 @@ class ZenSectionBar extends StatelessWidget implements PreferredSizeWidget {
             height: 24,
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: <Color>[zen.accent, zen.accentSecondary],
+                colors: <Color>[
+                  zen.accent,
+                  zen.gradientPartner(zen.accent, zen.accentSecondary),
+                ],
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
               ),
               borderRadius: BorderRadius.circular(3),
+              boxShadow: zen.neonGlow(zen.accent, radius: 10),
             ),
           ),
           const SizedBox(width: 12),

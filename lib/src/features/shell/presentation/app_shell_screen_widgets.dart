@@ -366,13 +366,20 @@ class _UnreadBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
+    return ZenSoftPulse(color: zen.accent, child: _badge(zen));
+  }
+
+  Widget _badge(ZenColors zen) {
     return Container(
       constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
       padding: const EdgeInsets.symmetric(horizontal: 7),
       alignment: Alignment.center,
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: <Color>[zen.accent, zen.accentSecondary],
+          colors: <Color>[
+            zen.accent,
+            zen.gradientPartner(zen.accent, zen.accentSecondary),
+          ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
