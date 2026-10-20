@@ -348,7 +348,7 @@ void main() {
           SignedRelease.fromJson(
             withField('mirrors', <String>['http://zenzenzen.onion/']),
           ),
-          isNotNull,
+          isNull,
         );
       },
     );

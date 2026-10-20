@@ -10,9 +10,11 @@ import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/features/update/canary.dart';
 import 'package:zen/src/features/update/presentation/share_app_screen.dart';
 import 'package:zen/src/features/update/release.dart';
+import 'package:zen/src/features/update/sha256_sums.dart';
 import 'package:zen/src/features/update/store_build.dart';
 import 'package:zen/src/features/update/update_service.dart';
 
@@ -33,6 +35,55 @@ class UpdatesScreen extends ConsumerStatefulWidget {
 class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
   String? _message;
   bool _busy = false;
+
+  /// The last on-demand comparison with GitHub's `SHA256SUMS` (§14.3
+  /// point 5): its verdict, or the reason it could not be made.
+  Sha256SumsVerdict? _sumsVerdict;
+  String? _sumsError;
+  bool _sumsBusy = false;
+
+  /// Compares the downloaded file with the release's `SHA256SUMS` from
+  /// GitHub. Only on a tap: Zen never connects to GitHub by itself.
+  Future<void> _compareSums(UpdateService service) async {
+    final ReleaseFile? file = service.status.file;
+    final String? version = service.status.release?.manifest.version;
+    if (file == null || version == null) {
+      return;
+    }
+    setState(() {
+      _sumsBusy = true;
+      _sumsVerdict = null;
+      _sumsError = null;
+    });
+    Sha256SumsVerdict? verdict;
+    String? error;
+    try {
+      final Uint8List? bytes = await service.fileBytes();
+      if (bytes == null) {
+        error = t('Plik aktualizacji jest niepełny albo uszkodzony.');
+      } else {
+        final String text = await ref.read(sha256SumsFetcherProvider)(
+          sha256SumsUri(version),
+        );
+        verdict = compareWithSha256Sums(
+          fileName: file.name,
+          sha256Hex: sha256Hex(bytes),
+          sumsText: text,
+        );
+      }
+    } on Object catch (e) {
+      error = t('Nie udało się pobrać SHA256SUMS z GitHuba: {error}', {
+        'error': e,
+      });
+    }
+    if (mounted) {
+      setState(() {
+        _sumsBusy = false;
+        _sumsVerdict = verdict;
+        _sumsError = error;
+      });
+    }
+  }
 
   Future<void> _run(Future<String> Function() work) async {
     setState(() {
@@ -373,6 +424,11 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
                 'reason': vetoed.reason,
               }),
             ),
+          if (s.phase == UpdatePhase.waiting ||
+              s.phase == UpdatePhase.ready) ...<Widget>[
+            const SizedBox(height: 14),
+            ..._sumsCheck(zen, service),
+          ],
           if (s.phase == UpdatePhase.ready) ...<Widget>[
             const SizedBox(height: 14),
             FilledButton.icon(
@@ -392,6 +448,72 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
         ],
       ),
     );
+  }
+
+  /// "Porównaj sumę z GitHubem" and what came of it (§14.3 point 5).
+  List<Widget> _sumsCheck(ZenColors zen, UpdateService service) {
+    final Sha256SumsVerdict? verdict = _sumsVerdict;
+    final String? error = _sumsError;
+    return <Widget>[
+      OutlinedButton.icon(
+        key: const Key('updates-check-sums'),
+        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+        onPressed: _sumsBusy ? null : () => unawaited(_compareSums(service)),
+        icon: _sumsBusy
+            ? const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.fact_check_outlined),
+        label: Text(t('Porównaj sumę z GitHubem')),
+      ),
+      Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text(
+          t(
+            'Łączy się z github.com tylko po naciśnięciu i porównuje '
+            'pobrany plik z plikiem SHA256SUMS tego wydania.',
+          ),
+          style: TextStyle(color: zen.textMuted, fontSize: 12.5, height: 1.35),
+        ),
+      ),
+      if (verdict == Sha256SumsVerdict.match)
+        ZenInfo(
+          key: const Key('updates-sums-match'),
+          icon: Icons.verified_rounded,
+          tone: zen.success,
+          text: t('Suma pobranego pliku zgadza się z SHA256SUMS tego wydania.'),
+        )
+      else if (verdict == Sha256SumsVerdict.mismatch)
+        ZenInfo(
+          key: const Key('updates-sums-mismatch'),
+          icon: Icons.gpp_bad_rounded,
+          tone: zen.danger,
+          title: t('Suma się nie zgadza'),
+          text: t(
+            'Suma kontrolna się nie zgadza — to nie jest oficjalny Zen '
+            '(link do zbiórki mógł zostać podmieniony). Nie instaluj tego '
+            'pliku.',
+          ),
+        )
+      else if (verdict == Sha256SumsVerdict.notListed)
+        ZenInfo(
+          key: const Key('updates-sums-unlisted'),
+          icon: Icons.help_outline_rounded,
+          tone: zen.warning,
+          text: t(
+            'Tego pliku nie ma w SHA256SUMS tego wydania na GitHubie '
+            '(może jeszcze go tam nie ma). Nie da się potwierdzić sumy.',
+          ),
+        )
+      else if (error != null)
+        ZenInfo(
+          key: const Key('updates-sums-error'),
+          icon: Icons.cloud_off_rounded,
+          tone: zen.textMuted,
+          text: error,
+        ),
+    ];
   }
 
   /// The signed donation details, the canary and the mirrors (§14.2,

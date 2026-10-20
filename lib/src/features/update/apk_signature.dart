@@ -137,3 +137,21 @@ Future<({List<String> own, List<String>? apk})?> _nativeCertificates(
     return null;
   }
 }
+
+/// SHA-256 of the certificates this very app is signed with (Android; lower
+/// case hex), read by the system. Null without the native side.
+Future<List<String>?> ownSigningCertificates() async {
+  try {
+    final Map<Object?, Object?>? reply = await _appUpdateChannel
+        .invokeMethod<Map<Object?, Object?>>(
+          'signingCertificates',
+          <String, Object>{},
+        );
+    final Object? own = reply?['own'];
+    return own is List ? own.whereType<String>().toList() : null;
+  } on MissingPluginException {
+    return null;
+  } on PlatformException {
+    return null;
+  }
+}

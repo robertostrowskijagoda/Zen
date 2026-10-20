@@ -15,6 +15,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/update/adb_installer.dart';
 import 'package:zen/src/features/update/apk_signature.dart';
+import 'package:zen/src/features/update/own_copy.dart';
 import 'package:zen/src/features/update/presentation/store_share_dialog.dart';
 import 'package:zen/src/features/update/release.dart';
 import 'package:zen/src/features/update/share_app_channel.dart';
@@ -568,6 +569,26 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                 height: 1.5,
               ),
             ),
+          if (hex != null) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              t('Kod kopii: {code}', {'code': buildShortCode(hex)}),
+              key: const Key('share-app-short-code'),
+              style: zen.mono(
+                color: zen.textPrimary,
+                size: 15,
+                weight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              t(
+                'Po instalacji znajomy zobaczy ten sam kod w „O aplikacji”. '
+                'Porównajcie go: jeśli się różni, to nie jest ten sam plik.',
+              ),
+              style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+            ),
+          ],
           const SizedBox(height: 8),
           Text(
             t(

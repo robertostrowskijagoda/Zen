@@ -10,6 +10,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
+import 'package:zen/src/features/update/presentation/own_copy_card.dart';
 import 'package:zen/src/features/update/presentation/share_app_screen.dart';
 
 /// Where donations for Zen go (the only official collection).
@@ -362,6 +363,7 @@ class AboutScreen extends StatelessWidget {
             ),
           ),
           ZenSection(t('Jak sprawdzić, że to nie wirus')),
+          const OwnCopyCard(),
           ZenCard(
             key: const Key('about-safety'),
             child: Column(

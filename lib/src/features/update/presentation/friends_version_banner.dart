@@ -8,6 +8,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+import 'package:zen/src/features/update/presentation/own_copy_card.dart';
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
 import 'package:zen/src/features/update/update_service.dart';
 
@@ -54,12 +55,14 @@ class FriendsNewerVersionBanner extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final String? signed = ref.watch(signedNewerVersionProvider);
     final String? version = signed ?? ref.watch(friendsNewerVersionProvider);
+    // At start: a red warning when this copy is signed with another key.
+    const Widget copyWarning = OwnCopyCard(onlyWarning: true);
     if (version == null) {
-      return const SizedBox.shrink();
+      return copyWarning;
     }
     final ZenColors zen = ZenColors.of(context);
     final BorderRadius radius = BorderRadius.circular(18);
-    return Padding(
+    final Widget tile = Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
         color: zen.accent.withValues(alpha: 0.09),
@@ -117,6 +120,10 @@ class FriendsNewerVersionBanner extends ConsumerWidget {
           ),
         ),
       ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[copyWarning, tile],
     );
   }
 }

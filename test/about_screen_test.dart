@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/about/presentation/about_screen.dart';
+import 'package:zen/src/features/update/own_copy.dart';
 
 void main() {
   Future<void> pumpAbout(WidgetTester tester, ThemeData theme) async {
@@ -9,7 +11,14 @@ void main() {
     tester.view.devicePixelRatio = 2.75;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
-      MaterialApp(theme: theme, home: const AboutScreen()),
+      ProviderScope(
+        overrides: [
+          ownCopyCheckProvider.overrideWith(
+            (Ref ref) async => const OwnCopyCheck(OwnCopyState.unknown),
+          ),
+        ],
+        child: MaterialApp(theme: theme, home: const AboutScreen()),
+      ),
     );
     await tester.pump();
   }
@@ -97,5 +106,19 @@ void main() {
       kTermsOfUseUrl,
       'https://github.com/robertostrowskijagoda/Zen/blob/main/docs/TERMS.md',
     );
+  });
+
+  testWidgets('about says whether this copy is the official one', (
+    WidgetTester tester,
+  ) async {
+    await pumpAbout(tester, ZenTheme.dark());
+    await tester.pump();
+    final Finder list = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('own-copy-unknown')),
+      300,
+      scrollable: list,
+    );
+    expect(find.text('Nie można sprawdzić'), findsOneWidget);
   });
 }

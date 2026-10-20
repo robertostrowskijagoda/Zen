@@ -292,7 +292,7 @@ final class UpdateService extends ChangeNotifier {
 
   /// Sent to friends: the newest release (or, when none is newer than this
   /// build, the one with the signed donation details), vetoes and the
-  /// canary. 1.10.0 peers read only `rel` and `rev`.
+  /// canary.
   Map<String, dynamic> _offerPayload() {
     final SignedRelease? release = book.candidate ?? book.officialSource;
     return <String, dynamic>{

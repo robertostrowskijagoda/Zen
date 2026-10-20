@@ -148,7 +148,7 @@ bool _safeFileName(String name) =>
     RegExp(r'^[A-Za-z0-9][A-Za-z0-9._+-]*$').hasMatch(name);
 
 /// A link a signed file may carry (donation page, repository, mirror):
-/// `https://` with a host, or plain `http://` to a Tor `.onion` address.
+/// `https://` with a host (no Tor or plain `http://` links).
 bool isSafeReleaseLink(Object? value) {
   if (value is! String || value.isEmpty || value.length > 200) {
     return false;
@@ -157,8 +157,7 @@ bool isSafeReleaseLink(Object? value) {
   if (uri == null || uri.host.isEmpty || uri.userInfo.isNotEmpty) {
     return false;
   }
-  return uri.scheme == 'https' ||
-      (uri.scheme == 'http' && uri.host.endsWith('.onion'));
+  return uri.scheme == 'https';
 }
 
 /// How many of [maintainers] signed [message]: [signatures] maps a
