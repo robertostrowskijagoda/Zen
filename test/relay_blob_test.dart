@@ -185,9 +185,9 @@ final List<String> helpers = <String>[
   for (int i = 1; i <= 6; i++) _addr('200::c$i'),
 ];
 
-/// Everyone befriended and online, relay sets (with the attachment
-/// capability) announced and confirmed. [bobHasBlobs] false makes bob an
-/// older app that never announced it.
+/// Everyone befriended and online, relay sets (with the mailboxes that hold
+/// attachments) announced and confirmed. [bobHasBlobs] false runs bob
+/// without a blob store, so he announces no such mailboxes.
 Future<_SimMesh> _mesh({bool bobHasBlobs = true}) async {
   final _SimMesh mesh = _SimMesh()
     ..add(alice)
@@ -260,12 +260,11 @@ Future<int> _heldChunkCount(_SimMesh mesh) async {
 }
 
 void main() {
-  test('mailboxes and the attachment capability are announced', () async {
+  test('mailboxes that hold attachments are announced', () async {
     final _SimMesh mesh = await _mesh();
     final RelayState bobState = await mesh.nodes[bob]!.state();
     final RelayPeerInfo? seenByAlice =
         (await mesh.nodes[alice]!.state()).peers[bob];
-    expect(seenByAlice?.canReceiveBlobs, isTrue);
     expect(
       seenByAlice?.blobRelays.keys.toSet(),
       bobState.currentRelays.toSet(),
@@ -379,8 +378,8 @@ void main() {
     expect(mesh.nodes[bob]!.framesOfType('message'), hasLength(1));
   });
 
-  test('a recipient that does not announce the capability keeps the old '
-      'behaviour: direct only', () async {
+  test('a recipient without attachment mailboxes gets large payloads '
+      'direct only', () async {
     final _SimMesh mesh = await _mesh(bobHasBlobs: false);
     final RelayEngine engine = mesh.nodes[alice]!.engine;
     expect(
@@ -555,7 +554,6 @@ void main() {
         bob: RelayPeerInfo(
           address: bob,
           relays: helpers,
-          canReceiveBlobs: true,
           blobQuotaBytes: 1000,
           blobRelays: <String, int>{helpers.first: 5000},
         ),
@@ -611,7 +609,6 @@ void main() {
     );
     final RelayState loaded = RelayState.fromJsonString(state.toJsonString());
     final RelayPeerInfo peer = loaded.peers[bob]!;
-    expect(peer.canReceiveBlobs, isTrue);
     expect(peer.blobQuotaBytes, 1000);
     expect(peer.blobRelays, <String, int>{helpers.first: 5000});
     expect(loaded.blobQuotaBytes, 0);

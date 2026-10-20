@@ -177,7 +177,7 @@ void main() {
         passwordIterations: 10,
       );
       await security.setPassword('sekret12');
-      await security.applySettings(const AppSettings(encryptionEnabled: true));
+      await security.applySettings(const AppSettings());
       store = FileBinaryStore(
         tempDirectory,
         codec: BinaryCodec(compressor: RecordingCompressor()),

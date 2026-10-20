@@ -27,9 +27,9 @@ part of 'relay_engine.dart';
 //   live transfer produces, so the app assembles it and runs it through the
 //   media guard as usual.
 //
-// Only devices that announce [kRelayBlobCapability] are ever sent a manifest
-// or asked to hold chunks; to anyone else (older versions) large payloads stay
-// direct-only, as before.
+// Only a recipient that announced mailboxes holding attachments (`br`) is
+// ever sent a manifest; a device running without a blob store announces none,
+// so large payloads to it stay direct-only.
 
 /// Payload type of a blob manifest (a reliable payload of the relay layer
 /// itself; never reaches the app).
@@ -168,7 +168,6 @@ extension _RelayEngineBlobs on RelayEngine {
         state.identity != null &&
         info != null &&
         info.publicKey != null &&
-        info.canReceiveBlobs &&
         _blobTargets(state, recipient, cipherBytes).isNotEmpty;
   }
 

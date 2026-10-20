@@ -12,13 +12,7 @@ const List<String> kZenCaps = <String>[
   'group_call1',
   'disappear1',
   'meet1',
-  // Passes on ledger spaces of kinds it does not know to friends that also
-  // say so (A17).
-  kForwardSpacesCap,
 ];
-
-/// The capability that says a build passes on ledger spaces it does not know.
-const String kForwardSpacesCap = 'spaces1';
 
 /// Most capability names taken from one peer.
 const int kMaxPeerCaps = 32;
@@ -30,7 +24,7 @@ final RegExp _versionPattern = RegExp(r'^\d{1,4}\.\d{1,4}\.\d{1,4}$');
 final RegExp _capPattern = RegExp(r'^[a-z][a-z0-9_]*$');
 
 /// The fields this build adds to every ping and pong it sends to an
-/// accepted friend. Peers of 1.10.0 ignore keys they do not know.
+/// accepted friend.
 Map<String, dynamic> versionHello() => <String, dynamic>{
   'ver': kAppVersion,
   'build': kAppBuild,
@@ -57,7 +51,7 @@ final class PeerVersion {
   bool hasCap(String cap) => caps.contains(cap);
 
   /// Reads `ver` / `build` / `caps` from a ping or pong; `null` when the
-  /// peer sent no (valid) version - a 1.10.0 peer, or garbage.
+  /// peer sent no (valid) version.
   static PeerVersion? fromPayload(Map<String, dynamic> payload) {
     final Object? ver = payload['ver'];
     if (ver is! String || !isValidAppVersion(ver)) {

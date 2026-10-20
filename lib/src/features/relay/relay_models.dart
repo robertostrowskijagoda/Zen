@@ -123,7 +123,6 @@ final class RelayPeerInfo {
     this.updatedAtMillis = 0,
     this.depositKey,
     this.depositToken,
-    this.canReceiveBlobs = false,
     this.blobQuotaBytes = 0,
     this.blobRelays = const <String, int>{},
   });
@@ -145,11 +144,6 @@ final class RelayPeerInfo {
   /// This device's token for leaving mail with the peer's relays.
   final String? depositToken;
 
-  /// Whether the peer takes attachments through its mailboxes (it announced
-  /// [kRelayBlobCapability]). Peers that did not (1.10.0 and older) only get
-  /// attachments while both devices are online.
-  final bool canReceiveBlobs;
-
   /// How many bytes of attachments the peer holds per sender for each friend
   /// it serves as a mailbox (0: none).
   final int blobQuotaBytes;
@@ -166,7 +160,6 @@ final class RelayPeerInfo {
     'u': updatedAtMillis,
     if (depositKey != null) 'dk': base64Url.encode(depositKey!),
     if (depositToken != null) 'tk': depositToken,
-    if (canReceiveBlobs) 'cb': true,
     if (blobQuotaBytes > 0) 'bq': blobQuotaBytes,
     if (blobRelays.isNotEmpty) 'br': blobRelays,
   };
@@ -184,7 +177,6 @@ final class RelayPeerInfo {
       updatedAtMillis: (json['u'] as num?)?.toInt() ?? 0,
       depositKey: decodeRelayKey(json['dk']),
       depositToken: token is String && token.isNotEmpty ? token : null,
-      canReceiveBlobs: json['cb'] == true,
       blobQuotaBytes: (json['bq'] as num?)?.toInt() ?? 0,
       blobRelays: _intMap(json['br']),
     );
@@ -639,11 +631,6 @@ Map<String, int> _intMap(Object? value) {
   }
   return result;
 }
-
-/// Capability a device lists in its `rly_announce` (`cap`) when it can take
-/// attachments through its mailboxes: collect the chunks a sender left with
-/// its friends and put them back together.
-const String kRelayBlobCapability = 'blob1';
 
 /// What a blob carries.
 enum RelayBlobKind {

@@ -252,6 +252,8 @@ const Set<String> kReliablePayloadTypes = <String>{
   'group_invite_ack',
   'group_leave',
   'group_message',
+  // Group board posts (§13); the sync between members is real-time.
+  'group_post',
   'profile_update',
   'disappear_timer',
   // Meeting features (§15–16): a friend offline now still gets them.
@@ -867,7 +869,6 @@ final class RelayEngine {
             .take(config.maxRelays)
             .toList(growable: false);
     final Map<String, int> blobRelaysBefore = _blobRelaysOf(state);
-    final Object? caps = payload['cap'];
     state.peers[from] = RelayPeerInfo(
       address: from,
       publicKey: publicKey ?? known?.publicKey,
@@ -879,7 +880,6 @@ final class RelayEngine {
       depositToken: token is String && token.isNotEmpty && token.length <= 64
           ? token
           : null,
-      canReceiveBlobs: caps is List && caps.contains(kRelayBlobCapability),
       blobQuotaBytes: max(0, _intOf(payload['bq'])),
       blobRelays: _blobRelaysFrom(payload['br'], relays),
     );
@@ -926,7 +926,6 @@ final class RelayEngine {
       'tk': _depositToken(depositKey, recipient: _self, sender: to),
       if (state.currentRelays.contains(to)) 'dk': base64Url.encode(depositKey),
       if (_blobs != null) ...<String, dynamic>{
-        'cap': const <String>[kRelayBlobCapability],
         if (_blobQuota(state) > 0) 'bq': _blobQuota(state),
         'br': _blobRelaysOf(state),
       },
@@ -2147,10 +2146,9 @@ final class RelayEngine {
   }
 
   /// Whether an attachment of [bytes] to [recipient] can wait in the
-  /// recipient's mailboxes: the recipient announced that it collects
-  /// attachments, and at least one of its mailboxes (other than this
-  /// device) holds that much. Peers that never announced it (older app
-  /// versions) only get attachments while both devices are online.
+  /// recipient's mailboxes: at least one of the mailboxes it announced
+  /// (other than this device) holds that much. Otherwise attachments go
+  /// only while both devices are online.
   Future<bool> canSendAttachmentTo(
     String recipient, {
     required int bytes,

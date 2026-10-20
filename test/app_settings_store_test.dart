@@ -46,7 +46,6 @@ void main() {
     expect(restored.inboxLimitMb, 80);
     expect(restored.autoCleanupDays, 14);
     expect(restored.notificationDelaySeconds, 8);
-    expect(restored.encryptionEnabled, isTrue);
     expect(restored.lockMode, AppLockMode.appClose);
     expect(restored.backgroundLockDelaySeconds, 12);
     expect(restored.themeMode, AppThemeMode.dark);

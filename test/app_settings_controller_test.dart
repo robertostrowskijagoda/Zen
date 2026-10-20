@@ -13,7 +13,6 @@ void main() {
           inboxLimitMb: 80,
           autoCleanupDays: 9,
           notificationDelaySeconds: 6,
-          encryptionEnabled: true,
           lockMode: AppLockMode.background,
           backgroundLockDelaySeconds: 9,
         ),
@@ -31,10 +30,6 @@ void main() {
       expect(
         container.read(appSettingsControllerProvider).notificationDelaySeconds,
         6,
-      );
-      expect(
-        container.read(appSettingsControllerProvider).encryptionEnabled,
-        isTrue,
       );
       expect(
         container.read(appSettingsControllerProvider).lockMode,
