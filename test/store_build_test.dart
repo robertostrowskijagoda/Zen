@@ -6,12 +6,12 @@ import 'package:zen/src/features/update/presentation/store_share_dialog.dart';
 import 'package:zen/src/features/update/store_build.dart';
 
 void main() {
-  test('only the store flavor or ZEN_STORE make a store build', () {
+  test('only the appStoreOnly flavor or ZEN_STORE make a store build', () {
     expect(isStoreBuildFor(flavor: null), isFalse);
-    expect(isStoreBuildFor(flavor: 'direct'), isFalse);
-    expect(isStoreBuildFor(flavor: 'store'), isTrue);
+    expect(isStoreBuildFor(flavor: 'full'), isFalse);
+    expect(isStoreBuildFor(flavor: 'appStoreOnly'), isTrue);
     expect(isStoreBuildFor(flavor: null, define: true), isTrue);
-    expect(isStoreBuildFor(flavor: 'direct', define: true), isTrue);
+    expect(isStoreBuildFor(flavor: 'full', define: true), isTrue);
   });
 
   test('tests run as the direct build', () {
