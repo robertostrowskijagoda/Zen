@@ -563,8 +563,8 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                 Slider(
                   value: _hops.toDouble(),
                   min: 1,
-                  max: 3,
-                  divisions: 2,
+                  max: kDatingMaxHops.toDouble(),
+                  divisions: kDatingMaxHops - 1,
                   label: '$_hops',
                   activeColor: tone,
                   onChanged: (double v) => setState(() => _hops = v.round()),
@@ -572,7 +572,7 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
-                    t('1 — Twoi znajomi, 2 — ich znajomi, 3 — o krok dalej.'),
+                    t('1 — Twoi znajomi, 2 — ich znajomi.'),
                     style: TextStyle(color: zen.textMuted, fontSize: 12.5),
                   ),
                 ),

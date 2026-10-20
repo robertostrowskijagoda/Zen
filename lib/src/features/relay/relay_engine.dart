@@ -295,7 +295,7 @@ const Set<String> kReliablePayloadTypes = <String>{
   'pyr_anon',
   'pyr_fx',
   // Dating (§19): only between friends; the content is sealed anyway.
-  'date_pkg',
+  'date_lantern',
   'date_back',
   'date_ask',
   'date_ask_re',

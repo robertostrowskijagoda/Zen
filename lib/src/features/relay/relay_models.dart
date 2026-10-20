@@ -378,17 +378,6 @@ final class RelayDeliveryReport {
   }
 }
 
-/// Version of the stored *settings* (as opposed to the delivery data) in
-/// [RelayState]. Bumped whenever a setting's default changes in a way that has
-/// to reach devices that already stored the old default.
-///
-/// * (absent) — states written before the version existed. They stored
-///   `shareWithGroups` as `true` by default, and a stored `true` cannot be told
-///   apart from "never touched".
-/// * 2 — `shareWithGroups` is off by default and, from here on, a stored value
-///   is the person's own choice.
-const int kRelaySettingsVersion = 2;
-
 /// Everything the relay layer persists for this device.
 final class RelayState {
   RelayState({
@@ -490,19 +479,13 @@ final class RelayState {
   String toJsonString({bool includeMailbox = true}) => jsonEncode(
     <String, dynamic>{
       'v': 1,
-      // Settings version (see [kRelaySettingsVersion]): lets a loader tell
-      // a `swg` the person chose from the old default.
-      'sv': kRelaySettingsVersion,
       if (identity != null) 'id': identity!.toJson(),
       'peers': peers.values.map((RelayPeerInfo p) => p.toJson()).toList(),
       if (manualRelays != null) 'manual': manualRelays,
       'cur': currentRelays,
       'ver': relaySetVersion,
-      // `ann3` (was `ann2`, before that `ann`): confirmations of
-      // announcements that carry deposit tokens (`ann2`) and the attachment
-      // capability (`ann3`); older ones are dropped so every contact hears
-      // both once.
-      'ann3': announcedVersions,
+      // Confirmations of announcements (deposit tokens, capabilities).
+      'ann': announcedVersions,
       'out': outbox.values.map((RelayOutboxEntry e) => e.toJson()).toList(),
       if (includeMailbox) 'mail': mailbox,
       'tomb': tombstones,
@@ -578,16 +561,6 @@ final class RelayState {
         }
       }
     }
-    // One-time migration (S-5). Before `sv` existed `shareWithGroups` was on by
-    // default and always written out, so a stored `true` could be the untouched
-    // default as well as a deliberate choice, and announcing mailboxes to
-    // strangers in groups must not stay on for people who never decided it.
-    // Everything stored without (or with an older) `sv` therefore loads as
-    // "off"; the next save writes the current `sv`, from then on `swg` is the
-    // person's own choice again and survives restarts — so this runs once, and
-    // they can switch it back on.
-    final bool storedChoiceIsTheirs =
-        ((decoded['sv'] as num?)?.toInt() ?? 0) >= kRelaySettingsVersion;
     final Object? manual = decoded['manual'];
     return RelayState(
       identity: RelayIdentity.fromJson(decoded['id']),
@@ -595,14 +568,14 @@ final class RelayState {
       manualRelays: manual is List ? _stringList(manual) : null,
       currentRelays: _stringList(decoded['cur']),
       relaySetVersion: (decoded['ver'] as num?)?.toInt() ?? 0,
-      announcedVersions: _intMap(decoded['ann3']),
+      announcedVersions: _intMap(decoded['ann']),
       outbox: outbox,
       mailbox: mailbox,
       tombstones: _intMap(decoded['tomb']),
       seen: _intMap(decoded['seen']),
       seenFloorMillis: (decoded['sfl'] as num?)?.toInt() ?? 0,
       seenFloors: _intMap(decoded['sfls']),
-      shareWithGroups: storedChoiceIsTheirs && decoded['swg'] == true,
+      shareWithGroups: decoded['swg'] == true,
       deliveryReports: reports,
       blobQuotaBytes: (decoded['bq'] as num?)?.toInt(),
       outBlobs: <String, RelayBlobOut>{

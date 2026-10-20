@@ -236,7 +236,7 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
                   icon: Icons.favorite_rounded,
                   tone: tone,
                   text: t(
-                    'Tylko z ludźmi oddalonymi o 1–3 kroki znajomości — '
+                    'Tylko z ludźmi oddalonymi o 1–2 kroki znajomości — '
                     'zawsze jest ktoś wspólny, kogo można zapytać.',
                   ),
                 ),
@@ -246,7 +246,7 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
                   title: t('Nikt nie wie, że randkujesz'),
                   text: t(
                     'Twój telefon wysyła i przekazuje dalej takie same '
-                    'paczki, czy randki są włączone, czy nie.',
+                    'latarnie, czy randki są włączone, czy nie.',
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -916,8 +916,8 @@ class DatingProfileScreen extends ConsumerWidget {
                   }
                   if (v == 'minor') {
                     // Switched off here at once; the pyramid (if any) hears
-                    // about it, and so do the people around in the next
-                    // package (§19.6).
+                    // about it, and so do the people around, in the profiles
+                    // this phone sends (§19.6).
                     await dating.reportMinor(p.key);
                     if (!context.mounted) {
                       return;
