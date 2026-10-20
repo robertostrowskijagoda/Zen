@@ -180,9 +180,7 @@ Future<Map<String, dynamic>?> handleFeatureHarness(
       await dating.saveMine((MyDating m) {
         m
           ..enabled = true
-          ..adult = true
           ..name = str('name', 'Ja')
-          ..age = integer('age', 30)
           ..gender = DatingGender.byCode(str('g', 'k')) ?? DatingGender.other;
       });
       return <String, dynamic>{'ok': dating.active};
@@ -208,6 +206,16 @@ Future<Map<String, dynamic>?> handleFeatureHarness(
         'ok': true,
         'code': ref.read(neighborsServiceProvider).doorCode?.toQr(),
       };
+    case '/x/flat/accept':
+      // Lets in everyone knocking on the door (§18.2).
+      final NeighborsService knocked = ref.read(neighborsServiceProvider);
+      int accepted = 0;
+      for (final FlatKnock k in knocked.knocks) {
+        if (await knocked.acceptKnock(k.key)) {
+          accepted++;
+        }
+      }
+      return <String, dynamic>{'ok': true, 'accepted': accepted};
     case '/x/flat/scan':
       final FlatDoorCode? code = FlatDoorCode.parse(str('code'));
       if (code == null) {

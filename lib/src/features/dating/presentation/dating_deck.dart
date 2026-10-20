@@ -214,12 +214,8 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
                         Positioned.fill(
                           child: Semantics(
                             label: t(
-                              '{name}, {age}. '
-                              'Przesuń w prawo — Tak, w lewo — Nie.',
-                              {
-                                'name': top.profile.name,
-                                'age': top.profile.age,
-                              },
+                              '{name}. Przesuń w prawo — Tak, w lewo — Nie.',
+                              {'name': top.profile.name},
                             ),
                             child: GestureDetector(
                               key: Key('dating-card-${top.profile.name}'),
@@ -638,7 +634,7 @@ class _DescriptionPage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  '${p.name}, ${p.age}',
+                  p.name,
                   style: zen.display(
                     color: zen.textPrimary,
                     size: 30,
@@ -791,7 +787,7 @@ class _PhotoPage extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Text(
-                  '${p.name}, ${p.age}',
+                  p.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: zen.display(

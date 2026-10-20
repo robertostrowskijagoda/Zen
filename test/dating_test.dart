@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:zen/src/core/ledger/ledger_archive.dart';
@@ -14,6 +15,15 @@ import 'package:zen/src/features/relay/relay_engine.dart' show kSendOnceKey;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
+
+/// A question a probing phone got answered: its key, blinding secret, points
+/// and the answer.
+typedef _Probe = (
+  RelayIdentity,
+  RelayIdentity,
+  List<String>,
+  Map<String, dynamic>,
+);
 
 final class _Net {
   final Map<String, _Phone> phones = <String, _Phone>{};
@@ -111,30 +121,39 @@ final class _Phone implements EventHost {
   @override
   Future<void> notify(RuntimeSystemNotification n) async => shown.add(n);
 
+  /// Turns dating on and sends a lantern (saving alone sends nothing).
   Future<void> date({
     required String name,
-    required int age,
     required DatingGender gender,
     Set<DatingGender>? wants,
-    int hops = 3,
+    int hops = kDatingMaxHops,
   }) async {
     await service.load();
     await service.saveMine((MyDating m) {
       m
         ..enabled = true
-        ..adult = true
         ..name = name
-        ..age = age
         ..gender = gender
         ..wants = DatingWants(
           genders: wants ?? DatingGender.values.toSet(),
           hops: hops,
         );
     });
+    await service.maybePublish(force: true);
   }
 
   int backCount() => sent
       .where((Map<String, dynamic> p) => p['type'] == DatingTypes.back)
+      .length;
+
+  /// Back messages received that are big enough to be a profile (or a
+  /// cover): a match test and its answer are much smaller.
+  int profilesIn() => received
+      .where(
+        (Map<String, dynamic> p) =>
+            p['type'] == DatingTypes.back &&
+            jsonEncode(p).length > kDatingBucket,
+      )
       .length;
 }
 
@@ -187,13 +206,11 @@ void main() {
     await bob.service.load();
     await ania.date(
       name: 'Ania',
-      age: 30,
       gender: DatingGender.woman,
       wants: <DatingGender>{DatingGender.man},
     );
     await darek.date(
       name: 'Darek',
-      age: 32,
       gender: DatingGender.man,
       wants: <DatingGender>{DatingGender.woman},
     );
@@ -246,7 +263,7 @@ void main() {
   });
 
   test('a lantern goes 2 steps and no further; a profile is asked for only '
-      'when the lantern fits', () async {
+      'when the match test says the two fit', () async {
     final _Net net = _Net();
     final _Phone ania = _Phone(net, 'ania');
     final _Phone bob = _Phone(net, 'bob');
@@ -262,20 +279,17 @@ void main() {
     await cyryl.service.load();
     await darek.date(
       name: 'Darek',
-      age: 32,
       gender: DatingGender.man,
       wants: <DatingGender>{DatingGender.woman},
     );
     // Ewa dates too, but is a woman and Ania looks for men.
     await ewa.date(
       name: 'Ewa',
-      age: 28,
       gender: DatingGender.woman,
       wants: <DatingGender>{DatingGender.man},
     );
     await ania.date(
       name: 'Ania',
-      age: 30,
       gender: DatingGender.woman,
       wants: <DatingGender>{DatingGender.man},
     );
@@ -294,13 +308,15 @@ void main() {
     expect(darek.service.toDecide, isEmpty);
     expect(cyryl.service.toDecide, isEmpty);
 
-    // Two steps away, but it does not fit Ewa: her phone asks for nothing
-    // (and sends nothing) while the lantern costs the network ~100 bytes.
+    // Two steps away, but it does not fit Ewa: her phone runs only the
+    // small sealed match test, never gets the profile, and the lantern costs
+    // the network well under 100 bytes.
     expect(
       ewa.received.any((Map<String, dynamic> p) => p['id'] == lanternId),
       isTrue,
     );
-    expect(ewa.backCount(), 0);
+    expect(ewa.backCount(), greaterThan(0));
+    expect(ewa.profilesIn(), 0);
     expect(ewa.service.toDecide, isEmpty);
     final List<Map<String, dynamic>> lanterns = <Map<String, dynamic>>[
       for (final _Phone p in <_Phone>[ania, bob, cyryl, darek, ewa])
@@ -321,7 +337,6 @@ void main() {
     net.link(fred, bob);
     await fred.date(
       name: 'Fred',
-      age: 33,
       gender: DatingGender.man,
       wants: <DatingGender>{DatingGender.woman},
     );
@@ -331,126 +346,205 @@ void main() {
     expect(fred.backCount(), greaterThan(0));
   });
 
-  test('a phone with dating off asks for the profile of a share of the '
-      'lanterns and drops the answer', () async {
+  test('every phone runs the match test; a share of the lanterns that do not '
+      'fit is asked for the profile anyway and the answer dropped', () async {
     final _Net net = _Net();
     final _Phone ania = _Phone(net, 'ania');
     final _Phone bob = _Phone(net, 'bob', decoyShare: 1);
     final _Phone cyryl = _Phone(net, 'cyryl');
+    final _Phone ewa = _Phone(net, 'ewa', decoyShare: 1);
     net
       ..link(ania, bob)
-      ..link(bob, cyryl);
+      ..link(bob, cyryl)
+      ..link(ania, ewa);
     await bob.service.load();
     await cyryl.service.load();
-    await ania.date(name: 'Ania', age: 30, gender: DatingGender.woman);
-    expect(bob.backCount(), greaterThan(0), reason: 'asked like a dater');
+    // Ewa dates, but looks for women only and Ania for men.
+    await ewa.date(
+      name: 'Ewa',
+      gender: DatingGender.woman,
+      wants: <DatingGender>{DatingGender.woman},
+    );
+    await ania.date(
+      name: 'Ania',
+      gender: DatingGender.woman,
+      wants: <DatingGender>{DatingGender.man},
+    );
+    expect(bob.profilesIn(), greaterThan(0), reason: 'asked like a dater');
     expect(bob.service.toDecide, isEmpty);
     expect(bob.shown, isEmpty);
-    expect(cyryl.backCount(), 0, reason: 'a share of 0 asks for nothing');
+    expect(ewa.profilesIn(), greaterThan(0), reason: 'dating on asks alike');
+    expect(ewa.service.toDecide, isEmpty);
+    expect(cyryl.backCount(), greaterThan(0), reason: 'the match test');
+    expect(cyryl.profilesIn(), 0, reason: 'a share of 0 asks for nothing');
   });
 
-  test(
-    'a lantern fits both ways; a decoy has the same shape as a real one',
-    () {
-      const DatingWants wants = DatingWants(
-        minAge: 25,
-        maxAge: 40,
-        genders: <DatingGender>{DatingGender.man},
-        hops: 1,
-      );
-      final DatingLantern real = DatingLantern.of(
-        key: 'ania-key',
-        age: 30,
-        gender: DatingGender.woman,
-        wants: wants,
-      );
-      final Map<String, dynamic> json =
-          jsonDecode(jsonEncode(real.toJson())) as Map<String, dynamic>;
-      expect(jsonEncode(json).length, lessThan(100));
-      final DatingLantern back = DatingLantern.fromJson(json)!;
-      expect(back.key, 'ania-key');
-      expect(back.age, 30);
-      expect(back.gender, DatingGender.woman);
-      expect(back.wants.minAge, 25);
-      expect(back.wants.maxAge, 40);
-      expect(back.wants.genders, <DatingGender>{DatingGender.man});
-      expect(back.wants.hops, 1);
+  test('preferences fit both ways; the match test tells only whether two '
+      'people fit', () async {
+    const DatingWants hers = DatingWants(
+      genders: <DatingGender>{DatingGender.man},
+      hops: 1,
+    );
+    expect(hers.accepts(gender: DatingGender.man, distance: 1), isTrue);
+    expect(hers.accepts(gender: DatingGender.woman, distance: 1), isFalse);
+    expect(hers.accepts(gender: DatingGender.man, distance: 2), isFalse);
+    expect(
+      DatingWants.fromJson(jsonDecode(jsonEncode(hers.toJson()))).genders,
+      hers.genders,
+    );
 
-      bool fits({
-        int age = 35,
-        DatingGender gender = DatingGender.man,
-        int distance = 1,
-        DatingWants mine = const DatingWants(),
-      }) => back.fits(
-        myAge: age,
-        myGender: gender,
-        myWants: mine,
-        distance: distance,
+    // Ania (a woman looking for men) has a lantern; who fits?
+    final Set<String> offer = hers.offerTags(DatingGender.woman);
+    Future<bool> fitsHer(DatingGender gender, Set<DatingGender> wants) async {
+      final (RelayIdentity, List<String>) q = await DatingMatch.ask(
+        DatingWants(genders: wants).seekTags(gender),
+        Random(1),
       );
-      expect(fits(), isTrue);
-      expect(fits(age: 41), isFalse, reason: 'her range');
-      expect(fits(gender: DatingGender.woman), isFalse, reason: 'her genders');
-      expect(fits(distance: 2), isFalse, reason: 'her distance');
+      final (List<String>, List<String>)? a = await DatingMatch.answer(
+        jsonDecode(jsonEncode(q.$2)),
+        offer,
+        Random(2),
+      );
+      // Always the same number of points, real or filler.
+      expect(q.$2, hasLength(DatingMatch.slots));
+      expect(a!.$1, hasLength(DatingMatch.slots));
+      expect(a.$2, hasLength(DatingMatch.slots));
+      final bool fit = await DatingMatch.fits(q.$1, a.$1, a.$2);
+      // The proof of fit holds exactly when they fit; a made-up secret
+      // proves nothing.
+      expect(await DatingMatch.proves(q.$1, q.$2, offer), fit);
       expect(
-        fits(mine: const DatingWants(minAge: 18, maxAge: 29)),
+        await DatingMatch.proves(await RelayIdentity.generate(), q.$2, offer),
         isFalse,
-        reason: 'his range',
       );
-      expect(
-        fits(
-          mine: const DatingWants(genders: <DatingGender>{DatingGender.man}),
-        ),
-        isFalse,
-        reason: 'his genders',
-      );
+      return fit;
+    }
 
-      // A decoy is valid and shaped like a real lantern, whatever the dice say.
-      for (int seed = 0; seed < 200; seed++) {
-        final Map<String, dynamic> decoy = DatingLantern.decoy(
-          'ania-key',
-          Random(seed),
-        ).toJson();
-        expect(DatingLantern.fromJson(decoy), isNotNull, reason: 'seed $seed');
-        expect(decoy.keys.toSet(), json.keys.toSet());
-        expect((decoy['h'] as String).length, (json['h'] as String).length);
-      }
+    expect(
+      await fitsHer(DatingGender.man, <DatingGender>{DatingGender.woman}),
+      isTrue,
+    );
+    expect(
+      await fitsHer(DatingGender.man, DatingGender.values.toSet()),
+      isTrue,
+    );
+    expect(
+      await fitsHer(DatingGender.man, <DatingGender>{DatingGender.man}),
+      isFalse,
+      reason: 'his genders',
+    );
+    expect(
+      await fitsHer(DatingGender.woman, DatingGender.values.toSet()),
+      isFalse,
+      reason: 'her genders',
+    );
 
-      // Anything this app never makes is not a lantern.
-      Map<String, dynamic> withField(String field, Object? value) =>
-          <String, dynamic>{...json, field: value};
-      List<int> bytes({int? age, int? mask, int? hops, int? min, int? max}) =>
-          <int>[age ?? 30, 1, min ?? 25, max ?? 40, mask ?? 2, hops ?? 1];
-      String h(List<int> b) => base64Url.encode(b);
-      expect(DatingLantern.fromJson(withField('v', 2)), isNull);
-      expect(DatingLantern.fromJson(withField('k', 5)), isNull);
-      expect(DatingLantern.fromJson(withField('k', 'x' * 65)), isNull);
-      expect(DatingLantern.fromJson(withField('h', 'abc')), isNull);
-      expect(
-        DatingLantern.fromJson(withField('h', h(<int>[30, 1, 25, 40, 2]))),
-        isNull,
-      );
-      expect(DatingLantern.fromJson(withField('h', h(bytes(age: 17)))), isNull);
-      expect(DatingLantern.fromJson(withField('h', h(bytes(min: 17)))), isNull);
-      expect(
-        DatingLantern.fromJson(withField('h', h(bytes(max: 100)))),
-        isNull,
-      );
-      expect(DatingLantern.fromJson(withField('h', h(bytes(mask: 0)))), isNull);
-      expect(DatingLantern.fromJson(withField('h', h(bytes(mask: 8)))), isNull);
-      expect(DatingLantern.fromJson(withField('h', h(bytes(hops: 0)))), isNull);
-      expect(
-        DatingLantern.fromJson(
-          withField('h', h(bytes(hops: kDatingMaxHops + 1))),
-        ),
-        isNull,
-      );
-      expect(DatingLantern.fromJson(withField('h', h(bytes()))), isNotNull);
-      expect(DatingLantern.fromJson('x'), isNull);
-    },
-  );
+    // Fillers only (dating off, or hidden) never fit.
+    final (RelayIdentity, List<String>) none = await DatingMatch.ask(
+      const <String>{},
+      Random(3),
+    );
+    final (List<String>, List<String>)? a = await DatingMatch.answer(
+      none.$2,
+      offer,
+      Random(4),
+    );
+    expect(await DatingMatch.fits(none.$1, a!.$1, a.$2), isFalse);
+    final (RelayIdentity, List<String>) man = await DatingMatch.ask(
+      const DatingWants().seekTags(DatingGender.man),
+      Random(5),
+    );
+    final (List<String>, List<String>)? off = await DatingMatch.answer(
+      man.$2,
+      const <String>{},
+      Random(6),
+    );
+    expect(await DatingMatch.fits(man.$1, off!.$1, off.$2), isFalse);
+    // Nothing in the answer is a tag in the clear.
+    expect(jsonEncode(<Object>[a.$1, a.$2]), isNot(contains('k>m')));
+    expect(await DatingMatch.answer(<String>['x'], offer, Random(7)), isNull);
 
-  test('phones with dating off send decoy lanterns that look the same and '
-      'are dropped; hidden people never see a profile', () async {
+    // The proof of a lantern's answer: the same on both sides, nobody else.
+    final RelayIdentity lantern = await RelayIdentity.generate();
+    final RelayIdentity asker = await RelayIdentity.generate();
+    final RelayIdentity eve = await RelayIdentity.generate();
+    final String proof = await datingLanternProof(
+      lantern,
+      asker.publicKey,
+      'id1',
+      'ania-key',
+    );
+    expect(
+      await datingLanternProof(asker, lantern.publicKey, 'id1', 'ania-key'),
+      proof,
+    );
+    expect(
+      await datingLanternProof(eve, lantern.publicKey, 'id1', 'ania-key'),
+      isNot(proof),
+    );
+    expect(
+      await datingLanternProof(asker, lantern.publicKey, 'id1', 'eve-key'),
+      isNot(proof),
+    );
+  });
+
+  test('a lantern carries only a new one-off key, with dating on or off; it '
+      'goes out only on the weekly schedule', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone bob = _Phone(net, 'bob');
+    final _Phone cyryl = _Phone(net, 'cyryl');
+    net
+      ..link(ania, cyryl)
+      ..link(bob, cyryl);
+    await cyryl.service.load();
+    await bob.service.load();
+    await ania.date(name: 'Ania', gender: DatingGender.woman);
+    await bob.service.maybePublish(force: true);
+    List<Map<String, dynamic>> lanterns(_Phone p) => <Map<String, dynamic>>[
+      for (final Map<String, dynamic> m in p.sent)
+        if (m['type'] == DatingTypes.lantern) m,
+    ];
+
+    // Changing the profile or turning dating off sends nothing.
+    final int before = lanterns(ania).length;
+    await ania.service.saveMine((MyDating m) => m.about = 'Nowe');
+    await ania.service.saveMine((MyDating m) => m.enabled = false);
+    await ania.service.maybePublish();
+    expect(lanterns(ania), hasLength(before));
+    // A week later: a new lantern, nothing like the last one.
+    net.clock += kDatingPublishEvery.inMilliseconds;
+    await ania.service.maybePublish();
+    await bob.service.maybePublish(force: true);
+    expect(lanterns(ania), hasLength(before + 1));
+
+    final Map<String, dynamic> a1 = lanterns(ania).first;
+    final Map<String, dynamic> a2 = lanterns(ania).last;
+    final Map<String, dynamic> b1 = lanterns(bob).first;
+    for (final Map<String, dynamic> l in <Map<String, dynamic>>[a1, a2, b1]) {
+      expect((l['l'] as Map).keys.toSet(), <String>{'v', 'k'});
+      expect(jsonEncode(l['l']).length, lessThan(80));
+      expect(DatingLantern.fromJson(l['l']), isNotNull);
+    }
+    expect(a1['id'], isNot(a2['id']));
+    expect(a1['l']['k'], isNot(a2['l']['k']));
+    expect(a1['l']['k'], isNot(ania.service.myKey));
+    expect(jsonEncode(lanterns(cyryl)), isNot(contains(ania.service.myKey)));
+
+    // Anything this app never makes is not a lantern.
+    final Map<String, dynamic> json = a1['l'] as Map<String, dynamic>;
+    Map<String, dynamic> withField(String field, Object? value) =>
+        <String, dynamic>{...json, field: value};
+    expect(DatingLantern.fromJson(withField('v', 3)), isNull);
+    expect(DatingLantern.fromJson(withField('k', 5)), isNull);
+    expect(DatingLantern.fromJson(withField('k', 'x' * 65)), isNull);
+    expect(DatingLantern.fromJson(withField('k', 'AAAA')), isNull);
+    expect(DatingLantern.fromJson(withField('h', 'AAAA'))!.toJson(), json);
+    expect(DatingLantern.fromJson('x'), isNull);
+  });
+
+  test('a phone with dating off never fits; hidden people never see a '
+      'profile', () async {
     final _Net net = _Net();
     final _Phone ania = _Phone(net, 'ania');
     final _Phone bob = _Phone(net, 'bob');
@@ -459,7 +553,7 @@ void main() {
       ..link(ania, bob)
       ..link(bob, ewa);
     await bob.service.load();
-    await ewa.date(name: 'Ewa', age: 28, gender: DatingGender.woman);
+    await ewa.date(name: 'Ewa', gender: DatingGender.woman);
     await bob.service.maybePublish(force: true);
     expect(
       bob.sent.where(
@@ -470,7 +564,7 @@ void main() {
     expect(
       ewa.service.toDecide,
       isEmpty,
-      reason: 'a decoy lantern shows nothing',
+      reason: 'a phone with dating off shows nothing',
     );
 
     // Ania hides from Ewa: the lantern passes Bob, but Ewa never sees the
@@ -479,12 +573,11 @@ void main() {
     await ania.service.saveMine((MyDating m) {
       m
         ..enabled = true
-        ..adult = true
         ..name = 'Ania'
-        ..age = 30
         ..gender = DatingGender.woman
         ..hiddenFriends.add(ewa.address);
     });
+    await ania.service.maybePublish(force: true);
     expect(ewa.service.toDecide, isEmpty);
     await ewa.service.maybePublish(force: true);
     expect(ewa.service.toDecide, isEmpty);
@@ -495,7 +588,6 @@ void main() {
     net.link(ola, bob);
     await ola.date(
       name: 'Ola',
-      age: 25,
       gender: DatingGender.woman,
       wants: <DatingGender>{DatingGender.man},
     );
@@ -513,15 +605,14 @@ void main() {
     net
       ..link(marta, xenia)
       ..link(marta, yann);
-    await marta.date(name: 'Marek', age: 35, gender: DatingGender.man);
+    await marta.date(name: 'Marek', gender: DatingGender.man);
     await xenia.date(
       name: 'Xenia',
-      age: 29,
       gender: DatingGender.woman,
       wants: <DatingGender>{DatingGender.man},
       hops: 1,
     );
-    await yann.date(name: 'Yann', age: 31, gender: DatingGender.man, hops: 1);
+    await yann.date(name: 'Yann', gender: DatingGender.man, hops: 1);
     await marta.service.maybePublish(force: true);
     await xenia.service.maybePublish(force: true);
     await yann.service.maybePublish(force: true);
@@ -564,8 +655,8 @@ void main() {
       ..link(ania, bob)
       ..link(bob, darek);
     await bob.service.load();
-    await ania.date(name: 'Ania', age: 30, gender: DatingGender.woman);
-    await darek.date(name: 'Darek', age: 32, gender: DatingGender.man);
+    await ania.date(name: 'Ania', gender: DatingGender.woman);
+    await darek.date(name: 'Darek', gender: DatingGender.man);
     await ania.service.maybePublish(force: true);
     final String aniaKey = ania.service.myKey!;
 
@@ -587,7 +678,9 @@ void main() {
     expect(v.by, 'bob');
     expect(v.approved, isFalse);
     await ania.service.setVouch(v.id, keep: true);
-    // The approved word travels with the next package.
+    // The approved word travels with the profile asked for after the next
+    // lantern.
+    await ania.service.maybePublish(force: true);
     expect(
       darek.service.profile(aniaKey)!.profile.vouches.single.text,
       'Najlepsza kucharka na osiedlu',
@@ -740,11 +833,11 @@ void main() {
       net.link(hub, p);
     }
     await hub.service.load();
-    await mia.date(name: 'Mia', age: 19, gender: DatingGender.woman);
-    await ania.date(name: 'Ania', age: 30, gender: DatingGender.woman);
-    await ewa.date(name: 'Ewa', age: 31, gender: DatingGender.woman);
-    await darek.date(name: 'Darek', age: 32, gender: DatingGender.man);
-    await fred.date(name: 'Fred', age: 33, gender: DatingGender.man);
+    await mia.date(name: 'Mia', gender: DatingGender.woman);
+    await ania.date(name: 'Ania', gender: DatingGender.woman);
+    await ewa.date(name: 'Ewa', gender: DatingGender.woman);
+    await darek.date(name: 'Darek', gender: DatingGender.man);
+    await fred.date(name: 'Fred', gender: DatingGender.man);
     for (final _Phone p in <_Phone>[mia, ania, ewa, darek, fred]) {
       await p.service.maybePublish(force: true);
     }
@@ -756,6 +849,7 @@ void main() {
 
     // Ania's report: gone from her phone at once, one report elsewhere.
     await ania.service.reportMinor(miaKey);
+    await ania.service.maybePublish(force: true);
     expect(ania.service.isMinorOff(miaKey), isTrue);
     expect(sees(ania), isFalse);
     expect(sees(darek), isTrue, reason: 'one report is not enough');
@@ -767,6 +861,7 @@ void main() {
     // A second, independent reporter: the profile goes for everybody who
     // sees the packages of both.
     await ewa.service.reportMinor(miaKey);
+    await ewa.service.maybePublish(force: true);
     expect(sees(ewa), isFalse);
     expect(sees(darek), isFalse);
     expect(sees(fred), isFalse);
@@ -794,8 +889,8 @@ void main() {
     final _Phone ania = _Phone(net, 'ania');
     final _Phone darek = _Phone(net, 'darek');
     net.link(ania, darek);
-    await ania.date(name: 'Ania', age: 30, gender: DatingGender.woman);
-    await darek.date(name: 'Darek', age: 32, gender: DatingGender.man);
+    await ania.date(name: 'Ania', gender: DatingGender.woman);
+    await darek.date(name: 'Darek', gender: DatingGender.man);
     final String key = ania.service.myKey!;
     await ania.service.decide(darek.service.myKey!, true);
 
@@ -865,8 +960,8 @@ void main() {
       ..link(ania, bob)
       ..link(bob, darek);
     await bob.service.load();
-    await ania.date(name: 'Ania', age: 30, gender: DatingGender.woman);
-    await darek.date(name: 'Darek', age: 32, gender: DatingGender.man);
+    await ania.date(name: 'Ania', gender: DatingGender.woman);
+    await darek.date(name: 'Darek', gender: DatingGender.man);
     final String aniaKey = ania.service.myKey!;
 
     await ania.service.requestVouch(bob.address);
@@ -894,6 +989,7 @@ void main() {
           ),
         );
     });
+    await ania.service.maybePublish(force: true);
     final List<DatingVouch> seen = darek.service
         .profile(aniaKey)!
         .profile
@@ -912,7 +1008,6 @@ void main() {
     final DatingProfile p = DatingProfile(
       key: 'k',
       name: 'Ola',
-      age: 25,
       gender: DatingGender.woman,
       at: 1,
       photos: photos,
@@ -951,17 +1046,16 @@ void main() {
     final _Phone ania = _Phone(net, 'ania');
     final _Phone darek = _Phone(net, 'darek');
     net.link(ania, darek);
-    await darek.date(name: 'Darek', age: 32, gender: DatingGender.man);
+    await darek.date(name: 'Darek', gender: DatingGender.man);
     await ania.service.load();
     await ania.service.saveMine((MyDating m) {
       m
         ..enabled = true
-        ..adult = true
         ..name = 'Ania'
-        ..age = 30
         ..gender = DatingGender.woman
         ..photos.addAll(photos);
     });
+    await ania.service.maybePublish(force: true);
     final DatingProfile atDarek = darek.service.toDecide.single.profile;
     expect(atDarek.photos, hasLength(3));
     for (final String ph in atDarek.photos) {
@@ -974,7 +1068,6 @@ void main() {
     final DatingProfile p = DatingProfile(
       key: 'ania-key',
       name: 'Ania',
-      age: 30,
       gender: DatingGender.woman,
       at: 1,
       about: 'Lubię góry',
@@ -995,7 +1088,6 @@ void main() {
       DatingProfile(
         key: 'k',
         name: 'Ola',
-        age: 25,
         gender: DatingGender.woman,
         at: 1,
         about: 'x' * 5000,
@@ -1015,21 +1107,20 @@ void main() {
       ..link(ania, bob)
       ..link(bob, darek);
     await bob.service.load();
-    await darek.date(name: 'Darek', age: 32, gender: DatingGender.man);
+    await darek.date(name: 'Darek', gender: DatingGender.man);
     await ania.service.load();
     await ania.service.saveMine((MyDating m) {
       m
         ..enabled = true
-        ..adult = true
         ..name = 'Ania'
-        ..age = 30
         ..gender = DatingGender.woman
         ..about = 'Tajemnica-123';
     });
+    await ania.service.maybePublish(force: true);
     expect(darek.service.toDecide.single.profile.about, 'Tajemnica-123');
 
     // Bob passed the lantern on, but nothing he sent or keeps carries the
-    // profile in the clear (it never passed him at all, only a request).
+    // profile in the clear (it passed him only sealed).
     final List<Map<String, dynamic>> lanterns = bob.sent
         .where((Map<String, dynamic> p) => p['type'] == DatingTypes.lantern)
         .toList();
@@ -1052,8 +1143,8 @@ void main() {
     );
     expect(bob.service.toDecide, isEmpty);
 
-    // Ola blocked Darek's dating key before she started: his phone asks for
-    // her profile like everyone, hers does not answer him.
+    // Ola blocked Darek's dating key before she started: his phone runs the
+    // match test like everyone, and never fits.
     final _Phone ola = _Phone(net, 'ola');
     net.link(ola, bob);
     await ola.service.load();
@@ -1061,11 +1152,10 @@ void main() {
     await ola.service.saveMine((MyDating m) {
       m
         ..enabled = true
-        ..adult = true
         ..name = 'Ola'
-        ..age = 27
         ..gender = DatingGender.woman;
     });
+    await ola.service.maybePublish(force: true);
     expect(
       darek.service.toDecide.where((SeenProfile s) => s.profile.name == 'Ola'),
       isEmpty,
@@ -1087,15 +1177,14 @@ void main() {
     net
       ..link(marek, xenia)
       ..link(marek, yann);
-    await marek.date(name: 'Marek', age: 35, gender: DatingGender.man);
+    await marek.date(name: 'Marek', gender: DatingGender.man);
     await xenia.date(
       name: 'Xenia',
-      age: 29,
       gender: DatingGender.woman,
       wants: <DatingGender>{DatingGender.man},
       hops: 1,
     );
-    await yann.date(name: 'Yann', age: 31, gender: DatingGender.man, hops: 1);
+    await yann.date(name: 'Yann', gender: DatingGender.man, hops: 1);
     await marek.service.maybePublish(force: true);
     await xenia.service.maybePublish(force: true);
     await yann.service.maybePublish(force: true);
@@ -1194,12 +1283,7 @@ void main() {
       final String key = base64Url.encode(
         (await RelayIdentity.generate()).publicKey,
       );
-      final Map<String, dynamic> lantern = DatingLantern.of(
-        key: key,
-        age: 30,
-        gender: DatingGender.woman,
-        wants: const DatingWants(),
-      ).toJson();
+      final Map<String, dynamic> lantern = DatingLantern(key).toJson();
       Future<void> send(String id, Object? l, {int hops = 1}) =>
           ania.send(bob.address, <String, dynamic>{
             'type': DatingTypes.lantern,
@@ -1213,8 +1297,8 @@ void main() {
           .toList();
 
       await send('zly-klucz', <String, dynamic>{...lantern, 'k': 5});
-      await send('zla-wersja', <String, dynamic>{...lantern, 'v': 2});
-      await send('zly-opis', <String, dynamic>{...lantern, 'h': 'AAAA'});
+      await send('zla-wersja', <String, dynamic>{...lantern, 'v': 3});
+      await send('krotki-klucz', <String, dynamic>{...lantern, 'k': 'AAAA'});
       await send('nic', null);
       expect(passed(), isEmpty);
 
@@ -1249,76 +1333,221 @@ void main() {
     },
   );
 
-  test('a dating key is answered with a profile only so often a day', () async {
+  test('a dating key is answered with a match test and a profile only so '
+      'often a day', () async {
     final _Net net = _Net();
     final _Phone ania = _Phone(net, 'ania');
     final _Phone darek = _Phone(net, 'darek');
     net.link(ania, darek);
-    await ania.date(name: 'Ania', age: 30, gender: DatingGender.woman);
-    await darek.date(name: 'Darek', age: 32, gender: DatingGender.man);
+    await ania.date(name: 'Ania', gender: DatingGender.woman);
+    await darek.date(name: 'Darek', gender: DatingGender.man);
     int answers() => ania.sent
         .where((Map<String, dynamic> p) => p['type'] == DatingTypes.back)
         .length;
-    for (int i = 0; i < kDatingFetchesPerKeyPerDay + 5; i++) {
+    // Her own match test and request for Darek's profile.
+    final int start = answers();
+    expect(start, 2);
+    const int weeks = kDatingFetchesPerKeyPerDay + 5;
+    for (int i = 0; i < weeks; i++) {
       await ania.service.maybePublish(force: true);
     }
-    // Her own request for Darek's profile is one of them.
-    final int first = answers();
-    expect(first, lessThanOrEqualTo(kDatingFetchesPerKeyPerDay + 1));
-    expect(first, greaterThan(kDatingFetchesPerKeyPerDay));
+    // One match test per lantern; profiles only up to the daily limit.
+    expect(answers() - start, weeks + kDatingFetchesPerKeyPerDay);
     expect(darek.service.toDecide.single.profile.name, 'Ania');
     net.clock += 24 * 3600 * 1000 + 1;
+    final int before = answers();
     await ania.service.maybePublish(force: true);
-    expect(answers(), first + 1);
+    expect(answers(), before + 2, reason: 'a match test and a profile');
   });
 
-  test('a friend the dating profile is hidden from gets no profile, even '
-      'when the lantern reaches them through someone else', () async {
+  test('a modified friend asking with a new key every time gets only a few '
+      'answers per lantern, no profile without a proof of fit, and nothing '
+      'when hidden', () async {
     final _Net net = _Net();
-    // Phones with dating off ask for a share of the profiles; all of them do.
-    final _Phone ania = _Phone(net, 'ania', decoyShare: 1);
-    final _Phone bob = _Phone(net, 'bob', decoyShare: 1);
-    final _Phone ewa = _Phone(net, 'ewa', decoyShare: 1);
-    final _Phone ola = _Phone(net, 'ola', decoyShare: 1);
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone eve = _Phone(net, 'eve');
+    net.link(ania, eve);
+    await eve.service.load();
+    await ania.service.load();
+    await ania.service.saveMine((MyDating m) {
+      m
+        ..enabled = true
+        ..name = 'Ania'
+        ..gender = DatingGender.woman;
+    });
+    int marks = 0;
+    late String lanternId;
+    late Uint8List lanternKey;
+    Future<void> publish() async {
+      await ania.service.maybePublish(force: true);
+      final Map<String, dynamic> l = ania.sent.lastWhere(
+        (Map<String, dynamic> p) => p['type'] == DatingTypes.lantern,
+      );
+      lanternId = l['id'] as String;
+      lanternKey = decodeRelayKey((l['l'] as Map)['k'])!;
+    }
+
+    // Sends [payload] sealed to the lantern from [me], as Eve's phone would,
+    // and opens what comes back.
+    Future<Map<String, dynamic>?> ask(
+      RelayIdentity me,
+      Map<String, dynamic> payload,
+    ) async {
+      final int before = eve.received.length;
+      await eve.send(ania.address, <String, dynamic>{
+        'type': DatingTypes.back,
+        'to': lanternId,
+        'm': 'mark-${marks++}',
+        'box': await DatingBox.seal(
+          me: me,
+          recipient: lanternKey,
+          payload: payload,
+        ),
+        'ttl': 7,
+      });
+      final List<Map<String, dynamic>> back = <Map<String, dynamic>>[
+        for (final Map<String, dynamic> m in eve.received.sublist(before))
+          if (m['type'] == DatingTypes.back) m,
+      ];
+      if (back.isEmpty) {
+        return null;
+      }
+      return (await DatingBox.open(me: me, box: back.single['box']))?.$2;
+    }
+
+    // Probing: a new key for every question, as a friend and as if passed on.
+    // Returns the answered questions (key, blinding secret, points, answer).
+    Future<List<_Probe>> probe(int times) async {
+      final List<_Probe> got = <_Probe>[];
+      for (int i = 0; i < times; i++) {
+        final RelayIdentity fresh = await RelayIdentity.generate();
+        final (RelayIdentity, List<String>) q = await DatingMatch.ask(
+          const DatingWants().seekTags(DatingGender.man),
+          Random(i),
+        );
+        final Map<String, dynamic>? a = await ask(fresh, <String, dynamic>{
+          'k': 'match',
+          'id': lanternId,
+          'd': i.isEven ? 1 : 2,
+          'q': q.$2,
+        });
+        if (a != null) {
+          got.add((fresh, q.$1, q.$2, a));
+        }
+      }
+      return got;
+    }
+
+    await publish();
+    final List<_Probe> answered = await probe(40);
+    expect(
+      answered,
+      hasLength(kDatingMatchFarPerFriend),
+      reason:
+          'keys are free; answers per lantern and friend are not (her '
+          "own phone already asked once as herself, so no other key does)",
+    );
+    // A new secret for every answer: no two answers can be put together.
+    expect(answered[1].$4['o'], isNot(answered[2].$4['o']));
+    // A man looking for anyone fits Ania (a woman looking for anyone).
+    final _Probe far = answered.first;
+    expect(await DatingMatch.fits(far.$2, far.$4['r'], far.$4['o']), isTrue);
+
+    // Without a proof of fit (a made-up secret) only a cover comes back.
+    final Map<String, dynamic>? cover = await ask(far.$1, <String, dynamic>{
+      'k': 'fetch',
+      'id': lanternId,
+      'a': far.$4['a'],
+      'b': (await RelayIdentity.generate()).toJson(),
+    });
+    expect((cover!['p'] as Map)['cover'], isTrue);
+    // The same answer cannot be used twice.
+    expect(
+      await ask(far.$1, <String, dynamic>{
+        'k': 'fetch',
+        'id': lanternId,
+        'a': far.$4['a'],
+        'b': far.$2.toJson(),
+      }),
+      isNull,
+    );
+    // With the proof: the profile, as for anyone who fits.
+    final _Probe other = answered.last;
+    final Map<String, dynamic>? real = await ask(other.$1, <String, dynamic>{
+      'k': 'fetch',
+      'id': lanternId,
+      'a': other.$4['a'],
+      'b': other.$2.toJson(),
+    });
+    expect((real!['p'] as Map)['n'], 'Ania');
+
+    // Hidden from Eve: whatever keys she asks with, she never fits and gets
+    // no profile, even with a valid proof.
+    await ania.service.saveMine(
+      (MyDating m) => m.hiddenFriends.add(eve.address),
+    );
+    await publish();
+    final List<_Probe> hidden = await probe(40);
+    expect(hidden, hasLength(kDatingMatchFarPerFriend));
+    for (final _Probe h in hidden) {
+      expect(await DatingMatch.fits(h.$2, h.$4['r'], h.$4['o']), isFalse);
+    }
+    final Map<String, dynamic>? none =
+        await ask(hidden.last.$1, <String, dynamic>{
+          'k': 'fetch',
+          'id': lanternId,
+          'a': hidden.last.$4['a'],
+          'b': hidden.last.$2.toJson(),
+        });
+    expect((none!['p'] as Map)['cover'], isTrue);
+  });
+
+  test('a friend the dating profile is hidden from never fits, even when the '
+      'lantern reaches them through someone else', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone bob = _Phone(net, 'bob');
+    final _Phone ewa = _Phone(net, 'ewa');
+    final _Phone ola = _Phone(net, 'ola');
     net
       ..link(ania, bob)
       ..link(bob, ewa)
       ..link(bob, ola)
       ..link(ania, ewa);
-    for (final _Phone p in <_Phone>[ania, bob, ewa, ola]) {
-      await p.service.load();
-    }
-    // Ewa's own weekly lantern tells Ania's phone Ewa's dating key.
-    await ewa.service.maybePublish(force: true);
-    int answers(_Phone p) => p.received
-        .where((Map<String, dynamic> m) => m['type'] == DatingTypes.back)
-        .length;
-
-    // Not hidden: Ewa's phone asks for the profile, like every phone, and
-    // gets an answer.
-    ewa.received.clear();
+    await bob.service.load();
+    // Ewa and Ola both date and both fit Ania (and each other: so the
+    // checks below look for Ania's profile on Ewa's phone, not any).
+    await ewa.date(name: 'Ewa', gender: DatingGender.woman);
+    await ola.date(name: 'Ola', gender: DatingGender.woman);
+    await ania.service.load();
     await ania.service.saveMine((MyDating m) {
       m
         ..enabled = true
-        ..adult = true
         ..name = 'Ania'
-        ..age = 30
-        ..gender = DatingGender.woman;
+        ..gender = DatingGender.woman
+        ..hiddenFriends.add(ewa.address);
     });
-    expect(answers(ewa), greaterThan(0));
+    // The first lantern reaches Ewa through Bob first, then from Ania
+    // herself: the profile is dropped on Ewa's phone, and her match test
+    // from one step away tells Ania's phone Ewa's dating key.
+    await ania.service.maybePublish(force: true);
+    expect(ewa.service.profile(ania.service.myKey!), isNull);
+    expect(ola.service.toDecide.single.profile.name, 'Ania');
 
-    // Hidden: the lantern still passes Bob to Ewa, but her phone gets no
-    // answer.
+    // From now on Ewa never fits — directly or through Bob — and gets no
+    // profile at all; Ola still does.
     ewa.received.clear();
     ola.received.clear();
-    await ania.service.saveMine(
-      (MyDating m) => m.hiddenFriends.add(ewa.address),
-    );
-    expect(answers(ewa), 0);
+    await ania.service.maybePublish(force: true);
     expect(
-      answers(ola),
-      greaterThan(0),
-      reason: 'everyone else still gets one',
+      ewa.received.where(
+        (Map<String, dynamic> m) => m['type'] == DatingTypes.lantern,
+      ),
+      hasLength(2),
+      reason: 'the same lantern as everyone, directly and through Bob',
     );
+    expect(ewa.profilesIn(), 0);
+    expect(ewa.service.profile(ania.service.myKey!), isNull);
+    expect(ola.profilesIn(), greaterThan(0));
   });
 }

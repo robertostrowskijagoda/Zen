@@ -50,9 +50,6 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
   late final TextEditingController _name = TextEditingController(
     text: _me.name,
   );
-  late final TextEditingController _age = TextEditingController(
-    text: _me.age >= 18 ? '${_me.age}' : '',
-  );
   late final TextEditingController _about = TextEditingController(
     text: _me.about,
   );
@@ -61,10 +58,6 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
   );
   late bool _enabled = _me.enabled || !_me.complete;
   late DatingGender _gender = _me.gender;
-  late RangeValues _ages = RangeValues(
-    _me.wants.minAge.toDouble(),
-    _me.wants.maxAge.toDouble(),
-  );
   late Set<DatingGender> _wantGenders = <DatingGender>{..._me.wants.genders};
   late int _hops = _me.wants.hops;
   late final List<String> _photos = List<String>.of(_me.photos);
@@ -74,7 +67,6 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
   @override
   void dispose() {
     _name.dispose();
-    _age.dispose();
     _about.dispose();
     _look.dispose();
     super.dispose();
@@ -152,13 +144,10 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
 
   Future<void> _save() async {
     final MeetService meet = ref.read(meetServiceProvider);
-    final int age = int.tryParse(_age.text.trim()) ?? 0;
     if (_enabled) {
       String? problem;
       if (_name.text.trim().isEmpty) {
         problem = t('Wpisz imię.');
-      } else if (age < 18 || age > 120) {
-        problem = t('Wpisz wiek (co najmniej 18).');
       } else if (_wantGenders.isEmpty) {
         problem = t('Zaznacz, kogo szukasz.');
       }
@@ -172,18 +161,11 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
     await _dating.saveMine((MyDating m) {
       m
         ..enabled = _enabled
-        ..adult = true
         ..name = _name.text.trim()
-        ..age = age
         ..gender = _gender
         ..about = _about.text.trim()
         ..lookingFor = _look.text.trim()
-        ..wants = DatingWants(
-          minAge: _ages.start.round(),
-          maxAge: _ages.end.round(),
-          genders: _wantGenders,
-          hops: _hops,
-        )
+        ..wants = DatingWants(genders: _wantGenders, hops: _hops)
         ..photos.clear()
         ..photos.addAll(_photos);
       m.hiddenFriends
@@ -453,18 +435,7 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
               prefixIcon: const Icon(Icons.badge_rounded),
             ),
           ),
-          const SizedBox(height: 4),
-          TextField(
-            key: const Key('dating-age'),
-            controller: _age,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: t('Wiek'),
-              hintText: t('co najmniej 18'),
-              prefixIcon: const Icon(Icons.cake_rounded),
-            ),
-          ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Text(t('JESTEM'), style: zen.label(color: zen.textMuted)),
           const SizedBox(height: 8),
           Wrap(
@@ -528,24 +499,6 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Expanded(child: Text(t('Wiek'), style: rowTitle)),
-                    ZenPill(
-                      text: '${_ages.start.round()}–${_ages.end.round()}',
-                      tone: tone,
-                    ),
-                  ],
-                ),
-                RangeSlider(
-                  values: _ages,
-                  min: 18,
-                  max: 99,
-                  divisions: 81,
-                  activeColor: tone,
-                  onChanged: (RangeValues v) => setState(() => _ages = v),
-                ),
-                Divider(height: 16, color: zen.outlineSoft),
                 Row(
                   children: <Widget>[
                     Expanded(child: Text(t('Jak daleko'), style: rowTitle)),

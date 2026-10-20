@@ -8,7 +8,6 @@ SeenProfile _seen(String name, {String? friend = '200::f'}) => SeenProfile(
   profile: DatingProfile(
     key: 'k-$name',
     name: name,
-    age: 30,
     gender: DatingGender.woman,
     at: 1,
     about: '$name lubi góry i dobrą kawę.',
@@ -84,7 +83,7 @@ void main() {
     await pumpDeck(tester, <SeenProfile>[_seen('Ania'), _seen('Basia')]);
     expect(find.byKey(const Key('dating-card-Ania')), findsOneWidget);
     // The description is the first "photo".
-    expect(find.text('Ania, 30'), findsOneWidget);
+    expect(find.text('Ania'), findsOneWidget);
     expect(find.text('Ania lubi góry i dobrą kawę.'), findsOneWidget);
     // The card under it shows its own description.
     expect(find.text('Basia lubi góry i dobrą kawę.'), findsOneWidget);

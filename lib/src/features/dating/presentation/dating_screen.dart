@@ -325,7 +325,7 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
                       for (final SeenProfile s in dating.liked)
                         _PersonRow(
                           photo: s.profile.photo,
-                          title: '${s.profile.name}, ${s.profile.age}',
+                          title: s.profile.name,
                           subtitle: t(
                             'Dowiesz się tylko, jeśli też powie „Tak”.',
                           ),
@@ -652,7 +652,7 @@ Future<void> introduceDatingProfile(
                       ),
                       leading: datingPhoto(o.profile.photo, size: 40),
                       title: Text(
-                        '${o.profile.name}, ${o.profile.age}',
+                        o.profile.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -742,7 +742,7 @@ class _Matches extends StatelessWidget {
               final List<DatingLine> chat = dating.chat(s.profile.key);
               return _PersonRow(
                 photo: s.profile.photo,
-                title: '${s.profile.name}, ${s.profile.age}',
+                title: s.profile.name,
                 subtitle: chat.isEmpty
                     ? t('Napisz pierwszy(-a)!')
                     : chat.last.text,
@@ -902,7 +902,7 @@ class DatingProfileScreen extends ConsumerWidget {
                       context,
                       ref.read(pyramidServiceProvider),
                       datingKey: p.key,
-                      evidence: '${p.name}, ${p.age}: ${p.about}',
+                      evidence: '${p.name}: ${p.about}',
                       // The profile and its chat go from this phone.
                       deleteLocal: () => dating.forget(p.key),
                     );
@@ -926,7 +926,7 @@ class DatingProfileScreen extends ConsumerWidget {
                       context,
                       ref.read(pyramidServiceProvider),
                       datingKey: p.key,
-                      evidence: '${p.name}, ${p.age}: ${p.about}',
+                      evidence: '${p.name}: ${p.about}',
                       onlyReason: 'minor',
                     );
                     if (context.mounted) {
@@ -984,7 +984,7 @@ class DatingProfileScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 16),
               Text(
-                '${p.name}, ${p.age}',
+                p.name,
                 style: zen.display(
                   color: zen.textPrimary,
                   size: 28,

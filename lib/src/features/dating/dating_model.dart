@@ -1,10 +1,10 @@
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/features/relay/relay_crypto.dart';
 
 /// Gender on a dating profile (§19.1).
 enum DatingGender {
@@ -40,8 +40,6 @@ const int kDatingMaxHops = 2;
 @immutable
 final class DatingWants {
   const DatingWants({
-    this.minAge = 18,
-    this.maxAge = 99,
     this.genders = const <DatingGender>{
       DatingGender.woman,
       DatingGender.man,
@@ -50,26 +48,28 @@ final class DatingWants {
     this.hops = kDatingMaxHops,
   });
 
-  final int minAge;
-  final int maxAge;
   final Set<DatingGender> genders;
 
   /// How far in the friendship graph (1–[kDatingMaxHops] steps).
   final int hops;
 
-  bool accepts({
-    required int age,
-    required DatingGender gender,
-    required int distance,
-  }) =>
-      age >= minAge &&
-      age <= maxAge &&
-      genders.contains(gender) &&
-      distance <= hops;
+  bool accepts({required DatingGender gender, required int distance}) =>
+      genders.contains(gender) && distance <= hops;
+
+  /// What the owner of a lantern puts into the private match test (§19.7):
+  /// "a person of gender [own] looking for gender g", for every wanted g.
+  Set<String> offerTags(DatingGender own) => <String>{
+    for (final DatingGender g in genders) '${own.code}>${g.code}',
+  };
+
+  /// What a person of gender [own] asks the match test with: "a person of
+  /// gender g looking for [own]", for every wanted g. A tag is common to
+  /// [offerTags] of the other side exactly when both fit each other.
+  Set<String> seekTags(DatingGender own) => <String>{
+    for (final DatingGender g in genders) '${g.code}>${own.code}',
+  };
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    'min': minAge,
-    'max': maxAge,
     'g': <String>[for (final DatingGender g in genders) g.code],
     'hops': hops,
   };
@@ -85,8 +85,6 @@ final class DatingWants {
           if (DatingGender.byCode(c) != null) DatingGender.byCode(c)!,
     };
     return DatingWants(
-      minAge: json['min'] is int ? (json['min'] as int).clamp(18, 99) : 18,
-      maxAge: json['max'] is int ? (json['max'] as int).clamp(18, 99) : 99,
       genders: genders.isEmpty ? const DatingWants().genders : genders,
       hops: json['hops'] is int
           ? (json['hops'] as int).clamp(1, kDatingMaxHops)
@@ -96,146 +94,31 @@ final class DatingWants {
 }
 
 /// A lantern (§19.7): the small thing every phone sends its friends every
-/// week, passed on up to [kDatingMaxHops] steps. It carries only the dating
-/// key and what is needed to see whether two people could fit — age,
-/// gender and preferences, six bytes — so it stays about 100 bytes. The
-/// profile itself is fetched only when the lantern fits. A phone with
-/// dating off sends a decoy lantern (random but valid values), so nobody
-/// can tell a real lantern from a decoy.
+/// week, with dating on or off, passed on up to [kDatingMaxHops] steps. It
+/// carries only a one-off key (X25519), new with every lantern: no dating
+/// key, nothing about the person, nothing that links it to the lantern of
+/// the week before. Whether two people fit is found out in a private match
+/// test sealed to this key (`DatingMatch`), so every lantern looks alike,
+/// real or not, to everyone who sees or passes it on.
 @immutable
 final class DatingLantern {
-  const DatingLantern({
-    required this.key,
-    required this.age,
-    required this.gender,
-    required this.wants,
-  });
+  const DatingLantern(this.key);
 
-  /// The lantern of a person with the given data (the values are brought
-  /// into the range a lantern can carry).
-  factory DatingLantern.of({
-    required String key,
-    required int age,
-    required DatingGender gender,
-    required DatingWants wants,
-  }) => DatingLantern(
-    key: key,
-    age: age.clamp(18, 120),
-    gender: gender,
-    wants: DatingWants(
-      minAge: wants.minAge.clamp(18, 99),
-      maxAge: wants.maxAge.clamp(18, 99),
-      genders: wants.genders,
-      hops: wants.hops.clamp(1, kDatingMaxHops),
-    ),
-  );
-
-  /// A lantern that belongs to nobody: plausible random values.
-  factory DatingLantern.decoy(String key, Random random) {
-    final int min = 18 + random.nextInt(30);
-    return DatingLantern(
-      key: key,
-      age: 18 + random.nextInt(50),
-      gender: DatingGender.values[random.nextInt(DatingGender.values.length)],
-      wants: DatingWants(
-        minAge: min,
-        maxAge: min + random.nextInt(100 - min),
-        genders: <DatingGender>{
-          for (final DatingGender g in DatingGender.values)
-            if (random.nextBool()) g,
-          DatingGender.values[random.nextInt(DatingGender.values.length)],
-        },
-        hops: 1 + random.nextInt(kDatingMaxHops),
-      ),
-    );
-  }
-
-  /// The dating key (X25519, base64url).
+  /// The lantern's one-off key (X25519, base64url).
   final String key;
-  final int age;
-  final DatingGender gender;
-  final DatingWants wants;
 
-  /// Whether this person and the one with [myAge], [myGender], [myWants]
-  /// could fit, [distance] steps apart (both ways, like a profile).
-  bool fits({
-    required int myAge,
-    required DatingGender myGender,
-    required DatingWants myWants,
-    required int distance,
-  }) =>
-      myWants.accepts(age: age, gender: gender, distance: distance) &&
-      wants.accepts(age: myAge, gender: myGender, distance: distance);
-
-  Map<String, dynamic> toJson() {
-    int mask = 0;
-    for (final DatingGender g in wants.genders) {
-      mask |= 1 << g.index;
-    }
-    return <String, dynamic>{
-      'v': 3,
-      'k': key,
-      'h': base64Url.encode(<int>[
-        age,
-        gender.index,
-        wants.minAge,
-        wants.maxAge,
-        mask,
-        wants.hops,
-      ]),
-    };
-  }
+  Map<String, dynamic> toJson() => <String, dynamic>{'v': 4, 'k': key};
 
   /// `null` for anything that is not a lantern this app makes.
   static DatingLantern? fromJson(Object? json) {
-    if (json is! Map || json['v'] != 3) {
+    if (json is! Map || json['v'] != 4) {
       return null;
     }
     final Object? k = json['k'];
-    final Object? h = json['h'];
-    if (k is! String || k.length > 64 || h is! String || h.length != 8) {
-      return null;
-    }
-    final List<int> b;
-    try {
-      b = base64Url.decode(h);
-    } on FormatException {
-      return null;
-    }
-    if (b.length != 6) {
-      return null;
-    }
-    final int age = b[0];
-    final int gender = b[1];
-    final int minAge = b[2];
-    final int maxAge = b[3];
-    final int mask = b[4];
-    final int hops = b[5];
-    if (age < 18 ||
-        age > 120 ||
-        gender >= DatingGender.values.length ||
-        minAge < 18 ||
-        maxAge > 99 ||
-        mask == 0 ||
-        mask >= 1 << DatingGender.values.length ||
-        hops < 1 ||
-        hops > kDatingMaxHops) {
-      return null;
-    }
-    return DatingLantern(
-      key: k,
-      age: age,
-      gender: DatingGender.values[gender],
-      wants: DatingWants(
-        minAge: minAge,
-        maxAge: maxAge,
-        genders: <DatingGender>{
-          for (final DatingGender g in DatingGender.values)
-            if (mask & (1 << g.index) != 0) g,
-        },
-        hops: hops,
-      ),
-    );
+    final Uint8List? key = k is String && k.length <= 44
+        ? decodeRelayKey(k)
+        : null;
+    return key == null ? null : DatingLantern(base64Url.encode(key));
   }
 }
 
@@ -392,7 +275,6 @@ final class DatingProfile {
   const DatingProfile({
     required this.key,
     required this.name,
-    required this.age,
     required this.gender,
     required this.at,
     this.about = '',
@@ -407,7 +289,6 @@ final class DatingProfile {
   /// The dating key (X25519, base64url).
   final String key;
   final String name;
-  final int age;
   final DatingGender gender;
   final String about;
 
@@ -431,7 +312,6 @@ final class DatingProfile {
       DatingProfile(
         key: key,
         name: name,
-        age: age,
         gender: gender,
         at: at,
         about: about,
@@ -447,7 +327,6 @@ final class DatingProfile {
     'v': 1,
     'k': key,
     'n': name,
-    'age': age,
     'g': gender.code,
     'ab': about,
     'look': lookingFor,
@@ -476,13 +355,11 @@ final class DatingProfile {
         json['cover'] == true ||
         json['k'] is! String ||
         json['n'] is! String ||
-        json['age'] is! int ||
         json['at'] is! int) {
       return null;
     }
     final DatingGender? gender = DatingGender.byCode(json['g']);
-    final int age = json['age'] as int;
-    if (gender == null || age < 18 || age > 120) {
+    if (gender == null) {
       return null;
     }
     final Object? ex = json['ex'];
@@ -490,7 +367,6 @@ final class DatingProfile {
     return DatingProfile(
       key: json['k'] as String,
       name: _clip(json['n'], 40),
-      age: age,
       gender: gender,
       about: _clip(json['ab'], 1000),
       lookingFor: _clip(json['look'], 300),
@@ -794,9 +670,7 @@ final class SafeDate {
 final class MyDating {
   MyDating({
     this.enabled = false,
-    this.adult = false,
     this.name = '',
-    this.age = 0,
     this.gender = DatingGender.other,
     this.about = '',
     this.lookingFor = '',
@@ -811,11 +685,7 @@ final class MyDating {
        vouches = vouches ?? <DatingVouch>[];
 
   bool enabled;
-
-  /// Declared 18+ (no documents, §19.1).
-  bool adult;
   String name;
-  int age;
   DatingGender gender;
   String about;
   String lookingFor;
@@ -842,13 +712,11 @@ final class MyDating {
   final List<String> hiddenGroups;
   final List<DatingVouch> vouches;
 
-  bool get complete => name.trim().isNotEmpty && age >= 18;
+  bool get complete => name.trim().isNotEmpty;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (enabled) 'on': true,
-    if (adult) 'adult': true,
     'n': name,
-    'age': age,
     'g': gender.code,
     'ab': about,
     'look': lookingFor,
@@ -871,9 +739,7 @@ final class MyDating {
     final Object? vo = json['vo'];
     return MyDating(
       enabled: json['on'] == true,
-      adult: json['adult'] == true,
       name: json['n'] is String ? json['n'] as String : '',
-      age: json['age'] is int ? json['age'] as int : 0,
       gender: DatingGender.byCode(json['g']) ?? DatingGender.other,
       about: json['ab'] is String ? json['ab'] as String : '',
       lookingFor: json['look'] is String ? json['look'] as String : '',

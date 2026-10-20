@@ -19,9 +19,8 @@ import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 abstract final class DatingTypes {
-  /// A lantern (§19.7): the dating key and what is needed to see whether two
-  /// people fit, flooding up to [kDatingMaxHops] steps (a real one, or a
-  /// decoy when dating is off).
+  /// A lantern (§19.7): a one-off key, the same for everyone with dating on
+  /// or off, flooding up to [kDatingMaxHops] steps.
   static const String lantern = 'date_lantern';
 
   /// A sealed message travelling back along the way a lantern came.
@@ -70,8 +69,8 @@ String? cleanDatingPhoto(String? photo) {
   }
 }
 
-/// How often a phone sends its lantern (a real one, or a decoy when dating
-/// is off, so nobody can tell the difference).
+/// How often a phone sends a new lantern — only on this schedule, with
+/// dating on or off, so nobody can tell the difference (§19.7).
 const Duration kDatingPublishEvery = Duration(days: 7);
 
 /// A profile not refreshed for this long disappears.
@@ -98,17 +97,27 @@ const Duration kDatingLocationAskEvery = Duration(minutes: 2);
 
 /// Flood guard on the receiving side: new lanterns taken in from one
 /// friend a day (their own and the ones they pass on). Every phone sends
-/// one a week (and again when its profile changes), so this covers a
-/// friend whose friends are several hundred phones; a broken or modified
-/// app cannot make the whole network pass on more.
+/// one a week, so this covers a friend whose friends are several hundred
+/// phones; a broken or modified app cannot make the whole network pass on
+/// more.
 const int kDatingLanternsPerFriendPerDay = 100;
 
 /// Requests for a profile answered per dating key a day: an answer is up to
 /// a few hundred kilobytes, so one key cannot make a phone send many.
 const int kDatingFetchesPerKeyPerDay = 10;
 
-/// The share of lanterns a phone with dating off asks the profile of anyway
-/// (and drops the answer), so that asking does not tell who dates.
+/// Match tests answered per lantern for a friend asking from one step away
+/// (the friend itself), whatever key it asks with: an honest phone asks once.
+const int kDatingMatchNearPerFriend = 1;
+
+/// Match tests answered per lantern that come through one friend from two
+/// steps away (that friend's friends). A dating key costs nothing, so this,
+/// not the key, is what limits how often anyone can run the test.
+const int kDatingMatchFarPerFriend = 12;
+
+/// The share of lanterns that did not fit whose profile a phone asks for
+/// anyway (and drops the answer) — with dating on or off alike, so that
+/// asking does not tell who dates.
 const double kDatingDecoyFetchShare = 0.25;
 
 /// Largest sealed message travelling back (an introduction carries a whole
@@ -120,15 +129,22 @@ const int _maxBackTtl = 8;
 
 /// "Randki przez znajomych" (§19).
 ///
-/// * Every phone has a dating key and sends a small lantern every week, also
-///   with dating off (then a decoy lantern), and passes on its friends'
-///   lanterns up to [kDatingMaxHops] steps (§19.7). From the outside, and to
-///   the friends passing them on, everybody looks the same.
-/// * Only when a lantern fits (age, gender, preferences, distance, both
-///   ways) does the phone ask for the profile, back along the way the
-///   lantern came; the answer is a profile or a cover of the same size
-///   range. A phone with dating off asks for a share of the lanterns too and
-///   drops the answers.
+/// * Every phone has a dating key and sends a small lantern every week on a
+///   fixed schedule, with dating on or off, and passes on its friends'
+///   lanterns up to [kDatingMaxHops] steps (§19.7). A lantern carries only a
+///   one-off key, so from the outside, and to the friends passing them on,
+///   everybody looks the same, every week anew.
+/// * Every phone runs a private match test ([DatingMatch]) with every
+///   lantern it sees, sealed to the lantern's key: it tells the asker
+///   whether the two fit (gender and wanted genders both ways, distance).
+///   Answers are limited per lantern and per friend the question comes
+///   through, not per key (keys cost nothing).
+///   A phone with dating off, or one this person is hidden from, never
+///   fits — just like someone who does not fit.
+/// * Only when they fit does the phone ask for the profile, back along the
+///   way the lantern came, with a proof of fit; the answer is the profile
+///   only when the proof holds, otherwise a cover of the same size range. Every phone asks for a share of the lanterns that did not
+///   fit too and drops the answers.
 /// * Likes, messages and introductions go back the way lanterns came,
 ///   sealed with dating keys (§19.2–19.3): the phones in between cannot read
 ///   them or tell who wrote them.
@@ -188,7 +204,7 @@ final class DatingService extends ChangeNotifier {
   /// when the person agreed to that beforehand ([SafeDate.autoShare]).
   final Future<(double, double)?> Function()? currentPosition;
 
-  /// The share of lanterns a phone with dating off asks the profile of
+  /// The share of lanterns that did not fit whose profile a phone asks for
   /// anyway ([kDatingDecoyFetchShare]; tests set 0 or 1).
   final double decoyFetchShare;
   final int Function() _now;
@@ -201,6 +217,12 @@ final class DatingService extends ChangeNotifier {
   /// Profiles waited for, at most.
   static const int _wantedMax = 200;
 
+  /// Match tests waited for, at most.
+  static const int _askedMax = 1000;
+
+  /// Answered match tests kept for a profile request, at most.
+  static const int _answersMax = 2000;
+
   RelayIdentity? _identity;
 
   /// The key this phone signs vouches with (Ed25519; separate from the
@@ -208,7 +230,6 @@ final class DatingService extends ChangeNotifier {
   LedgerKeyPair? _signer;
   MyDating me = MyDating();
   int _publishedAt = 0;
-  bool _dirty = true;
 
   final Map<String, int> _seen = <String, int>{};
 
@@ -219,9 +240,20 @@ final class DatingService extends ChangeNotifier {
   /// Ids that end here: own lantern ids and marks.
   final Map<String, int> _own = <String, int>{};
 
-  /// This phone's own lanterns (id → when): only their ids are answered with
-  /// a profile.
-  final Map<String, int> _lanterns = <String, int>{};
+  /// This phone's own lanterns (id → its keys): only their ids are answered
+  /// with a match test and a profile.
+  final Map<String, _OwnLantern> _lanterns = <String, _OwnLantern>{};
+
+  /// Match tests asked (lantern id → the lantern's key, the blinding
+  /// secret, who passed it on, the way, the answer mark, when).
+  final Map<String, Map<String, dynamic>> _asked =
+      <String, Map<String, dynamic>>{};
+
+  /// Lanterns seen so far only through someone else (id → the lantern's
+  /// key): when the sender's own copy comes later, the match test is asked
+  /// again from one step away, so the sender learns this phone's dating key
+  /// (see [_friendKeys]).
+  final Map<String, String> _far = <String, String>{};
 
   /// The mark others use to answer us, per dating key.
   final Map<String, String> _marks = <String, String>{};
@@ -245,10 +277,27 @@ final class DatingService extends ChangeNotifier {
   final Map<String, Map<String, dynamic>> _wanted =
       <String, Map<String, dynamic>>{};
 
-  /// Friends' own dating keys (address → key), learnt from the lanterns
-  /// they send themselves: a friend this person hides from gets no profile
-  /// from this phone (see [_onFetch]).
+  /// Friends' own dating keys (address → key), learnt from the match tests
+  /// they ask of this phone's lanterns from one step away: a friend this
+  /// person hides from never fits and gets no profile from this phone, also
+  /// when they ask through a mutual friend (see [_onMatchAsk], [_onFetch]).
+  /// The first key stays; another one from the same friend is answered with
+  /// fillers only, unless the known one has not been used for
+  /// [kDatingProfileLife] (a reinstalled app).
   final Map<String, String> _friendKeys = <String, String>{};
+
+  /// When each friend's key in [_friendKeys] was last used.
+  final Map<String, int> _friendKeyAt = <String, int>{};
+
+  /// Other keys a friend asked with from one step away (address → keys): for
+  /// a friend this person hides from they count as hidden too.
+  final Map<String, List<String>> _friendOtherKeys = <String, List<String>>{};
+
+  /// Match tests answered (answer id → the lantern id, the asker's key, its
+  /// points, whether the test was open, when): a profile goes out only for
+  /// one of these, with a proof of fit ([DatingMatch.proves]).
+  final Map<String, Map<String, dynamic>> _answers =
+      <String, Map<String, dynamic>>{};
 
   /// New lanterns taken in per friend (when), for the flood guard.
   final Map<String, List<int>> _lanternsFrom = <String, List<int>>{};
@@ -420,7 +469,6 @@ final class DatingService extends ChangeNotifier {
     _identity = RelayIdentity.fromJson(json['id']) ?? _identity;
     me = MyDating.fromJson(json['me']);
     _publishedAt = json['pub'] is int ? json['pub'] as int : 0;
-    _dirty = json['dirty'] != false;
     _seen
       ..clear()
       ..addAll(_ints(json['seen']));
@@ -504,12 +552,49 @@ final class DatingService extends ChangeNotifier {
     _vouchFor
       ..clear()
       ..addAll(_strings(json['vfor']));
-    _lanterns
-      ..clear()
-      ..addAll(_ints(json['lan']));
+    _lanterns.clear();
+    final Object? lanterns = json['lan'];
+    if (lanterns is Map) {
+      lanterns.forEach((Object? k, Object? v) {
+        final _OwnLantern? l = _OwnLantern.fromJson(v);
+        if (k is String && l != null) {
+          _lanterns[k] = l;
+        }
+      });
+    }
+    _asked.clear();
+    final Object? asked = json['asked'];
+    if (asked is Map) {
+      asked.forEach((Object? k, Object? v) {
+        if (k is String && v is Map) {
+          _asked[k] = Map<String, dynamic>.from(v);
+        }
+      });
+    }
     _friendKeys
       ..clear()
       ..addAll(_strings(json['fkeys']));
+    _friendKeyAt
+      ..clear()
+      ..addAll(_ints(json['fkat']));
+    _friendOtherKeys.clear();
+    final Object? other = json['fkx'];
+    if (other is Map) {
+      other.forEach((Object? k, Object? v) {
+        if (k is String && v is List) {
+          _friendOtherKeys[k] = v.whereType<String>().take(20).toList();
+        }
+      });
+    }
+    _answers.clear();
+    final Object? answers = json['ans'];
+    if (answers is Map) {
+      answers.forEach((Object? k, Object? v) {
+        if (k is String && v is Map) {
+          _answers[k] = Map<String, dynamic>.from(v);
+        }
+      });
+    }
     _wanted.clear();
     final Object? wanted = json['want'];
     if (wanted is Map) {
@@ -576,7 +661,21 @@ final class DatingService extends ChangeNotifier {
     _safe.removeWhere(
       (String _, SafeDate s) => s.isOver && t - s.okAt! > 2 * 24 * 3600 * 1000,
     );
-    _lanterns.removeWhere((String id, int _) => !_own.containsKey(id));
+    _lanterns.removeWhere((String id, _OwnLantern _) => !_own.containsKey(id));
+    _answers.removeWhere(
+      (String _, Map<String, dynamic> a) =>
+          a['at'] is! int ||
+          t - (a['at'] as int) > _wantedLife.inMilliseconds ||
+          !_lanterns.containsKey(a['l']),
+    );
+    _asked.removeWhere((String _, Map<String, dynamic> a) {
+      final bool old =
+          a['at'] is! int || t - (a['at'] as int) > _wantedLife.inMilliseconds;
+      if (old && a['m'] is String) {
+        _own.remove(a['m']);
+      }
+      return old;
+    });
     _pruneMinorReports(t);
     _wanted.removeWhere(
       (String _, Map<String, dynamic> p) =>
@@ -593,7 +692,6 @@ final class DatingService extends ChangeNotifier {
           if (_signer != null) 'vs': base64Url.encode(_signer!.seed),
           'me': me.toJson(),
           'pub': _publishedAt,
-          'dirty': _dirty,
           'seen': _seen,
           'own': _own,
           'routes': <String, dynamic>{
@@ -624,8 +722,15 @@ final class DatingService extends ChangeNotifier {
           ],
           'vreq': vouchRequests,
           'vfor': _vouchFor,
-          'lan': _lanterns,
+          'lan': <String, dynamic>{
+            for (final MapEntry<String, _OwnLantern> e in _lanterns.entries)
+              e.key: e.value.toJson(),
+          },
+          'asked': _asked,
           if (_friendKeys.isNotEmpty) 'fkeys': _friendKeys,
+          if (_friendKeyAt.isNotEmpty) 'fkat': _friendKeyAt,
+          if (_friendOtherKeys.isNotEmpty) 'fkx': _friendOtherKeys,
+          'ans': _answers,
           'want': _wanted,
           'safe': <Map<String, dynamic>>[
             for (final SafeDate s in _safe.values) s.toJson(),
@@ -657,12 +762,12 @@ final class DatingService extends ChangeNotifier {
 
   // ---- own profile ----
 
-  /// Saves the profile and settings; the next lantern carries the change.
+  /// Saves the profile and settings. Nothing is sent because of it (that
+  /// would tell who dates): people get the change with the next profile
+  /// they ask for.
   Future<void> saveMine(void Function(MyDating me) change) async {
     change(me);
-    _dirty = true;
     await _save();
-    await maybePublish();
   }
 
   String _hiddenHash(String salt, String address) => crypto.sha256
@@ -684,7 +789,6 @@ final class DatingService extends ChangeNotifier {
     return DatingProfile(
       key: key,
       name: me.name.trim(),
-      age: me.age,
       gender: me.gender,
       about: me.about.trim(),
       lookingFor: me.lookingFor.trim(),
@@ -700,43 +804,31 @@ final class DatingService extends ChangeNotifier {
     );
   }
 
-  /// Sends this phone's lantern when it is time (or the profile changed).
+  /// Sends a new lantern when it is time: only every
+  /// [kDatingPublishEvery], whatever this person does in Dating, and the same
+  /// lantern to every friend (also the ones this person hides from — the
+  /// lantern says nothing; the match test keeps them out, §19.7).
   Future<void> maybePublish({bool force = false}) async {
     final int t = _now();
-    final String? key = myKey;
-    if (_identity == null || key == null) {
+    if (_identity == null) {
       return;
     }
     final bool due = t - _publishedAt >= kDatingPublishEvery.inMilliseconds;
-    if (!force && !due && !(_dirty && active)) {
+    if (!force && !due) {
       return;
     }
-    // A phone with dating off sends a decoy of the same shape (§19.7).
-    final bool real = active;
-    final DatingLantern lantern = real
-        ? DatingLantern.of(
-            key: key,
-            age: me.age,
-            gender: me.gender,
-            wants: me.wants,
-          )
-        : DatingLantern.decoy(key, _random);
+    final _OwnLantern own = _OwnLantern(
+      at: t,
+      box: await RelayIdentity.generate(),
+    );
+    final DatingLantern lantern = DatingLantern(own.box.publicKeyBase64);
     final String id = _newId(16);
     _own[id] = t;
-    _lanterns[id] = t;
+    _lanterns[id] = own;
     _seen[id] = t;
     _publishedAt = t;
-    _dirty = false;
     await _save();
-    final Set<String> hiddenFriends = <String>{
-      ...me.hiddenFriends.map(_n),
-      for (final String g in me.hiddenGroups) ...?groupMembers?.call(g).map(_n),
-    };
     for (final String f in host.friends()) {
-      // Hidden people do not even get it directly.
-      if (real && hiddenFriends.contains(_n(f))) {
-        continue;
-      }
       await _send(f, <String, dynamic>{
         'type': DatingTypes.lantern,
         'id': id,
@@ -881,9 +973,7 @@ final class DatingService extends ChangeNotifier {
     }
     _minorSelf[key] = _now();
     _matches.remove(key);
-    _dirty = true;
     await _save();
-    await maybePublish();
   }
 
   /// The `mr` entry of a profile this phone sends: the newest reports of a
@@ -1162,13 +1252,11 @@ final class DatingService extends ChangeNotifier {
 
   /// Whether [datingKey] is the (known) dating key of someone this person
   /// hides from.
-  bool _hiddenKey(String datingKey) {
-    if (!_friendKeys.containsValue(datingKey)) {
-      return false;
-    }
-    final Set<String> hidden = hiddenAddresses();
-    return hidden.any((String a) => _friendKeys[a] == datingKey);
-  }
+  bool _hiddenKey(String datingKey) => hiddenAddresses().any(
+    (String a) =>
+        _friendKeys[a] == datingKey ||
+        (_friendOtherKeys[a]?.contains(datingKey) ?? false),
+  );
 
   // ---- thanking the matchmaker (§19.3) ----
 
@@ -1659,33 +1747,63 @@ final class DatingService extends ChangeNotifier {
 
   /// Whether the dating key [requester] may be answered with a profile now
   /// (the flood guard). Counts it when it may.
-  bool _takeFetch(String requester) {
+  bool _takeFetch(String requester) =>
+      _take(_fetchesFrom, requester, kDatingFetchesPerKeyPerDay);
+
+  /// Whether [key] may be answered now, at most [limit] times a day per key
+  /// in [log]. Counts it when it may.
+  bool _take(Map<String, List<int>> log, String key, int limit) {
     final int t = _now();
-    final List<int> recent = (_fetchesFrom[requester] ??= <int>[])
+    final List<int> recent = (log[key] ??= <int>[])
       ..removeWhere((int at) => t - at > 24 * 3600 * 1000);
-    if (recent.length >= kDatingFetchesPerKeyPerDay) {
+    if (recent.length >= limit) {
       return false;
     }
     recent.add(t);
-    while (_fetchesFrom.length > 500) {
-      _fetchesFrom.remove(_fetchesFrom.keys.first);
+    while (log.length > 500) {
+      log.remove(log.keys.first);
     }
     return true;
   }
 
-  /// Notes [key] (the sender's key of a lantern) as the dating key of
-  /// the friend [from]. Returns whether it changed anything.
-  bool _learnFriendKey(String from, Object? key) {
-    if (key is! String ||
-        decodeRelayKey(key) == null ||
-        _friendKeys[from] == key) {
+  /// A question from the friend [from] itself (one step away) with [key]:
+  /// whether [key] is that friend's dating key. The first key a friend asks
+  /// with stays theirs; any other is kept as one of their other keys (hidden
+  /// with them, see [_hiddenKey]) and answered with fillers only — unless
+  /// the known key has not been used for [kDatingProfileLife].
+  bool _friendKey(String from, String key) {
+    final int t = _now();
+    final String? known = _friendKeys[from];
+    if (known == key) {
+      _friendKeyAt[from] = t;
+      return true;
+    }
+    final List<String> other = _friendOtherKeys[from] ??= <String>[];
+    if (known != null &&
+        t - (_friendKeyAt[from] ?? 0) <= kDatingProfileLife.inMilliseconds) {
+      if (!other.contains(key)) {
+        other.add(key);
+        if (other.length > 20) {
+          other.removeAt(0);
+        }
+      }
       return false;
+    }
+    if (known != null) {
+      other.add(known);
+      if (other.length > 20) {
+        other.removeAt(0);
+      }
     }
     _friendKeys
       ..remove(from)
       ..[from] = key;
+    _friendKeyAt[from] = t;
     while (_friendKeys.length > 2000) {
-      _friendKeys.remove(_friendKeys.keys.first);
+      final String gone = _friendKeys.keys.first;
+      _friendKeys.remove(gone);
+      _friendKeyAt.remove(gone);
+      _friendOtherKeys.remove(gone);
     }
     return true;
   }
@@ -1709,21 +1827,25 @@ final class DatingService extends ChangeNotifier {
     if (lantern == null) {
       return;
     }
-    // A friend's own lantern (nobody passed it on yet) names their dating
-    // key — also when the same lantern already came through someone else.
-    final bool learnt = path.isEmpty && _learnFriendKey(from, lantern.key);
-    if (_seen.containsKey(id)) {
-      if (learnt) {
-        await _save();
-      }
+    // The sender's own copy after one passed on by someone else: asked
+    // again from one step away (see [_far]).
+    final bool again =
+        path.isEmpty && _far[id] == lantern.key && _far.remove(id) != null;
+    if (_seen.containsKey(id) && !again) {
       return;
     }
-    if (!_takeLantern(from)) {
+    if (!again && !_takeLantern(from)) {
       return;
     }
     final int t = _now();
     _seen[id] = t;
     _routes[id] = (from, id, t);
+    if (path.isNotEmpty) {
+      _far[id] = lantern.key;
+      while (_far.length > 2000) {
+        _far.remove(_far.keys.first);
+      }
+    }
     final List<String> names = <String>[
       for (final String n in path.whereType<String>().take(kDatingMaxHops))
         n.length > 40 ? n.substring(0, 40) : n,
@@ -1749,11 +1871,10 @@ final class DatingService extends ChangeNotifier {
     await _onLanternSeen(from, id, names, lantern, t);
   }
 
-  /// A lantern reached this phone. With dating on and a lantern that fits
-  /// (age, gender, preferences, distance — both ways), this phone asks for
-  /// the profile; with dating off it asks for a share of the lanterns anyway
-  /// ([decoyFetchShare]) and drops the answer, so asking tells nobody
-  /// anything. A lantern that does not fit costs nothing (§19.7).
+  /// A lantern reached this phone: it asks the match test, with dating on
+  /// or off alike (with dating off, or farther than this person looks, it
+  /// asks with fillers only, so it never fits). The question is sealed to
+  /// the lantern's key and goes back the way the lantern came (§19.7).
   Future<void> _onLanternSeen(
     String from,
     String id,
@@ -1762,49 +1883,186 @@ final class DatingService extends ChangeNotifier {
     int t,
   ) async {
     final RelayIdentity? identity = _identity;
-    final Uint8List? senderKey = decodeRelayKey(lantern.key);
-    if (senderKey == null ||
-        identity == null ||
-        lantern.key == myKey ||
-        _blocked.contains(lantern.key) ||
-        isMinorOff(lantern.key)) {
+    final Uint8List? lanternKey = decodeRelayKey(lantern.key);
+    if (lanternKey == null || identity == null || _lanterns.containsKey(id)) {
       await _save();
       return;
     }
-    final bool wanted =
+    final int distance = names.length + 1;
+    final bool looking = active && distance <= me.wants.hops;
+    final (RelayIdentity, List<String>) question = await DatingMatch.ask(
+      looking ? me.wants.seekTags(me.gender) : const <String>{},
+      _random,
+    );
+    // A one-off mark the answer comes back to.
+    final String mark = _newId(16);
+    _own[mark] = t;
+    final Object? oldMark = _asked[id]?['m'];
+    if (oldMark is String) {
+      _own.remove(oldMark);
+    }
+    _asked[id] = <String, dynamic>{
+      'k': lantern.key,
+      'b': question.$1.toJson(),
+      'f': from,
+      'path': names,
+      'm': mark,
+      'at': t,
+    };
+    while (_asked.length > _askedMax) {
+      final Object? m = _asked.remove(_asked.keys.first)?['m'];
+      if (m is String) {
+        _own.remove(m);
+      }
+    }
+    final Map<String, String> box = await DatingBox.seal(
+      me: identity,
+      recipient: lanternKey,
+      payload: <String, dynamic>{
+        'k': 'match',
+        'id': id,
+        'd': distance,
+        'q': question.$2,
+      },
+    );
+    await _save();
+    await _route(id, mark, box, from: null);
+  }
+
+  /// Someone runs the match test with this phone's lantern [lantern]. A key
+  /// costs nothing, so the limits do not count keys: per lantern, a friend
+  /// asking from one step away is answered [kDatingMatchNearPerFriend] times
+  /// and only with the key learnt for them ([_friendKey]); questions coming
+  /// through one friend from two steps away [kDatingMatchFarPerFriend]
+  /// times. Questions through a friend this person hides from, and from
+  /// keys of hidden, blocked, banned or reported people, get fillers only.
+  /// Every question is answered alike, with dating on or off, with a new
+  /// secret each time; only a person who may see the profile can fit.
+  Future<void> _onMatchAsk(
+    String from,
+    Uint8List sender,
+    String? mark,
+    String id,
+    _OwnLantern lantern,
+    Map<String, dynamic> msg,
+  ) async {
+    final Object? d = msg['d'];
+    final String senderKey = base64Url.encode(sender);
+    if (d is! int || d < 1 || d > kDatingMaxHops || mark == null) {
+      return;
+    }
+    final String slot = '${d == 1 ? 'n' : 'f'}|$from';
+    final int used = lantern.asks[slot] ?? 0;
+    if (used >=
+        (d == 1 ? kDatingMatchNearPerFriend : kDatingMatchFarPerFriend)) {
+      return;
+    }
+    lantern.asks[slot] = used + 1;
+    final bool theirKey = d != 1 || _friendKey(from, senderKey);
+    final bool open =
         active &&
-        lantern.fits(
-          myAge: me.age,
-          myGender: me.gender,
-          myWants: me.wants,
-          distance: names.length + 1,
-        );
-    if (!wanted && (active || _random.nextDouble() >= decoyFetchShare)) {
+        theirKey &&
+        d <= me.wants.hops &&
+        !hiddenAddresses().contains(from) &&
+        !_blocked.contains(senderKey) &&
+        !(isBanned?.call(senderKey) ?? false) &&
+        !isMinorOff(senderKey) &&
+        !_hiddenKey(senderKey);
+    final Object? q = msg['q'];
+    final (List<String>, List<String>)? answer = await DatingMatch.answer(
+      q,
+      open ? me.wants.offerTags(me.gender) : const <String>{},
+      _random,
+    );
+    if (answer == null) {
+      return;
+    }
+    final String answerId = _newId(16);
+    _answers[answerId] = <String, dynamic>{
+      'l': id,
+      'k': senderKey,
+      'q': List<String>.from(q as List),
+      'd': d,
+      'open': open,
+      'at': _now(),
+    };
+    while (_answers.length > _answersMax) {
+      _answers.remove(_answers.keys.first);
+    }
+    final Map<String, String> box = await DatingBox.seal(
+      me: lantern.box,
+      recipient: sender,
+      payload: <String, dynamic>{
+        'k': 'match_re',
+        'id': id,
+        'a': answerId,
+        'r': answer.$1,
+        'o': answer.$2,
+      },
+    );
+    await _route(mark, null, box, from: null);
+  }
+
+  /// The answer to a match test (from [sender], the lantern's key). When the
+  /// two fit, this phone asks for the profile; otherwise it asks anyway for
+  /// a share of them ([decoyFetchShare]) and drops the answer, with dating on
+  /// or off alike, so asking tells nobody anything.
+  Future<void> _onMatchAnswer(
+    Uint8List sender,
+    Map<String, dynamic> msg,
+  ) async {
+    final Object? id = msg['id'];
+    final Map<String, dynamic>? asked = id is String ? _asked[id] : null;
+    final RelayIdentity? identity = _identity;
+    if (id is! String ||
+        asked == null ||
+        identity == null ||
+        asked['k'] != base64Url.encode(sender)) {
+      return;
+    }
+    _asked.remove(id);
+    final Object? mark = asked['m'];
+    if (mark is String) {
+      _own.remove(mark);
+    }
+    final RelayIdentity? blind = RelayIdentity.fromJson(asked['b']);
+    final bool fits =
+        active &&
+        blind != null &&
+        await DatingMatch.fits(blind, msg['r'], msg['o']);
+    if (!fits && _random.nextDouble() >= decoyFetchShare) {
       await _save();
       return;
     }
-    if (wanted) {
+    final int t = _now();
+    if (fits) {
       _wanted[id] = <String, dynamic>{
-        'k': lantern.key,
-        'f': from,
-        'path': names,
-        'at': t,
+        'k': asked['k'],
+        'f': asked['f'],
+        'path': asked['path'],
+        'at': asked['at'],
       };
       while (_wanted.length > _wantedMax) {
         _wanted.remove(_wanted.keys.first);
       }
     }
-    // A one-off mark the answer comes back to (not the per-person mark: a
-    // phone asks every sender in range).
-    final String mark = _newId(16);
-    _own[mark] = t;
+    final String fetchMark = _newId(16);
+    _own[fetchMark] = t;
+    // The proof of fit is the blinding secret of the question: with it the
+    // owner sees that a common tag was asked. It goes out only on a fit (a
+    // request that did not fit carries a new random secret instead, and
+    // gets a cover), so the owner learns this person's wishes only when the
+    // two fit anyway.
+    final Object? b = fits
+        ? asked['b']
+        : (await RelayIdentity.generate()).toJson();
     final Map<String, String> box = await DatingBox.seal(
       me: identity,
-      recipient: senderKey,
-      payload: <String, dynamic>{'k': 'fetch', 'id': id},
+      recipient: sender,
+      payload: <String, dynamic>{'k': 'fetch', 'id': id, 'a': msg['a'], 'b': b},
     );
     await _save();
-    await _route(id, mark, box, from: null);
+    await _route(id, fetchMark, box, from: null);
   }
 
   /// A profile out of an answer: kept when it fits both ways and is
@@ -1833,16 +2091,8 @@ final class DatingService extends ChangeNotifier {
         own.isNotEmpty &&
         profile.hidden.contains(_hiddenHash(profile.salt, own));
     final bool fits =
-        me.wants.accepts(
-          age: profile.age,
-          gender: profile.gender,
-          distance: distance,
-        ) &&
-        profile.wants.accepts(
-          age: me.age,
-          gender: me.gender,
-          distance: distance,
-        );
+        me.wants.accepts(gender: profile.gender, distance: distance) &&
+        profile.wants.accepts(gender: me.gender, distance: distance);
     if (hiddenFromMe || !fits) {
       await _save();
       return;
@@ -1871,13 +2121,9 @@ final class DatingService extends ChangeNotifier {
           id: 'date-new-${profile.key.hashCode}',
           title: t('Randki: ktoś nowy'),
           body: distance == 1
-              ? t('{name}, {age} — ktoś z Twoich znajomych', {
+              ? t('{name} — ktoś z Twoich znajomych', {'name': profile.name})
+              : t('{name} — znacie się przez {friend}', {
                   'name': profile.name,
-                  'age': profile.age,
-                })
-              : t('{name}, {age} — znacie się przez {friend}', {
-                  'name': profile.name,
-                  'age': profile.age,
                   'friend': host.nameOf(from),
                 }),
           createdAtMillis: now,
@@ -1914,11 +2160,18 @@ final class DatingService extends ChangeNotifier {
     final Object? id = msg['id'];
     final Object? content = msg['p'];
     final Map<String, dynamic>? waiting = id is String ? _wanted[id] : null;
-    // Only the sender of the lantern can answer for it.
+    final Uint8List? lanternKey = decodeRelayKey(waiting?['k']);
+    final RelayIdentity? identity = _identity;
     if (id is! String ||
         content is! Map ||
         waiting == null ||
-        waiting['k'] != sender) {
+        lanternKey == null ||
+        identity == null) {
+      return;
+    }
+    // Only the sender of the lantern can answer for it.
+    if (msg['lp'] !=
+        await datingLanternProof(identity, lanternKey, id, sender)) {
       return;
     }
     _wanted.remove(id);
@@ -1947,34 +2200,55 @@ final class DatingService extends ChangeNotifier {
     );
   }
 
-  /// Someone asks for the profile behind this phone's lantern (a real one or
-  /// a cover — every phone answers alike, the answer padded to whole
-  /// [kDatingBucket]s). Blocked and banned dating keys get none, and neither
-  /// do the dating keys of the people this person hides from, when this phone
-  /// knows them (friends' own keys, from their lanterns) — with dating on or
-  /// off alike, so a missing answer says nothing about dating.
-  /// A modified app can still ask with a key nobody knows: hiding works
-  /// against the ordinary app, not against a determined one (§19.1).
+  /// Someone asks for the profile behind this phone's lantern [lantern],
+  /// after a match test this phone answered ([_answers], once each). The
+  /// real profile goes out only with a proof of fit: the question's blinding
+  /// secret shows that it asked a tag this person offers, and the test was
+  /// open for that key. Anything else gets a cover, with dating on or off
+  /// alike (padded to whole [kDatingBucket]s), so an answer says nothing to
+  /// the phones in between. Hiding and blocking hold for every key the test
+  /// was closed for; someone who invents fitting wishes under a new key from
+  /// two steps away gets the profile, like anyone who fits (§19.1).
   Future<void> _onFetch(
     Uint8List sender,
     String? mark,
+    String id,
+    _OwnLantern lantern,
     Map<String, dynamic> msg,
   ) async {
-    final Object? id = msg['id'];
     final RelayIdentity? identity = _identity;
+    final String? key = myKey;
     final String senderKey = base64Url.encode(sender);
-    if (id is! String ||
-        !_lanterns.containsKey(id) ||
-        mark == null ||
+    final Object? answerId = msg['a'];
+    final Map<String, dynamic>? answered = answerId is String
+        ? _answers[answerId]
+        : null;
+    if (mark == null ||
+        key == null ||
         identity == null ||
-        (isBanned?.call(senderKey) ?? false) ||
-        isMinorOff(senderKey) ||
-        _hiddenKey(senderKey) ||
+        answered == null ||
+        answered['l'] != id ||
+        answered['k'] != senderKey ||
         !_takeFetch(senderKey)) {
       return;
     }
+    _answers.remove(answerId);
+    final RelayIdentity? blind = RelayIdentity.fromJson(msg['b']);
+    final bool proven =
+        answered['open'] == true &&
+        active &&
+        !_blocked.contains(senderKey) &&
+        !(isBanned?.call(senderKey) ?? false) &&
+        !isMinorOff(senderKey) &&
+        !_hiddenKey(senderKey) &&
+        blind != null &&
+        await DatingMatch.proves(
+          blind,
+          answered['q'],
+          me.wants.offerTags(me.gender),
+        );
     final int t = _now();
-    final DatingProfile? mine = _myProfile(_newId(12));
+    final DatingProfile? mine = proven ? _myProfile(_newId(12)) : null;
     final Map<String, dynamic> content = datingPadded(<String, dynamic>{
       ...(mine?.toJson() ?? const <String, dynamic>{'v': 1, 'cover': true}),
       // Reports of a minor travel with every answer, real or cover, so
@@ -1984,7 +2258,12 @@ final class DatingService extends ChangeNotifier {
     final Map<String, String> box = await DatingBox.seal(
       me: identity,
       recipient: sender,
-      payload: <String, dynamic>{'k': 'prof', 'id': id, 'p': content},
+      payload: <String, dynamic>{
+        'k': 'prof',
+        'id': id,
+        'p': content,
+        'lp': await datingLanternProof(lantern.box, sender, id, key),
+      },
     );
     await _route(mark, null, box, from: null);
   }
@@ -2017,6 +2296,29 @@ final class DatingService extends ChangeNotifier {
     if (id == null) {
       return;
     }
+    // Sealed to one of this phone's lanterns: a match test or a request for
+    // the profile, nothing else.
+    final _OwnLantern? lantern = _lanterns[to];
+    if (lantern != null) {
+      final (Uint8List, Map<String, dynamic>)? asked = await DatingBox.open(
+        me: lantern.box,
+        box: box,
+      );
+      if (asked != null) {
+        if (mark is String) {
+          _routes[mark] = (from, mark, _now());
+        }
+        final String? m = mark is String ? mark : null;
+        switch (asked.$2['k']) {
+          case 'match':
+            await _onMatchAsk(from, asked.$1, m, to, lantern, asked.$2);
+          case 'fetch':
+            await _onFetch(asked.$1, m, to, lantern, asked.$2);
+        }
+        await _save();
+        return;
+      }
+    }
     final (Uint8List, Map<String, dynamic>)? opened = await DatingBox.open(
       me: id,
       box: box,
@@ -2035,14 +2337,13 @@ final class DatingService extends ChangeNotifier {
     if (mark is String) {
       _routes[mark] = (from, mark, _now());
       final SeenProfile? s = _profiles[sender];
-      if (s != null && msg['k'] != 'intro' && msg['k'] != 'fetch') {
+      if (s != null && msg['k'] != 'intro') {
         s.replyTo = mark;
       }
     }
     switch (msg['k']) {
-      case 'fetch':
-        await _onFetch(opened.$1, mark is String ? mark : null, msg);
-        await _save();
+      case 'match_re':
+        await _onMatchAnswer(opened.$1, msg);
       case 'prof':
         await _onProfile(sender, msg);
       case 'like':
@@ -2115,8 +2416,8 @@ final class DatingService extends ChangeNotifier {
       return;
     }
     // Preferences still count; the distance does not (a friend vouches).
-    if (!me.wants.accepts(age: other.age, gender: other.gender, distance: 1) ||
-        !other.wants.accepts(age: me.age, gender: me.gender, distance: 1)) {
+    if (!me.wants.accepts(gender: other.gender, distance: 1) ||
+        !other.wants.accepts(gender: me.gender, distance: 1)) {
       return;
     }
     // The way to the other person goes through the matchmaker's mark.
@@ -2146,12 +2447,8 @@ final class DatingService extends ChangeNotifier {
           'name': by is String ? by : t('Znajomy'),
         }),
         body: note is String && note.isNotEmpty
-            ? t('{name}, {age} — „{note}”', {
-                'name': other.name,
-                'age': other.age,
-                'note': note,
-              })
-            : '${other.name}, ${other.age}',
+            ? t('{name} — „{note}”', {'name': other.name, 'note': note})
+            : other.name,
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'date-intro',
@@ -2243,5 +2540,45 @@ final class DatingService extends ChangeNotifier {
         ),
       );
     }
+  }
+}
+
+/// One of this phone's own lanterns (§19.7): when it went out, its one-off
+/// key (questions are sealed to it) and how many match tests it answered per
+/// friend the questions came through (`n|address` from the friend itself,
+/// `f|address` through them).
+final class _OwnLantern {
+  _OwnLantern({required this.at, required this.box, Map<String, int>? asks})
+    : asks = asks ?? <String, int>{};
+
+  final int at;
+  final RelayIdentity box;
+  final Map<String, int> asks;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'at': at,
+    'k': box.toJson(),
+    'n': asks,
+  };
+
+  static _OwnLantern? fromJson(Object? json) {
+    if (json is! Map || json['at'] is! int) {
+      return null;
+    }
+    final RelayIdentity? box = RelayIdentity.fromJson(json['k']);
+    if (box == null) {
+      return null;
+    }
+    final Object? n = json['n'];
+    return _OwnLantern(
+      at: json['at'] as int,
+      box: box,
+      asks: <String, int>{
+        if (n is Map)
+          for (final MapEntry<dynamic, dynamic> e in n.entries)
+            if (e.key is String && e.value is int)
+              e.key as String: e.value as int,
+      },
+    );
   }
 }
