@@ -134,6 +134,15 @@ overwritten by one signed with a different key. Changing the package to
      `linux/packaging/build_deb.sh` (`/opt/zen`, `/usr/bin/zen`, `.desktop`
      file, AppStream; dependencies from `dpkg-shlibdeps`; AAC/H.264 playback
      needs `gstreamer1.0-libav`, a recommended dependency);
+   - `Zen-Linux-x64.flatpak` — the x64 bundle above packaged by the `flatpak`
+     job with `linux/packaging/com.roj.zen.yml` (a repackaging of the built
+     `Zen-Linux-x64.tar.gz`, not a build from source; runtime
+     `org.gnome.Platform` 48, which is based on `org.freedesktop.Platform`
+     and adds GTK 3; `libayatana-appindicator3` and its libraries are copied
+     from the runner into the package). Sandbox: network, Wayland/X11,
+     PulseAudio, all devices (camera), secret service, notifications, tray.
+     Install: `flatpak install --user ./Zen-Linux-x64.flatpak`. Not on Flathub
+     (that needs a from-source build); ARM64 is not built;
    - `Zen-macOS.zip` — `build/macos/Build/Products/Release/Zen.app` packed with
      `ditto -c -k --keepParent` (universal: Apple Silicon and Intel;
      ad hoc signature, no notarization — on first launch use "Open Anyway"
@@ -146,15 +155,18 @@ overwritten by one signed with a different key. Changing the package to
    - `SHA256SUMS` — checksums of all the files above (item 5).
 
    **Store variant** (Google Play, Galaxy Store) is **not** a release file; it
-   is built by hand with the `store` flavor (§6.2):
-   `flutter build appbundle --release --flavor store` (Play AAB),
-   `flutter build apk --release --flavor store` (Galaxy Store).
+   is built by hand with the `appStoreOnly` flavor (§6.2):
+   `flutter build appbundle --release --flavor appStoreOnly` (Play AAB),
+   `flutter build apk --release --flavor appStoreOnly` (Galaxy Store). The
+   copies named `Zen-APP-STORE-ONLY-do-not-install-manually.aab|apk` appear in
+   `build/app/outputs/app-store-only/`; the app is called "Zen (sklep)". Never
+   attach them to a GitHub release or hand them to people to sideload.
 
    The README links to `…/releases/latest/download/Zen.apk`,
    `…/releases/latest/download/Zen-Windows.zip`
    and `…/releases/latest/download/Zen-unsigned.ipa`, so fixed names always
    give the newest version in one click (likewise `Zen-Windows-arm64.zip`,
-   `Zen-Linux-x64.tar.gz`, `Zen-Linux-arm64.tar.gz`, the `.deb` files and
+   `Zen-Linux-x64.tar.gz`, `Zen-Linux-arm64.tar.gz`, the `.deb` files, `Zen-Linux-x64.flatpak` and
    `Zen-macOS.zip`).
 5. **Checksums:** `SHA256SUMS` is computed by the last-but-one job of
    `release.yml` over all release files (`sha256sum` format; check with
@@ -181,7 +193,8 @@ overwritten by one signed with a different key. Changing the package to
 - **Automatic:** Android — the Gradle task `buildGoBridge` (before
   `preBuild`), Windows — the CMake target `yggdrasil_bridge`. Both call
   `build_if_changed.ps1 -Target android|windows`, which computes a SHA-256 of
-  the sources (`*.go` without tests, `go.mod`, `go.sum`, the build script) and
+  the sources (`*.go` without tests, `go.mod`, `go.sum`, the build script)
+  and `go version`, and
   builds only when it differs from the one stored next to the library
   (`libyggdrasil_bridge.so.sha256`, `bin/yggdrasil_bridge.dll.sha256`; when
   the library is in the repository, its sum goes there together with it).
@@ -254,8 +267,9 @@ overwritten by one signed with a different key. Changing the package to
   Debians). The runner is single-instance via GApplication (required by
   app_links on Linux: a link from the browser reaches the running Zen); the
   test profile (`--zen-profile` / `ZEN_PROFILE`) still starts alongside.
-- **Not done:** Flatpak (needs Flutter and Go dependencies collected offline in
-  the manifest; a separate task).
+- **Flatpak:** only repackaged from the built bundle (§3 item 4, the file list);
+  a from-source Flatpak for Flathub (Flutter and Go dependencies collected
+  offline in the manifest) is not done.
 
 ### 3.3. iPhone (GitHub Actions)
 
@@ -329,7 +343,7 @@ State as of 15.10.2026 (sources: §6.6):
 - **macOS:** ad hoc signature, no notarization — since macOS 15 the first
   launch only via "Open Anyway" in System Settings (or
   `xattr -dr com.apple.quarantine`). Eventually Developer ID and notarization
-  (Apple account, §6.3). **Linux:** unsigned (`.tar.gz` and `.deb`); sums in
+  (Apple account, §6.3). **Linux:** unsigned (`.tar.gz`, `.deb` and `.flatpak`); sums in
   `SHA256SUMS`.
 
 ## 6. Distribution: channels and plan
@@ -355,7 +369,7 @@ legal nor tax advice; uncertain places are marked. Summary and priorities:
 | iPhone: SideStore / AltStore with a free Apple ID | works | `Zen-unsigned.ipa`; signing every 7 days, at most 3 apps, no background work |
 | iPhone: TestFlight, AltStore PAL, App Store | needs a USD 99/year account | §6.3 |
 | Windows | x64 ZIP and experimental ARM64 ZIP, no Authenticode | later MSIX and winget (§5) |
-| Linux | `tar.gz` and `.deb`, x64 and ARM64 | to do: Flatpak (not done, see §3.2); AppImage and Snap optional |
+| Linux | `tar.gz` and `.deb`, x64 and ARM64; Flatpak (x64, repackaged bundle, attached to the release; not on Flathub) | AppImage and Snap optional |
 | macOS | ZIP with an ad hoc signature | Developer ID + notarization with the same account as iPhone (§6.3); official Homebrew only after notarization |
 | Repository mirror (e.g. Codeberg) | optional | in case GitHub is blocked; mirror addresses can be published in the signed manifest (§8.2) |
 
@@ -370,24 +384,27 @@ links from the camera.
 ### 6.2 Store variant of Android (Google Play, Galaxy Store)
 
 Model: Signal — **the same package `com.roj.zen` and the same key**, two
-flavors: `direct` (the default; the full app with self-update, what GitHub
-ships) and `store` without it; users move between channels without losing
+flavors: `full` (the default; the full app with self-update, what GitHub
+ships) and `appStoreOnly` without it (named so that nobody sideloads it by
+accident: the label is "Zen (sklep)", the files are called
+`Zen-APP-STORE-ONLY-do-not-install-manually.*`); users move between channels without losing
 data. Yggdrasil runs in Zen as a library, without `VpnService` (VPN would
 require an organization account).
 
-**Done (the `store` flavor, D12):**
+**Done (the `appStoreOnly` flavor, D12):**
 
-- the manifest in `src/store` removes `REQUEST_INSTALL_PACKAGES`;
-- Dart (`appFlavor == 'store'` or `--dart-define=ZEN_STORE=true`) turns off
+- the manifest in `src/appStoreOnly` removes `REQUEST_INSTALL_PACKAGES` and
+  sets the label "Zen (sklep)";
+- Dart (`appFlavor == 'appStoreOnly'` or `--dart-define=ZEN_STORE=true`) turns off
   the update service, shows "Aktualizacje ze sklepu" ("Updates from the
   store") and replaces "Podaj dalej" with a dialog containing a link
   (`--dart-define=ZEN_STORE_URL=…`, default: the project page);
-- flavors are active only for a task with a flavor (`--flavor store|direct`)
+- flavors are active only for a task with a flavor (`--flavor appStoreOnly|full`)
   or with `-Pzen.flavors=true`, so a plain `flutter build apk` / `flutter run`
   works unchanged;
 - built by hand, not by `release.yml` (§3 item 4).
 
-**Still to do** for the `store` variant:
+**Still to do** for the `appStoreOnly` variant:
 
 1. ~~no self-update, no `REQUEST_INSTALL_PACKAGES`~~ (done; self-update from
    outside Play is a hard violation of the Device and Network Abuse policy);
@@ -492,7 +509,7 @@ Now (October–December 2026):
 2. Release key backup with Shamir (§2 item 3) — before registration.
 3. Google account USD 25 and registration of `com.roj.zen` with the release
    key (§4).
-4. The `store` variant (§6.2: built; the remaining items open) with the same
+4. The `appStoreOnly` variant (§6.2: built; the remaining items open) with the same
    package and key; closed test with 12 testers × 14 days; publication in
    Poland and the EU (+ English-speaking countries); then Galaxy Store with the
    same variant. About 3–6 weeks in total.
@@ -500,7 +517,7 @@ Now (October–December 2026):
    IPA, AltStore PAL for the EU in parallel; Developer ID and macOS
    notarization in CI.
 6. App Store once the TestFlight version stabilizes (Poland, EU, UK, USA).
-7. Linux: Flatpak (`.deb` and audio/video playback are done, §3.2).
+7. Linux: Flathub (a from-source Flatpak; `.deb`, audio/video playback and a release-file Flatpak are done, §3.2).
 8. Privacy policy and terms — required by the stores; with klipy.com and
    public Yggdrasil nodes. Drafts exist in `docs/PRIVACY.md` and
    `docs/TERMS.md` (not legal advice; to be reviewed by the maintainer),

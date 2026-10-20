@@ -131,7 +131,7 @@ screen, 25.3 Appearance) · 26. Gaps and risks (26.3 iPhone, Mac, Linux) ·
 | 1 | Engine | journal, files, certificates, write policies, replication, archive, network simulator | Done |
 | 2 | Network and account | Yggdrasil v0.5.14, node pool, bridges on computers (§5.1), account key and device certificates (§6) | Done; the identity on the network is still the node key (§6.1) |
 | 3 | Profile and feed | levels with keys (§8), profile in the journal (§9), posts, sharing, likes, comments (§10–11), following (§12), gratitude cards | Partial (§8–§12) |
-| 3a | Calls+ | screen sharing, explicit recording, call in a window (§13.1–13.3) | Done with gaps (§13.1–13.2; recording: Android, Windows; camera and screen at once not done) |
+| 3a | Calls+ | screen sharing, explicit recording, call in a window (§13.1–13.3) | Done with gaps (§13.1–13.2; recording: Android, Windows; camera + screen at once not tested on devices) |
 | 4 | Account you cannot lose | password, recovery circle, multiple devices (§6.3, §6.5), data protection (§14.1) | Partial (§14.1); paper backup of the account key done |
 | 5 | Resilience | Pass It On, installation via USB, HTTPS-like traffic, updates over the network (§14.2) | Partial: updates over the network disabled; §14.3 partly done (signed manifest, canary, tooling) |
 | 6 | Meetings | Bluetooth (§15), graph, statuses, alarm (§16), events and the rest of §17 | Done with gaps |
@@ -162,20 +162,20 @@ Languages: 21, chosen automatically or in Settings (§25.1).
 |---|---|---|---|
 | Messenger: chats, groups, audio/video calls, relays | 13 | Partial | messages to strangers; attachments to offline friends now go through mailboxes (blobs), but GIFs go through klipy.com |
 | Calls+: screen, recording, window | 13.1–13.3 | Done with gaps | camera and screen at once; recording on macOS/Linux (notifications are hidden while sharing the screen and recording plays a signal tone — done) |
-| Network, bridges | 5 | Done | local network (multicast) has no Dart side yet (Go support ready, off by default) |
-| Account, devices, recovery | 6 | Partial | identity = node key; pyramid key random on each device; pyramid traffic through relays; "met in person" unsigned |
-| Profile, feed, likes, following | 8–12 | Partial | level permissions; profile field visibility, nationality, mini-profile, metadata-free videos, follower list done; "N verified"; mini-profile on likes/comments |
+| Network, bridges | 5 | Done | local network (multicast) on iPhone needs Apple's multicast entitlement |
+| Account, devices, recovery | 6 | Partial | identity = node key; pyramid traffic through relays |
+| Profile, feed, likes, following | 8–12 | Partial | level permissions; profile field visibility, nationality, mini-profile, metadata-free videos, follower list, "N verified" done; mini-profile on likes/comments |
 | Data protection on the device | 14.1 | Partial | background service holds the master key |
-| Resilience, distribution | 14.2 | Partial | updates over the network disabled; camouflage, Tor, Wi-Fi Direct |
+| Resilience, distribution | 14.2 | Partial | updates over the network disabled; Tor, Wi-Fi Direct |
 | Integrity of releases and fundraising | 14.3 | Partial | APK certificate check and signed manifest with fundraising link/author/repository, mirrors and canary exist; pinned fingerprint not yet published; APK key in CI secrets |
-| People nearby (Bluetooth) | 15 | Partial | Android only; old shared secret still sent for 1.10.0 compatibility |
+| People nearby (Bluetooth) | 15 | Partial | Android only |
 | Graph | 16.1 | Done | — |
 | Statuses | 16.2 | Done | — |
 | Alarm | 16.3 | Done | SMS fallback opens the system SMS app |
 | Events, circles, Table for Six, weekend plan, Ask the Network | 17 | Done | — |
-| Neighbors | 18 | Done | a truly separate door-inbox identity needs a second node/relay; routing of `zen://m/<code>` |
+| Neighbors | 18 | Done | the door node only while the app runs in the foreground |
 | Dating | 19 | Done | scale (§19.7) |
-| Pyramid, authority, politics | 20–22 | Done in code | address of the device visible in the pyramid; "met in person" referendum rule |
+| Pyramid, authority, politics | 20–22 | Done in code | address of the device visible in the pyramid |
 | Currency, access market | 23–24 | Done in code | transfer privacy |
 | Navigation, appearance, languages | 25 | Partial | accessibility (translations done, §25.1) |
 | Law | 27 | Partial | privacy policy, terms and DPIA draft exist (English); legal review pending |
@@ -188,7 +188,8 @@ Languages: 21, chosen automatically or in Settings (§25.1).
    legal opinion. **Mechanism done in 1.11.0** (`feature_flags.dart`; pyramid,
    wallet, dating, neighbors; Settings → "Funkcje eksperymentalne"
    (Experimental features); defaults from `--dart-define=ZEN_FEATURE_…`,
-   `ZEN_FEATURES_LOCKED=true` blocks the choice). Open: the defaults are all
+   `ZEN_FEATURES_LOCKED=true` blocks the choice); a disabled feature's
+   services are not started (`ZenCore`, A15 step 0). Open: the defaults are all
    still **on** — the "core" release needs them off.
 2. **Remove migrations and backward-compatibility code (S/M).** **Done in
    1.10.0** (config re-sealing of the node remains). Partly done in 1.11.0:
@@ -200,8 +201,8 @@ Languages: 21, chosen automatically or in Settings (§25.1).
    publication remain.
 5. **CI (S)** — **done:** GitHub Actions (`ci.yml`, `release.yml`,
    `ios.yml`, `pages.yml`).
-6. **Default settings per §1.8, age gate, privacy policy (S)** — §27. Age
-   gate done; privacy policy, terms and DPIA drafts exist.
+6. **Default settings per §1.8, privacy policy (S)** — §27. No age gate
+   (owner's decision); privacy policy, terms and DPIA drafts exist.
 
 ---
 
@@ -227,7 +228,7 @@ Every new feature is a new kind of space with its own "who may write" rule
 on the same engine, not a second system next to it.
 
 **Status: Partial.** Besides the journal there are several separate
-distribution mechanisms (relay mailboxes, pyramid sync, dating packets,
+distribution mechanisms (relay mailboxes, pyramid sync, dating lanterns,
 event and question chains, neighbors, a friend's state in "Spotkania"
 (Meetings)), each with its own limits and bugs. Direction: new features on
 journal spaces, one "friend state" mechanism (`STATUS.md`).
@@ -284,15 +285,17 @@ carries itself through users' bridges.
 5. **A new person** starts from public nodes and gets bridges from the
    first friend. The invitation code does not carry bridges (it must be short).
 6. **Local network**: on the same Wi-Fi, devices are meant to connect by
-   themselves (multicast). **Status:** off everywhere — it never worked on
-   phones (Android: SELinux, iOS: a separate permission), and on computers
-   the node needs a multicast password that the app does not set (§26.1).
-   Since 1.11.0 the Go side is ready and off by default (key
-   `ZenLanDiscovery` in the node config: `Enabled`, `Secret` — shared by the
-   account's devices, from which the bridge derives an HMAC-SHA256 password,
-   `OnWiFi`; phones only with `OnWiFi` and only on Wi-Fi interfaces). The
-   Dart side is missing (setting, account secret, Android MulticastLock).
-   Open decision (S/M).
+   themselves (multicast). **Status: Done** — only the account's own
+   devices find each other. Setting "Szukaj znajomych w tej samej sieci
+   Wi-Fi" (Advanced → Network and service; on by default on computers, off
+   on phones); the node config gets `ZenLanDiscovery` (`Enabled`, `Secret`,
+   `OnWiFi`) at every node start, the secret is HKDF(`zen.lan.v1`) of the
+   account's self key (itself derived from the account key), and the bridge
+   derives an HMAC-SHA256 multicast password from it; phones only on Wi-Fi
+   interfaces. Android holds a `WifiManager.MulticastLock` only while it is
+   on (`runtime_lan_discovery.dart`, `ZenMulticastLock.kt`). Others on the
+   network still see the beacon (the node key). iPhone: needs Apple's
+   multicast entitlement, so it does not work there yet.
 
 | Attack | Defense |
 |---|---|
@@ -332,8 +335,7 @@ IPv4, because Android WebRTC binds sockets to the network); a local socket
 is accepted only if its first datagram is an ICE check with this call's
 username (random ufrag of both sides, known only from encrypted signaling),
 so "first come, first served" no longer works (`relay_admission.go`,
-`bridge_relay.go`); compatible with 1.10.0 bridges. Missing: the local
-network (item 6). A public node sees the IP and the permanent node key,
+`bridge_relay.go`); compatible with 1.10.0 bridges. A public node sees the IP and the permanent node key,
 i.e. the invitation code (`STATUS.md` §6 item 8).
 
 ### 5.2 Updating Yggdrasil
@@ -348,9 +350,9 @@ i.e. the invitation code (`STATUS.md` §6 item 8).
   prebuilt libraries in the repository (`RELEASES.md` §3.1). Since 1.11.0
   the Android bridge is built for three ABIs (arm64-v8a, armeabi-v7a,
   x86_64), each with its own `.sha256` marker, and the `YggGetBuildInfoJson`
-  export reports the Yggdrasil version, Go version, OS and architecture.
-  Missing: the Go version in the checksum (add `go version` to the
-  `build_if_changed.*` scripts) (S).
+  export reports the Yggdrasil version, Go version, OS and architecture
+  (shown under Network and service → technical info). The checksum also
+  includes `go version`, so a new Go release rebuilds the bridge.
 - **Permanently:** the public node list is refreshed with every release,
   a quarterly review of Yggdrasil and Go releases; the bridge book
   gradually replaces the list.
@@ -384,10 +386,10 @@ i.e. the invitation code (`STATUS.md` §6 item 8).
 - The identity on the network is still the Yggdrasil node key (address =
   key = invitation code, no rotation). Goal: the identity is the account
   key, node keys are replaceable and certified (L).
-- The pyramid key is random on each device: a lost phone means losing the
-  wallet and the place in the pyramid, and a phone and a computer count as
-  two people to the pyramid. Fix: a key derived from the account key (HKDF)
-  (S/M).
+- The pyramid key is derived from the account key (HKDF, label
+  `zen.pyramid.v1`), kept next to the device key: every device of the
+  account is one person in the pyramid, and a recovered account gets its
+  place and wallet back (**done 21.10.2026**, A7).
 - Paper backup of the account key: **done in 1.11.0** (§6.3).
 
 ### 6.2 Credentials (general mechanism)
@@ -402,10 +404,16 @@ A signed sentence by one person about another: `{who, about whom, what, until wh
 | **Vouching** | a friend | "this is a real person"; false vouching is penalized (§21.5) |
 
 **Status: Partial.** Pyramid member and basic data work as pyramid records.
-There is no common credential type. "Met in person" is today a local,
-unsigned marker (`metInPerson`), set by Bluetooth and at events, but not
-when adding by QR, and not exchanged with friends — so "verified" (§11) and
-the referendums of §20.6 have nothing to rely on (M). Since 1.11.0, after
+There is no common credential type. **"Met in person" (21.10.2026)** is a
+signed `met` entry in the attester's `acts` (`{a: other account, d: day}`),
+which friends replicate: written after adding by a scanned QR, "Nearby"
+and "We met" at an event (with the level question below), and for a
+friend seen close by Bluetooth while the app runs (not from the background
+service). Each side signs its own; the side that showed the QR signs only if
+it also confirms in person, which is not asked yet. When the other account
+is not known yet (friend request pending), the attestation waits up to 30
+days and is signed on their first hello. It feeds "verified" (§11) and the
+`met` pyramid records of §20.6. Since 1.11.0, after
 adding by a scanned QR, "Nearby" and "We met" at an event, the app asks
 "Jak blisko się znacie?" (How close do you know each other?: casual contact
 / friend / close friend; "Skip" = friend); the level is visible only to you.
@@ -422,11 +430,14 @@ back with them.
 
 **Status: Done.** In 1.11.0: **paper backup** of the account key
 (`account/paper_backup.dart`: seed + 3 checksum bytes = 56 base32
-characters, 14 groups of 4, QR `zen-key:<code>`); screen `PaperBackupScreen`
-(asks again for the app password and the account password if set, secure
-screen, warnings, QR on demand, check of 2 random groups) and
-`PaperRestoreScreen` (typing/scan, account fingerprint to confirm, taking
-over the account on a new device), reachable from "Konto i odzyskiwanie"
+characters, 14 groups of 4, QR `zen-key:<code>`) and an **encrypted key
+file** (`account/key_file.dart`: `zen-klucz-<date>.zenkey`, versioned header,
+Argon2id + AES-GCM, password typed twice); screen `KeyBackupScreen` "Kopia
+zapasowa klucza" (asks again for the app password and the account password if
+set, secure screen, warnings; option "Zapisz plik kopii" and option "Pokaż
+klucz jako kod" with QR on demand and a check of 2 random groups) and
+`KeyRestoreScreen` (file + password, or typing/scan; account fingerprint to
+confirm, taking over the account on a new device), reachable from "Konto i odzyskiwanie"
 (Account and recovery). After the permissions step a card "Zabezpiecz konto"
 (Secure your account) offers: circle / paper copy / later (`AccountSecureStage`
 in `AppSecurityGate`, remembered in `accountSecureOffered`), and Settings
@@ -666,7 +677,10 @@ likes / 30 newest comments) + counters `nl`/`nc`/`np`, further pages in `rxp`
 entries (up to 10 pages: 2000 likes, 300 comments), older versions read
 page 0; grouped notifications in the bell on the Feed ("Cela and 3 others
 liked your post…", only what is new since last opened; in-app only, not
-system notifications). Not done: "N verified" (S/M, requires §6.2).
+system notifications). "N verified" (21.10.2026): next to "Liked by…" the
+feed shows "w tym N zweryfikowanych" — likers met in person (a signed
+attestation, §6.2) by you or one of your friends; pyramid membership is not
+counted.
 
 ## 12. Following
 
@@ -728,12 +742,13 @@ while sharing (1:1 and group) system notifications are shown without content
 (`screenShareHidesNotifications` in `call_safety_cues.dart`, read by
 `PrivacyRedactingNotificationService`), a permanent red bar "You are sharing
 the whole screen — everything is visible, notifications too", and a warning
-before starting on Android < 14 (`screen_share_guard.dart`). The screen still
-replaces the camera image (`replaceTrack`) instead of using a second track:
-camera and screen at once is **not done** — the code has one video
-transceiver per connection and one remote renderer; a second track needs an
-extra transceiver, renegotiation, a second renderer and layout in both
-screens, and cannot be tested here (S/M).
+before starting on Android < 14 (`screen_share_guard.dart`). The screen goes
+out on a second video track and the camera stays on: in 1:1 calls a second
+video transceiver (the second `m=video`, carrying the screen stream's msid)
+added on demand and renegotiated through the relay-pinned SDP; in group
+calls every leg is negotiated with a camera slot and a screen slot from the
+start, so sharing is a track swap. The other side shows the screen large and
+the camera small. Not yet tested on devices.
 
 ### 13.2 Call recording (stage 3a)
 
@@ -846,9 +861,8 @@ master key (envelope encryption, AES-GCM with AAD). **Exceptions today:** the
 diagnostic log (`STATUS.md` S34) and the file with the chosen language (the
 own avatar and profile background were moved to the encrypted vault in
 1.11.0, §9). File names in `meet/list/` and `ledger/` are now hidden
-(HMAC with a storage subkey, `kZenHiddenNamePrefixes`; old readable files,
-with `.bak`, are moved at first use of the key). On Windows data now lives in
-`%LOCALAPPDATA%` instead of Roaming, with a one-time move. Everything
+(HMAC with a storage subkey, `kZenHiddenNamePrefixes`). On Windows data
+lives in `%LOCALAPPDATA%` instead of Roaming. Everything
 copied to the clipboard (including pyramid codes and post links) is cleared
 after 60 s through `copyWithExpiry`.
 
@@ -909,7 +923,7 @@ weak points are distribution, the network and people.
 | 5 | Network blocking | direct connections between friends, HTTPS-like traffic (TLS on 443), bridges from friends without a central list; later Tor and a Bluetooth/Wi-Fi Direct mesh |
 | 6 | Blocking of the download page | There is no own page — there is the repository README and the invitation page on GitHub Pages. Repository mirrors (e.g. Codeberg) and "Pass It On" work without them |
 | 7 | Pressure on the author | Open code; the license lets anyone build from unchanged code and distribute copies with the same SHA-256; no kill switch (no server); a canary. **Weakness:** one signing key of one person and a ban on forks (`STATUS.md`) |
-| 8 | Prosecution of users | Camouflage (plan: another icon and name, entry via PIN), panic password, pseudonyms, HTTPS-like traffic. The app makes detection harder, it gives no legal protection |
+| 8 | Prosecution of users | Camouflage (another icon and name on Android; entry via PIN not done), panic password, pseudonyms, HTTPS-like traffic. The app makes detection harder, it gives no legal protection |
 | 9 | Pressure on pyramid leaders | Pseudonyms, replacing the absent (§20.4), 8 of 15 treasurers |
 | 10 | Labeling as "harmful" (Play Protect) | Open code, verifiable sums (§14.3); ADB always works |
 
@@ -953,10 +967,14 @@ weak points are distribution, the network and people.
   `can` in `zen_rel`, ignored by 1.10.0); after `until` a warning "not
   renewed" appears (`RELEASES.md` §8.3). The signed release manifest lists
   repository mirrors (`mirrors`), shown in the app.
-- **To do:** camouflage (S–M; not done — needs moving LAUNCHER from
-  MainActivity to an activity-alias, and on many launchers the home-screen
-  shortcut disappears on update, which cannot be checked without a device),
-  Tor, Wi-Fi Direct, Bluetooth mesh (L), installation instructions with
+- **Camouflage (done, Android; not tested on a device):** Settings > Security
+  > "Kamuflaż ikony" swaps the launcher icon and name for a neutral "Notatki"
+  notepad. `MainActivity` has no LAUNCHER filter; two `activity-alias`es
+  (`LauncherDefault` enabled, `LauncherDisguise` disabled) carry it and
+  `ZenSystemBridge` `setDisguise` flips them so exactly one is enabled. It
+  changes only the launcher look: the real name stays in system settings.
+  Entry via PIN is not done.
+- **To do:** Tor, Wi-Fi Direct, Bluetooth mesh (L), installation instructions with
   pictures (Android with the 2027 advanced path, Windows SmartScreen, macOS
   "Open anyway") (S), registering as a verified developer (S, organizational).
   Other store requirements (D12: foreground service declarations, 18+,
@@ -1095,13 +1113,8 @@ Done on 20.10.2026 (for 1.11.0):
   one-time X25519 key. The reply travels over Bluetooth (v8), with the address
   encrypted for that one phone; only then does the author write over the
   network (with proof of knowing the key), so addresses are learned only by
-  people who replied to each other. Older phones (1.10.0) get the old greeting;
-  the screen warns that they will see the address.
-- **Compatibility with 1.10.0 (temporary):** the old secret (`k`), old tokens,
-  old greetings (v1) and v5 alarm waves from friends who gave only the old
-  secret are still sent and read. A v5 wave no longer counts from a friend with
-  the new keys. Known limitation: a 1.10.0 phone does not recognise the
-  presence of an updated friend (it sees a stranger); alarms work both ways.
+  people who replied to each other. Phones that show a token without a hint
+  are not listed.
 - **Persistent blocks** (`MeetBook.nearbyBlocked`, `nb`), with "Unblock" on the
   screen.
 - **"1 message from a stranger until you reply"** is now enforced on the
@@ -1201,9 +1214,8 @@ reception also with the app closed; each wave rings once); 5× power shortcut
 (optional, requires PINs, vibration long–short–long); **acknowledgements**
 `alarm_ack` ("got" immediately, "seen" on opening), accepted only from those
 the alarm was sent to; after ~60 s "Not delivered to: …" with "Send again" and
-advice to phone them. The Bluetooth wave is signed (v5, HMAC-SHA256 with the
-"Nearby" secret, ±10 min, no replays; 1.10.0), and since 20.10.2026 v6 with a
-per-friend pair key (§15): only a verified friend's alarm rings, strangers
+advice to phone them. The Bluetooth wave is signed (v6, HMAC-SHA256 with a
+per-friend pair key (§15), ±10 min, no replays): only a verified friend's alarm rings, strangers
 produce a quiet "Unverified…" note. The alarm goes out before the "Meetings"
 state is saved (B10, 1.10.0). Added on 20.10.2026: a **fresh location for the
 background shortcut** (`currentFixInBackground`, no consent prompt, read under
@@ -1346,26 +1358,24 @@ money.
 
 - An A6 sticker (PNG, 300 dpi): QR + name + own tagline ("Scan — come over
   for coffee!"). The code contains the flat's address and key, not accounts.
-  **Done 20.10.2026 (door code v2, `FlatDoorCode`):** flat key + sticker
-  tagline + name + exactly one "door inbox" address
-  (`NeighborsService.doorInbox` — a dedicated address if the host has one;
-  otherwise the address of the phone by the door). Never a list of household
-  members' addresses. Old stickers (without `v`, up to 3 addresses) are still
-  read and knock, but are no longer created. The sticker carries the link
-  `https://…/Zen/m#<code>` (`toLink()`); Zen reads both forms. The sticker
-  screen honestly says that without a dedicated inbox the address in the code
-  is that of the phone by the door. Open: a truly separate inbox identity needs
-  a second node/relay.
-- "New code" invalidates the old one (whoever scans the old one sees
-  "invalid").
+  **Done (`FlatDoorCode`):** flat key + sticker password + name + the address
+  of the flat's door, never a resident's. The door is a second, minimal
+  Yggdrasil node in the bridge (`door_node.go`, `YggStartDoorNode`) with its
+  own random key, kept on that phone only, peered to the main node over
+  loopback; it takes only knock frames (`flat_hello`) and hands them to the app
+  marked as door traffic; the app answers from its normal identity, and a knock
+  with a wrong password gets no answer. The sticker carries the link
+  `https://…/Zen/m#<code>` (`toLink()`); Zen reads both forms.
+- "New code" invalidates the old one and gives the door a new key, so the old
+  sticker's address no longer answers.
 - The code has the form `zen-flat:…` and works without a website. The app also
   understands the link `https://<domain>/m#<code>`. There is no site of its
   own; invitations lead to the invitations page on GitHub Pages (§6.1). **Done
   20.10.2026:** the page `tool/pages/m/index.html` (English + Polish in a TEXTS
   object); a script in `index.html` redirects a long door-code hash to `m/`, so
   a door code scanned with an ordinary camera opens Zen or the download.
-  Open: `zen://m/<code>` and `/m#` links are not yet routed in
-  `runtime_route_intent.dart`.
+  `zen://m/<code>` and `/m#` links open the neighbours section and, after a
+  confirmation, knock.
 
 ### 18.3 My neighbours
 
@@ -1407,22 +1417,25 @@ outvote the rest in neighbours' eyes.
 **Idea:** you date people within 3 steps of friendship, always with someone in
 common you can ask.
 
-**Status: Done** ("Dating" — "Randki" — on the bar), but distribution does not
-scale (§19.7).
+**Status: Done** ("Dating" — "Randki" — on the bar); distribution through
+lanterns (§19.7).
 
 ### 19.1 Dating profile
 
-- Switched on deliberately (off by default), a 18+ age declaration without
-  documents; minors can be reported (§19.6).
+- Switched on deliberately (off by default); no separate age question (the
+  profile's age is needed for matching and must be at least 18); minors can
+  be reported (§19.6).
 - Separate, built from the main profile with one tap: name, age, gender, "about
   me", "what I'm looking for", up to 4 photos, preferences (gender, age, 1–3
   steps). Matching is mutual.
 - **Nobody knows who is dating:** every app has a dating key (X25519) and every
-  week sends friends a packet — a profile or a decoy of similar size (padded to
-  a multiple of 4 KB). Everyone forwards packets on, up to 3 steps, appending
-  themselves to the path; a phone without dating does not open or store them.
-  A packet is encrypted with that packet's key, which anyone receives on
-  request via the return path — traffic looks the same for everyone.
+  week sends friends a small lantern (§19.7) — real, or a decoy of the same
+  shape. Everyone forwards lanterns on, up to 2 steps, appending themselves to
+  the path; a phone without dating keeps nothing. A phone that sees a lantern
+  that fits asks for the profile via the return path (the answer is sealed to
+  the asker and padded to a multiple of 4 KB, a cover when dating is off); a
+  phone with dating off asks for a share of the lanterns too and drops the
+  answers — traffic looks the same for everyone.
 - **Exclusions:** hiding from chosen friends and whole chat groups (salted
   address hashes in the profile).
 - Turning dating off: the profile stops spreading and disappears from others
@@ -1449,7 +1462,7 @@ scale (§19.7).
 - **Vouches:** a few signed (Ed25519) words from a friend on the profile; the
   signature covers the dating key, name, text and time.
 - Return messages (likes, pair conversations, introductions) travel back step
-  by step along the packet's route, in two layers of encryption; phones along
+  by step along the lantern's route, in two layers of encryption; phones along
   the way do not even know the sender's key.
 
 ### 19.4 Date safety
@@ -1469,9 +1482,9 @@ scale (§19.7).
   in SafeDate are optional).
 - Blocking a person; reports (§19.6).
 
-Honestly: the packet key goes to anyone in reach who asks — a modified app sees
-profiles in reach and one-sided "Yes"es. Packet size reveals a range. At most
-100 new packets per day from a friend; packets over 512 KB are not forwarded.
+Honestly: the profile goes to anyone in reach who asks — a modified app sees
+profiles in reach and one-sided "Yes"es. The answer's size reveals a range. At
+most 100 new lanterns per day from a friend (§19.7).
 
 ### 19.5 Browsing cards (like Tinder)
 
@@ -1494,27 +1507,34 @@ pyramid, your own block remains.
 
 **Reporting a minor (20.10.2026):** a separate menu item on the profile. It
 immediately disables the profile locally (`reportMinor`: disappears from lists,
-pairs, is not accepted, does not receive the key of our packets), then reports
+pairs, is not accepted, gets no answer to its profile requests), then reports
 to the pyramid (reason "minor") and hides it. Signal for others: reports ride
-on dating packets (field `mr` in the encrypted content, decoy packets too, so
-it reveals nothing). A phone that opens packets from >= 2 different reporting
+on the profiles a phone sends on request (field `mr` in the sealed answer, covers
+too, so it reveals nothing). A phone that opens profiles from >= 2 different reporting
 dating keys disables the profile on its side (`kDatingMinorQuorum`). The
-pyramid's decision works as before via `isBanned`. Backward compatible
-(unknown field `mr` ignored). Known limitations: minor reports count distinct
+pyramid's decision works as before via `isBanned`.  Known limitations: minor reports count distinct
 dating keys, which are cheap (a Sybil attack could hide someone's profile from
-people who receive packets of both fake keys); reports only within 3 steps.
+people who fetch profiles of both fake keys); reports only within 2 steps.
 
-### 19.7 Distribution scale
+### 19.7 Distribution scale (lanterns)
 
-**To do (L).** Traffic grows as the cube of the number of friends
-(`dating_service.dart`): every week a packet of 8–52 KB from each friend,
-forwarded up to 3 steps; at ~150 friends that is tens of thousands of packets
-per week per phone. Plan: small **beacons** (~100 B: dating key, preference
-range, path) distributed to **2 steps**, with the profile fetched only on
-request when a beacon matches. Preserve "nobody knows who is dating" (decoy
-beacons). Not done on 20.10.2026: it is a change to the distribution protocol
-(L) that does not fit a small release without compatibility risk; it remains
-in `STATUS.md`.
+**Done 21.10.2026.** The weekly 8–52 KB packet flooded 3 steps made traffic
+grow as the cube of the number of friends. Now every phone sends a
+**lantern** (`date_lantern`, ~100 B: dating key plus 6 bytes — age, gender,
+preference range, genders, steps) to **2 steps** (`kDatingMaxHops`; the
+distance slider in the profile is 1–2). The profile is fetched **on request,
+only when the lantern fits** both ways (age, gender, preferences, distance):
+the asker sends a sealed `fetch` back along the way the lantern came, the
+sender answers with a sealed `prof` (the profile, or a cover with dating off,
+padded to 4 KB buckets; the reports of a minor ride in it, real or cover).
+"Nobody knows who is dating" is kept: dating-off phones send decoy lanterns
+(random valid values) and ask for a share of the lanterns they see
+(`kDatingDecoyFetchShare`), dropping the answers. Limits: a dating key is
+answered at most `kDatingFetchesPerKeyPerDay` times a day, 100 new lanterns a
+day per friend, blocked, banned and hidden-from keys get no answer. Honestly:
+the lantern shows age, gender and preferences of everyone to the phones on its
+way, real or decoy, so they cannot tell who dates but can see a plausible
+age/gender; anyone in range who asks gets the profile (as before).
 
 ---
 
@@ -1559,8 +1579,10 @@ gaps: end of §24.
 
 ### 20.2a Basic data confirmed at entry
 
-- At entry you give your birth year, nationality and gender; the admitting
-  person (meeting in person) signs that it is true and vouches for it.
+- At entry you give your nationality and gender, and optionally your birth
+  year (skippable: without it there is no age badge and no age in the
+  statistics, and joining is not blocked); the admitting person (meeting in
+  person) signs that it is true and vouches for it.
 - The data stays unchanged as long as you are in the pyramid; a correction =
   leaving and re-entering from the bottom. This way nobody, years into a
   promotion, "changes" their nationality to take over another country's
@@ -1644,10 +1666,13 @@ need 2 of 3 in cells of real people. A meeting in person at every admission
 costs time. Plus reports and penalties (§21.5), and referenda could be counted
 only from members "met in person" by at least 2 people.
 
-**Not done (20.10.2026):** referenda counted only from "met in person" by >= 2
-people — there is no such signal in the pyramid: "met in person" is a local,
-unsigned marker (`STATUS.md` §10, §6.2). It needs signed meeting attestations
-(a "met" record type) and a rule in the referendum sums (rules 3).
+**Done (21.10.2026):** a member who signed a "met in person" attestation
+(§6.2) about another member's account also signs a `met` pyramid record about
+their pyramid key. The fold counts distinct current members per person; only
+members met by >= 2 vote (`eligible`), a cell head's sum may add at most one
+vote per such direct member (and the root's vote only if the root is one),
+and the quorum of binding referenda counts only them. The Votes tab says why
+someone cannot vote yet.
 
 ## 21. Power, delegations, bans, reports, referenda
 
@@ -1667,8 +1692,7 @@ unsigned marker (`STATUS.md` §10, §6.2). It needs signed meeting attestations
 | Merging pyramids | no | §20.5 |
 
 Done on 20.10.2026: timeouts of 24 h / 7 days / 30 days in a report decision.
-A content ban carries the entry id (`eid`, S36); the text hash stays for
-1.10.0.
+A content ban carries the entry id (`eid`, S36).
 
 ### 21.1a Immunity in the pyramid
 
@@ -1703,11 +1727,8 @@ The top cannot ban everyone who approaches it:
   before anyone sees them); sums only after the end; the head must include the
   newest sum of each branch (without it, it counts after 6 h), each once;
   numbers bounded by branch size.
-- **Rules generation 2 (20.10.2026, `PyrParams.rules`, `kPyrRules = 2`):**
-  changes that would alter the fold result between 1.10.0 and a newer phone
-  apply only at `rules >= 2`. A new pyramid (genesis from this version) starts
-  with `rules: 2`; existing ones (no field) have `rules = 1` and get the new
-  rules only by a constitutional referendum (`params.rules = 2`).
+- **Rules (20.10.2026):** there is one set of fold rules (no `rules` generation
+  in `PyrParams`).
   - **S18:** a record whose rule throws during application leaves no trace —
     the fold is recomputed with that record rejected up front ("bad record"),
     deterministically on every phone (instead of copying the state per record,
@@ -1744,7 +1765,7 @@ from those who handle them, with limits (1.10.0). Done on 20.10.2026:
 - **S36:** a report carries the entry id and (when the phone has it) the signed
   original `LogEntry`; the recipient keeps it only after verifying the device
   signature and certificate; a content ban by entry id (also hides a modified
-  copy), the text hash for older phones.
+  copy).
 - Timeouts 24 h / 7 days / 30 days (§21.1); a "Passed up: no decision below."
   marker.
 
@@ -1885,7 +1906,7 @@ without internet there is no transfer; collusion of a majority of the 15 could
 cheat. A treasurer signs only orders not older than a week and not from the
 future.
 
-**Issue above the limit by referendum (20.10.2026, `rules >= 2`):** a
+**Issue above the limit by referendum (20.10.2026):** a
 `kind: 'emit'` referendum of the whole pyramid (min. 72 h, announced by 2 of 3
 of the top) on a specific amount for a specific person; after the end + 6 h
 the top issues with `ref` — once; the day's wait and the veto still apply; it
@@ -1989,9 +2010,8 @@ device address (M/L); the pyramid key from the account key (S/M); recomputing
 from scratch every 60 s on the interface thread and all records at every
 member (M–L: checkpoints, incremental background computation, a phone keeps its
 own branch); transfer privacy (L); transfers spread to all members, whereas
-§23 speaks of treasurers. Smaller (`STATUS.md` §10): referenda without the
-"met in person" requirement (§20.6) and reversal of transfers proven to be
-fraud. The `report` and `appeal` acceptance from anyone was fixed in 1.10.0
+§23 speaks of treasurers. Smaller (`STATUS.md` §10): reversal of transfers
+proven to be fraud. The `report` and `appeal` acceptance from anyone was fixed in 1.10.0
 (S1). Done on 20.10.2026 from the earlier list: timeouts of 24 h / 7 days / 30
 days, admission with a "Friend" level check, "Reached / read" counters, pinning
 in the national section, issues above the limit by referendum, the price list
@@ -2157,7 +2177,7 @@ a bar under the connection bar and a row in the report.
 | 5 | Approving releases | a version with a backdoor as an update | §14.2 "Open decision", 7 days before activation |
 | 6 | Treasurers see transfers | taking over a treasurer's phone = the financial history of pseudonyms | pseudonyms, deleting old transfers, a panic passcode; transfer privacy later |
 | 7 | No moderation before the pyramid | illegal content in shares and at intermediaries | "Remove from device" with a hash block (M); a button with instructions for law enforcement; an optional hash list from a chosen organisation |
-| 8 | Minors | a network for < 16 requires parental consent (GDPR) | **age gate (done 20.10.2026)**: before Dating, the Pyramid and the Wallet, a question for the date of birth or "I am 18 or older"; the answer only on the device (settings). Under 18 the sections are closed ("Available from 18"; the date can be corrected). It is a declaration (§27). No restricted mode for < 16 in the rest of the app (S) |
+| 8 | Minors | a network for < 16 requires parental consent (GDPR) | **no age gate (owner's decision, 21.10.2026)**: Dating and the Wallet do not ask about age; the Pyramid asks for an optional birth year (§20.2a) that is not a condition for joining. Reporting a minor (§19.6) remains. No age verification and no restricted mode for < 16 (S) |
 | 9 | A state "big pyramid" | disinformation about the movement's strength | everyone sees the legitimacy of their own pyramid; numbers verifiable in the branch |
 | 10 | Infiltration | taking over the structure from within | removal by swapping, public acts, immunity |
 | 11 | Delayed Yggdrasil update | known bugs | a quarterly review (§5.2) |
@@ -2276,9 +2296,9 @@ browser version is out (a server could swap the code).
 - **Politics:** the app has no parties or party accounts (§22.3), so the
   currency does not finance parties. Foreigners in the pyramid and campaigns —
   to be analysed. The app cannot enforce an election silence.
-- **Dating:** 18+ is a declaration (deliberately); terms and a quick way to
-  report minors are needed — the report-a-minor path is done (§19.6), and the
-  age gate (§26.1 #8).
+- **Dating:** 18+ is stated in the terms only (no age question, deliberately);
+  terms and a quick way to report minors are needed — the report-a-minor path
+  is done (§19.6).
 - **Illegal content:** the absence of an operator does not remove the risk;
   rules, reports, "Remove from my device".
 - **GDPR:** the author may be deemed a joint controller; the "right to

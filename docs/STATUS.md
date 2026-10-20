@@ -26,7 +26,7 @@ numbers may be off by a few. Reviews of 14 Oct 2026: second security audit
     ABIs — arm64-v8a, armeabi-v7a (older 32-bit phones) and x86_64
     (ChromeOS, emulators); native libraries are stored compressed so three
     ABIs do not make the file ~2.5x bigger. 32-bit x86 is not supported
-    (Flutter has no release engine for it). A **"store" flavor** (Play,
+    (Flutter has no release engine for it). An **`appStoreOnly` flavor** (Play,
     Galaxy Store) exists, built by hand: no `REQUEST_INSTALL_PACKAGES`, no
     self-update, "Pass it on" becomes a link (D12).
   - **Windows** x64 (`Zen-Windows.zip`); **Windows ARM64** is new and
@@ -77,7 +77,9 @@ numbers may be off by a few. Reviews of 14 Oct 2026: second security audit
   haptics) when recording starts, for the recorder and the other
   participants. Group **Board** tab (a post is a normal group message with
   an id `grp-board-…`; older participants see it as an ordinary message). GIFs
-  from the **klipy.com** search (third party; S29, S37).
+  from the **klipy.com** search (third party, contacted by the sender's device
+  only; the chosen GIF is downloaded by the sender and sent as an ordinary image
+  attachment, so the recipient never contacts klipy.com; S29, S37).
 - **Account:** password, recovery circle (up to 6 people: password + 2 after
   24 h or 4 without a password after 7 days), several devices on one
   account, chat history on a new device. New: **paper backup of the
@@ -123,11 +125,13 @@ numbers may be off by a few. Reviews of 14 Oct 2026: second security audit
   blocks with "Unblock", "1 message from a stranger until you reply"
   enforced at the receiver, badges next to strangers (distance, "wrote to you",
   "waiting for reply", "you are chatting", "older Zen version").
-- **Neighbors (§18):** door code v2 (flat key + sticker password + name +
-  exactly one address — the door mailbox if the host has one, otherwise the
-  address of the door phone; never a list of residents' addresses; old stickers
-  still read), link `https://…/Zen/m#<code>` and a `/m` page (English + Polish),
-  invitation chat ("Ask" button on an invitation).
+- **Neighbors (§18):** door code (flat key + sticker password + name + the
+  address of the flat's **door**: a second, minimal Yggdrasil node with its own
+  random key that the phone runs next to its own node, peered over loopback,
+  taking only knocks; "New code" gives it a new key; never a resident's
+  address), link `https://…/Zen/m#<code>` and `zen://m/<code>` open the knock in
+  Zen, a `/m` page (English + Polish), invitation chat ("Ask" button on an
+  invitation).
 - **Dating (§19):** full mechanisms plus: **location on demand** for "I'm
   going on a date" (the watching friend taps "Ask for location"; the date's
   phone asks consent or answers by itself if the person allowed it at start;
@@ -171,8 +175,10 @@ numbers may be off by a few. Reviews of 14 Oct 2026: second security audit
   carries the device address only after the first public post or share. After
   meeting in person (QR, Nearby, "We met" at an event) the app asks "How close
   do you know each other?". The recovery circle and mailbox slots go to close
-  friends first. **Age gate** before Dating, Pyramid and Wallet: date of birth
-  or "I am 18 or older", stored only on the device (a declaration; §27).
+  friends first. There is no age gate: Dating, the Pyramid and the Wallet do not
+  ask for age. Dating asks only for the age on the dating profile (needed for
+  matching); the Pyramid asks for an optional birth year when joining, for the
+  badge and statistics (§20.2a), and skipping it blocks nothing.
 - **First run:** a short "Welcome to Zen" card, password, then the permissions
   screen — location, background location (Android 10+), exact alarms
   (Android 12+), Bluetooth, battery instructions per manufacturer (Xiaomi,
@@ -192,7 +198,8 @@ numbers may be off by a few. Reviews of 14 Oct 2026: second security audit
   spaces `<kind>/<account>` are stored for the owner (limit 1000 entries per
   device log); **feature flags** (Pyramid, Wallet, Dating, Neighbors; default on;
   Settings → Experimental features; `--dart-define=ZEN_FEATURE_*`,
-  `ZEN_FEATURES_LOCKED=true`) hide the tabs, data and services stay; formats
+  `ZEN_FEATURES_LOCKED=true`) hide the tabs and `ZenCore` does not start the
+  feature's services (the data stays); formats
   with `v: 1` for settings, profile and flags; golden protocol frames
   (`test/wire/golden_frames_test.dart`).
 - **Performance:** AES-GCM of stores and ChaCha20 of post media above 64 KB and
@@ -232,14 +239,13 @@ Changes of the latest round: `CHANGELOG.md`, 1.11.0.
 | License (14 Oct 2026): PolyForm Strict 1.0.0 with additional permissions — anyone, including companies and public offices, may use Zen for any purpose; reading the code, sending pull requests, building from unchanged code and handing out unchanged releases (same SHA-256) are allowed; selling Zen, charging for access to it or bundling it into paid products and services is not; the author and the fundraiser must stay; forks and modified versions are forbidden | project continuity depends on the author (§6 pt 4); the license is not free (OSI/FSF), so F-Droid and IzzyOnDroid are out (§9); app stores require publication by the author |
 | Translations (14 Oct 2026): own `t()` with Polish text as the key and JSON files instead of the ARB from §25.1; 21 languages; the choice is saved in a plain `language.txt` in the data folder (needed before unlock and in the background service) | fixing a Polish text loses its translations, two meanings of the same string get one translation (A23); the chosen language is visible without the password |
 | Linux and macOS in releases (14 Oct 2026): archives from CI, unsigned; macOS **without App Sandbox**, ad hoc signature | Zen runs `route`, `adb`, `open` (reason in `macos/Runner/Release.entitlements`); data without a sandbox container; after every update macOS asks for keychain access; since macOS 15 the first launch only through "Open Anyway" (D10) |
-| Android store flavor (20 Oct 2026): a separate `store` flavor (default stays the full `direct`), enabled only by a flavored task (`--flavor store\|direct`) or `-Pzen.flavors=true` | ordinary `flutter build apk` / `flutter run` are unchanged; the store build is made by hand (`flutter build appbundle --release --flavor store`), the rest of D12 is not done |
+| Android store flavor (20 Oct 2026): a separate `appStoreOnly` flavor (label "Zen (sklep)", files `Zen-APP-STORE-ONLY-do-not-install-manually.*`; default stays the full `full`), enabled only by a flavored task (`--flavor appStoreOnly\|full`) or `-Pzen.flavors=true` | ordinary `flutter build apk` / `flutter run` are unchanged; the store build is made by hand (`flutter build appbundle --release --flavor appStoreOnly`), the rest of D12 is not done |
 | Android ABIs (20 Oct 2026): one universal APK with three ABIs, compressed native libraries (`useLegacyPackaging`) | the APK is larger; `--split-per-abi` works, but self-update and "Pass it on" assume a single file |
 | Linux playback (20 Oct 2026): own GStreamer backend rather than `video_player_media_kit` or `fvp` | media_kit swaps `malloc` of the whole app for mimalloc and hard-depends on libmpv; fvp adds FFmpeg/mdk to every platform; the `.deb` recommends `gstreamer1.0-libav` |
 | Heavy work off the UI thread (20 Oct 2026): short-lived isolates (`runSizedWork`, data > 64 KB), disabled under `flutter test`; `cryptography_flutter` **not** adopted | it would replace `Cryptography.instance` app-wide (also Ed25519, which is non-deterministic on Apple CryptoKit, X25519, HKDF…); to do with a device and `--profile` measurement (A19, A32) |
 | Alarm fallback SMS opens the system SMS app | no `SEND_SMS` permission, so the user presses send |
-| Pyramid rules generation 2 (20 Oct 2026): rule changes that alter the fold apply only at `rules >= 2`; new pyramids start with `rules: 2`, existing ones have `rules = 1` and get them only by a constitutional referendum (`params.rules = 2`) | mixed 1.10.0 / 1.11.0 phones compute the same result as long as `rules = 1` |
 | Group board post = a normal group message with a flag in the id (`grp-board-…`) | no protocol or disk-format change; older participants see an ordinary message |
-| Age gate is a self-declaration stored on the device (20 Oct 2026) | no verification (§27); no restricted mode under 16 for the rest of the app |
+| No age gate anywhere (owner's decision, 21 Oct 2026); the birth year in the Pyramid is optional | no age verification and no restricted mode under 16 (§27) |
 | Biometrics off by default; lock after 5 min in the background by default | — |
 | AI assistant removed (V1.9) | — |
 | Pyramid without parties (14 Oct 2026) | politics is votes and delegation, no electoral lists |
@@ -266,7 +272,7 @@ redrawn without pause (B5), "uninstall" advice in ADB (B9), alarm blocked by a
 big "Meetings" state (B10).
 
 Performance on a weaker phone (A32): the biggest cost is cryptography and
-folding the pyramid (A5), encryption in pure Dart and bridge polling (A19).
+folding the pyramid (A5) and encryption in pure Dart (A19).
 Measure with `flutter run --profile`. 1.11.0 moved large AES-GCM/ChaCha work and
 big JSON parsing into isolates and made the Feed lazy and memoized; not
 measured on a device.
@@ -281,15 +287,15 @@ independent review is needed, especially of the ring cryptography (§24,
 
 | # | Severity | Problem | Where | Fix | P, size | Status |
 |---|---|---|---|---|---|---|
-| S5 | Medium | The "Nearby" greeting reveals the stable address while the UI says "not your account" | `nearby.dart:487`, `nearby_screen.dart:87` | one-time address or correct text | P2, M | **done in 1.11.0:** greeting v7 (nickname, message, token, one-time X25519 key), reply over Bluetooth (v8) with the address encrypted to that one phone; only people who replied learn addresses. Remaining: a phone on 1.10.0 still gets the old greeting with the address (the screen warns), remove with the compatibility code |
-| S6 | Medium | One "Nearby" secret for all friends: a friend can fake your presence to others and sign a false alarm wave in your name (S2 closes strangers, not friends); the token change was not synced with MAC rotation | `meet_book.dart`, `nearby_keeper.dart` | a separate secret per friend, sync with the MAC (§15) | P2, M | **done in 1.11.0:** private "Nearby" key never leaves the phone; a friend gets the mask key, anchors of a one-way hash chain (30 days) and a pair key; BLE token = chain value of the window masked (4-byte hint); alarm wave v6 signed with the pair key; token rotates every 10 min (< Android's 15 min MAC rotation). Remaining (transitional): the old secret, tokens, v1 greetings and v5 waves are still sent/read for 1.10.0; a 1.10.0 phone does not recognize an updated friend's presence (sees a stranger), alarms work both ways |
+| S5 | Medium | The "Nearby" greeting reveals the stable address while the UI says "not your account" | `nearby.dart:487`, `nearby_screen.dart:87` | one-time address or correct text | P2, M | **done in 1.11.0:** greeting v7 (nickname, message, token, one-time X25519 key), reply over Bluetooth (v8) with the address encrypted to that one phone; only people who replied learn addresses. |
+| S6 | Medium | One "Nearby" secret for all friends: a friend can fake your presence to others and sign a false alarm wave in your name (S2 closes strangers, not friends); the token change was not synced with MAC rotation | `meet_book.dart`, `nearby_keeper.dart` | a separate secret per friend, sync with the MAC (§15) | P2, M | **done in 1.11.0:** private "Nearby" key never leaves the phone; a friend gets the mask key, anchors of a one-way hash chain (30 days) and a pair key; BLE token = chain value of the window masked (4-byte hint); alarm wave v6 signed with the pair key; token rotates every 10 min (< Android's 15 min MAC rotation). |
 | S10 | Medium | The background service holds the master key while it runs | §14.1 pt 1 | service without the master key (separate keys for receiving) | P2, M | open |
 | S11 | Medium (decision) | A computer is a bridge without asking (UPnP, `tls://[::]:32913`, port 443) and reveals identity | §5.1 | conscious decision (§2); eventually a separate listener key | P3, M | open (limits added, see §2) |
 | S13 | Low | "Pass it on" listens on every private IPv4, HTTP in the same network | `share_app_server.dart:201–222` | only the chosen interface; integrity is checked by §14.3 anyway | P3, S | **done in 1.11.0:** listens on one address — the network chosen by the person (switch on the screen when there are several) or the best one (hotspot, then Wi-Fi, then cable); skips cellular (rmnet, ccmni…), VPN, VMs and containers |
 | S15 | Low | Certificate fingerprint not published (`kOfficialApkCertificatesSha256` in `apk_signature.dart` is empty, so the computer shows only the fingerprint with verdict "unknown"); Windows without Authenticode | — | enter the fingerprint at the first signed release (`RELEASES.md` §2 pt 4), §14.3 | P1, S | open; tooling ready: `tool/zen_release.dart fingerprint APK\|--keystore --write` |
 | S16 | Low | Windows Hello without hardware consent: a program of the same user can unseal the key when Hello unlock is on (no UI policy in the TPM); described in settings | — | no simple solution | P3 | open |
 | S17 | Low | The call-answer token is bound only to the address, not to the call number | — | bind to the call identifier | P3, S | **done in 1.11.0:** the "Answer" route carries the call number (`call=`), the token issued in the isolate is bound to it; routes without a number work as before |
-| S18 | Low | A pyramid record rejected during application may leave part of its changes (same at everyone, no divergence) | — | apply on a copy | P3, S | **done in 1.11.0 for rules ≥ 2:** a record whose rule throws is rejected up front ("bad record"), the fold is recomputed deterministically. Existing pyramids (`rules = 1`) get it only after a constitutional referendum |
+| S18 | Low | A pyramid record rejected during application may leave part of its changes (same at everyone, no divergence) | — | apply on a copy | P3, S | **done in 1.11.0:** a record whose rule throws is rejected up front ("bad record"), the fold is recomputed deterministically |
 
 Deep links: none performs an action by itself.
 
@@ -311,14 +317,14 @@ last column; tests pass (`flutter test`, `go test`).
 | S26 | S-8 | Low | The "after 5 min in the background" lock engages only on return — the master key and UI stay in memory the whole time in the background; no idle lock on desktop | `app_security_gate.dart:42-68` | lock timer from going to the background; idle lock on desktop (cf. S10) | P2, S | **fixed in 1.10.0 (round 2)** |
 | S27 | S-9 | Low | Screen protection and blank thumbnail in "Recents" only on selected screens: the chat list with content preview, graph, profiles and dating unprotected (also macOS) | `ZenSecurityBridge.kt:58-77`, `secure_screen.dart` | no thumbnail at all times when the screenshot block is on; chat list and dating under protection | P2, S | **fixed in 1.10.0 (round 2)** |
 | S28 | S-10 | Low (uncertain) | When the pinned SDP is rejected, the peer's original is used — ICE may connect outside Yggdrasil (IP disclosure) | `call_media_session.dart:1949-1960`, `group_call_media_webrtc.dart:736-741` | abort the call or strip `a=candidate` from the original | P2, S | **fixed in 1.10.0 (round 2)** |
-| S29 | S-11 | Low | A GIF from the peer is fetched automatically from klipy.com: the recipient's IP at a third party, the friend knows when the chat was opened; bytes go to the system decoder bypassing `media_guard` | `animated_gif.dart:43-177`, `remote_media_guard.dart` | fetch on tap; eventually the sender sends bytes as an attachment through `media_guard`, no `gifUrl` | P1, S | **fixed in 1.10.0 (round 2)** |
+| S29 | S-11 | Low | A GIF from the peer is fetched automatically from klipy.com: the recipient's IP at a third party, the friend knows when the chat was opened; bytes go to the system decoder bypassing `media_guard` | `animated_gif.dart:43-177`, `remote_media_guard.dart` | fetch on tap; eventually the sender sends bytes as an attachment through `media_guard`, no `gifUrl` | P1, S | **fixed in 1.10.0 (round 2); the sender now downloads the GIF and sends it as an attachment through `media_guard` (animation kept: structure, size, frame count and canvas validated), no recipient-side fetch** |
 | S30 | S-12 | Low | "Notifications without content" hide the content but not the title ("X is going on a date", "Answer: {question}", "Invitation: {event}") | `runtime_system_notifications.dart:217-225`, `dating_service.dart`, `ask_service.dart:523`, `event_service.dart:1141` | a generic title for sensitive categories; alarms and calls stay explicit | P2, S | **fixed in 1.10.0 (round 2)** |
 | S31 | S-13 | Low | BLE alarm waves: global limit 40/min counted before the signature check — changing MAC can drown out a real alarm | `ZenNearbyBridge.kt:107-109,598-620` | a separate pool for waves with a verified friend signature | P2, S | **fixed in 1.10.0 (round 2)** |
 | S32 | S-14 | Low | Device linking: the first `al_hello` takes the session — a stranger who knows the address can block linking (no takeover: commit–reveal and 6 digits protect) | `account_link.dart:286-311` | several parallel attempts or reset the session on mismatched digits | P3, S | **fixed in 1.10.0 (round 2)** |
 | S33 | S-15 | Low | Windows: system tools by bare name (`route`, `taskkill`, `explorer`, `adb`); `taskkill /IM zen.exe` kills any process of that name when a stranger program takes the lock port 47821; activation IPC unauthenticated | `single_instance_guard.dart:80-113,270-283`, `port_mapper.dart:502,513` | full paths; kill only own processes | P3, S | **fixed in 1.10.0 (round 2)** |
 | S34 | S-16 | Info | Diagnostic log in plain text next to the data (bridge addresses, router description, file names) | `zen_log.dart:28-79` | log in the vault or cleared on lock; broader redaction | P3, S | **fixed in 1.10.0 (round 2)** |
 | S35 | S-17 | Info | A letter and an introduction through a mutual friend without the author's signature — the broker can change text, address and name | `intro_service.dart:938-992` | the author signs the content, the recipient verifies | P3, S | **fixed in 1.10.0 (round 2)** |
-| S36 | S-18 | Info | Report: the evidence is the reporter's text; content ban by hash of the whole text (an added space bypasses it) | `content_moderation.dart:28-54` | signed original of the entry; ban by entry identifier | P3, S | **fixed in 1.11.0:** a report carries the entry id and (when the phone has it) the signed original `LogEntry`; the receiver keeps it only after verifying the device signature and certificate; the content ban is by entry id (hides a modified copy too, field `eid`); the text hash stays for older phones |
+| S36 | S-18 | Info | Report: the evidence is the reporter's text; content ban by hash of the whole text (an added space bypasses it) | `content_moderation.dart:28-54` | signed original of the entry; ban by entry identifier | P3, S | **fixed in 1.11.0:** a report carries the entry id and (when the phone has it) the signed original `LogEntry`; the receiver keeps it only after verifying the device signature and certificate; the content ban is by entry id (hides a modified copy too, field `eid`); the text hash was dropped |
 | S37 | S-19 | Info | Embedded shared Klipy API key (a comment claimed there is none); searched terms and IP go to klipy.com, `locale=pl_PL` hard-coded; documented nowhere | `chat_gif_catalog.dart:7-96` | a truthful comment; in the UI, README and privacy policy that search contacts klipy.com; consider off by default | P1, S | **fixed in 1.10.0 (round 2)** |
 | S38 | S-20 | Info | Minor: hard-coded DNS 8.8.8.8 / 1.1.1.1 (Android); `FLUTTER_TEST` in the environment disables the password requirement; the call UDP relay accepts the first local process; replying to a stranger reveals the device is online; bridge DLL also searched in the current directory (Windows) | `android_net.go`, `app_bootstrap.dart:140-149`, `bridge_relay.go`, `yggdrasil_bridge_ffi.dart:133-137` | DoH/DoT or own servers; `kDebugMode` instead of the variable; DLL only next to `zen.exe` | P3, S | **done:** 1.10.0 (round 2) `FLUTTER_TEST` only outside release, DLL only next to `zen.exe`, no reply to strangers; **1.11.0** DNS — system resolver first (incl. Private DNS), then a list (default DNS-over-TLS: Quad9, Cloudflare, Google, port 853, certificate checked; changed by exporting `YggSetDnsServersJson`), UDP relay — on desktops only on 127.0.0.1, a local socket accepted only when its first datagram is an ICE check with this call's username, before the relay has learned the name it forwards local checks (up to 40/s) but accepts no sender. Remaining: on phones the relay still listens on all IPv4 (Android WebRTC binds sockets to the network) |
 
@@ -336,7 +342,7 @@ review K9) — `SECURITY.md` and private vulnerability reporting on GitHub
 - cryptography of mailboxes and dating (X25519 + HKDF + ChaCha20-Poly1305 with
   AAD, two-layer box); the ring signature (canonical key image, torsion
   rejection, no exceptions on bad input);
-- `media_guard` (apart from GIFs, S29, and videos — a conscious risk); limits
+- `media_guard` (apart from videos — a conscious risk; GIFs are validated, not re-encoded); limits
   of incoming frames (attachments, blobs, entries of 64 KiB, budget of strangers per /64,
   signal parser, reassembly in Go — apart from zstd, S20);
 - the call-answer token; the test remote only in debug with a Host check; the
@@ -451,15 +457,12 @@ in `native/yggdrasil_bridge`. Added in 1.11.0: `test/relay_blob_test.dart`,
   back; merging pyramids rests on the signature of the source's top.
 - Mixed versions: versions before 1.10.0 are not supported (compatibility code
   removed before the first release). 1.11.0 keeps transitional paths for 1.10.0
-  (Nearby old secret and greetings, v5 waves, pyramid `rules = 1`, hash-based
-  content bans, large messages without mailbox blobs); a 1.10.0 phone ignores
-  the new pyramid record kinds `natpin` and `badge` and the `pyr_sum`
-  messages (its branch is not counted in the sums), and does not recognize an
-  updated friend's Nearby presence. To be removed once 1.10.0 dies out.
+  only for large messages without mailbox blobs. To be removed once 1.10.0
+  dies out.
 - Pyramid: a cell's boss sees the sums of direct members (a leaf is one
   person): "read" and the leaf's age/gender bucket are visible to them (like a
   vote in a triple, §21.3).
-- The age gate is a declaration; a blocked follower can still read public
+- There is no age verification; a blocked follower can still read public
   posts; the version a friend reports is their own declaration.
 
 ### 4.6 New in 1.11.0 (limitations and risks)
@@ -468,7 +471,7 @@ in `native/yggdrasil_bridge`. Added in 1.11.0: `test/relay_blob_test.dart`,
 |---|---|---|---|---|---|
 | S39 | Low | Underage reports in Dating count different dating keys, which are cheap: a Sybil attack can hide someone else's profile for people who get packets of both fake keys (quorum `kDatingMinorQuorum` = 2); reports travel only within 3 steps | `dating_service.dart` | tie the quorum to something expensive (accounts known by friends / pyramid members) | P3, M |
 | S40 | Info | The "About" text claims Zen adds its own encryption to every message; in code direct messages are protected by Yggdrasil end-to-end encryption, and Zen's own layers are mailboxes, the ledger, dating, etc. (noticed while writing the privacy documents) | About screen | correct the text (and keep `PRIVACY.md` consistent) | P1, S |
-| S41 | Info | The door code still carries one phone address when the host has no dedicated door mailbox; a true separate mailbox identity needs a second node or relay | `neighbors_service.dart` `doorInbox` | see §6 pt 15 | P1, S/M |
+| S41 | Info | The door node peers only with the resident's main node, so someone with a view of mesh paths who already suspects a resident can link the door to that phone (its path is one hop below it); the door answers only while that phone runs Zen in the foreground (not from the Android background service) | `door_node.go`, `neighbors_providers.dart` | peer the door through another public peer; run it in the background service | P2, M |
 | S42 | Info | Mailbox hosts store friends' attachments (ciphertext only) up to a quota — storage and traffic cost on their phone, they see sizes and timing | `relay/blob/…` | quota exists (20 MB per sender by default, 200 MB total); "Wi-Fi only" for blobs not checked | P3, S |
 
 ## 5. Architecture
@@ -481,7 +484,7 @@ in `native/yggdrasil_bridge`. Added in 1.11.0: `test/relay_blob_test.dart`,
 | A4 | Separate distribution mechanisms instead of ledger spaces (mailboxes, pyramid, dating, event and question chains, neighbors); the relay keeps a manual list of ~90 types from all features (`kReliablePayloadTypes`, `_directOnlyPayloadTypes`) next to the typed `ZenSignal` | `space_policy.dart:35-53`, `relay_engine.dart:166-268`, `zen_signal.dart:5-47` | new features on ledger spaces; one "friend state" mechanism; each module registers its types with a policy (`reliable`, `directOnly`, `maxBytes`, `ttl`) | P3, M–L |
 | A5 | **Cryptography in pure Dart on the UI thread**; the pyramid folded from scratch every 60 s; every member holds all records | `ledger_identity.dart:50`, `ledger_store.dart:176`, `pyramid_record.dart:155,181`, `pyramid_service.dart:1576,1604`, fold `:457-471` | crypto in Go over FFI or a separate isolate; incremental fold; signed checkpoints; the phone holds its own branch | P2, M. **Partly (1.11.0):** big AES-GCM/ChaCha work runs in isolates; remaining: signature/ring crypto, incremental fold, checkpoints |
 | A6 | The pyramid reveals the device address (breaks §6.4) | `pyramid_service.dart:3534-3537` → `pyramid_state.dart:1320-1325` | traffic through relays, no address in the state | P2, M/L |
-| A7 | The pyramid key is random on each device: a lost phone = loss of the wallet; a phone and a PC are two people | `pyramid_service.dart:820-829` | HKDF from the account key | P1, S/M |
+| A7 | The pyramid key is random on each device: a lost phone = loss of the wallet; a phone and a PC are two people | `pyramid_service.dart:820-829` | HKDF from the account key | P1, S/M. **Done (21.10.2026):** HKDF from the account seed (`zen.pyramid.v1`), kept in the ledger identity; no separate key. Per-device pyramid state (proposals, own votes, entry data) is still not shared between devices |
 | A8 | No common schema and version: enums by number, protocol without a version, dozens of "older version" branches | `social_snapshot_store.dart:51,67,92,117,520`; `attachment_transfer_store.dart:522` | before release reset the formats, enums by name, capabilities (caps) in the greeting (§7); version on the wire: A17 | P1, S/M. **Partly (1.11.0):** `v: 1` for settings, profile, flags; `ver`/`build`/`caps` in ping/pong; remaining: reset of numbers, enums by name (§7), caps in the greeting |
 | A9 | Battery: a constant wake lock and Wi-Fi lock, ping every 45 s also in the background, no "Wi-Fi only" mode | `android_background_runtime.dart:589-590`, `:1800-1830` | event-driven presence, a saving mode, media only on Wi-Fi; bridge polling: A19 | P2, M. **Partly (1.11.0):** "Media only over Wi-Fi" done (default for new installs); remaining: the locks and event-driven presence |
 | A10 | Identity = the Yggdrasil node key (address = invitation code, no rotation) | — | identity = the account key, replaceable nodes (§6.1) | P3, L |
@@ -489,21 +492,21 @@ in `native/yggdrasil_bridge`. Added in 1.11.0: `test/relay_blob_test.dart`,
 | A12 | Huge objects: `PyramidService` is one class of ~4.7k lines (84 `Future` methods), `PyramidState` ~2.2k, the chat controller ~11.9k lines in 11 `part`s with shared private state, `app_shell_screen_views.dart` ~4k lines (~40 classes), a single package | `pyramid_service.dart`, `pyramid_state.dart`, `features/social/*`, `app_shell_screen_views.dart` | `PyramidSync` / `PyramidFold` / `PyramidProposals` / `Wallet` / `Market` / `Reports`; `CallCoordinator`, `TransferCoordinator`, `PresenceService`, `FriendshipService`, `DeviceSync` as separate `Notifier`s; settings in `settings/` one file per section; then packages (`zen_core`, `zen_transport`, `zen_pyramid`…) | P3, L |
 | A13 | Tests and process: CI exists (§8), but tests run only on Windows, no APK on push and no emulator; the background service (~2.3k lines) has 5 tests, Kotlin code (BLE, calls) none; no fuzzing of network inputs in Go, no corrupt-data test (B11), no tests of `group_call_media_webrtc.dart`; `sim_network.dart` sits in `lib/` | `.github/workflows/ci.yml`, `native/yggdrasil_bridge`, `lib/src/dev/sim/` | `go test -fuzz` for `parseYggPacket`, reassembly and zstd; a test "a corrupt snapshot sends not a single frame"; `flutter test` also on Linux; simulator to `test/support`; smaller releases | P2, S. **Partly (1.11.0):** golden protocol frames (`test/wire/`) added; the rest open |
 | A14 | **Destructive reflexes** (review A1, K12): automatic replies delete something at the other side — `friend_remove` on a ping from a "stranger" (B11); a newly linked device can do the same before synchronization (`AccountRoutingTransport` rewrites the sender to the account — to check in the simulator) | `runtime_signal_bridge.dart:174-232`, `social_hub_controller_helpers.dart:131-142`, `account_routing_transport.dart:91-130` | read-only mode on unreadable data (like the background service); instead of the reflex a non-destructive `peer_unknown`; `friend_remove` only from a human action, signed with the account key, with a 7-day soft delete; regression tests | P1, S |
-| A15 | **Composition root in widgets** (review A2, A5): 8 nested "bridges" in `app.dart`, `RuntimeSignalBridge` creates 14 services, `AlarmWatcher` runs the dating and pyramid timers and reloads 8 services on return, the background service assembles a different set by hand; providers do IO and network in the body; `ZenPersistentStores` silently substitutes in-memory stores | `app.dart:65-79`, `runtime_signal_bridge.dart:86-108`, `alarm_screen.dart:1392-1471`, `pyramid_providers.dart:10-36`, `persistent_stores.dart:28-31` | `ZenCore` (pure Dart, `start`/`stop`) with a `FeatureModule` registry — the same in the UI and in the service; feature flags as a list of modules; services without side effects in constructors; required stores instead of silent `Memory*` | P1, M. **Partly (1.11.0):** feature flags (`feature_flags.dart`: Pyramid, Wallet, Dating, Neighbors); remaining: `ZenCore`, the registry, constructors without effects, required stores |
+| A15 | **Composition root in widgets** (review A2, A5): 8 nested "bridges" in `app.dart`, `RuntimeSignalBridge` creates 14 services, `AlarmWatcher` runs the dating and pyramid timers and reloads 8 services on return, the background service assembles a different set by hand; providers do IO and network in the body; `ZenPersistentStores` silently substitutes in-memory stores | `app.dart:65-79`, `runtime_signal_bridge.dart:86-108`, `alarm_screen.dart:1392-1471`, `pyramid_providers.dart:10-36`, `persistent_stores.dart:28-31` | `ZenCore` (pure Dart, `start`/`stop`) with a `FeatureModule` registry — the same in the UI and in the service; feature flags as a list of modules; services without side effects in constructors; required stores instead of silent `Memory*` | P1, M. **Partly:** feature flags (1.11.0, `feature_flags.dart`: Pyramid, Wallet, Dating, Neighbors); **step 0 done 21.10.2026:** `ZenCore` (`app/zen_core.dart`, plain Dart) with a `ZenModule` registry (`app/zen_app_modules.dart`: signal → ledger → meet → neighbors → dating → pyramid → plan), driven by `zenCoreProvider` (started by `RuntimeSignalBridge` once the security gate opens, stopped when it closes; `ZenRewriteApp` forwards `resumed` and flag changes), starts the modules in order, stops them in reverse, runs the minute duties (dating, pyramid) and resume reloads; modules of disabled features do not start (turned on/off while running: started/stopped). `RuntimeSignalBridge` otherwise only forwards visibility, `AlarmWatcher` only the alarm duties. Remaining: the background service still assembles its own set (`HeadlessBackgroundRuntimeCoordinator`, not on the registry), the Android handoff bridge, some screens still create pyramid/dating services lazily via `ref.read` (A3), constructors without effects, required stores |
 | A16 | Cyclic dependencies between features (review A3): the pyramid is imported by the feed, meetings, dating and moderation; `runtime` ↔ `shell`; `domain/` imports `social` — a "core" release needs `ref.exists(pyramidServiceProvider)` in many places | `report_content.dart:40-52`, `friend_profile.dart:3` | ports in `domain/` (`ContentBanPolicy`, `PaymentPort`, `FriendDirectory`, `ClockPort`); import rules in CI | P2, M |
-| A17 | **A network unaware of versions** (review K6, A10): the app version does not go in ping/pong or the greeting, unknown spaces are rejected (against §1.6), updates over the network are off — the network will quietly drift into versions without patches | `app_version.dart`, `space_policy.dart:55-71` | `ver`/`build`/`caps` in ping/pong; a signed release marker spread by gossip, with a bar "Zen 1.11 is out — at 4 friends"; unknown spaces "store and forward" with a limit; golden frame samples (`test/wire/`) and a mixed-version test | P1, S. **Partly (1.11.0):** `ver`/`build`/`caps` in ping/pong, remembered per friend, a quiet bar in Settings "Friends have a newer Zen version (X)" (a declaration, nothing security-related depends on it); unknown spaces of a recognizable kind (`<kind>/<account>`) stored for the owner (1000 entries per device log; ownerless spaces still rejected; shared only with the account's own devices); golden frames incl. 1.10.0 and 1.11 ping/pong. Remaining: the **signed release marker** spread by gossip, **forwarding** unknown spaces from friends (the replicator subscribes only to known spaces — needs subscriptions from `caps`), the mixed-version test |
+| A17 | **A network unaware of versions** (review K6, A10): the app version does not go in ping/pong or the greeting, unknown spaces are rejected (against §1.6), updates over the network are off — the network will quietly drift into versions without patches | `app_version.dart`, `space_policy.dart:55-71` | `ver`/`build`/`caps` in ping/pong; a signed release marker spread by gossip, with a bar "Zen 1.11 is out — at 4 friends"; unknown spaces "store and forward" with a limit; golden frame samples (`test/wire/`) and a mixed-version test | P1, S. **Partly (1.11.0):** `ver`/`build`/`caps` in ping/pong, remembered per friend, a quiet bar in Settings "Friends have a newer Zen version (X)" (a declaration, nothing security-related depends on it); unknown spaces of a recognizable kind (`<kind>/<account>`) stored for the owner (1000 entries per device log; ownerless spaces still rejected; shared only with the account's own devices); golden frames incl. 1.10.0 and 1.11 ping/pong. Also done: the signed release (existing update gossip, `zen_rel`) shows the bar "nowa oficjalna wersja X (podpisana)" only once its maintainer signatures verify here (friends' bare `ver` stays a soft hint); unknown `<kind>/<account>` spaces are forwarded between friends that advertise `spaces1` in `caps` (carried in `lg_hello`; 1000 entries per log, 256 such spaces per device). Remaining: the mixed-version test |
 | A18 | **Offline mailboxes promise more than they do** (review K3, A8): only reliable types up to 48 KB go to mailboxes; after 14 days a message vanished from the queue without a trace (B12); files go through three separate mechanisms (WebRTC channel — the whole file in memory; chunks over signals; ledger blobs) | `relay_engine.dart:47,65,166-247,1505-1513`, `realtime_attachment_transfer.dart`, `attachment_transfer_store.dart`, `blob_store.dart` | (S) state in the bubble: "waiting at friends" / "waiting until you are both online" / `failed` with "Send again"; (M) attachments as encrypted ledger blobs, recipient's relays as sources — one blob layer | P1 S / P2 M. **Done in 1.11.0** (as a separate mailbox blob layer): a *blob* = the attachment cut into chunks encrypted once with a fresh key (ChaCha20-Poly1305, nonce = chunk number, AAD = blob id, sender, recipient, number, count), the key in a small `blob_manifest` (direct or sealed by `RelayCipher` in mailboxes); two kinds: `p` (reliable payload > 48 KB, inline ≤ 1 MB) and `a` (attachment from chunked transfer, > 1 MB up to 24 MB, when WebRTC fails — the recipient gets ordinary `message_placeholder` + `message_chunk`, so reassembly and `media_guard` work as before; "delivered" after `message_ack`, error after 14 days); frames `rly_bput/bput_ack/bput_no`, `rly_bget/bchunk/bnone`, `rly_bdrop`, `rly_bdone` sent only to devices that announced `cap: ["blob1"]`; the sender stores copies at up to 3 mailboxes (`maxBlobCopies`); recipient collects from the manifest's deliverer, then own mailboxes, then the sender; collecting survives restart. Mailbox limits: only for friends who chose it, only from senders it vouches for, per sender per friend 20 MB (off/5/10/20/50 MB), 200 MB total, whole size reserved up front, expiry like messages (14 days) and when the friend leaves. Remaining: the three older file mechanisms are not unified into the blob layer |
-| A19 | **Hot paths** (review A6, extends A5): FFI bridge polling every ≤ 400 ms (in the background service every ≤ 2 s — waking around the clock, the ring up to 2 s late); JSON frame → zstd → base64 → 1300-byte chunks in JSON (~40% overhead, a lost chunk = the whole message); AES-GCM in pure Dart on every write (no `cryptography_flutter`); the Feed computed from scratch in `build()`, 68× `ListView(` against 5 builders; startup reads the whole ledger of all friends and removes nothing | `yggdrasil_signal_transport.dart:124-246`, `bridge_signaling.go:100-172`, `app_security_crypto.dart:66-93`, `feed_screen.dart:615-654`, `ledger_archive.dart:126-200` | (S) `cryptography_flutter` and copying without spreads; (M) a `NativePort` from Go instead of polling; (S/M) the Feed incrementally and lazy lists; (M) lazy segments, a 12-month window for others' logs; (P3, M) a binary envelope and repeating single chunks | P2, M. **Partly (1.11.0):** AES-GCM/ChaCha of large data and big JSON in isolates (> 64 KB, `runSizedWork`), assembly without spreads (`setRange`), the Feed memoized (`FeedMemo`) and a `ListView.builder`, adaptive polling (40 ms → 500 ms / 2 s in the background). **Not done:** `cryptography_flutter` (global `Cryptography.instance` replacement is too risky without device builds), event-driven `NativePort` (needs a separate isolate with its own `DynamicLibrary`, `SendPort`, handover between UI and service — M), other lists (chats in `Column` inside `AnimatedSwitcher`, graph, circle), lazy ledger segments, binary envelope |
-| A20 | **Persistence** (review A7): a hard 20 MB limit per file with state in one JSON (`dating/state` with photos, `meet/state`) — after exceeding it writing silently stops; names `meet/list/<sha256(address)>` and `ledger/log-<sha256>` are unkeyed hashes (a seized phone + a list of codes = "has this person as a friend"); Windows: data in Roaming AppData (a profile copy = a second computer with the same key → a forked log without a word in the UI); orphaned `*.tmp` | `binary_store.dart:55,91,346-349,487-492`, `meet_book.dart:801`, `ledger_archive.dart:117`, `zen_instance.dart:36` | warning at 50% of the limit, photos as blobs; `meet/list/` and `ledger/` in hidden names (HMAC); `%LOCALAPPDATA%` and detection of an own fork with a new device key | P2, S. **Mostly done (1.11.0):** hidden names (old files migrated on first key use), `%LOCALAPPDATA%` with one-time move, warning from 50% (`ZenStorageHealth`), stronger zstd from 75%, `full` reported before a write is refused, orphaned `*.tmp` older than 1 h swept. Remaining: photos as blobs, detection of an own fork |
+| A19 | **Hot paths** (review A6, extends A5): FFI bridge polling every ≤ 400 ms (in the background service every ≤ 2 s — waking around the clock, the ring up to 2 s late); JSON frame → zstd → base64 → 1300-byte chunks in JSON (~40% overhead, a lost chunk = the whole message); AES-GCM in pure Dart on every write (no `cryptography_flutter`); the Feed computed from scratch in `build()`, 68× `ListView(` against 5 builders; startup reads the whole ledger of all friends and removes nothing | `yggdrasil_signal_transport.dart:124-246`, `bridge_signaling.go:100-172`, `app_security_crypto.dart:66-93`, `feed_screen.dart:615-654`, `ledger_archive.dart:126-200` | (S) `cryptography_flutter` and copying without spreads; (M) a `NativePort` from Go instead of polling; (S/M) the Feed incrementally and lazy lists; (M) lazy segments, a 12-month window for others' logs; (P3, M) a binary envelope and repeating single chunks | P2, M. **Partly (1.11.0):** AES-GCM/ChaCha of large data and big JSON in isolates (> 64 KB, `runSizedWork`), assembly without spreads (`setRange`), the Feed memoized (`FeedMemo`) and a `ListView.builder`, adaptive polling (40 ms → 500 ms / 2 s in the background); **21.10.2026:** signals are event-driven — an isolate of its own blocks in `YggWaitSignal` and wakes the app or the background service per signal (`yggdrasil_signal_waiter.dart`; `YggStopNode` wakes it at once), polling only if that wait fails. **Not done:** `cryptography_flutter` (global `Cryptography.instance` replacement is too risky without device builds), other lists (chats in `Column` inside `AnimatedSwitcher`, graph, circle), lazy ledger segments, binary envelope |
+| A20 | **Persistence** (review A7): a hard 20 MB limit per file with state in one JSON (`dating/state` with photos, `meet/state`) — after exceeding it writing silently stops; names `meet/list/<sha256(address)>` and `ledger/log-<sha256>` are unkeyed hashes (a seized phone + a list of codes = "has this person as a friend"); Windows: data in Roaming AppData (a profile copy = a second computer with the same key → a forked log without a word in the UI); orphaned `*.tmp` | `binary_store.dart:55,91,346-349,487-492`, `meet_book.dart:801`, `ledger_archive.dart:117`, `zen_instance.dart:36` | warning at 50% of the limit, photos as blobs; `meet/list/` and `ledger/` in hidden names (HMAC); `%LOCALAPPDATA%` and detection of an own fork with a new device key | P2, S. **Mostly done (1.11.0):** hidden names, `%LOCALAPPDATA%`, warning from 50% (`ZenStorageHealth`), stronger zstd from 75%, `full` reported before a write is refused, orphaned `*.tmp` older than 1 h swept. Remaining: photos as blobs, detection of an own fork |
 | A21 | The clock as a silent filter (review K11): tolerances differ in every subsystem (relay 1 day, ledger 10 min, table and circles 10 min, tickets ±90 s); a phone running 15 min fast is quietly rejected everywhere | `hlc.dart:42`, `relay_engine.dart:73`, `table_service.dart:22` | time in pong; a bar "Your clock is 14 min fast"; tolerances in one place | P2, S. **Done in 1.11.0:** `ClockSkewTracker` collects time from friends' messages (needs ≥ 2 friends and > 2 min), a bar under the connection bar and a line in the report. Remaining: tolerances in one place |
 | A22 | Failures invisible to a human (review A11): 636 `unawaited`, 53 `catch (_)` (17 empty); a write error, a rejected record, a forked log, queue expiry and overflow in Go end as a log line | — | `HealthReport` (last successful write, rejected frames by reason, file sizes, clock, friends' versions) on a diagnostics screen and a bar "Something is wrong — show"; a report to send by hand | P2, S. **Mostly done in 1.11.0:** the "Why isn't it working?" screen (`HealthScreen`, `health_report.dart`: network, node and neighbors, background work, notifications, battery, clock, free space, fix buttons, "Copy report" without addresses; from Settings and the connection bar). Remaining: last successful write, rejected frames by reason, file sizes and friends' versions in the report; the global bar; handling the silent `unawaited`/`catch (_)` |
 | A23 | Translations — traps (review A12): localized texts saved in state (`InboxEntry.title/body`, "Now", system messages) stay in the old language; key = Polish text (a fix loses translations, "Save" as save and sign up has one translation, no grammatical gender); GIFs with `locale=pl_PL` | `social_hub_controller_helpers.dart:38,105,642-664`, `social_hub_controller_messages.dart:762`, `chat_gif_catalog.dart` | save an event code and arguments, build the text on display; an optional `context:` in `t()`; the tool marks translations "to review" instead of losing them | P1, S. **Partly (1.11.0):** all texts outside the Dart UI are English-first and translated into 21 languages (see §1). Remaining: the traps above |
 | A24 | Platforms (review A14, U6): 85× `Platform.isAndroid`, 49× Windows, 26× macOS/Linux in 39 files; a computer gets a 430 px phone column | `app.dart:84-124` | `PlatformCapabilities` (BLE, background work, recording, bridge, window); from 900 px two panels (chat list + conversation), keyboard shortcuts | P3, S/M |
-| A25 | **Screen sharing has a single video track** (new): the code has one video transceiver per call and one remote renderer; sharing replaces the camera; camera + screen at once needs another transceiver, renegotiation, a second renderer and layout on both screens (cannot be tested without devices) | `call_media_session.dart`, `group_call_media_webrtc.dart` | a second video track | P3, M |
-| A26 | **Local-network discovery is not wired from Dart** (new): Go supports multicast (key `ZenLanDiscovery`: `Enabled`, `Secret` — shared by the account's devices, the bridge derives an HMAC-SHA256 password from it —, `OnWiFi`; phones only `OnWiFi` and only on Wi-Fi interfaces wlan/swlan/ap, iPhone en0), off by default; missing: the Dart side — a setting, the account secret, `MulticastLock` on Android | `native/yggdrasil_bridge`, node configuration | add the setting and secret | P3, S/M |
+| A25 | **Screen sharing on a second video track** (new): camera + screen at once — 1:1 adds a second video transceiver and renegotiates, group legs carry a screen slot from the start; the other side shows the screen large, the camera small | `call_media_session.dart`, `group_call_media_webrtc.dart` | test on devices | P3, S. **Done in code**; not tested on devices |
+| A26 | **Local-network discovery is not wired from Dart** (**done 21.10.2026**: setting, secret from the account key, `MulticastLock`; see `PLAN.md` §5.1 item 6): Go supports multicast (key `ZenLanDiscovery`: `Enabled`, `Secret` — shared by the account's devices, the bridge derives an HMAC-SHA256 password from it —, `OnWiFi`; phones only `OnWiFi` and only on Wi-Fi interfaces wlan/swlan/ap, iPhone en0), off by default; missing: the Dart side — a setting, the account secret, `MulticastLock` on Android | `native/yggdrasil_bridge`, node configuration | add the setting and secret | P3, S/M |
 
 Proposals: a "core" release behind feature flags (done at the flag level; step
-0: A15); one "friend state" mechanism; the Go bridge as the engine for
+0 of A15, `ZenCore`, done); one "friend state" mechanism; the Go bridge as the engine for
 cryptography and the database (FFI, SQLite); a diagnostics screen (done,
 A22; connections, mailboxes, friend lists and queues remain); a load test
 before a wider release (150 friends, 2 years of history, dating: startup time,
@@ -511,12 +514,10 @@ memory, file sizes, daily traffic).
 
 ## 6. Concept
 
-1. **Dating grows as the third power of the number of friends**
-   (`dating_service.dart:67,76,83,578-584`): an 8–52 KB packet from everyone
-   every week, up to 3 steps; at ~150 friends tens of thousands of packets a
-   week. Fix: lanterns of ~100 B on demand, 2 steps (§19.7) — **not done**:
-   it changes the distribution protocol (L) and was not safe to fit in a small
-   release. P2, L.
+1. **Dating grew as the third power of the number of friends** (an 8–52 KB
+   packet from everyone every week, up to 3 steps). **Fixed (21 Oct 2026,
+   §19.7):** lanterns of ~100 B to 2 steps; the profile is fetched only when
+   a lantern fits. Open: a load test with ~150 friends (§5).
 2. **A contact economy based on currency**: commodification of acquaintance,
    KNF/AML risk (Polish financial supervision), the name "Pyramid" evokes a
    financial pyramid (also for store reviewers, §9). First a version without
@@ -527,11 +528,10 @@ memory, file sizes, daily traffic).
 3. **"Private by default" not met** (largely fixed in 1.11.0): the friend list
    and statuses are now hidden from weak friends, group invites have a level
    threshold, the ledger profile carries the address only after a public
-   post/share, an age gate exists. Remaining: older profile versions with the
+   post/share. Remaining: older profile versions with the
    address stay in the ledger; the address is also in device records in `acts`
    (needed for routing); public posts can be followed by anyone who knows the
-   address (it leaks through the door code, pt 15, and now only through a
-   Bluetooth reply, S5); no real age verification. P1, S.
+   address (it leaks only through a Bluetooth reply, S5); no real age verification. P1, S.
 4. **"No release keys" is fiction**: the APK key is one key of one person, and it
    sits in GitHub Actions secrets (D11); the license forbids forks, so after the
    author disappears nobody can legally continue; a public APK key would be
@@ -555,7 +555,7 @@ memory, file sizes, daily traffic).
    treasurers. A public node sees the IP and the stable node key, that is the
    invitation code — whoever adds a node to the list can collect a map "IP ↔
    person in Zen" (review K7; eventually rotated node keys, A10). The GIF
-   search goes to the commercial klipy.com with an embedded key (S29, S37) —
+   search (sender's device only) goes to the commercial klipy.com with an embedded key (S29, S37) —
    against "no ads" and "no server that sees everything". More honestly:
    "a network run by its users", a sentence about metadata in the README
    (and `PRIVACY.md`, now drafted, names klipy.com and public nodes). P2, S.
@@ -574,8 +574,7 @@ memory, file sizes, daily traffic).
     from all seats (also dead and fake ones) and the requirement of the full sum of
     every branch — shells or one offline cell block changing the constitution;
     the national-section threshold (~100 people) is passed by the same shells;
-    a transfer needs 8 of 15 treasurers online. **Done in 1.11.0 (rules 2, new
-    pyramids; existing ones only via a constitutional referendum):** the quorum
+    a transfer needs 8 of 15 treasurers online. **Done in 1.11.0:** the quorum
     of binding referenda counts members seen (signed record, "I'm alive" every 7
     days) within the last `absenceDays`, the branch sum published after the top's
     sum (after 6 h of grace) does not invalidate the result. Remaining: the
@@ -596,13 +595,10 @@ memory, file sizes, daily traffic).
     starting with the own one, while §18.2 promised "the flat's key, not the
     account's". An address is an identity and an invitation code: whoever walks
     through the stairwell gets the chain home → person → public profile and posts →
-    online presence. **Mostly fixed in 1.11.0 (door code v2):** the code carries
-    the flat key and exactly one address — a dedicated door mailbox if the host
-    has one, otherwise the address of the door phone; never a list of residents;
-    the sticker screen says so. Remaining: a truly separate mailbox identity
-    needs a second node or relays; the person's address only after "Show my
-    profile"; `zen://m/<code>` and `/m#` links are not yet routed in
-    `runtime_route_intent.dart`. P1, S/M.
+    online presence. **Fixed:** the code carries the flat key and the address of
+    the flat's door, a separate node with its own random key (`door_node.go`,
+    S41 for what remains); `zen://m/<code>` and `/m#` links open the knock.
+    Remaining: the person's address only after "Show my profile". P1, S.
 16. **A lost phone** (review K4): without a circle the account and all friends
     are lost; with a circle friends and groups come back, but not the chat and
     file history (`own`), the wallet (A7) or the dating profile. The circle was
@@ -611,10 +607,10 @@ memory, file sizes, daily traffic).
     reminder in Settings until a circle or a paper copy exists. Remaining: a
     "What you will recover if you lose your phone" screen (S); export of an
     encrypted backup to a file (S); a copy of `own` at the circle with a limit
-    (M); the wallet key is still not from the account (A7). P1, S/M.
+    (M); the wallet key now comes from the account key (A7, done). P1, S/M.
 
 Proposals: contact economy without money; paper copy of the account key (done) +
-the pyramid key from the account; mutual verification of the official version
+the pyramid key from the account (done); mutual verification of the official version
 (§14.3); event-driven presence and a saving mode; invitation through an event;
 dating on demand, 2 steps. From the architecture review (no servers): "Is
 everyone OK?" with one tap after a storm or outage (alarm, confirmations and
@@ -630,31 +626,13 @@ and 200% zoom test), the computer as a computer (A24).
 
 ## 7. Migrations and compatibility code
 
-Compatibility code was removed before the first release (1.10.0). Kept
-deliberately: the one-time resealing of the node configuration ZENENC1 →
-ZENENC2 (`runtime_native_signal_transport.dart`, `isUnboundSeal` /
-`unsealUnbound`) — without it the address of an existing installation would
-change; remove when no installation has the old envelope. New transitional
-code for 1.10.0 phones is listed in §4.5.
-
-To do for "everything from version 1" (S, one change of formats at once):
-- reset the numbers: `BinaryCodec` envelope v2, device linking v2
-  (`zen.link.v2`), dating packets v2, flat invitation v2, alarm wave v5 (v6/v7/v8
-  now exist for Nearby), messages v7, snapshot v8, signal queue v3, transfers v3;
-- enums by name (the snapshot, messages, queue and transfers save indices);
-- a reserved byte in the thread index (the former marker of the old file);
-- dating profile photos as one list instead of `ph` + `phx`; recipients of
-  the friend list as one field instead of the `noList` / `listAsk` flags
-  (the friend list now has a named audience `la`, old flags still written);
-- capabilities (caps) and version in the greeting and ping/pong (A17) —
-  **ping/pong done in 1.11.0**, the greeting not covered; this is the last
-  format change that can be done painlessly;
-- **done in 1.11.0:** `v: 1` on writing settings (`settings/app`), the profile
-  (`user_profile`) and feature flags; files without `v` are read as version 1
-  (`lib/src/core/storage/format_version.dart`);
-- unknown version = read-only: today only the "Meetings" state; a snapshot
-  unreadable for this version is set aside (`.unreadable`) before anything
-  overwrites it (but see B11).
+There are none. The app has not been released, so no data migrations and no
+readers for older file formats or older peers are kept: a stored document is
+read in the current format only (`v: 1` where the format names a version,
+`lib/src/core/storage/format_version.dart`), and a file this build cannot read
+falls back to the defaults (a social snapshot is set aside as `.unreadable`
+first). The Windows data folder is `%LOCALAPPDATA%\<company>\<app>` directly;
+`flutter_secure_storage` keeps its own file in `%APPDATA%` and is left alone.
 
 ## 8. Versions and process
 
@@ -681,7 +659,7 @@ To do for "everything from version 1" (S, one change of formats at once):
   `pubspec.lock` (`flutter pub get` and commit), the GStreamer backend and
   `.deb` dependencies (`dpkg-shlibdeps`), llvm-mingw 20251021 (checked by
   SHA-256) for cgo on Windows ARM64 and `flutter_webrtc` ≥ 1.5 (raised in
-  `pubspec`). The build scripts do not stamp `go version` yet (see §10).
+  `pubspec`).
 - The Dart package is called `zen`; code formatted with `dart format`.
 - Next: smaller releases instead of many stages at once; a closed beta of
   20–50 people from one community with the release marker as the channel (A17).
@@ -811,43 +789,35 @@ level check, age/gender badge and anonymous statistics, 24 h / 30 d pauses,
 level-by-level escalation, comment author in reports, signed evidence (S36),
 hiding and appeals (B13), "reached/read" counters, national-section pinning,
 issuing above the limit by referendum, price list and paid introduction, tab
-grouping, the permissions screen, the age gate, Linux playback / `zen://` links /
+grouping, the permissions screen, Linux playback / `zen://` links /
 `.deb`, privacy policy / terms / DPIA drafts, the protocol specification draft.
 
 | What | § | Size |
 |---|---|---|
 | Feature flags — leftovers: the wallet link in the "Introduce me" window and the "From my pyramid" graph filter are not hidden | 2.5 | S |
 | Formats from version 1 (reset of numbers, enums by name; ping/pong caps done, the greeting not covered; `v: 1` for settings/profile/flags done) | 2.5, `STATUS` §7 | S |
-| GIFs from klipy.com: an external server with an embedded key, outside the exceptions of §1.1 (S29, S37 fixed in 1.10.0 round 2, the design exception remains) | 1.1, 13 | S |
-| Spaces `hood`, `date`, `cell`, `treasury`, `event` in the engine; unknown spaces are now **stored for the owner** (limit 1000/log) but not forwarded, and the spaces themselves do not exist (A17) | 1.6, 4 | L |
-| Local network (multicast): the Go side is ready and off by default; the Dart side is missing — a setting, the account secret, `MulticastLock` on Android (A26) | 5.1 | S/M |
-| Bridge build stamp without the Go version: `YggGetBuildInfoJson` exports Yggdrasil/Go/OS/architecture, but `build_if_changed.*` does not yet add `go version` to the checksum | 5.1, 5.2 | S |
+| GIFs from klipy.com: an external server with an embedded key, outside the exceptions of §1.1 (sender's device only; recipients never contact it; S29, S37 fixed, the design exception remains) | 1.1, 13 | S |
+| Spaces `hood`, `date`, `cell`, `treasury`, `event` in the engine; unknown spaces are now **stored for the owner** (limit 1000/log) and forwarded to friends that advertise `spaces1`, and the spaces themselves do not exist (A17) | 1.6, 4 | L |
 | Identity on the account key | 6.1 | L |
-| The pyramid key from the account key (A7) | 6.1 | S/M |
 | A recovery screen "What you will recover if you lose your phone", an encrypted backup export, a copy of `own` at the circle (§6 pt 16) | 6.1, 6.3 | S–M |
-| General credentials: "met in person" is still a local, unsigned mark — not shared with friends (the base of "verified" and §20.6). 1.11.0 only asks "How close do you know each other?" after a meeting | 6.2 | M |
+| General credentials: no common credential type; "met in person" is a signed `met` entry in `acts` (21.10.2026), but the side that showed the QR is not asked to confirm, and the background service does not sign Bluetooth meetings | 6.2 | S/M |
 | Voluntary identity linking (signature of both keys) | 6.4 | S/M |
 | Pyramid traffic through relays | 6.4 | M |
 | Storage limits: shown read-only, not editable or enforced beyond file limits | 7 | S |
 | Mini-profile attached to likes/comments/messages to strangers (a change of the `like`/`comment` format); the graph and "Nearby" calling `showMiniProfile` | 9 | S/M |
 | Watching a video while it downloads | 10 | M |
 | Signed snapshot of counters; system (not only in-app) aggregated notifications; the blocked follower does not use `store.blockAccount` (it would reject his group entries too) | 11, 12 | M |
-| "N verified" next to likes (depends on signed met-in-person attestations) | 11 | S/M |
 | Messages to strangers (apart from a letter through a mutual friend) | 13, 24.1 | M |
-| Screen sharing: a second video track (camera + screen at once; A25); today the screen replaces the camera | 13.1 | M |
+| Screen sharing on a second video track (camera + screen at once; A25): test on devices | 13.1 | S |
 | Installation instructions with pictures; registration as a verified developer; Authenticode (D1, D5, D7) | 14.2 | S |
 | Tor, Wi-Fi Direct, a Bluetooth mesh | 14.2, 28 | L |
-| Camouflage (another icon/name — needs the LAUNCHER intent moved from `MainActivity` to an `activity-alias`, which on many launchers removes the home-screen shortcut on update; not testable without a device), mirrors of the own screen. Canary and mirrors of the repository done | 14.2 | S–M |
+| Camouflage: Android icon/name switch done (`activity-alias`es, Settings > Security; not tested on a device, and moving LAUNCHER to an alias may drop the home-screen shortcut on update on some launchers); entry via PIN and iOS/desktop not done. Mirrors of the own screen. Canary and mirrors of the repository done | 14.2 | S–M |
 | Approving versions for updates over the network (`kReleaseMaintainers` is empty) | 14.2 | S/M |
 | Integrity of releases and fundraiser: code ready (signed manifest with link, author, repository, mirrors); still to do — publish the fingerprint and set the maintainers (S15, D4) | 14.3 | S |
-| "Nearby": the old secret/greetings for 1.10.0 to be removed later | 15 | S |
 | Bluetooth on Windows, iPhone, Linux and macOS; creating pyramid cells through Bluetooth | 15, 20 | M |
 | Alarm: recording from the background (B7) | 16.3 | M |
-| Neighbors: a truly separate door mailbox (second node/relay), routing `zen://m/<code>` and `/m#` in `runtime_route_intent.dart`; the person's address only after "Show my profile" (§6 pt 15) | 18 | S/M |
-| Dating: lanterns on demand | 19.7 | L |
+| Neighbors: the person's address only after "Show my profile" (§6 pt 15); the door in the Android background service (S41) | 18 | S/M |
 | Dating: a stronger quorum for underage reports against Sybil (S39) | 19.6 | M |
-| Pyramid: referenda only from members "met in person" by ≥ 2 people (§20.6) — no such signal in the pyramid; needs signed meeting attestations (a `met` record) and a rule in the referendum sums (**rules 3**) | 20.6 | M |
-| Pyramid: existing pyramids stay at `rules = 1` until a constitutional referendum | 20, 21 | S |
 | Reports: farm-account signals, vouching with penalties, reversing transfers proven as fraud | 21.5 | M |
 | Pyramid: scenario "paralysis by absence" in the simulator | 21 | S |
 | Privacy of transfers | 23.4 | L |
@@ -868,8 +838,8 @@ S5, S6, S13, S17, S36, S38 and S18 (for new pyramids); B8, B12 (mailbox
 attachments), A18, A20 (mostly), A21, A22 (mostly), feature flags (part of A15),
 `ver`/`caps` exchange and golden frames (part of A17), `v: 1` formats (part of
 §7), crypto in isolates and the memoized Feed (part of A5/A19), media only over
-Wi-Fi (part of A9), kworum from active members (§6 pt 11), the privacy defaults
-and the age gate, paper backup and the "Secure your account" card, graph zoom,
+Wi-Fi (part of A9), kworum from active members (§6 pt 11), the privacy defaults,
+paper backup and the "Secure your account" card, graph zoom,
 alarm in the background with SMS, issuing above the limit by referendum,
 reports with escalation and signed evidence, the signed manifest with link/
 author/repository/mirrors and the canary, the Android store flavor and ABIs,
@@ -882,15 +852,13 @@ B13, `SECURITY.md`.
 | What | Size |
 |---|---|
 | Unreadable data does not delete friends: B11 fixed; the rest of A14 — a non-destructive `peer_unknown`, `friend_remove` only from a human action signed with the account key, a 7-day soft delete | S |
-| Door code: one address remains (a dedicated door mailbox or relay, route `zen://m/`, the person's address only after "Show my profile", §6 pt 15) — or Neighbors behind the flag | S/M |
-| GIFs: eventually as an attachment through `media_guard` (S29, S37) | S |
-| Version exchange: the signed release marker with a bar spread by gossip, forwarding unknown spaces (A17) | S |
+| Door code: the person's address only after "Show my profile" (§6 pt 15) — or Neighbors behind the flag | S |
+| Version exchange (A17): done except the mixed-version test | S |
 | Trust in releases: signing outside CI (D11); entering the fingerprint and setting maintainers so the signed manifest works (S15, D4) | S/M |
 | Translations: events instead of saved strings, `context:` for ambiguous texts (A23) | S |
 | About-screen claim about "own encryption of every message" (S40) | S |
-| Feature flags: the `ZenCore` composition root (A15 step 0) | M |
+| Feature flags: the `ZenCore` composition root (A15 step 0) — **done 21.10.2026**; the background service on the same registry remains | M |
 | Recovery: the "What you will recover" screen, an encrypted backup export (§6 pt 16) | S |
-| The pyramid key from the account key (A7) | S/M |
 | Signing key with a Shamir copy; the fingerprint in the README, releases and `apk_signature.dart`; registration of `com.roj.zen` as a verified Android developer by the end of 2026 (D1) | S |
 | Privacy policy and terms: a lawyer's review of the drafts | S |
 | Formats from version 1 (§7): reset of numbers, enums by name, caps in the greeting | S |
@@ -901,15 +869,14 @@ B13, `SECURITY.md`.
 | What | Size |
 |---|---|
 | Second audit, low: iOS (S25 — `UIFileSharingEnabled` stays) | S |
-| Battery: no constant locks, event-driven presence (A9); `NativePort` instead of bridge polling (A19) | M |
+| Battery: no constant locks, event-driven presence (A9) | M |
 | Cryptography off the UI thread: signatures/ring crypto, incremental pyramid fold (A5); other lists lazy, lazy ledger segments (A19) | M |
 | Persistence: photos as blobs, own-fork detection (A20) | S |
 | Clock tolerances in one place (A21); the rest of the health report: last successful write, rejected frames, file sizes, the global bar (A22) | S |
 | Dependency cycles: ports in `domain/`, import rules (A16) | M |
 | Unify the three older file mechanisms with the blob layer (A18) | M |
 | Tests: Go fuzzing, corrupt data, group calls, `flutter test` on Linux (A13) | S |
-| Pyramid: scenario "paralysis by absence" in the simulator; carrying existing pyramids to rules 2 (§6 pt 11) | S/M |
-| Dating: lanterns on demand, 2 steps (§19.7) | L |
+| Pyramid: scenario "paralysis by absence" in the simulator (§6 pt 11) | S/M |
 | Alarm: recording from the background (B7) | M |
 | Installation instructions with pictures; Authenticode on Windows (D5, D7) | S; S/M |
 | Apple account: TestFlight + AltStore PAL, Developer ID and macOS notarization (D10) | M |
@@ -932,9 +899,8 @@ B13, `SECURITY.md`.
 | iPhone: background work, Bluetooth, push (needs a paid account and a push server, §26.3) | L |
 | Updates over the network per §14.2 | S/M |
 | Mutual verification of the official version (key attestation) | M |
-| Local-network discovery from Dart (A26); a second video track (A25) | S/M; M |
-| Tor, Wi-Fi Direct, a Bluetooth mesh; camouflage (activity-alias), mirrors | L; S–M |
-| Referenda of "met in person" members, signed attestations (rules 3, §20.6) | M |
+| A second video track (A25) | M |
+| Tor, Wi-Fi Direct, a Bluetooth mesh; mirrors | L; S–M |
 | Protocol trust map | S |
 | Privacy of transfers | L |
 | Splitting the code into packages (A12) | L |

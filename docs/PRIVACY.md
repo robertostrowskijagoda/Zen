@@ -106,7 +106,7 @@ Everything below is sent device to device over the Yggdrasil network.
 | Alarm | The friends chosen for alarms: your location (if allowed), a note, recorded sound, and delivery confirmations. Phones nearby may receive a signed Bluetooth "wave" (alarm id and time; only friends can tell whose it is). Tapping a map link opens openstreetmap.org in your browser with the coordinates. |
 | "People nearby" (Android) | If you turn it on, your phone advertises a token over Bluetooth that changes every 15 minutes; only friends can tell it is you. Anyone nearby can see that *a* Zen phone is there and its approximate signal strength. If you "wave", the person gets your pseudonym, your short text and your mesh address - not your account. |
 | Neighbours | Flat or building members you join: what you choose to reveal in that feature. |
-| Dating (18+) | Sealed profile packages are passed up to three hops through friends' phones, which cannot read them; people who can read your profile see what you put in it. Your "Yes" is sent only as an unlinkable token; "No" sends nothing. |
+| Dating (18+) | Small "lanterns" (your dating key, age, gender and preferences, the same shape whether or not you date) are passed up to two hops through friends' phones; your profile itself is sent sealed only to a person whose lantern fits yours and who asks for it, so the phones on the way cannot read it. People who can read your profile see what you put in it. Your "Yes" is sent only as an unlinkable token; "No" sends nothing. |
 | Pyramid | Members of the pyramids you join receive the signed records you create (votes, proposals, posts, payments, reports). Some votes and requests are signed anonymously within a ring of members. |
 | Introductions | The friend who introduces you and the person you are introduced to. |
 
@@ -174,11 +174,13 @@ another Zen user.
   Settings), a client name (`zen_messenger`) and, as with any web request,
   **your IP address** and the usual technical headers. Nothing from your
   conversations, contacts or account is sent.
-- GIF images are downloaded from klipy.com. When a friend sends you a GIF, only
-  its link is sent; **your device then downloads it from klipy.com, so
-  klipy.com sees your IP address** and which GIF. GIFs are exempt from the
-  image sanitising Zen applies to other pictures. Zen refuses GIF links that do
-  not point to klipy.com over HTTPS.
+- The GIF previews and the GIF you choose are downloaded from klipy.com by
+  **your** device, so klipy.com sees your IP address and which GIF you picked.
+  Zen then sends the chosen GIF to your friend as an ordinary image attachment
+  (end-to-end encrypted like any other). **A friend who receives a GIF never
+  contacts klipy.com**: nothing is fetched on their device, and the GIF passes
+  through the same checks as other pictures (it must be a well-formed GIF within
+  size, frame and dimension limits; it is not re-encoded, so it keeps moving).
 - Klipy's own terms and privacy policy apply to what Klipy does with this
   data. The author has no control over it. **If you do not want this, do not
   use GIFs.**
@@ -280,11 +282,12 @@ account because none exists.
 - **Minimum age for Zen: 16.** If you are under 16 (or under the age of digital
   consent in your country, which can be 13-16), you may use Zen only with a
   parent's or guardian's permission, and the author recommends you do not use
-  it. Zen has no age check and cannot verify age or consent; it is the
-  responsibility of users and parents.
-- **Dating: 18+ only.** The dating feature requires a declared age of at least
-  18 (a self-declaration, no documents are checked). Do not use dating if you
-  are under 18. If you see someone who is clearly a minor in the dating feature,
+  it. Zen does not ask for your age (except an optional birth year in the
+  pyramid) and cannot verify age or consent; it is the responsibility of users
+  and parents.
+- **Dating: 18+ only.** The dating profile requires an age of at least 18
+  (what you type, no documents are checked; there is no separate age question).
+  Do not use dating if you are under 18. If you see someone who is clearly a minor in the dating feature,
   report and block them and tell a trusted adult; you can report illegal
   content as described in docs/TERMS.md.
 - Zen is not designed for or marketed to children. If you believe a child is
