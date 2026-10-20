@@ -308,6 +308,11 @@ final class PyrDelegation {
   /// Records done with it (id → time), so a revocation can say which of
   /// them it knew about (§21.2).
   final Map<String, int> acts = <String, int>{};
+
+  /// Once revoked: the acts done with it (or with one passed on from it)
+  /// that the revocation listed. Of the acts dated before the revocation
+  /// only these count (§21.2).
+  Set<String> knownAtRevocation = const <String>{};
 }
 
 final class PyrBan {
@@ -761,14 +766,16 @@ final class PyramidState {
   final Map<String, String> rejected = <String, String>{};
   final Set<String> applied = <String>{};
 
-  /// Delegations revoked in the first pass of [fold]: nothing done through
-  /// them, or through one passed on from them, counts — whenever it was
-  /// done. A revocation invalidates everything that resulted from it
-  /// (§21.2; the second pass runs without those acts and what followed).
-  Set<String> _void = const <String>{};
+  /// Delegations revoked in the first pass of [fold] → the acts their
+  /// revocation listed. A revocation works from its own time on: what the
+  /// delegate did before it stays (§21.2), but an act dated before it and
+  /// not on its list was made up later and does not count (the second
+  /// pass runs without it).
+  Map<String, Set<String>> _witnessed = const <String, Set<String>>{};
 
-  /// Records refused in this pass because their delegation was revoked.
-  final Set<String> _revokedHit = <String>{};
+  /// Records refused in this pass as made up after their delegation was
+  /// revoked.
+  final Set<String> _lateHit = <String>{};
 
   /// Records refused up front because their rule threw in an earlier round
   /// of the fold (rules 2, S18), and those that threw in this round.
@@ -1080,7 +1087,8 @@ final class PyramidState {
   }
 
   /// The applied acts done through delegation [delegationId] or anything
-  /// delegated from it: what its revocation invalidates (§21.2).
+  /// delegated from it: what its revocation lists as known, so they stay
+  /// (§21.2).
   Set<String> actsOf(String delegationId) {
     final Set<String> out = <String>{};
     for (final PyrDelegation d in delegations.values) {
@@ -1130,9 +1138,9 @@ final class PyramidState {
   /// - a closing record ([PyrT.merged]) counts only when signed by 2 of the
   ///   top as it stands with every other record (a top already replaced
   ///   cannot close the pyramid by dating the closing before its fall);
-  /// - a revocation lists the acts of the delegate it knew about; an act
-  ///   dated before the revocation but not on its list was made up later
-  ///   and does not count (a second pass);
+  /// - a revocation works from its time on and lists the acts of the
+  ///   delegate it knew about; an act dated before the revocation but not
+  ///   on its list was made up later and does not count (a second pass);
   /// - money waits for most treasurers, who sign only fresh orders and one
   ///   settlement per payment (§23.2, §23.5);
   /// - a pyramid that joined another with its money closes with the time
@@ -1164,7 +1172,7 @@ final class PyramidState {
         ],
         now,
         treasurerSigs,
-        const <String>{},
+        const <String, Set<String>>{},
         null,
         const <String>{},
         poison,
@@ -1177,25 +1185,25 @@ final class PyramidState {
       list,
       now,
       treasurerSigs,
-      const <String>{},
+      const <String, Set<String>>{},
       finalTop,
       const <String>{},
       poison,
     );
-    final Set<String> revoked = s._revokedWithActs();
+    final Map<String, Set<String>> witnessed = s._witnessIfLate();
     final int? cut = s.mergedInto == null ? null : s.mergeCut;
     final Set<String> cutOff = <String>{
       if (cut != null)
         for (final PyramidRecord r in list)
           if (moneyKinds.contains(r.type) && r.at > cut) r.id,
     };
-    if (revoked.isNotEmpty || cutOff.isNotEmpty) {
+    if (witnessed.isNotEmpty || cutOff.isNotEmpty) {
       s = _runClean(
         pyramidId,
         list,
         now,
         treasurerSigs,
-        revoked,
+        witnessed,
         finalTop,
         cutOff,
         s._poison,
@@ -1214,7 +1222,7 @@ final class PyramidState {
     List<PyramidRecord> list,
     int now,
     Map<String, Set<String>> treasurerSigs,
-    Set<String> voids,
+    Map<String, Set<String>> witnessed,
     Set<String>? finalTop,
     Set<String> cutOff,
     Set<String> poison,
@@ -1227,7 +1235,7 @@ final class PyramidState {
         list,
         now,
         treasurerSigs,
-        voids,
+        witnessed,
         finalTop,
         cutOff,
         bad,
@@ -1263,13 +1271,13 @@ final class PyramidState {
     List<PyramidRecord> list,
     int now,
     Map<String, Set<String>> treasurerSigs,
-    Set<String> voids,
+    Map<String, Set<String>> witnessed,
     Set<String>? finalTop,
     Set<String> cutOff, [
     Set<String> poison = const <String>{},
   ]) {
     final PyramidState s = PyramidState._(pyramidId)
-      .._void = voids
+      .._witnessed = witnessed
       .._finalTop = finalTop
       .._poison = poison;
     // Proposals already counted (content without the time): a fresh copy
@@ -1316,9 +1324,8 @@ final class PyramidState {
           s.lastSeen[k] = max(s.lastSeen[k] ?? 0, r.at);
         }
       } else {
-        s.rejected[r.id] = s._revokedHit.contains(r.id)
-            ? 'akt z cofniętej delegacji (cofnięcie unieważnia wszystko, '
-                  'co z niej wynikało)'
+        s.rejected[r.id] = s._lateHit.contains(r.id)
+            ? 'akt z cofniętej delegacji, dopisany po jej cofnięciu'
             : why;
       }
     }
@@ -1326,24 +1333,29 @@ final class PyramidState {
     return s;
   }
 
-  /// The revoked delegations, when an act done through one of them (or
-  /// through one passed on from it) counted: the second pass of [fold]
-  /// runs without such acts, whenever they were done, so whatever followed
-  /// from them falls too (§21.2). Empty when nothing needs undoing.
-  Set<String> _revokedWithActs() {
-    final Set<String> revoked = <String>{
+  /// The revoked delegations → the acts their revocation listed, when an
+  /// act through one of them (or through one passed on from it) counted
+  /// without being on that list: it was dated back past the revocation,
+  /// and the second pass of [fold] runs without it (§21.2). Empty when
+  /// every act that counted was listed.
+  Map<String, Set<String>> _witnessIfLate() {
+    final Map<String, Set<String>> witnessed = <String, Set<String>>{
       for (final PyrDelegation d in delegations.values)
-        if (d.revoked) d.id,
+        if (d.revoked) d.id: d.knownAtRevocation,
     };
-    if (revoked.isEmpty) {
-      return const <String>{};
+    if (witnessed.isEmpty) {
+      return const <String, Set<String>>{};
     }
-    final bool undo = delegations.values.any(
-      (PyrDelegation x) =>
-          x.acts.keys.any(applied.contains) &&
-          _chainOf(x).any((PyrDelegation y) => revoked.contains(y.id)),
+    final bool late = delegations.values.any(
+      (PyrDelegation x) => x.acts.keys.any(
+        (String act) =>
+            applied.contains(act) &&
+            _chainOf(
+              x,
+            ).any((PyrDelegation y) => witnessed[y.id]?.contains(act) == false),
+      ),
     );
-    return undo ? revoked : const <String>{};
+    return late ? witnessed : const <String, Set<String>>{};
   }
 
   /// Things that happen by time: elections end, emissions take effect.
@@ -1778,15 +1790,20 @@ final class PyramidState {
         if (d.revoked) {
           return 'już cofnięta';
         }
+        final Object? known = r.body['acts'];
+        if (known is! List) {
+          return 'brak listy znanych aktów';
+        }
         final bool byIssuer =
             d.parent != null && by.contains(delegations[d.parent]?.to);
         if (!_twoOfTop(r) && !byIssuer) {
           return 'cofnąć może szczyt albo wystawca';
         }
-        // Everything done through it (and through delegations passed on
-        // from it) is void, earlier acts too (§21.2): [fold] runs again
-        // without them.
-        d.revoked = true;
+        // From now on it (and every delegation passed on from it) is worth
+        // nothing; the acts done before stay, those it lists (§21.2).
+        d
+          ..revoked = true
+          ..knownAtRevocation = known.whereType<String>().toSet();
         history.add(
           PyrHistory(
             r.at,
@@ -2569,9 +2586,9 @@ final class PyramidState {
   /// through delegation [via] (§21.2): the holder signed, the whole chain
   /// is in force (not revoked, not expired, every holder still in the
   /// pyramid), the target is in scope, and no limit on the way up is used
-  /// up, and nothing on the way up was revoked in the first pass of [fold]
-  /// (then the act is void, §21.2). Records no use; [_use] does once the
-  /// act counts.
+  /// up. An act dated before a revocation on the way up counts only when
+  /// that revocation listed it (otherwise it was made up later, §21.2).
+  /// Records no use; [_use] does once the act counts.
   bool _canUse(String via, String power, String targetPath, PyramidRecord r) {
     final PyrDelegation? d = delegations[via];
     if (d == null ||
@@ -2580,8 +2597,10 @@ final class PyramidState {
         !_validChain(d, r.at)) {
       return false;
     }
-    if (_chainOf(d).any((PyrDelegation x) => _void.contains(x.id))) {
-      _revokedHit.add(r.id);
+    if (_chainOf(
+      d,
+    ).any((PyrDelegation x) => _witnessed[x.id]?.contains(r.id) == false)) {
+      _lateHit.add(r.id);
       return false;
     }
     if (!PyrPath.within(targetPath, d.scope)) {

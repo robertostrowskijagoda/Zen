@@ -940,49 +940,92 @@ void main() {
       expect(st.alarms.map((PyrAlarm a) => a.id), <String>[own.id]);
     });
 
+    test('a revocation works going forward: acts made before it stay, '
+        'later ones do not count (§21.2)', () async {
+      const int at = t0 + day;
+      final PyramidRecord d = await delegate(at, w.b, 'content');
+      final PyramidRecord ban1 = await contentBan(at + h, w.b, d.id, 'h1');
+      final PyramidRecord ban2 = await contentBan(
+        at + 90 * 60000,
+        w.b,
+        d.id,
+        'h2',
+      );
+      final PyramidRecord revoke = await rec(
+        PyrT.revoke,
+        w.py,
+        at + 2 * h,
+        <LedgerKeyPair>[w.s, w.a],
+        <String, dynamic>{
+          'd': d.id,
+          'acts': <String>[ban1.id, ban2.id],
+        },
+      );
+      final PyramidRecord after = await contentBan(at + 3 * h, w.b, d.id, 'h3');
+      final PyramidState before = w.fold(<PyramidRecord>[d, ban1, ban2]);
+      expect(before.actsOf(d.id), <String>{ban1.id, ban2.id});
+      final PyramidState st = w.fold(<PyramidRecord>[
+        d,
+        ban1,
+        ban2,
+        revoke,
+        after,
+      ]);
+      expect(st.applied, containsAll(<String>[ban1.id, ban2.id, revoke.id]));
+      expect(st.delegations[d.id]!.revoked, isTrue);
+      expect(st.bannedEntries(at + 4 * h), <String>{'h1', 'h2'});
+      expect(st.rejected[after.id], isNotNull);
+      expect(st.actsOf(d.id), <String>{ban1.id, ban2.id});
+    });
+
+    test('an act dated back before the revocation but not on its list does not '
+        'count (§21.2)', () async {
+      const int at = t0 + day;
+      final PyramidRecord d = await delegate(at, w.b, 'content');
+      final PyramidRecord ban1 = await contentBan(at + h, w.b, d.id, 'h1');
+      final PyramidRecord revoke = await rec(
+        PyrT.revoke,
+        w.py,
+        at + 2 * h,
+        <LedgerKeyPair>[w.s, w.a],
+        <String, dynamic>{
+          'd': d.id,
+          'acts': <String>[ban1.id],
+        },
+      );
+      // Made after the revocation, dated before it.
+      final PyramidRecord backDated = await contentBan(
+        at + 90 * 60000,
+        w.b,
+        d.id,
+        'h2',
+      );
+      final PyramidState st = w.fold(<PyramidRecord>[
+        d,
+        ban1,
+        revoke,
+        backDated,
+      ]);
+      expect(st.applied, containsAll(<String>[ban1.id, revoke.id]));
+      expect(st.bannedEntries(at + 3 * h), <String>{'h1'});
+      expect(st.rejected[backDated.id], contains('dopisany po'));
+    });
+
     test(
-      'a revocation invalidates everything that resulted from the delegation, '
-      'earlier acts too (§21.2)',
+      'a revocation without the list of known acts does not count',
       () async {
         const int at = t0 + day;
         final PyramidRecord d = await delegate(at, w.b, 'content');
-        final PyramidRecord ban1 = await contentBan(at + h, w.b, d.id, 'h1');
-        final PyramidRecord ban2 = await contentBan(
-          at + 90 * 60000,
-          w.b,
-          d.id,
-          'h2',
-        );
         final PyramidRecord revoke = await rec(
           PyrT.revoke,
           w.py,
-          at + 2 * h,
+          at + h,
           <LedgerKeyPair>[w.s, w.a],
           <String, dynamic>{'d': d.id},
         );
-        final PyramidRecord after = await contentBan(
-          at + 3 * h,
-          w.b,
-          d.id,
-          'h3',
-        );
-        // Before the revocation both bans count.
-        final PyramidState before = w.fold(<PyramidRecord>[d, ban1, ban2]);
-        expect(before.bannedEntries(at + 4 * h), <String>{'h1', 'h2'});
-        expect(before.actsOf(d.id), <String>{ban1.id, ban2.id});
-        final PyramidState st = w.fold(<PyramidRecord>[
-          d,
-          ban1,
-          ban2,
-          revoke,
-          after,
-        ]);
-        expect(st.applied, contains(revoke.id));
-        expect(st.bannedEntries(at + 4 * h), isEmpty);
-        expect(st.rejected[ban1.id], contains('cofniętej delegacji'));
-        expect(st.rejected[ban2.id], contains('cofniętej delegacji'));
-        expect(st.rejected[after.id], isNotNull);
-        expect(st.actsOf(d.id), isEmpty);
+        final PyramidState st = w.fold(<PyramidRecord>[d, revoke]);
+        expect(st.rejected[revoke.id], isNotNull);
+        expect(st.delegations[d.id]!.revoked, isFalse);
       },
     );
   });

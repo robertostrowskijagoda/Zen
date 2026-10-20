@@ -97,15 +97,15 @@ void main() {
       await w.approve('B', PyrT.ban);
       expect(w['A2'].state!.silencedAt(a, now()), isTrue);
 
-      // Revoked, the delegation stops working, and what B did with it
-      // falls too: B1's pause is void (§21.2).
+      // Revoked, the delegation stops working from now on; what B already
+      // did with it stays: B1's pause holds (§21.2).
       final int bansBefore = w['S'].state!.bans.length;
-      await s.topDecision(<String, dynamic>{'t': PyrT.revoke, 'd': d.id});
+      await s.revokeDelegation(d.id);
       await w.net.run();
       await w.approve('A', PyrT.revoke);
       expect(w['B'].state!.delegations[d.id]!.revoked, isTrue);
-      expect(w['S'].state!.bans, hasLength(bansBefore - 1));
-      expect(w['S'].state!.silencedAt(b1, now()), isFalse);
+      expect(w['S'].state!.bans, hasLength(bansBefore));
+      expect(w['S'].state!.silencedAt(b1, now()), isTrue);
       await w['B'].ban(
         target: b1,
         kind: 'pause',
@@ -113,7 +113,7 @@ void main() {
         via: d.id,
       );
       await w.net.run();
-      expect(w['S'].state!.bans, hasLength(bansBefore - 1));
+      expect(w['S'].state!.bans, hasLength(bansBefore));
 
       // A dating report ends in a dating ban the app applies (§19.6).
       await w['A2'].report(

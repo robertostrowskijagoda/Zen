@@ -8,16 +8,23 @@ import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 
 /// Parts of Zen that a "core" release (A15) can leave out of sight.
-/// The core release (§2.5.1) has the pyramid (with its access market) and
-/// the wallet off by default; neighbours are core and have no flag.
+/// The pyramid (with its access market) and the wallet are on by default
+/// and can be switched off in "Funkcje eksperymentalne" (§2.5.1);
+/// neighbours are core and have no flag.
 ///
 /// A flag hides the feature's tabs and entry points, and `ZenCore` does not
 /// start the feature's module (its services, timers and reloads). The data
 /// stays on the device: turning the feature back on shows everything as it
 /// was.
 enum ZenFeature {
-  pyramid('pyramid', bool.fromEnvironment('ZEN_FEATURE_PYRAMID')),
-  wallet('wallet', bool.fromEnvironment('ZEN_FEATURE_WALLET')),
+  pyramid(
+    'pyramid',
+    bool.fromEnvironment('ZEN_FEATURE_PYRAMID', defaultValue: true),
+  ),
+  wallet(
+    'wallet',
+    bool.fromEnvironment('ZEN_FEATURE_WALLET', defaultValue: true),
+  ),
   dating(
     'dating',
     bool.fromEnvironment('ZEN_FEATURE_DATING', defaultValue: true),
@@ -29,7 +36,7 @@ enum ZenFeature {
   final String tabId;
 
   /// The default chosen at build time, e.g.
-  /// `--dart-define=ZEN_FEATURE_PYRAMID=true`.
+  /// `--dart-define=ZEN_FEATURE_PYRAMID=false`.
   final bool compiledDefault;
 
   static ZenFeature? ofTab(String tabId) {

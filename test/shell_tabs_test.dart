@@ -1,10 +1,6 @@
-import 'dart:convert';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -177,22 +173,8 @@ void main() {
     tester.view.physicalSize = const Size(420, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    // Pyramid and wallet are experimental, off by default (§2.5.1).
-    final MemoryLedgerDisk disk = MemoryLedgerDisk();
-    await disk.write(
-      kFeatureFlagsKey,
-      Uint8List.fromList(
-        utf8.encode(
-          jsonEncode(
-            const FeatureFlags()
-                .withFeature(ZenFeature.pyramid, true)
-                .withFeature(ZenFeature.wallet, true)
-                .toJson(),
-          ),
-        ),
-      ),
-    );
-    await _pumpApp(tester, disk: disk);
+    // Pyramid and wallet are on by default (§2.5.1).
+    await _pumpApp(tester);
 
     for (final String id in <String>[
       'dating', 'pyramid', 'wallet', 'nearby', 'invite', 'about', //

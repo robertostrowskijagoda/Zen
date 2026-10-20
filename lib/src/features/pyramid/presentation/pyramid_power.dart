@@ -905,12 +905,8 @@ class PyramidPower extends StatelessWidget {
                   ].join(' · '),
                   trailing: _top
                       ? TextButton(
-                          onPressed: () => unawaited(
-                            pyr.topDecision(<String, dynamic>{
-                              't': 'revoke',
-                              'd': d.id,
-                            }),
-                          ),
+                          onPressed: () =>
+                              unawaited(pyr.revokeDelegation(d.id)),
                           child: Text(t('Cofnij')),
                         )
                       : null,

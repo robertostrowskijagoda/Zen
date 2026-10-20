@@ -24,14 +24,14 @@ Uint8List _stored(FeatureFlags flags) =>
 
 void main() {
   group('FeatureFlags', () {
-    test('the core release: pyramid and wallet off, dating on; neighbours '
-        'are core (§2.5.1)', () {
+    test('pyramid, wallet and dating on by default; neighbours are core '
+        '(§2.5.1)', () {
       const FeatureFlags flags = FeatureFlags();
-      expect(flags.isEnabled(ZenFeature.pyramid), isFalse);
-      expect(flags.isEnabled(ZenFeature.wallet), isFalse);
+      expect(flags.isEnabled(ZenFeature.pyramid), isTrue);
+      expect(flags.isEnabled(ZenFeature.wallet), isTrue);
       expect(flags.isEnabled(ZenFeature.dating), isTrue);
-      expect(flags.showsTab('pyramid'), isFalse);
-      expect(flags.showsTab('wallet'), isFalse);
+      expect(flags.showsTab('pyramid'), isTrue);
+      expect(flags.showsTab('wallet'), isTrue);
       expect(flags.showsTab('dating'), isTrue);
       // Tabs of no feature always show; neighbours have no flag.
       expect(ZenFeature.ofTab('neighbors'), isNull);
@@ -41,7 +41,7 @@ void main() {
 
     test('a choice survives the round-trip; v is written', () {
       final FeatureFlags flags = const FeatureFlags()
-          .withFeature(ZenFeature.pyramid, true)
+          .withFeature(ZenFeature.pyramid, false)
           .withFeature(ZenFeature.dating, false);
       final Map<String, Object?> json = flags.toJson();
       expect(json['v'], 1);
@@ -49,9 +49,9 @@ void main() {
         jsonDecode(jsonEncode(json)),
       );
       expect(back, flags);
-      expect(back.showsTab('pyramid'), isTrue);
+      expect(back.showsTab('pyramid'), isFalse);
       expect(back.showsTab('dating'), isFalse);
-      expect(back.showsTab('wallet'), isFalse);
+      expect(back.showsTab('wallet'), isTrue);
     });
 
     test('unknown or malformed values keep the defaults', () {
@@ -86,11 +86,11 @@ void main() {
       );
       await container
           .read(featureFlagsProvider.notifier)
-          .setEnabled(ZenFeature.wallet, true);
+          .setEnabled(ZenFeature.wallet, false);
       final FeatureFlags saved = FeatureFlags.fromJson(
         jsonDecode(utf8.decode(disk.files[kFeatureFlagsKey]!)),
       );
-      expect(saved.isEnabled(ZenFeature.wallet), isTrue);
+      expect(saved.isEnabled(ZenFeature.wallet), isFalse);
       expect(saved.isEnabled(ZenFeature.dating), isFalse);
     });
   });
@@ -181,11 +181,11 @@ void main() {
     // Neighbours are core: no switch.
     expect(find.byKey(const Key('feature-flag-neighbors')), findsNothing);
     final Finder pyramid = find.byKey(const Key('feature-flag-pyramid'));
-    expect(tester.widget<SwitchListTile>(pyramid).value, isFalse);
+    expect(tester.widget<SwitchListTile>(pyramid).value, isTrue);
     await tester.tap(pyramid);
     await tester.runAsync(_settle);
     await tester.pump();
-    expect(tester.widget<SwitchListTile>(pyramid).value, isTrue);
+    expect(tester.widget<SwitchListTile>(pyramid).value, isFalse);
     expect(disk.files[kFeatureFlagsKey], isNotNull);
   });
 }
