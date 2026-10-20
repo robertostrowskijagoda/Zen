@@ -1,0 +1,369 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/zen_core.dart';
+import 'package:zen/src/app/zen_host.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/ledger/ledger_node.dart';
+import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/runtime/bluetooth_local_links.dart';
+import 'package:zen/src/features/runtime/local_link.dart';
+import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
+import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/runtime/wifi_direct_local_link.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
+
+// "Łączność bez internetu" (§5.1 item 6): keeps the running node's local
+// links in line with the settings, the devices the ledger knows and
+// whether the app is used, and runs the native transports (local_link.dart).
+
+/// Where the settings go: the node runtime ([RuntimeNodeRuntime]).
+abstract interface class LocalLinksTarget {
+  /// The bridge's settings (localLinksSettingsJson).
+  void setLocalLinks(String? settingsJson);
+
+  /// The running node's calls, `null` while it is not running.
+  LocalLinkNodeApi? get localLinks;
+}
+
+final class _RuntimeTarget implements LocalLinksTarget {
+  const _RuntimeTarget(this._runtime);
+
+  final RuntimeNodeRuntime _runtime;
+
+  @override
+  void setLocalLinks(String? settingsJson) =>
+      _runtime.setLocalLinks(settingsJson);
+
+  @override
+  LocalLinkNodeApi? get localLinks => _runtime.localLinks;
+}
+
+/// The native transports the settings turn on ([LocalLink]s other than the
+/// LAN, which the bridge runs itself). Wi-Fi Direct makes a local network,
+/// so it needs the LAN setting too; Bluetooth and Multipeer streams do not.
+Set<LocalLinkTransport> enabledLocalTransports(AppSettings settings) =>
+    <LocalLinkTransport>{
+      if (settings.lanDiscoveryOn && settings.wifiDirect)
+        LocalLinkTransport.wifiDirect,
+      if (settings.bluetoothLinks) LocalLinkTransport.bluetooth,
+      if (settings.multipeerLinks) LocalLinkTransport.multipeer,
+    };
+
+final class LocalLinksController {
+  LocalLinksController({
+    required LocalLinksTarget target,
+    required Future<List<LocalLinkPeer>> Function() loadPeers,
+    List<LocalLink> transports = const <LocalLink>[],
+    Future<void> Function(bool held) setMulticastLock =
+        AndroidMulticastLock.setHeld,
+  }) : _target = target,
+       _loadPeers = loadPeers,
+       transports = List<LocalLink>.unmodifiable(transports),
+       _setMulticastLock = setMulticastLock;
+
+  final LocalLinksTarget _target;
+  final Future<List<LocalLinkPeer>> Function() _loadPeers;
+  final Future<void> Function(bool held) _setMulticastLock;
+
+  /// The native transports this platform has.
+  final List<LocalLink> transports;
+
+  bool _running = false;
+
+  /// Native transports may run: the app is used, or the Android background
+  /// service runs.
+  bool _active = false;
+
+  /// The app is on screen (beacons more often, the multicast lock).
+  bool _foreground = false;
+  bool _lan = true;
+  Set<LocalLinkTransport> _enabled = const <LocalLinkTransport>{};
+  List<LocalLinkPeer> _peers = const <LocalLinkPeer>[];
+  bool? _lockHeld;
+  int _generation = 0;
+  Future<void> _transportWork = Future<void>.value();
+
+  bool get isRunning => _running;
+
+  /// The devices handed to the bridge last.
+  @visibleForTesting
+  List<LocalLinkPeer> get peers => _peers;
+
+  /// Starts handing the node its local links. Returns at once: the devices
+  /// come once the ledger has them (it may still be loading).
+  Future<void> start({required bool active, required bool foreground}) async {
+    _running = true;
+    _active = active;
+    _foreground = foreground;
+    _push();
+    unawaited(refreshPeers());
+    unawaited(_applyTransports());
+  }
+
+  Future<void> stop() async {
+    _running = false;
+    _generation++;
+    _target.setLocalLinks(
+      localLinksSettingsJson(
+        lan: false,
+        beaconSeconds: kLocalLinkIdleBeaconSeconds,
+        peers: const <LocalLinkPeer>[],
+      ),
+    );
+    await _lock(false);
+    await _applyTransports();
+  }
+
+  /// The person changed "Łączność bez internetu".
+  void setSettings({
+    required bool lan,
+    required Set<LocalLinkTransport> transports,
+  }) {
+    if (lan == _lan && setEquals(transports, _enabled)) {
+      return;
+    }
+    _lan = lan;
+    _enabled = Set<LocalLinkTransport>.unmodifiable(transports);
+    if (_running) {
+      _push();
+    }
+    unawaited(_applyTransports());
+  }
+
+  /// The app went to or came back from the background.
+  void setUsage({required bool active, required bool foreground}) {
+    if (active == _active && foreground == _foreground) {
+      return;
+    }
+    _active = active;
+    _foreground = foreground;
+    if (_running) {
+      _push();
+    }
+    for (final LocalLink link in transports) {
+      link.setForeground(foreground);
+    }
+    unawaited(_applyTransports());
+  }
+
+  /// Friends or devices changed: new secrets for the bridge.
+  Future<void> refreshPeers() async {
+    final int generation = ++_generation;
+    final List<LocalLinkPeer> peers;
+    try {
+      peers = await _loadPeers();
+    } on Object catch (error, stackTrace) {
+      logZenError('Local link devices unreadable', error, stackTrace);
+      return;
+    }
+    if (generation != _generation || !_running) {
+      return;
+    }
+    _peers = List<LocalLinkPeer>.unmodifiable(peers);
+    _push();
+  }
+
+  /// Tries the transports again: a permission may have been given
+  /// meanwhile (the system dialog closed and the app came back).
+  Future<void> refreshTransports() => _applyTransports();
+
+  void _push() {
+    _target.setLocalLinks(
+      localLinksSettingsJson(
+        lan: _lan,
+        beaconSeconds: _foreground
+            ? kLocalLinkActiveBeaconSeconds
+            : kLocalLinkIdleBeaconSeconds,
+        peers: _peers,
+      ),
+    );
+    unawaited(_lock(_lan && _foreground && _peers.isNotEmpty));
+  }
+
+  Future<void> _lock(bool held) async {
+    if (_lockHeld == held) {
+      return;
+    }
+    _lockHeld = held;
+    await _setMulticastLock(held);
+  }
+
+  /// Starts the transports that should run and stops the others, one change
+  /// at a time.
+  Future<void> _applyTransports() {
+    return _transportWork = _transportWork.then((_) async {
+      for (final LocalLink link in transports) {
+        final bool wanted =
+            _running &&
+            _active &&
+            link.isSupported &&
+            _enabled.contains(link.transport);
+        try {
+          if (wanted) {
+            await link.start(() => _target.localLinks, foreground: _foreground);
+          } else {
+            await link.stop();
+          }
+        } on Object catch (error, stackTrace) {
+          logZenError(
+            'Local link ${link.transport.wireName} failed',
+            error,
+            stackTrace,
+          );
+        }
+      }
+    });
+  }
+
+  void dispose() {
+    for (final LocalLink link in transports) {
+      link.dispose();
+    }
+  }
+}
+
+/// The native transports of this platform.
+List<LocalLink> platformLocalLinks() => <LocalLink>[
+  if (Platform.isAndroid) WifiDirectLocalLink(),
+  if (bluetoothLinksPlatform) bluetoothLocalLink(),
+  if (multipeerLinksPlatform) multipeerLocalLink(),
+];
+
+/// The devices this one links with: friends' devices and the account's own,
+/// each with its pair secret.
+Future<List<LocalLinkPeer>> Function() ledgerLocalLinkPeers(
+  LedgerNode? Function() ledger,
+) {
+  LocalLinkSecrets? secrets;
+  return () async {
+    final LedgerNode? node = ledger();
+    if (node == null) {
+      return const <LocalLinkPeer>[];
+    }
+    await node.start();
+    final LocalLinkSecrets made = secrets ??= LocalLinkSecrets(
+      node.identity.deviceKey,
+    );
+    return made.peersFor(node.linkableDevices, account: node.account);
+  };
+}
+
+final Provider<LocalLinksController> localLinksControllerProvider =
+    Provider<LocalLinksController>((Ref ref) {
+      final LedgerNode? ledger = ref.watch(ledgerNodeProvider);
+      final LocalLinksController controller = LocalLinksController(
+        target: _RuntimeTarget(ref.watch(runtimeNodeRuntimeProvider)),
+        loadPeers: ledgerLocalLinkPeers(() => ledger),
+        transports: platformLocalLinks(),
+      );
+      ref.listen<AppSettings>(appSettingsControllerProvider, (
+        AppSettings? previous,
+        AppSettings next,
+      ) {
+        controller.setSettings(
+          lan: next.lanDiscoveryOn,
+          transports: enabledLocalTransports(next),
+        );
+      }, fireImmediately: true);
+      final List<StreamSubscription<void>> subscriptions =
+          <StreamSubscription<void>>[
+            if (ledger != null) ...<StreamSubscription<void>>[
+              ledger.devicesChanged.listen(
+                (_) => unawaited(controller.refreshPeers()),
+              ),
+              ledger.contactsChanged.listen(
+                (_) => unawaited(controller.refreshPeers()),
+              ),
+            ],
+          ];
+      ref.onDispose(() {
+        for (final StreamSubscription<void> s in subscriptions) {
+          unawaited(s.cancel());
+        }
+        unawaitedLogged(controller.stop(), context: 'Stopping local links');
+        controller.dispose();
+      });
+      return controller;
+    });
+
+/// What the settings page shows of the bridge's local links; read every few
+/// seconds while it is open.
+final Provider<LocalLinksStatus Function()> localLinksStatusReaderProvider =
+    Provider<LocalLinksStatus Function()>((Ref ref) {
+      final RuntimeNodeRuntime runtime = ref.watch(runtimeNodeRuntimeProvider);
+      return () {
+        try {
+          return runtime.localLinks?.status() ?? LocalLinksStatus.empty;
+        } on Object catch (error) {
+          logZenWarning('Local links status unreadable: $error');
+          return LocalLinksStatus.empty;
+        }
+      };
+    });
+
+/// The local links module of [ZenCore]: on while the core runs. In the app
+/// the native transports run while it is used, on Android while its core
+/// runs at all (on screen or unlocked in the background).
+final class LocalLinksModule extends ZenModule {
+  LocalLinksModule(this._ref);
+
+  final Ref _ref;
+  bool _interactive = false;
+  bool _started = false;
+
+  /// Devices are read again this often anyway (friends removed).
+  static const int refreshMinutes = 5;
+
+  @override
+  String get id => 'local-links';
+
+  /// Links keep going with nobody looking: in the background service, and
+  /// on Android in the app too — its core runs there only while it owns
+  /// the node, on screen or unlocked in the background (§14.1).
+  bool get _background =>
+      _ref.read(zenHostProvider) == ZenHost.backgroundService ||
+      Platform.isAndroid;
+
+  @override
+  Future<void> start() async {
+    _started = true;
+    await _ref
+        .read(localLinksControllerProvider)
+        .start(active: _background || _interactive, foreground: _interactive);
+  }
+
+  @override
+  Future<void> stop() async {
+    _started = false;
+    await _ref.read(localLinksControllerProvider).stop();
+  }
+
+  @override
+  void onInteractiveChanged(bool interactive) {
+    _interactive = interactive;
+    if (!_started) {
+      return;
+    }
+    _ref
+        .read(localLinksControllerProvider)
+        .setUsage(active: _background || interactive, foreground: interactive);
+  }
+
+  @override
+  void onResume() {
+    if (_started) {
+      unawaited(_ref.read(localLinksControllerProvider).refreshTransports());
+    }
+  }
+
+  @override
+  void onMinute(int minute) {
+    if (minute % refreshMinutes == 0) {
+      unawaited(_ref.read(localLinksControllerProvider).refreshPeers());
+    }
+  }
+}

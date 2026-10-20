@@ -6,3 +6,4 @@
 "NSLocationWhenInUseUsageDescription" = "Zen asks for your location only when you choose to send it to someone, for example in an alert or when meeting up.";
 "NSMicrophoneUsageDescription" = "Zen uses the microphone for voice and video calls and for recording voice messages.";
 "NSPhotoLibraryUsageDescription" = "Zen needs access to your photos when you pick a photo or video to send, for a post or for your profile.";
+"NSBluetoothAlwaysUsageDescription" = "Zen uses Bluetooth to connect directly to your friends’ devices nearby when there is no internet.";

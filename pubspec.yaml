@@ -19,6 +19,8 @@ dependencies:
   file_picker: ^10.3.3
   flutter_riverpod: ^3.3.1
   crypto: ^3.0.6
+  # BlueZ (Linux Bluetooth links, bluez_le.dart).
+  dbus: ^0.7.12
   mime: ^2.0.0
   video_player: ^2.10.0
   # Linux has no video_player backend: UnsupportedVideoPlayer stands in.
@@ -84,3 +86,5 @@ flutter:
     # Licenses of the Go bridge's modules (tool/go_licenses.dart) and fonts.
     - assets/licenses/go/
     - assets/licenses/fonts/
+    # Zen's own sounds (tool/sounds/generate_sounds.py).
+    - assets/sounds/

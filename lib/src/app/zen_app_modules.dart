@@ -14,6 +14,7 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/plan/plan_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
+import 'package:zen/src/features/runtime/local_links_controller.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/update/update_service.dart';
 
@@ -21,10 +22,9 @@ import 'package:zen/src/features/update/update_service.dart';
 /// the security gate lets the app through and stops it when the gate closes;
 /// `ZenRewriteApp` forwards flag changes and the return to the screen.
 ///
-/// The Android background service builds the same core, from the same
-/// registry, in its own isolate while the app is away (`zenHostProvider`
-/// is `ZenHost.backgroundService` there; the app's core pauses meanwhile).
-/// No module is left out there: none of them needs a screen.
+/// The Android background service does not run it: while the app is locked
+/// or gone the service only receives, without the master key, into a sealed
+/// inbox the app drains after unlock (`LockedReceiver`, §14.1).
 final Provider<ZenCore> zenCoreProvider = Provider<ZenCore>((Ref ref) {
   final ZenCore core = ZenCore(
     modules: zenAppModules(ref),
@@ -55,6 +55,8 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
       ref.read(updateServiceProvider);
     },
   ),
+  // Friends nearby without internet: same Wi-Fi, Wi-Fi Direct (§5.1).
+  LocalLinksModule(ref),
   ServicesModule(
     id: 'feed',
     // Notifications about reactions and the storage limits (§7, §11).

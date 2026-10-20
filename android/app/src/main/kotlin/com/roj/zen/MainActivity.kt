@@ -82,6 +82,8 @@ class MainActivity : FlutterFragmentActivity() {
         ZenSystemBridge.register(flutterEngine, this)
         ZenMulticastLock.register(flutterEngine, this)
         ZenNearbyBridge.register(flutterEngine, this)
+        ZenWifiDirectBridge.register(flutterEngine, this)
+        ZenBluetoothLinkBridge.register(flutterEngine, this)
         ZenPermissionsBridge.register(flutterEngine, this)
         ZenAlarmShortcut.register(flutterEngine, this, background = false)
     }
@@ -91,6 +93,8 @@ class MainActivity : FlutterFragmentActivity() {
         // Only this engine's share of the radio stops; the background
         // service keeps whatever it still uses (§15, §16.3).
         ZenNearbyBridge.unregister(flutterEngine)
+        ZenWifiDirectBridge.unregister(flutterEngine)
+        ZenBluetoothLinkBridge.unregister(flutterEngine)
         ZenAlarmShortcut.unregister(flutterEngine)
         super.cleanUpFlutterEngine(flutterEngine)
     }

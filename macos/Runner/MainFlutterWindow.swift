@@ -15,6 +15,8 @@ class MainFlutterWindow: NSWindow {
     // Screen protection and the Secure Enclave key vault (§14.1).
     SecurityBridge.register(
       with: flutterViewController.engine.binaryMessenger, window: self)
+    // Bluetooth and Multipeer links with friends nearby (§5.1 item 6).
+    ZenLocalLinksBridge.register(with: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }

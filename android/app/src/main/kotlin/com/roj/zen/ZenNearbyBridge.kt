@@ -306,7 +306,8 @@ object ZenNearbyBridge {
             listOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
 
-    private fun missingPermissions(context: Context): List<String> = neededPermissions().filter {
+    /** Also what Bluetooth links need ([ZenBluetoothLinkBridge]). */
+    internal fun missingPermissions(context: Context): List<String> = neededPermissions().filter {
         ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
     }
 

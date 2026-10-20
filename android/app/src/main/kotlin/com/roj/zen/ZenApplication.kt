@@ -27,6 +27,10 @@ class ZenApplication : Application() {
                 // the app is closed (§15, §16.3). No Activity here: the
                 // nearby bridge only reports missing permissions.
                 ZenNearbyBridge.registerBackground(flutterEngine, this@ZenApplication)
+                // Wi-Fi Direct links with friends nearby (§5.1 item 6).
+                ZenWifiDirectBridge.registerBackground(flutterEngine, this@ZenApplication)
+                // Bluetooth links with friends nearby (§5.1 item 6).
+                ZenBluetoothLinkBridge.registerBackground(flutterEngine, this@ZenApplication)
                 ZenAlarmShortcut.register(flutterEngine, this@ZenApplication, background = true)
             }
 
@@ -44,6 +48,8 @@ class ZenApplication : Application() {
 
     private fun forgetTaskEngine(engine: FlutterEngine) {
         ZenNearbyBridge.unregister(engine)
+        ZenWifiDirectBridge.unregister(engine)
+        ZenBluetoothLinkBridge.unregister(engine)
         ZenAlarmShortcut.unregister(engine)
     }
 

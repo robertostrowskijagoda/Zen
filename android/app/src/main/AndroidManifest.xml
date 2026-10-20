@@ -47,7 +47,12 @@
     <!-- "Podaj dalej": a local-only hotspot to pass the app on without
          internet. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-    <!-- People nearby (§15): Bluetooth LE, never used to find where you are. -->
+    <!-- Links with friends nearby without a Wi-Fi network (§5.1 item 6). -->
+    <uses-feature
+        android:name="android.hardware.wifi.direct"
+        android:required="false" />
+    <!-- People nearby (§15) and links with friends nearby (§5.1 item 6):
+         Bluetooth, never used to find where you are. -->
     <uses-feature
         android:name="android.hardware.bluetooth_le"
         android:required="false" />

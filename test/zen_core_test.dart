@@ -91,10 +91,9 @@ void main() {
       await core.start();
       log.clear();
 
+      // The pyramid is on by default (§2.5.1).
       core.applyFlags(
-        const FeatureFlags()
-            .withFeature(ZenFeature.dating, false)
-            .withFeature(ZenFeature.pyramid, true),
+        const FeatureFlags().withFeature(ZenFeature.dating, false),
       );
       await _settle();
       expect(log, <String>['stop dating', 'start pyramid']);
@@ -220,6 +219,7 @@ void main() {
     expect(core.modules.map((ZenModule m) => m.id), <String>[
       'signal',
       'ledger',
+      'local-links',
       'feed',
       'meet',
       'neighbors',
@@ -234,6 +234,7 @@ void main() {
       <String, ZenFeature?>{
         'signal': null,
         'ledger': null,
+        'local-links': null,
         'feed': null,
         'meet': null,
         'neighbors': null,

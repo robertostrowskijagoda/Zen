@@ -8,11 +8,11 @@ import io.flutter.plugin.common.MethodChannel
 
 /**
  * The Wi-Fi multicast lock (`zen/multicast`) for LAN discovery (§5.1 item 6):
- * Android delivers multicast on Wi-Fi only to apps holding a
- * `WifiManager.MulticastLock`, and holding one costs battery, so it is held
- * only while the setting "Szukaj znajomych w tej samej sieci Wi-Fi" is on.
- * Dart sets it at every node start (`setHeld`). One lock for the process:
- * the app's and the background service's engines both use it.
+ * Android reliably delivers broadcasts and multicast on Wi-Fi only to apps
+ * holding a `WifiManager.MulticastLock`, and holding one costs battery, so
+ * it is held only while "Znajomi w tej samej sieci Wi-Fi" is on and the app
+ * is on screen (local_links_controller.dart, `setHeld`). One lock for the
+ * process: the app's and the background service's engines both use it.
  */
 object ZenMulticastLock {
     private const val TAG = "ZenMulticast"

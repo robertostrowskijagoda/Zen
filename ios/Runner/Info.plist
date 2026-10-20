@@ -2,11 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Films play while they download from the app's own loopback server. -->
+	<!-- Films play while they download from the app's own loopback server: plain HTTP is allowed for 127.0.0.1 only. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>127.0.0.1</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
 	</dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
@@ -75,6 +81,13 @@
 	<true/>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Zen needs access to your music only when you choose a recording to send in a message or post.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Zen uses Bluetooth to connect directly to your friends’ devices nearby when there is no internet.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_zen-link._tcp</string>
+		<string>_zen-link._udp</string>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Zen uses the camera for video calls, for scanning friends’ QR codes, and for taking the photos and videos you send.</string>
 	<key>NSFaceIDUsageDescription</key>

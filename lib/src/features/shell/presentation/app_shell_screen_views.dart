@@ -826,6 +826,22 @@ class _SettingsScreen extends ConsumerWidget {
                         .setMediaOnlyOnWifi(value),
                   ),
                 ),
+                _SettingsSwitchTile(
+                  key: const Key('settings-in-app-sounds'),
+                  icon: Icons.music_note_outlined,
+                  toneIndex: 1,
+                  title: t('Dźwięki w aplikacji'),
+                  subtitle: t(
+                    'Ciche dźwięki przy wysłaniu wiadomości i w rozmowach. '
+                    'Alarm przyjaciela słychać zawsze.',
+                  ),
+                  value: settings.inAppSounds,
+                  onChanged: (bool value) => unawaited(
+                    ref
+                        .read(appSettingsControllerProvider.notifier)
+                        .setInAppSounds(value),
+                  ),
+                ),
                 _SettingsNavTile(
                   key: const Key('settings-nav-storage-limits'),
                   icon: Icons.sd_storage_outlined,
@@ -886,8 +902,9 @@ class _SettingsScreen extends ConsumerWidget {
                   icon: Icons.palette_outlined,
                   toneIndex: 2,
                   title: t('Wygląd'),
-                  subtitle: t('Motyw: {theme}', {
-                    'theme': settings.themeMode.label,
+                  subtitle: t('{palette} · {mode}', {
+                    'palette': settings.palette.label,
+                    'mode': settings.themeMode.label,
                   }),
                   pageTitle: t('Wygląd'),
                   pageChildren: const <Widget>[_AppearanceSection()],
@@ -957,7 +974,7 @@ class _SettingsScreen extends ConsumerWidget {
                   pageTitle: t('Sieć i usługa'),
                   pageChildren: const <Widget>[
                     _LiveTechInfoSection(),
-                    _LanDiscoverySection(),
+                    _OfflineLinksPanel(),
                     _BridgeHostSection(),
                   ],
                 ),
@@ -1284,54 +1301,16 @@ class _LiveTechInfoSection extends ConsumerWidget {
   }
 }
 
-/// "Szukaj znajomych w tej samej sieci Wi-Fi" (§5.1 item 6): the account's
-/// own devices on one network connect directly. Off by default.
-class _LanDiscoverySection extends ConsumerWidget {
-  const _LanDiscoverySection();
+/// "Łączność bez internetu" (§5.1 item 6): friends and own devices nearby
+/// link directly (offline_links_section.dart).
+class _OfflineLinksPanel extends StatelessWidget {
+  const _OfflineLinksPanel();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final bool phone = Platform.isAndroid || Platform.isIOS;
-    final bool enabled = ref.watch(
-      appSettingsControllerProvider.select(
-        (AppSettings s) => s.lanDiscoveryOn(phone: phone),
-      ),
-    );
-    final ZenColors zen = ZenColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: _Panel(
-        child: SwitchListTile.adaptive(
-          key: const Key('settings-lan-discovery-switch'),
-          contentPadding: EdgeInsets.zero,
-          value: enabled,
-          onChanged: (bool value) => unawaited(
-            ref
-                .read(appSettingsControllerProvider.notifier)
-                .setLanDiscovery(value),
-          ),
-          title: Text(
-            t('Szukaj znajomych w tej samej sieci Wi-Fi'),
-            style: TextStyle(
-              color: zen.textPrimary,
-              fontSize: 15.5,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          subtitle: Text(
-            t(
-              'Twoje urządzenia w tej samej sieci łączą się ze sobą '
-              'bezpośrednio, także bez internetu. Inni w tej sieci mogą '
-              'zobaczyć adres Zen tego urządzenia, ale nie połączą się z nim.',
-            ),
-            style: TextStyle(
-              color: zen.textSecondary,
-              fontSize: 13.5,
-              height: 1.4,
-            ),
-          ),
-        ),
-      ),
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.only(top: 12),
+      child: _Panel(child: OfflineLinksSection()),
     );
   }
 }
@@ -1842,11 +1821,47 @@ class _AppearanceSection extends ConsumerWidget {
     final AppSettingsController controller = ref.read(
       appSettingsControllerProvider.notifier,
     );
+    final Brightness brightness = Theme.of(context).brightness;
     return _Panel(
       accentTone: zen.accentTertiary,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
+          _SectionIntro(
+            title: t('Motyw'),
+            caption: t('Kolory i charakter całej aplikacji.'),
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints c) {
+              // Two previews per row on a phone, more on a wide window.
+              const double gap = 10;
+              final int columns = (c.maxWidth / 170).floor().clamp(2, 6);
+              final double width = (c.maxWidth - gap * (columns - 1)) / columns;
+              return Wrap(
+                key: const Key('settings-palette-picker'),
+                spacing: gap,
+                runSpacing: gap,
+                children: <Widget>[
+                  for (final AppPalette p in AppPalette.values)
+                    SizedBox(
+                      width: width,
+                      child: _PaletteCard(
+                        palette: p,
+                        colors: ZenColors.forPalette(
+                          p,
+                          settings.accentTheme,
+                          brightness,
+                        ),
+                        selected: settings.palette == p,
+                        onTap: () => controller.setPalette(p),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 20),
           _SectionIntro(title: t('Tryb')),
           const SizedBox(height: 10),
           Wrap(
@@ -1854,7 +1869,11 @@ class _AppearanceSection extends ConsumerWidget {
             spacing: 8,
             runSpacing: 8,
             children: <Widget>[
-              for (final AppThemeMode mode in AppThemeMode.values)
+              for (final AppThemeMode mode in const <AppThemeMode>[
+                AppThemeMode.light,
+                AppThemeMode.dark,
+                AppThemeMode.system,
+              ])
                 ChoiceChip(
                   key: Key('settings-theme-${mode.name}'),
                   avatar: Icon(switch (mode) {
@@ -1869,28 +1888,292 @@ class _AppearanceSection extends ConsumerWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 20),
-          _SectionIntro(
-            title: t('Kolor'),
-            caption: t('Akcent całej aplikacji: {accent}.', {
-              'accent': settings.accentTheme.label,
-            }),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            key: const Key('settings-accent-picker'),
-            spacing: 12,
-            runSpacing: 12,
-            children: <Widget>[
-              for (final AppAccentTheme t in AppAccentTheme.values)
-                _AccentSwatch(
-                  theme: t,
-                  selected: settings.accentTheme == t,
-                  onTap: () => controller.setAccentTheme(t),
-                ),
-            ],
-          ),
+          // The accent is the colour of Klasyczny; the other palettes have
+          // their own.
+          if (settings.palette == AppPalette.classic) ...<Widget>[
+            const SizedBox(height: 20),
+            _SectionIntro(
+              title: t('Kolor'),
+              caption: t('Akcent całej aplikacji: {accent}.', {
+                'accent': settings.accentTheme.label,
+              }),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              key: const Key('settings-accent-picker'),
+              spacing: 12,
+              runSpacing: 12,
+              children: <Widget>[
+                for (final AppAccentTheme t in AppAccentTheme.values)
+                  _AccentSwatch(
+                    theme: t,
+                    selected: settings.accentTheme == t,
+                    onTap: () => controller.setAccentTheme(t),
+                  ),
+              ],
+            ),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+/// A palette to pick: a tiny screen drawn in its colours (rail, title,
+/// a card with an unread dot, a button), its name and character.
+class _PaletteCard extends StatelessWidget {
+  const _PaletteCard({
+    required this.palette,
+    required this.colors,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final AppPalette palette;
+  final ZenColors colors;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final ZenColors c = colors;
+    final BorderRadius radius = BorderRadius.circular(18);
+    Widget line(Color color, double widthFactor, {double height = 5}) {
+      return FractionallySizedBox(
+        widthFactor: widthFactor,
+        alignment: Alignment.centerLeft,
+        child: Container(
+          height: height,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+      );
+    }
+
+    return Semantics(
+      selected: selected,
+      button: true,
+      label: palette.label,
+      child: Material(
+        color: zen.surface,
+        borderRadius: radius,
+        child: InkWell(
+          key: Key('settings-palette-${palette.name}'),
+          borderRadius: radius,
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              borderRadius: radius,
+              border: Border.all(
+                color: selected ? zen.accent : zen.outlineSoft,
+                width: selected ? 2 : 1,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                ExcludeSemantics(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      height: 78,
+                      color: c.background,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          // The tab rail with its active tab.
+                          Container(
+                            width: 16,
+                            color: c.surfaceSunk,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 3,
+                              vertical: 8,
+                            ),
+                            child: Column(
+                              children: <Widget>[
+                                for (int i = 0; i < 4; i++)
+                                  Container(
+                                    height: 9,
+                                    margin: const EdgeInsets.only(bottom: 5),
+                                    decoration: BoxDecoration(
+                                      color: i == 1
+                                          ? c.accent.withValues(alpha: 0.30)
+                                          : c.outline,
+                                      borderRadius: BorderRadius.circular(3),
+                                      border: i == 1
+                                          ? Border.all(color: c.accent)
+                                          : null,
+                                      boxShadow: i == 1
+                                          ? c.neonGlow(c.accent, radius: 6)
+                                          : null,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(7, 8, 7, 7),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: <Widget>[
+                                  Row(
+                                    children: <Widget>[
+                                      Container(
+                                        width: 3,
+                                        height: 9,
+                                        decoration: BoxDecoration(
+                                          color: c.accent,
+                                          borderRadius: BorderRadius.circular(
+                                            2,
+                                          ),
+                                          boxShadow: c.neonGlow(
+                                            c.accent,
+                                            radius: 6,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: line(
+                                          c.textPrimary,
+                                          0.55,
+                                          height: 6,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 7),
+                                  Expanded(
+                                    child: Container(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        6,
+                                        6,
+                                        6,
+                                        6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: c.surface,
+                                        borderRadius: BorderRadius.circular(7),
+                                        border: Border.all(
+                                          color: c.outlineSoft,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: <Widget>[
+                                          Expanded(
+                                            child: Column(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: <Widget>[
+                                                line(c.textPrimary, 0.8),
+                                                const SizedBox(height: 4),
+                                                line(c.textMuted, 0.6),
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Container(
+                                            width: 8,
+                                            height: 8,
+                                            decoration: BoxDecoration(
+                                              color: c.accentSecondary,
+                                              shape: BoxShape.circle,
+                                              boxShadow: c.neonGlow(
+                                                c.accentSecondary,
+                                                radius: 6,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: Container(
+                                      width: 34,
+                                      height: 10,
+                                      decoration: BoxDecoration(
+                                        color: c.glow > 0
+                                            ? c.surfaceRaised
+                                            : c.accent,
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                        border: c.glow > 0
+                                            ? Border.all(color: c.accent)
+                                            : null,
+                                        boxShadow: c.neonGlow(
+                                          c.accent,
+                                          radius: 6,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(6, 8, 4, 4),
+                  child: Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              palette.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: zen.textPrimary,
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              palette.tagline,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: zen.textSecondary,
+                                fontSize: 12,
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (selected)
+                        Icon(
+                          Icons.check_circle_rounded,
+                          size: 20,
+                          color: zen.accent,
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -19,6 +19,10 @@ import UserNotifications
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    // Bluetooth and Multipeer links with friends nearby (§5.1 item 6).
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenLocalLinksBridge") {
+      ZenLocalLinksBridge.register(with: registrar.messenger())
+    }
   }
 }
 

@@ -1,87 +1,130 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:zen/src/core/ledger/ledger_archive.dart';
-import 'package:zen/src/features/ledger/ledger_identity_store.dart';
+import 'package:zen/src/core/ledger/ledger_codec.dart';
+import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
+String _hex(List<int> bytes) =>
+    bytes.map((int b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+Uint8List _seed(int start) =>
+    Uint8List.fromList(List<int>.generate(32, (int i) => (start + i) & 0xff));
+
 void main() {
-  test('LAN discovery is off by default on every platform', () {
+  test('friends on the same Wi-Fi are on by default, Wi-Fi Direct off', () {
     const AppSettings defaults = AppSettings();
     expect(defaults.lanDiscovery, isNull);
-    expect(defaults.lanDiscoveryOn(phone: false), isFalse);
-    expect(defaults.lanDiscoveryOn(phone: true), isFalse);
+    expect(defaults.lanDiscoveryOn, isTrue);
+    expect(defaults.wifiDirect, isFalse);
     expect(defaults.toJson().containsKey('lanDiscovery'), isFalse);
 
     final AppSettings chosen = AppSettings.fromJson(
-      defaults.copyWith(lanDiscovery: true).toJson(),
+      defaults.copyWith(lanDiscovery: false, wifiDirect: true).toJson(),
     );
-    expect(chosen.lanDiscoveryOn(phone: true), isTrue);
-    final AppSettings off = AppSettings.fromJson(
-      defaults.copyWith(lanDiscovery: false).toJson(),
-    );
-    expect(off.lanDiscoveryOn(phone: false), isFalse);
+    expect(chosen.lanDiscoveryOn, isFalse);
+    expect(chosen.wifiDirect, isTrue);
   });
 
-  test('the secret is the same for the same account key only', () async {
-    final Uint8List key = Uint8List.fromList(List<int>.generate(32, (i) => i));
-    final Uint8List other = Uint8List.fromList(
-      List<int>.generate(32, (i) => 255 - i),
+  test('an Ed25519 key converts to the X25519 key of the same seed', () async {
+    // Checked against an independent implementation.
+    final LedgerKeyPair key = await LedgerKeyPair.fromSeed(_seed(0));
+    expect(
+      _hex(key.publicKey),
+      '03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8',
     );
-    final String secret = await deriveLanDiscoverySecret(key);
+    expect(
+      _hex(ed25519PublicKeyToX25519(key.publicKey)!),
+      '4701d08488451f545a409fb58ae3e58581ca40ac3f7f114698cd71deac73ca01',
+    );
+    final SimplePublicKey x = await (await ed25519SeedToX25519(
+      key.seed,
+    )).extractPublicKey();
+    expect(x.bytes, ed25519PublicKeyToX25519(key.publicKey));
 
-    expect(secret, matches(RegExp(r'^[0-9a-f]{64}$')));
-    expect(await deriveLanDiscoverySecret(key), secret);
-    expect(await deriveLanDiscoverySecret(other), isNot(secret));
+    expect(ed25519PublicKeyToX25519(Uint8List(31)), isNull);
+    // y = 1 is the neutral point: no X25519 key.
+    expect(ed25519PublicKeyToX25519(Uint8List(32)..[0] = 1), isNull);
   });
 
-  test('the node config carries the setting the bridge reads', () {
-    const String config = '{"PrivateKey":"abc","Peers":["tls://1.2.3.4:443"]}';
+  test('both devices of a pair make the same secret, others another', () async {
+    final LedgerKeyPair a = await LedgerKeyPair.fromSeed(_seed(1));
+    final LedgerKeyPair b = await LedgerKeyPair.fromSeed(_seed(2));
+    final LedgerKeyPair c = await LedgerKeyPair.fromSeed(_seed(3));
+    final String? ab = await LocalLinkSecrets(a).secretWith(b.publicKey);
+    final String? ba = await LocalLinkSecrets(b).secretWith(a.publicKey);
+    final String? ac = await LocalLinkSecrets(a).secretWith(c.publicKey);
 
-    final Map<String, dynamic> on =
-        jsonDecode(applyLanDiscoveryToNodeConfig(config, 'aa' * 32))
+    expect(ab, matches(RegExp(r'^[0-9a-f]{64}$')));
+    expect(ba, ab);
+    expect(ac, isNot(ab));
+    expect(await LocalLinkSecrets(a).secretWith(a.publicKey), isNull);
+  });
+
+  test('peers: devices with an address, own ones marked', () async {
+    final LedgerKeyPair me = await LedgerKeyPair.fromSeed(_seed(4));
+    final LedgerKeyPair friend = await LedgerKeyPair.fromSeed(_seed(5));
+    final LedgerKeyPair sibling = await LedgerKeyPair.fromSeed(_seed(6));
+    final LocalLinkSecrets secrets = LocalLinkSecrets(me);
+
+    final List<LocalLinkPeer> peers = await secrets.peersFor(<AccountDevice>[
+      AccountDevice(
+        account: 'friend-account',
+        device: b64(friend.publicKey),
+        name: 'Kasia',
+        address: '200:1::1',
+      ),
+      AccountDevice(
+        account: 'my-account',
+        device: b64(sibling.publicKey),
+        name: 'Laptop',
+        address: '200:2::1',
+      ),
+      // No address yet: nothing to link with.
+      AccountDevice(
+        account: 'friend-account',
+        device: b64(sibling.publicKey),
+        name: 'Tablet',
+      ),
+      // Not a key.
+      const AccountDevice(
+        account: 'friend-account',
+        device: 'nope',
+        name: 'Broken',
+        address: '200:3::1',
+      ),
+    ], account: 'my-account');
+
+    expect(peers.map((LocalLinkPeer p) => p.address), <String>[
+      '200:1::1',
+      '200:2::1',
+    ]);
+    expect(peers.map((LocalLinkPeer p) => p.own), <bool>[false, true]);
+    expect(peers.first.secretHex, await secrets.secretWith(friend.publicKey));
+  });
+
+  test('the bridge gets the setting and the devices', () {
+    final Map<String, dynamic> json =
+        jsonDecode(
+              localLinksSettingsJson(
+                lan: true,
+                beaconSeconds: 10,
+                peers: const <LocalLinkPeer>[
+                  LocalLinkPeer(address: '200::1', secretHex: 'ab', own: true),
+                ],
+              ),
+            )
             as Map<String, dynamic>;
-    expect(on['PrivateKey'], 'abc');
-    expect(on['Peers'], <String>['tls://1.2.3.4:443']);
-    expect(on[kLanDiscoveryConfigKey], <String, dynamic>{
-      'Enabled': true,
-      'Secret': 'aa' * 32,
-      'OnWiFi': true,
+    expect(json, <String, dynamic>{
+      'Lan': true,
+      'BeaconSeconds': 10,
+      'Peers': <dynamic>[
+        <String, dynamic>{'Address': '200::1', 'Secret': 'ab', 'Own': true},
+      ],
     });
-
-    final Map<String, dynamic> off =
-        jsonDecode(applyLanDiscoveryToNodeConfig(jsonEncode(on), null))
-            as Map<String, dynamic>;
-    expect(off.containsKey(kLanDiscoveryConfigKey), isFalse);
-    expect(off['PrivateKey'], 'abc');
-  });
-
-  test('the resolver follows the setting and the account', () async {
-    final MemoryLedgerDisk disk = MemoryLedgerDisk();
-    AppSettings settings = const AppSettings();
-    RuntimeLanDiscoveryResolver resolver({required bool phone}) =>
-        lanDiscoveryResolver(
-          loadSettings: () async => settings,
-          ledgerDisk: disk,
-          phone: phone,
-        );
-
-    // No identity yet: nothing to derive from.
-    expect(await resolver(phone: false)(), isNull);
-
-    final LedgerIdentity identity = await LedgerIdentity.loadOrCreate(disk);
-    final String expected = await deriveLanDiscoverySecret(identity.selfKey!);
-    // Off by default on every platform.
-    expect(await resolver(phone: false)(), isNull);
-    expect(await resolver(phone: true)(), isNull);
-
-    settings = settings.copyWith(lanDiscovery: true);
-    expect(await resolver(phone: false)(), expected);
-    expect(await resolver(phone: true)(), expected);
-
-    settings = settings.copyWith(lanDiscovery: false);
-    expect(await resolver(phone: false)(), isNull);
   });
 }
