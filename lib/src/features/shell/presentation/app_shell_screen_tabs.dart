@@ -285,6 +285,8 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
             const _StatusBar(),
             // This phone's clock is off (A21): a bar, tap for the report.
             const ClockSkewBanner(),
+            // A newer release on GitHub, or GitHub blocked.
+            const GithubUpdateBanner(),
             Expanded(
               child: Row(
                 children: <Widget>[
@@ -670,6 +672,7 @@ class _SideTabButton extends StatelessWidget {
                         ? zen.danger.withValues(alpha: 0.30)
                         : Colors.transparent,
                   ),
+                  boxShadow: selected ? zen.neonGlow(hue) : null,
                 ),
                 child: Center(
                   child: Badge(

@@ -4,11 +4,12 @@
 # Zen-Linux-arm64.tar.gz, Zen-Linux-x64.deb, Zen-Linux-arm64.deb,
 # Zen-Linux-x64.flatpak,
 # Zen-macOS.zip (universal), Zen-unsigned.ipa (the iOS workflow),
-# LICENSES-GO.txt and SHA256SUMS of all of them, and attaches them to a draft
-# release of that tag. Every build job uploads its files as an artifact; the
-# checksums job gathers them and writes SHA256SUMS, and the last job attaches
-# everything. Publish the draft by hand after checking it (docs/RELEASES.md,
-# section 3).
+# LICENSES-GO.txt, LICENSE, NOTICE, SHA256SUMS of all of them and
+# SHA256SUMS.sig (SHA256SUMS signed with the release signing key), and
+# attaches them to a draft release of that tag. Every build job uploads its
+# files as an artifact; the checksums job gathers them and writes SHA256SUMS,
+# the sign job signs it, and the last job attaches everything. Publish the
+# draft by hand after checking it (docs/RELEASES.md, section 3).
 #
 # The release key (security audit S-6):
 # - Only a run of a tag v* ever touches it. The android job runs only for
@@ -30,6 +31,12 @@
 #       ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD;
 #       then delete them from the repository secrets, so that no other job
 #       can read them. Without them the APK is not built (a warning).
+#     * ZEN_RELEASE_SIGNING_KEY: the release signing key (the contents of
+#       the file `dart run tool/zen_release.dart keygen` wrote; its public
+#       key is in kReleaseMaintainers, docs/RELEASES.md §8.6). The sign job
+#       signs SHA256SUMS with it. Without it SHA256SUMS.sig is not made (a
+#       warning), and builds that know a release key refuse to update
+#       themselves from that release.
 #   Environments with reviewers are free for public repositories. A private
 #   repository needs a paid plan for environments (Pro, Team or Enterprise),
 #   and GitHub Enterprise for required reviewers. Until the environment
@@ -41,6 +48,8 @@
 #   flutter-action's own cache step uses actions/cache by tag, not by SHA.
 # - GITHUB_TOKEN: read-only in every job; contents: write only in the last
 #   job, which runs only for tags and does nothing but attach the files.
+#   It never replaces a file already attached (no --clobber) and never
+#   touches a release that is already published.
 name: Release
 
 on:
@@ -359,7 +368,7 @@ jobs:
           work="$RUNNER_TEMP/flatpak"
           mkdir -p "$work/extra-lib" dist
           cp linux/packaging/com.roj.zen.yml linux/packaging/com.roj.zen.desktop \
-            linux/packaging/com.roj.zen.metainfo.xml "$work/"
+            linux/packaging/com.roj.zen.metainfo.xml LICENSE NOTICE "$work/"
           cp linux-dist/Zen-Linux-x64.tar.gz "$work/"
           # The GNOME runtime has no libayatana-appindicator3: take it and
           # its dependencies that the runtime lacks from this runner.
@@ -467,7 +476,7 @@ jobs:
         run: |
           export LC_ALL=C
           rm -f dist/*.sha256
-          cp native/yggdrasil_bridge/LICENSES-GO.txt dist/
+          cp native/yggdrasil_bridge/LICENSES-GO.txt LICENSE NOTICE dist/
           cd dist
           sums=$(sha256sum -- *)
           printf '%s\n' "$sums" > SHA256SUMS
@@ -479,14 +488,91 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  attach:
-    name: Draft release
+  # Signs SHA256SUMS with the release signing key (an environment secret,
+  # see the top): SHA256SUMS.sig, which the app checks before it updates
+  # itself from GitHub (lib/src/features/update/release.dart, SignedSums).
+  # In the environment "release", so it waits for the approval like the
+  # android job.
+  sign:
+    name: Sign SHA256SUMS
     needs: checksums
-    # !cancelled(): the optional windows-arm64 job may have failed further
-    # up, which alone would skip this job.
     if: >-
       !cancelled()
       && needs.checksums.result == 'success'
+      && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+    outputs:
+      signed: ${{ steps.key.outputs.ready }}
+    steps:
+      - name: Signing key
+        id: key
+        env:
+          SIGNING_KEY: ${{ secrets.ZEN_RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::warning::No ZEN_RELEASE_SIGNING_KEY in the secrets of the environment 'release': SHA256SUMS.sig is not made, and builds that know a release key will not update themselves from this release."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$SIGNING_KEY" > "$RUNNER_TEMP/zen-release.key"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        if: steps.key.outputs.ready == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        if: steps.key.outputs.ready == 'true'
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: false
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        if: steps.key.outputs.ready == 'true'
+        with:
+          name: zen-release
+          path: dist
+
+      - name: Sign
+        if: steps.key.outputs.ready == 'true'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          flutter pub get
+          mkdir -p signed
+          dart run tool/zen_release.dart sums-manifest --version "${TAG#v}" \
+            --out signed/SHA256SUMS.sig dist/SHA256SUMS
+          dart run tool/zen_release.dart sign signed/SHA256SUMS.sig "$RUNNER_TEMP/zen-release.key"
+          dart run tool/zen_release.dart verify signed/SHA256SUMS.sig
+
+      - name: Forget the signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/zen-release.key"
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: steps.key.outputs.ready == 'true'
+        with:
+          name: zen-release-signature
+          path: signed/
+          if-no-files-found: error
+
+  attach:
+    name: Draft release
+    needs: [checksums, sign]
+    # !cancelled(): the optional windows-arm64 job may have failed further
+    # up, which alone would skip this job. A failed signing stops it; a
+    # missing signing key only leaves SHA256SUMS.sig out (a warning above).
+    if: >-
+      !cancelled()
+      && needs.checksums.result == 'success'
+      && needs.sign.result == 'success'
       && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -500,14 +586,29 @@ jobs:
           name: zen-release
           path: dist
 
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        if: needs.sign.outputs.signed == 'true'
+        with:
+          name: zen-release-signature
+          path: dist
+
+      # Never --clobber: a file once attached is not replaced by a re-run
+      # (delete it by hand in the draft first), and a published release is
+      # never changed.
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+            if [ "$draft" != "true" ]; then
+              echo "::error::Release $TAG is already published; its files are never replaced."
+              exit 1
+            fi
+          else
             gh release create "$TAG" --draft --title "$TAG" \
-              --notes "Draft release. What changed: see CHANGELOG.md. Verify your download against the SHA-256 sums (SHA256SUMS) and the signing certificate fingerprint before installing." \
+              --notes "Draft release. What changed: see CHANGELOG.md. Verify your download against the SHA-256 sums (SHA256SUMS), their signature (SHA256SUMS.sig) and the signing certificate fingerprint before installing." \
               --repo "$GITHUB_REPOSITORY"
           fi
-          gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY"

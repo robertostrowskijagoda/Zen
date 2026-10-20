@@ -13,6 +13,8 @@
 //   dart run tool/zen_release.dart sign release.json maintainer.key
 //   dart run tool/zen_release.dart verify release.json
 //   dart run tool/zen_release.dart sums release.json > SHA256SUMS
+//   dart run tool/zen_release.dart sums-manifest --version 1.10.0 \
+//       --out SHA256SUMS.sig SHA256SUMS        # then: sign SHA256SUMS.sig key
 //   dart run tool/zen_release.dart bundle release.json zen-1.10.0.zenupdate \
 //       android=... windows=...
 //   dart run tool/zen_release.dart revoke --build 10 --why "Powód" \
@@ -183,6 +185,42 @@ Map<String, dynamic> createCanary({
       'at': when,
       'until': when + validFor.inMilliseconds,
       'text': text,
+    },
+    'sigs': <Map<String, String>>[],
+  };
+}
+
+/// The unsigned `SHA256SUMS.sig` of GitHub release [version] (`SignedSums`
+/// in the app): every file [sumsText] (a `SHA256SUMS`) lists, with its sum.
+Map<String, dynamic> createSignedSums({
+  required String version,
+  required String sumsText,
+}) {
+  if (!RegExp(r'^\d{1,4}\.\d{1,4}\.\d{1,4}$').hasMatch(version)) {
+    throw FormatException('To nie jest numer wersji: $version');
+  }
+  final RegExp line = RegExp(r'^([0-9a-fA-F]{64}) [ *]?(.+)$');
+  final Map<String, String> files = <String, String>{};
+  for (final String raw in const LineSplitter().convert(sumsText)) {
+    final RegExpMatch? m = line.firstMatch(raw.trim());
+    if (m == null) {
+      continue;
+    }
+    final String name = m.group(2)!.trim();
+    if (!RegExp(r'^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$').hasMatch(name)) {
+      throw FormatException('Nazwa pliku nie do podpisania: $name');
+    }
+    files[name] = m.group(1)!.toLowerCase();
+  }
+  if (files.isEmpty || files.length > 64) {
+    throw const FormatException('SHA256SUMS bez plików (albo ponad 64).');
+  }
+  return <String, dynamic>{
+    'm': <String, dynamic>{
+      't': 'zen_sums',
+      'app': 'zen',
+      'version': version,
+      'files': files,
     },
     'sigs': <Map<String, String>>[],
   };
@@ -407,7 +445,7 @@ const String _usage = '''
 Użycie: dart run tool/zen_release.dart <polecenie>
   keygen PLIK                     nowy klucz opiekuna (prywatny do PLIKU)
   pubkey PLIK                     klucz publiczny z pliku klucza
-  maintainers [--write] K1 K2 K3  lista kReleaseMaintainers (release.dart)
+  maintainers [--write] K1 [K2 K3]  lista kReleaseMaintainers (release.dart)
   create --version V --build N [--notes T] [--out release.json]
          [--donation URL] [--author A] [--repo URL] [--no-official]
          [--mirror URL]... platforma=plik...
@@ -415,6 +453,8 @@ Użycie: dart run tool/zen_release.dart <polecenie>
   sign PLIK.json KLUCZ            podpis wydania albo kanarka
   verify PLIK.json                kto podpisał i co jest w środku
   sums release.json               linie SHA256SUMS
+  sums-manifest --version V [--out SHA256SUMS.sig] SHA256SUMS
+                                  SHA256SUMS do podpisania (aktualizacja z GitHuba)
   bundle release.json WYJŚCIE.zenupdate platforma=plik...
   revoke --build N --why T KLUCZ WYJŚCIE.json
   fingerprint PLIK.apk [--write]  odcisk certyfikatu APK
@@ -464,9 +504,14 @@ Future<void> _run(String command, List<String> args) async {
         }
       }
       if (positional.toSet().length != positional.length ||
-          positional.length < 3) {
-        throw const FormatException(
-          'Podaj co najmniej 3 różne klucze publiczne (próg: 2 z nich).',
+          positional.isEmpty) {
+        throw const FormatException('Podaj różne klucze publiczne.');
+      }
+      if (positional.length < 3) {
+        stdout.writeln(
+          'Uwaga: aktualizacje z GitHuba wymagają podpisu jednym z tych '
+          'kluczy; aktualizacje przez sieć zostają wyłączone (potrzebują 2 '
+          'podpisów z listy co najmniej 3 kluczy).',
         );
       }
       if (args.contains('--write')) {
@@ -552,7 +597,12 @@ Future<void> _run(String command, List<String> args) async {
     case 'verify':
       final Map<String, dynamic> json = _readJson(positional.first);
       final Map<String, dynamic> m = json['m'] as Map<String, dynamic>;
-      if (m['t'] == 'zen_canary') {
+      if (m['t'] == 'zen_sums') {
+        stdout.writeln('SHA256SUMS wydania ${m['version']} na GitHubie:');
+        (m['files'] as Map<String, dynamic>).forEach(
+          (String name, dynamic sha) => stdout.writeln('  $sha  $name'),
+        );
+      } else if (m['t'] == 'zen_canary') {
         stdout.writeln(
           'Kanarek z ${_day(m['at'] as int)}, następny do '
           '${_day(m['until'] as int)}:\n${m['text']}',
@@ -577,13 +627,32 @@ Future<void> _run(String command, List<String> args) async {
         }
       }
       final List<String> ok = await validSigners(json);
+      final bool sums = m['t'] == 'zen_sums';
       stdout.writeln(
-        'Ważne podpisy (${ok.length}; aplikacja wymaga 2 z listy '
-        'kReleaseMaintainers):',
+        'Ważne podpisy (${ok.length}; aplikacja wymaga ${sums ? 1 : 2} z '
+        'listy kReleaseMaintainers):',
       );
       ok.forEach(stdout.writeln);
+      if (sums && ok.isEmpty) {
+        stderr.writeln('Brak ważnego podpisu.');
+        exitCode = 1;
+      }
     case 'sums':
       stdout.write(sha256Sums(_readJson(positional.first)));
+    case 'sums-manifest':
+      final String? version = _option(args, 'version');
+      if (version == null) {
+        throw const FormatException('Podaj --version.');
+      }
+      final String out = _option(args, 'out') ?? 'SHA256SUMS.sig';
+      _writeJson(
+        out,
+        createSignedSums(
+          version: version,
+          sumsText: File(positional.first).readAsStringSync(),
+        ),
+      );
+      stdout.writeln('Zapisano $out. Teraz podpisz: sign $out klucz');
     case 'bundle':
       final Map<String, dynamic> release = _readJson(positional[0]);
       final Map<String, dynamic> m = release['m'] as Map<String, dynamic>;

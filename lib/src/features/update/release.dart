@@ -16,10 +16,9 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 const int kReleaseThreshold = 2;
 const Duration kReleaseEmbargo = Duration(days: 7);
 
-/// Public keys (Ed25519, base64url) of release maintainers. Deliberately
-/// empty: the project does not want anyone holding publishing keys (they
-/// can die, lose them or be coerced), so network updates stay off until
-/// another way to approve versions is decided (docs/PLAN.md,
+/// Public keys (Ed25519, base64url) of release maintainers. Empty for now.
+/// Network updates stay off while it holds fewer than [kReleaseThreshold]
+/// keys, until another way to approve versions is decided (docs/PLAN.md,
 /// §14.2, "Otwarta decyzja"). While it is empty nothing signed is taken:
 /// no releases, vetoes, canaries or signed donation details.
 ///
@@ -28,6 +27,11 @@ const Duration kReleaseEmbargo = Duration(days: 7);
 /// machine and sends only the public key; then
 /// `dart run tool/zen_release.dart maintainers --write <key1> <key2> <key3>`
 /// fills this list, and the next release built with it takes updates.
+///
+/// The same keys sign the `SHA256SUMS` of GitHub releases ([SignedSums],
+/// RELEASES.md §8.6): once this list is not empty, the self-update from
+/// GitHub installs only a file one of them signed. One key is enough for
+/// that; network updates still need [kReleaseThreshold] of them.
 const List<String> kReleaseMaintainers = <String>[];
 
 const String kReleaseApp = 'zen';
@@ -460,6 +464,132 @@ final class SignedRelease {
   }) async =>
       maintainers.length >= threshold &&
       await validSignatures(maintainers) >= threshold;
+}
+
+/// The file of a GitHub release that carries [SignedSums]
+/// (docs/RELEASES.md §8.6).
+const String kSignedSumsAssetName = 'SHA256SUMS.sig';
+
+/// What a maintainer signs for a GitHub release: its version and the
+/// SHA-256 of every file in it, as its `SHA256SUMS` lists them. The format
+/// is that of a signed release, `{"m": {"t": "zen_sums", "app", "version",
+/// "files": {name: sha256}}, "sigs": [{"k", "s"}]}`, made by
+/// `tool/zen_release.dart sums-manifest` and `sign`. The version is signed
+/// too, so the files of an older release cannot be passed off as a newer
+/// one.
+@immutable
+final class SignedSums {
+  const SignedSums({
+    required this.version,
+    required this.files,
+    required this.signatures,
+  });
+
+  final String version;
+
+  /// File name → lower-case hex SHA-256.
+  final Map<String, String> files;
+
+  /// Maintainer key → signature (base64url).
+  final Map<String, String> signatures;
+
+  static Map<String, dynamic> _body(
+    String version,
+    Map<String, String> files,
+  ) => <String, dynamic>{
+    't': 'zen_sums',
+    'app': kReleaseApp,
+    'version': version,
+    'files': files,
+  };
+
+  Uint8List signedBytes() => canonicalJsonBytes(_body(version, files));
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'm': _body(version, files),
+    'sigs': <Map<String, String>>[
+      for (final MapEntry<String, String> e in signatures.entries)
+        <String, String>{'k': e.key, 's': e.value},
+    ],
+  };
+
+  static SignedSums? fromJson(Object? json) {
+    if (json is! Map) {
+      return null;
+    }
+    final Object? m = json['m'];
+    final Map<String, String>? signatures = readSignatureList(json['sigs']);
+    if (m is! Map ||
+        m['t'] != 'zen_sums' ||
+        m['app'] != kReleaseApp ||
+        m.length != 4 ||
+        signatures == null) {
+      return null;
+    }
+    final Object? version = m['version'];
+    final Object? files = m['files'];
+    if (version is! String ||
+        version.isEmpty ||
+        version.length > 30 ||
+        files is! Map ||
+        files.isEmpty ||
+        files.length > 64) {
+      return null;
+    }
+    final Map<String, String> parsed = <String, String>{};
+    for (final MapEntry<Object?, Object?> e in files.entries) {
+      final Object? name = e.key;
+      final Object? sha = e.value;
+      if (name is! String || !_safeFileName(name) || !isHex(sha, 64)) {
+        return null;
+      }
+      parsed[name] = sha as String;
+    }
+    return SignedSums(
+      version: version,
+      files: Map<String, String>.unmodifiable(parsed),
+      signatures: signatures,
+    );
+  }
+
+  /// Reads the text of a [kSignedSumsAssetName] file; null when it is not
+  /// one.
+  static SignedSums? decode(String text) {
+    try {
+      return fromJson(jsonDecode(text));
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// Adds the signature of [maintainer].
+  Future<SignedSums> signedBy(LedgerKeyPair maintainer) async {
+    final Uint8List sig = await maintainer.sign(signedBytes());
+    return SignedSums(
+      version: version,
+      files: files,
+      signatures: <String, String>{...signatures, maintainer.id: b64(sig)},
+    );
+  }
+
+  /// Whether one of [maintainers] signed that release [version] has the
+  /// file [name] with exactly [sha256Hex]. Always false while
+  /// [maintainers] is empty.
+  Future<bool> confirms({
+    required String version,
+    required String name,
+    required String sha256Hex,
+    List<String> maintainers = kReleaseMaintainers,
+  }) async =>
+      maintainers.isNotEmpty &&
+      this.version == version &&
+      files[name] == sha256Hex.toLowerCase() &&
+      await countMaintainerSignatures(
+            message: signedBytes(),
+            signatures: signatures,
+            maintainers: maintainers,
+          ) >=
+          1;
 }
 
 /// "Do not install build [build]", signed by one maintainer: a veto any of

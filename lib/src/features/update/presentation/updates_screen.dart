@@ -12,6 +12,7 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/features/update/canary.dart';
+import 'package:zen/src/features/update/presentation/github_update_banner.dart';
 import 'package:zen/src/features/update/presentation/share_app_screen.dart';
 import 'package:zen/src/features/update/release.dart';
 import 'package:zen/src/features/update/sha256_sums.dart';
@@ -134,6 +135,8 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: <Widget>[
           _versionCard(zen),
+          // The newest release on GitHub (not in the store build).
+          if (!isStoreBuild) const GithubUpdateCard(),
           ZenSection(t('Aktualizacje'), top: 16),
           // A store build is updated by its store (STAN D12).
           if (isStoreBuild)
@@ -222,11 +225,10 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
           if (!isStoreBuild)
             ZenInfo(
               icon: Icons.verified_user_outlined,
-              title: t('Bez sklepu i bez serwera'),
+              title: t('Bez sklepu'),
               text: t(
-                'Nowe wersje przychodzą od znajomych, bez sklepu i bez '
-                'serwera. Zen czeka 7 dni od pierwszego zobaczenia wersji '
-                'i nigdy nie instaluje niczego sam.',
+                'Nowe wersje przychodzą z GitHuba albo od znajomych, bez '
+                'sklepu. Zen nie instaluje niczego bez Twojej zgody.',
               ),
             ),
           ZenSection(t('Podaj dalej'), top: 24),

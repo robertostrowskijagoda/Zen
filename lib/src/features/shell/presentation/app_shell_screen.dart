@@ -10,6 +10,7 @@ import 'package:zen/src/app/app_data_reset.dart';
 import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/theme/zen_concept.dart';
 import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
@@ -55,6 +56,7 @@ import 'package:zen/src/features/pyramid/presentation/wallet_screen.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
+import 'package:zen/src/features/runtime/presentation/offline_links_section.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -74,6 +76,7 @@ import 'package:zen/src/features/social/presentation/friend_nickname_prompt.dart
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/update/presentation/friends_version_banner.dart';
+import 'package:zen/src/features/update/presentation/github_update_banner.dart';
 import 'package:zen/src/features/update/presentation/share_app_screen.dart';
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
 import 'package:zen/src/features/update/store_build.dart';
@@ -293,6 +296,8 @@ class AppShellScreen extends ConsumerWidget {
           children: <Widget>[
             _CallFeedbackHost(),
             _StatusBar(),
+            // A newer release on GitHub, or GitHub blocked.
+            GithubUpdateBanner(),
             // The chat list shows the last messages (S-9).
             Expanded(
               child: SecureScreen(child: _ChatsPage(key: Key('chats-page'))),

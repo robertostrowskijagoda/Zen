@@ -12,6 +12,7 @@ import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/about/presentation/about_screen.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -580,6 +581,63 @@ void main() {
       expect(service.book.mirrors, <String>['https://codeberg.org/zen/Zen']);
       expect(service.book.signedOfficial!.donation, kDonationUrl);
       expect(await service.fileBytes(), apk);
+    });
+
+    test('signed SHA256SUMS for the GitHub update: the tool signs, the app '
+        'checks', () async {
+      await tool.main(<String>['keygen', at('release.key')]);
+      final String seed = File(at('release.key')).readAsStringSync().trim();
+      final String key = await tool.publicKeyOf(
+        await tool.keyFromSeed(base64Url.decode(seed)),
+      );
+      final String apk = 'ab' * 32;
+      File(at('SHA256SUMS')).writeAsStringSync(
+        '$apk  Zen.apk\n${'cd' * 32}  Zen-Windows.zip\nnot a line\n',
+      );
+      await tool.main(<String>[
+        'sums-manifest',
+        '--version',
+        '1.12.0',
+        '--out',
+        at('SHA256SUMS.sig'),
+        at('SHA256SUMS'),
+      ]);
+      await tool.main(<String>[
+        'sign',
+        at('SHA256SUMS.sig'),
+        at('release.key'),
+      ]);
+      final SignedSums signed = SignedSums.decode(
+        File(at('SHA256SUMS.sig')).readAsStringSync(),
+      )!;
+      expect(signed.files.keys, <String>['Zen.apk', 'Zen-Windows.zip']);
+      Future<bool> confirms({
+        String version = '1.12.0',
+        String name = 'Zen.apk',
+        String? sha,
+        List<String>? maintainers,
+      }) => signed.confirms(
+        version: version,
+        name: name,
+        sha256Hex: sha ?? apk,
+        maintainers: maintainers ?? <String>[key],
+      );
+      expect(await confirms(), isTrue);
+      expect(await confirms(sha: apk.toUpperCase()), isTrue);
+      expect(await confirms(version: '1.13.0'), isFalse);
+      expect(await confirms(name: 'Zen-Windows.zip'), isFalse);
+      expect(await confirms(sha: 'ee' * 32), isFalse);
+      expect(await confirms(maintainers: <String>[]), isFalse);
+      final LedgerKeyPair other = await LedgerKeyPair.generate();
+      expect(await confirms(maintainers: <String>[other.id]), isFalse);
+      expect(
+        () => tool.createSignedSums(version: 'v1.12.0', sumsText: ''),
+        throwsFormatException,
+      );
+      expect(
+        () => tool.createSignedSums(version: '1.12.0', sumsText: 'nothing'),
+        throwsFormatException,
+      );
     });
 
     test('options with "=" in their value are not taken for files', () {

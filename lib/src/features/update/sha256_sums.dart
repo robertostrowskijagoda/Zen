@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
+import 'package:zen/src/features/update/github_redirects.dart';
 
 /// What the release's `SHA256SUMS` says about a file (§14.3 point 5).
 enum Sha256SumsVerdict {
@@ -58,8 +59,9 @@ Sha256SumsVerdict compareWithSha256Sums({
       : Sha256SumsVerdict.notListed;
 }
 
-/// Downloads the text at [uri]; swapped out in tests. Called only when the
-/// person asks: Zen never reaches GitHub on its own.
+/// Downloads the text at [uri]; swapped out in tests. Called when the person
+/// compares a file from friends, and before installing a release downloaded
+/// from GitHub (github_update_service.dart).
 typedef Sha256SumsFetcher = Future<String> Function(Uri uri);
 
 final Provider<Sha256SumsFetcher> sha256SumsFetcherProvider =
@@ -68,20 +70,20 @@ final Provider<Sha256SumsFetcher> sha256SumsFetcherProvider =
 /// The most a `SHA256SUMS` file may be (a few lines in reality).
 const int kMaxSha256SumsBytes = 64 * 1024;
 
-/// Fetches [uri] over HTTPS (GitHub redirects to its CDN, which is followed),
-/// refusing anything larger than [kMaxSha256SumsBytes]. Throws on any error.
+/// Fetches [uri] over HTTPS from GitHub (it redirects to its file servers,
+/// which is followed, but to no other host), refusing anything larger than
+/// [kMaxSha256SumsBytes]. Throws on any error. Also fetches a release's
+/// signed sums (`SHA256SUMS.sig`).
 Future<String> fetchSha256Sums(Uri uri) async {
-  if (uri.scheme != 'https') {
-    throw ArgumentError.value(uri, 'uri', 'HTTPS only');
-  }
   final HttpClient client = HttpClient()
-    ..connectionTimeout = const Duration(seconds: 15);
+    ..connectionTimeout = const Duration(seconds: 15)
+    // The only header Zen sets (as for the release check).
+    ..userAgent = 'Zen';
   try {
-    final HttpClientRequest request = await client
-        .getUrl(uri)
-        .timeout(const Duration(seconds: 15));
-    final HttpClientResponse response = await request.close().timeout(
-      const Duration(seconds: 15),
+    final HttpClientResponse response = await getFromGithub(
+      client,
+      uri,
+      timeout: const Duration(seconds: 15),
     );
     if (response.statusCode != 200) {
       throw HttpException('HTTP ${response.statusCode}', uri: uri);
