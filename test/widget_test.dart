@@ -1722,6 +1722,7 @@ void main() {
               ),
             ]),
           ),
+          gifDownloaderProvider.overrideWithValue(_FakeGifDownloader()),
           messageTimelineStoreProvider.overrideWithValue(timelineStore),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty().copyWith(
@@ -1743,7 +1744,9 @@ void main() {
 
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('conversation-gif-button')));
-    await tester.pumpAndSettle();
+    // Not pumpAndSettle: the previews' spinners / animations never settle.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('Wybierz GIF'), findsOneWidget);
     // GIF search is a third-party connection, and the picker says so.
     expect(
@@ -1752,12 +1755,17 @@ void main() {
     );
 
     await tester.tap(find.byKey(const Key('conversation-gif-tile-0')));
-    await tester.pumpAndSettle();
+    // Bounded pumps: the sent GIF's bubble shows a spinner that never settles
+    // (its codec decodes outside fake async).
+    for (int i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 200));
+    }
 
     final List<ChatMessage> messages = await timelineStore.load('ada.ygg');
     expect(messages, hasLength(1));
     expect(messages.single.type, ChatMessageType.image);
-    expect(messages.single.gifUrl, 'https://example.com/cat.gif');
+    // The sender downloaded the GIF and sent its bytes as an attachment.
+    expect(messages.single.attachmentBytes, _tinyGif);
     expect(messages.single.mimeType, 'image/gif');
     expect(messages.single.fileName, 'gif.gif');
   });
@@ -3219,6 +3227,19 @@ final class _FakeDeepLinkSource implements DeepLinkSource {
   void emit(Uri uri) {
     _links.add(uri);
   }
+}
+
+/// A valid 1x1 GIF.
+final Uint8List _tinyGif = Uint8List.fromList(const <int>[
+  0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x80, 0x00, //
+  0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x21, 0xF9, 0x04, 0x01, 0x00,
+  0x00, 0x00, 0x00, 0x2C, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
+  0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3B,
+]);
+
+final class _FakeGifDownloader implements GifDownloader {
+  @override
+  Future<Uint8List> download(String url) async => _tinyGif;
 }
 
 final class _FakeGifCatalog implements GifCatalog {

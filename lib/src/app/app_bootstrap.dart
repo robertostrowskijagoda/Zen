@@ -14,6 +14,7 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -259,6 +260,10 @@ final class ZenBootstrapper {
           () => initRuntime(
             settings: settingsState.settings,
             appSecurityService: appSecurityService,
+            lanDiscovery: lanDiscoveryResolver(
+              loadSettings: settingsState.appSettingsStore.load,
+              ledgerDisk: stores.ledgerDisk,
+            ),
           ),
         );
     return ZenBootstrapResult(
@@ -311,6 +316,7 @@ final class ZenBootstrapper {
   Future<ZenBootstrapRuntimeState> initRuntime({
     required AppSettings settings,
     AppSecurityService? appSecurityService,
+    RuntimeLanDiscoveryResolver? lanDiscovery,
   }) async {
     final RuntimeSignalBootstrapConfig runtimeConfig =
         RuntimeSignalBootstrapConfig(
@@ -318,6 +324,7 @@ final class ZenBootstrapper {
           nodeConfigProtector: appSecurityService == null
               ? null
               : EncryptedBinaryPayloadProtector(appSecurityService),
+          lanDiscovery: lanDiscovery,
         );
     return ZenBootstrapRuntimeState(
       runtime: _runtimeBuilder(config: runtimeConfig),

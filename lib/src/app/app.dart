@@ -2,9 +2,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_language_controller.dart';
 import 'package:zen/src/app/i18n/zen_locales.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/app/zen_app_modules.dart';
+import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/calls/presentation/call_compact_layer.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
@@ -40,16 +43,29 @@ class ZenRewriteApp extends ConsumerStatefulWidget {
 
 class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
     with WidgetsBindingObserver {
+  /// Runs the services (A15); started by `RuntimeSignalBridge` once the
+  /// security gate lets the app through. This widget forwards the return to
+  /// the screen and flag changes.
+  late final ZenCore _core;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _core = ref.read(zenCoreProvider);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _core.resumed();
+    }
   }
 
   @override
@@ -64,6 +80,12 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
 
   @override
   Widget build(BuildContext context) {
+    // A feature switched on or off while the app runs starts or stops its
+    // module.
+    ref.listen<FeatureFlags>(
+      featureFlagsProvider,
+      (FeatureFlags? previous, FeatureFlags next) => _core.applyFlags(next),
+    );
     final AppSettings settings = ref.watch(appSettingsControllerProvider);
     final String languageCode = ref.watch(
       zenLanguageControllerProvider.select(
