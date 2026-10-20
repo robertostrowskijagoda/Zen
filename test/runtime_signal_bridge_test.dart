@@ -143,10 +143,10 @@ void main() {
     (WidgetTester tester) async {
       final MemorySignalTransport transport = MemorySignalTransport();
       final MemoryAppSettingsStore settingsStore = MemoryAppSettingsStore(
-        const AppSettings(encryptionEnabled: true),
+        const AppSettings(),
       );
       final MemoryAppSecurityService security = MemoryAppSecurityService(
-        settings: const AppSettings(encryptionEnabled: true),
+        settings: const AppSettings(),
         hasPassword: true,
         locked: true,
       );

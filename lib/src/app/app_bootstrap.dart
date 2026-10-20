@@ -24,6 +24,7 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
+import 'package:zen/src/features/social/social_hub_state.dart';
 
 typedef SupportDirectoryLoader = Future<Directory> Function();
 typedef AppSecurityServiceBuilder = AppSecurityService Function();
@@ -93,8 +94,13 @@ final class ZenBootstrapResult {
   final AppSettings initialSettings;
   final ZenPersistentStores stores;
 
+  /// The app's providers. The Android background service builds the same
+  /// ones (`ZenHost.backgroundService`), reading the social state itself
+  /// ([socialHubAutoHydrate] off) from [socialHubSeed].
   List buildProviderOverrides({
     RuntimeSystemNotificationServiceFactory? systemNotificationServiceFactory,
+    bool socialHubAutoHydrate = true,
+    SocialHubState? socialHubSeed,
   }) {
     return [
       ...buildRuntimeTransportProviderOverrides(
@@ -126,6 +132,8 @@ final class ZenBootstrapResult {
           SyncingMessageTimelineStore(stores.messageTimelineStore),
         ),
         attachmentTransferStore: stores.attachmentTransferStore,
+        autoHydrate: socialHubAutoHydrate,
+        seedState: socialHubSeed,
       ),
       userProfileStoreProvider.overrideWithValue(stores.userProfileStore),
       groupStoreProvider.overrideWithValue(stores.groupStore),

@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/app/zen_app_modules.dart';
+import 'package:zen/src/app/zen_core.dart';
+import 'package:zen/src/app/zen_host.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
@@ -70,6 +73,7 @@ void main() {
           MemoryAttachmentTransferStore(),
         ),
         callMediaSessionControllerProvider.overrideWithValue(callMedia),
+        zenHostProvider.overrideWithValue(ZenHost.backgroundService),
         socialHubAutoHydrateProvider.overrideWithValue(false),
         socialHubSeedProvider.overrideWithValue(
           SocialHubState.empty(lifecycle: background),
@@ -89,6 +93,14 @@ void main() {
     });
 
     await coordinator.start();
+    // The service runs the app's own core: the same modules, one code
+    // path (A15).
+    final ZenCore core = container.read(zenCoreProvider);
+    expect(core.isStarted, isTrue);
+    expect(core.modules.map((ZenModule m) => m.id), <String>[
+      for (final ZenModule m in _appRegistry()) m.id,
+    ]);
+    expect(core.runningModules, contains('signal'));
     transport.sentSignals.clear();
     await transport.injectIncoming(
       from: 'stranger.ygg',
@@ -157,6 +169,7 @@ void main() {
             MemoryAttachmentTransferStore(),
           ),
           callMediaSessionControllerProvider.overrideWithValue(callMedia),
+          zenHostProvider.overrideWithValue(ZenHost.backgroundService),
           socialHubAutoHydrateProvider.overrideWithValue(false),
           socialHubSeedProvider.overrideWithValue(
             SocialHubState.empty(
@@ -214,7 +227,7 @@ void main() {
         List<int>.generate(32, (int index) => index + 7),
       );
       final MemoryAppSecurityService security = MemoryAppSecurityService(
-        settings: const AppSettings(encryptionEnabled: true),
+        settings: const AppSettings(),
         hasPassword: true,
         locked: false,
         encryptionKey: encryptionKey,
@@ -235,9 +248,7 @@ void main() {
             signalTransportProvider.overrideWithValue(runtime),
             appSecurityServiceProvider.overrideWithValue(security),
             appSettingsStoreProvider.overrideWithValue(
-              MemoryAppSettingsStore(
-                const AppSettings(encryptionEnabled: true),
-              ),
+              MemoryAppSettingsStore(const AppSettings()),
             ),
             signalQueueStoreProvider.overrideWithValue(
               MemorySignalQueueStore(),
@@ -594,17 +605,12 @@ void main() {
       final AndroidBackgroundBootstrapPayload payload =
           await loadStoredAndroidBackgroundBootstrapPayload(
             settingsStore: MemoryAppSettingsStore(
-              const AppSettings(
-                inboxLimitMb: 91,
-                encryptionEnabled: true,
-                notificationDelaySeconds: 44,
-              ),
+              const AppSettings(inboxLimitMb: 91, notificationDelaySeconds: 44),
             ),
             credentialsStore: credentials,
           );
 
       expect(payload.settings.inboxLimitMb, 91);
-      expect(payload.settings.encryptionEnabled, isTrue);
       expect(payload.settings.notificationDelaySeconds, 44);
       expect(payload.hasPassword, isTrue);
       expect(payload.encryptionKey, isNull);
@@ -945,4 +951,11 @@ final class _FakeAndroidBackgroundServiceController
     }
     _running = false;
   }
+}
+
+/// The app's module registry, as the app's own container builds it.
+List<ZenModule> _appRegistry() {
+  final ProviderContainer app = ProviderContainer();
+  addTearDown(app.dispose);
+  return app.read(zenCoreProvider).modules;
 }

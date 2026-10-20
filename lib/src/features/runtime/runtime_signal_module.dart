@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/zen_core.dart';
+import 'package:zen/src/app/zen_host.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
@@ -42,11 +43,15 @@ bool isSecurityBlockingUi(AppSecurityService security) {
 }
 
 /// The core's first module: the signal transport, frames into the social
-/// state, and friends' presence (ping/pong) while the app is in use.
+/// state, and friends' presence (ping/pong) while the app is in use — and
+/// all the time in the Android background service, which receives for the
+/// app while it is away ([ZenHost.backgroundService]).
 final class RuntimeSignalModule extends ZenModule {
-  RuntimeSignalModule(this._ref);
+  RuntimeSignalModule(this._ref)
+    : _inService = _ref.read(zenHostProvider) == ZenHost.backgroundService;
 
   final Ref _ref;
+  final bool _inService;
   StreamSubscription<SignalTransportFrame>? _subscription;
   SignalTransport? _transport;
   Timer? _presenceTimer;
@@ -75,6 +80,12 @@ final class RuntimeSignalModule extends ZenModule {
       // it starts again once the app is in use (see onInteractiveChanged).
       logZenError('Runtime signal transport start failed', error, stackTrace);
     }
+    if (_inService && _running) {
+      // Nobody looks at the service: friends see this phone and it sees
+      // them for as long as it runs.
+      _restartPresenceLoop();
+      await _tickPresenceLoop();
+    }
   }
 
   @override
@@ -99,6 +110,9 @@ final class RuntimeSignalModule extends ZenModule {
 
   @override
   void onInteractiveChanged(bool interactive) {
+    if (_inService) {
+      return;
+    }
     if (!interactive) {
       _presenceTimer?.cancel();
       return;
@@ -304,11 +318,11 @@ final class RuntimeSignalModule extends ZenModule {
   }
 
   Future<void> _tickPresenceLoop() async {
-    if (!_running || !_isUiInteractive()) {
+    if (!_running || !_presenceRuns()) {
       return;
     }
     await _ref.read(socialHubControllerProvider.notifier).whenHydrated;
-    if (!_running || !_isUiInteractive()) {
+    if (!_running || !_presenceRuns()) {
       return;
     }
     final RuntimePresenceConfig config = _ref.read(
@@ -322,6 +336,10 @@ final class RuntimeSignalModule extends ZenModule {
         .read(socialHubControllerProvider.notifier)
         .decayPresence(offlineAfter: config.offlineAfter);
   }
+
+  /// Presence pings go out while the app is in use, and always in the
+  /// background service.
+  bool _presenceRuns() => _inService || _isUiInteractive();
 
   String _presenceStateLabel() {
     return _isUiInteractive() ? 'foreground' : 'background';

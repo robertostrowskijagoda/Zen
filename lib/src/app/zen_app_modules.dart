@@ -6,6 +6,8 @@ import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/recovery_providers.dart';
 import 'package:zen/src/features/dating/dating_providers.dart';
+import 'package:zen/src/features/feed/feed_maintenance.dart';
+import 'package:zen/src/features/groups/group_board_providers.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
@@ -18,6 +20,11 @@ import 'package:zen/src/features/update/update_service.dart';
 /// The app's `ZenCore`, created once. `RuntimeSignalBridge` starts it when
 /// the security gate lets the app through and stops it when the gate closes;
 /// `ZenRewriteApp` forwards flag changes and the return to the screen.
+///
+/// The Android background service builds the same core, from the same
+/// registry, in its own isolate while the app is away (`zenHostProvider`
+/// is `ZenHost.backgroundService` there; the app's core pauses meanwhile).
+/// No module is left out there: none of them needs a screen.
 final Provider<ZenCore> zenCoreProvider = Provider<ZenCore>((Ref ref) {
   final ZenCore core = ZenCore(
     modules: zenAppModules(ref),
@@ -49,6 +56,16 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
     },
   ),
   ServicesModule(
+    id: 'feed',
+    // Notifications about reactions and the storage limits (§7, §11).
+    start: () {
+      ref.read(feedMaintenanceProvider)?.start();
+    },
+    minute: (int minute) {
+      ref.read(feedMaintenanceProvider)?.minute(minute);
+    },
+  ),
+  ServicesModule(
     id: 'meet',
     start: () {
       // Friends' statuses and alarms; this phone shown nearby (§15–16).
@@ -60,6 +77,8 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
       ref.read(circleServiceProvider);
       // Introductions and letters through friends (§24.1).
       ref.read(introServiceProvider);
+      // Group boards (§13).
+      ref.read(groupBoardServiceProvider);
     },
     // The Android background service may have taken frames meanwhile.
     resume: () {
@@ -72,8 +91,7 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
   ),
   ServicesModule(
     id: 'neighbors',
-    feature: ZenFeature.neighbors,
-    // Flats and neighbours (§18).
+    // Flats and neighbours (§18): core, always on (§2.5.1).
     start: () {
       ref.read(neighborsServiceProvider);
     },

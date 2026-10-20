@@ -8,40 +8,35 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/app_bootstrap.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/i18n/zen_language_preference.dart';
-import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/persistent_stores.dart';
+import 'package:zen/src/app/zen_app_modules.dart';
+import 'package:zen/src/app/zen_core.dart';
+import 'package:zen/src/app/zen_host.dart';
 import 'package:zen/src/app/zen_instance.dart';
-import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
-import 'package:zen/src/domain/friends/friend_profile.dart';
-import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
-import 'package:zen/src/domain/signals/zen_signal.dart';
-import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
 import 'package:zen/src/features/calls/group_call_media.dart';
 import 'package:zen/src/features/calls/noop_call_media_session.dart';
-import 'package:zen/src/features/ledger/friend_level_lookup.dart';
-import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/alarm_shortcut.dart';
 import 'package:zen/src/features/meet/location.dart';
-import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/nearby_keeper.dart';
+import 'package:zen/src/features/meet/presentation/alarm_audio.dart';
 import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
-import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -49,7 +44,6 @@ import 'package:zen/src/features/security/security_payload_protector.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
-import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -411,7 +405,6 @@ final class AndroidBackgroundBootstrapPayload {
       'inboxLimitMb': settings.inboxLimitMb,
       'autoCleanupDays': settings.autoCleanupDays,
       'notificationDelaySeconds': settings.notificationDelaySeconds,
-      'encryptionEnabled': settings.encryptionEnabled,
       'lockMode': settings.lockMode.index,
       'backgroundLockDelaySeconds': settings.backgroundLockDelaySeconds,
       'hasPassword': hasPassword,
@@ -441,9 +434,6 @@ final class AndroidBackgroundBootstrapPayload {
         notificationDelaySeconds:
             (data['notificationDelaySeconds'] as num?)?.toInt() ??
             AppSettings.defaultNotificationDelaySeconds,
-        encryptionEnabled:
-            (data['encryptionEnabled'] as bool?) ??
-            AppSettings.defaultEncryptionEnabled,
         lockMode: AppSettings.lockModeFromStorage(
           (data['lockMode'] as num?)?.toInt() ?? AppLockMode.background.index,
         ),
@@ -792,6 +782,10 @@ final class _AndroidBackgroundRuntimeBridgeState
   bool _syncInFlight = false;
   bool _syncQueued = false;
   bool _handoffActive = false;
+
+  /// The app's `ZenCore` was stopped for the handoff: the service runs the
+  /// same modules meanwhile, and only one of them may do the duties.
+  bool _coreHandedOff = false;
   int? _lastBackgroundHandoffGeneration;
   AndroidBackgroundRuntimeMode? _lastConfirmedMode;
   String? _lastParkedCallSignature;
@@ -1067,6 +1061,17 @@ final class _AndroidBackgroundRuntimeBridgeState
     if (!mounted) {
       return;
     }
+    // The service runs the app's own modules (one `ZenCore`, one code
+    // path): the app's duties pause meanwhile, so the minute work and the
+    // writes of the shared state happen in one isolate only.
+    final ZenCore core = ref.read(zenCoreProvider);
+    final bool coreWasRunning = core.isStarted;
+    if (coreWasRunning) {
+      await core.stop();
+      if (!mounted) {
+        return;
+      }
+    }
     _lastConfirmedMode = null;
     _lastParkedCallSignature = null;
     // The service is about to own the node; a heartbeat from here on would
@@ -1086,10 +1091,14 @@ final class _AndroidBackgroundRuntimeBridgeState
       );
       await ref.read(ledgerNodeProvider)?.resume();
       await runtime.start();
+      if (coreWasRunning) {
+        _restartCore();
+      }
       return;
     }
     _lastConfirmedMode = AndroidBackgroundRuntimeMode.active;
     _handoffActive = true;
+    _coreHandedOff = coreWasRunning;
     logZenMessage('Background service owns the runtime node.');
   }
 
@@ -1141,6 +1150,24 @@ final class _AndroidBackgroundRuntimeBridgeState
     if (!runtimeSnapshot.serviceRunning) {
       await ref.read(runtimeNodeRuntimeProvider).start();
     }
+    if (_coreHandedOff && (!serviceOwnsNode || parked) && mounted) {
+      _coreHandedOff = false;
+      _restartCore();
+    }
+  }
+
+  /// Starts the app's `ZenCore` again after the service let go, and reloads
+  /// what the service changed meanwhile. A locked app leaves it to the
+  /// security gate, which starts the core once the app is unlocked.
+  void _restartCore() {
+    if (isSecurityBlockingUi(ref.read(appSecurityServiceProvider))) {
+      return;
+    }
+    final ZenCore core = ref.read(zenCoreProvider);
+    unawaitedLogged(
+      core.start().then((_) => core.resumed()),
+      context: 'Restarting ZenCore after the background service failed',
+    );
   }
 
   /// Starts the foreground service while the app is still on screen and parks
@@ -1205,18 +1232,19 @@ final class BackgroundRuntimeEnvironment {
     required this.transport,
     required this.callMediaController,
     this.runtime,
-    this.ledgerDisk,
   });
 
+  /// The app's providers, built as the app builds them, with
+  /// [zenHostProvider] set to [ZenHost.backgroundService].
   final ProviderContainer container;
   final SignalTransport transport;
   final CallMediaSessionController callMediaController;
   final RuntimeNodeRuntime? runtime;
-
-  /// The app's ledger on disk, served to friends while the app is away.
-  final LedgerDisk? ledgerDisk;
 }
 
+/// The service's providers: the app's own ([ZenBootstrapResult]), over the
+/// same stores, with the key the app handed over, and no call media (calls
+/// are answered in the app).
 Future<BackgroundRuntimeEnvironment> buildHeadlessBackgroundRuntimeEnvironment(
   AndroidBackgroundBootstrapPayload payload,
 ) async {
@@ -1252,37 +1280,24 @@ Future<BackgroundRuntimeEnvironment> buildHeadlessBackgroundRuntimeEnvironment(
   );
   final NoopCallMediaSessionController callMedia =
       NoopCallMediaSessionController();
+  final ZenBootstrapResult app = ZenBootstrapResult(
+    runtime: runtime,
+    runtimeConfig: runtimeConfig,
+    appSecurityService: security,
+    initialSettings: payload.settings,
+    stores: stores,
+  );
   final ProviderContainer container = ProviderContainer(
     overrides: [
-      ...buildRuntimeTransportProviderOverrides(
-        runtime: runtime,
-        runtimeConfig: runtimeConfig,
-        relayStateStore: stores.relayStateStore,
-      ),
-      ...buildRuntimeSystemNotificationProviderOverrides(
-        serviceFactory: () => FlutterLocalRuntimeSystemNotificationService(
-          // No Activity is attached to the service engine.
-          canRequestPermission: false,
-        ),
-      ),
-      ...buildAppSecurityProviderOverrides(service: security),
-      ...buildAppSettingsProviderOverrides(
-        store: appSettingsStore,
-        // The user's own choices (e.g. notification content) apply in the
-        // background too; without this the service ran on defaults.
-        initialState: payload.settings,
-        hydrationEnabled: false,
-      ),
-      ...buildSocialHubProviderOverrides(
-        signalQueueStore: stores.signalQueueStore,
-        socialSnapshotStore: stores.socialSnapshotStore,
-        messageTimelineStore: stores.messageTimelineStore,
-        attachmentTransferStore: stores.attachmentTransferStore,
-        autoHydrate: false,
-        seedState: SocialHubState.empty(
+      ...app.buildProviderOverrides(
+        // Read by the coordinator itself, which must not run on an empty
+        // stand-in (see [HeadlessBackgroundRuntimeCoordinator.start]).
+        socialHubAutoHydrate: false,
+        socialHubSeed: SocialHubState.empty(
           lifecycle: _backgroundLifecycleSnapshot(),
         ),
       ),
+      zenHostProvider.overrideWithValue(ZenHost.backgroundService),
       ...buildCallMediaSessionProviderOverrides(controller: callMedia),
     ],
   );
@@ -1293,48 +1308,26 @@ Future<BackgroundRuntimeEnvironment> buildHeadlessBackgroundRuntimeEnvironment(
     transport: container.read(signalTransportProvider),
     callMediaController: callMedia,
     runtime: runtime,
-    ledgerDisk: stores.ledgerDisk,
   );
 }
 
+/// Runs Zen in the Android background service while the app is away: the
+/// same `ZenCore` as the app (`zenAppModules`, one code path), started on
+/// the app's state, plus what only the service does — the power-button
+/// alarm, alarm waves from phones around and its own notification.
 final class HeadlessBackgroundRuntimeCoordinator {
   HeadlessBackgroundRuntimeCoordinator({required this.environment});
 
   final BackgroundRuntimeEnvironment environment;
-  StreamSubscription<SignalTransportFrame>? _subscription;
-  Timer? _presenceTimer;
 
-  /// "Idę na randkę" deadlines (§19.4), checked every minute while the app
-  /// is away: the reminder and the alarm come on time.
-  Timer? _datingTimer;
+  /// The app's modules, running here.
+  ZenCore? _core;
 
-  /// The ledger while the app is away: friends keep getting posts, photos
-  /// and videos from this phone, and what they publish is kept for the app.
-  LedgerNode? _ledger;
-
-  /// Statuses and alarms while the app is away: a friend's alarm still
-  /// rings (§16.3).
-  late final MeetService _meet = MeetService(
-    host: ContainerMeetHost(
-      container: _container,
-      transport: environment.transport,
-      ledger: () => _ledger,
-      ownAddress: () => environment.runtime?.snapshot.localAddress ?? '',
-    ),
-    store: MeetStore(environment.ledgerDisk ?? MemoryLedgerDisk()),
-  );
-
-  /// Events, questions, tables and dinner circles while the app is away
-  /// (§17): kept for the app instead of lost.
-  late final MeetInbox _meetInbox = MeetInbox(
-    meet: _meet,
-    disk: environment.ledgerDisk ?? MemoryLedgerDisk(),
-    address: () => environment.runtime?.snapshot.localAddress ?? '',
-  );
+  /// Stops following calls (they change the service notification's text).
+  void Function()? _stopCallText;
 
   /// People nearby while the app is away (§15, §16.3): alarm waves from
   /// phones around and, when allowed, a short look around now and then.
-  NearbyService? _nearby;
   NearbyKeeper? _nearbyKeeper;
 
   /// Set once [dispose] began: late work (an alarm's position) stops.
@@ -1342,9 +1335,10 @@ final class HeadlessBackgroundRuntimeCoordinator {
 
   /// Last text pushed onto the service notification.
   ///
-  /// A ringing call re-sends its invite once per second, and every frame runs
-  /// this sync: re-posting the unchanged notification each time makes the
-  /// shade entry flash as if a new call notification kept arriving.
+  /// A ringing call re-sends its invite once per second, and every frame
+  /// could post the notification again: re-posting the unchanged
+  /// notification makes the shade entry flash as if a new call notification
+  /// kept arriving.
   String? _lastServiceNotificationText;
 
   ProviderContainer get _container => environment.container;
@@ -1379,82 +1373,31 @@ final class HeadlessBackgroundRuntimeCoordinator {
       '(${_container.read(socialHubControllerProvider).friends.length} peers).',
     );
     await controller.setLifecycle(_backgroundLifecycleSnapshot());
-    // Weak acquaintances get no friend list and statuses (§8).
-    _meet.levelOf = (String a) => _ledger?.levelOf(a);
-    _container.read(friendLevelLookupProvider).levelOf = (String a) =>
-        _ledger?.levelOf(a);
-    // A friend who lost this phone's friend list asks again (B1/B2).
-    _meet.friendNames = () {
-      final SocialHubState s = _container.read(socialHubControllerProvider);
-      return <String, String>{
-        for (final FriendProfile f in s.acceptedFriends)
-          f.address: s.nameFor(f),
-      };
-    };
-    // Subscribe before starting. `frames` is a broadcast stream, so anything
-    // emitted between start() and listen() is gone for good.
-    _subscription = environment.transport.frames.listen((
-      SignalTransportFrame frame,
-    ) {
-      unawaitedLogged(
-        _handleFrame(frame),
-        context: 'Headless background frame handling failed',
-      );
-    });
-    await environment.transport.start();
-    logZenMessage('Background runtime node started.');
-    await _startLedger();
+    final callText = _container.listen<String>(
+      socialHubControllerProvider.select(
+        (SocialHubState s) => _backgroundServiceNotificationText(s.activeCall),
+      ),
+      (String? previous, String next) => unawaitedLogged(
+        _syncForegroundServiceState(),
+        context: 'Background service notification',
+      ),
+    );
+    _stopCallText = callText.close;
+    final ZenCore core = _container.read(zenCoreProvider);
+    _core = core;
+    await core.start();
+    logZenMessage(
+      'Background runtime started: ${core.runningModules.join(', ')}.',
+    );
     await _startAlarmDuties();
     await _syncForegroundServiceState();
-    _restartPresenceLoop();
-    await _tickPresenceLoop();
-    _datingTimer?.cancel();
-    _datingTimer = Timer.periodic(const Duration(minutes: 1), (_) {
-      unawaitedLogged(
-        _meetInbox.dating.backgroundTick(),
-        context: 'Headless background dating deadlines failed',
-      );
-    });
-  }
-
-  Future<void> _startLedger() async {
-    final LedgerDisk? disk = environment.ledgerDisk;
-    if (disk == null) {
-      return;
-    }
-    final LedgerNode node = LedgerNode(
-      // The ledger talks to devices, not to accounts.
-      transport: meshOf(environment.transport),
-      localAddress: () => environment.runtime?.snapshot.localAddress ?? '',
-      disk: disk,
-      friendAddresses: () =>
-          acceptedFriendAddresses(_container.read(socialHubControllerProvider)),
-      autoDownloadMedia: () =>
-          _container.read(appSettingsControllerProvider).autoDownloadMedia,
-      createIdentity: false,
-    );
-    try {
-      await node.start();
-      _ledger = node;
-      _container
-          .read(accountDirectoryHolderProvider)
-          .directory = LedgerAccountDirectory(
-        node,
-        () => acceptedFriendAddresses(
-          _container.read(socialHubControllerProvider),
-        ),
-      );
-      logZenMessage('Background ledger is serving posts and files.');
-    } catch (error, stackTrace) {
-      logZenError('Background ledger did not start', error, stackTrace);
-      await node.stop();
-    }
   }
 
   /// What this service does for alarms while it runs the network (§16.3):
   /// the power-button shortcut comes here, this person's running alarm is
   /// sent once more, and phones nearby are heard.
   Future<void> _startAlarmDuties() async {
+    final MeetService meet = _container.read(meetServiceProvider);
     try {
       const AlarmShortcutChannel shortcut = AlarmShortcutChannel();
       if (Platform.isAndroid) {
@@ -1462,43 +1405,34 @@ final class HeadlessBackgroundRuntimeCoordinator {
         // just let the network go.
         await shortcut.setNodeOwner(true);
       }
-      await _meet.reload();
+      await meet.reload();
       if (Platform.isAndroid &&
-          _meet.book.alarmPowerButton &&
-          _meet.hasAlarmPin) {
+          meet.book.alarmPowerButton &&
+          meet.hasAlarmPin) {
         await shortcut.setEnabled(true);
       }
       // The shortcut fires as the screen goes off, while the app is
       // handing the network over: an alarm the app raised just then may
       // not have gone out.
-      await _meet.resendOwnAlarm();
+      await meet.resendOwnAlarm();
     } catch (error, stackTrace) {
       logZenError('Background alarm duties did not start', error, stackTrace);
     }
-    await _startNearby();
-  }
-
-  Future<void> _startNearby() async {
     if (!Platform.isAndroid) {
       return;
     }
-    final ChannelNearbyRadio radio = ChannelNearbyRadio();
-    final NearbyService nearby = NearbyService(
-      radio: radio,
-      meet: _meet,
-      ownAddress: () => environment.runtime?.snapshot.localAddress ?? '',
-      sendMesh: (String to, Map<String, dynamic> payload) =>
-          environment.transport.send(remoteAddress: to, payload: payload),
-      frames: environment.transport.frames,
-    );
-    final NearbyKeeper keeper = NearbyKeeper(
-      nearby: nearby,
-      inService: true,
-      announceAlarmReceiver: radio.setAlarmReceiver,
-    );
-    _nearby = nearby;
-    _nearbyKeeper = keeper;
     try {
+      // The app's "people nearby", kept working with nobody looking.
+      final NearbyService nearby = _container.read(nearbyServiceProvider);
+      final NearbyRadio radio = nearby.radio;
+      final NearbyKeeper keeper = NearbyKeeper(
+        nearby: nearby,
+        inService: true,
+        announceAlarmReceiver: radio is ChannelNearbyRadio
+            ? radio.setAlarmReceiver
+            : null,
+      );
+      _nearbyKeeper = keeper;
       await keeper.start();
       logZenMessage(
         'Background nearby started '
@@ -1511,19 +1445,13 @@ final class HeadlessBackgroundRuntimeCoordinator {
 
   Future<void> _stopAlarmDuties() async {
     final NearbyKeeper? keeper = _nearbyKeeper;
-    final NearbyService? nearby = _nearby;
     _nearbyKeeper = null;
-    _nearby = null;
     try {
       if (Platform.isAndroid) {
         // From now on the shortcut goes to the app again.
         await const AlarmShortcutChannel().setNodeOwner(false);
       }
       await keeper?.close();
-      if (nearby != null) {
-        await nearby.close();
-        nearby.dispose();
-      }
     } catch (error, stackTrace) {
       logZenError('Stopping background nearby failed', error, stackTrace);
     }
@@ -1532,10 +1460,17 @@ final class HeadlessBackgroundRuntimeCoordinator {
   /// The power-button shortcut while this service runs the network
   /// (§16.3): the same alarm as the button in the app.
   Future<void> onPowerShortcut() async {
-    final ShortcutAlarmResult result = await raiseAlarmFromShortcut(_meet);
+    final MeetService meet = _container.read(meetServiceProvider);
+    final ShortcutAlarmResult result = await raiseAlarmFromShortcut(meet);
     logZenMessage('Power-button alarm in the background: ${result.name}.');
     if (result != ShortcutAlarmResult.raised) {
       return;
+    }
+    // Sound too, when the person chose it for alarms (§16.3): the same
+    // pieces as after the button. Android lets the service record only if
+    // the microphone permission is there; without it nothing is recorded.
+    if (meet.book.alarmRecordAudio) {
+      AlarmAudioPump.start(meet);
     }
     // The position, if Android lets the service have it (often only the
     // last known one); the app sends fresh ones once it is opened.
@@ -1546,7 +1481,7 @@ final class HeadlessBackgroundRuntimeCoordinator {
         timeout: const Duration(seconds: 15),
       );
       if (fix != null && !_disposed) {
-        await _meet.updateAlarmLocation(
+        await meet.updateAlarmLocation(
           fix.lat,
           fix.lon,
           accuracy: fix.accuracy,
@@ -1557,20 +1492,21 @@ final class HeadlessBackgroundRuntimeCoordinator {
 
   Future<void> dispose() async {
     _disposed = true;
+    AlarmAudioPump.stop();
     await _stopAlarmDuties();
+    _stopCallText?.call();
+    _stopCallText = null;
+    final ZenCore? core = _core;
+    _core = null;
+    await core?.stop();
     // Saved and closed before the app takes the ledger back.
-    final LedgerNode? ledger = _ledger;
-    _ledger = null;
-    if (ledger != null) {
+    if (_container.exists(ledgerNodeProvider)) {
       try {
-        await ledger.stop();
+        await _container.read(ledgerNodeProvider)?.stop();
       } catch (error, stackTrace) {
         logZenError('Stopping the background ledger failed', error, stackTrace);
       }
     }
-    _presenceTimer?.cancel();
-    _datingTimer?.cancel();
-    await _subscription?.cancel();
     await environment.transport.stop();
     await environment.callMediaController.close();
     environment.callMediaController.dispose();
@@ -1635,189 +1571,6 @@ final class HeadlessBackgroundRuntimeCoordinator {
       default:
         return;
     }
-  }
-
-  bool _isAcceptedFriend(String address) {
-    return _container
-            .read(socialHubControllerProvider)
-            .friendByAddress(address)
-            ?.status ==
-        FriendRelationshipStatus.accepted;
-  }
-
-  bool _isAcceptedFriendOrGroupMember(String address) {
-    if (_isAcceptedFriend(address)) {
-      return true;
-    }
-    final SocialHubState hubState = _container.read(
-      socialHubControllerProvider,
-    );
-    return hubState.groups.values.any(
-      (GroupProfile g) =>
-          // A group nobody here joined yet could be invented by a stranger.
-          !g.isInvitePending &&
-          (g.hasMember(address) ||
-              PeerShareCodec.addressesEqual(g.createdById, address)),
-    );
-  }
-
-  /// What app version a friend named (A17): only for the "newer Zen" hint.
-  Future<void> _notePeerVersion(
-    String from,
-    Map<String, dynamic> payload,
-  ) async {
-    final PeerVersion? version = PeerVersion.fromPayload(payload);
-    if (version != null) {
-      await _container
-          .read(socialHubControllerProvider.notifier)
-          .notePeerAppVersion(peerAddress: from, version: version.version);
-    }
-  }
-
-  Future<void> _handleFrame(SignalTransportFrame frame) async {
-    final String from = PeerShareCodec.normalizeAddress(frame.from);
-    final String type = frame.payload['type'] as String? ?? '';
-    if (MeetInbox.handles(type)) {
-      await _meetInbox.handle(frame);
-      return;
-    }
-    if ((type == 'ping' || type == 'pong') &&
-        _container.read(socialHubControllerProvider).snapshotUnreadable) {
-      // The stored friend list could not be read: every friend would look
-      // like a stranger. Presence waits - no answer, nothing recorded.
-      return;
-    }
-    // Presence is friend-gated exactly like in the foreground: never reveal
-    // our state to, or take state from, a peer we have not accepted.
-    final bool isAcceptedFriend = _isAcceptedFriend(from);
-    final bool isGroupMember =
-        !isAcceptedFriend && _isAcceptedFriendOrGroupMember(from);
-    if (type == 'ping') {
-      if (!isAcceptedFriend && !isGroupMember) {
-        // No answer at all to a peer we do not know: any reply would confirm
-        // that this device is online at this address. (An automatic
-        // `friend_remove` used to go back, which also ended real friendships
-        // whenever this side had only lost its friend list.)
-        return;
-      }
-      await environment.transport.send(
-        remoteAddress: from,
-        payload: <String, dynamic>{
-          'type': 'pong',
-          'state': 'background',
-          if (isAcceptedFriend) ...versionHello(),
-          if (isAcceptedFriend) ..._meetInbox.meet.helloFor(from),
-        },
-      );
-      if (isAcceptedFriend) {
-        await _meetInbox.meet.onHello(from, frame.payload);
-        await _notePeerVersion(from, frame.payload);
-      }
-      return;
-    }
-    if (type == 'pong') {
-      if (!isAcceptedFriend && !isGroupMember) {
-        // Not taken, and not answered either (see the ping above).
-        return;
-      }
-      await _container
-          .read(socialHubControllerProvider.notifier)
-          .updatePeerPresence(
-            peerAddress: from,
-            isForeground:
-                (frame.payload['state'] as String? ?? '') == 'foreground',
-            observedAtMillis: frame.receivedAtMillis,
-          );
-      if (isAcceptedFriend) {
-        await _meetInbox.meet.onHello(from, frame.payload);
-        await _notePeerVersion(from, frame.payload);
-      }
-      return;
-    }
-    if (isUnconfirmedFriendRemovePayload(frame.payload)) {
-      // An older peer's automatic reply, not a person's decision: it must
-      // not end the friendship here.
-      await _container
-          .read(socialHubControllerProvider.notifier)
-          .receiveUnconfirmedFriendRemove(
-            from,
-            receivedAtMillis: frame.receivedAtMillis,
-          );
-      return;
-    }
-    final ZenSignal? signal = zenSignalFromTransportPayload(
-      sender: from,
-      payload: frame.payload,
-    );
-    if (signal == null) {
-      logZenWarning('Background runtime could not parse a "$type" frame.');
-      return;
-    }
-    logZenMessage(
-      'Background runtime received ${signal.type.name} '
-      '(known peer: ${_isAcceptedFriend(from)}).',
-    );
-    await _container
-        .read(socialHubControllerProvider.notifier)
-        .receiveSignal(signal, receivedAtMillis: frame.receivedAtMillis);
-    await _syncForegroundServiceState();
-  }
-
-  void _restartPresenceLoop() {
-    _presenceTimer?.cancel();
-    final Duration interval = _container
-        .read(runtimePresenceConfigProvider)
-        .pingInterval;
-    if (interval <= Duration.zero) {
-      return;
-    }
-    _presenceTimer = Timer.periodic(interval, (_) {
-      unawaitedLogged(
-        _tickPresenceLoop(),
-        context: 'Headless background presence tick failed',
-      );
-    });
-  }
-
-  Future<void> _tickPresenceLoop() async {
-    final RuntimePresenceConfig config = _container.read(
-      runtimePresenceConfigProvider,
-    );
-    final SocialHubState hubState = _container.read(
-      socialHubControllerProvider,
-    );
-    final String localAddr = _container
-        .read(runtimeNodeSnapshotProvider)
-        .localAddress;
-    final Set<String> peersToPing = <String>{
-      ...hubState.acceptedFriends.map((FriendProfile friend) => friend.address),
-      // Not the members of a group the user has not joined yet.
-      for (final GroupProfile group in hubState.groupList)
-        ...group.memberAddresses,
-    };
-    for (final String address in peersToPing) {
-      if (localAddr.isNotEmpty &&
-          PeerShareCodec.addressesEqual(address, localAddr)) {
-        continue;
-      }
-      if (!isRoutablePeerAddress(address)) {
-        continue;
-      }
-      await environment.transport.send(
-        remoteAddress: address,
-        payload: <String, dynamic>{
-          'type': 'ping',
-          if (_isAcceptedFriend(address)) ...<String, dynamic>{
-            ...versionHello(),
-            ..._meetInbox.meet.helloFor(address),
-          },
-        },
-      );
-    }
-    await _container
-        .read(socialHubControllerProvider.notifier)
-        .decayPresence(offlineAfter: config.offlineAfter);
-    await _syncForegroundServiceState();
   }
 
   Future<void> _syncForegroundServiceState() async {

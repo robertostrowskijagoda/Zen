@@ -22,7 +22,7 @@ void main() {
       );
       addTearDown(() => supportDirectory.delete(recursive: true));
       final MemoryAppSettingsStore store = MemoryAppSettingsStore(
-        const AppSettings(notificationDelaySeconds: 9, encryptionEnabled: true),
+        const AppSettings(notificationDelaySeconds: 9),
       );
 
       final ZenBootstrapper bootstrapper = ZenBootstrapper(
@@ -35,7 +35,6 @@ void main() {
       expect(state.supportDirectory.path, supportDirectory.path);
       expect(state.appSettingsStore, same(store));
       expect(state.settings.notificationDelaySeconds, 9);
-      expect(state.settings.encryptionEnabled, isTrue);
     },
   );
 
@@ -59,10 +58,7 @@ void main() {
 
   test('bootstrap retries a critical step once before succeeding', () async {
     int prepareCalls = 0;
-    final AppSettings settings = const AppSettings(
-      notificationDelaySeconds: 8,
-      encryptionEnabled: true,
-    );
+    final AppSettings settings = const AppSettings(notificationDelaySeconds: 8);
     final MemoryAppSettingsStore store = MemoryAppSettingsStore(settings);
     final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
     addTearDown(runtime.dispose);
