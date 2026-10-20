@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 
@@ -13,8 +14,9 @@ import 'package:zen/src/core/logging/zen_log.dart';
 /// code and their browser downloads the file.
 ///
 /// Only one file is served, under a random path, only while the screen is
-/// open (and at most [lifetime]), and only on the addresses the screen
-/// shows (the hotspot / Wi-Fi ones) — not on mobile data, a VPN or any other
+/// open (and at most [lifetime]), and only on the one address of the
+/// network the person shares on (the hotspot or the Wi-Fi, see
+/// [chooseShareNetwork]) — not on mobile data, a VPN or any other
 /// interface. Nothing else on this device is reachable.
 final class ShareAppServer {
   ShareAppServer({
@@ -195,30 +197,116 @@ a.b{display:block;text-align:center;background:#2f6f5e;color:#fff;padding:1rem;b
   }
 }
 
-/// Addresses other devices nearby can reach this one at: private IPv4
-/// ones (home Wi-Fi, this phone's hotspot), the hotspot's first.
-Future<List<InternetAddress>> localShareAddresses() async {
+/// A local network this device can share on: one interface and its
+/// private IPv4 address.
+@immutable
+final class ShareNetwork {
+  const ShareNetwork({required this.interfaceName, required this.address});
+
+  final String interfaceName;
+  final InternetAddress address;
+
+  /// Short text for a chooser: `wlan0 · 192.168.1.20`.
+  String get label => '$interfaceName · ${address.address}';
+
+  @override
+  bool operator ==(Object other) =>
+      other is ShareNetwork &&
+      other.interfaceName == interfaceName &&
+      other.address == address;
+
+  @override
+  int get hashCode => Object.hash(interfaceName, address);
+}
+
+/// Interfaces that never lead to a person nearby: mobile data (whose
+/// carrier addresses are often private too), VPNs and tunnels, virtual
+/// machines and containers.
+final RegExp _notNearbyInterface = RegExp(
+  r'^(rmnet|ccmni|pdp_ip|clat|v4-|dummy|lo|tun|tap|utun|ipsec|ppp|wg|'
+  r'tailscale|zt|docker|br-|veth|virbr|vmnet|vboxnet|awdl|llw|anpi)|'
+  r'virtualbox|vmware|vethernet|hyper-v|wsl|loopback|npcap|vpn',
+  caseSensitive: false,
+);
+
+final RegExp _hotspotInterface = RegExp(
+  r'^(ap|swlan|softap)',
+  caseSensitive: false,
+);
+
+final RegExp _wifiInterface = RegExp(
+  r'^(wlan|wl|wifi|wi-fi|wlp|bridge1)|wi-?fi|wireless|wlan',
+  caseSensitive: false,
+);
+
+/// Ranks [networks] for sharing (S13): this phone's hotspot first, then
+/// Wi-Fi, then the rest (wired), leaving out interfaces that never reach
+/// anyone nearby. The first one is the network the default route most
+/// likely uses on the local network.
+List<ShareNetwork> rankShareNetworks(Iterable<ShareNetwork> networks) {
+  int rank(ShareNetwork n) {
+    final List<int> b = n.address.rawAddress;
+    // Android hotspots: 192.168.43.1 (older), 192.168.49.1 (local-only),
+    // 10.x.x.1 on some phones: the hotspot's own address ends in .1.
+    if (_hotspotInterface.hasMatch(n.interfaceName)) {
+      return 0;
+    }
+    if (_wifiInterface.hasMatch(n.interfaceName)) {
+      return b[3] == 1 ? 0 : 1;
+    }
+    return b[3] == 1 ? 2 : 3;
+  }
+
+  final List<ShareNetwork> out = <ShareNetwork>[
+    for (final ShareNetwork n in networks)
+      if (!n.address.isLoopback &&
+          isPrivateIPv4(n.address) &&
+          !_notNearbyInterface.hasMatch(n.interfaceName))
+        n,
+  ];
+  // A stable sort: equal ranks keep the system's interface order.
+  final List<int> order = <int>[for (int i = 0; i < out.length; i++) i];
+  order.sort((int a, int b) {
+    final int byRank = rank(out[a]) - rank(out[b]);
+    return byRank != 0 ? byRank : a - b;
+  });
+  return <ShareNetwork>[for (final int i in order) out[i]];
+}
+
+/// The networks other devices nearby can reach this one on, best first
+/// (see [rankShareNetworks]).
+Future<List<ShareNetwork>> localShareNetworks() async {
   final List<NetworkInterface> interfaces = await NetworkInterface.list(
     type: InternetAddressType.IPv4,
   );
-  final List<InternetAddress> out = <InternetAddress>[
+  return rankShareNetworks(<ShareNetwork>[
     for (final NetworkInterface i in interfaces)
       for (final InternetAddress a in i.addresses)
-        if (!a.isLoopback && isPrivateIPv4(a)) a,
-  ];
-  int rank(InternetAddress a) {
-    final List<int> b = a.rawAddress;
-    // Android hotspots: 192.168.43.1 (older), 192.168.49.1 (local-only),
-    // 10.x.x.1 on some phones: the hotspot's own address ends in .1.
-    if (b[3] == 1) {
-      return 0;
-    }
-    return b[0] == 192 ? 1 : 2;
-  }
-
-  out.sort((InternetAddress a, InternetAddress b) => rank(a) - rank(b));
-  return out;
+        ShareNetwork(interfaceName: i.name, address: a),
+  ]);
 }
+
+/// The one network to share on: the one the person chose ([chosen], when
+/// it is still there), otherwise the best ranked. The server listens on
+/// that address only, never on every private address (S13).
+ShareNetwork? chooseShareNetwork(
+  List<ShareNetwork> networks, {
+  ShareNetwork? chosen,
+}) {
+  if (chosen != null) {
+    for (final ShareNetwork n in networks) {
+      if (n == chosen) {
+        return n;
+      }
+    }
+  }
+  return networks.firstOrNull;
+}
+
+/// Addresses other devices nearby can reach this one at, best first.
+Future<List<InternetAddress>> localShareAddresses() async => <InternetAddress>[
+  for (final ShareNetwork n in await localShareNetworks()) n.address,
+];
 
 bool isPrivateIPv4(InternetAddress a) {
   if (a.type != InternetAddressType.IPv4) {

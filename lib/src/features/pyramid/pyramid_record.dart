@@ -57,6 +57,19 @@ abstract final class PyrT {
   /// (pays out here, takes the money there).
   static const String fxRate = 'fx';
 
+  /// The national section's lead pins (or unpins) a post (§22.2).
+  static const String natPin = 'natpin';
+
+  /// A member shows (or hides) their age and gender badge (§20.2a): the
+  /// birth year, gender and salt behind their data commitment.
+  static const String badge = 'badge';
+
+  /// Kinds added after 1.10.0. A 1.10.0 phone does not know them and
+  /// rejects them, so they must never change anything the older rules
+  /// read: they are not a sign of life ([PyramidState.lastSeen]) and touch
+  /// only state of their own.
+  static const Set<String> since111 = <String>{natPin, badge};
+
   /// Kinds signed anonymously with a ring signature (§20.3a).
   static const Set<String> anonymous = <String>{voteRequest, vote};
 

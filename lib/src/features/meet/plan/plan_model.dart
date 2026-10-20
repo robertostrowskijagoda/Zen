@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -47,6 +48,80 @@ enum PlanAnswerKind {
       .firstOrNull;
 }
 
+/// "Wspólna sprawa" (§17.6): at most this many things on the list, each
+/// wanted by at most [kPlanMaxNeedQty] people, text up to [kPlanMaxNeedLabel].
+const int kPlanMaxNeeds = 12;
+const int kPlanMaxNeedQty = 50;
+const int kPlanMaxNeedLabel = 60;
+
+/// One line of a "Wspólna sprawa" list: what is needed (people, hands,
+/// things, dates) and how many of it. No money.
+@immutable
+final class PlanNeed {
+  const PlanNeed({required this.key, required this.label, this.wanted = 1});
+
+  /// Stable id inside the plan ("n0", "n1", …); claims refer to it.
+  final String key;
+  final String label;
+  final int wanted;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'k': key,
+    'l': label,
+    if (wanted != 1) 'w': wanted,
+  };
+
+  static PlanNeed? fromJson(Object? json) {
+    if (json is! Map || json['k'] is! String || json['l'] is! String) {
+      return null;
+    }
+    final String key = json['k'] as String;
+    final String label = _clip((json['l'] as String).trim(), kPlanMaxNeedLabel);
+    if (key.isEmpty || key.length > 8 || label.isEmpty) {
+      return null;
+    }
+    final Object? w = json['w'];
+    return PlanNeed(
+      key: key,
+      label: label,
+      wanted: w is int ? w.clamp(1, kPlanMaxNeedQty) : 1,
+    );
+  }
+}
+
+/// Reads a list typed one need per line: "Worki na śmieci", "Grabie x4",
+/// "kierowca ×2". Blank lines are skipped; at most [kPlanMaxNeeds].
+List<PlanNeed> parsePlanNeeds(String text) {
+  final List<PlanNeed> out = <PlanNeed>[];
+  final RegExp qty = RegExp(
+    r'^(.*\S)\s+[x×*]\s*(\d{1,2})$',
+    caseSensitive: false,
+  );
+  for (final String raw in text.split('\n')) {
+    String line = raw.trim();
+    int wanted = 1;
+    final RegExpMatch? m = qty.firstMatch(line);
+    if (m != null && m.group(1)!.trim().isNotEmpty) {
+      line = m.group(1)!.trim();
+      wanted = int.parse(m.group(2)!).clamp(1, kPlanMaxNeedQty);
+    }
+    if (line.isEmpty) {
+      continue;
+    }
+    out.add(
+      PlanNeed(
+        key: 'n${out.length}',
+        label: _clip(line, kPlanMaxNeedLabel),
+        wanted: wanted,
+      ),
+    );
+    if (out.length >= kPlanMaxNeeds) {
+      break;
+    }
+  }
+  return out;
+}
+
 String _clip(Object? v, int max) =>
     v is String ? (v.length > max ? v.substring(0, max) : v) : '';
 
@@ -60,12 +135,16 @@ final class PlanAnswer {
     required this.at,
     this.via,
     this.viaName = '',
+    this.claims = const <String, int>{},
   });
 
   final String address;
   final String name;
   final PlanAnswerKind kind;
   final int at;
+
+  /// "Wspólna sprawa": what this person takes on (need key → how many).
+  final Map<String, int> claims;
 
   /// The organizer's friend this person is connected through (`null` for
   /// the organizer's own friend).
@@ -79,6 +158,7 @@ final class PlanAnswer {
     'at': at,
     if (via != null) 'via': via,
     if (viaName.isNotEmpty) 'vn': viaName,
+    if (claims.isNotEmpty) 'cl': claims,
   };
 
   static PlanAnswer? fromJson(Object? json) {
@@ -90,7 +170,16 @@ final class PlanAnswer {
       return null;
     }
     final Object? via = json['via'];
+    final Object? cl = json['cl'];
     return PlanAnswer(
+      claims: <String, int>{
+        if (cl is Map)
+          for (final MapEntry<dynamic, dynamic> e in cl.entries.take(
+            kPlanMaxNeeds,
+          ))
+            if (e.key is String && e.value is int && (e.value as int) > 0)
+              e.key as String: (e.value as int).clamp(1, kPlanMaxNeedQty),
+      },
       address: PeerShareCodec.normalizeAddress(json['a'] as String),
       name: _clip(json['n'], 60),
       kind: kind,
@@ -122,6 +211,7 @@ final class WeekendPlan {
     this.eventId,
     this.cancelled = false,
     this.updatedAt = 0,
+    this.needs = const <PlanNeed>[],
   });
 
   final String id;
@@ -142,6 +232,18 @@ final class WeekendPlan {
   final String? eventId;
   final bool cancelled;
   final int updatedAt;
+
+  /// "Wspólna sprawa": what is needed (people, hands, things, dates). Empty
+  /// for an ordinary plan.
+  final List<PlanNeed> needs;
+
+  bool get isCause => needs.isNotEmpty;
+
+  /// How many are taken on for [need] across all answers.
+  int claimed(String need) => answers.values.fold(
+    0,
+    (int s, PlanAnswer a) => s + (a.claims[need] ?? 0),
+  );
 
   bool get isMine => organizer == 'self';
   bool get isEvent => eventId != null;
@@ -178,6 +280,7 @@ final class WeekendPlan {
     eventId: eventId ?? this.eventId,
     cancelled: cancelled ?? this.cancelled,
     updatedAt: updatedAt ?? this.updatedAt,
+    needs: needs,
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -193,6 +296,10 @@ final class WeekendPlan {
       for (final PlanAnswer a in answers.values) a.toJson(),
     ],
     if (eventId != null) 'ev': eventId,
+    if (needs.isNotEmpty)
+      'needs': <Map<String, dynamic>>[
+        for (final PlanNeed n in needs) n.toJson(),
+      ],
     if (cancelled) 'cancelled': true,
     'upd': updatedAt,
   };
@@ -221,6 +328,16 @@ final class WeekendPlan {
     final Object? min = json['min'];
     final Object? ans = json['ans'];
     final Object? ev = json['ev'];
+    final Object? needsJson = json['needs'];
+    final List<PlanNeed> needs = <PlanNeed>[];
+    if (needsJson is List) {
+      for (final Object? n in needsJson.take(kPlanMaxNeeds)) {
+        final PlanNeed? need = PlanNeed.fromJson(n);
+        if (need != null && !needs.any((PlanNeed x) => x.key == need.key)) {
+          needs.add(need);
+        }
+      }
+    }
     final Map<String, PlanAnswer> answers = <String, PlanAnswer>{};
     if (ans is List) {
       for (final Object? a in ans.take(maxAnswers)) {
@@ -245,27 +362,17 @@ final class WeekendPlan {
       eventId: ev is String && ev.isNotEmpty && ev.length <= 40 ? ev : null,
       cancelled: json['cancelled'] == true,
       updatedAt: json['upd'] is int ? json['upd'] as int : 0,
+      needs: needs,
     );
   }
 }
-
-List<String> get _weekdays => <String>[
-  t('Poniedziałek'),
-  t('Wtorek'),
-  t('Środa'),
-  t('Czwartek'),
-  t('Piątek'),
-  t('Sobota'),
-  t('Niedziela'),
-];
 
 /// When a plan is, said the short way: "Dziś, 18:00", "Jutro, 10:00",
 /// "Sobota, 10:00" (this week), else "25.10, 10:00".
 String planWhen(int millis, int now) {
   final DateTime d = DateTime.fromMillisecondsSinceEpoch(millis);
   final DateTime n = DateTime.fromMillisecondsSinceEpoch(now);
-  String two(int v) => v.toString().padLeft(2, '0');
-  final String time = '${two(d.hour)}:${two(d.minute)}';
+  final String time = ZenFormat.time(d);
   // Rounded: a day around a clock change is 23 or 25 hours long.
   final int days =
       (DateTime(
@@ -282,7 +389,7 @@ String planWhen(int millis, int now) {
     return t('Jutro, {time}', {'time': time});
   }
   if (days > 1 && days < 7) {
-    return '${_weekdays[d.weekday - 1]}, $time';
+    return '${ZenFormat.weekdayLong(d, capitalized: true)}, $time';
   }
-  return '${d.day}.${two(d.month)}, $time';
+  return '${ZenFormat.dayMonth(d, padDay: false)}, $time';
 }

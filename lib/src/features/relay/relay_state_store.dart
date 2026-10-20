@@ -11,6 +11,20 @@ abstract interface class RelayStateStore {
   Future<void> save(RelayState state);
 }
 
+/// Storage for the sealed chunks of attachments that travel through
+/// mailboxes (see `RelayEngine.submitAttachment`): the ones this device
+/// sends, holds for friends, or is collecting. Kept out of [RelayState] so
+/// that megabytes of ciphertext are never part of the state document.
+///
+/// Keys are short `/`-separated lowercase hex paths made by the engine.
+abstract interface class RelayBlobStore {
+  Future<void> writeBlobChunk(String key, Uint8List bytes);
+
+  Future<Uint8List?> readBlobChunk(String key);
+
+  Future<void> deleteBlobChunk(String key);
+}
+
 /// Relay state in the app's (optionally encrypted) binary store.
 ///
 /// Split in two so a busy relay does not rewrite megabytes per message:
@@ -22,7 +36,7 @@ abstract interface class RelayStateStore {
 /// Both the UI isolate and the Android background service use this store;
 /// only the one owning the mesh node writes, and it reloads when it takes the
 /// node over.
-final class FileRelayStateStore implements RelayStateStore {
+final class FileRelayStateStore implements RelayStateStore, RelayBlobStore {
   FileRelayStateStore({required this.store, this.storageKey = 'relay/state'});
 
   final FileBinaryStore store;
@@ -102,6 +116,19 @@ final class FileRelayStateStore implements RelayStateStore {
     await _writeIfChanged(storageKey, jsonEncode(core));
   }
 
+  // Blob chunks live next to the state as one file each: `relay/blob/<key>`.
+
+  @override
+  Future<void> writeBlobChunk(String key, Uint8List bytes) async {
+    await store.write('relay/blob/$key', bytes);
+  }
+
+  @override
+  Future<Uint8List?> readBlobChunk(String key) => store.read('relay/blob/$key');
+
+  @override
+  Future<void> deleteBlobChunk(String key) => store.delete('relay/blob/$key');
+
   Future<void> _writeIfChanged(String key, String content) async {
     if (_lastContent[key] == content) {
       return;
@@ -121,8 +148,24 @@ final class FileRelayStateStore implements RelayStateStore {
   }
 }
 
-final class MemoryRelayStateStore implements RelayStateStore {
+final class MemoryRelayStateStore implements RelayStateStore, RelayBlobStore {
   String? _raw;
+
+  /// Blob chunks, kept across "restarts" like the state.
+  final Map<String, Uint8List> blobChunks = <String, Uint8List>{};
+
+  @override
+  Future<void> writeBlobChunk(String key, Uint8List bytes) async {
+    blobChunks[key] = Uint8List.fromList(bytes);
+  }
+
+  @override
+  Future<Uint8List?> readBlobChunk(String key) async => blobChunks[key];
+
+  @override
+  Future<void> deleteBlobChunk(String key) async {
+    blobChunks.remove(key);
+  }
 
   /// Serialized on every save, so tests exercise the real (de)serialisation
   /// and a "restart" is simply a new engine over the same store.

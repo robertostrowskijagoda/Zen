@@ -317,6 +317,51 @@ class _AskScreenState extends ConsumerState<AskScreen> {
                                     height: 1.35,
                                   ),
                                 ),
+                                if (!a.signed)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Row(
+                                      key: Key('ask-unsigned-${q.id}-$i'),
+                                      children: <Widget>[
+                                        Icon(
+                                          Icons.gpp_maybe_rounded,
+                                          size: 15,
+                                          color: zen.warning,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            askUnsignedLabel(),
+                                            style: TextStyle(
+                                              color: zen.warning,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Row(
+                                      children: <Widget>[
+                                        Icon(
+                                          Icons.verified_rounded,
+                                          size: 15,
+                                          color: zen.success,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          t('Podpisana przez autora'),
+                                          style: TextStyle(
+                                            color: zen.textMuted,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 if (a.tipped > 0 ||
                                     pyr.canTip(
                                       a.pyramidKey,

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:video_player/video_player.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -249,15 +250,13 @@ class _AlarmClipTileState extends State<AlarmClipTile> {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final DateTime at = DateTime.fromMillisecondsSinceEpoch(widget.clip.at);
-    String two(int v) => v.toString().padLeft(2, '0');
     return ZenTile(
       key: Key('alarm-clip-${widget.clip.n}'),
       icon: _playing ? Icons.graphic_eq_rounded : Icons.mic_rounded,
       tone: zen.danger,
       title: t('Nagranie {number}', {'number': widget.clip.n + 1}),
       subtitle:
-          '${two(at.hour)}:${two(at.minute)}'
-          '${widget.clip.ms > 0 ? ' · ${_duration(widget.clip.ms)}' : ''}',
+          '${ZenFormat.time(at)}${widget.clip.ms > 0 ? ' · ${_duration(widget.clip.ms)}' : ''}',
       onTap: _loading ? null : () => unawaited(_toggle()),
       trailing: _loading
           ? const SizedBox(

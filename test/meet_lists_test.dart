@@ -176,9 +176,10 @@ void main() {
     expect(bob.service.book.friendNearbySecrets['ania'], isNull);
 
     await ania.ping(bob);
+    // Her keys for Bob alone (S6), not the legacy secret.
     expect(
       bob.service.book.friendNearbySecrets['ania'],
-      ania.service.book.nearbySecret,
+      ania.service.nearbyKeysFor('bob'),
     );
     expect(bob.service.book.intentOf('ania', 1500)?.kind, IntentKind.talk);
   });

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -386,6 +387,16 @@ class PlanCard extends StatelessWidget {
                   _PersonChip(answer: a, isMe: a.address == me, tone: tone),
               ],
             ),
+          if (p.isCause) ...<Widget>[
+            const SizedBox(height: 14),
+            _NeedsList(
+              plan: p,
+              plans: plans,
+              me: me,
+              tone: tone,
+              canClaim: !p.isMine && !p.isEvent && !over,
+            ),
+          ],
           const SizedBox(height: 12),
           if (eventId != null && events?.event(eventId) != null)
             OutlinedButton.icon(
@@ -424,6 +435,107 @@ class PlanCard extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// "Wspólna sprawa": what is needed, how much is taken, by whom, and a
+/// "Biorę" button per line.
+class _NeedsList extends StatelessWidget {
+  const _NeedsList({
+    required this.plan,
+    required this.plans,
+    required this.me,
+    required this.tone,
+    required this.canClaim,
+  });
+
+  final WeekendPlan plan;
+  final PlanService plans;
+  final String me;
+  final Color tone;
+  final bool canClaim;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return Column(
+      key: Key('plan-needs-${plan.id}'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(t('CZEGO POTRZEBA'), style: zen.label(color: zen.textMuted)),
+        const SizedBox(height: 6),
+        for (final PlanNeed n in plan.needs)
+          Builder(
+            builder: (BuildContext context) {
+              final int taken = plan.claimed(n.key);
+              final int mine =
+                  plan.answers[me]?.claims[n.key] ??
+                  plans.myClaims(plan.id)[n.key] ??
+                  0;
+              final List<String> who = <String>[
+                for (final PlanAnswer a in plan.answers.values)
+                  if ((a.claims[n.key] ?? 0) > 0)
+                    a.address == me ? t('Ty') : a.name,
+              ];
+              final bool full = taken >= n.wanted;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: <Widget>[
+                    Icon(
+                      full
+                          ? Icons.check_circle_rounded
+                          : Icons.radio_button_unchecked_rounded,
+                      size: 20,
+                      color: full ? zen.success : zen.textMuted,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            '${n.label} · $taken/${n.wanted}',
+                            style: TextStyle(
+                              color: zen.textPrimary,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (who.isNotEmpty)
+                            Text(
+                              who.join(', '),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: zen.textSecondary,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (canClaim && mine > 0)
+                      TextButton(
+                        key: Key('plan-unclaim-${plan.id}-${n.key}'),
+                        onPressed: () =>
+                            unawaited(plans.setClaim(plan.id, n.key, 0)),
+                        child: Text(t('Rezygnuję')),
+                      )
+                    else if (canClaim && !full)
+                      FilledButton.tonal(
+                        key: Key('plan-claim-${plan.id}-${n.key}'),
+                        onPressed: () =>
+                            unawaited(plans.setClaim(plan.id, n.key, 1)),
+                        child: Text(t('Biorę')),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+      ],
     );
   }
 }
@@ -586,15 +698,6 @@ DateTime _defaultDay(DateTime now) {
 }
 
 String _dayLabel(DateTime day, DateTime now) {
-  final List<String> names = <String>[
-    t('Pon.'),
-    t('Wt.'),
-    t('Śr.'),
-    t('Czw.'),
-    t('Pt.'),
-    t('Sobota'),
-    t('Niedziela'),
-  ];
   final int days =
       (day.difference(DateTime(now.year, now.month, now.day)).inHours / 24)
           .round();
@@ -605,9 +708,12 @@ String _dayLabel(DateTime day, DateTime now) {
     return t('Jutro');
   }
   if (days > 1 && days < 7) {
-    return names[day.weekday - 1];
+    // Weekdays short, the weekend in full (the usual days for plans).
+    return day.weekday >= DateTime.saturday
+        ? ZenFormat.weekdayLong(day, capitalized: true)
+        : ZenFormat.weekdayShort(day, capitalized: true);
   }
-  return '${day.day}.${day.month.toString().padLeft(2, '0')}';
+  return ZenFormat.dayMonth(day, padDay: false);
 }
 
 /// Putting out a plan: what, when, where, who sees it, and from how many
@@ -615,11 +721,13 @@ String _dayLabel(DateTime day, DateTime now) {
 Future<void> showPlanSheet(BuildContext context, PlanService plans) {
   final TextEditingController title = TextEditingController();
   final TextEditingController place = TextEditingController();
+  final TextEditingController needsText = TextEditingController();
   final DateTime now = DateTime.fromMillisecondsSinceEpoch(plans.now);
   DateTime day = _defaultDay(now);
   TimeOfDay time = const TimeOfDay(hour: 10, minute: 0);
   PlanReach reach = PlanReach.friends;
   int threshold = kPlanDefaultThreshold;
+  bool cause = false;
   bool busy = false;
   return showModalBottomSheet<void>(
     context: context,
@@ -638,8 +746,11 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
           time.minute,
         );
         final bool past = at.millisecondsSinceEpoch <= plans.now;
-        final bool ready = title.text.trim().isNotEmpty && !past && !busy;
-        String two(int v) => v.toString().padLeft(2, '0');
+        final bool ready =
+            title.text.trim().isNotEmpty &&
+            !past &&
+            !busy &&
+            (!cause || parsePlanNeeds(needsText.text).isNotEmpty);
         Future<void> pickDay() async {
           final DateTime? d = await showDatePicker(
             context: context,
@@ -670,6 +781,7 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
             place: place.text,
             reach: reach,
             threshold: threshold,
+            needs: cause ? parsePlanNeeds(needsText.text) : const <PlanNeed>[],
           );
           if (context.mounted) {
             Navigator.of(context).pop();
@@ -752,7 +864,9 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
                   icon: const Icon(Icons.schedule_rounded),
                   label: Text(
                     t('Godzina {time}', {
-                      'time': '${two(time.hour)}:${two(time.minute)}',
+                      'time': ZenFormat.time(
+                        DateTime(2026, 1, 1, time.hour, time.minute),
+                      ),
                     }),
                   ),
                 ),
@@ -805,6 +919,33 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
                   height: 1.35,
                 ),
               ),
+              SwitchListTile(
+                key: const Key('plan-cause'),
+                contentPadding: EdgeInsets.zero,
+                value: cause,
+                title: Text(t('Wspólna sprawa')),
+                subtitle: Text(
+                  t(
+                    'Zbiórka sąsiedzka, sprzątanie, pomoc sąsiadowi: lista '
+                    'tego, co potrzebne, a każdy mówi, co bierze. Bez pieniędzy.',
+                  ),
+                ),
+                onChanged: (bool v) => setSheet(() => cause = v),
+              ),
+              if (cause)
+                TextField(
+                  key: const Key('plan-needs'),
+                  controller: needsText,
+                  minLines: 3,
+                  maxLines: 8,
+                  textCapitalization: TextCapitalization.sentences,
+                  onChanged: (_) => setSheet(() {}),
+                  decoration: InputDecoration(
+                    labelText: t('Czego potrzeba (każde w osobnej linii)'),
+                    hintText: t('np. Grabie x4'),
+                    prefixIcon: const Icon(Icons.checklist_rounded),
+                  ),
+                ),
               ZenSection(t('Ilu chętnych do wydarzenia')),
               Wrap(
                 spacing: 8,
@@ -836,5 +977,7 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
         );
       },
     ),
-  ).whenComplete(() => disposeLater(<TextEditingController>[title, place]));
+  ).whenComplete(
+    () => disposeLater(<TextEditingController>[title, place, needsText]),
+  );
 }

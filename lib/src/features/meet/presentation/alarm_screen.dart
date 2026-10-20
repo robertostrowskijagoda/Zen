@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/app.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -12,6 +13,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
 import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/meet/alarm_shortcut.dart';
+import 'package:zen/src/features/meet/alarm_sms.dart';
 import 'package:zen/src/features/meet/location.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
@@ -25,9 +27,7 @@ import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 const Color _alarmRed = Color(0xFFD32F2F);
 
 String _clock(int millis) {
-  final DateTime d = DateTime.fromMillisecondsSinceEpoch(millis);
-  String two(int v) => v.toString().padLeft(2, '0');
-  return '${two(d.hour)}:${two(d.minute)}';
+  return ZenFormat.time(DateTime.fromMillisecondsSinceEpoch(millis));
 }
 
 /// How sure a position is, shown after it: " (±12 m)", or nothing.
@@ -193,6 +193,64 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
     }
   }
 
+  /// "Zapasowy SMS": the phone numbers the alarm text can be sent to from
+  /// the system SMS app when the network does not get it through.
+  Future<void> _editSmsNumbers(MeetService service) async {
+    final TextEditingController controller = TextEditingController(
+      text: service.book.alarmSmsNumbers.join('\n'),
+    );
+    final String? text = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(t('Zapasowy SMS')),
+        content: TextField(
+          key: const Key('alarm-sms-numbers'),
+          controller: controller,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 5,
+          keyboardType: TextInputType.multiline,
+          decoration: InputDecoration(
+            labelText: t('Numery telefonów (każdy w osobnej linii)'),
+            helperText: t('Do {max} numerów. Zostają tylko w tym telefonie.', {
+              'max': kAlarmSmsMaxNumbers,
+            }),
+            prefixIcon: const Icon(Icons.sms_rounded),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('alarm-sms-save'),
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: Text(t('Zapisz')),
+          ),
+        ],
+      ),
+    );
+    disposeLater(controller);
+    if (text != null) {
+      await service.setAlarmSmsNumbers(parseSmsNumbers(text));
+    }
+  }
+
+  /// Opens the SMS app with the alarm text; the person presses send.
+  Future<void> _sendSms(MeetService service, AlarmRecord alarm) async {
+    final bool ok = await sendAlarmSms(
+      numbers: service.book.alarmSmsNumbers,
+      name: ref.read(eventServiceProvider).host.ownName(),
+      alarm: alarm,
+    );
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t('Nie udało się otworzyć SMS-ów.'))),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final MeetService service = ref.watch(meetServiceProvider);
@@ -240,105 +298,119 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
         ),
         const SizedBox(height: 24),
         Center(
-          child: Listener(
-            onPointerDown: (_) {
-              if (!_sending && to.isNotEmpty) {
-                unawaited(_hold.forward(from: 0));
-              }
-            },
-            onPointerUp: (_) {
-              if (!_hold.isCompleted) {
-                _hold.reset();
-              }
-            },
-            onPointerCancel: (_) {
-              if (!_hold.isCompleted) {
-                _hold.reset();
-              }
-            },
-            child: AnimatedBuilder(
-              animation: _hold,
-              builder: (BuildContext context, Widget? _) => SizedBox(
-                key: const Key('alarm-hold-button'),
-                width: 220,
-                height: 220,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: <Widget>[
-                    Container(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: RadialGradient(
-                          colors: <Color>[
-                            _alarmRed.withValues(
-                              alpha: 0.10 + 0.25 * _hold.value,
-                            ),
-                            _alarmRed.withValues(alpha: 0),
-                          ],
-                        ),
-                      ),
-                    ),
-                    SizedBox.expand(
-                      child: CircularProgressIndicator(
-                        value: _hold.value,
-                        strokeWidth: 10,
-                        strokeCap: StrokeCap.round,
-                        color: _alarmRed,
-                        backgroundColor: _alarmRed.withValues(alpha: 0.15),
-                      ),
-                    ),
-                    Transform.scale(
-                      scale: 1 - 0.05 * _hold.value,
-                      child: Container(
-                        width: 176,
-                        height: 176,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: const LinearGradient(
-                            colors: <Color>[Color(0xFFEF5350), _alarmRed],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          boxShadow: <BoxShadow>[
-                            BoxShadow(
-                              color: _alarmRed.withValues(alpha: 0.45),
-                              blurRadius: 28,
-                              offset: const Offset(0, 10),
-                            ),
-                          ],
-                        ),
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: <Widget>[
-                            Icon(
-                              _sending
-                                  ? Icons.wifi_tethering_rounded
-                                  : Icons.touch_app_rounded,
-                              color: Colors.white,
-                              size: 34,
-                            ),
-                            const SizedBox(height: 6),
-                            FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                _sending
-                                    ? t('Wysyłam…')
-                                    : t('Przytrzymaj\n3 sekundy'),
-                                textAlign: TextAlign.center,
-                                style: zen.display(
-                                  color: Colors.white,
-                                  size: 20,
-                                  weight: FontWeight.w600,
+          // TalkBack / VoiceOver: a button with a long press (double tap and
+          // hold) — the pointer-based hold below cannot be reached by them.
+          child: Semantics(
+            button: true,
+            container: true,
+            enabled: !_sending && to.isNotEmpty,
+            label: _sending ? t('Alarm: wysyłam…') : t('Alarm'),
+            hint: t('Przytrzymaj 3 sekundy, żeby wysłać alarm do przyjaciół'),
+            onLongPress: _sending || to.isEmpty
+                ? null
+                : () => unawaited(_hold.forward(from: 0)),
+            child: ExcludeSemantics(
+              child: Listener(
+                onPointerDown: (_) {
+                  if (!_sending && to.isNotEmpty) {
+                    unawaited(_hold.forward(from: 0));
+                  }
+                },
+                onPointerUp: (_) {
+                  if (!_hold.isCompleted) {
+                    _hold.reset();
+                  }
+                },
+                onPointerCancel: (_) {
+                  if (!_hold.isCompleted) {
+                    _hold.reset();
+                  }
+                },
+                child: AnimatedBuilder(
+                  animation: _hold,
+                  builder: (BuildContext context, Widget? _) => SizedBox(
+                    key: const Key('alarm-hold-button'),
+                    width: 220,
+                    height: 220,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: <Widget>[
+                        Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: RadialGradient(
+                              colors: <Color>[
+                                _alarmRed.withValues(
+                                  alpha: 0.10 + 0.25 * _hold.value,
                                 ),
-                              ),
+                                _alarmRed.withValues(alpha: 0),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
-                      ),
+                        SizedBox.expand(
+                          child: CircularProgressIndicator(
+                            value: _hold.value,
+                            strokeWidth: 10,
+                            strokeCap: StrokeCap.round,
+                            color: _alarmRed,
+                            backgroundColor: _alarmRed.withValues(alpha: 0.15),
+                          ),
+                        ),
+                        Transform.scale(
+                          scale: 1 - 0.05 * _hold.value,
+                          child: Container(
+                            width: 176,
+                            height: 176,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: const LinearGradient(
+                                colors: <Color>[Color(0xFFEF5350), _alarmRed],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              boxShadow: <BoxShadow>[
+                                BoxShadow(
+                                  color: _alarmRed.withValues(alpha: 0.45),
+                                  blurRadius: 28,
+                                  offset: const Offset(0, 10),
+                                ),
+                              ],
+                            ),
+                            alignment: Alignment.center,
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                Icon(
+                                  _sending
+                                      ? Icons.wifi_tethering_rounded
+                                      : Icons.touch_app_rounded,
+                                  color: Colors.white,
+                                  size: 34,
+                                ),
+                                const SizedBox(height: 6),
+                                FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    _sending
+                                        ? t('Wysyłam…')
+                                        : t('Przytrzymaj\n3 sekundy'),
+                                    textAlign: TextAlign.center,
+                                    style: zen.display(
+                                      color: Colors.white,
+                                      size: 20,
+                                      weight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -404,6 +476,22 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                 onChanged: (bool v) =>
                     unawaited(service.setAlarmPowerButton(v)),
               ),
+            ListTile(
+              key: const Key('alarm-sms-setup'),
+              leading: const Icon(Icons.sms_rounded),
+              title: Text(t('Zapasowy SMS')),
+              subtitle: Text(
+                service.book.alarmSmsNumbers.isEmpty
+                    ? t(
+                        'Numery, do których możesz wysłać alarm SMS-em, gdy '
+                        'internet nie wystarcza. Otworzy się Twoja aplikacja '
+                        'do SMS-ów — wysyłasz sam(a).',
+                      )
+                    : service.book.alarmSmsNumbers.join(', '),
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => unawaited(_editSmsNumbers(service)),
+            ),
           ],
         ),
         if (AlarmShortcutChannel.supported && service.book.alarmPowerButton)
@@ -597,6 +685,18 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                   ),
               ],
             ),
+        ],
+        if (service.book.alarmSmsNumbers.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            key: const Key('alarm-sms-send'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
+            ),
+            onPressed: () => unawaited(_sendSms(service, a)),
+            icon: const Icon(Icons.sms_rounded),
+            label: Text(t('Wyślij SMS z alarmem')),
+          ),
         ],
         const SizedBox(height: 20),
         FilledButton.icon(

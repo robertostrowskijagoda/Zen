@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_glyphs.dart';
@@ -22,6 +23,7 @@ import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/presentation/ask_screen.dart';
 import 'package:zen/src/features/meet/presentation/intent_widgets.dart';
 import 'package:zen/src/features/meet/presentation/intro_widgets.dart';
+import 'package:zen/src/features/profile/presentation/profile_screen.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -145,6 +147,89 @@ List<(String, String)> friendLinks(Iterable<String> friends, MeetBook book) {
   return out;
 }
 
+/// Communities among the people on the graph (a simple label propagation
+/// over "knows": friends who know each other, and friends of friends with
+/// the friends who connect them). The result maps an address to a cluster
+/// number: 0, 1, … for groups of two or more (the biggest first), -1 for
+/// everyone who belongs to no group. Deterministic for the same input.
+Map<String, int> graphClusters(List<GraphNode> nodes, MeetBook book) {
+  final Set<String> known = <String>{
+    for (final GraphNode n in nodes) n.address,
+  };
+  final Map<String, Set<String>> adj = <String, Set<String>>{
+    for (final String a in known) a: <String>{},
+  };
+  void join(String a, String b) {
+    if (a != b && known.contains(a) && known.contains(b)) {
+      adj[a]!.add(b);
+      adj[b]!.add(a);
+    }
+  }
+
+  for (final GraphNode n in nodes) {
+    if (n.ring < 4) {
+      for (final String other in book.friendsOf(n.address).keys) {
+        join(n.address, PeerShareCodec.normalizeAddress(other));
+      }
+    } else {
+      for (final String v in n.via) {
+        join(n.address, v);
+      }
+    }
+  }
+  final List<String> order = known.toList()..sort();
+  final Map<String, String> label = <String, String>{
+    for (final String a in order) a: a,
+  };
+  for (int round = 0; round < 12; round++) {
+    bool changed = false;
+    for (final String a in order) {
+      final Map<String, int> counts = <String, int>{};
+      for (final String n in adj[a]!) {
+        counts.update(label[n]!, (int c) => c + 1, ifAbsent: () => 1);
+      }
+      if (counts.isEmpty) {
+        continue;
+      }
+      String best = counts.keys.first;
+      for (final MapEntry<String, int> e in counts.entries) {
+        final int c = counts[best]!;
+        if (e.value > c || (e.value == c && e.key.compareTo(best) < 0)) {
+          best = e.key;
+        }
+      }
+      if (best != label[a]) {
+        label[a] = best;
+        changed = true;
+      }
+    }
+    if (!changed) {
+      break;
+    }
+  }
+  final Map<String, List<String>> groups = <String, List<String>>{};
+  for (final String a in order) {
+    groups.putIfAbsent(label[a]!, () => <String>[]).add(a);
+  }
+  final List<List<String>> real =
+      <List<String>>[
+        for (final List<String> g in groups.values)
+          if (g.length >= 2) g,
+      ]..sort((List<String> x, List<String> y) {
+        final int bySize = y.length.compareTo(x.length);
+        return bySize != 0 ? bySize : x.first.compareTo(y.first);
+      });
+  final Map<String, int> out = <String, int>{
+    for (final String a in order) a: -1,
+  };
+  for (int i = 0; i < real.length; i++) {
+    for (final String a in real[i]) {
+      out[a] = i;
+    }
+  }
+  return out;
+}
+
 /// The shortest way from this person to [target] over what is known: this
 /// person's [friends] (closest first; a closer friend wins a tie) and the
 /// lists they shared. Breadth first. The addresses after "Ty", ending with
@@ -259,8 +344,51 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
   /// The person picked (tap or search): the way to them is drawn.
   String? _selected;
 
+  /// Pinch-zoom and pan of the picture.
+  final TransformationController _view = TransformationController();
+
+  double get _scale => _view.value.getMaxScaleOnAxis();
+
+  /// Zoomed in: dragging pans the picture, so the page stops scrolling
+  /// under the finger (zoom out to scroll again).
+  bool _zoomed = false;
+
+  void _onView() {
+    final bool zoomed = _scale > 1.001;
+    if (zoomed != _zoomed && mounted) {
+      setState(() => _zoomed = zoomed);
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _view.addListener(_onView);
+  }
+
+  /// Zooms by [factor] around the middle of the picture (1…8 times).
+  void _zoom(double factor, Size size) {
+    final double now = _scale;
+    final double target = (now * factor).clamp(1.0, 8.0);
+    if (target <= 1.0001) {
+      _view.value = Matrix4.identity();
+      return;
+    }
+    final double f = target / now;
+    final Offset c = size.center(Offset.zero);
+    _view.value =
+        (Matrix4.identity()
+          ..translateByDouble(c.dx, c.dy, 0, 1)
+          ..scaleByDouble(f, f, 1, 1)
+          ..translateByDouble(-c.dx, -c.dy, 0, 1)) *
+        _view.value;
+  }
+
   @override
   void dispose() {
+    _view
+      ..removeListener(_onView)
+      ..dispose();
     _search.dispose();
     super.dispose();
   }
@@ -273,7 +401,11 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
     };
   }
 
-  void _layout(List<GraphNode> nodes, Size size) {
+  void _layout(
+    List<GraphNode> nodes,
+    Size size, [
+    Map<String, int> cluster = const <String, int>{},
+  ]) {
     final Offset c = size.center(Offset.zero);
     final double r = min(size.width, size.height) / 2 - 28;
     // Only the rings that have people are drawn, spread from well outside
@@ -282,6 +414,23 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
     final List<int> used = <int>{
       for (final GraphNode n in nodes) n.ring,
     }.toList()..sort();
+    // Communities get a sector each (the same on every ring), so people
+    // who know each other sit next to each other.
+    final List<int> groups = <int>{
+      for (final GraphNode n in nodes) cluster[n.address] ?? -1,
+    }.toList()..sort((int a, int b) => a == -1 ? 1 : (b == -1 ? -1 : a - b));
+    final Map<int, (double, double)> sector = <int, (double, double)>{};
+    if (groups.length > 1) {
+      double start = -pi / 2;
+      for (final int g in groups) {
+        final int w = nodes
+            .where((GraphNode n) => (cluster[n.address] ?? -1) == g)
+            .length;
+        final double span = 2 * pi * w / nodes.length;
+        sector[g] = (start, span);
+        start += span;
+      }
+    }
     for (int k = 0; k < used.length; k++) {
       final int ring = used[k];
       final List<GraphNode> on = nodes
@@ -290,9 +439,22 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
       final double radius = used.length == 1
           ? r * 0.62
           : r * (0.4 + 0.6 * k / (used.length - 1));
-      for (int i = 0; i < on.length; i++) {
-        final double angle = 2 * pi * i / max(on.length, 1) + ring * 0.4;
-        on[i].at = c + Offset(cos(angle), sin(angle)) * radius;
+      if (sector.isEmpty) {
+        for (int i = 0; i < on.length; i++) {
+          final double angle = 2 * pi * i / max(on.length, 1) + ring * 0.4;
+          on[i].at = c + Offset(cos(angle), sin(angle)) * radius;
+        }
+        continue;
+      }
+      for (final int g in groups) {
+        final List<GraphNode> part =
+            on.where((GraphNode n) => (cluster[n.address] ?? -1) == g).toList()
+              ..sort((GraphNode a, GraphNode b) => a.name.compareTo(b.name));
+        final (double, double) sec = sector[g]!;
+        for (int i = 0; i < part.length; i++) {
+          final double angle = sec.$1 + sec.$2 * (i + 0.5) / part.length;
+          part[i].at = c + Offset(cos(angle), sin(angle)) * radius;
+        }
       }
     }
   }
@@ -458,6 +620,24 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                 ),
               if (n.friend != null) ...<Widget>[
                 const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  key: const Key('graph-profile'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    unawaited(
+                      ProfileScreen.open(
+                        this.context,
+                        address: n.friend!.address,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.account_circle_outlined),
+                  label: Text(t('Zobacz profil')),
+                ),
+                const SizedBox(height: 8),
                 FilledButton.icon(
                   style: FilledButton.styleFrom(
                     minimumSize: const Size.fromHeight(52),
@@ -650,6 +830,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
     final Set<String> drawn = <String>{
       for (final GraphNode n in nodes) n.address,
     };
+    final Map<String, int> clusters = graphClusters(nodes, meet.book);
     final List<(String, String)> links = <(String, String)>[
       for (final (String, String) l in friendLinks(friendOrder, meet.book))
         if (drawn.contains(l.$1) && drawn.contains(l.$2)) l,
@@ -704,6 +885,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
         );
         return ListView(
           padding: EdgeInsets.zero,
+          physics: _zoomed ? const NeverScrollableScrollPhysics() : null,
           children: <Widget>[
             if (all.isNotEmpty)
               Padding(
@@ -822,46 +1004,112 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
                     : LayoutBuilder(
                         builder: (BuildContext context, BoxConstraints box) {
                           final Size size = box.biggest;
-                          _layout(nodes, size);
-                          return GestureDetector(
-                            key: const Key('graph-canvas'),
-                            onTapUp: (TapUpDetails d) {
-                              GraphNode? hit;
-                              double best = 28;
-                              for (final GraphNode n in nodes) {
-                                final double dist =
-                                    (n.at - d.localPosition).distance;
-                                if (dist < best) {
-                                  best = dist;
-                                  hit = n;
-                                }
-                              }
-                              if (hit != null) {
-                                open(hit);
-                              } else if (_selected != null) {
-                                setState(() => _selected = null);
-                              }
+                          _layout(nodes, size, clusters);
+                          final Widget picture = ListenableBuilder(
+                            listenable: _view,
+                            builder: (BuildContext context, Widget? _) {
+                              final double scale = _scale;
+                              return GestureDetector(
+                                key: const Key('graph-canvas'),
+                                onTapUp: (TapUpDetails d) {
+                                  GraphNode? hit;
+                                  // The tap area stays the size of a finger
+                                  // when the picture is zoomed in.
+                                  double best = max(12, 28 / scale);
+                                  for (final GraphNode n in nodes) {
+                                    final double dist =
+                                        (n.at - d.localPosition).distance;
+                                    if (dist < best) {
+                                      best = dist;
+                                      hit = n;
+                                    }
+                                  }
+                                  if (hit != null) {
+                                    open(hit);
+                                  } else if (_selected != null) {
+                                    setState(() => _selected = null);
+                                  }
+                                },
+                                child: CustomPaint(
+                                  size: size,
+                                  // Screen readers: every person is a button.
+                                  foregroundPainter: _GraphSemantics(
+                                    nodes: nodes,
+                                    onOpen: open,
+                                  ),
+                                  painter: _GraphPainter(
+                                    nodes: nodes,
+                                    colorOf: (GraphNode n) =>
+                                        _colorFor(meet, n, zen),
+                                    met: (GraphNode n) =>
+                                        meet.book.metAt(n.address) != null,
+                                    line: zen.outline,
+                                    guide: zen.outlineSoft,
+                                    me: zen.accent,
+                                    meText: zen.onAccent,
+                                    text: zen.textPrimary,
+                                    labelBg: zen.surfaceRaised,
+                                    links: links,
+                                    path: path,
+                                    marked: marked,
+                                    selected: selected,
+                                    cluster: clusters,
+                                    clusterColors: <Color>[
+                                      for (int i = 0; i < 6; i++)
+                                        zenTone(zen, i),
+                                    ],
+                                    scale: scale,
+                                  ),
+                                ),
+                              );
                             },
-                            child: CustomPaint(
-                              size: size,
-                              painter: _GraphPainter(
-                                nodes: nodes,
-                                colorOf: (GraphNode n) =>
-                                    _colorFor(meet, n, zen),
-                                met: (GraphNode n) =>
-                                    meet.book.metAt(n.address) != null,
-                                line: zen.outline,
-                                guide: zen.outlineSoft,
-                                me: zen.accent,
-                                meText: zen.onAccent,
-                                text: zen.textPrimary,
-                                labelBg: zen.surfaceRaised,
-                                links: links,
-                                path: path,
-                                marked: marked,
-                                selected: selected,
+                          );
+                          return Stack(
+                            children: <Widget>[
+                              Positioned.fill(
+                                child: InteractiveViewer(
+                                  key: const Key('graph-viewer'),
+                                  transformationController: _view,
+                                  minScale: 1,
+                                  maxScale: 8,
+                                  child: SizedBox.fromSize(
+                                    size: size,
+                                    child: picture,
+                                  ),
+                                ),
                               ),
-                            ),
+                              Positioned(
+                                right: 8,
+                                bottom: 8,
+                                child: ListenableBuilder(
+                                  listenable: _view,
+                                  builder: (BuildContext context, Widget? _) =>
+                                      Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: <Widget>[
+                                          IconButton.filledTonal(
+                                            key: const Key('graph-zoom-in'),
+                                            tooltip: t('Przybliż'),
+                                            onPressed: _scale >= 8
+                                                ? null
+                                                : () => _zoom(1.6, size),
+                                            icon: const Icon(Icons.add_rounded),
+                                          ),
+                                          IconButton.filledTonal(
+                                            key: const Key('graph-zoom-out'),
+                                            tooltip: t('Oddal'),
+                                            onPressed: _scale <= 1.001
+                                                ? null
+                                                : () => _zoom(1 / 1.6, size),
+                                            icon: const Icon(
+                                              Icons.remove_rounded,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                ),
+                              ),
+                            ],
                           );
                         },
                       ),
@@ -1184,9 +1432,20 @@ class _GraphPainter extends CustomPainter {
     this.path = const <String>[],
     this.marked = const <String>{},
     this.selected,
+    this.cluster = const <String, int>{},
+    this.clusterColors = const <Color>[],
+    this.scale = 1,
   });
 
   final List<GraphNode> nodes;
+
+  /// Community of each person (-1: none) and the colours to tell them by.
+  final Map<String, int> cluster;
+  final List<Color> clusterColors;
+
+  /// How far the picture is zoomed in: close up, friends of friends get
+  /// their names too.
+  final double scale;
   final Color Function(GraphNode) colorOf;
   final bool Function(GraphNode) met;
   final Color line;
@@ -1226,6 +1485,7 @@ class _GraphPainter extends CustomPainter {
     final Map<String, GraphNode> byAddress = <String, GraphNode>{
       for (final GraphNode n in nodes) n.address: n,
     };
+    _halos(canvas);
     final Paint edge = Paint()
       ..color = line
       ..strokeCap = StrokeCap.round;
@@ -1320,7 +1580,7 @@ class _GraphPainter extends CustomPainter {
             ..strokeWidth = 2,
         );
       }
-      if (n.ring < 4 || lit) {
+      if (n.ring < 4 || lit || scale >= 2) {
         _label(
           canvas,
           n.name,
@@ -1329,6 +1589,46 @@ class _GraphPainter extends CustomPainter {
           pill: true,
         );
       }
+    }
+  }
+
+  /// A soft blob behind each community (when there are at least two).
+  void _halos(Canvas canvas) {
+    final Map<int, List<GraphNode>> groups = <int, List<GraphNode>>{};
+    for (final GraphNode n in nodes) {
+      final int g = cluster[n.address] ?? -1;
+      if (g >= 0) {
+        groups.putIfAbsent(g, () => <GraphNode>[]).add(n);
+      }
+    }
+    if (groups.length < 2 || clusterColors.isEmpty) {
+      return;
+    }
+    for (final MapEntry<int, List<GraphNode>> e in groups.entries) {
+      Offset sum = Offset.zero;
+      for (final GraphNode n in e.value) {
+        sum += n.at;
+      }
+      final Offset mid = sum / e.value.length.toDouble();
+      double radius = 0;
+      for (final GraphNode n in e.value) {
+        radius = max(radius, (n.at - mid).distance);
+      }
+      final Color col = clusterColors[e.key % clusterColors.length];
+      canvas
+        ..drawCircle(
+          mid,
+          radius + 20,
+          Paint()..color = col.withValues(alpha: 0.08),
+        )
+        ..drawCircle(
+          mid,
+          radius + 20,
+          Paint()
+            ..color = col.withValues(alpha: 0.28)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1,
+        );
     }
   }
 
@@ -1390,8 +1690,61 @@ class _GraphPainter extends CustomPainter {
     'path:${path.join('>')}',
     'marked:${(marked.toList()..sort()).join(',')}',
     'selected:${selected ?? ''}',
+    'cluster:${(cluster.entries.map((MapEntry<String, int> e) => '${e.key}=${e.value}').toList()..sort()).join(',')}',
+    'zoom:${scale >= 2}',
   ].join(';');
 
   @override
   bool shouldRepaint(_GraphPainter old) => old._signature != _signature;
+}
+
+/// Screen readers cannot see a canvas: every person drawn on the graph
+/// becomes a button with the name and the circle they belong to. Paints
+/// nothing.
+class _GraphSemantics extends CustomPainter {
+  _GraphSemantics({required this.nodes, required this.onOpen});
+
+  final List<GraphNode> nodes;
+  final void Function(GraphNode) onOpen;
+
+  /// The first nodes (closest friends first) — enough to browse, light on
+  /// the accessibility tree.
+  static const int maxNodes = 120;
+
+  static String ringLabel(int ring) => switch (ring) {
+    1 => t('najbliżsi'),
+    2 => t('znajomi'),
+    3 => t('słabi znajomi'),
+    _ => t('znajomi znajomych'),
+  };
+
+  @override
+  void paint(Canvas canvas, Size size) {}
+
+  @override
+  bool shouldRepaint(_GraphSemantics oldDelegate) => false;
+
+  @override
+  bool shouldRebuildSemantics(_GraphSemantics oldDelegate) => true;
+
+  @override
+  SemanticsBuilderCallback get semanticsBuilder =>
+      (Size size) => <CustomPainterSemantics>[
+        for (final GraphNode n in nodes.take(maxNodes))
+          CustomPainterSemantics(
+            key: ValueKey<String>(n.address),
+            rect: Rect.fromCenter(center: n.at, width: 44, height: 44),
+            properties: SemanticsProperties(
+              label: t('{name}, {circle}', {
+                'name': n.name,
+                'circle': ringLabel(n.ring),
+              }),
+              textDirection: ZenI18n.language.rtl
+                  ? TextDirection.rtl
+                  : TextDirection.ltr,
+              button: true,
+              onTap: () => onOpen(n),
+            ),
+          ),
+      ];
 }

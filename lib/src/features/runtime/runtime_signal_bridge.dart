@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
@@ -202,9 +203,13 @@ final class _RuntimeSignalBridgeState
         payload: <String, dynamic>{
           'type': 'pong',
           'state': _presenceStateLabel(),
+          if (isAcceptedFriend) ...versionHello(),
           if (isAcceptedFriend) ..._hello(from),
         },
       );
+      if (isAcceptedFriend) {
+        await _notePeerVersion(hub, from, frame.payload);
+      }
       return;
     }
     if (type == 'pong') {
@@ -217,6 +222,9 @@ final class _RuntimeSignalBridgeState
         isForeground: (frame.payload['state'] as String? ?? '') == 'foreground',
         observedAtMillis: frame.receivedAtMillis,
       );
+      if (isAcceptedFriend) {
+        await _notePeerVersion(hub, from, frame.payload);
+      }
       return;
     }
     if (isUnconfirmedFriendRemovePayload(frame.payload)) {
@@ -236,6 +244,18 @@ final class _RuntimeSignalBridgeState
       return;
     }
     await hub.receiveSignal(signal, receivedAtMillis: frame.receivedAtMillis);
+  }
+
+  /// What app version a friend named (A17): only for the "newer Zen" hint.
+  Future<void> _notePeerVersion(
+    SocialHubController hub,
+    String from,
+    Map<String, dynamic> payload,
+  ) async {
+    final PeerVersion? version = PeerVersion.fromPayload(payload);
+    if (version != null) {
+      await hub.notePeerAppVersion(peerAddress: from, version: version.version);
+    }
   }
 
   bool _isAcceptedFriendAddress(String address) {
@@ -287,8 +307,10 @@ final class _RuntimeSignalBridgeState
         payload: <String, dynamic>{
           'type': 'ping',
           if (hubState.friendByAddress(address)?.status ==
-              FriendRelationshipStatus.accepted)
+              FriendRelationshipStatus.accepted) ...<String, dynamic>{
+            ...versionHello(),
             ..._hello(address),
+          },
         },
       );
     }

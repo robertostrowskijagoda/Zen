@@ -180,8 +180,12 @@ final class IntentStatus {
 
 /// Who sees this person's friend list (§16.1, §24.1).
 enum FriendListAudience {
-  /// Every friend (the default).
+  /// Every friend, weak acquaintances too.
   all,
+
+  /// Friends at level "Znajomy" and up (the default, §8): a weak
+  /// acquaintance sees it only after asking and being let in.
+  friends,
 
   /// Only friends this person let see it, after they asked.
   onRequest,
@@ -533,6 +537,14 @@ final class MeetBook {
   /// Friends who have this person's current [nearbySecret].
   final Set<String> nearbyGivenTo = <String>{};
 
+  /// This person's private nearby key (S6): never sent; friends get only
+  /// what comes from it, one set per friend ([NearbyOwnKeys.materialFor]).
+  /// [nearbySecret] stays for 1.10.0 friends (transition).
+  String? nearbyPrivate;
+
+  /// Addresses blocked in "W pobliżu" (§15), normalised.
+  final Set<String> nearbyBlocked = <String>{};
+
   /// Friends met in person (address → first time).
   final Map<String, int> metInPerson = <String, int>{};
 
@@ -540,7 +552,7 @@ final class MeetBook {
   bool nearbyVisible = true;
 
   /// Who may see this person's friend list (§9, §16.1, §24.1).
-  FriendListAudience friendListAudience = FriendListAudience.all;
+  FriendListAudience friendListAudience = FriendListAudience.friends;
 
   /// Friends allowed to see the list while it is shown only on request
   /// (normalised addresses). Kept when the audience changes, so going back
@@ -553,12 +565,18 @@ final class MeetBook {
   /// Whether the list goes out at all (to everyone or to those allowed).
   bool get shareFriendList => friendListAudience != FriendListAudience.nobody;
 
-  /// Whether [friend] may see the list now.
-  bool showsFriendListTo(String friend) => switch (friendListAudience) {
-    FriendListAudience.all => true,
-    FriendListAudience.nobody => false,
-    FriendListAudience.onRequest => friendListAllowed.contains(_key(friend)),
-  };
+  /// Whether [friend] may see the list now ([weak]: they are only a weak
+  /// acquaintance, §8).
+  bool showsFriendListTo(String friend, {bool weak = false}) =>
+      switch (friendListAudience) {
+        FriendListAudience.all => true,
+        FriendListAudience.friends =>
+          !weak || friendListAllowed.contains(_key(friend)),
+        FriendListAudience.nobody => false,
+        FriendListAudience.onRequest => friendListAllowed.contains(
+          _key(friend),
+        ),
+      };
 
   /// Record sound during this person's alarm and send it to the friends
   /// who get the alarm (§16.3, off by default).
@@ -572,6 +590,11 @@ final class MeetBook {
   /// Raise the alarm by pressing the power button 5 times (§16.3, Android,
   /// off by default).
   bool alarmPowerButton = false;
+
+  /// Phone numbers for the backup SMS of the alarm (§16.3): the system SMS
+  /// app opens with the alarm text, the person presses send. Never leaves
+  /// this phone.
+  List<String> alarmSmsNumbers = <String>[];
 
   /// Look around for friends now and then without the "W pobliżu" screen
   /// open (§15, off by default: scanning is for that screen): a short
@@ -697,15 +720,20 @@ final class MeetBook {
     if (nearbySecret != null) 'ns': nearbySecret,
     'fns': friendNearbySecrets,
     'given': nearbyGivenTo.toList(),
+    if (nearbyPrivate != null) 'np': nearbyPrivate,
+    if (nearbyBlocked.isNotEmpty) 'nb': nearbyBlocked.toList(),
     'met': metInPerson,
     if (!nearbyVisible) 'hidden': true,
-    // The audience: no flag for everyone.
+    // The audience by name; the older flags stay for older versions (no
+    // flag there meant everyone).
+    'la': friendListAudience.name,
     if (friendListAudience == FriendListAudience.nobody) 'noList': true,
     if (friendListAudience == FriendListAudience.onRequest) 'listAsk': true,
     if (friendListAllowed.isNotEmpty) 'listOk': friendListAllowed.toList(),
     if (alarmRecordAudio) 'alarmAudio': true,
     if (alarmNearby) 'alarmNearby': true,
     if (alarmPowerButton) 'alarmPower': true,
+    if (alarmSmsNumbers.isNotEmpty) 'alarmSms': alarmSmsNumbers,
     // Always written: a book without it (never chosen) means on.
     'bgScan': nearbyBackgroundScan,
     'listSent': friendListSent,
@@ -744,6 +772,11 @@ final class MeetBook {
         ? json['panic'] as String
         : null;
     book.nearbySecret = json['ns'] is String ? json['ns'] as String : null;
+    book.nearbyPrivate = json['np'] is String ? json['np'] as String : null;
+    final Object? nb = json['nb'];
+    if (nb is List) {
+      book.nearbyBlocked.addAll(nb.whereType<String>().take(1000));
+    }
     final Object? fns = json['fns'];
     if (fns is Map) {
       for (final MapEntry<dynamic, dynamic> e in fns.entries) {
@@ -753,11 +786,15 @@ final class MeetBook {
       }
     }
     book.nearbyVisible = json['hidden'] != true;
-    book.friendListAudience = json['listAsk'] == true
-        ? FriendListAudience.onRequest
-        : json['noList'] == true
-        ? FriendListAudience.nobody
-        : FriendListAudience.all;
+    // A book from before 'la' without a flag never had a choice that
+    // differs from the old default, so it gets the new one (§8).
+    book.friendListAudience =
+        FriendListAudience.byName(json['la']) ??
+        (json['listAsk'] == true
+            ? FriendListAudience.onRequest
+            : json['noList'] == true
+            ? FriendListAudience.nobody
+            : FriendListAudience.friends);
     final Object? listOk = json['listOk'];
     if (listOk is List) {
       book.friendListAllowed.addAll(
@@ -770,6 +807,13 @@ final class MeetBook {
     book.alarmRecordAudio = json['alarmAudio'] == true;
     book.alarmNearby = json['alarmNearby'] == true;
     book.alarmPowerButton = json['alarmPower'] == true;
+    final Object? sms = json['alarmSms'];
+    if (sms is List) {
+      book.alarmSmsNumbers = <String>[
+        for (final Object? n in sms.take(5))
+          if (n is String && RegExp(r'^\+?\d{5,15}$').hasMatch(n)) n,
+      ];
+    }
     book.nearbyBackgroundScan = json['bgScan'] == true;
     book.friendListSent = json['listSent'] is String
         ? json['listSent'] as String

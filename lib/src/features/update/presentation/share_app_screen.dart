@@ -15,9 +15,11 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/update/adb_installer.dart';
 import 'package:zen/src/features/update/apk_signature.dart';
+import 'package:zen/src/features/update/presentation/store_share_dialog.dart';
 import 'package:zen/src/features/update/release.dart';
 import 'package:zen/src/features/update/share_app_channel.dart';
 import 'package:zen/src/features/update/share_app_server.dart';
+import 'package:zen/src/features/update/store_build.dart';
 import 'package:zen/src/features/update/update_service.dart';
 
 /// A file that can be passed on.
@@ -39,11 +41,17 @@ final class _ShareSource {
 class ShareAppScreen extends ConsumerStatefulWidget {
   const ShareAppScreen({super.key});
 
-  static Future<void> open(BuildContext context) => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (BuildContext context) => const ShareAppScreen(),
-    ),
-  );
+  static Future<void> open(BuildContext context) {
+    // A store build passes Zen on as a link, never as a file (STAN D12).
+    if (isStoreBuild) {
+      return showStoreShareDialog(context);
+    }
+    return Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => const ShareAppScreen(),
+      ),
+    );
+  }
 
   @override
   ConsumerState<ShareAppScreen> createState() => _ShareAppScreenState();
@@ -57,6 +65,11 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
   _ShareSource? _source;
   ShareAppServer? _server;
   List<InternetAddress> _addresses = const <InternetAddress>[];
+
+  /// Networks this device could share on, and the one it shares on (S13:
+  /// the server listens on that one address only).
+  List<ShareNetwork> _networks = const <ShareNetwork>[];
+  ShareNetwork? _network;
   StreamSubscription<int>? _downloadsSub;
   int _downloads = 0;
   String? _message;
@@ -275,10 +288,15 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
       return;
     }
     await _stopServer();
-    // Listen only where the friend can reach this device: the hotspot or
-    // the Wi-Fi network, never every interface.
-    final List<InternetAddress> addresses = await localShareAddresses();
-    if (addresses.isEmpty) {
+    // Listen only where the friend can reach this device: the network the
+    // person picked, else the hotspot or the Wi-Fi - one address, never
+    // every interface.
+    final List<ShareNetwork> networks = await localShareNetworks();
+    final ShareNetwork? network = chooseShareNetwork(
+      networks,
+      chosen: _network,
+    );
+    if (network == null) {
       if (mounted) {
         setState(
           () => _message = t(
@@ -294,7 +312,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
       fileName: source.name,
     );
     try {
-      await server.start(addresses: addresses);
+      await server.start(addresses: <InternetAddress>[network.address]);
     } on Object catch (error) {
       if (mounted) {
         setState(
@@ -317,6 +335,8 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     setState(() {
       _server = server;
       _addresses = server.servedAddresses;
+      _networks = networks;
+      _network = network;
       _downloads = 0;
       _message = null;
     });
@@ -894,6 +914,34 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                         letterSpacing: 0.2,
                       ),
                     ),
+                  if (_networks.length > 1) ...<Widget>[
+                    const SizedBox(height: 10),
+                    Text(
+                      t('Sieć, w której udostępniasz:'),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: <Widget>[
+                        for (final ShareNetwork n in _networks)
+                          ChoiceChip(
+                            label: Text(n.label),
+                            selected: n == _network,
+                            onSelected: (bool selected) {
+                              if (!selected || n == _network) {
+                                return;
+                              }
+                              setState(() => _network = n);
+                              unawaited(_startServer());
+                            },
+                          ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   _checksum(zen),
                   const SizedBox(height: 12),

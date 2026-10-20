@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/binary_buffer.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
@@ -11,6 +12,7 @@ import 'package:zen/src/domain/friends/peer_public_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 abstract interface class SocialSnapshotStore {
@@ -84,8 +86,8 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       friends[friend.address] = friend;
     }
 
-    final List<InboxEntry> inbox = _readInboxEntries(reader);
-    final List<InboxEntry> backgroundAlerts = _readInboxEntries(
+    List<InboxEntry> inbox = _readInboxEntries(reader);
+    List<InboxEntry> backgroundAlerts = _readInboxEntries(
       reader,
     ).where((e) => e.type != InboxEntryType.callInvite).toList();
     CallSession? activeCall;
@@ -167,6 +169,7 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         <String, PeerPublicProfile>{};
     int profileSentVersion = 0;
     final Map<String, int> disappearingTimers = <String, int>{};
+    final Map<String, String> peerAppVersions = <String, String>{};
     final int extensionCount = reader.readUint32();
     for (int i = 0; i < extensionCount; i++) {
       final String id = reader.readString();
@@ -256,6 +259,25 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
           }
         }
       }
+      // Added after 1.10.0: older snapshots simply have none.
+      final Object? versions = decoded['peerVersions'];
+      if (versions is Map) {
+        for (final MapEntry<dynamic, dynamic> e in versions.entries) {
+          if (e.key is String &&
+              friends.containsKey(e.key) &&
+              e.value is String &&
+              isValidAppVersion(e.value as String)) {
+            peerAppVersions[e.key as String] = e.value as String;
+          }
+        }
+      }
+      // Added in 1.11.0: what the inbox texts say, so they are shown in the
+      // language of the moment (older snapshots keep their saved texts).
+      final Object? inboxText = decoded['inboxText'];
+      if (inboxText is Map) {
+        inbox = _withInboxEvents(inbox, inboxText);
+        backgroundAlerts = _withInboxEvents(backgroundAlerts, inboxText);
+      }
       final Object? inviteIds = decoded['rejectedInviteIds'];
       if (inviteIds is List) {
         rejectedInviteIds.addAll(inviteIds.whereType<String>());
@@ -308,6 +330,28 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
       peerProfiles: peerProfiles,
       profileSentVersion: profileSentVersion,
       disappearingTimers: disappearingTimers,
+      peerAppVersions: peerAppVersions,
+    );
+  }
+
+  static List<InboxEntry> _withInboxEvents(
+    List<InboxEntry> entries,
+    Map<dynamic, dynamic> texts,
+  ) => <InboxEntry>[
+    for (final InboxEntry entry in entries) _withInboxEvent(entry, texts),
+  ];
+
+  static InboxEntry _withInboxEvent(
+    InboxEntry entry,
+    Map<dynamic, dynamic> texts,
+  ) {
+    final Object? saved = texts[entry.id];
+    if (saved is! Map) {
+      return entry;
+    }
+    return entry.withEvents(
+      titleEvent: SocialEventText.fromJson(saved['t']),
+      bodyEvent: SocialEventText.fromJson(saved['b']),
     );
   }
 
@@ -453,6 +497,22 @@ final class FileSocialSnapshotStore implements SocialSnapshotStore {
         // hands it (see `CallSession.acceptToken`).
         'callAcceptToken': ?activeCall?.acceptToken,
         'disappear': state.disappearingTimers,
+        'inboxText': <String, Object?>{
+          for (final InboxEntry e in <InboxEntry>[
+            ...state.inbox,
+            ...state.backgroundAlerts,
+          ])
+            if (e.titleEvent != null || e.bodyEvent != null)
+              e.id: <String, Object?>{
+                't': ?e.titleEvent?.toJson(),
+                'b': ?e.bodyEvent?.toJson(),
+              },
+        },
+        'peerVersions': <String, String>{
+          for (final MapEntry<String, String> e
+              in state.peerAppVersions.entries)
+            if (state.friends.containsKey(e.key)) e.key: e.value,
+        },
         'groups': <String, dynamic>{
           for (final GroupProfile group in state.groups.values)
             if (group.pendingInviteIds.isNotEmpty ||
@@ -537,6 +597,7 @@ final class MemorySocialSnapshotStore implements SocialSnapshotStore {
       peerProfiles: Map<String, PeerPublicProfile>.from(state.peerProfiles),
       profileSentVersion: state.profileSentVersion,
       disappearingTimers: Map<String, int>.from(state.disappearingTimers),
+      peerAppVersions: Map<String, String>.from(state.peerAppVersions),
     );
   }
 }

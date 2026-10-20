@@ -8,6 +8,7 @@ import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
+import 'package:zen/src/features/social/social_event_text.dart';
 
 enum InboxEntryType {
   friendRequest,
@@ -31,15 +32,77 @@ final class InboxEntry {
     required this.createdAtMillis,
     this.routeKey,
     this.peerAddress,
+    this.titleEvent,
+    this.bodyEvent,
   });
+
+  /// An entry whose [title] (and [body], unless [bodyText] is given: what
+  /// a friend wrote) is said by events, so the inbox shows it in the
+  /// language of the moment ([displayTitle], [displayBody]).
+  factory InboxEntry.fromEvents({
+    required String id,
+    required InboxEntryType type,
+    required SocialEventText title,
+    SocialEventText? body,
+    String? bodyText,
+    required int createdAtMillis,
+    String? routeKey,
+    String? peerAddress,
+  }) {
+    final SocialEventText? bodyEvent = bodyText == null ? body : null;
+    return InboxEntry(
+      id: id,
+      type: type,
+      title: title.render(),
+      body: bodyText ?? bodyEvent?.render() ?? '',
+      createdAtMillis: createdAtMillis,
+      routeKey: routeKey,
+      peerAddress: peerAddress,
+      titleEvent: title,
+      bodyEvent: bodyEvent,
+    );
+  }
 
   final String id;
   final InboxEntryType type;
+
+  /// The title in the language it was made in (older entries have only
+  /// this; also what notifications and matching use).
   final String title;
+
+  /// The body in the language it was made in, see [title].
   final String body;
   final int createdAtMillis;
   final String? routeKey;
   final String? peerAddress;
+
+  /// What the title says, put into words when it is shown (STAN A23).
+  final SocialEventText? titleEvent;
+
+  /// What the body says, when it is not a friend's own words.
+  final SocialEventText? bodyEvent;
+
+  /// The title in the app's current language.
+  String get displayTitle => titleEvent?.render(title) ?? title;
+
+  /// The body in the app's current language.
+  String get displayBody => bodyEvent?.render(body) ?? body;
+
+  /// This entry with its events (read back from where they are kept).
+  InboxEntry withEvents({
+    SocialEventText? titleEvent,
+    SocialEventText? bodyEvent,
+  }) => InboxEntry(
+    id: id,
+    type: type,
+    title: title,
+    body: body,
+    createdAtMillis: createdAtMillis,
+    routeKey: routeKey,
+    peerAddress: peerAddress,
+    titleEvent: titleEvent ?? this.titleEvent,
+    bodyEvent: bodyEvent ?? this.bodyEvent,
+  );
 }
 
 const Object _pendingLaunchIntentSentinel = Object();
@@ -68,6 +131,7 @@ final class SocialHubState {
     this.profileSentVersion = 0,
     this.disappearingTimers = const <String, int>{},
     this.snapshotUnreadable = false,
+    this.peerAppVersions = const <String, String>{},
   });
 
   factory SocialHubState.empty({
@@ -204,6 +268,11 @@ final class SocialHubState {
   /// what happened. Never stored: it describes this run only.
   final bool snapshotUnreadable;
 
+  /// The Zen version each friend last named in a ping or pong (A17), by
+  /// [FriendProfile.address]. Self-reported: only for the "friends have a
+  /// newer Zen" hint, never for anything that guards security.
+  final Map<String, String> peerAppVersions;
+
   /// Seconds messages in conversation [key] live (0 = they stay).
   int disappearSecondsFor(String key) {
     final int? direct = disappearingTimers[key];
@@ -282,6 +351,7 @@ final class SocialHubState {
     int? profileSentVersion,
     Map<String, int>? disappearingTimers,
     bool? snapshotUnreadable,
+    Map<String, String>? peerAppVersions,
   }) {
     return SocialHubState(
       lifecycle: lifecycle ?? this.lifecycle,
@@ -307,6 +377,7 @@ final class SocialHubState {
       profileSentVersion: profileSentVersion ?? this.profileSentVersion,
       disappearingTimers: disappearingTimers ?? this.disappearingTimers,
       snapshotUnreadable: snapshotUnreadable ?? this.snapshotUnreadable,
+      peerAppVersions: peerAppVersions ?? this.peerAppVersions,
     );
   }
 

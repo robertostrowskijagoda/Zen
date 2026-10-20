@@ -158,7 +158,9 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
       return;
     }
     final ChatMessage? lastMessage = thread.isEmpty ? null : thread.last;
-    final String nextPreview = lastMessage?.text ?? '';
+    final String nextPreview = lastMessage == null
+        ? ''
+        : chatMessageText(lastMessage);
     final String nextLabel = lastMessage == null
         ? ''
         : _activityLabelForMillis(lastMessage.sentAtMillis);

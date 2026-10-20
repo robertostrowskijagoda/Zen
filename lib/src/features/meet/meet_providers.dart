@@ -99,6 +99,9 @@ final Provider<MeetService> meetServiceProvider = Provider<MeetService>((
   }
 
   service.friendNames = names;
+  // Weak acquaintances get no friend list and statuses (§8); after a
+  // level change [setFriendLevel] sends both again.
+  service.levelOf = (String a) => ref.read(ledgerNodeProvider)?.levelOf(a);
   unawaitedLogged(
     service.reload().then((_) async {
       // Before the friends are read there is nothing to send (and an empty
@@ -158,7 +161,7 @@ final Provider<MeetService> meetServiceProvider = Provider<MeetService>((
       final IntentStatus? mine = service.book.myIntent;
       if (!firstRead && mine != null && mine.activeAt(service.now)) {
         for (final String friend in added) {
-          if (!mine.onlyClose) {
+          if (service.statusVisibleTo(mine, friend)) {
             unawaitedLogged(
               service.host.send(friend, <String, dynamic>{
                 'type': MeetTypes.intent,

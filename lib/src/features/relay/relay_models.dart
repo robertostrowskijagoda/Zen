@@ -123,6 +123,9 @@ final class RelayPeerInfo {
     this.updatedAtMillis = 0,
     this.depositKey,
     this.depositToken,
+    this.canReceiveBlobs = false,
+    this.blobQuotaBytes = 0,
+    this.blobRelays = const <String, int>{},
   });
 
   final String address;
@@ -142,6 +145,19 @@ final class RelayPeerInfo {
   /// This device's token for leaving mail with the peer's relays.
   final String? depositToken;
 
+  /// Whether the peer takes attachments through its mailboxes (it announced
+  /// [kRelayBlobCapability]). Peers that did not (1.10.0 and older) only get
+  /// attachments while both devices are online.
+  final bool canReceiveBlobs;
+
+  /// How many bytes of attachments the peer holds per sender for each friend
+  /// it serves as a mailbox (0: none).
+  final int blobQuotaBytes;
+
+  /// The peer's mailboxes that hold attachments, with their per-sender
+  /// quota in bytes.
+  final Map<String, int> blobRelays;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
     'a': address,
     if (publicKey != null) 'pk': base64Url.encode(publicKey!),
@@ -150,6 +166,9 @@ final class RelayPeerInfo {
     'u': updatedAtMillis,
     if (depositKey != null) 'dk': base64Url.encode(depositKey!),
     if (depositToken != null) 'tk': depositToken,
+    if (canReceiveBlobs) 'cb': true,
+    if (blobQuotaBytes > 0) 'bq': blobQuotaBytes,
+    if (blobRelays.isNotEmpty) 'br': blobRelays,
   };
 
   static RelayPeerInfo? fromJson(Object? json) {
@@ -165,6 +184,9 @@ final class RelayPeerInfo {
       updatedAtMillis: (json['u'] as num?)?.toInt() ?? 0,
       depositKey: decodeRelayKey(json['dk']),
       depositToken: token is String && token.isNotEmpty ? token : null,
+      canReceiveBlobs: json['cb'] == true,
+      blobQuotaBytes: (json['bq'] as num?)?.toInt() ?? 0,
+      blobRelays: _intMap(json['br']),
     );
   }
 }
@@ -183,6 +205,7 @@ final class RelayOutboxEntry {
     this.nextDirectAttemptAtMillis = 0,
     this.depositedTo = const <String>[],
     this.depositAttemptAtMillis = const <String, int>{},
+    this.blobId,
   });
 
   final String rid;
@@ -205,11 +228,16 @@ final class RelayOutboxEntry {
   /// Last deposit attempt per relay, to space out retries.
   final Map<String, int> depositAttemptAtMillis;
 
+  /// For a payload too large for one envelope: the blob ([RelayBlobOut]) its
+  /// copy for the mailboxes was cut into.
+  final String? blobId;
+
   RelayOutboxEntry copyWith({
     int? directAttempts,
     int? nextDirectAttemptAtMillis,
     List<String>? depositedTo,
     Map<String, int>? depositAttemptAtMillis,
+    String? blobId,
   }) {
     return RelayOutboxEntry(
       rid: rid,
@@ -224,6 +252,7 @@ final class RelayOutboxEntry {
       depositedTo: depositedTo ?? this.depositedTo,
       depositAttemptAtMillis:
           depositAttemptAtMillis ?? this.depositAttemptAtMillis,
+      blobId: blobId ?? this.blobId,
     );
   }
 
@@ -238,6 +267,7 @@ final class RelayOutboxEntry {
     'nd': nextDirectAttemptAtMillis,
     'dep': depositedTo,
     'dat': depositAttemptAtMillis,
+    if (blobId != null) 'blob': blobId,
   };
 
   static RelayOutboxEntry? fromJson(Object? json) {
@@ -267,6 +297,7 @@ final class RelayOutboxEntry {
       nextDirectAttemptAtMillis: (json['nd'] as num?)?.toInt() ?? 0,
       depositedTo: _stringList(json['dep']),
       depositAttemptAtMillis: attempts,
+      blobId: json['blob'] is String ? json['blob'] as String : null,
     );
   }
 }
@@ -375,7 +406,14 @@ final class RelayState {
     Map<String, int>? seenFloors,
     this.shareWithGroups = false,
     List<RelayDeliveryReport>? deliveryReports,
+    this.blobQuotaBytes,
+    Map<String, RelayBlobOut>? outBlobs,
+    Map<String, Map<String, RelayHeldBlob>>? heldBlobs,
+    Map<String, RelayBlobIn>? inBlobs,
   }) : peers = peers ?? <String, RelayPeerInfo>{},
+       outBlobs = outBlobs ?? <String, RelayBlobOut>{},
+       heldBlobs = heldBlobs ?? <String, Map<String, RelayHeldBlob>>{},
+       inBlobs = inBlobs ?? <String, RelayBlobIn>{},
        seenFloors = seenFloors ?? <String, int>{},
        currentRelays = currentRelays ?? <String>[],
        announcedVersions = announcedVersions ?? <String, int>{},
@@ -435,32 +473,60 @@ final class RelayState {
   /// first (see [RelayDeliveryReport]).
   final List<RelayDeliveryReport> deliveryReports;
 
-  String toJsonString({bool includeMailbox = true}) =>
-      jsonEncode(<String, dynamic>{
-        'v': 1,
-        // Settings version (see [kRelaySettingsVersion]): lets a loader tell
-        // a `swg` the person chose from the old default.
-        'sv': kRelaySettingsVersion,
-        if (identity != null) 'id': identity!.toJson(),
-        'peers': peers.values.map((RelayPeerInfo p) => p.toJson()).toList(),
-        if (manualRelays != null) 'manual': manualRelays,
-        'cur': currentRelays,
-        'ver': relaySetVersion,
-        // `ann2` (was `ann`): confirmations of announcements that carry deposit
-        // tokens; older ones are dropped so every contact gets its token once.
-        'ann2': announcedVersions,
-        'out': outbox.values.map((RelayOutboxEntry e) => e.toJson()).toList(),
-        if (includeMailbox) 'mail': mailbox,
-        'tomb': tombstones,
-        'seen': seen,
-        if (seenFloorMillis > 0) 'sfl': seenFloorMillis,
-        if (seenFloors.isNotEmpty) 'sfls': seenFloors,
-        'swg': shareWithGroups,
-        if (deliveryReports.isNotEmpty)
-          'rep': deliveryReports
-              .map((RelayDeliveryReport r) => r.toJson())
-              .toList(),
-      });
+  /// How many bytes of attachments this device holds per sender for each
+  /// friend it serves as a mailbox; `null` = the default
+  /// (`RelayConfig.defaultBlobQuotaBytes`), 0 = none.
+  int? blobQuotaBytes;
+
+  /// Attachments from here on their way to mailboxes, by blob id.
+  final Map<String, RelayBlobOut> outBlobs;
+
+  /// Attachments held for friends: recipient -> `sender|blobId` -> blob.
+  final Map<String, Map<String, RelayHeldBlob>> heldBlobs;
+
+  /// Attachments for this device being collected: `sender|blobId` -> blob.
+  final Map<String, RelayBlobIn> inBlobs;
+
+  String toJsonString({bool includeMailbox = true}) => jsonEncode(
+    <String, dynamic>{
+      'v': 1,
+      // Settings version (see [kRelaySettingsVersion]): lets a loader tell
+      // a `swg` the person chose from the old default.
+      'sv': kRelaySettingsVersion,
+      if (identity != null) 'id': identity!.toJson(),
+      'peers': peers.values.map((RelayPeerInfo p) => p.toJson()).toList(),
+      if (manualRelays != null) 'manual': manualRelays,
+      'cur': currentRelays,
+      'ver': relaySetVersion,
+      // `ann3` (was `ann2`, before that `ann`): confirmations of
+      // announcements that carry deposit tokens (`ann2`) and the attachment
+      // capability (`ann3`); older ones are dropped so every contact hears
+      // both once.
+      'ann3': announcedVersions,
+      'out': outbox.values.map((RelayOutboxEntry e) => e.toJson()).toList(),
+      if (includeMailbox) 'mail': mailbox,
+      'tomb': tombstones,
+      'seen': seen,
+      if (seenFloorMillis > 0) 'sfl': seenFloorMillis,
+      if (seenFloors.isNotEmpty) 'sfls': seenFloors,
+      'swg': shareWithGroups,
+      if (deliveryReports.isNotEmpty)
+        'rep': deliveryReports
+            .map((RelayDeliveryReport r) => r.toJson())
+            .toList(),
+      if (blobQuotaBytes != null) 'bq': blobQuotaBytes,
+      if (outBlobs.isNotEmpty)
+        'bo': outBlobs.values.map((RelayBlobOut b) => b.toJson()).toList(),
+      if (heldBlobs.isNotEmpty)
+        'bh': <String, dynamic>{
+          for (final MapEntry<String, Map<String, RelayHeldBlob>> e
+              in heldBlobs.entries)
+            e.key: e.value.values.map((RelayHeldBlob b) => b.toJson()).toList(),
+        },
+      if (inBlobs.isNotEmpty)
+        'bi': inBlobs.values.map((RelayBlobIn b) => b.toJson()).toList(),
+    },
+  );
 
   static RelayState fromJsonString(String raw) {
     final Object? decoded = jsonDecode(raw);
@@ -529,7 +595,7 @@ final class RelayState {
       manualRelays: manual is List ? _stringList(manual) : null,
       currentRelays: _stringList(decoded['cur']),
       relaySetVersion: (decoded['ver'] as num?)?.toInt() ?? 0,
-      announcedVersions: _intMap(decoded['ann2']),
+      announcedVersions: _intMap(decoded['ann3']),
       outbox: outbox,
       mailbox: mailbox,
       tombstones: _intMap(decoded['tomb']),
@@ -538,8 +604,48 @@ final class RelayState {
       seenFloors: _intMap(decoded['sfls']),
       shareWithGroups: storedChoiceIsTheirs && decoded['swg'] == true,
       deliveryReports: reports,
+      blobQuotaBytes: (decoded['bq'] as num?)?.toInt(),
+      outBlobs: <String, RelayBlobOut>{
+        for (final RelayBlobOut blob
+            in ((decoded['bo'] as List?) ?? const <Object?>[])
+                .map(RelayBlobOut.fromJson)
+                .whereType<RelayBlobOut>())
+          blob.blobId: blob,
+      },
+      heldBlobs: _heldBlobsFromJson(decoded['bh']),
+      inBlobs: <String, RelayBlobIn>{
+        for (final RelayBlobIn blob
+            in ((decoded['bi'] as List?) ?? const <Object?>[])
+                .map(RelayBlobIn.fromJson)
+                .whereType<RelayBlobIn>())
+          blob.scope: blob,
+      },
     );
   }
+}
+
+Map<String, Map<String, RelayHeldBlob>> _heldBlobsFromJson(Object? raw) {
+  final Map<String, Map<String, RelayHeldBlob>> result =
+      <String, Map<String, RelayHeldBlob>>{};
+  if (raw is! Map) {
+    return result;
+  }
+  raw.forEach((Object? recipient, Object? blobs) {
+    if (recipient is! String || blobs is! List) {
+      return;
+    }
+    final Map<String, RelayHeldBlob> held = <String, RelayHeldBlob>{};
+    for (final Object? item in blobs) {
+      final RelayHeldBlob? blob = RelayHeldBlob.fromJson(item);
+      if (blob != null) {
+        held[blob.scope] = blob;
+      }
+    }
+    if (held.isNotEmpty) {
+      result[recipient] = held;
+    }
+  });
+  return result;
 }
 
 List<String> _stringList(Object? value) {
@@ -559,4 +665,305 @@ Map<String, int> _intMap(Object? value) {
     });
   }
   return result;
+}
+
+/// Capability a device lists in its `rly_announce` (`cap`) when it can take
+/// attachments through its mailboxes: collect the chunks a sender left with
+/// its friends and put them back together.
+const String kRelayBlobCapability = 'blob1';
+
+/// What a blob carries.
+enum RelayBlobKind {
+  /// A reliable payload too large for one envelope (an inline photo or voice
+  /// message, up to the size of one signal): once complete it is handed to
+  /// the app exactly as if it had arrived directly.
+  payload('p'),
+
+  /// A chat attachment cut into the app's own transfer chunks: the app gets
+  /// a `message_placeholder` and one `message_chunk` per chunk, as from the
+  /// sender's live transfer.
+  attachment('a');
+
+  const RelayBlobKind(this.wire);
+
+  final String wire;
+
+  static RelayBlobKind? fromWire(Object? value) {
+    for (final RelayBlobKind kind in values) {
+      if (kind.wire == value) {
+        return kind;
+      }
+    }
+    return null;
+  }
+}
+
+List<int> _intList(Object? value) {
+  if (value is! List) {
+    return <int>[];
+  }
+  return value.whereType<num>().map((num n) => n.toInt()).toList();
+}
+
+/// A blob this device sent: its sealed chunks wait here until the
+/// recipient's mailboxes hold them (or the recipient collected it).
+final class RelayBlobOut {
+  RelayBlobOut({
+    required this.blobId,
+    required this.recipient,
+    required this.kind,
+    required this.manifestRid,
+    required this.chunkCount,
+    required this.cipherBytes,
+    required this.createdAtMillis,
+    required this.expiresAtMillis,
+    this.ref,
+    Map<String, List<int>>? stored,
+    List<String>? refused,
+  }) : stored = stored ?? <String, List<int>>{},
+       refused = refused ?? <String>[];
+
+  final String blobId;
+  final String recipient;
+  final RelayBlobKind kind;
+
+  /// Reliable id of the manifest that tells the recipient about the blob.
+  final String manifestRid;
+
+  /// For [RelayBlobKind.payload]: the reliable id of the payload it carries.
+  final String? ref;
+  final int chunkCount;
+
+  /// Sum of the sealed chunks' sizes (what a mailbox has to store).
+  final int cipherBytes;
+  final int createdAtMillis;
+  final int expiresAtMillis;
+
+  /// Mailbox -> chunk indexes it confirmed holding.
+  final Map<String, List<int>> stored;
+
+  /// Mailboxes that would not take it (over their quota).
+  final List<String> refused;
+
+  bool isCompleteAt(String relay) =>
+      (stored[relay]?.toSet().length ?? 0) >= chunkCount;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'b': blobId,
+    'to': recipient,
+    'k': kind.wire,
+    'm': manifestRid,
+    if (ref != null) 'ref': ref,
+    'n': chunkCount,
+    'z': cipherBytes,
+    'c': createdAtMillis,
+    'x': expiresAtMillis,
+    if (stored.isNotEmpty) 'st': stored,
+    if (refused.isNotEmpty) 'no': refused,
+  };
+
+  static RelayBlobOut? fromJson(Object? json) {
+    if (json is! Map ||
+        json['b'] is! String ||
+        json['to'] is! String ||
+        json['m'] is! String) {
+      return null;
+    }
+    final RelayBlobKind? kind = RelayBlobKind.fromWire(json['k']);
+    if (kind == null) {
+      return null;
+    }
+    final Map<String, List<int>> stored = <String, List<int>>{};
+    final Object? rawStored = json['st'];
+    if (rawStored is Map) {
+      rawStored.forEach((Object? relay, Object? indexes) {
+        if (relay is String) {
+          stored[relay] = _intList(indexes);
+        }
+      });
+    }
+    return RelayBlobOut(
+      blobId: json['b'] as String,
+      recipient: json['to'] as String,
+      kind: kind,
+      manifestRid: json['m'] as String,
+      ref: json['ref'] is String ? json['ref'] as String : null,
+      chunkCount: (json['n'] as num?)?.toInt() ?? 0,
+      cipherBytes: (json['z'] as num?)?.toInt() ?? 0,
+      createdAtMillis: (json['c'] as num?)?.toInt() ?? 0,
+      expiresAtMillis: (json['x'] as num?)?.toInt() ?? 0,
+      stored: stored,
+      refused: _stringList(json['no']),
+    );
+  }
+}
+
+/// Sealed chunks this device holds for a friend (it is one of the friend's
+/// mailboxes). Only ciphertext: the key travels inside the sealed manifest.
+final class RelayHeldBlob {
+  RelayHeldBlob({
+    required this.blobId,
+    required this.sender,
+    required this.chunkCount,
+    required this.cipherBytes,
+    required this.arrivedAtMillis,
+    required this.holdUntilMillis,
+    this.storedBytes = 0,
+    Set<int>? have,
+  }) : have = have ?? <int>{};
+
+  final String blobId;
+  final String sender;
+  final int chunkCount;
+
+  /// Announced total size; reserved against the sender's quota up front.
+  final int cipherBytes;
+  final int arrivedAtMillis;
+  final int holdUntilMillis;
+
+  /// Bytes actually written so far (never more than [cipherBytes]).
+  int storedBytes;
+
+  /// Chunk indexes held.
+  final Set<int> have;
+
+  String get scope => '$sender|$blobId';
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'b': blobId,
+    's': sender,
+    'n': chunkCount,
+    'z': cipherBytes,
+    'sz': storedBytes,
+    'ha': arrivedAtMillis,
+    'hx': holdUntilMillis,
+    'i': have.toList()..sort(),
+  };
+
+  static RelayHeldBlob? fromJson(Object? json) {
+    if (json is! Map || json['b'] is! String || json['s'] is! String) {
+      return null;
+    }
+    return RelayHeldBlob(
+      blobId: json['b'] as String,
+      sender: json['s'] as String,
+      chunkCount: (json['n'] as num?)?.toInt() ?? 0,
+      cipherBytes: (json['z'] as num?)?.toInt() ?? 0,
+      storedBytes: (json['sz'] as num?)?.toInt() ?? 0,
+      arrivedAtMillis: (json['ha'] as num?)?.toInt() ?? 0,
+      holdUntilMillis: (json['hx'] as num?)?.toInt() ?? 0,
+      have: _intList(json['i']).toSet(),
+    );
+  }
+}
+
+/// A blob addressed to this device that is being collected from the
+/// sender's deposits (the mailboxes, or the sender itself).
+final class RelayBlobIn {
+  RelayBlobIn({
+    required this.blobId,
+    required this.sender,
+    required this.kind,
+    required this.key,
+    required this.chunkCount,
+    required this.chunkSize,
+    required this.plainBytes,
+    required this.createdAtMillis,
+    required this.expiresAtMillis,
+    this.digest,
+    this.ref,
+    this.messageId,
+    Map<String, dynamic>? meta,
+    Set<int>? received,
+  }) : meta = meta ?? <String, dynamic>{},
+       received = received ?? <int>{};
+
+  final String blobId;
+  final String sender;
+  final RelayBlobKind kind;
+
+  /// The blob's chunk key (from the manifest, which only the recipient can
+  /// open).
+  final Uint8List key;
+  final int chunkCount;
+  final int chunkSize;
+  final int plainBytes;
+  final int createdAtMillis;
+  final int expiresAtMillis;
+
+  /// SHA-256 (base64url) of the whole plaintext ([RelayBlobKind.payload]).
+  final String? digest;
+
+  /// [RelayBlobKind.payload]: reliable id of the payload inside.
+  final String? ref;
+
+  /// [RelayBlobKind.attachment]: the chat message it belongs to.
+  final String? messageId;
+
+  /// [RelayBlobKind.attachment]: what the app needs to show it (name, type,
+  /// size…), as in a `message_placeholder`.
+  final Map<String, dynamic> meta;
+
+  /// Chunk indexes already taken.
+  final Set<int> received;
+
+  String get scope => '$sender|$blobId';
+
+  bool get isComplete => received.length >= chunkCount;
+
+  /// Lowest indexes not received yet, at most [limit].
+  List<int> missing(int limit) {
+    final List<int> result = <int>[];
+    for (int i = 0; i < chunkCount && result.length < limit; i++) {
+      if (!received.contains(i)) {
+        result.add(i);
+      }
+    }
+    return result;
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'b': blobId,
+    's': sender,
+    'k': kind.wire,
+    'key': base64Url.encode(key),
+    'n': chunkCount,
+    'cs': chunkSize,
+    'z': plainBytes,
+    'c': createdAtMillis,
+    'x': expiresAtMillis,
+    if (digest != null) 'h': digest,
+    if (ref != null) 'ref': ref,
+    if (messageId != null) 'mid': messageId,
+    if (meta.isNotEmpty) 'meta': meta,
+    'i': received.toList()..sort(),
+  };
+
+  static RelayBlobIn? fromJson(Object? json) {
+    if (json is! Map || json['b'] is! String || json['s'] is! String) {
+      return null;
+    }
+    final RelayBlobKind? kind = RelayBlobKind.fromWire(json['k']);
+    final Uint8List? key = decodeRelayKey(json['key']);
+    if (kind == null || key == null) {
+      return null;
+    }
+    final Object? meta = json['meta'];
+    return RelayBlobIn(
+      blobId: json['b'] as String,
+      sender: json['s'] as String,
+      kind: kind,
+      key: key,
+      chunkCount: (json['n'] as num?)?.toInt() ?? 0,
+      chunkSize: (json['cs'] as num?)?.toInt() ?? 0,
+      plainBytes: (json['z'] as num?)?.toInt() ?? 0,
+      createdAtMillis: (json['c'] as num?)?.toInt() ?? 0,
+      expiresAtMillis: (json['x'] as num?)?.toInt() ?? 0,
+      digest: json['h'] is String ? json['h'] as String : null,
+      ref: json['ref'] is String ? json['ref'] as String : null,
+      messageId: json['mid'] is String ? json['mid'] as String : null,
+      meta: meta is Map ? Map<String, dynamic>.from(meta) : null,
+      received: _intList(json['i']).toSet(),
+    );
+  }
 }

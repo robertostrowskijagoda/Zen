@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/meet/nearby.dart';
@@ -19,8 +20,20 @@ enum ZenPermission {
   /// Bluetooth itself switched on.
   bluetoothOn,
 
+  /// Where this phone is while Zen is open: the place sent with an alarm,
+  /// neighbours nearby (§16.3, §17).
+  location,
+
+  /// The same, also with the screen off ("Always" in the system dialog):
+  /// an alarm raised from the lock screen or the background service.
+  backgroundLocation,
+
   /// A friend's alarm over the locked screen (Android 14+ may refuse it).
   fullScreen,
+
+  /// Alarms and reminders at the exact minute (Android 12+: a special
+  /// access the person gives on a system page).
+  exactAlarms,
 
   /// Android does not put Zen to sleep (battery optimisation off).
   battery,
@@ -30,7 +43,11 @@ enum ZenPermission {
   /// Not needed for messages, alarms and Bluetooth: asked again on first
   /// use anyway.
   bool get optional =>
-      this == ZenPermission.microphone || this == ZenPermission.camera;
+      this == ZenPermission.microphone ||
+      this == ZenPermission.camera ||
+      this == ZenPermission.location ||
+      this == ZenPermission.backgroundLocation ||
+      this == ZenPermission.exactAlarms;
 }
 
 /// What the permissions screen shows.
@@ -40,6 +57,7 @@ final class PermissionsSnapshot {
     this.applicable = const <ZenPermission>[],
     this.granted = const <ZenPermission, bool>{},
     this.bluetoothNeedsLocation = false,
+    this.manufacturer = '',
   });
 
   /// What applies on this device, in the order it is asked.
@@ -51,6 +69,10 @@ final class PermissionsSnapshot {
 
   /// Android 11 and older: Bluetooth needs the location permission.
   final bool bluetoothNeedsLocation;
+
+  /// The phone maker (`Build.MANUFACTURER`, lower case; empty when unknown):
+  /// picks the battery instructions of the vendor.
+  final String manufacturer;
 
   bool? operator [](ZenPermission permission) => granted[permission];
 
@@ -94,6 +116,12 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
   /// The Android version (14) that may refuse full-screen notifications.
   static const int _fullScreenSdk = 34;
 
+  /// Android 10: "allow all the time" is a separate step.
+  static const int _backgroundLocationSdk = 29;
+
+  /// Android 12: SCHEDULE_EXACT_ALARM.
+  static const int _exactAlarmSdk = 31;
+
   final ChannelNearbyRadio _radio;
 
   @override
@@ -122,6 +150,7 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
     final bool fullScreen = await canUseCallFullScreenIntent();
     final Object? sdk = own['sdk'];
     final bool bluetooth = radio['supported'] == true;
+    final LocationPermission? place = await _locationPermission();
     return PermissionsSnapshot(
       applicable: <ZenPermission>[
         ZenPermission.notifications,
@@ -129,7 +158,13 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
           ZenPermission.bluetooth,
           ZenPermission.bluetoothOn,
         ],
+        ZenPermission.location,
+        // Android 10 split "also in the background" from the rest.
+        if (sdk is int && sdk >= _backgroundLocationSdk)
+          ZenPermission.backgroundLocation,
         if (sdk is int && sdk >= _fullScreenSdk) ZenPermission.fullScreen,
+        // Android 12: exact alarms became a special access.
+        if (sdk is int && sdk >= _exactAlarmSdk) ZenPermission.exactAlarms,
         ZenPermission.battery,
         ZenPermission.microphone,
         ZenPermission.camera,
@@ -138,13 +173,31 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
         ZenPermission.notifications: own['notifications'] == true,
         ZenPermission.bluetooth: radio['permitted'] == true,
         ZenPermission.bluetoothOn: radio['enabled'] == true,
+        ZenPermission.location:
+            place == LocationPermission.whileInUse ||
+            place == LocationPermission.always,
+        ZenPermission.backgroundLocation: place == LocationPermission.always,
         ZenPermission.fullScreen: fullScreen,
+        // Missing in the answer of an older app part: nothing to ask.
+        ZenPermission.exactAlarms: own['exactAlarms'] != false,
         ZenPermission.battery: battery,
         ZenPermission.microphone: own['microphone'] == true,
         ZenPermission.camera: own['camera'] == true,
       },
       bluetoothNeedsLocation: radio['needsLocation'] == true,
+      manufacturer: own['manufacturer'] is String
+          ? (own['manufacturer']! as String).toLowerCase()
+          : '',
     );
+  }
+
+  Future<LocationPermission?> _locationPermission() async {
+    try {
+      return await Geolocator.checkPermission();
+    } on Object catch (error) {
+      logZenWarning('Uprawnienia (położenie): $error');
+      return null;
+    }
   }
 
   @override
@@ -152,7 +205,8 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
     switch (permission) {
       case ZenPermission.notifications ||
           ZenPermission.microphone ||
-          ZenPermission.camera:
+          ZenPermission.camera ||
+          ZenPermission.exactAlarms:
         try {
           await _channel.invokeMethod<bool>('request', permission.name);
         } on MissingPluginException {
@@ -164,6 +218,25 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
         await _radio.requestPermissions();
       case ZenPermission.bluetoothOn:
         await _radio.requestEnable();
+      case ZenPermission.location:
+        try {
+          await Geolocator.requestPermission();
+        } on Object catch (error) {
+          logZenWarning('Uprawnienia (położenie): $error');
+        }
+      case ZenPermission.backgroundLocation:
+        try {
+          LocationPermission now = await Geolocator.checkPermission();
+          if (now == LocationPermission.denied) {
+            now = await Geolocator.requestPermission();
+          }
+          // Android 11+ takes "all the time" only from the settings page.
+          if (now != LocationPermission.always) {
+            await openAndroidAppSettings();
+          }
+        } on Object catch (error) {
+          logZenWarning('Uprawnienia (położenie w tle): $error');
+        }
       case ZenPermission.fullScreen:
         await requestCallFullScreenIntentPermission();
       case ZenPermission.battery:

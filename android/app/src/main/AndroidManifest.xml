@@ -25,6 +25,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <!-- The alarm's fresh position while Zen is closed (§16.3): read under a
+         service of the location type, only after the person allowed the
+         location (the service is never started without it). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- Screen sharing in calls (Android 14+ needs this service type). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -61,6 +65,11 @@
     <!-- Hotspot (until Android 12) and the alarm's location (§16.3). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- The alarm's place also from the lock screen / background service
+         (asked on the permissions screen, §25.2). -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- Exact reminders (Android 12+, a special access given by the person). -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission
         android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation" />
@@ -176,10 +185,11 @@
         </receiver>
         <!-- specialUse: the always-on node (Android 14+); dataSync: the same
              on Android 10-13; microphone/camera/mediaProjection: only while
-             a call (or screen sharing) runs. -->
+             a call (or screen sharing) runs; location: only while an alarm
+             reads its position (never in the always-on types). -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
-            android:foregroundServiceType="specialUse|dataSync|microphone|camera|mediaProjection"
+            android:foregroundServiceType="specialUse|dataSync|microphone|camera|mediaProjection|location"
             android:stopWithTask="false"
             android:exported="false">
             <property

@@ -404,7 +404,7 @@ object ZenCallBridge {
     ) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             ?: return
-        ensureIncomingCallLaunchChannel(manager)
+        ensureIncomingCallLaunchChannel(context, manager)
         val accept = actionBroadcastIntent(
             context,
             IncomingCallActionReceiver.ACTION_ACCEPT,
@@ -434,15 +434,19 @@ object ZenCallBridge {
         builder
             .setSmallIcon(R.drawable.ic_stat_call)
             .setContentTitle(displayName)
-            .setContentText(if (isVideo) "Przychodzące połączenie wideo" else "Przychodzące połączenie audio")
+            .setContentText(
+                context.getString(
+                    if (isVideo) R.string.call_notification_video else R.string.call_notification_audio,
+                ),
+            )
             .setCategory(Notification.CATEGORY_CALL)
             .setOngoing(true)
             .setAutoCancel(false)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setContentIntent(fullScreen)
             .setFullScreenIntent(fullScreen, true)
-            .addAction(0, "Odrzuć", decline)
-            .addAction(0, "Odbierz", accept)
+            .addAction(0, context.getString(R.string.call_decline), decline)
+            .addAction(0, context.getString(R.string.call_accept), accept)
         try {
             manager.notify(INCOMING_CALL_NOTIFICATION_ID, builder.build())
         } catch (error: Exception) {
@@ -450,7 +454,7 @@ object ZenCallBridge {
         }
     }
 
-    private fun ensureIncomingCallLaunchChannel(manager: NotificationManager) {
+    private fun ensureIncomingCallLaunchChannel(context: Context, manager: NotificationManager) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return
         }
@@ -460,7 +464,7 @@ object ZenCallBridge {
         }
         val channel = NotificationChannel(
             INCOMING_CALL_CHANNEL_ID,
-            "Połączenie przychodzące",
+            context.getString(R.string.call_channel_name),
             NotificationManager.IMPORTANCE_MAX,
         )
         val ringtone = android.provider.Settings.System.DEFAULT_RINGTONE_URI

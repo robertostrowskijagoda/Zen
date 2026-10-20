@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -13,6 +14,7 @@ import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/dating/dating_service.dart';
 import 'package:zen/src/features/dating/presentation/dating_deck.dart';
 import 'package:zen/src/features/dating/presentation/dating_profile_editor.dart';
+import 'package:zen/src/features/dating/presentation/dating_reconfirm.dart';
 import 'package:zen/src/features/meet/location.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/presentation/safe_photo.dart';
@@ -206,8 +208,13 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
     unawaited(ref.read(datingServiceProvider).load());
   }
 
+  // Shut until the person confirms (and again after the app was away):
+  // dating is one of the sensitive places (§14.1).
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      DatingReconfirm(child: Builder(builder: _buildContent));
+
+  Widget _buildContent(BuildContext context) {
     final DatingService dating = ref.watch(datingServiceProvider);
     // Profiles the person reported are left out of the lists (§21.4); the
     // lists change when they are hidden or shown anyway.
@@ -764,8 +771,12 @@ class DatingProfileScreen extends ConsumerWidget {
   static Future<void> open(BuildContext context, String key) =>
       Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (BuildContext context) =>
-              SecureScreen(child: DatingProfileScreen(profileKey: key)),
+          builder: (BuildContext context) => SecureScreen(
+            child: DatingReconfirm(
+              askOnOpen: false,
+              child: DatingProfileScreen(profileKey: key),
+            ),
+          ),
         ),
       );
 
@@ -903,6 +914,26 @@ class DatingProfileScreen extends ConsumerWidget {
                     }
                     return;
                   }
+                  if (v == 'minor') {
+                    // Switched off here at once; the pyramid (if any) hears
+                    // about it, and so do the people around in the next
+                    // package (§19.6).
+                    await dating.reportMinor(p.key);
+                    if (!context.mounted) {
+                      return;
+                    }
+                    await showReportSheet(
+                      context,
+                      ref.read(pyramidServiceProvider),
+                      datingKey: p.key,
+                      evidence: '${p.name}, ${p.age}: ${p.about}',
+                      onlyReason: 'minor',
+                    );
+                    if (context.mounted) {
+                      Navigator.of(context).pop();
+                    }
+                    return;
+                  }
                   if (v == 'block') {
                     await dating.block(p.key);
                     if (context.mounted) {
@@ -919,10 +950,17 @@ class DatingProfileScreen extends ConsumerWidget {
                     ),
                   ),
                   PopupMenuItem<String>(
+                    value: 'minor',
+                    child: ListTile(
+                      leading: const Icon(Icons.child_care_rounded),
+                      title: Text(t('Zgłoś osobę niepełnoletnią')),
+                    ),
+                  ),
+                  PopupMenuItem<String>(
                     value: 'report',
                     child: ListTile(
                       leading: const Icon(Icons.flag_rounded),
-                      title: Text(t('Zgłoś (np. osoba niepełnoletnia)')),
+                      title: Text(t('Zgłoś (inny powód)')),
                     ),
                   ),
                 ],
@@ -1138,8 +1176,12 @@ class DatingChatScreen extends ConsumerStatefulWidget {
   static Future<void> open(BuildContext context, String key) =>
       Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (BuildContext context) =>
-              SecureScreen(child: DatingChatScreen(profileKey: key)),
+          builder: (BuildContext context) => SecureScreen(
+            child: DatingReconfirm(
+              askOnOpen: false,
+              child: DatingChatScreen(profileKey: key),
+            ),
+          ),
         ),
       );
 
@@ -1461,6 +1503,7 @@ class _FriendCorner extends ConsumerWidget {
                                 t('Położenie z {time}', {
                                   'time': _clock(d.locatedAt!),
                                 }),
+                              if (d.locationPending) t('Czekasz na położenie'),
                             ].join(' · '),
                             style: TextStyle(
                               color: zen.textSecondary,
@@ -1470,6 +1513,16 @@ class _FriendCorner extends ConsumerWidget {
                           ),
                         ],
                       ),
+                    ),
+                    IconButton(
+                      key: Key('dating-loc-ask-${d.id}'),
+                      tooltip: t('Poproś o położenie'),
+                      color: cardTone,
+                      icon: const Icon(Icons.location_searching_rounded),
+                      onPressed: d.locationPending
+                          ? null
+                          : () =>
+                                unawaited(_askLocation(context, dating, d.id)),
                     ),
                     if (d.lat != null)
                       IconButton(
@@ -1537,9 +1590,28 @@ class _FriendCorner extends ConsumerWidget {
   }
 }
 
+Future<void> _askLocation(
+  BuildContext context,
+  DatingService dating,
+  String id,
+) async {
+  final bool sent = await dating.requestSafeLocation(id);
+  if (!context.mounted) {
+    return;
+  }
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        sent
+            ? t('Poproszono o położenie. Telefon znajomego zapyta o zgodę.')
+            : t('Już poproszono o położenie — poczekaj chwilę.'),
+      ),
+    ),
+  );
+}
+
 String _clock(int millis) {
-  final DateTime d = DateTime.fromMillisecondsSinceEpoch(millis);
-  return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  return ZenFormat.time(DateTime.fromMillisecondsSinceEpoch(millis));
 }
 
 /// "Idę na randkę" (§19.4).
@@ -1560,6 +1632,7 @@ class _SafeDateCard extends ConsumerWidget {
     }
     String friend = friends.first;
     int hours = 3;
+    bool autoShare = false;
     final TextEditingController note = TextEditingController();
     final bool? ok = await showDialog<bool>(
       context: context,
@@ -1638,6 +1711,19 @@ class _SafeDateCard extends ConsumerWidget {
                         prefixIcon: const Icon(Icons.place_rounded),
                       ),
                     ),
+                    SwitchListTile(
+                      key: const Key('dating-safe-autoshare'),
+                      contentPadding: EdgeInsets.zero,
+                      value: autoShare,
+                      onChanged: (bool v) => set(() => autoShare = v),
+                      title: Text(t('Odpowiadaj na prośbę o położenie')),
+                      subtitle: Text(
+                        t(
+                          'Gdy przyjaciel poprosi, telefon sam wyśle położenie. '
+                          'Bez tego zapyta Cię o zgodę.',
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1668,6 +1754,7 @@ class _SafeDateCard extends ConsumerWidget {
       note: text,
       lat: fix?.lat,
       lon: fix?.lon,
+      autoShareLocation: autoShare,
     );
   }
 
@@ -1768,6 +1855,58 @@ class _SafeDateCard extends ConsumerWidget {
               ),
             ],
           ),
+          if (d.locationAsked) ...<Widget>[
+            const SizedBox(height: 12),
+            Container(
+              key: const Key('dating-loc-asked'),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: tone.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Text(
+                    t('{name} prosi o Twoje położenie.', <String, Object?>{
+                      'name': MeetHostNames(ref).nameOf(d.friend),
+                    }),
+                    style: TextStyle(
+                      color: zen.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      FilledButton(
+                        key: const Key('dating-loc-allow'),
+                        onPressed: () => unawaited(() async {
+                          final GeoFix? fix = await currentFix();
+                          await dating.answerLocationRequest(
+                            allow: fix != null,
+                            lat: fix?.lat,
+                            lon: fix?.lon,
+                          );
+                        }()),
+                        child: Text(t('Wyślij teraz')),
+                      ),
+                      OutlinedButton(
+                        key: const Key('dating-loc-deny'),
+                        onPressed: () => unawaited(
+                          dating.answerLocationRequest(allow: false),
+                        ),
+                        child: Text(t('Nie teraz')),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           Wrap(
             spacing: 8,

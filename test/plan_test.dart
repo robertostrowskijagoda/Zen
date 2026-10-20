@@ -418,4 +418,146 @@ void main() {
     expect(planWhen(at(17, 10), now), 'Sobota, 10:00');
     expect(planWhen(at(25, 9), now), '25.10, 09:00');
   });
+
+  group('Wspólna sprawa', () {
+    test('a typed list becomes needs with quantities', () {
+      final List<PlanNeed> needs = parsePlanNeeds(
+        'Grabie x4\n\n  Worki na liście \nKierowca ×2\nMix 5\n${'a' * 100}',
+      );
+      expect(needs.map((PlanNeed n) => n.label).toList(), <String>[
+        'Grabie',
+        'Worki na liście',
+        'Kierowca',
+        'Mix 5',
+        'a' * kPlanMaxNeedLabel,
+      ]);
+      expect(needs.map((PlanNeed n) => n.wanted).toList(), <int>[
+        4,
+        1,
+        2,
+        1,
+        1,
+      ]);
+      expect(needs.map((PlanNeed n) => n.key).toList()[2], 'n2');
+      expect(parsePlanNeeds('  \n \n'), isEmpty);
+      expect(
+        parsePlanNeeds(List<String>.generate(30, (int i) => 'r$i').join('\n')),
+        hasLength(kPlanMaxNeeds),
+      );
+    });
+
+    test('friends take things on, the lists add up, nobody takes more than '
+        'is wanted, and it all survives JSON', () async {
+      final _Net net = _Net();
+      final _Phone ania = _Phone(net, 'a1');
+      final _Phone bob = _Phone(net, 'b2');
+      final _Phone cela = _Phone(net, 'c3');
+      net
+        ..link(ania, bob)
+        ..link(ania, cela);
+      final WeekendPlan p = await ania.plans.create(
+        title: 'Sprzątanie podwórka',
+        startsAt: _saturday(net),
+        threshold: 20,
+        needs: parsePlanNeeds('Grabie x2\nWorki'),
+      );
+      await net.settle();
+      expect(p.isCause, isTrue);
+      expect(bob.plans.plan(p.id)!.needs.map((PlanNeed n) => n.label), <String>[
+        'Grabie',
+        'Worki',
+      ]);
+
+      await bob.plans.setClaim(p.id, 'n0', 2);
+      await net.settle();
+      await cela.plans.setClaim(p.id, 'n0', 1);
+      await cela.plans.setClaim(p.id, 'n1', 1);
+      await net.settle();
+
+      final WeekendPlan atAnia = ania.plans.plan(p.id)!;
+      expect(atAnia.answers[bob.address]!.claims, <String, int>{'n0': 2});
+      // Two rakes wanted, Bob took both: Cela only gets the bags.
+      expect(atAnia.answers[cela.address]!.claims, <String, int>{'n1': 1});
+      expect(atAnia.claimed('n0'), 2);
+      expect(atAnia.claimed('n1'), 1);
+      expect(atAnia.joinCount, 2, reason: 'claiming counts as joining');
+      expect(cela.plans.plan(p.id)!.claimed('n0'), 2);
+
+      // Giving up frees it for others.
+      await bob.plans.setClaim(p.id, 'n0', 0);
+      await net.settle();
+      expect(ania.plans.plan(p.id)!.claimed('n0'), 0);
+      expect(
+        ania.plans.plan(p.id)!.answers[bob.address]!.kind,
+        PlanAnswerKind.join,
+      );
+
+      // Claims for things that are not on the list are ignored.
+      await bob.send(ania.address, <String, dynamic>{
+        'type': PlanTypes.answer,
+        'id': p.id,
+        's': 'join',
+        'c': <String, int>{'n9': 3, 'n0': 100},
+      });
+      await net.settle();
+      expect(ania.plans.plan(p.id)!.answers[bob.address]!.claims, <String, int>{
+        'n0': 2,
+      });
+
+      // Withdrawing takes the claims back too.
+      await cela.plans.answer(p.id, null);
+      await net.settle();
+      expect(ania.plans.plan(p.id)!.claimed('n1'), 0);
+
+      final WeekendPlan back = WeekendPlan.fromJson(
+        jsonDecode(jsonEncode(ania.plans.plan(p.id)!.toJson())),
+      )!;
+      expect(back.needs, hasLength(2));
+      expect(back.needs.first.wanted, 2);
+      expect(back.answers[bob.address]!.claims, <String, int>{'n0': 2});
+
+      // A plan from before has no list and no claims.
+      final WeekendPlan plain = WeekendPlan.fromJson(
+        (ania.plans.plan(p.id)!.toJson())..remove('needs'),
+      )!;
+      expect(plain.isCause, isFalse);
+    });
+
+    test('a friend of a friend takes something on through the friend in '
+        'the middle', () async {
+      final _Net net = _Net();
+      final _Phone ania = _Phone(net, 'a1');
+      final _Phone kuba = _Phone(net, 'b2');
+      final _Phone ola = _Phone(net, 'c3');
+      net
+        ..link(ania, kuba)
+        ..link(kuba, ola);
+      final WeekendPlan p = await ania.plans.create(
+        title: 'Zbiórka dla sąsiada',
+        startsAt: _saturday(net),
+        reach: PlanReach.friendsOfFriends,
+        threshold: 20,
+        needs: <PlanNeed>[
+          const PlanNeed(key: 'x', label: 'Kartony', wanted: 3),
+        ],
+      );
+      await net.settle();
+      expect(ola.plans.plan(p.id)!.needs.single.key, 'n0', reason: 're-keyed');
+      await ola.plans.setClaim(p.id, 'n0', 2);
+      await net.settle();
+      final PlanAnswer a = ania.plans.plan(p.id)!.answers[ola.address]!;
+      expect(a.claims, <String, int>{'n0': 2});
+      expect(a.via, kuba.address);
+      expect(ola.plans.myClaims(p.id), <String, int>{'n0': 2});
+
+      // Kept across a restart of Ola's app.
+      final PlanService again = PlanService(
+        host: ola,
+        disk: ola.planDisk,
+        now: () => net.clock,
+      );
+      await again.load();
+      expect(again.myClaims(p.id), <String, int>{'n0': 2});
+    });
+  });
 }

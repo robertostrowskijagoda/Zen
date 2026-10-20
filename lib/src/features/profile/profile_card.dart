@@ -1,12 +1,14 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/meet/events/event_photo.dart';
 import 'package:zen/src/features/profile/avatar_sanitizer.dart';
+import 'package:zen/src/features/profile/own_profile_images.dart';
+import 'package:zen/src/features/profile/profile_fields.dart';
 
 /// Edge of the avatar thumbnail that travels to friends, in pixels.
 const int kProfileAvatarSize = 160;
@@ -20,16 +22,22 @@ const int _maxIncomingAvatarDimension = 2048;
 
 /// The `profile_update` payload for [profile]: what friends see about you.
 ///
-/// The avatar goes as a small JPEG thumbnail, never the original photo.
+/// It goes to every friend alike, so a field reaches it only when all
+/// friends may see it (§9: "Publiczne" or "Wszyscy znajomi"); friends of a
+/// higher level read the other fields from the sealed parts of the profile
+/// in the ledger (`profile_fields.dart`). The avatar goes as a small JPEG
+/// thumbnail, never the original photo.
 Future<Map<String, dynamic>> buildProfilePayload(UserProfile profile) async {
+  bool shared(ProfileField field) =>
+      fieldVisibleTo(fieldVisibility(profile, field), FriendLevel.weak);
   String? avatar;
-  final String? path = profile.avatarPath;
-  if (path != null) {
+  if (shared(ProfileField.photo)) {
     try {
-      final File file = File(path);
-      if (await file.exists() &&
-          await file.length() <= AvatarSanitizer.maxAvatarFileSize) {
-        final Uint8List bytes = await file.readAsBytes();
+      final Uint8List? bytes = await readOwnProfileImage(
+        profile.avatarPath,
+        maxBytes: AvatarSanitizer.maxAvatarFileSize,
+      );
+      if (bytes != null) {
         final Uint8List? thumbnail = await compute(makeAvatarThumbnail, bytes);
         if (thumbnail != null) {
           avatar = base64Encode(thumbnail);
@@ -43,8 +51,8 @@ Future<Map<String, dynamic>> buildProfilePayload(UserProfile profile) async {
     'type': 'profile_update',
     'v': profile.updatedAtMillis,
     'name': profile.displayName.trim(),
-    'status': profile.customStatus.trim(),
-    'bio': profile.bio.trim(),
+    'status': shared(ProfileField.status) ? profile.customStatus.trim() : '',
+    'bio': shared(ProfileField.bio) ? profile.bio.trim() : '',
     'avatar': ?avatar,
   };
 }

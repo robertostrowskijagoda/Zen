@@ -285,6 +285,24 @@ final class LedgerNode {
   /// other devices are recognised too.
   final Iterable<String> Function()? greetAlso;
 
+  /// Extra fields for the hello sent to a (normalised) address: a signed
+  /// follow notice for someone this account follows (§12). Peers that do
+  /// not know a field ignore it.
+  Map<String, dynamic>? Function(String address)? helloExtras;
+
+  /// Called for every proven hello from someone who is neither a friend
+  /// nor this account ([account] at [address]), with its payload (follow
+  /// notices, §12).
+  void Function(String address, String account, Map<String, dynamic> payload)?
+  onStrangerHello;
+
+  /// This device's own mesh address ('' when unknown).
+  String get ownAddress => _ownAddress;
+
+  /// Greets [address] now, friend or not (e.g. to tell someone this
+  /// account stopped following them).
+  void greet(String address) => _hello(address, force: true);
+
   /// Devices of accounts that are neither ours nor friends' (group
   /// members), learnt from proven hellos. Kept in memory only.
   final Map<String, _DeviceRef> _strangerDevices = <String, _DeviceRef>{};
@@ -371,9 +389,11 @@ final class LedgerNode {
               // Own entries are signed by own devices: whoever brings them
               // back (a seed while recovering) cannot have forged them.
               (_isSeed(peer) && _ownSpaces.contains(space)),
-    // Chat copies never leave this account's own devices.
+    // Chat copies never leave this account's own devices; nor does a space
+    // of a kind this build does not know (kept for a newer build, §1.6):
+    // its rules for who may read it are not known here.
     servesTo: (String peer, String space) =>
-        !space.startsWith('own/') || _isSibling(peer),
+        (isKnownSpace(space) && !space.startsWith('own/')) || _isSibling(peer),
   );
   late final LedgerIdentity identity;
   late final LedgerAuthor author;
@@ -1480,6 +1500,7 @@ final class LedgerNode {
       // alone is public and could be shown by anyone).
       final Uint8List proof = await identity.deviceKey.sign(_proofBytes(me));
       _send(friend, <String, dynamic>{
+        ...?helloExtras?.call(normalized),
         'type': kLedgerHelloType,
         'cert': identity.certificate.toJson(),
         'p': <String, dynamic>{'f': me, 's': b64(proof)},
@@ -1633,6 +1654,7 @@ final class LedgerNode {
           cert.name,
           0,
         );
+        onStrangerHello?.call(from, cert.account, frame.payload);
       }
       if (_isSeed(from)) {
         // Not vouched for (yet): it may hold our own entries (a friend

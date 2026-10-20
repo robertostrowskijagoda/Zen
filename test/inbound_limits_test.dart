@@ -25,6 +25,8 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/test_harness_server.dart';
 import 'package:zen/src/features/runtime/zstd_frame_guard.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -95,6 +97,12 @@ final class _Hub {
   SocialHubState get state => container.read(socialHubControllerProvider);
 
   Future<void> start() => transport.start();
+
+  /// Invitations to groups from people who are not friends are taken (off
+  /// by default, §8).
+  Future<void> allowInvitesFromAnyone() => container
+      .read(appSettingsControllerProvider.notifier)
+      .setGroupInviteFrom(GroupInviteFrom.everyone);
 
   Future<void> deliver(
     String from,
@@ -286,6 +294,8 @@ void main() {
     test('a stranger cannot post into the invitation they sent', () async {
       final _Hub hub = _Hub();
       await hub.start();
+      // Only when invitations from anyone are taken (not the default, §8).
+      await hub.allowInvitesFromAnyone();
       final String stranger = _nodeAddress(7);
       await hub.deliver(stranger, <String, dynamic>{
         'type': 'group_invite',
@@ -320,6 +330,7 @@ void main() {
         ),
       );
       await hub.start();
+      await hub.allowInvitesFromAnyone();
       const int extra = 3;
       for (int i = 0; i < kMaxPendingGroupInvites + extra; i++) {
         await hub.deliver(_nodeAddress(i), <String, dynamic>{

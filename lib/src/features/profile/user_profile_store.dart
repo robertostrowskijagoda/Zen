@@ -3,7 +3,9 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
+import 'package:zen/src/features/profile/own_profile_images.dart';
 
 abstract interface class UserProfileStore {
   Future<UserProfile?> load();
@@ -45,7 +47,8 @@ final class FileUserProfileStore implements UserProfileStore {
 
   @override
   Future<void> save(UserProfile profile) async {
-    final String jsonStr = jsonEncode(profile.toJson());
+    // `v` since 1.11 (STAN §7); files without it are version 1 too.
+    final String jsonStr = jsonEncode(withFormatVersion(profile.toJson()));
     await store.write(storageKey, Uint8List.fromList(utf8.encode(jsonStr)));
   }
 }
@@ -91,7 +94,41 @@ final class UserProfileController extends Notifier<UserProfile> {
     }
     if (persisted != null) {
       state = persisted;
+      // Profiles from earlier versions kept the photo and cover as plain
+      // files: move them into the vault (§14.1).
+      await _sealImages();
     }
+  }
+
+  /// The vault sealer, or `null` where there is none (it cannot be built).
+  ProfileImageSealer? _sealer() {
+    try {
+      return ref.read(profileImageSealerProvider);
+    } on Object catch (error, stackTrace) {
+      logZenError('The media vault is not available', error, stackTrace);
+      return null;
+    }
+  }
+
+  Future<void> _sealImages() async {
+    if (!needsProfileImageSealing(state)) {
+      return;
+    }
+    final ProfileImageSealer? seal = _sealer();
+    if (seal == null || !ref.mounted) {
+      return;
+    }
+    final UserProfile before = state;
+    final UserProfile sealed = await sealOwnProfileImages(before, seal);
+    if (identical(sealed, before) || !ref.mounted) {
+      return;
+    }
+    if (!identical(state, before)) {
+      // Edited meanwhile: the edit seals its own pictures.
+      return;
+    }
+    state = sealed;
+    await ref.read(userProfileStoreProvider).save(sealed);
   }
 
   Future<void> updateProfile({
@@ -103,8 +140,10 @@ final class UserProfileController extends Notifier<UserProfile> {
     bool clearCoverPath = false,
     String? customStatus,
     String? bio,
+    Map<String, String>? visibility,
+    List<String>? nationalities,
   }) async {
-    final UserProfile next = state.copyWith(
+    UserProfile next = state.copyWith(
       displayName: displayName,
       avatarPreset: avatarPreset,
       avatarPath: avatarPath,
@@ -113,8 +152,20 @@ final class UserProfileController extends Notifier<UserProfile> {
       clearCoverPath: clearCoverPath,
       customStatus: customStatus,
       bio: bio,
+      visibility: visibility,
+      nationalities: nationalities,
       updatedAtMillis: DateTime.now().millisecondsSinceEpoch,
     );
+    // A new photo or cover is a plain file from the editor: into the vault.
+    if (needsProfileImageSealing(next)) {
+      final ProfileImageSealer? seal = _sealer();
+      if (seal != null) {
+        next = await sealOwnProfileImages(next, seal);
+      }
+      if (!ref.mounted) {
+        return;
+      }
+    }
     state = next;
     await ref.read(userProfileStoreProvider).save(next);
   }

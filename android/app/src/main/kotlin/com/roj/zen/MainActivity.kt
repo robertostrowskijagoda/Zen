@@ -130,8 +130,8 @@ class MainActivity : FlutterFragmentActivity() {
                 listOf(
                     RemoteAction(
                         Icon.createWithResource(this, R.drawable.ic_pip_hang_up),
-                        "Rozłącz",
-                        "Rozłącz",
+                        getString(R.string.call_hang_up),
+                        getString(R.string.call_hang_up),
                         hangUp,
                     ),
                 ),

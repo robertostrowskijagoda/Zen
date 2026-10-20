@@ -43,6 +43,43 @@ const Set<String> kAccountSpaceKinds = <String>{
   'own',
 };
 
+/// Most entries kept per device log in a space kind this build does not
+/// know (written by a newer Zen): enough to hand them on, not a way to fill
+/// the disk.
+const int kMaxUnknownSpaceEntries = 1000;
+
+/// A space kind a newer build may add: short, lower-case.
+final RegExp _spaceKindPattern = RegExp(r'^[a-z][a-z0-9_]{0,23}$');
+
+/// Only devices of [owner] may write, and only [maxEntries] per device log.
+///
+/// For `<kind>/<account>` spaces of a kind this build does not know (§1.6:
+/// an older version keeps what it does not understand). The entries are
+/// still signed by the owner's devices and checked like any other.
+final class UnknownAccountSpacePolicy implements SpacePolicy {
+  const UnknownAccountSpacePolicy(
+    this.owner, {
+    this.maxEntries = kMaxUnknownSpaceEntries,
+  });
+
+  final String owner;
+  final int maxEntries;
+
+  @override
+  bool allows(LogEntry entry) =>
+      entry.account == owner && entry.seq <= maxEntries;
+}
+
+/// Whether [space] is of a kind this build knows (and so may serve it by
+/// its own rules). Spaces kept only for forward compatibility are not.
+bool isKnownSpace(String space) {
+  if (space == kPowerSpace) {
+    return true;
+  }
+  final int slash = space.indexOf('/');
+  return slash > 0 && kAccountSpaceKinds.contains(space.substring(0, slash));
+}
+
 /// Space name for [kind] owned by [account].
 String accountSpace(String kind, String account) {
   assert(kAccountSpaceKinds.contains(kind));
@@ -52,8 +89,13 @@ String accountSpace(String kind, String account) {
 /// The shared log of the (future) governing structure.
 const String kPowerSpace = 'power';
 
-/// The policy for [space], or `null` for a space this build does not know
-/// (refused: accepting unknown spaces would let anyone fill our storage).
+/// The policy for [space], or `null` for a space that is refused.
+///
+/// A `<kind>/<account>` space of a kind this build does not know is kept
+/// for its owner, with a cap ([UnknownAccountSpacePolicy]); anything else
+/// unknown (no owner, a malformed kind) is refused. Whether entries of such
+/// a space arrive at all is still up to the replicator: it only takes
+/// spaces it subscribes to.
 SpacePolicy? defaultSpacePolicy(String space) {
   if (space == kPowerSpace) {
     return const ClosedSpacePolicy();
@@ -64,8 +106,14 @@ SpacePolicy? defaultSpacePolicy(String space) {
   }
   final String kind = space.substring(0, slash);
   final String owner = space.substring(slash + 1);
-  if (!kAccountSpaceKinds.contains(kind) || owner.isEmpty) {
+  if (owner.isEmpty || owner.contains('/')) {
     return null;
   }
-  return AccountSpacePolicy(owner);
+  if (kAccountSpaceKinds.contains(kind)) {
+    return AccountSpacePolicy(owner);
+  }
+  if (!_spaceKindPattern.hasMatch(kind)) {
+    return null;
+  }
+  return UnknownAccountSpacePolicy(owner);
 }

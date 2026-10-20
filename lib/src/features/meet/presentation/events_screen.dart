@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -18,6 +19,7 @@ import 'package:zen/src/features/meet/events/event_photo.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
+import 'package:zen/src/features/meet/presentation/met_level_prompt.dart';
 import 'package:zen/src/features/meet/presentation/safe_photo.dart';
 import 'package:zen/src/features/meet/presentation/table_screen.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_wallet.dart'
@@ -33,20 +35,10 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 
 String eventDate(int millis) {
   final DateTime d = DateTime.fromMillisecondsSinceEpoch(millis);
-  final List<String> days = <String>[
-    t('pon.'),
-    t('wt.'),
-    t('śr.'),
-    t('czw.'),
-    t('pt.'),
-    t('sob.'),
-    t('niedz.'),
-  ];
-  String two(int v) => v.toString().padLeft(2, '0');
   return t('{weekday} {date} o {time}', {
-    'weekday': days[d.weekday - 1],
-    'date': '${d.day}.${two(d.month)}',
-    'time': '${two(d.hour)}:${two(d.minute)}',
+    'weekday': ZenFormat.weekdayShort(d),
+    'date': ZenFormat.dayMonth(d, padDay: false),
+    'time': ZenFormat.time(d),
   });
 }
 
@@ -171,20 +163,6 @@ class _EventCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final DateTime d = DateTime.fromMillisecondsSinceEpoch(event.startsAt);
-    final List<String> months = <String>[
-      t('sty'),
-      t('lut'),
-      t('mar'),
-      t('kwi'),
-      t('maj'),
-      t('cze'),
-      t('lip'),
-      t('sie'),
-      t('wrz'),
-      t('paź'),
-      t('lis'),
-      t('gru'),
-    ];
     final Color tone = event.cancelled
         ? zen.textMuted
         : zenTone(zen, event.kind.index + 1);
@@ -204,7 +182,7 @@ class _EventCard extends StatelessWidget {
               children: <Widget>[
                 Text('${d.day}', style: zen.display(color: tone, size: 24)),
                 Text(
-                  months[d.month - 1],
+                  ZenFormat.monthShort(d),
                   style: TextStyle(
                     color: tone,
                     fontSize: 12,
@@ -1098,6 +1076,8 @@ class EventScreen extends ConsumerWidget {
           content: Text(t('Zaproszenie do {name} wysłane.', {'name': g.name})),
         ),
       );
+      // Met in person: how close are you (§8)?
+      await showMetLevelPrompt(context, address: g.address, name: g.name);
     }
   }
 

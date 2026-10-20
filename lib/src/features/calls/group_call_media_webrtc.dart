@@ -83,6 +83,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     }
     _recordingPath = path;
     _recordingLabel = label;
+    announceRecordingStartedWithTone();
     _notify();
   }
 
@@ -165,7 +166,10 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     }
     if (type == kGroupRecordingSignal) {
       if (frame.payload['on'] == true) {
-        _recordingPeers.add(peer);
+        if (_recordingPeers.add(peer)) {
+          // Everyone hears that a recording began (§13.2).
+          announceRecordingStartedWithTone();
+        }
       } else {
         _recordingPeers.remove(peer);
       }
@@ -272,6 +276,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     final MediaStreamTrack track = tracks.first;
     _screenStream = screen;
     _screenTrack = track;
+    screenShareHidesNotifications.value = true;
     track.onEnded = () => unawaited(stopScreenShare());
     for (final _GroupLeg leg in _legs.values.toList()) {
       await _replaceVideo(leg, track, local);
@@ -291,6 +296,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     _screenStream = null;
     _screenTrack = null;
     androidScreenCaptureActive.value = false;
+    screenShareHidesNotifications.value = false;
     final MediaStream? local = _localStream;
     if (local != null) {
       for (final _GroupLeg leg in _legs.values.toList()) {
@@ -1096,6 +1102,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     _remoteScreens.clear();
     if (screen != null) {
       androidScreenCaptureActive.value = false;
+      screenShareHidesNotifications.value = false;
       await _stopStream(screen);
     }
     _generation += 1;

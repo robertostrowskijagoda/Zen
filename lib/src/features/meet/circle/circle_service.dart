@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -21,11 +22,69 @@ abstract final class CircleTypes {
   static const Set<String> all = <String>{circle, swap, guest};
 }
 
+/// A dinner circle has 4–8 members (people, or pairs when
+/// [DinnerCircle.pairs] is set), the host included (§17.3).
+const int kCircleMinMembers = 4;
+const int kCircleMaxMembers = 8;
+
+/// Most kitty entries a circle keeps (the oldest are dropped).
+const int kCircleKittyMax = 200;
+
+/// One contribution to the circle's shared kitty ("wspólna kasa na
+/// składniki"), in grosze.
+@immutable
+final class KittyEntry {
+  const KittyEntry({
+    required this.by,
+    required this.cents,
+    required this.at,
+    this.note = '',
+  });
+
+  /// The member who paid in (positive) or was reimbursed (negative).
+  final String by;
+  final int cents;
+  final int at;
+  final String note;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'a': by,
+    'c': cents,
+    't': at,
+    if (note.isNotEmpty) 'n': note,
+  };
+
+  static KittyEntry? fromJson(Object? json) {
+    if (json is! Map ||
+        json['a'] is! String ||
+        json['c'] is! int ||
+        json['t'] is! int) {
+      return null;
+    }
+    final Object? n = json['n'];
+    final int c = json['c'] as int;
+    if (c == 0 || c.abs() > 100000000) {
+      return null;
+    }
+    return KittyEntry(
+      by: PeerShareCodec.normalizeAddress(json['a'] as String),
+      cents: c,
+      at: json['t'] as int,
+      note: n is String ? (n.length > 60 ? n.substring(0, 60) : n) : '',
+    );
+  }
+}
+
 /// Someone from outside the circle a member brings to one dinner
 /// ("kółko otwarte", §17.3): once a month per member.
 @immutable
 final class CircleGuest {
-  const CircleGuest({required this.name, required this.day, this.address});
+  const CircleGuest({
+    required this.name,
+    required this.day,
+    this.address,
+    this.vouchedBy,
+  });
 
   final String name;
 
@@ -36,10 +95,15 @@ final class CircleGuest {
   /// invitation).
   final String? address;
 
+  /// The member who vouches for this guest ("przyprowadzający ręczy");
+  /// null in guests saved before vouching existed.
+  final String? vouchedBy;
+
   Map<String, String> toJson() => <String, String>{
     'n': name,
     'd': day,
     'a': ?address,
+    'v': ?vouchedBy,
   };
 
   static CircleGuest? fromJson(Object? json) {
@@ -49,7 +113,11 @@ final class CircleGuest {
     final String n = json['n'] as String;
     final String d = json['d'] as String;
     final Object? a = json['a'];
+    final Object? v = json['v'];
     return CircleGuest(
+      vouchedBy: v is String && isRoutablePeerAddress(v)
+          ? PeerShareCodec.normalizeAddress(v)
+          : null,
       name: n.length > 60 ? n.substring(0, 60) : n,
       day: d.length > 10 ? d.substring(0, 10) : d,
       address: a is String && isRoutablePeerAddress(a)
@@ -85,6 +153,8 @@ final class DinnerCircle {
     this.items = const <String, Map<String, String>>{},
     this.open = false,
     this.guests = const <String, Map<String, CircleGuest>>{},
+    this.pairs = false,
+    this.kitty = const <KittyEntry>[],
     this.updatedAt = 0,
   });
 
@@ -114,7 +184,31 @@ final class DinnerCircle {
 
   /// Guests brought along: month (yyyy-mm) → member address → guest.
   final Map<String, Map<String, CircleGuest>> guests;
+
+  /// Every member stands for a pair (two people at the table).
+  final bool pairs;
+
+  /// Shared kitty for ingredients: who paid in what.
+  final List<KittyEntry> kitty;
   final int updatedAt;
+
+  /// Whether [count] members (the host included) make a valid circle.
+  static bool validSize(int count) =>
+      count >= kCircleMinMembers && count <= kCircleMaxMembers;
+
+  /// People at the table: twice the members for a circle of pairs.
+  int get headcount => members.length * (pairs ? 2 : 1);
+
+  /// Total in the kitty, in grosze.
+  int get kittyTotal => kitty.fold(0, (int s, KittyEntry e) => s + e.cents);
+
+  /// What [member] has put into the kitty, in grosze.
+  int paidBy(String member) => kitty
+      .where((KittyEntry e) => PeerShareCodec.addressesEqual(e.by, member))
+      .fold(0, (int s, KittyEntry e) => s + e.cents);
+
+  /// An even share of the kitty per member, in grosze (rounded down).
+  int get kittyShare => members.isEmpty ? 0 : kittyTotal ~/ members.length;
 
   static String dayKey(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
@@ -179,6 +273,7 @@ final class DinnerCircle {
     Map<String, Map<String, String>>? items,
     bool? open,
     Map<String, Map<String, CircleGuest>>? guests,
+    List<KittyEntry>? kitty,
     int? updatedAt,
   }) => DinnerCircle(
     id: id,
@@ -192,6 +287,8 @@ final class DinnerCircle {
     items: items ?? this.items,
     open: open ?? this.open,
     guests: guests ?? this.guests,
+    pairs: pairs,
+    kitty: kitty ?? this.kitty,
     updatedAt: updatedAt ?? this.updatedAt,
   );
 
@@ -208,6 +305,11 @@ final class DinnerCircle {
     'prefs': prefs,
     'items': items,
     if (open) 'open': true,
+    if (pairs) 'pairs': true,
+    if (kitty.isNotEmpty)
+      'kitty': <Map<String, dynamic>>[
+        for (final KittyEntry e in kitty) e.toJson(),
+      ],
     if (guests.isNotEmpty)
       'guests': <String, dynamic>{
         for (final MapEntry<String, Map<String, CircleGuest>> m
@@ -241,7 +343,14 @@ final class DinnerCircle {
     final Object? prefs = json['prefs'];
     final Object? items = json['items'];
     final Object? guests = json['guests'];
+    final Object? kitty = json['kitty'];
     return DinnerCircle(
+      pairs: json['pairs'] == true,
+      kitty: <KittyEntry>[
+        if (kitty is List)
+          for (final Object? e in kitty.take(kCircleKittyMax))
+            if (KittyEntry.fromJson(e) case final KittyEntry k) k,
+      ],
       id: json['id'] as String,
       name: clip(json['name'], 60),
       members: members,
@@ -385,8 +494,21 @@ final class CircleService extends ChangeNotifier {
     required int hour,
     required DateTime firstDinner,
     int everyWeeks = 1,
+    bool pairs = false,
   }) async {
+    final Set<String> unique = <String>{
+      for (final String f in friends)
+        if (_n(f) != _me) _n(f),
+    };
+    if (!DinnerCircle.validSize(unique.length + 1)) {
+      throw ArgumentError.value(
+        unique.length + 1,
+        'friends',
+        'a circle has $kCircleMinMembers–$kCircleMaxMembers members',
+      );
+    }
     final DinnerCircle c = DinnerCircle(
+      pairs: pairs,
       id: List<String>.generate(
         14,
         (_) => _random.nextInt(36).toRadixString(36),
@@ -394,7 +516,7 @@ final class CircleService extends ChangeNotifier {
       name: name,
       members: <CircleMember>[
         CircleMember(_me, host.ownName()),
-        for (final String f in friends) CircleMember(_n(f), host.nameOf(f)),
+        for (final String f in unique) CircleMember(f, host.nameOf(f)),
       ],
       weekday: weekday,
       hour: hour,
@@ -508,10 +630,12 @@ final class CircleService extends ChangeNotifier {
     DateTime day, {
     required String name,
     String? address,
+    bool vouch = false,
   }) async {
     final DinnerCircle? c = _circles[id];
     final String n = name.trim();
-    if (c == null || n.isEmpty || !c.canBringGuest(_me, day)) {
+    // The one who brings a guest vouches for them: no vouching, no guest.
+    if (!vouch || c == null || n.isEmpty || !c.canBringGuest(_me, day)) {
       return false;
     }
     if (address != null && c.hasMember(address)) {
@@ -522,6 +646,7 @@ final class CircleService extends ChangeNotifier {
       name: n.length > 60 ? n.substring(0, 60) : n,
       day: DinnerCircle.dayKey(day),
       address: address == null ? null : _n(address),
+      vouchedBy: _me,
     );
     await _publish(
       c.copyWith(
@@ -550,6 +675,47 @@ final class CircleService extends ChangeNotifier {
       });
     }
     return true;
+  }
+
+  /// Records that this person put [cents] grosze into the kitty (negative:
+  /// took money out, e.g. a reimbursement). Returns whether it was saved.
+  Future<bool> addToKitty(String id, int cents, {String note = ''}) async {
+    final DinnerCircle? c = _circles[id];
+    if (c == null || cents == 0 || cents.abs() > 100000000) {
+      return false;
+    }
+    final String text = note.trim();
+    final List<KittyEntry> all = <KittyEntry>[
+      ...c.kitty,
+      KittyEntry(
+        by: _me,
+        cents: cents,
+        at: _now(),
+        note: text.length > 60 ? text.substring(0, 60) : text,
+      ),
+    ];
+    await _publish(
+      c.copyWith(
+        kitty: all.length > kCircleKittyMax
+            ? all.sublist(all.length - kCircleKittyMax)
+            : all,
+      ),
+    );
+    return true;
+  }
+
+  /// Removes this person's own kitty entry at [index] (a mistake).
+  Future<void> removeKittyEntry(String id, int index) async {
+    final DinnerCircle? c = _circles[id];
+    if (c == null ||
+        index < 0 ||
+        index >= c.kitty.length ||
+        c.kitty[index].by != _me) {
+      return;
+    }
+    await _publish(
+      c.copyWith(kitty: <KittyEntry>[...c.kitty]..removeAt(index)),
+    );
   }
 
   /// Takes back this person's guest for the month of [day].
@@ -585,11 +751,10 @@ final class CircleService extends ChangeNotifier {
       final Object? cook = frame.payload['cook'];
       if (host.isFriend(from) && name is String && at is int) {
         final DateTime d = DateTime.fromMillisecondsSinceEpoch(at);
-        String two(int v) => v.toString().padLeft(2, '0');
         final Map<String, Object?> args = <String, Object?>{
           'circle': name.length > 60 ? name.substring(0, 60) : name,
-          'date': '${two(d.day)}.${two(d.month)}',
-          'time': '${two(d.hour)}:00',
+          'date': ZenFormat.dayMonth(d),
+          'time': ZenFormat.time(DateTime(d.year, d.month, d.day, d.hour)),
         };
         await host.notify(
           RuntimeSystemNotification(

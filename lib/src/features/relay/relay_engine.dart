@@ -11,13 +11,23 @@ import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
+part 'relay_engine_blobs.dart';
+
 /// A friend as the relay layer sees it.
 @immutable
 final class RelayFriend {
-  const RelayFriend({required this.address, this.lastSeenAtMillis = 0});
+  const RelayFriend({
+    required this.address,
+    this.lastSeenAtMillis = 0,
+    this.closeness = 1,
+  });
 
   final String address;
   final int lastSeenAtMillis;
+
+  /// How close this friend is (§8: 0 "Słaby znajomy", 1 "Znajomy", 2
+  /// "Przyjaciel"): free mailbox places go to the closest first (§7).
+  final int closeness;
 }
 
 /// The social facts the relay layer needs, without depending on the social
@@ -74,6 +84,17 @@ final class RelayConfig {
     this.maxClockSkew = const Duration(days: 1),
     this.unattributableGrace = const Duration(hours: 12),
     this.maxStrangerSeenEntries = 2000,
+    this.defaultBlobQuotaBytes = 20 * 1024 * 1024,
+    this.maxHeldBlobBytesTotal = 200 * 1024 * 1024,
+    this.maxBlobBytes = 24 * 1024 * 1024,
+    this.maxPayloadBlobBytes = 2 * 1024 * 1024,
+    this.blobChunkBytes = 64 * 1024,
+    this.maxBlobChunkBytes = 128 * 1024,
+    this.blobWindow = 8,
+    this.blobRequestTimeout = const Duration(seconds: 20),
+    this.maxIncomingBlobs = 32,
+    this.maxOutgoingBlobs = 64,
+    this.maxBlobCopies = 3,
   });
 
   /// How many friends hold this device's mail.
@@ -131,6 +152,45 @@ final class RelayConfig {
 
   /// Reliable ids from people who are not contacts, remembered in memory.
   final int maxStrangerSeenEntries;
+
+  // Attachments through mailboxes (blobs, see [RelayEngine.submitAttachment]).
+
+  /// Bytes of attachments held per sender for each friend this device serves
+  /// as a mailbox, unless the person chose otherwise
+  /// ([RelayEngine.setBlobQuota]).
+  final int defaultBlobQuotaBytes;
+
+  /// Bytes of attachments held for all friends together.
+  final int maxHeldBlobBytesTotal;
+
+  /// Largest attachment (plaintext) sent or collected as a blob.
+  final int maxBlobBytes;
+
+  /// Largest reliable payload cut into a blob when it is too large for one
+  /// envelope (one signal at most, so about 2 MB).
+  final int maxPayloadBlobBytes;
+
+  /// Chunk size of payload blobs (attachments use the app's own chunks).
+  final int blobChunkBytes;
+
+  /// Largest plaintext chunk taken.
+  final int maxBlobChunkBytes;
+
+  /// Chunks asked for (or handed in) at once, per blob and device.
+  final int blobWindow;
+
+  /// How long an unanswered window of chunks is waited for.
+  final Duration blobRequestTimeout;
+
+  /// Blobs being collected at once (more manifests are ignored).
+  final int maxIncomingBlobs;
+
+  /// Blobs from here not yet in the mailboxes.
+  final int maxOutgoingBlobs;
+
+  /// Mailboxes that get a copy of each blob: every copy is uploaded from the
+  /// sender's phone, so not all six.
+  final int maxBlobCopies;
 }
 
 /// Snapshot for the settings screen.
@@ -144,6 +204,9 @@ final class RelayOverview {
     this.heldForPeerCount = 0,
     this.publicKeyFingerprint = '',
     this.shareWithGroups = false,
+    this.blobQuotaBytes = 0,
+    this.heldBlobBytes = 0,
+    this.outgoingBlobCount = 0,
   });
 
   final bool isAutomatic;
@@ -162,6 +225,16 @@ final class RelayOverview {
   final int heldEnvelopeCount;
   final int heldForPeerCount;
   final String publicKeyFingerprint;
+
+  /// Attachments this device holds per sender for each friend (0: none, or
+  /// no attachment storage in this build).
+  final int blobQuotaBytes;
+
+  /// Bytes of attachments held here for friends.
+  final int heldBlobBytes;
+
+  /// Attachments from here still on their way to the mailboxes.
+  final int outgoingBlobCount;
 }
 
 /// Payload types that must reach their recipient eventually.
@@ -230,6 +303,7 @@ const Set<String> kReliablePayloadTypes = <String>{
   'date_vouch',
   'date_safe',
   'date_safe_ok',
+  'date_loc_req',
   // Neighbours (§18): flats are usually not friends, so only directly.
   'flat_hello',
   'flat_nope',
@@ -328,12 +402,18 @@ final class RelayEngine {
     send,
     this.config = const RelayConfig(),
     int Function()? clock,
+    RelayBlobStore? blobStore,
   }) : _store = store,
        _peers = peers,
        _rawSend = send,
+       _blobs = blobStore,
        _now = clock ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final RelayStateStore _store;
+
+  /// Where sealed attachment chunks are kept; `null` = no attachments through
+  /// mailboxes (nothing is announced, large payloads stay direct-only).
+  final RelayBlobStore? _blobs;
   final RelayPeerSource _peers;
   final Future<void> Function(String, Map<String, dynamic>) _rawSend;
   final int Function() _now;
@@ -376,7 +456,22 @@ final class RelayEngine {
   final Map<String, Map<String, int>> _lastPushedAt =
       <String, Map<String, int>>{};
 
+  /// Chunk windows handed to a mailbox and not confirmed yet:
+  /// `blobId|relay` -> window.
+  final Map<String, _BlobWindow> _blobDeposits = <String, _BlobWindow>{};
+
+  /// Last window sent per `blobId|relay`, to space out tries to a mailbox
+  /// that is offline.
+  final Map<String, int> _blobDepositAt = <String, int>{};
+
+  /// Collection progress per incoming blob (`sender|blobId`).
+  final Map<String, _BlobPull> _blobPulls = <String, _BlobPull>{};
+
   bool get isActive => _active;
+
+  /// Whether this engine can send, hold and collect attachments through
+  /// mailboxes at all.
+  bool get supportsBlobs => _blobs != null;
 
   String get _self => PeerShareCodec.normalizeAddress(_peers.localAddress);
 
@@ -388,6 +483,8 @@ final class RelayEngine {
   Future<void> activate() {
     return _locked(() async {
       _state = null;
+      _blobDeposits.clear();
+      _blobPulls.clear();
       final RelayState state = await _load();
       _active = true;
       _refreshRelaySet(state);
@@ -427,29 +524,42 @@ final class RelayEngine {
   Future<void> submit(String recipient, Map<String, dynamic> payload) {
     return _locked(() async {
       final RelayState state = await _load();
-      final String to = PeerShareCodec.normalizeAddress(recipient);
-      final String rid =
-          (payload[kReliableIdKey] as String?) ?? _newReliableId();
-      final Map<String, dynamic> wire = Map<String, dynamic>.from(payload)
-        ..remove(kSendOnceKey)
-        ..[kReliableIdKey] = rid;
-      final int now = _now();
-      final bool relayable =
-          !_directOnlyPayloadTypes.contains(wire['type']) &&
-          utf8.encode(jsonEncode(wire)).length <=
-              config.maxRelayablePayloadBytes;
-      RelayOutboxEntry entry = RelayOutboxEntry(
-        rid: rid,
-        recipient: to,
-        payload: wire,
-        createdAtMillis: now,
-        expiresAtMillis: now + config.messageTtl.inMilliseconds,
-        relayable: relayable,
+      await _enqueue(
+        state,
+        PeerShareCodec.normalizeAddress(recipient),
+        payload,
+        _now(),
       );
-      entry = await _attemptDirect(entry, now);
-      state.outbox[rid] = entry;
       await _save(state);
     });
+  }
+
+  /// Puts [payload] into the outbox for [to] and makes the first direct try;
+  /// returns its reliable id. The caller saves.
+  Future<String> _enqueue(
+    RelayState state,
+    String to,
+    Map<String, dynamic> payload,
+    int now,
+  ) async {
+    final String rid = (payload[kReliableIdKey] as String?) ?? _newReliableId();
+    final Map<String, dynamic> wire = Map<String, dynamic>.from(payload)
+      ..remove(kSendOnceKey)
+      ..[kReliableIdKey] = rid;
+    final bool relayable =
+        !_directOnlyPayloadTypes.contains(wire['type']) &&
+        utf8.encode(jsonEncode(wire)).length <= config.maxRelayablePayloadBytes;
+    RelayOutboxEntry entry = RelayOutboxEntry(
+      rid: rid,
+      recipient: to,
+      payload: wire,
+      createdAtMillis: now,
+      expiresAtMillis: now + config.messageTtl.inMilliseconds,
+      relayable: relayable,
+    );
+    entry = await _attemptDirect(entry, now);
+    state.outbox[rid] = entry;
+    return rid;
   }
 
   /// Hands the chat layer what it must not keep believing about its queued
@@ -506,7 +616,12 @@ final class RelayEngine {
     int now,
   ) {
     final Object? messageId = entry.payload['msgId'];
-    if (entry.payload['type'] != _chatMessageType ||
+    // An attachment's manifest stands for its chat message.
+    final bool chatMessage =
+        entry.payload['type'] == _chatMessageType ||
+        (entry.payload['type'] == kBlobManifestType &&
+            entry.payload['k'] == RelayBlobKind.attachment.wire);
+    if (!chatMessage ||
         messageId is! String ||
         messageId.isEmpty ||
         state.deliveryReports.any(
@@ -558,6 +673,24 @@ final class RelayEngine {
       } else {
         forward.add(frame);
       }
+      if (forward.any(
+        (SignalTransportFrame f) => f.payload['type'] == kBlobManifestType,
+      )) {
+        // Blob manifests are the relay layer's own: they become the blob's
+        // collection (and, for an attachment, the chat's placeholder).
+        final List<SignalTransportFrame> kept = <SignalTransportFrame>[];
+        for (final SignalTransportFrame f in forward) {
+          if (f.payload['type'] == kBlobManifestType) {
+            changed =
+                await _acceptBlobManifest(state, f, kept, via: from) || changed;
+          } else {
+            kept.add(f);
+          }
+        }
+        forward
+          ..clear()
+          ..addAll(kept);
+      }
       changed = await _onPeerSeen(state, from) || changed;
       if (changed) {
         await _save(state);
@@ -580,6 +713,10 @@ final class RelayEngine {
     final String key = '$from|$rid';
     final int now = _now();
     if (state.seen.containsKey(key) || (_strangerSeen[key] ?? 0) > now) {
+      if (frame.payload['type'] == kBlobManifestType) {
+        // The sender is still retrying a blob that was collected long ago.
+        await _remindBlobCollected(state, from, frame.payload['b']);
+      }
       return false;
     }
     forward.add(frame);
@@ -613,6 +750,15 @@ final class RelayEngine {
             (RelayDeliveryReport r) => r.rid == entry.rid,
           );
           _reportedDirectOnly.remove(entry.rid);
+          final String? blobId = entry.blobId;
+          if (blobId != null) {
+            // Its copy for the mailboxes is not needed any more.
+            final RelayBlobOut? blob = state.outBlobs[blobId];
+            if (blob != null) {
+              state.outbox.remove(blob.manifestRid);
+              await _dropOutBlob(state, blob);
+            }
+          }
           return true;
         }
         return false;
@@ -646,6 +792,24 @@ final class RelayEngine {
         return _dropDelivered(state, recipient: from, ids: payload['ids']);
       case 'rly_sync':
         return _handleSync(state, from, payload);
+      case 'rly_bput':
+        return _handleBlobPut(state, from, payload);
+      case 'rly_bput_ack':
+        return _handleBlobPutAck(state, from, payload);
+      case 'rly_bput_no':
+        return _handleBlobRefused(state, from, payload);
+      case 'rly_bget':
+        await _handleBlobGet(state, from, payload);
+        return false;
+      case 'rly_bchunk':
+        return _handleBlobChunk(state, from, payload, forward);
+      case 'rly_bnone':
+        await _handleBlobNone(state, from, payload);
+        return false;
+      case 'rly_bdrop':
+        return _handleBlobDrop(state, from, payload);
+      case 'rly_bdone':
+        return _handleBlobDone(state, from, payload);
       case 'rly_sync_want':
         final String recipient = PeerShareCodec.normalizeAddress(
           payload['r'] as String? ?? '',
@@ -696,14 +860,18 @@ final class RelayEngine {
         listEquals(known.publicKey, publicKey)) {
       return false; // stale copy
     }
+    final List<String> relays =
+        _stringList(payload['relays'], limit: config.maxRelays * 4)
+            .map(PeerShareCodec.normalizeAddress)
+            .where((String a) => a.isNotEmpty && a != from)
+            .take(config.maxRelays)
+            .toList(growable: false);
+    final Map<String, int> blobRelaysBefore = _blobRelaysOf(state);
+    final Object? caps = payload['cap'];
     state.peers[from] = RelayPeerInfo(
       address: from,
       publicKey: publicKey ?? known?.publicKey,
-      relays: _stringList(payload['relays'], limit: config.maxRelays * 4)
-          .map(PeerShareCodec.normalizeAddress)
-          .where((String a) => a.isNotEmpty && a != from)
-          .take(config.maxRelays)
-          .toList(growable: false),
+      relays: relays,
       version: version,
       updatedAtMillis: _now(),
       // Sent only to the peer's relays.
@@ -711,7 +879,18 @@ final class RelayEngine {
       depositToken: token is String && token.isNotEmpty && token.length <= 64
           ? token
           : null,
+      canReceiveBlobs: caps is List && caps.contains(kRelayBlobCapability),
+      blobQuotaBytes: max(0, _intOf(payload['bq'])),
+      blobRelays: _blobRelaysFrom(payload['br'], relays),
     );
+    if (_blobs != null &&
+        state.currentRelays.contains(from) &&
+        !mapEquals(blobRelaysBefore, _blobRelaysOf(state))) {
+      // One of our mailboxes started (or stopped) holding attachments:
+      // friends have to hear it to leave attachments with it.
+      state.relaySetVersion += 1;
+      _lastAnnounceAt.clear();
+    }
     return true;
   }
 
@@ -746,6 +925,11 @@ final class RelayEngine {
       'v': state.relaySetVersion,
       'tk': _depositToken(depositKey, recipient: _self, sender: to),
       if (state.currentRelays.contains(to)) 'dk': base64Url.encode(depositKey),
+      if (_blobs != null) ...<String, dynamic>{
+        'cap': const <String>[kRelayBlobCapability],
+        if (_blobQuota(state) > 0) 'bq': _blobQuota(state),
+        'br': _blobRelaysOf(state),
+      },
     };
   }
 
@@ -803,10 +987,13 @@ final class RelayEngine {
           friends.where((RelayFriend f) {
             final String a = PeerShareCodec.normalizeAddress(f.address);
             return friendAddresses.contains(a) && !kept.contains(a);
-          }).toList()..sort(
-            (RelayFriend a, RelayFriend b) =>
-                b.lastSeenAtMillis.compareTo(a.lastSeenAtMillis),
-          );
+          }).toList()..sort((RelayFriend a, RelayFriend b) {
+            // "Przyjaciel" first (§7), then the most recently seen.
+            final int byLevel = b.closeness.compareTo(a.closeness);
+            return byLevel != 0
+                ? byLevel
+                : b.lastSeenAtMillis.compareTo(a.lastSeenAtMillis);
+          });
       for (final RelayFriend candidate in candidates) {
         if (kept.length >= config.maxRelays) {
           break;
@@ -1536,6 +1723,11 @@ final class RelayEngine {
         await _sendQuietly(address, <String, dynamic>{'type': 'rly_poll'});
       }
     }
+    // 7. Attachments: chunks for it to hold, and chunks to collect from it.
+    if (_blobs != null) {
+      await _depositBlobs(state, onlyRelay: address);
+      await _resumeBlobPulls(state, now, onlySource: address);
+    }
     return changed;
   }
 
@@ -1576,6 +1768,11 @@ final class RelayEngine {
         }
       }
       changed = await _depositPending(state) || changed;
+      if (_blobs != null) {
+        changed = await _blobHousekeeping(state, now) || changed;
+        await _depositBlobs(state);
+        await _resumeBlobPulls(state, now);
+      }
       // Collect from our relays now and then.
       for (final String relay in state.currentRelays) {
         final int? last = _lastPollAt[relay];
@@ -1732,6 +1929,13 @@ final class RelayEngine {
         continue;
       }
       if (!entry.relayable) {
+        if (entry.blobId != null) {
+          continue; // its copy travels to the mailboxes as a blob
+        }
+        if (await _cutIntoBlob(state, entry, now)) {
+          changed = true;
+          continue;
+        }
         // The mailboxes would have got a copy by now but this one is too large
         // for them: it waits for both devices to be online together, and the
         // chat should say so rather than keep showing it as safely sent.
@@ -1883,7 +2087,14 @@ final class RelayEngine {
         (String _, RelayOutboxEntry e) =>
             e.recipient == to && !keepTypes.contains(e.payload['type']),
       );
-      if (state.outbox.length != before) {
+      bool changed = state.outbox.length != before;
+      for (final RelayBlobOut blob in state.outBlobs.values.toList()) {
+        if (blob.recipient == to) {
+          await _dropOutBlob(state, blob);
+          changed = true;
+        }
+      }
+      if (changed) {
         await _save(state);
       }
     });
@@ -1911,6 +2122,153 @@ final class RelayEngine {
         _lastAnnounceAt.clear();
       }
       await _save(state);
+    });
+  }
+
+  /// Sets how many bytes of attachments this device holds per sender for
+  /// each friend it serves as a mailbox (0: none). Friends hear it with the
+  /// next announcement; what is already held stays until collected or
+  /// expired.
+  Future<void> setBlobQuota(int bytes) {
+    return _locked(() async {
+      final RelayState state = await _load();
+      final int next = max(0, bytes);
+      if (_blobQuota(state) == next && state.blobQuotaBytes != null) {
+        return;
+      }
+      state.blobQuotaBytes = next;
+      state.relaySetVersion += 1;
+      _lastAnnounceAt.clear();
+      if (_active) {
+        await _announceToAll(state);
+      }
+      await _save(state);
+    });
+  }
+
+  /// Whether an attachment of [bytes] to [recipient] can wait in the
+  /// recipient's mailboxes: the recipient announced that it collects
+  /// attachments, and at least one of its mailboxes (other than this
+  /// device) holds that much. Peers that never announced it (older app
+  /// versions) only get attachments while both devices are online.
+  Future<bool> canSendAttachmentTo(
+    String recipient, {
+    required int bytes,
+    required int chunkSize,
+  }) {
+    return _locked(() async {
+      if (_blobs == null || bytes <= 0 || chunkSize <= 0) {
+        return false;
+      }
+      final RelayState state = await _load();
+      final int count = (bytes + chunkSize - 1) ~/ chunkSize;
+      return _canSendBlob(
+        state,
+        PeerShareCodec.normalizeAddress(recipient),
+        bytes + count * RelayBlobCipher.overheadBytes,
+      );
+    });
+  }
+
+  /// Hands a chat attachment to [recipient]'s mailboxes, for when the two
+  /// devices are not online together.
+  ///
+  /// The attachment ([totalBytes], read with [readChunk] in [chunkSize]
+  /// pieces — the app's own transfer chunks) is sealed chunk by chunk under
+  /// a fresh key ([RelayBlobCipher]) and kept here until the mailboxes hold
+  /// it. The key travels in a small manifest, an ordinary reliable payload
+  /// (direct, or sealed for the mailboxes like any message). The recipient
+  /// collects the chunks from its mailboxes (or from this device) and its
+  /// app gets them as the usual `message_placeholder` + `message_chunk`
+  /// frames carrying [meta] and [messageId], so they are put together and
+  /// checked by the media guard exactly as a live transfer would be.
+  ///
+  /// Returns false — and nothing is queued — when the recipient or its
+  /// mailboxes cannot take it (see [canSendAttachmentTo]) or the file could
+  /// not be read; the caller then keeps its own (online-only) transfer.
+  Future<bool> submitAttachment({
+    required String recipient,
+    required String messageId,
+    required Map<String, dynamic> meta,
+    required int totalBytes,
+    required int chunkSize,
+    required Future<Uint8List> Function(int index) readChunk,
+  }) async {
+    final String to = PeerShareCodec.normalizeAddress(recipient);
+    if (_blobs == null ||
+        messageId.isEmpty ||
+        totalBytes <= 0 ||
+        totalBytes > config.maxBlobBytes ||
+        chunkSize <= 0 ||
+        chunkSize > config.maxBlobChunkBytes) {
+      return false;
+    }
+    final int count = (totalBytes + chunkSize - 1) ~/ chunkSize;
+    final int expectedCipherBytes =
+        totalBytes + count * RelayBlobCipher.overheadBytes;
+    final bool possible = await _locked(() async {
+      final RelayState state = await _load();
+      return state.outBlobs.length < config.maxOutgoingBlobs &&
+          _canSendBlob(state, to, expectedCipherBytes);
+    });
+    if (!possible) {
+      return false;
+    }
+    final String blobId = _newBlobId();
+    final Uint8List key = RelayBlobCipher.newKey();
+    // Sealed outside the lock: megabytes of AEAD must not hold up messages.
+    final int? cipherBytes = await _sealBlobChunks(
+      blobId: blobId,
+      recipient: to,
+      key: key,
+      count: count,
+      chunkAt: (int index) async {
+        final Uint8List chunk = await readChunk(index);
+        final int expected = index < count - 1
+            ? chunkSize
+            : totalBytes - chunkSize * (count - 1);
+        if (chunk.length != expected) {
+          throw StateError('Attachment chunk $index has the wrong size.');
+        }
+        return chunk;
+      },
+    );
+    if (cipherBytes == null) {
+      return false;
+    }
+    return _locked(() async {
+      final RelayState state = await _load();
+      if (!_canSendBlob(state, to, cipherBytes)) {
+        await _deleteChunks(count, (int i) => _outChunkKey(blobId, i));
+        return false;
+      }
+      final int now = _now();
+      final int expires = now + config.messageTtl.inMilliseconds;
+      final String manifestRid = await _enqueue(state, to, <String, dynamic>{
+        'type': kBlobManifestType,
+        'b': blobId,
+        'k': RelayBlobKind.attachment.wire,
+        'key': base64Url.encode(key),
+        'n': count,
+        'cs': chunkSize,
+        'z': totalBytes,
+        'x': expires,
+        'msgId': messageId,
+        'meta': _attachmentMeta(meta),
+      }, now);
+      state.outBlobs[blobId] = RelayBlobOut(
+        blobId: blobId,
+        recipient: to,
+        kind: RelayBlobKind.attachment,
+        manifestRid: manifestRid,
+        chunkCount: count,
+        cipherBytes: cipherBytes,
+        createdAtMillis: now,
+        expiresAtMillis: expires,
+      );
+      await _depositBlobs(state, onlyBlob: blobId);
+      await _save(state);
+      return true;
     });
   }
 
@@ -1964,6 +2322,9 @@ final class RelayEngine {
       heldForPeerCount: state.mailbox.length,
       publicKeyFingerprint: _fingerprint(state.identity?.publicKey),
       shareWithGroups: state.shareWithGroups,
+      blobQuotaBytes: _blobQuota(state),
+      heldBlobBytes: _heldBlobBytes(state),
+      outgoingBlobCount: state.outBlobs.length,
     );
     deliveryReportCount.value = state.deliveryReports.length;
   }
@@ -1996,6 +2357,20 @@ final class RelayEngine {
       },
     );
     return result;
+  }
+
+  /// [value] as an int, or -1 for anything that is not a number.
+  static int _intOf(Object? value) => value is num ? value.toInt() : -1;
+
+  static List<int> _intListOf(Object? value, {required int limit}) {
+    if (value is! List) {
+      return const <int>[];
+    }
+    return value
+        .take(limit)
+        .whereType<num>()
+        .map((num n) => n.toInt())
+        .toList(growable: false);
   }
 
   static List<String> _stringList(Object? value, {int? limit}) {

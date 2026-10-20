@@ -1,9 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/feed/reaction_relay.dart';
+import 'package:zen/src/features/feed/thread_moderation.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
@@ -73,7 +76,7 @@ Map<String, dynamic> reshareBody(LogEntry original, {LogEntry? authorProfile}) {
 }
 
 /// Parses [json] as an entry and checks its certificate and signature.
-Future<LogEntry?> _verified(Object? json) async {
+Future<LogEntry?> verifiedEntry(Object? json) async {
   final LogEntry? entry = LogEntry.fromJson(json);
   if (entry == null ||
       entry.certificate.account != entry.account ||
@@ -91,7 +94,7 @@ Future<LogEntry?> unpackReshare(LogEntry reshare) async {
   if (reshare.kind != kReshareKind) {
     return null;
   }
-  final LogEntry? original = await _verified(reshare.body['entry']);
+  final LogEntry? original = await verifiedEntry(reshare.body['entry']);
   if (original == null ||
       original.kind != kPostKind ||
       isSealed(original.body) ||
@@ -110,17 +113,55 @@ Future<LedgerProfile?> unpackReshareProfile(
   if (json == null) {
     return null;
   }
-  final LogEntry? entry = await _verified(json);
+  final LogEntry? entry = await verifiedEntry(json);
   if (entry == null || entry.account != original.account) {
     return null;
   }
   return profileFromEntry(entry);
 }
 
-/// Checked reshares, by reshare entry id (a bad one maps to `null`).
+/// Entry kind of a passed-on tombstone in a resharer's feed (§10): the
+/// author removed a post this account reshared, and friends of this
+/// account (who may not follow the author) should hide it too. The body
+/// carries the author's signed `post_del`; older versions ignore it.
+const String kReshareDeleteKind = 'reshare_del';
+
+/// Body passing on the author's signed [tombstone].
+Map<String, dynamic> reshareDeleteBody(LogEntry tombstone) {
+  if (tombstone.kind != kPostDeleteKind || tombstone.body['post'] is! String) {
+    throw ArgumentError.value(tombstone.kind, 'tombstone');
+  }
+  return <String, dynamic>{
+    'post': tombstone.body['post'],
+    'entry': tombstone.toJson(),
+  };
+}
+
+/// The author's verified tombstone inside [e], or `null`.
+Future<LogEntry?> unpackTombstone(LogEntry e) async {
+  if (e.kind != kReshareDeleteKind) {
+    return null;
+  }
+  final LogEntry? tomb = await verifiedEntry(e.body['entry']);
+  final Object? post = tomb?.body['post'];
+  if (tomb == null ||
+      tomb.kind != kPostDeleteKind ||
+      tomb.space != accountSpace('feed', tomb.account) ||
+      post is! String ||
+      post != e.body['post']) {
+    return null;
+  }
+  return tomb;
+}
+
+/// Checked reshares, by reshare entry id (a bad one maps to `null`), and
+/// the tombstones resharers passed on.
 final class ReshareCache {
   final Map<String, LogEntry?> _checked = <String, LogEntry?>{};
   final Map<String, LedgerProfile> _profiles = <String, LedgerProfile>{};
+
+  /// Removed post id → its author (from passed-on tombstones).
+  final Map<String, String> _removed = <String, String>{};
 
   bool isChecked(String reshareId) => _checked.containsKey(reshareId);
 
@@ -129,10 +170,25 @@ final class ReshareCache {
   /// The author's profile carried by the reshare, if valid.
   LedgerProfile? profileOf(String reshareId) => _profiles[reshareId];
 
-  /// Checks the reshares not seen yet; true if any new one was valid.
+  /// Whether the author of [original] removed it (a tombstone signed by
+  /// them reached this device through a resharer).
+  bool isRemoved(LogEntry original) =>
+      _removed[original.id] == original.account;
+
+  /// Checks the reshares and passed-on tombstones not seen yet; true if any
+  /// new one was valid.
   Future<bool> checkAll(Iterable<LogEntry> entries) async {
     bool added = false;
     for (final LogEntry e in entries.toList()) {
+      if (e.kind == kReshareDeleteKind && !_checked.containsKey(e.id)) {
+        _checked[e.id] = null;
+        final LogEntry? tomb = await unpackTombstone(e);
+        if (tomb != null) {
+          _removed[tomb.body['post'] as String] = tomb.account;
+          added = true;
+        }
+        continue;
+      }
       if (e.kind != kReshareKind || _checked.containsKey(e.id)) {
         continue;
       }
@@ -163,12 +219,85 @@ final class FeedComment {
     required this.authorLabel,
     required this.text,
     required this.millis,
+    this.authorAddress = '',
+    this.account = '',
+    this.hiddenByAuthor = false,
   });
 
   final String id;
   final String authorLabel;
   final String text;
   final int millis;
+
+  /// The author's device address when they are a friend ('' otherwise):
+  /// a report of the comment names its author (§21.4).
+  final String authorAddress;
+
+  /// Who wrote it ('' when unknown).
+  final String account;
+
+  /// Hidden by the post's author (§11): only the author still sees it, to
+  /// show it again.
+  final bool hiddenByAuthor;
+
+  FeedComment hidden() => FeedComment(
+    id: id,
+    authorLabel: authorLabel,
+    text: text,
+    millis: millis,
+    authorAddress: authorAddress,
+    account: account,
+    hiddenByAuthor: true,
+  );
+}
+
+/// Someone who likes a post.
+@immutable
+final class FeedLiker {
+  const FeedLiker({
+    required this.account,
+    required this.name,
+    this.friend = false,
+  });
+
+  final String account;
+  final String name;
+
+  /// This account or a friend (shown first: "Lubią to: Bob, Kasia…").
+  final bool friend;
+}
+
+/// "Lubią to: Ty, Bob i 1 284 inne osoby" (§11): up to two names of
+/// friends first, then how many others; `null` when nobody likes [post].
+String? likeSummary(FeedPost post) {
+  final int total = post.likeTotal;
+  if (total <= 0) {
+    return null;
+  }
+  final List<String> named = <String>[
+    for (final FeedLiker l in post.likes)
+      if (l.friend) l.name,
+  ].take(2).toList();
+  final int others = total - named.length;
+  if (named.isEmpty) {
+    return tn(
+      others,
+      one: 'Lubi to {n} osoba',
+      few: 'Lubią to {n} osoby',
+      many: 'Lubi to {n} osób',
+    );
+  }
+  final String names = named.join(', ');
+  if (others <= 0) {
+    return t('Lubią to: {names}', {'names': names});
+  }
+  return tn(
+    others,
+    one: 'Lubią to: {names} i {n} inna osoba',
+    few: 'Lubią to: {names} i {n} inne osoby',
+    many: 'Lubią to: {names} i {n} innych osób',
+    args: <String, Object?>{'names': names},
+  );
 }
 
 /// Body of a comment on [postId] (validated, trimmed).
@@ -208,8 +337,13 @@ final class FeedPost {
     this.authorAddress = '',
     this.audience = Audience.public,
     this.images = const <MediaRef>[],
+    this.likes = const <FeedLiker>[],
+    int? likeTotal,
+    int? commentTotal,
     int? sortMillis,
-  }) : sortMillis = sortMillis ?? millis;
+  }) : sortMillis = sortMillis ?? millis,
+       _likeTotal = likeTotal,
+       _commentTotal = commentTotal;
 
   final String id;
   final String account;
@@ -218,9 +352,23 @@ final class FeedPost {
   final int millis;
   final bool isOwn;
 
-  /// Display names of those who like the post (visible to this node).
+  /// Display names of those who like the post (visible to this node):
+  /// this account and friends first.
   final List<String> likers;
   final bool likedByMe;
+
+  /// Who likes the post, in the order of [likers].
+  final List<FeedLiker> likes;
+
+  final int? _likeTotal;
+  final int? _commentTotal;
+
+  /// How many like it in all: at least [likers], more when a bundle said
+  /// there are more than it carried (§11).
+  int get likeTotal => _likeTotal ?? likers.length;
+
+  /// How many comments in all (the same way).
+  int get commentTotal => _commentTotal ?? comments.length;
 
   /// Oldest first.
   final List<FeedComment> comments;
@@ -251,6 +399,9 @@ final class FeedPost {
     List<String> likers, {
     required bool likedByMe,
     required List<FeedComment> comments,
+    List<FeedLiker> likes = const <FeedLiker>[],
+    int? likeTotal,
+    int? commentTotal,
   }) => FeedPost(
     id: id,
     account: account,
@@ -268,6 +419,9 @@ final class FeedPost {
     audience: audience,
     images: images,
     sortMillis: sortMillis,
+    likes: likes,
+    likeTotal: likeTotal,
+    commentTotal: commentTotal,
   );
 }
 
@@ -504,7 +658,8 @@ List<FeedPost> buildFeed(
         final LogEntry? original = reshares.originalOf(e.id);
         if (original == null ||
             shown.contains(original.id) ||
-            deleted.contains(original.id)) {
+            deleted.contains(original.id) ||
+            reshares.isRemoved(original)) {
           continue;
         }
         final (LogEntry, List<String>, int, LedgerProfile?)? had =
@@ -563,20 +718,36 @@ List<FeedPost> buildFeed(
 
   final List<LogEntry> myActs = node.entriesOf(spaceKind: 'acts');
   final Set<String> mine = likedPosts(myActs);
-  // Post id -> liker account -> name (direct likes win over bundles).
-  final Map<String, Map<String, String>> likers =
-      <String, Map<String, String>>{};
+  // Post id -> liker account -> liker (direct likes win over bundles).
+  final Map<String, Map<String, FeedLiker>> likers =
+      <String, Map<String, FeedLiker>>{};
   final Map<String, List<FeedComment>> comments = <String, List<FeedComment>>{};
   final Set<String> commentIds = <String>{};
+  // What came in bundles: the author's decisions passed on in bundles
+  // apply to these only (people in the circle speak for themselves).
+  final Set<String> relayedComments = <String>{};
+  final Set<String> relayedLikes = <String>{};
+  final Map<String, ThreadModeration> passedOn = <String, ThreadModeration>{};
+  final Map<String, int> likeTotals = <String, int>{};
+  final Map<String, int> commentTotals = <String, int>{};
   void addComment(String post, FeedComment c) {
     if (commentIds.add(c.id)) {
       (comments[post] ??= <FeedComment>[]).add(c);
     }
   }
 
-  void collect(Iterable<LogEntry> acts, String name, String account) {
+  void collect(
+    Iterable<LogEntry> acts,
+    String name,
+    String account, [
+    String address = '',
+  ]) {
     for (final String id in likedPosts(acts)) {
-      (likers[id] ??= <String, String>{})[account] = name;
+      (likers[id] ??= <String, FeedLiker>{})[account] = FeedLiker(
+        account: account,
+        name: name,
+        friend: true,
+      );
     }
     for (final LogEntry e in acts) {
       final Object? post = e.body['post'];
@@ -596,6 +767,8 @@ List<FeedPost> buildFeed(
               ? text.substring(0, kMaxCommentChars)
               : text,
           millis: e.hlc.millis,
+          authorAddress: address,
+          account: account,
         ),
       );
     }
@@ -611,6 +784,7 @@ List<FeedPost> buildFeed(
       node.entriesOf(spaceKind: 'acts', ofAccount: account),
       name,
       account,
+      address,
     );
   });
   // Reactions from outside the circle, relayed along the reshare tree.
@@ -630,26 +804,33 @@ List<FeedPost> buildFeed(
           : t('{name} (przez {via})', {'name': shown, 'via': relayedBy});
     }
 
-    for (final LogEntry e in latestBundles(acts).values) {
-      final String post = e.body['post'] as String;
-      final ({List<BundleLike> likes, List<BundleComment> comments})? b =
-          readBundle(e);
-      if (b == null) {
-        continue;
-      }
-      for (final BundleLike l in b.likes) {
+    for (final MapEntry<String, PostReactions> b in readBundles(acts).entries) {
+      final String post = b.key;
+      final PostReactions r = b.value;
+      passedOn[post] = (passedOn[post] ?? ThreadModeration.none).merge(
+        r.moderation,
+      );
+      likeTotals[post] = math.max(likeTotals[post] ?? 0, r.likeTotal);
+      commentTotals[post] = math.max(commentTotals[post] ?? 0, r.commentTotal);
+      for (final BundleLike l in r.likes) {
         if (friendNames.containsKey(l.account)) {
           continue;
         }
-        (likers[post] ??= <String, String>{}).putIfAbsent(
-          l.account,
-          () => relayedLabel(l.name),
-        );
+        final Map<String, FeedLiker> those = likers[post] ??=
+            <String, FeedLiker>{};
+        if (!those.containsKey(l.account)) {
+          those[l.account] = FeedLiker(
+            account: l.account,
+            name: relayedLabel(l.name),
+          );
+          relayedLikes.add('$post\n${l.account}');
+        }
       }
-      for (final BundleComment c in b.comments) {
-        if (friendNames.containsKey(c.account)) {
+      for (final BundleComment c in r.comments) {
+        if (friendNames.containsKey(c.account) || commentIds.contains(c.id)) {
           continue;
         }
+        relayedComments.add(c.id);
         addComment(
           post,
           FeedComment(
@@ -657,6 +838,7 @@ List<FeedPost> buildFeed(
             authorLabel: relayedLabel(c.name),
             text: c.text,
             millis: c.millis,
+            account: c.account,
           ),
         );
       }
@@ -675,14 +857,66 @@ List<FeedPost> buildFeed(
   for (final List<FeedComment> list in comments.values) {
     list.sort((FeedComment a, FeedComment b) => a.millis.compareTo(b.millis));
   }
-  final List<FeedPost> result = <FeedPost>[
-    for (final FeedPost p in posts)
+  // The author's say over the thread (§11): their signed entries (when
+  // this device reads their acts) and what their bundles passed on.
+  final Map<String, ThreadModeration> signed = <String, ThreadModeration>{};
+  final List<FeedPost> result = <FeedPost>[];
+  for (final FeedPost p in posts) {
+    final ThreadModeration own = signed[p.account] ??= authorModeration(
+      node,
+      p.account,
+    );
+    final ThreadModeration bundled = passedOn[p.id] ?? ThreadModeration.none;
+    bool blocked(String account, {required bool relayed}) =>
+        account.isNotEmpty &&
+        (own.blocks(account) || (relayed && bundled.blocks(account)));
+    final List<FeedLiker> kept = <FeedLiker>[
+      for (final FeedLiker l in likers[p.id]?.values ?? const <FeedLiker>[])
+        if (!blocked(
+          l.account,
+          relayed: relayedLikes.contains('${p.id}\n${l.account}'),
+        ))
+          l,
+    ];
+    // This account first, then friends, then everyone else.
+    final List<FeedLiker> ordered = <FeedLiker>[
+      for (final FeedLiker l in kept)
+        if (l.account == node.account) l,
+      for (final FeedLiker l in kept)
+        if (l.account != node.account && l.friend) l,
+      for (final FeedLiker l in kept)
+        if (!l.friend) l,
+    ];
+    final List<FeedComment> shown = <FeedComment>[];
+    for (final FeedComment c in comments[p.id] ?? const <FeedComment>[]) {
+      final bool relayed = relayedComments.contains(c.id);
+      if (blocked(c.account, relayed: relayed)) {
+        continue;
+      }
+      final bool hidden =
+          own.hidesComment(p.id, c.id) ||
+          (relayed && bundled.hidesComment(p.id, c.id));
+      if (!hidden) {
+        shown.add(c);
+      } else if (p.account == node.account) {
+        // The author still sees it, marked, to show it again.
+        shown.add(c.hidden());
+      }
+    }
+    final int visible = shown
+        .where((FeedComment c) => !c.hiddenByAuthor)
+        .length;
+    result.add(
       p.withReactions(
-        likers[p.id]?.values.toList() ?? const <String>[],
+        <String>[for (final FeedLiker l in ordered) l.name],
         likedByMe: mine.contains(p.id),
-        comments: comments[p.id] ?? const <FeedComment>[],
+        comments: shown,
+        likes: ordered,
+        likeTotal: math.max(ordered.length, likeTotals[p.id] ?? 0),
+        commentTotal: math.max(visible, commentTotals[p.id] ?? 0),
       ),
-  ];
+    );
+  }
   result.sort((FeedPost a, FeedPost b) => b.sortMillis.compareTo(a.sortMillis));
   return result;
 }

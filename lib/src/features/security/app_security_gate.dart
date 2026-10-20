@@ -8,7 +8,10 @@ import 'package:zen/src/app/app_data_reset.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/features/account/account_secure_providers.dart';
+import 'package:zen/src/features/account/presentation/account_secure_stage.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
+import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -192,6 +195,11 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
         ref.watch(permissionsSetupRequiredProvider) &&
         !appSettings.permissionsSetupDone &&
         ref.watch(permissionsPlatformProvider).hasAnything;
+    // §6.1, §6.3: then, once, the "Zabezpiecz konto" card.
+    final bool accountStep =
+        ref.watch(accountSecureStepRequiredProvider) &&
+        ref.watch(ledgerNodeEnabledProvider) &&
+        !appSettings.accountSecureOffered;
     // The whole app, lock screen included: Android keeps its window out of
     // screenshots and the recent apps while the setting is on (S-9), and
     // every touch, click or mouse move restarts the idle lock (S-8).
@@ -202,12 +210,16 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
         onPointerMove: _onPointer,
         onPointerHover: _onPointer,
         onPointerSignal: _onPointer,
-        child: _gated(security, permissionsStep),
+        child: _gated(security, permissionsStep, accountStep),
       ),
     );
   }
 
-  Widget _gated(AppSecurityService security, bool permissionsStep) {
+  Widget _gated(
+    AppSecurityService security,
+    bool permissionsStep,
+    bool accountStep,
+  ) {
     return AnimatedBuilder(
       animation: security,
       builder: (BuildContext context, Widget? child) {
@@ -245,6 +257,15 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
                 settings: route,
                 builder: (BuildContext context) =>
                     const PermissionsSetupStage(),
+              ),
+            );
+          }
+          if (accountStep) {
+            return Navigator(
+              key: const ValueKey<String>('gate-account-secure'),
+              onGenerateRoute: (RouteSettings route) => MaterialPageRoute<void>(
+                settings: route,
+                builder: (BuildContext context) => const AccountSecureStage(),
               ),
             );
           }

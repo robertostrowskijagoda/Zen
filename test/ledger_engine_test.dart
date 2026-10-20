@@ -135,7 +135,7 @@ void main() {
     });
 
     test(
-      'only the owner may write in a space; unknown spaces are refused',
+      'only the owner may write in a space; ownerless spaces are refused',
       () async {
         final LedgerStore store = _store();
         final (_, LedgerAuthor ada) = await _account(store);
@@ -154,7 +154,11 @@ void main() {
           throwsStateError,
         );
         await expectLater(
-          ada.append('whatever/${ada.account}', 'post', <String, dynamic>{}),
+          ada.append('whatever', 'post', <String, dynamic>{}),
+          throwsStateError,
+        );
+        await expectLater(
+          ada.append('Bad Kind/${ada.account}', 'post', <String, dynamic>{}),
           throwsStateError,
         );
         await ada.append(
@@ -162,6 +166,50 @@ void main() {
           'like',
           <String, dynamic>{},
         );
+      },
+    );
+
+    test(
+      'a space kind from a newer build is kept for its owner (§1.6)',
+      () async {
+        final LedgerStore a = _store();
+        final (_, LedgerAuthor ada) = await _account(a);
+        final (_, LedgerAuthor bob) = await _account(a);
+        final String space = 'stories/${ada.account}';
+        expect(isKnownSpace(space), isFalse);
+        expect(isKnownSpace(accountSpace('feed', ada.account)), isTrue);
+        final LogEntry entry = await ada.append(
+          space,
+          'story',
+          <String, dynamic>{'text': 'Z nowszej wersji', 'extra': 1},
+        );
+        // Another device takes it as it is, unknown fields included.
+        final LedgerStore b = _store();
+        expect((await b.ingest(entry)).status, IngestStatus.added);
+        expect(b.entries(space).single.body['extra'], 1);
+        // Still only the owner writes there.
+        await expectLater(
+          bob.append(space, 'story', <String, dynamic>{}),
+          throwsStateError,
+        );
+        // And only so much of it.
+        expect(
+          const UnknownAccountSpacePolicy('x').maxEntries,
+          kMaxUnknownSpaceEntries,
+        );
+        final LedgerStore small = LedgerStore(
+          clock: HlcClock(wallClock: () => _now),
+          policies: (String s) => s == space
+              ? UnknownAccountSpacePolicy(ada.account, maxEntries: 1)
+              : defaultSpacePolicy(s),
+        );
+        final LogEntry second = await ada.append(
+          space,
+          'story',
+          <String, dynamic>{},
+        );
+        expect((await small.ingest(entry)).status, IngestStatus.added);
+        expect((await small.ingest(second)).status, IngestStatus.rejected);
       },
     );
 

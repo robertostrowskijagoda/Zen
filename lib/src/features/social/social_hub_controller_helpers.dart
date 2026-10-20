@@ -627,20 +627,25 @@ InboxEntry _buildInboxEntry({
     knownName: friends?[signal.sender]?.displayLabel,
   );
   return switch (signal.type) {
-    ZenSignalType.friendRequest => InboxEntry(
+    ZenSignalType.friendRequest => InboxEntry.fromEvents(
       id: 'friend-request-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.friendRequest,
-      title: t('Nowe zaproszenie od {name}', {'name': label}),
-      body: signal.content ?? t('Chce dodać Cię do znajomych.'),
+      title: SocialEventText('inbox.friendRequest', <String, String>{
+        'name': label,
+      }),
+      body: const SocialEventText('inbox.friendRequest.body'),
+      bodyText: signal.content,
       createdAtMillis: receivedAtMillis,
       routeKey: buildInboxRouteKey(),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.friendAccept => InboxEntry(
+    ZenSignalType.friendAccept => InboxEntry.fromEvents(
       id: 'friend-accept-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.friendAccepted,
-      title: t('{name} zaakceptował(a) zaproszenie', {'name': label}),
-      body: t('Możecie już pisać i dzwonić.'),
+      title: SocialEventText('inbox.friendAccepted', <String, String>{
+        'name': label,
+      }),
+      body: const SocialEventText('inbox.friendAccepted.body'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
         peerAddress: signal.sender,
@@ -648,47 +653,54 @@ InboxEntry _buildInboxEntry({
       ),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.friendReject => InboxEntry(
+    ZenSignalType.friendReject => InboxEntry.fromEvents(
       id: 'friend-reject-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.friendRejected,
-      title: t('{name} odrzucił(a) zaproszenie', {'name': label}),
-      body: t('Zaproszenie nie zostało przyjęte.'),
+      title: SocialEventText('inbox.friendRejected', <String, String>{
+        'name': label,
+      }),
+      body: const SocialEventText('inbox.friendRejected.body'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildInboxRouteKey(),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.friendCancel => InboxEntry(
+    ZenSignalType.friendCancel => InboxEntry.fromEvents(
       id: 'friend-cancel-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.friendCancelled,
-      title: t('{name} wycofał(a) zaproszenie', {'name': label}),
-      body: t('Zaproszenie nie jest już aktualne.'),
+      title: SocialEventText('inbox.friendCancelled', <String, String>{
+        'name': label,
+      }),
+      body: const SocialEventText('inbox.friendCancelled.body'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildInboxRouteKey(),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.friendRemove => InboxEntry(
+    ZenSignalType.friendRemove => InboxEntry.fromEvents(
       id: 'friend-remove-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.friendRemoved,
-      title: t('{name} usunął(-ęła) Cię ze znajomych', {'name': label}),
-      body: t('Nie możecie już do siebie pisać.'),
+      title: SocialEventText('inbox.friendRemoved', <String, String>{
+        'name': label,
+      }),
+      body: const SocialEventText('inbox.friendRemoved.body'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildInboxRouteKey(),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.transferCancel => InboxEntry(
+    ZenSignalType.transferCancel => InboxEntry.fromEvents(
       id: 'transfer-cancel-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.transferCancelled,
-      title: t('Przesyłanie pliku anulowane'),
-      body: t('Nadawca przerwał wysyłanie pliku.'),
+      title: const SocialEventText('inbox.transferCancelled'),
+      body: const SocialEventText('inbox.transferCancelled.body'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildInboxRouteKey(),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.message => InboxEntry(
+    ZenSignalType.message => InboxEntry.fromEvents(
       id: 'message-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: t('Nowa wiadomość od {name}', {'name': label}),
-      body: signal.content ?? t('Masz nową wiadomość do przeczytania.'),
+      title: SocialEventText('inbox.message', <String, String>{'name': label}),
+      body: const SocialEventText('inbox.message.body'),
+      bodyText: signal.content,
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
         peerAddress: signal.sender,
@@ -696,34 +708,36 @@ InboxEntry _buildInboxEntry({
       ),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.callInvite => InboxEntry(
+    ZenSignalType.callInvite => InboxEntry.fromEvents(
       id: 'call-invite-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.callInvite,
-      title: t('Połączenie od {name}', {'name': label}),
-      body: t('Przychodzące połączenie {kind}.', {
-        'kind': _callKindLabel(signal.content),
+      title: SocialEventText('inbox.callFrom', <String, String>{'name': label}),
+      body: SocialEventText('inbox.callFrom.body', <String, String>{
+        'kind': _callKind(signal.content).name,
       }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildCallRouteKey(peerAddress: signal.sender, title: label),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.callOffer => InboxEntry(
+    ZenSignalType.callOffer => InboxEntry.fromEvents(
       id: 'call-offer-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.callInvite,
-      title: t('Połączenie od {name}', {'name': label}),
-      body: t('Przychodzące połączenie {kind}.', {
-        'kind': _callKindLabel(signal.content),
+      title: SocialEventText('inbox.callFrom', <String, String>{'name': label}),
+      body: SocialEventText('inbox.callFrom.body', <String, String>{
+        'kind': _callKind(signal.content).name,
       }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildCallRouteKey(peerAddress: signal.sender, title: label),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.callAnswer => InboxEntry(
+    ZenSignalType.callAnswer => InboxEntry.fromEvents(
       id: 'call-answer-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: t('{name} odebrał(a) rozmowę', {'name': label}),
-      body: t('Połączenie {kind} jest już aktywne.', {
-        'kind': _callKindLabel(signal.content),
+      title: SocialEventText('inbox.callAnswered', <String, String>{
+        'name': label,
+      }),
+      body: SocialEventText('inbox.callAnswered.body', <String, String>{
+        'kind': _callKind(signal.content).name,
       }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
@@ -732,12 +746,14 @@ InboxEntry _buildInboxEntry({
       ),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.callAccept => InboxEntry(
+    ZenSignalType.callAccept => InboxEntry.fromEvents(
       id: 'call-accept-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: t('{name} odebrał(a) rozmowę', {'name': label}),
-      body: t('Połączenie {kind} jest już aktywne.', {
-        'kind': _callKindLabel(signal.content),
+      title: SocialEventText('inbox.callAnswered', <String, String>{
+        'name': label,
+      }),
+      body: SocialEventText('inbox.callAnswered.body', <String, String>{
+        'kind': _callKind(signal.content).name,
       }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
@@ -746,12 +762,14 @@ InboxEntry _buildInboxEntry({
       ),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.callDecline => InboxEntry(
+    ZenSignalType.callDecline => InboxEntry.fromEvents(
       id: 'call-decline-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: t('{name} odrzucił(a) rozmowę', {'name': label}),
-      body: t('Sesja {kind} została zakończona.', {
-        'kind': _callKindLabel(signal.content),
+      title: SocialEventText('inbox.callDeclined', <String, String>{
+        'name': label,
+      }),
+      body: SocialEventText('inbox.callDeclined.body', <String, String>{
+        'kind': _callKind(signal.content).name,
       }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
@@ -760,12 +778,12 @@ InboxEntry _buildInboxEntry({
       ),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.callBusy => InboxEntry(
+    ZenSignalType.callBusy => InboxEntry.fromEvents(
       id: 'call-busy-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: t('{name} jest zajęty(a)', {'name': label}),
-      body: t('Rozmowa {kind} nie mogła się rozpocząć.', {
-        'kind': _callKindLabel(signal.content),
+      title: SocialEventText('inbox.callBusy', <String, String>{'name': label}),
+      body: SocialEventText('inbox.callBusy.body', <String, String>{
+        'kind': _callKind(signal.content).name,
       }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
@@ -774,12 +792,14 @@ InboxEntry _buildInboxEntry({
       ),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.callEnd => InboxEntry(
+    ZenSignalType.callEnd => InboxEntry.fromEvents(
       id: 'call-end-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: t('{name} zakończył(a) rozmowę', {'name': label}),
-      body: t('Sesja {kind} została zamknięta.', {
-        'kind': _callKindLabel(signal.content),
+      title: SocialEventText('inbox.callEnded', <String, String>{
+        'name': label,
+      }),
+      body: SocialEventText('inbox.callEnded.body', <String, String>{
+        'kind': _callKind(signal.content).name,
       }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildConversationRouteKey(
@@ -788,13 +808,15 @@ InboxEntry _buildInboxEntry({
       ),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.groupInvite => InboxEntry(
+    ZenSignalType.groupInvite => InboxEntry.fromEvents(
       id: 'group-invite-${signal.groupId ?? signal.sender}',
       type: InboxEntryType.groupInvite,
-      title: t('Zaproszenie do grupy: {group}', {
-        'group': signal.groupName ?? t('Nowa grupa'),
+      title: SocialEventText('inbox.groupInvite', <String, String>{
+        'group': signal.groupName ?? '',
       }),
-      body: t('{name} zaprasza Cię do grupy.', {'name': label}),
+      body: SocialEventText('inbox.groupInvite.body', <String, String>{
+        'name': label,
+      }),
       createdAtMillis: receivedAtMillis,
       routeKey: buildGroupRouteKey(
         groupId: signal.groupId ?? 'grp-${signal.sender}',
@@ -802,11 +824,15 @@ InboxEntry _buildInboxEntry({
       ),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.groupMessage => InboxEntry(
+    ZenSignalType.groupMessage => InboxEntry.fromEvents(
       id: 'group-message-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: '${signal.groupName ?? t('Grupa')}: $label',
-      body: signal.content ?? t('Nowa wiadomość w grupie.'),
+      title: SocialEventText('inbox.groupMessage', <String, String>{
+        'group': signal.groupName ?? '',
+        'name': label,
+      }),
+      body: const SocialEventText('inbox.groupMessage.body'),
+      bodyText: signal.content,
       createdAtMillis: receivedAtMillis,
       routeKey: buildGroupRouteKey(
         groupId: signal.groupId ?? 'grp-${signal.sender}',
@@ -814,13 +840,13 @@ InboxEntry _buildInboxEntry({
       ),
       peerAddress: signal.sender,
     ),
-    ZenSignalType.groupCallInvite => InboxEntry(
+    ZenSignalType.groupCallInvite => InboxEntry.fromEvents(
       id: 'group-call-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.callInvite,
-      title: t('Połączenie grupowe: {group}', {
-        'group': signal.groupName ?? t('Grupa'),
+      title: SocialEventText('inbox.groupCall', <String, String>{
+        'group': signal.groupName ?? '',
       }),
-      body: t('Trwa połączenie grupowe.'),
+      body: const SocialEventText('inbox.groupCall.body'),
       createdAtMillis: receivedAtMillis,
       routeKey: buildGroupRouteKey(
         groupId: signal.groupId ?? 'grp-${signal.sender}',
@@ -850,11 +876,14 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.deepLink ||
     ZenSignalType.presence ||
     ZenSignalType.typing ||
-    ZenSignalType.unknown => InboxEntry(
+    ZenSignalType.unknown => InboxEntry.fromEvents(
       id: 'background-$receivedAtMillis-${signal.sender}',
       type: InboxEntryType.message,
-      title: t('Nowe zdarzenie'),
-      body: signal.content ?? t('Nowy wpis od {name}.', {'name': label}),
+      title: const SocialEventText('inbox.event'),
+      body: SocialEventText('inbox.event.body', <String, String>{
+        'name': label,
+      }),
+      bodyText: signal.content,
       createdAtMillis: receivedAtMillis,
       routeKey: null,
       peerAddress: signal.sender,
@@ -1359,7 +1388,7 @@ String _activityLabelForMillis(int sentAtMillis) {
       now.day == sentAt.day &&
       now.month == sentAt.month &&
       now.year == sentAt.year) {
-    return '${sentAt.hour.toString().padLeft(2, '0')}:${sentAt.minute.toString().padLeft(2, '0')}';
+    return ZenFormat.time(sentAt);
   }
   final DateTime yesterday = now.subtract(const Duration(days: 1));
   if (yesterday.day == sentAt.day &&
@@ -1367,7 +1396,7 @@ String _activityLabelForMillis(int sentAtMillis) {
       yesterday.year == sentAt.year) {
     return t('Wczoraj');
   }
-  return '${sentAt.day.toString().padLeft(2, '0')}.${sentAt.month.toString().padLeft(2, '0')}';
+  return ZenFormat.dayMonth(sentAt);
 }
 
 String _presenceLastSeenLabel({

@@ -233,6 +233,18 @@ class _RelayMailboxScreen extends ConsumerWidget {
                         ),
                       ],
                     ),
+                    if (engine.supportsBlobs) ...<Widget>[
+                      ZenSection(t('Załączniki'), top: 16),
+                      ZenGroup(
+                        children: <Widget>[
+                          _RelayBlobQuotaTile(
+                            quotaBytes: overview.blobQuotaBytes,
+                            onChanged: (int bytes) =>
+                                unawaited(engine.setBlobQuota(bytes)),
+                          ),
+                        ],
+                      ),
+                    ],
                     ZenSection(t('Stan'), top: 16),
                     ZenGroup(
                       children: <Widget>[
@@ -251,6 +263,16 @@ class _RelayMailboxScreen extends ConsumerWidget {
                             'people': overview.heldForPeerCount,
                           }),
                         ),
+                        if (overview.heldBlobBytes > 0)
+                          _RelayStatRow(
+                            icon: Icons.attach_file_rounded,
+                            tone: zenTone(zen, 1),
+                            label: t('Załączniki znajomych u Ciebie'),
+                            value: t('{mb} MB', {
+                              'mb': (overview.heldBlobBytes / (1024 * 1024))
+                                  .toStringAsFixed(1),
+                            }),
+                          ),
                         if (overview.publicKeyFingerprint.isNotEmpty)
                           _RelayStatRow(
                             icon: Icons.fingerprint_rounded,
@@ -265,6 +287,61 @@ class _RelayMailboxScreen extends ConsumerWidget {
                 );
               },
             ),
+    );
+  }
+}
+
+/// How much of friends' attachments this device keeps per sender.
+class _RelayBlobQuotaTile extends StatelessWidget {
+  const _RelayBlobQuotaTile({
+    required this.quotaBytes,
+    required this.onChanged,
+  });
+
+  final int quotaBytes;
+  final ValueChanged<int> onChanged;
+
+  static const int _mb = 1024 * 1024;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final int current = quotaBytes ~/ _mb;
+    final List<int> options = <int>{0, 5, 10, 20, 50, current}.toList()..sort();
+    return ListTile(
+      key: const Key('relay-blob-quota'),
+      leading: ZenIconBadge(
+        icon: Icons.attach_file_rounded,
+        tone: zenTone(zen, 1),
+        size: 40,
+      ),
+      title: Text(t('Miejsce na załączniki znajomych')),
+      subtitle: Text(
+        t(
+          'Zdjęcia i nagrania dla znajomych, dla których prowadzisz '
+          'skrzynkę, czekają u Ciebie zaszyfrowane, gdy są offline — '
+          'najwyżej tyle od jednej osoby. Wyłączenie nie usuwa tego, '
+          'co już przechowujesz.',
+        ),
+        style: TextStyle(color: zen.textSecondary, height: 1.35),
+      ),
+      trailing: DropdownButton<int>(
+        key: const Key('relay-blob-quota-dropdown'),
+        value: current,
+        underline: const SizedBox.shrink(),
+        items: <DropdownMenuItem<int>>[
+          for (final int mb in options)
+            DropdownMenuItem<int>(
+              value: mb,
+              child: Text(mb == 0 ? t('wył.') : t('{mb} MB', {'mb': mb})),
+            ),
+        ],
+        onChanged: (int? mb) {
+          if (mb != null && mb != current) {
+            onChanged(mb * _mb);
+          }
+        },
+      ),
     );
   }
 }

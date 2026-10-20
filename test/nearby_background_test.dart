@@ -226,10 +226,11 @@ void main() {
     final String aniaToken = _hex(
       nearbyToken(ania.meet.book.nearbySecret!, nearbyEpoch(ania.clock)),
     );
-    // The wave carries her token and her signature (only friends can check
-    // it).
-    final Map<String, dynamic> wave = ania.meet.alarmWave(alarm);
-    expect(wave['t'], aniaToken);
+    // The wave for everyone carries her legacy token and signature; Bob,
+    // who has her keys for him alone, gets one signed for the pair (S6).
+    expect(ania.meet.alarmWave(alarm)['t'], aniaToken);
+    final Map<String, dynamic> wave = ania.meet.alarmWave(alarm, to: 'bob');
+    expect(wave['v'], kAlarmPairWaveVersion);
     expect(wave['m'], isA<String>());
     bob.radio.hear(wave, device: 'mac-ania');
     await _settle();
@@ -476,7 +477,8 @@ void main() {
     expect(device, 'mac-obcy');
     expect(wave['v'], kAlarmWaveVersion);
     expect(wave['id'], ania.meet.book.ownActiveAlarm!.id);
-    expect(wave['t'], ania.nearby.myToken);
+    // A stranger gets the wave for everyone: her legacy token.
+    expect(wave['t'], _hex(nearbyToken(secret, nearbyEpoch(ania.clock))));
     expect(wave['at'], ania.clock);
     expect(AlarmWave.parse(wave)!.verify(secret), isTrue);
     expect(
@@ -501,10 +503,10 @@ void main() {
     await ania.meet.shareNearbySecret('bob');
     bob.radio.around.add(<Object?, Object?>{
       'type': 'seen',
-      'token': nearbyToken(
-        ania.meet.book.nearbySecret!,
-        nearbyEpoch(bob.clock),
-      ),
+      // Her token and hint now (S6), as her phone shows them.
+      'token': NearbyOwnKeys(
+        ania.meet.book.nearbyPrivate!,
+      ).advert(nearbySlot(bob.clock)),
       'rssi': -65,
       'device': 'mac-ania',
     });

@@ -10,6 +10,7 @@ import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/features/calls/call_media_devices.dart';
 import 'package:zen/src/features/calls/call_recorder.dart';
 import 'package:zen/src/features/calls/call_recordings.dart';
+import 'package:zen/src/features/calls/call_safety_cues.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
 import 'package:zen/src/features/calls/group_call_media.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -230,6 +231,7 @@ final class WebRtcCallMediaSessionController
     }
     _recordingPath = path;
     _recordingLabel = label;
+    announceRecordingStartedWithTone();
     _notify();
   }
 
@@ -282,7 +284,12 @@ final class WebRtcCallMediaSessionController
     if (type == kCallScreenSignal) {
       _remoteScreenSharing = frame.payload['on'] == true;
     } else {
-      _remoteRecording = frame.payload['on'] == true;
+      final bool on = frame.payload['on'] == true;
+      if (on && !_remoteRecording) {
+        // Everyone hears that a recording began (§13.2).
+        announceRecordingStartedWithTone();
+      }
+      _remoteRecording = on;
     }
     _notify();
   }
@@ -409,6 +416,7 @@ final class WebRtcCallMediaSessionController
     // Stopped from the system UI ("Zatrzymaj udostępnianie").
     track.onEnded = () => unawaited(stopScreenShare());
     _screenStream = screen;
+    screenShareHidesNotifications.value = true;
     await _ensureRenderers();
     final RTCRtpSender? sender = await _videoSender(connection);
     if (sender != null) {
@@ -435,6 +443,7 @@ final class WebRtcCallMediaSessionController
     }
     _screenStream = null;
     androidScreenCaptureActive.value = false;
+    screenShareHidesNotifications.value = false;
     final RTCPeerConnection? connection = _peerConnection;
     final MediaStream? localStream = _localStream;
     if (connection != null) {
@@ -2009,6 +2018,7 @@ final class WebRtcCallMediaSessionController
     _screenStream = null;
     _remoteScreenSharing = false;
     androidScreenCaptureActive.value = false;
+    screenShareHidesNotifications.value = false;
     await _disposeStream(screen);
     _disconnectGraceTimer?.cancel();
     _disconnectGraceTimer = null;

@@ -22,6 +22,7 @@ final class RuntimeRouteIntent {
     this.rawInput,
     this.autoAcceptCall = false,
     this.acceptToken,
+    this.callId,
   });
 
   factory RuntimeRouteIntent.inbox({required String id}) {
@@ -60,6 +61,7 @@ final class RuntimeRouteIntent {
     String? title,
     bool autoAcceptCall = false,
     String? acceptToken,
+    String? callId,
   }) {
     return RuntimeRouteIntent(
       id: id,
@@ -68,6 +70,7 @@ final class RuntimeRouteIntent {
       title: title,
       autoAcceptCall: autoAcceptCall,
       acceptToken: acceptToken,
+      callId: callId,
     );
   }
 
@@ -102,6 +105,19 @@ final class RuntimeRouteIntent {
   /// issue it. Never persisted.
   final String? acceptToken;
 
+  /// The call a call route was built for (its `call` parameter), when the
+  /// route names one. An answering route only answers that very call, not a
+  /// later one from the same person (STAN S17). Never persisted.
+  final String? callId;
+
+  /// Whether this route may answer [ringingCallId]: a route that names a
+  /// call answers only that call; one without a call id (older routes)
+  /// only by its token, as before.
+  bool answersCall(String ringingCallId) {
+    final String? wanted = callId;
+    return wanted == null || wanted.isEmpty || wanted == ringingCallId;
+  }
+
   /// This intent with [autoAcceptCall] set.
   RuntimeRouteIntent withAutoAcceptCall() {
     return RuntimeRouteIntent(
@@ -112,6 +128,7 @@ final class RuntimeRouteIntent {
       rawInput: rawInput,
       autoAcceptCall: true,
       acceptToken: acceptToken,
+      callId: callId,
     );
   }
 
@@ -162,21 +179,31 @@ String buildGroupRouteKey({required String groupId, String? title}) {
 /// token is [acceptToken] when given - the ringing call's own token, known
 /// to every isolate through the stored call - or else a fresh one issued
 /// for this isolate (see [issueCallAcceptToken]).
+///
+/// [callId] names the call the route is for; an answering route then
+/// answers only that call (a token issued here is bound to it too), not a
+/// later call from the same person.
 String buildCallRouteKey({
   required String peerAddress,
   String? title,
   bool autoAccept = false,
   String? acceptToken,
+  String? callId,
 }) {
   final String? trimmedTitle = title?.trim();
+  final String? trimmedCallId = callId?.trim();
+  final String? boundCallId = trimmedCallId == null || trimmedCallId.isEmpty
+      ? null
+      : trimmedCallId;
   final String? token = autoAccept
       ? (acceptToken != null && acceptToken.isNotEmpty
             ? acceptToken
-            : issueCallAcceptToken(peerAddress))
+            : issueCallAcceptToken(peerAddress, callId: boundCallId))
       : null;
   final Map<String, String> queryParameters = <String, String>{
     if (trimmedTitle != null && trimmedTitle.isNotEmpty) 'title': trimmedTitle,
     'accept': ?token,
+    'call': ?boundCallId,
   };
   return Uri(
     scheme: 'zen',
@@ -214,14 +241,20 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
   if (uri.host == 'call' && uri.pathSegments.isNotEmpty) {
     final String peerAddress = uri.pathSegments.first;
     final String? acceptToken = uri.queryParameters['accept'];
+    final String? callId = uri.queryParameters['call'];
     return RuntimeRouteIntent.call(
       id: id,
       peerAddress: peerAddress,
       title: uri.queryParameters['title'],
       // The old `accept=1` - or anything else a link could carry - is not
       // a token this isolate issued: the call is only opened, never answered.
-      autoAcceptCall: isIssuedCallAcceptToken(acceptToken, peerAddress),
+      autoAcceptCall: isIssuedCallAcceptToken(
+        acceptToken,
+        peerAddress,
+        callId: callId,
+      ),
       acceptToken: acceptToken,
+      callId: callId == null || callId.isEmpty ? null : callId,
     );
   }
   if (uri.host == 'chat' && uri.pathSegments.isNotEmpty) {
@@ -255,9 +288,14 @@ const Duration kCallAcceptTokenLifetime = Duration(minutes: 5);
 
 const int _maxIssuedCallAcceptTokens = 32;
 
-final Map<String, ({String peerAddress, int expiresAtMillis})>
-_issuedCallAcceptTokens =
-    <String, ({String peerAddress, int expiresAtMillis})>{};
+typedef _CallAcceptGrant = ({
+  String peerAddress,
+  String? callId,
+  int expiresAtMillis,
+});
+
+final Map<String, _CallAcceptGrant> _issuedCallAcceptTokens =
+    <String, _CallAcceptGrant>{};
 
 /// A fresh random token for a call's accept route (128 bits, hex).
 String generateCallAcceptToken() {
@@ -269,12 +307,12 @@ String generateCallAcceptToken() {
 }
 
 /// Issues an accept token for a call with [peerAddress], valid in this
-/// isolate for [kCallAcceptTokenLifetime].
-String issueCallAcceptToken(String peerAddress) {
+/// isolate for [kCallAcceptTokenLifetime]. With [callId] the token answers
+/// only that call.
+String issueCallAcceptToken(String peerAddress, {String? callId}) {
   final int now = DateTime.now().millisecondsSinceEpoch;
   _issuedCallAcceptTokens.removeWhere(
-    (String _, ({String peerAddress, int expiresAtMillis}) grant) =>
-        grant.expiresAtMillis <= now,
+    (String _, _CallAcceptGrant grant) => grant.expiresAtMillis <= now,
   );
   while (_issuedCallAcceptTokens.length >= _maxIssuedCallAcceptTokens) {
     _issuedCallAcceptTokens.remove(_issuedCallAcceptTokens.keys.first);
@@ -282,21 +320,31 @@ String issueCallAcceptToken(String peerAddress) {
   final String token = generateCallAcceptToken();
   _issuedCallAcceptTokens[token] = (
     peerAddress: peerAddress,
+    callId: callId == null || callId.isEmpty ? null : callId,
     expiresAtMillis: now + kCallAcceptTokenLifetime.inMilliseconds,
   );
   return token;
 }
 
 /// Whether [token] was issued here, is still valid, and was issued for a
-/// call with [peerAddress].
-bool isIssuedCallAcceptToken(String? token, String peerAddress) {
+/// call with [peerAddress] - and, when it was bound to a call, for the call
+/// [callId] (STAN S17: a token for one call never answers another call
+/// from the same person).
+bool isIssuedCallAcceptToken(
+  String? token,
+  String peerAddress, {
+  String? callId,
+}) {
   if (token == null || token.isEmpty) {
     return false;
   }
-  final ({String peerAddress, int expiresAtMillis})? grant =
-      _issuedCallAcceptTokens[token];
+  final _CallAcceptGrant? grant = _issuedCallAcceptTokens[token];
   if (grant == null ||
       grant.expiresAtMillis <= DateTime.now().millisecondsSinceEpoch) {
+    return false;
+  }
+  final String? boundCallId = grant.callId;
+  if (boundCallId != null && boundCallId != callId) {
     return false;
   }
   return PeerShareCodec.addressesEqual(grant.peerAddress, peerAddress);

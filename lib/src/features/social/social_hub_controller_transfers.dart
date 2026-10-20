@@ -271,6 +271,34 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
       nowMillis: timestamp,
     );
     await _transferStore.deleteIncoming(signal.sender, messageId);
+    // The whole file is here: a delivery receipt the sender gets even if it
+    // is offline now (the chunks may have come from its friends' mailboxes,
+    // long after it sent them). Older senders already count it delivered
+    // from the chunk acks; for them this is a harmless repeat.
+    unawaitedLogged(
+      _sendAttachmentDeliveredAck(
+        peerAddress: signal.sender,
+        messageId: messageId,
+      ),
+      context: 'Sending an attachment delivery receipt failed',
+    );
+  }
+
+  Future<void> _sendAttachmentDeliveredAck({
+    required String peerAddress,
+    required String messageId,
+  }) async {
+    if (!ref.mounted ||
+        !isRoutablePeerAddress(peerAddress) ||
+        messageId.isEmpty) {
+      return;
+    }
+    await ref
+        .read(signalTransportProvider)
+        .send(
+          remoteAddress: peerAddress,
+          payload: <String, dynamic>{'type': 'message_ack', 'msgId': messageId},
+        );
   }
 
   @override
@@ -695,6 +723,9 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
         await transferStore.deleteOutgoing(peerAddress, messageId);
         return;
       }
+      if (await _handOutgoingAttachmentToMailboxes(transfer)) {
+        return;
+      }
       final AttachmentTransferDispatchResult result = await _transferRunner.run(
         loadState: () async {
           final OutgoingAttachmentTransfer? current = await transferStore
@@ -770,6 +801,95 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
     } finally {
       _activeOutgoingTransfers.remove(key);
     }
+  }
+
+  /// The realtime path did not work — most often because the recipient is
+  /// offline. If the recipient announced that it collects attachments from
+  /// its mailboxes (older versions did not), the file goes there: sealed
+  /// chunks wait with its friends (within their quota, for as long as
+  /// messages wait) and its app gets them as the usual chunks once it is
+  /// back. Otherwise — or if the mailboxes cannot take it — the caller goes
+  /// on with the chunked transfer, which needs both devices online.
+  ///
+  /// Returns whether the mailboxes took it over; the message then shows as
+  /// sent, and as delivered once the recipient's receipt comes back.
+  Future<bool> _handOutgoingAttachmentToMailboxes(
+    OutgoingAttachmentTransfer transfer,
+  ) async {
+    final RelayEngine? engine = ref.read(relayEngineProvider);
+    if (engine == null || !engine.supportsBlobs || !ref.mounted) {
+      return false;
+    }
+    final MediaVault vault = _mediaVault;
+    final bool handed;
+    try {
+      if (!await engine.canSendAttachmentTo(
+        transfer.peerAddress,
+        bytes: transfer.transferBytes,
+        chunkSize: transfer.chunkSizeBytes,
+      )) {
+        return false;
+      }
+      handed = await engine.submitAttachment(
+        recipient: transfer.peerAddress,
+        messageId: transfer.messageId,
+        meta: <String, dynamic>{
+          'text': transfer.text,
+          'createdAt': DateTime.fromMillisecondsSinceEpoch(
+            transfer.sentAtMillis,
+          ).toUtc().toIso8601String(),
+          'messageType': transfer.type.name,
+          'fileName': ?transfer.fileName,
+          'mimeType': ?transfer.mimeType,
+          'attachmentSizeBytes': ?transfer.attachmentSizeBytes,
+          'durationMs': ?transfer.durationMs,
+        },
+        totalBytes: transfer.transferBytes,
+        chunkSize: transfer.chunkSizeBytes,
+        readChunk: (int index) => transfer.chunkAt(index, vault: vault),
+      );
+    } catch (error, stackTrace) {
+      logZenError(
+        'Handing an attachment to the mailboxes failed',
+        error,
+        stackTrace,
+      );
+      return false;
+    }
+    if (!handed || !ref.mounted) {
+      return handed;
+    }
+    await _upsertTimelineMessage(
+      peerAddress: transfer.peerAddress,
+      messageId: transfer.messageId,
+      build: (ChatMessage? existing) {
+        final ChatMessage base =
+            existing ??
+            ChatMessage(
+              id: transfer.messageId,
+              sender: 'self',
+              text: transfer.text,
+              sentAtMillis: transfer.sentAtMillis,
+              direction: ChatMessageDirection.outgoing,
+              type: transfer.type,
+              attachmentBytes: transfer.attachmentBytes,
+              attachmentPath: transfer.attachmentPath,
+              fileName: transfer.fileName,
+              mimeType: transfer.mimeType,
+              attachmentSizeBytes: transfer.attachmentSizeBytes,
+              durationMs: transfer.durationMs,
+            );
+        // Its receipt may already be in: delivered stays delivered.
+        return base.deliveryState == ChatMessageDeliveryState.delivered
+            ? base
+            : base.copyWith(deliveryState: ChatMessageDeliveryState.sent);
+      },
+    );
+    await _transferStore.deleteOutgoing(
+      transfer.peerAddress,
+      transfer.messageId,
+    );
+    return true;
   }
 
   Future<bool> _tryRealtimeOutgoingAttachmentTransfer(

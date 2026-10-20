@@ -554,13 +554,10 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
     if (groupId != null) {
       await _appendGroupSystemMessage(
         groupId,
-        missed
-            ? t('Nieodebrane połączenie grupowe ({kind}).', {
-                'kind': _callKindWord(session.kind),
-              })
-            : t('Odrzucono połączenie grupowe ({kind}).', {
-                'kind': _callKindWord(session.kind),
-              }),
+        SocialEventText(
+          missed ? 'groupCall.missed' : 'groupCall.declined',
+          <String, String>{'kind': session.kind.name},
+        ),
       );
       if (missed && !_isUiFocused()) {
         final int now = _nowMillis;
@@ -809,10 +806,10 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
     await _appendGroupSystemMessage(
       group.id,
       starting
-          ? t('Rozpoczęto połączenie grupowe ({kind}).', {
-              'kind': _callKindWord(session.kind),
+          ? SocialEventText('groupCall.started', <String, String>{
+              'kind': session.kind.name,
             })
-          : t('Dołączono do połączenia grupowego.'),
+          : const SocialEventText('groupCall.joined'),
     );
   }
 
@@ -824,14 +821,14 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
     await _leaveJoinedGroupCall(
       session,
       note: othersRemain
-          ? t('Opuszczono połączenie grupowe.')
-          : t('Zakończono połączenie grupowe.'),
+          ? const SocialEventText('groupCall.left')
+          : const SocialEventText('groupCall.ended'),
     );
   }
 
   Future<void> _leaveJoinedGroupCall(
     CallSession session, {
-    required String? note,
+    required SocialEventText? note,
   }) async {
     _groupCallReRingTimer?.cancel();
     _groupCallReRingTimer = null;
@@ -1061,7 +1058,7 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
       if (!_groupCallEverConnected && call.isEmpty) {
         await _leaveJoinedGroupCall(
           joined,
-          note: t('Nikt nie dołączył do połączenia grupowego.'),
+          note: const SocialEventText('groupCall.nobody'),
         );
       }
       return;
@@ -1153,16 +1150,23 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
     _ensureGroupCallTicker();
   }
 
-  Future<void> _appendGroupSystemMessage(String groupId, String text) async {
+  Future<void> _appendGroupSystemMessage(
+    String groupId,
+    SocialEventText event,
+  ) async {
     final int now = _nowMillis;
+    final String text = event.render();
     await _messageTimelineStore.append(
       'group:$groupId',
-      ChatMessage(
-        id: 'grp-sys-$now-${text.hashCode}',
-        sender: 'system',
-        text: text,
-        sentAtMillis: now,
-        direction: ChatMessageDirection.system,
+      chatMessageWithEvent(
+        ChatMessage(
+          id: 'grp-sys-$now-${text.hashCode}',
+          sender: 'system',
+          text: text,
+          sentAtMillis: now,
+          direction: ChatMessageDirection.system,
+        ),
+        event,
       ),
     );
     _bumpTimelineRevision();

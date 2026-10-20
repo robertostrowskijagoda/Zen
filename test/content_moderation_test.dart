@@ -58,6 +58,19 @@ void main() {
     expect(isContentHidden(banned, 'Dzień dobry', id: 'p3'), isFalse);
   });
 
+  test('a ban of an entry holds whatever its text (S36)', () {
+    const String bad = 'Kup tanio!!!';
+    // The entry is banned by id; the hash only matches the exact text.
+    final Set<String> banned = <String>{'entry-1', contentHash(bad)};
+    // One space added: another hash, but still the banned entry.
+    expect(isContentBanned(banned, '$bad ', id: 'entry-1'), isTrue);
+    expect(isContentHidden(banned, '$bad ', id: 'entry-1'), isTrue);
+    // Without the id, only the exact text (a 1.10.0 ban) is caught.
+    expect(isContentBanned(banned, '$bad '), isFalse);
+    expect(isContentBanned(banned, bad), isTrue);
+    expect(isContentBanned(banned, 'Dzień dobry', id: 'entry-2'), isFalse);
+  });
+
   testWidgets('a message menu offers "Zgłoś" only with a report action', (
     WidgetTester tester,
   ) async {

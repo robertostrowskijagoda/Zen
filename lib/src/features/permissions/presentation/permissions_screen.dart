@@ -10,6 +10,8 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
+import 'package:zen/src/features/permissions/presentation/vendor_battery_help.dart';
+import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
 /// "Uprawnienia i Bluetooth" from the settings (§25.2).
@@ -113,10 +115,13 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
   static bool _settingsAfterNo(ZenPermission p) => switch (p) {
     ZenPermission.notifications ||
     ZenPermission.bluetooth ||
+    ZenPermission.location ||
+    ZenPermission.backgroundLocation ||
     ZenPermission.microphone ||
     ZenPermission.camera => true,
     ZenPermission.bluetoothOn ||
     ZenPermission.fullScreen ||
+    ZenPermission.exactAlarms ||
     ZenPermission.battery => false,
   };
 
@@ -153,8 +158,12 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
   }
 
   /// Bluetooth can be switched on only once it may be used.
-  static bool _enabled(PermissionsSnapshot s, ZenPermission p) =>
-      p != ZenPermission.bluetoothOn || s[ZenPermission.bluetooth] == true;
+  static bool _enabled(PermissionsSnapshot s, ZenPermission p) => switch (p) {
+    ZenPermission.bluetoothOn => s[ZenPermission.bluetooth] == true,
+    // "All the time" is a second step on top of the first.
+    ZenPermission.backgroundLocation => s[ZenPermission.location] == true,
+    _ => true,
+  };
 
   Future<void> _setVisible(bool on) async {
     setState(() => _visible = on);
@@ -209,6 +218,7 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
     final ZenColors zen = ZenColors.of(context);
     final PermissionsSnapshot? s = _snapshot;
     final List<Widget> children = <Widget>[
+      if (widget.firstStart) _welcome(zen),
       ZenHero(
         title: t('Uprawnienia i Bluetooth'),
         icon: Icons.verified_user_outlined,
@@ -268,8 +278,8 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
               padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
               child: Text(
                 t(
-                  'Możesz zezwolić później — Zen zapyta przy pierwszym '
-                  'użyciu.',
+                  'Możesz zezwolić później — wiele z tego Zen zapyta przy '
+                  'pierwszym użyciu albo włączysz tu w Ustawieniach.',
                 ),
                 style: TextStyle(color: zen.textMuted, fontSize: 13),
               ),
@@ -278,6 +288,16 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
         for (final ZenPermission p in optional) {
           children.add(_step(zen, s, p));
         }
+      }
+      if (s.applicable.contains(ZenPermission.battery)) {
+        children
+          ..add(ZenSection(t('Telefony z własnym oszczędzaniem baterii')))
+          ..add(
+            VendorBatteryHelp(
+              manufacturer: s.manufacturer,
+              onOpenSettings: () => unawaited(openAndroidAppSettings()),
+            ),
+          );
       }
     }
     if (widget.firstStart) {
@@ -309,6 +329,34 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
       children: children,
     );
   }
+
+  /// First start only: a minimal welcome above the steps.
+  Widget _welcome(ZenColors zen) => ZenCard(
+    key: const Key('permissions-welcome'),
+    tone: zen.accent,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          t('Witaj w Zen'),
+          style: TextStyle(
+            color: zen.textPrimary,
+            fontWeight: FontWeight.w800,
+            fontSize: 20,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          t(
+            'Sieć ludzi, którzy się znają — bez serwerów, reklam i '
+            'algorytmu. Wiadomości idą prosto między telefonami '
+            'znajomych.',
+          ),
+          style: TextStyle(color: zen.textSecondary, fontSize: 14, height: 1.4),
+        ),
+      ],
+    ),
+  );
 
   Widget _visibility(ZenColors zen, PermissionsSnapshot s) => ZenCard(
     key: const Key('permissions-row-visible'),
@@ -405,7 +453,11 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  enabled ? text : t('Najpierw zezwól na Bluetooth.'),
+                  enabled
+                      ? text
+                      : p == ZenPermission.backgroundLocation
+                      ? t('Najpierw zezwól na położenie.')
+                      : t('Najpierw zezwól na Bluetooth.'),
                   style: TextStyle(
                     color: zen.textSecondary,
                     fontSize: 13,
@@ -456,6 +508,33 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
         t('Włączony Bluetooth'),
         t('Telefon pokazuje się znajomym obok i słyszy ich alarm.'),
       ),
+      ZenPermission.location => (
+        Icons.my_location_rounded,
+        t('Położenie'),
+        t(
+          'Alarm wysyła znajomym miejsce, w którym jesteś, a sąsiedzi '
+          'widzą, kto jest obok. Zen pyta o położenie tylko wtedy, gdy '
+          'jest potrzebne, i nie zapisuje trasy.',
+        ),
+      ),
+      ZenPermission.backgroundLocation => (
+        Icons.share_location_rounded,
+        t('Położenie także w tle'),
+        t(
+          'Żeby alarm z zablokowanego ekranu lub z działającej w tle '
+          'usługi niósł miejsce. W oknie systemu wybierz „Zawsze” albo '
+          '„Zezwalaj przez cały czas”.',
+        ),
+      ),
+      ZenPermission.exactAlarms => (
+        Icons.alarm_on_rounded,
+        t('Dokładne alarmy'),
+        t(
+          'Przypomnienia o spotkaniach i wydarzeniach o właściwej '
+          'minucie, bez opóźnień od oszczędzania baterii. Włączysz je na '
+          'stronie systemu.',
+        ),
+      ),
       ZenPermission.fullScreen => (
         Icons.phone_locked_outlined,
         t('Alarm na pełnym ekranie'),
@@ -493,6 +572,9 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
     ZenPermission.notifications => 'notifications',
     ZenPermission.bluetooth => 'bluetooth',
     ZenPermission.bluetoothOn => 'bluetooth-on',
+    ZenPermission.location => 'location',
+    ZenPermission.backgroundLocation => 'background-location',
+    ZenPermission.exactAlarms => 'exact-alarms',
     ZenPermission.fullScreen => 'full-screen',
     ZenPermission.battery => 'battery',
     ZenPermission.microphone => 'microphone',

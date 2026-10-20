@@ -68,4 +68,30 @@ void main() {
     expect(find.byKey(const Key('about-public-peers')), findsOneWidget);
     expect(kYggdrasilUrl, startsWith('https://yggdrasil-network.github.io'));
   });
+
+  testWidgets('about links the privacy policy and the terms', (
+    WidgetTester tester,
+  ) async {
+    await pumpAbout(tester, ZenTheme.light());
+    final Finder list = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('about-privacy-policy')),
+      300,
+      scrollable: list,
+    );
+    expect(find.byKey(const Key('about-privacy-policy')), findsOneWidget);
+    await tester.pump();
+    expect(
+      find.byKey(const Key('about-terms'), skipOffstage: false),
+      findsOneWidget,
+    );
+    expect(
+      kPrivacyPolicyUrl,
+      'https://github.com/robertostrowskijagoda/Zen/blob/main/docs/PRIVACY.md',
+    );
+    expect(
+      kTermsOfUseUrl,
+      'https://github.com/robertostrowskijagoda/Zen/blob/main/docs/TERMS.md',
+    );
+  });
 }

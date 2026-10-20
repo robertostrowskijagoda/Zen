@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -15,10 +14,12 @@ import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/features/dating/dating_model.dart';
 import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/dating/dating_service.dart';
+import 'package:zen/src/features/dating/presentation/dating_reconfirm.dart';
 import 'package:zen/src/features/dating/presentation/dating_screen.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
+import 'package:zen/src/features/profile/own_profile_images.dart';
 import 'package:zen/src/features/profile/profile_card.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
@@ -32,8 +33,9 @@ class DatingProfileEditor extends ConsumerStatefulWidget {
 
   static Future<void> open(BuildContext context) => Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (BuildContext context) =>
-          const SecureScreen(child: DatingProfileEditor()),
+      builder: (BuildContext context) => const SecureScreen(
+        child: DatingReconfirm(askOnOpen: false, child: DatingProfileEditor()),
+      ),
     ),
   );
 
@@ -79,14 +81,13 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
   }
 
   Future<String?> _thumbnail(String path) async {
-    final File file = File(path);
-    if (!await file.exists() || await file.length() > 20 * 1024 * 1024) {
+    // The main profile photo is kept encrypted (§14.1): read through the
+    // vault; a freshly picked file is read as it is.
+    final Uint8List? bytes = await readOwnProfileImage(path);
+    if (bytes == null) {
       return null;
     }
-    final Uint8List? thumb = await compute(
-      makeAvatarThumbnail,
-      await file.readAsBytes(),
-    );
+    final Uint8List? thumb = await compute(makeAvatarThumbnail, bytes);
     return thumb == null ? null : base64Encode(thumb);
   }
 

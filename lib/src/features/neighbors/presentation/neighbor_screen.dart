@@ -55,6 +55,82 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
     await _service.sendMessage(widget.flatKey, t);
   }
 
+  /// The small chat about one invitation (§18.3): a thread with the flat,
+  /// answered by any of the residents.
+  Future<void> _askAbout(FlatItem item) async {
+    final TextEditingController input = TextEditingController();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (BuildContext context) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: ListenableBuilder(
+          listenable: _service,
+          builder: (BuildContext context, Widget? _) {
+            final List<FlatMessage> thread = _service.threadAbout(
+              widget.flatKey,
+              item.id,
+            );
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(item.text, style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                if (thread.isEmpty)
+                  Text(
+                    t('Zapytajcie o szczegóły — odpisze ktoś z domowników.'),
+                  ),
+                for (final FlatMessage m in thread)
+                  Align(
+                    alignment: m.mine
+                        ? Alignment.centerRight
+                        : Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Text(m.by.isEmpty ? m.text : '${m.by}: ${m.text}'),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                TextField(
+                  key: const Key('flat-invite-chat-input'),
+                  controller: input,
+                  maxLength: 500,
+                  decoration: InputDecoration(
+                    hintText: t('Napisz o zaproszeniu…'),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.send_rounded),
+                      onPressed: () {
+                        final String text = input.text;
+                        if (text.trim().isEmpty) {
+                          return;
+                        }
+                        input.clear();
+                        unawaited(
+                          _service.sendMessage(
+                            widget.flatKey,
+                            text,
+                            itemId: item.id,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+    input.dispose();
+  }
+
   Future<void> _signUp(FlatItem item, int current) async {
     int count = current > 0 ? current : 1;
     final int? chosen = await showDialog<int>(
@@ -557,6 +633,11 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                                       tone: zen.success,
                                       icon: Icons.check_rounded,
                                     ),
+                                  TextButton.icon(
+                                    onPressed: () => unawaited(_askAbout(i)),
+                                    icon: const Icon(Icons.forum_rounded),
+                                    label: Text(t('Zapytaj')),
+                                  ),
                                   FilledButton.tonal(
                                     onPressed: i.isFull && mine == 0
                                         ? null

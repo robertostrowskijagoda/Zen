@@ -154,7 +154,8 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
               ),
             );
           }
-          final String qr = code.toQr();
+          // A link, so a plain camera reaches the /m page; Zen reads both.
+          final String qr = code.toLink();
           final ZenColors zen = ZenColors.of(context);
           final Color tone = neighborsTone(zen);
           return ListView(
@@ -259,12 +260,25 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
                 tone: tone,
                 title: t('Co jest w kodzie?'),
                 text: t(
-                  'Klucz mieszkania i adres, pod który pukać — nie Wasze '
-                  'konta. Kto go zeskanuje, wysyła Wam swój profil '
-                  'mieszkania i dostaje Wasz. Sąsiad bez aplikacji dostanie '
-                  'ją od kogoś, kto ją ma („Podaj dalej”).',
+                  'Klucz mieszkania, hasło tej naklejki i jeden adres, pod '
+                  'który pukać — nie lista Waszych kont. Kto go zeskanuje, '
+                  'wysyła Wam swój profil mieszkania i dostaje Wasz. Sąsiad '
+                  'bez aplikacji dostanie ją od kogoś, kto ją ma („Podaj '
+                  'dalej”).',
                 ),
               ),
+              if (!code.dedicated) ...<Widget>[
+                const SizedBox(height: 10),
+                ZenInfo(
+                  icon: Icons.info_outline_rounded,
+                  tone: tone,
+                  text: t(
+                    'Adres w kodzie to adres tego telefonu (telefonu od '
+                    'drzwi): kto zeskanuje naklejkę, może go zobaczyć. '
+                    '„Nowy kod” zmienia hasło naklejki, ale nie ten adres.',
+                  ),
+                ),
+              ],
             ],
           );
         },

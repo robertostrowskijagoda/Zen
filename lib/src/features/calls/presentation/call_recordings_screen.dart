@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -62,10 +63,7 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
   }
 
   String _when(int millis) {
-    final DateTime t = DateTime.fromMillisecondsSinceEpoch(millis);
-    String two(int v) => v.toString().padLeft(2, '0');
-    return '${two(t.day)}.${two(t.month)}.${t.year} '
-        '${two(t.hour)}:${two(t.minute)}';
+    return ZenFormat.dateTime(DateTime.fromMillisecondsSinceEpoch(millis));
   }
 
   String _size(int bytes) => bytes >= 1024 * 1024

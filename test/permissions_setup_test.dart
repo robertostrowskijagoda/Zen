@@ -151,7 +151,7 @@ final class _Nearby {
 }
 
 void _tallScreen(WidgetTester tester) {
-  tester.view.physicalSize = const Size(1080, 3400);
+  tester.view.physicalSize = const Size(1080, 7000);
   tester.view.devicePixelRatio = 2.0;
   addTearDown(tester.view.reset);
 }

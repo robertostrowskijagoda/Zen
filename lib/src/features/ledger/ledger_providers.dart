@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/unmetered_network.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
@@ -19,9 +20,13 @@ import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/reaction_relay.dart';
 import 'package:zen/src/features/ledger/bridge_host.dart';
+import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/media/media_vault.dart';
+import 'package:zen/src/features/profile/follows.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
+import 'package:zen/src/features/profile/own_profile_images.dart';
+import 'package:zen/src/features/profile/profile_fields.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -173,8 +178,9 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     disk: ref.read(ledgerDiskProvider),
     friendAddresses: () =>
         acceptedFriendAddresses(ref.read(socialHubControllerProvider)),
-    autoDownloadMedia: () =>
-        ref.read(appSettingsControllerProvider).autoDownloadMedia,
+    autoDownloadMedia: () => ref
+        .read(appSettingsControllerProvider)
+        .allowsAutoDownload(onUnmetered: UnmeteredNetwork.instance.onUnmetered),
     onBridgesChosen: (List<String> uris) =>
         ref.read(runtimeNodeRuntimeProvider).addMeshPeers(uris),
     // On Android the background service may still be serving the ledger
@@ -183,6 +189,12 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     startSuspended: !kIsWeb && Platform.isAndroid,
   );
   unawaitedLogged(node.start(), context: 'Start dziennika nie udał się');
+  // Follows are signed entries; followers learn of them from hellos (§12).
+  final FollowLedger follows = FollowLedger.of(node);
+  ref.onDispose(
+    () =>
+        unawaitedLogged(follows.dispose(), context: 'Zatrzymanie obserwowania'),
+  );
   // §14.1: the unwrapped account key lives only while the app is open.
   final AppSecurityService security = ref.read(appSecurityServiceProvider);
   void lockAccountKey() {
@@ -215,6 +227,14 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
       }, spaceKind: 'private'),
       context: 'Zapis wyjścia z grupy nie udał się',
     ));
+  // The social hub asks friends' levels without starting the ledger (§8).
+  final FriendLevelLookup levels = ref.read(friendLevelLookupProvider)
+    ..levelOf = node.levelOf;
+  ref.onDispose(() {
+    if (levels.levelOf == node.levelOf) {
+      levels.levelOf = null;
+    }
+  });
   // Conversations are the same on every device of the account (§6).
   final DeviceChatSync chatSync = DeviceChatSync(
     node: node,
@@ -293,30 +313,26 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     },
   );
   // The profile you edit is mirrored into the public profile space (§9),
-  // with your mesh address so followers can find you.
+  // with your mesh address only once something public of yours can bring
+  // followers (friends know it anyway).
   Future<void> publishProfile() async {
+    await node.start();
     final UserProfile me = ref.read(userProfileControllerProvider);
-    final String address = ref.read(runtimeNodeSnapshotProvider).localAddress;
-    final String? path = me.avatarPath;
-    Uint8List? photo;
-    if (path != null && File(path).existsSync()) {
-      photo = await File(path).readAsBytes();
-    }
-    final String? coverPath = me.coverPath;
-    Uint8List? cover;
-    if (coverPath != null && File(coverPath).existsSync()) {
-      cover = await File(coverPath).readAsBytes();
-    }
-    await publishProfileIfChanged(
+    final String address = profileNeedsAddress(node)
+        ? ref.read(runtimeNodeSnapshotProvider).localAddress
+        : '';
+    // Each field goes to whom the user chose (§9): public ones in the
+    // public entry, the others sealed per audience; the photo and cover
+    // are read from the vault (§14.1).
+    await publishOwnProfile(
       node,
-      profileBody(
-        name: me.displayName,
-        status: me.customStatus,
-        bio: me.bio,
-        address: address,
-        avatar: await avatarRefFor(node, photo),
-        cover: await coverRefFor(node, cover),
-      ),
+      me: me,
+      address: address,
+      readImage: readOwnProfileImage,
+      friendCount: acceptedFriendAddresses(
+        ref.read(socialHubControllerProvider),
+      ).length,
+      followerCount: follows.followerCount,
     );
   }
 
@@ -324,6 +340,27 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     publishProfile(),
     context: 'Zapis profilu w dzienniku nie udał się',
   );
+  // The numbers of friends and followers are profile fields too.
+  final StreamSubscription<void> followersSub = follows.changes.listen(
+    (_) => mirrorProfile(),
+  );
+  ref.onDispose(() => unawaited(followersSub.cancel()));
+  ref.listen<int>(
+    socialHubControllerProvider.select(
+      (SocialHubState s) => acceptedFriendAddresses(s).length,
+    ),
+    (int? previous, int next) => mirrorProfile(),
+  );
+  // The first public post or reshare: the profile gets the address now.
+  final StreamSubscription<LogEntry> profileAddressSub = node.store.added
+      .listen((LogEntry e) {
+        if (e.account == node.account &&
+            reachesStrangers(e) &&
+            (latestProfile(node, node.account)?.address.isEmpty ?? true)) {
+          mirrorProfile();
+        }
+      });
+  ref.onDispose(() => unawaited(profileAddressSub.cancel()));
   unawaitedLogged(
     node.start().then((_) => mirrorProfile()),
     context: 'Zapis profilu w dzienniku nie udał się',
@@ -352,6 +389,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     kCommentKind,
     kReactionsKind,
     kReshareKind,
+    ...kReactionRelayExtraKinds,
   };
   final StreamSubscription<LogEntry> relaySub = node.store.added.listen((
     LogEntry e,

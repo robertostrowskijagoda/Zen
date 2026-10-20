@@ -137,8 +137,44 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(permissionsSetupDone: value));
   }
 
+  /// The first-start "Zabezpiecz konto" card was answered (§6.3).
+  Future<void> setAccountSecureOffered(bool value) async {
+    await _save(state.copyWith(accountSecureOffered: value));
+  }
+
+  /// The paper copy of the account key was written down (§6.1).
+  Future<void> setPaperBackupDone(bool value) async {
+    await _save(state.copyWith(paperBackupDone: value));
+  }
+
+  /// Who may invite this person to a new group (§8).
+  Future<void> setGroupInviteFrom(GroupInviteFrom value) async {
+    await _save(state.copyWith(groupInviteFrom: value));
+  }
+
+  /// The age gate's answer (§26.1, §27): a date of birth, or only the
+  /// 18+ confirmation ([birth] `null`). Kept on this device only.
+  Future<void> setAgeGate({DateTime? birth, bool adult = false}) async {
+    await _save(
+      state.copyWith(
+        birthDateMillis: birth == null
+            ? 0
+            : DateTime(
+                birth.year,
+                birth.month,
+                birth.day,
+              ).millisecondsSinceEpoch,
+        adultConfirmed: birth == null && adult,
+      ),
+    );
+  }
+
   Future<void> setAutoDownloadMedia(bool value) async {
     await _save(state.copyWith(autoDownloadMedia: value));
+  }
+
+  Future<void> setMediaOnlyOnWifi(bool value) async {
+    await _save(state.copyWith(mediaOnlyOnWifi: value));
   }
 
   Future<void> reset() async {

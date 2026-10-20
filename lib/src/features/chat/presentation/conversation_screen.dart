@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
@@ -45,6 +46,7 @@ import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/presentation/friend_nickname_prompt.dart';
+import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 

@@ -170,7 +170,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     );
     await _appendSystemMessage(
       peerAddress: peerAddress,
-      text: t('Połączenie z {name} jest gotowe.', {
+      event: SocialEventText('chat.connected', <String, String>{
         'name': updated.displayLabel,
       }),
       timestamp: DateTime.now().millisecondsSinceEpoch,
@@ -466,8 +466,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     await _appendSystemMessage(
       peerAddress: peerAddress,
-      text: t('Wysłano zaproszenie do rozmowy {kind}.', {
-        'kind': _callKindWord(kind),
+      event: SocialEventText('call.inviteOut', <String, String>{
+        'kind': kind.name,
       }),
       timestamp: timestamp,
     );
@@ -717,13 +717,10 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     await _appendSystemMessage(
       peerAddress: session.peerAddress,
-      text: session.isIncoming
-          ? t('Nieodebrane połączenie {kind}.', {
-              'kind': _callKindWord(session.kind),
-            })
-          : t('Brak odpowiedzi na połączenie {kind}.', {
-              'kind': _callKindWord(session.kind),
-            }),
+      event: SocialEventText(
+        session.isIncoming ? 'call.missed' : 'call.noAnswer',
+        <String, String>{'kind': session.kind.name},
+      ),
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
     await _persistState();
@@ -792,11 +789,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     await _appendSystemMessage(
       peerAddress: session.peerAddress,
-      text: t(
-        'Nie udało się zestawić rozmowy {kind} — druga strona nie '
-        'odpowiada.',
-        {'kind': _callKindWord(session.kind)},
-      ),
+      event: SocialEventText('call.failed', <String, String>{
+        'kind': session.kind.name,
+      }),
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
     await _persistState();
@@ -862,8 +857,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     } else {
       await _appendSystemMessage(
         peerAddress: peerAddress,
-        text: t('Odrzucono rozmowę {kind}.', {
-          'kind': _callKindWord(session.kind),
+        event: SocialEventText('call.declined', <String, String>{
+          'kind': session.kind.name,
         }),
         timestamp: DateTime.now().millisecondsSinceEpoch,
       );
@@ -937,8 +932,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     } else {
       await _appendSystemMessage(
         peerAddress: peerAddress,
-        text: t('Zakończono rozmowę {kind}.', {
-          'kind': _callKindWord(session.kind),
+        event: SocialEventText('call.ended', <String, String>{
+          'kind': session.kind.name,
         }),
         timestamp: DateTime.now().millisecondsSinceEpoch,
       );
@@ -1048,8 +1043,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       } else {
         await _appendSystemMessage(
           peerAddress: session.peerAddress,
-          text: t('Odebrano rozmowę {kind}.', {
-            'kind': _callKindLabel(offer.content),
+          event: SocialEventText('call.answered', <String, String>{
+            'kind': _callKind(offer.content).name,
           }),
           timestamp: DateTime.now().millisecondsSinceEpoch,
         );
@@ -1442,6 +1437,33 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     _persistSoon();
   }
 
+  /// Remembers the Zen version an accepted friend named in a ping or pong
+  /// (A17). Self-reported: it only feeds the "friends have a newer Zen"
+  /// hint, nothing else may depend on it.
+  Future<void> notePeerAppVersion({
+    required String peerAddress,
+    required String version,
+  }) {
+    return _enqueueStateWork(() async {
+      if (!isValidAppVersion(version)) {
+        return;
+      }
+      final FriendProfile? friend = state.friendByAddress(peerAddress);
+      if (friend == null ||
+          friend.status != FriendRelationshipStatus.accepted ||
+          state.peerAppVersions[friend.address] == version) {
+        return;
+      }
+      state = state.copyWith(
+        peerAppVersions: <String, String>{
+          ...state.peerAppVersions,
+          friend.address: version,
+        },
+      );
+      _persistSoon();
+    });
+  }
+
   Future<void> decayPresence({required Duration offlineAfter, int? nowMillis}) {
     return _enqueueStateWork(
       () => _decayPresence(offlineAfter: offlineAfter, nowMillis: nowMillis),
@@ -1826,9 +1848,12 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
   }
 
+  /// [board] makes the message a post on the group board (§13): same
+  /// signal, only the message id carries the flag (see `group_board.dart`).
   Future<void> sendGroupMessage({
     required String groupId,
     required String text,
+    bool board = false,
   }) async {
     final GroupProfile? group = state.groups[groupId];
     if (group == null || text.trim().isEmpty) {
@@ -1839,7 +1864,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
     final String trimmed = text.trim();
     final int timestamp = DateTime.now().millisecondsSinceEpoch;
-    final String messageId = 'grp-msg-$timestamp-$groupId';
+    final String messageId = board
+        ? newBoardPostId(timestamp: timestamp, groupId: groupId)
+        : 'grp-msg-$timestamp-$groupId';
 
     await _messageTimelineStore.append(
       'group:$groupId',

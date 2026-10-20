@@ -37,6 +37,10 @@ abstract final class DatingTypes {
   static const String safe = 'date_safe';
   static const String safeOk = 'date_safe_ok';
 
+  /// Between friends: the watching friend asks once for the current
+  /// location of the person on a date (the answer is a plain [safe] update).
+  static const String locationRequest = 'date_loc_req';
+
   static const Set<String> all = <String>{
     package,
     back,
@@ -46,6 +50,7 @@ abstract final class DatingTypes {
     vouch,
     safe,
     safeOk,
+    locationRequest,
   };
 }
 
@@ -75,6 +80,22 @@ const Duration kDatingRouteLife = Duration(days: 30);
 
 /// Steps a package travels (always the same, real or cover).
 const int kDatingHops = 3;
+
+/// Independent reports of a minor (from different dating keys) that hide a
+/// dating profile on a phone which never reported it itself (§19.6).
+const int kDatingMinorQuorum = 2;
+
+/// Reports of a minor a phone carries in its own packages, at most (the
+/// newest), and for how long.
+const int _minorCarried = 16;
+const Duration _minorCarriedLife = Duration(days: 60);
+
+/// Reporters kept per reported dating key, and reported keys kept.
+const int _minorReportersMax = 50;
+const int _minorKeysMax = 300;
+
+/// A request for the location of a date is answered at most this often.
+const Duration kDatingLocationAskEvery = Duration(minutes: 2);
 
 /// Flood guard on the receiving side: new packages taken in from one
 /// friend a day (their own and the ones they pass on). Every phone sends
@@ -117,6 +138,7 @@ final class DatingService extends ChangeNotifier {
     this.pyramidKey,
     this.canPay,
     this.pay,
+    this.currentPosition,
     int Function()? now,
     Random? random,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch),
@@ -149,6 +171,11 @@ final class DatingService extends ChangeNotifier {
   /// Pays [amount] to pyramid member [pyramidKey]; true when the order went
   /// out.
   final Future<bool> Function(String pyramidKey, int amount, String memo)? pay;
+
+  /// The current position of this phone (latitude, longitude), when it can
+  /// be read: answers a friend's request for the location of a date at once
+  /// when the person agreed to that beforehand ([SafeDate.autoShare]).
+  final Future<(double, double)?> Function()? currentPosition;
   final int Function() _now;
   final Random _random;
   static const String _key = 'dating/state';
@@ -213,6 +240,14 @@ final class DatingService extends ChangeNotifier {
   /// over, so two phones answering each other never wait on each other.
   List<(String, Map<String, dynamic>)>? _outbox;
   final Map<String, SafeDate> _safe = <String, SafeDate>{};
+
+  /// Dating keys this person reported as a minor (key → when): switched off
+  /// on this phone at once and carried in this phone's own packages.
+  final Map<String, int> _minorSelf = <String, int>{};
+
+  /// Reports of a minor seen in other people's packages: reported dating
+  /// key → (reporting dating key → when).
+  final Map<String, Map<String, int>> _minorSeen = <String, Map<String, int>>{};
   Future<void> _queue = Future<void>.value();
 
   int get now => _now();
@@ -249,13 +284,30 @@ final class DatingService extends ChangeNotifier {
   List<SeenProfile> get matches =>
       <SeenProfile>[
         for (final String k in _matches.keys)
-          if (_profiles[k] != null && !_hiddenByMe(k)) _profiles[k]!,
+          if (_profiles[k] != null && !_hiddenByMe(k) && !isMinorOff(k))
+            _profiles[k]!,
       ]..sort(
         (SeenProfile a, SeenProfile b) => (_matches[b.profile.key] ?? 0)
             .compareTo(_matches[a.profile.key] ?? 0),
       );
 
   bool _hiddenByMe(String key) => isHiddenByMe?.call(key) ?? false;
+
+  /// Whether the dating profile [key] is switched off on this phone because
+  /// of a report of a minor (§19.6): this person reported it, or at least
+  /// [kDatingMinorQuorum] other dating keys did (independent reports, from
+  /// the packages of the people around). A pyramid decision comes through
+  /// [isBanned]. It cannot be shown again.
+  bool isMinorOff(String key) {
+    if (_minorSelf.containsKey(key)) {
+      return true;
+    }
+    final Map<String, int>? by = _minorSeen[key];
+    return by != null && by.length >= kDatingMinorQuorum;
+  }
+
+  /// Whether this person reported the profile [key] as a minor.
+  bool reportedMinor(String key) => _minorSelf.containsKey(key);
 
   Iterable<SeenProfile> _visible() {
     final int t = _now();
@@ -264,6 +316,7 @@ final class DatingService extends ChangeNotifier {
           (SeenProfile s) =>
               !_blocked.contains(s.profile.key) &&
               !(isBanned?.call(s.profile.key) ?? false) &&
+              !isMinorOff(s.profile.key) &&
               !_hiddenByMe(s.profile.key) &&
               t - s.at < kDatingProfileLife.inMilliseconds,
         )
@@ -277,6 +330,7 @@ final class DatingService extends ChangeNotifier {
     for (final SeenProfile s in _profiles.values)
       if (_hiddenByMe(s.profile.key) &&
           !_blocked.contains(s.profile.key) &&
+          !isMinorOff(s.profile.key) &&
           !(isBanned?.call(s.profile.key) ?? false))
         s,
   ]..sort((SeenProfile a, SeenProfile b) => b.at.compareTo(a.at));
@@ -445,6 +499,19 @@ final class DatingService extends ChangeNotifier {
         }
       });
     }
+    _minorSelf
+      ..clear()
+      ..addAll(_ints(json['mrs']));
+    _minorSeen.clear();
+    final Object? seen = json['mrn'];
+    if (seen is Map) {
+      seen.forEach((Object? k, Object? v) {
+        final Map<String, int> by = _ints(v);
+        if (k is String && by.isNotEmpty) {
+          _minorSeen[k] = by;
+        }
+      });
+    }
     _safe.clear();
     final Object? safe = json['safe'];
     if (safe is List) {
@@ -490,6 +557,7 @@ final class DatingService extends ChangeNotifier {
       (String _, SafeDate s) => s.isOver && t - s.okAt! > 2 * 24 * 3600 * 1000,
     );
     _pkgKeys.removeWhere((String id, String _) => !_own.containsKey(id));
+    _pruneMinorReports(t);
     _pending.removeWhere(
       (String _, Map<String, dynamic> p) =>
           p['at'] is! int || t - (p['at'] as int) > _pendingLife.inMilliseconds,
@@ -542,6 +610,8 @@ final class DatingService extends ChangeNotifier {
           'safe': <Map<String, dynamic>>[
             for (final SafeDate s in _safe.values) s.toJson(),
           ],
+          if (_minorSelf.isNotEmpty) 'mrs': _minorSelf,
+          if (_minorSeen.isNotEmpty) 'mrn': _minorSeen,
         }),
       ),
     );
@@ -625,14 +695,18 @@ final class DatingService extends ChangeNotifier {
     final String id = _newId(16);
     // Sealed for the phones on the way; a cover is padded to the size of a
     // profile with one to four photos (see DatingPackageSeal).
-    final (Uint8List, Map<String, dynamic>) sealed =
-        await DatingPackageSeal.seal(
-          sender: myKey!,
-          packageId: id,
-          content:
-              mine?.toJson() ?? const <String, dynamic>{'v': 1, 'cover': true},
-          minBuckets: mine == null ? 2 + _random.nextInt(11) : 2,
-        );
+    final (Uint8List, Map<String, dynamic>)
+    sealed = await DatingPackageSeal.seal(
+      sender: myKey!,
+      packageId: id,
+      content: <String, dynamic>{
+        ...(mine?.toJson() ?? const <String, dynamic>{'v': 1, 'cover': true}),
+        // Reports of a minor travel inside every package, real or
+        // cover, so they do not tell whether dating is on.
+        ...?_carriedMinorReports(t),
+      },
+      minBuckets: mine == null ? 2 + _random.nextInt(11) : 2,
+    );
     final Map<String, dynamic> p = sealed.$2;
     _pkgKeys[id] = base64Url.encode(sealed.$1);
     _own[id] = t;
@@ -779,6 +853,82 @@ final class DatingService extends ChangeNotifier {
     (_chats[key] ??= <DatingLine>[]).add(line);
     await _save();
     return _sendBack(key, <String, dynamic>{'k': 'msg', 'id': line.id, 't': t});
+  }
+
+  /// Reports the dating profile [key] as a minor (§19.6): it is switched
+  /// off on this phone at once (gone from the lists and the matches, never
+  /// shown again), and the report travels in this phone's next packages. A
+  /// phone that gets reports from [kDatingMinorQuorum] different dating keys
+  /// switches the profile off too. The chat is kept (as evidence), unreadable
+  /// in the lists.
+  Future<void> reportMinor(String key) async {
+    if (key.isEmpty || key.length > 100 || key == myKey) {
+      return;
+    }
+    _minorSelf[key] = _now();
+    _matches.remove(key);
+    _dirty = true;
+    await _save();
+    await maybePublish();
+  }
+
+  /// The `mr` entry of this phone's package: the newest reports of a minor.
+  Map<String, dynamic>? _carriedMinorReports(int t) {
+    final List<String> keys = <String>[
+      for (final MapEntry<String, int> e in _minorSelf.entries)
+        if (t - e.value < _minorCarriedLife.inMilliseconds) e.key,
+    ];
+    if (keys.isEmpty) {
+      return null;
+    }
+    final List<String> newest = keys.length > _minorCarried
+        ? keys.sublist(keys.length - _minorCarried)
+        : keys;
+    return <String, dynamic>{'mr': newest};
+  }
+
+  /// Reports of a minor found in the opened package of [sender] (a dating
+  /// key): counted once per reporting key. Returns whether anything new was
+  /// learnt.
+  bool _noteMinorReports(String sender, Object? reported) {
+    if (reported is! List || sender == myKey || _blocked.contains(sender)) {
+      return false;
+    }
+    bool changed = false;
+    final int t = _now();
+    for (final Object? k in reported.take(_minorCarried)) {
+      if (k is! String ||
+          k.isEmpty ||
+          k.length > 100 ||
+          k == sender ||
+          k == myKey ||
+          decodeRelayKey(k) == null) {
+        continue;
+      }
+      final Map<String, int>? known = _minorSeen[k];
+      if (known == null && _minorSeen.length >= _minorKeysMax) {
+        continue;
+      }
+      final Map<String, int> by = known ?? (_minorSeen[k] = <String, int>{});
+      if (by.containsKey(sender)) {
+        by[sender] = t;
+        continue;
+      }
+      if (by.length >= _minorReportersMax) {
+        continue;
+      }
+      by[sender] = t;
+      changed = true;
+    }
+    return changed;
+  }
+
+  void _pruneMinorReports(int t) {
+    final int life = kDatingProfileLife.inMilliseconds * 4;
+    for (final Map<String, int> by in _minorSeen.values) {
+      by.removeWhere((String _, int at) => t - at > life);
+    }
+    _minorSeen.removeWhere((String _, Map<String, int> by) => by.isEmpty);
   }
 
   Future<void> block(String key) async {
@@ -1049,6 +1199,7 @@ final class DatingService extends ChangeNotifier {
     String note = '',
     double? lat,
     double? lon,
+    bool autoShareLocation = false,
   }) async {
     if (mySafeDate != null) {
       return mySafeDate;
@@ -1062,6 +1213,7 @@ final class DatingService extends ChangeNotifier {
       lat: lat,
       lon: lon,
       locatedAt: lat == null ? null : _now(),
+      autoShare: autoShareLocation,
     );
     _safe[d.id] = d;
     await _save();
@@ -1089,6 +1241,96 @@ final class DatingService extends ChangeNotifier {
       ..locatedAt = _now();
     await _save();
     await _sendSafe(d);
+  }
+
+  /// The watching friend asks once for the current location of the person
+  /// on date [id] (§19.4). The other phone asks that person for consent, or
+  /// answers by itself when they agreed beforehand. At most one question
+  /// every [kDatingLocationAskEvery] until it is answered. Returns whether
+  /// the question went out.
+  Future<bool> requestSafeLocation(String id) async {
+    final SafeDate? d = _safe[id];
+    if (d == null || d.mine || d.isOver) {
+      return false;
+    }
+    final int t = _now();
+    final int? asked = d.requestedAt;
+    final bool answered = asked != null && (d.locatedAt ?? 0) >= asked;
+    if (asked != null &&
+        !answered &&
+        t - asked < kDatingLocationAskEvery.inMilliseconds) {
+      return false;
+    }
+    d.requestedAt = t;
+    await _save();
+    await _send(d.friend, <String, dynamic>{
+      'type': DatingTypes.locationRequest,
+      'id': d.id,
+    });
+    return true;
+  }
+
+  /// The person on the date answers a friend's request for the location:
+  /// [allow] with the current position ([lat], [lon]) sends it; without it
+  /// the question is dropped and nothing is sent.
+  Future<void> answerLocationRequest({
+    required bool allow,
+    double? lat,
+    double? lon,
+  }) async {
+    final SafeDate? d = mySafeDate;
+    if (d == null) {
+      return;
+    }
+    d.askedAt = null;
+    if (allow && lat != null && lon != null) {
+      await updateSafeLocation(lat, lon);
+      return;
+    }
+    await _save();
+  }
+
+  Future<void> _onLocationRequest(String from, Map<String, dynamic> p) async {
+    final Object? id = p['id'];
+    final SafeDate? d = id is String ? _safe[id] : null;
+    if (d == null || !d.mine || d.friend != from || d.isOver) {
+      return;
+    }
+    final int stamp = _now();
+    final int? asked = d.askedAt;
+    if (asked != null &&
+        stamp - asked < kDatingLocationAskEvery.inMilliseconds) {
+      return;
+    }
+    if (d.autoShare) {
+      (double, double)? at;
+      try {
+        at = await currentPosition?.call();
+      } on Object catch (error, stack) {
+        logZenError('Randki: położenie na żądanie', error, stack);
+      }
+      if (at != null) {
+        d
+          ..lat = at.$1
+          ..lon = at.$2
+          ..locatedAt = _now();
+        await _save();
+        await _sendSafe(d);
+        return;
+      }
+    }
+    d.askedAt = stamp;
+    await _save();
+    await host.notify(
+      RuntimeSystemNotification(
+        id: 'date-loc-ask-${d.id}',
+        title: t('{name} prosi o Twoje położenie', {'name': host.nameOf(from)}),
+        body: t('Otwórz Randki i wybierz, czy je wysłać.'),
+        createdAtMillis: stamp,
+        category: RuntimeSystemNotificationCategory.social,
+        slotKey: 'date-loc-ask:${d.id}',
+      ),
+    );
   }
 
   Future<void> extendSafeDate(Duration more) async {
@@ -1365,6 +1607,8 @@ final class DatingService extends ChangeNotifier {
         }
       case DatingTypes.safe:
         await _onSafe(from, p);
+      case DatingTypes.locationRequest:
+        await _onLocationRequest(from, p);
       case DatingTypes.safeOk:
         final Object? id = p['id'];
         final SafeDate? d = id is String ? _safe[id] : null;
@@ -1529,7 +1773,8 @@ final class DatingService extends ChangeNotifier {
         : await _cleanProfile(parsed);
     if (profile == null ||
         profile.key == myKey ||
-        _blocked.contains(profile.key)) {
+        _blocked.contains(profile.key) ||
+        isMinorOff(profile.key)) {
       await _save();
       return;
     }
@@ -1636,6 +1881,10 @@ final class DatingService extends ChangeNotifier {
     final Object? from = waiting['f'];
     final Object? path = waiting['path'];
     final Object? at = waiting['at'];
+    // Covers carry reports of a minor too.
+    if (content != null && active) {
+      _noteMinorReports(sender, content['mr']);
+    }
     // A cover, or a profile wrapped by someone else's key: nothing to show.
     if (content == null ||
         content['k'] != sender ||
@@ -1676,6 +1925,7 @@ final class DatingService extends ChangeNotifier {
         mark == null ||
         me == null ||
         (isBanned?.call(senderKey) ?? false) ||
+        isMinorOff(senderKey) ||
         _hiddenKey(senderKey)) {
       return;
     }

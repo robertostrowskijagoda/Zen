@@ -5,10 +5,14 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/core/ledger/ledger_codec.dart';
+import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/friend_display_name.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 abstract final class AskTypes {
@@ -35,6 +39,32 @@ const int kAnswerMaxChars = 1000;
 const int kAnswersPerQuestion = 200;
 const int kAnswersFromFriendPerQuestion = 50;
 
+/// What the answerer signs with their device key (§17.5): the question,
+/// their own address and name, the words and the pyramid key a tip goes to.
+/// Whoever passes the answer back adds their name to the path but cannot
+/// change any of this without the signature failing.
+Uint8List askAnswerSignedBytes({
+  required String id,
+  required String answerer,
+  required String name,
+  required String text,
+  String? pyramidKey,
+  String? pyramid,
+}) => canonicalJsonBytes(<String, dynamic>{
+  't': 'zen_ask_answer_v1',
+  'q': id,
+  'a': answerer,
+  'n': name,
+  'txt': text,
+  'k': pyramidKey ?? '',
+  'py': pyramid ?? '',
+});
+
+/// The mark on an answer that came without the answerer's signature (from
+/// an older app): someone on the way could have changed it.
+String askUnsignedLabel() =>
+    t('Niepodpisana — mogła zostać zmieniona po drodze');
+
 /// One answer, with the way it came back ("znajomy Bartka").
 @immutable
 final class AskAnswer {
@@ -46,9 +76,14 @@ final class AskAnswer {
     this.pyramidKey,
     this.pyramid,
     this.tipped = 0,
+    this.signed = false,
   });
 
   final String text;
+
+  /// The answerer's signature checked out: the words, name and tip key are
+  /// theirs. False for answers from older apps (shown marked).
+  final bool signed;
 
   /// Names from the one who answered back towards the asker (the first is
   /// the one who answered).
@@ -74,6 +109,7 @@ final class AskAnswer {
     pyramid: pyramid,
     tipped: tipped + amount,
     from: from,
+    signed: signed,
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -83,6 +119,7 @@ final class AskAnswer {
     'k': ?pyramidKey,
     'py': ?pyramid,
     if (tipped > 0) 'tip': tipped,
+    if (signed) 'sd': true,
     'f': from,
   };
 
@@ -106,6 +143,7 @@ final class AskAnswer {
           ? json['tip'] as int
           : 0,
       from: json['f'] as String,
+      signed: json['sd'] == true,
     );
   }
 }
@@ -224,6 +262,10 @@ final class AskService extends ChangeNotifier {
   static const String _key = 'meet/questions';
 
   final Map<String, Question> _questions = <String, Question>{};
+
+  /// This installation's ledger identity, for signing answers (read from
+  /// the store when first needed; none before the ledger made the keys).
+  LedgerIdentity? _identity;
 
   /// Questions taken in per friend per day (spam guard).
   final Map<String, List<int>> _received = <String, List<int>>{};
@@ -368,18 +410,128 @@ final class AskService extends ChangeNotifier {
     if (q == null || from == null || text.trim().isEmpty) {
       return;
     }
+    final String body = text.trim().length > kAnswerMaxChars
+        ? text.trim().substring(0, kAnswerMaxChars)
+        : text.trim();
+    final String name = sanitizePeerName(host.ownName()).isEmpty
+        ? host.ownName()
+        : sanitizePeerName(host.ownName());
+    final String? key = askKeyField(pyramidKey);
+    final String? py = askKeyField(pyramid);
+    final Map<String, dynamic>? proof = await _signAnswer(
+      id: id,
+      name: name,
+      text: body,
+      pyramidKey: key,
+      pyramid: py,
+    );
     await _send(from, <String, dynamic>{
       'type': AskTypes.answer,
       'id': id,
-      't': text.trim().length > 1000
-          ? text.trim().substring(0, 1000)
-          : text.trim(),
-      'p': <String>[host.ownName()],
-      'k': ?askKeyField(pyramidKey),
-      'py': ?askKeyField(pyramid),
+      't': body,
+      'p': <String>[name],
+      'k': ?key,
+      'py': ?py,
+      'sg': ?proof,
     });
     q.answeredByMe = true;
     await _save();
+  }
+
+  /// This person's signature on an answer ([askAnswerSignedBytes]); null
+  /// before the ledger made the keys (the answer then goes unsigned, as
+  /// from an older app).
+  Future<Map<String, dynamic>?> _signAnswer({
+    required String id,
+    required String name,
+    required String text,
+    String? pyramidKey,
+    String? pyramid,
+  }) async {
+    final String own = host.ownAddress();
+    if (own.isEmpty) {
+      return null;
+    }
+    try {
+      final LedgerIdentity? me = _identity ??= await LedgerIdentity.read(disk);
+      if (me == null) {
+        return null;
+      }
+      final String answerer = _n(own);
+      final Uint8List sig = await me.deviceKey.sign(
+        askAnswerSignedBytes(
+          id: id,
+          answerer: answerer,
+          name: name,
+          text: text,
+          pyramidKey: pyramidKey,
+          pyramid: pyramid,
+        ),
+      );
+      return <String, dynamic>{
+        'd': me.certificate.toJson(),
+        's': b64(sig),
+        'a': answerer,
+      };
+    } on Object catch (error, stack) {
+      logZenError('Zapytaj sieć: podpis', error, stack);
+      return null;
+    }
+  }
+
+  /// Checks the answerer's signature ([proof]) over what came:
+  ///  - `true`: signed by the device in its certificate, for this question,
+  ///    these words, this name (the first of [path]) and tip key;
+  ///  - `false` (the answer is dropped): malformed or not matching;
+  ///  - `null` (kept, shown marked): no signature (an older app), or a
+  ///    sound one under another address than the friend who answered
+  ///    directly — it may be another of their devices (§6).
+  Future<bool?> _checkAnswer(
+    Object? proof, {
+    required String id,
+    required String from,
+    required List<String> path,
+    required String text,
+    String? pyramidKey,
+    String? pyramid,
+  }) async {
+    if (proof == null) {
+      return null;
+    }
+    if (proof is! Map ||
+        proof['s'] is! String ||
+        (proof['s'] as String).length > 200 ||
+        proof['a'] is! String ||
+        !isRoutablePeerAddress(proof['a'] as String) ||
+        path.isEmpty) {
+      return false;
+    }
+    final DeviceCertificate? cert = DeviceCertificate.fromJson(proof['d']);
+    if (cert == null) {
+      return false;
+    }
+    final String answerer = _n(proof['a'] as String);
+    final bool sound =
+        await cert.verify() &&
+        await verifyLedgerSignature(
+          publicKey: cert.device,
+          message: askAnswerSignedBytes(
+            id: id,
+            answerer: answerer,
+            name: path.first,
+            text: text,
+            pyramidKey: pyramidKey,
+            pyramid: pyramid,
+          ),
+          signature: proof['s'] as String,
+        );
+    if (!sound) {
+      return false;
+    }
+    if (path.length == 1 && answerer != from) {
+      return null;
+    }
+    return true;
   }
 
   /// Notes a tip given for answer [index] of this person's question [id].
@@ -498,6 +650,24 @@ final class AskService extends ChangeNotifier {
     ];
     final String? key = askKeyField(p['k']);
     final String? pyramid = askKeyField(p['py']);
+    // A signed answer is checked before it is shown or passed on; a
+    // signature that does not fit (words, name or tip key changed) drops it.
+    final Object? sg = p['sg'];
+    final bool? checked = raw.length > kAnswerMaxChars && sg != null
+        ? false
+        : await _checkAnswer(
+            sg,
+            id: q.id,
+            from: from,
+            path: names,
+            text: raw,
+            pyramidKey: key,
+            pyramid: pyramid,
+          );
+    if (checked == false) {
+      return;
+    }
+    final bool signed = checked == true;
     if (q.isMine) {
       final int fromThem = q.answers
           .where((AskAnswer a) => a.from == from)
@@ -514,6 +684,7 @@ final class AskService extends ChangeNotifier {
           pyramidKey: key,
           pyramid: pyramid,
           from: from,
+          signed: signed,
         ),
       );
       await _save();
@@ -541,6 +712,8 @@ final class AskService extends ChangeNotifier {
         'p': <String>[...names, host.ownName()],
         'k': ?key,
         'py': ?pyramid,
+        // Passed on untouched: the answerer's signature covers the rest.
+        'sg': ?sg,
       });
     }
   }

@@ -185,6 +185,29 @@ enum AppAccentTheme {
   }
 }
 
+/// Who may invite this person to a new group (§8). Members of a group the
+/// person is in may always add people to it.
+enum GroupInviteFrom {
+  /// Anyone, people who are not friends too (the behaviour before 1.11).
+  everyone,
+
+  /// Every friend, weak acquaintances too.
+  allFriends,
+
+  /// Friends at level "Znajomy" and up (the default).
+  friends,
+
+  /// Only "Przyjaciel".
+  closeFriends;
+
+  String get label => switch (this) {
+    GroupInviteFrom.everyone => t('Każdy'),
+    GroupInviteFrom.allFriends => t('Wszyscy znajomi'),
+    GroupInviteFrom.friends => t('Znajomi i przyjaciele'),
+    GroupInviteFrom.closeFriends => t('Tylko przyjaciele'),
+  };
+}
+
 @immutable
 final class AppSettings {
   const AppSettings({
@@ -198,11 +221,17 @@ final class AppSettings {
     this.accentTheme = defaultAccentTheme,
     this.gifApiKey = '',
     this.autoDownloadMedia = true,
+    this.mediaOnlyOnWifi = true,
     this.hideNotificationContent = true,
     this.secureScreens = true,
     this.allowNoAppPassword = false,
     this.bridgeEnabled = true,
     this.permissionsSetupDone = false,
+    this.accountSecureOffered = false,
+    this.paperBackupDone = false,
+    this.groupInviteFrom = GroupInviteFrom.friends,
+    this.birthDateMillis = 0,
+    this.adultConfirmed = false,
   });
 
   static const int defaultInboxLimitMb = 100;
@@ -242,6 +271,16 @@ final class AppSettings {
   /// Photos and videos in posts download on their own (default: yes).
   final bool autoDownloadMedia;
 
+  /// Automatic downloads (above) happen only on Wi-Fi or a wired network,
+  /// not on mobile data. On for new installs; a settings file written
+  /// before this setting existed keeps its behaviour (off).
+  final bool mediaOnlyOnWifi;
+
+  /// Whether media may download on their own right now, given whether the
+  /// network in use is unmetered ([onUnmetered]).
+  bool allowsAutoDownload({required bool onUnmetered}) =>
+      autoDownloadMedia && (!mediaOnlyOnWifi || onUnmetered);
+
   /// Notifications say only "Nowa wiadomość", so message text never lands
   /// in the system's notification history (§14.1). On by default.
   final bool hideNotificationContent;
@@ -263,6 +302,48 @@ final class AppSettings {
   /// The first-start step "Uprawnienia i Bluetooth" (§25.2) was gone
   /// through: it is not shown again (it stays under Ustawienia).
   final bool permissionsSetupDone;
+
+  /// The first-start card "Zabezpiecz konto" was answered (§6.1, §6.3).
+  final bool accountSecureOffered;
+
+  /// The paper copy of the account key was written down and checked.
+  final bool paperBackupDone;
+
+  /// Who may invite this person to a new group (§8).
+  final GroupInviteFrom groupInviteFrom;
+
+  /// Date of birth from the age gate (§26.1, §27), local midnight in
+  /// milliseconds; 0 when not given. Never leaves the device.
+  final int birthDateMillis;
+
+  /// The person confirmed being 18 or older instead of giving the date.
+  final bool adultConfirmed;
+
+  /// The age gate was answered (a date or the 18+ confirmation).
+  bool get ageAnswered => adultConfirmed || birthDateMillis != 0;
+
+  /// Whether the person is 18 or older on [now] (Dating and the adult
+  /// sections, §19, §20, §27).
+  bool isAdultAt(DateTime now) {
+    if (adultConfirmed) {
+      return true;
+    }
+    if (birthDateMillis == 0) {
+      return false;
+    }
+    return ageOn(DateTime.fromMillisecondsSinceEpoch(birthDateMillis), now) >=
+        18;
+  }
+
+  /// Full years between [birth] and [now].
+  static int ageOn(DateTime birth, DateTime now) {
+    int years = now.year - birth.year;
+    if (now.month < birth.month ||
+        (now.month == birth.month && now.day < birth.day)) {
+      years--;
+    }
+    return years;
+  }
 
   /// Longest key accepted; real keys are ~64 characters.
   static const int maximumGifApiKeyLength = 200;
@@ -300,11 +381,17 @@ final class AppSettings {
     AppAccentTheme? accentTheme,
     String? gifApiKey,
     bool? autoDownloadMedia,
+    bool? mediaOnlyOnWifi,
     bool? hideNotificationContent,
     bool? secureScreens,
     bool? allowNoAppPassword,
     bool? bridgeEnabled,
     bool? permissionsSetupDone,
+    bool? accountSecureOffered,
+    bool? paperBackupDone,
+    GroupInviteFrom? groupInviteFrom,
+    int? birthDateMillis,
+    bool? adultConfirmed,
   }) {
     return AppSettings(
       inboxLimitMb: normalizeInboxLimitMb(inboxLimitMb ?? this.inboxLimitMb),
@@ -323,12 +410,18 @@ final class AppSettings {
       accentTheme: accentTheme ?? this.accentTheme,
       gifApiKey: normalizeGifApiKey(gifApiKey ?? this.gifApiKey),
       autoDownloadMedia: autoDownloadMedia ?? this.autoDownloadMedia,
+      mediaOnlyOnWifi: mediaOnlyOnWifi ?? this.mediaOnlyOnWifi,
       hideNotificationContent:
           hideNotificationContent ?? this.hideNotificationContent,
       secureScreens: secureScreens ?? this.secureScreens,
       allowNoAppPassword: allowNoAppPassword ?? this.allowNoAppPassword,
       bridgeEnabled: bridgeEnabled ?? this.bridgeEnabled,
       permissionsSetupDone: permissionsSetupDone ?? this.permissionsSetupDone,
+      accountSecureOffered: accountSecureOffered ?? this.accountSecureOffered,
+      paperBackupDone: paperBackupDone ?? this.paperBackupDone,
+      groupInviteFrom: groupInviteFrom ?? this.groupInviteFrom,
+      birthDateMillis: birthDateMillis ?? this.birthDateMillis,
+      adultConfirmed: adultConfirmed ?? this.adultConfirmed,
     );
   }
 
@@ -344,11 +437,17 @@ final class AppSettings {
     'accentTheme': accentTheme.name,
     'gifApiKey': gifApiKey,
     'autoDownloadMedia': autoDownloadMedia,
+    'mediaOnlyOnWifi': mediaOnlyOnWifi,
     'hideNotificationContent': hideNotificationContent,
     'secureScreens': secureScreens,
     'allowNoAppPassword': allowNoAppPassword,
     'bridgeEnabled': bridgeEnabled,
     'permissionsSetupDone': permissionsSetupDone,
+    'accountSecureOffered': accountSecureOffered,
+    'paperBackupDone': paperBackupDone,
+    'groupInviteFrom': groupInviteFrom.name,
+    'birthDateMillis': birthDateMillis,
+    'adultConfirmed': adultConfirmed,
   };
 
   static AppSettings fromJson(Map<String, dynamic> json) {
@@ -377,11 +476,19 @@ final class AppSettings {
       accentTheme: byName(AppAccentTheme.values, 'accentTheme'),
       gifApiKey: pick<String>('gifApiKey'),
       autoDownloadMedia: pick<bool>('autoDownloadMedia'),
+      // A file from before this setting: downloads keep working on mobile
+      // data as they did.
+      mediaOnlyOnWifi: pick<bool>('mediaOnlyOnWifi') ?? false,
       hideNotificationContent: pick<bool>('hideNotificationContent'),
       secureScreens: pick<bool>('secureScreens'),
       allowNoAppPassword: pick<bool>('allowNoAppPassword'),
       bridgeEnabled: pick<bool>('bridgeEnabled'),
       permissionsSetupDone: pick<bool>('permissionsSetupDone'),
+      accountSecureOffered: pick<bool>('accountSecureOffered'),
+      paperBackupDone: pick<bool>('paperBackupDone'),
+      groupInviteFrom: byName(GroupInviteFrom.values, 'groupInviteFrom'),
+      birthDateMillis: pick<int>('birthDateMillis'),
+      adultConfirmed: pick<bool>('adultConfirmed'),
     );
   }
 

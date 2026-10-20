@@ -30,6 +30,25 @@ Future<bool> openDialer(String number) async {
   }
 }
 
+/// Opens the phone's SMS app with [body] ready for [numbers] (the person
+/// presses send: no SMS permission is needed). Returns `false` where that
+/// is not possible (not Android) or there is nobody to write to.
+Future<bool> openSmsComposer(List<String> numbers, String body) async {
+  if (kIsWeb || !Platform.isAndroid || numbers.isEmpty) {
+    return false;
+  }
+  try {
+    return await _system.invokeMethod<bool>('sms', <String, Object>{
+          'numbers': numbers,
+          'body': body,
+        }) ??
+        false;
+  } on Object catch (error) {
+    logZenWarning('Otwieranie SMS: $error');
+    return false;
+  }
+}
+
 /// Opens a map at [lat], [lon] (a map app on the phone, the browser on a
 /// computer).
 Future<bool> openMap(double lat, double lon, {String label = ''}) async {

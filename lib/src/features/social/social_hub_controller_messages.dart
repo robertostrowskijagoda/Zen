@@ -325,7 +325,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           } on FormatException catch (error) {
             await _appendSystemMessage(
               peerAddress: signal.sender,
-              text: t('Nie udało się odebrać załącznika od {name}: {error}', {
+              event: SocialEventText('chat.attachmentFailed', <String, String>{
                 'name': _labelFor(signal, friends: state.friends),
                 'error': error.message,
               }),
@@ -457,7 +457,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       case ZenSignalType.friendAccept:
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text: t('Połączenie z {name} jest gotowe.', {
+          event: SocialEventText('chat.connected', <String, String>{
             'name': _labelFor(signal, friends: state.friends),
           }),
           timestamp: timestamp,
@@ -466,7 +466,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       case ZenSignalType.friendReject:
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text: t('{name} odrzucił(a) zaproszenie.', {
+          event: SocialEventText('chat.inviteRejected', <String, String>{
             'name': _labelFor(signal, friends: state.friends),
           }),
           timestamp: timestamp,
@@ -475,7 +475,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       case ZenSignalType.friendCancel:
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text: t('{name} anulował(a) oczekujące zaproszenie.', {
+          event: SocialEventText('chat.inviteCancelled', <String, String>{
             'name': _labelFor(signal, friends: state.friends),
           }),
           timestamp: timestamp,
@@ -508,7 +508,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         } else {
           await _appendSystemMessage(
             peerAddress: signal.sender,
-            text: t('Transfer został anulowany i stan obu stron jest zgodny.'),
+            event: const SocialEventText('chat.transferCancelled'),
             timestamp: timestamp,
           );
         }
@@ -580,8 +580,8 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         }
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text: t('Przyszło zaproszenie do rozmowy {kind}.', {
-            'kind': _callKindLabel(signal.content),
+          event: SocialEventText('call.inviteIn', <String, String>{
+            'kind': _callKind(signal.content).name,
           }),
           timestamp: timestamp,
         );
@@ -601,9 +601,9 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         if (wasRingingAnswer) {
           await _appendSystemMessage(
             peerAddress: signal.sender,
-            text: t('{name} odebrał(a) rozmowę {kind}.', {
+            event: SocialEventText('call.answeredBy', <String, String>{
               'name': _labelFor(signal, friends: state.friends),
-              'kind': _callKindLabel(signal.content),
+              'kind': _callKind(signal.content).name,
             }),
             timestamp: timestamp,
           );
@@ -627,9 +627,9 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         if (wasRingingAccept) {
           await _appendSystemMessage(
             peerAddress: signal.sender,
-            text: t('{name} odebrał(a) rozmowę {kind}.', {
+            event: SocialEventText('call.answeredBy', <String, String>{
               'name': _labelFor(signal, friends: state.friends),
-              'kind': _callKindLabel(signal.content),
+              'kind': _callKind(signal.content).name,
             }),
             timestamp: timestamp,
           );
@@ -650,14 +650,10 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         );
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text: t(
-            '{name} jest aktualnie zajęty(a) i nie może odebrać rozmowy '
-            '{kind}.',
-            {
-              'name': _labelFor(signal, friends: state.friends),
-              'kind': _callKindLabel(signal.content),
-            },
-          ),
+          event: SocialEventText('call.busy', <String, String>{
+            'name': _labelFor(signal, friends: state.friends),
+            'kind': _callKind(signal.content).name,
+          }),
           timestamp: timestamp,
         );
         return;
@@ -676,9 +672,9 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         );
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text: t('{name} odrzucił(a) rozmowę {kind}.', {
+          event: SocialEventText('call.declinedBy', <String, String>{
             'name': _labelFor(signal, friends: state.friends),
-            'kind': _callKindLabel(signal.content),
+            'kind': _callKind(signal.content).name,
           }),
           timestamp: timestamp,
         );
@@ -716,9 +712,9 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         }
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text: t('{name} zakończył(a) rozmowę {kind}.', {
+          event: SocialEventText('call.endedBy', <String, String>{
             'name': _labelFor(signal, friends: state.friends),
-            'kind': _callKindLabel(signal.content),
+            'kind': _callKind(signal.content).name,
           }),
           timestamp: timestamp,
         );
@@ -754,16 +750,21 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       case ZenSignalType.groupLeave:
         final GroupProfile? leftGroup = state.groups[signal.groupId ?? ''];
         if (leftGroup != null && groupHasMember(leftGroup, signal.sender)) {
+          final SocialEventText left = SocialEventText(
+            'group.left',
+            <String, String>{'name': _labelFor(signal, friends: state.friends)},
+          );
           await _messageTimelineStore.append(
             'group:${leftGroup.id}',
-            ChatMessage(
-              id: 'system-leave-$timestamp-${signal.sender}',
-              sender: 'system',
-              text: t('{name} opuścił(a) grupę.', {
-                'name': _labelFor(signal, friends: state.friends),
-              }),
-              sentAtMillis: timestamp,
-              direction: ChatMessageDirection.system,
+            chatMessageWithEvent(
+              ChatMessage(
+                id: 'system-leave-$timestamp-${signal.sender}',
+                sender: 'system',
+                text: left.render(),
+                sentAtMillis: timestamp,
+                direction: ChatMessageDirection.system,
+              ),
+              left,
             ),
           );
           _bumpTimelineRevision();
@@ -832,22 +833,24 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
   @override
   Future<void> _appendSystemMessage({
     required String peerAddress,
-    required String text,
+    String? text,
+    SocialEventText? event,
     required int timestamp,
   }) async {
     if (!ref.mounted) {
       return;
     }
     final MessageTimelineStore timelineStore = _messageTimelineStore;
+    final ChatMessage message = ChatMessage(
+      id: 'system-$timestamp-$peerAddress',
+      sender: 'system',
+      text: text ?? event?.render() ?? '',
+      sentAtMillis: timestamp,
+      direction: ChatMessageDirection.system,
+    );
     await timelineStore.append(
       peerAddress,
-      ChatMessage(
-        id: 'system-$timestamp-$peerAddress',
-        sender: 'system',
-        text: text,
-        sentAtMillis: timestamp,
-        direction: ChatMessageDirection.system,
-      ),
+      event == null ? message : chatMessageWithEvent(message, event),
     );
     _bumpTimelineRevision();
     await _applyConversationRetention(
@@ -1123,6 +1126,10 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
 /// old (relays keep mail for two weeks at most).
 int _effectiveSentAt(ZenSignal signal, int receivedAtMillis) {
   final int? claimed = signal.sentAtMillis;
+  if (claimed != null) {
+    // A21: what friends' timestamps say about this phone's clock.
+    ClockSkewTracker.instance.observe(signal.sender, claimed, receivedAtMillis);
+  }
   if (claimed == null ||
       claimed > receivedAtMillis ||
       receivedAtMillis - claimed > const Duration(days: 15).inMilliseconds) {

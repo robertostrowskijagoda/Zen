@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -139,9 +140,7 @@ class FlatItemCard extends StatelessWidget {
 
 /// Short date and hour: "12.10 19:00".
 String flatDate(int millis) {
-  final DateTime d = DateTime.fromMillisecondsSinceEpoch(millis);
-  String two(int x) => x.toString().padLeft(2, '0');
-  return '${two(d.day)}.${two(d.month)} ${two(d.hour)}:${two(d.minute)}';
+  return ZenFormat.dayMonthTime(DateTime.fromMillisecondsSinceEpoch(millis));
 }
 
 /// Scans a QR (camera) or, where there is no camera, takes the code pasted.

@@ -63,12 +63,12 @@ object IncomingCallUi {
         val icon = root.findViewById<ImageView>(R.id.incoming_call_avatar_icon)
         root.findViewById<TextView>(R.id.incoming_call_name).text = displayName
         if (isVideo) {
-            kind.text = "POŁĄCZENIE WIDEO"
-            subtitle.text = "Zaproszenie do rozmowy wideo"
+            kind.setText(R.string.call_kind_video)
+            subtitle.setText(R.string.call_subtitle_video)
             icon.setImageResource(android.R.drawable.ic_menu_camera)
         } else {
-            kind.text = "POŁĄCZENIE AUDIO"
-            subtitle.text = "Zaproszenie do rozmowy głosowej"
+            kind.setText(R.string.call_kind_audio)
+            subtitle.setText(R.string.call_subtitle_audio)
             icon.setImageResource(R.drawable.ic_stat_call)
         }
         root.findViewById<Button>(R.id.incoming_call_accept).setOnClickListener { onAccept() }

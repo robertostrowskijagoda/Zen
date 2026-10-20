@@ -226,13 +226,16 @@ void main() {
     final _Host bob = _Host(net, 'bob', <String>['ania']);
     await ania.service.shareNearbySecret('bob');
     final String first = ania.service.book.nearbySecret!;
-    expect(bob.service.book.friendNearbySecrets['ania'], first);
+    // Bob keeps Ania's keys for him alone (S6), not her legacy secret.
+    final String firstKeys = ania.service.nearbyKeysFor('bob')!;
+    expect(bob.service.book.friendNearbySecrets['ania'], firstKeys);
     expect(ania.service.book.nearbyGivenTo, contains('bob'));
     await ania.service.rotateNearbySecret();
     expect(ania.service.book.nearbySecret, isNot(first));
+    expect(ania.service.nearbyKeysFor('bob'), isNot(firstKeys));
     expect(
       bob.service.book.friendNearbySecrets['ania'],
-      ania.service.book.nearbySecret,
+      ania.service.nearbyKeysFor('bob'),
     );
 
     await ania.service.markMet('bob');
@@ -360,17 +363,31 @@ void main() {
 
     // Kasia is a friend but not "przyjaciel": she hears it nearby, and it
     // rings like one from the network.
+    // Her phone signs the wave for Kasia alone (S6: NearbyService.waveAll
+    // does this for each friend it recognises).
     expect(kasia.service.book.alarm(alarm.id), isNull);
+    final Map<String, dynamic> forKasia = ania.service.alarmWave(
+      alarm,
+      to: 'kasia',
+    );
+    expect(forKasia['v'], kAlarmPairWaveVersion);
+    // The wave for everyone (which any of her friends could make) does not
+    // ring at a friend who has her per-friend keys.
     await kasia.service.onAlarmWave(wave, friend: 'ania');
+    expect(kasia.service.book.alarm(alarm.id), isNull);
+    await kasia.service.onAlarmWave(forKasia, friend: 'ania');
     final AlarmRecord heard = kasia.service.book.alarm(alarm.id)!;
     expect(heard.from, 'ania');
     expect(heard.nearby, isTrue);
     expect(heard.isActive, isTrue);
-    expect(kasia.shown.single.isRingingCall, isTrue);
-    expect(kasia.shown.single.title, contains('ANIA'));
+    expect(kasia.shown.last.isRingingCall, isTrue);
+    expect(kasia.shown.last.title, contains('ANIA'));
     // Heard twice: rings once.
-    await kasia.service.onAlarmWave(wave, friend: 'ania');
-    expect(kasia.shown, hasLength(1));
+    await kasia.service.onAlarmWave(forKasia, friend: 'ania');
+    expect(
+      kasia.shown.where((RuntimeSystemNotification n) => n.isRingingCall),
+      hasLength(1),
+    );
 
     // Someone who does not know her: no name, no ringing, clearly marked
     // as unchecked.

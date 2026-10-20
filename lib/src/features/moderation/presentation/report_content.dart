@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/features/moderation/content_moderation.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/pyramid/presentation/report_sheet.dart';
@@ -18,6 +19,10 @@ import 'package:zen/src/features/pyramid/pyramid_state.dart';
 /// With [deleteLocal] the person may also remove the local copy; leave it
 /// out where the store cannot. Without a pyramid the sheet offers only
 /// what works on this phone: hiding and deleting.
+///
+/// [contentId] also names the reported entry for a content ban (S36), and
+/// [entry] — the signed original, where the screen has it — goes in as
+/// evidence nobody can make up.
 Future<void> reportContent(
   BuildContext context,
   WidgetRef ref, {
@@ -26,6 +31,7 @@ Future<void> reportContent(
   String header = '',
   bool hashContent = true,
   String contentId = '',
+  LogEntry? entry,
   Future<void> Function()? deleteLocal,
 }) async {
   final PyramidService pyr = ref.read(pyramidServiceProvider);
@@ -40,6 +46,10 @@ Future<void> reportContent(
     evidence: reportEvidence(text, header: header),
     contentHash: hashContent && text.isNotEmpty ? contentHash(text) : null,
     contentId: contentId,
+    entryId: !hashContent
+        ? null
+        : (contentId.isNotEmpty ? contentId : entry?.id),
+    entry: hashContent ? entry?.toJson() : null,
     deleteLocal: deleteLocal,
   );
 }
@@ -55,14 +65,19 @@ void showHiddenAnyway(
     .read(hiddenByMeProvider.notifier)
     .showContent(id: id, text: text, datingKey: datingKey);
 
-/// Hashes of content the pyramid banned, now. Empty when the pyramid has
-/// not started (it is never started just for this).
+/// Content the pyramid banned, now: ids of banned entries (S36) and
+/// hashes of banned texts (1.10.0 bans), for [isContentBanned]. Empty when
+/// the pyramid has not started (it is never started just for this).
 Set<String> bannedContentNow(WidgetRef ref) {
   if (!ref.exists(pyramidServiceProvider)) {
     return const <String>{};
   }
   final PyramidService pyr = ref.read(pyramidServiceProvider);
-  return pyr.state?.bannedContent(pyr.now) ?? const <String>{};
+  final PyramidState? s = pyr.state;
+  if (s == null) {
+    return const <String>{};
+  }
+  return <String>{...s.bannedContent(pyr.now), ...s.bannedEntries(pyr.now)};
 }
 
 /// The running pyramid service, when there is one (to listen for bans).

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -9,16 +10,6 @@ import 'package:zen/src/features/meet/events/event_model.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/presentation/events_screen.dart';
 import 'package:zen/src/features/meet/table/table_service.dart';
-
-List<String> get _dayNames => <String>[
-  t('pn'),
-  t('wt'),
-  t('śr'),
-  t('cz'),
-  t('pt'),
-  t('sb'),
-  t('nd'),
-];
 
 /// Stół na sześć (§17.4).
 class TableScreen extends ConsumerStatefulWidget {
@@ -198,7 +189,7 @@ class _TableScreenState extends ConsumerState<TableScreen> {
                     Expanded(
                       child: _DayToggle(
                         key: Key('table-day-$d'),
-                        label: _dayNames[d - 1],
+                        label: ZenFormat.weekdayShortOf(d, compact: true),
                         selected: _days.contains(d),
                         onTap: () => setState(() {
                           _days = <int>{..._days};

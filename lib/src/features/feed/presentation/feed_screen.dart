@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_player/video_player.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -13,9 +14,12 @@ import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
+import 'package:zen/src/features/feed/feed_memo.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/feed/presentation/post_editor_screen.dart';
+import 'package:zen/src/features/feed/presentation/post_reactions_sheet.dart';
+import 'package:zen/src/features/feed/presentation/reaction_notices.dart';
 import 'package:zen/src/features/feed/presentation/rich_post_body.dart';
 import 'package:zen/src/features/feed/presentation/video_autoplay.dart';
 import 'package:zen/src/features/feed/rich_text.dart';
@@ -28,6 +32,7 @@ import 'package:zen/src/features/moderation/content_moderation.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/local_delete.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
+import 'package:zen/src/features/profile/follows.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
 import 'package:zen/src/features/profile/presentation/own_avatar.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
@@ -62,6 +67,13 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   final ReshareCache _reshares = ReshareCache();
   String? _error;
 
+  /// Bumped whenever something [buildFeed] reads may have changed (the
+  /// ledger, bodies that became readable, checked reshares): [build] walks
+  /// every log again only then, not on every presence change or tap.
+  int _feedRevision = 0;
+  StreamSubscription<void>? _storeChanges;
+  final FeedMemo _feedMemo = FeedMemo();
+
   /// Posts hidden by a pyramid content ban that the user chose to see.
   final Set<String> _revealed = <String>{};
 
@@ -78,12 +90,16 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       }
     });
     _opened = _node?.openedChanges.listen((_) {
+      _feedRevision++;
       if (mounted) {
         setState(() {});
       }
     });
+    // Every change of the ledger (entries added or dropped, blocks).
+    _storeChanges = _node?.store.changed.listen((_) => _feedRevision++);
     _updates = _node?.store.added.listen((LogEntry e) {
-      if (e.kind == kReshareKind) {
+      _feedRevision++;
+      if (e.kind == kReshareKind || e.kind == kReshareDeleteKind) {
         unawaited(_checkReshares());
       }
       if (mounted) {
@@ -92,6 +108,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     });
     unawaited(
       _node?.start().then((_) async {
+        _feedRevision++;
         await _checkReshares();
         if (mounted) {
           setState(() {});
@@ -104,6 +121,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   void dispose() {
     _pyramid?.removeListener(_onPyramid);
     unawaited(_updates?.cancel());
+    unawaited(_storeChanges?.cancel());
     unawaited(_opened?.cancel());
     unawaited(_media?.cancel());
     super.dispose();
@@ -155,6 +173,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       text: post.text,
       header: t('Post na tablicy — {name}', {'name': post.authorLabel}),
       contentId: post.id,
+      // The signed post itself goes in as evidence (S36).
+      entry: post.entry,
       deleteLocal: node == null || post.images.isEmpty
           ? null
           : () => deletePostMediaLocally(node, post.images),
@@ -246,7 +266,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     if (node == null || post.authorAddress.isEmpty) {
       return;
     }
-    await node.follow(post.authorAddress);
+    // A signed follow: the author learns of it, other own devices too.
+    await FollowLedger.of(node).follow(post.authorAddress);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -311,7 +332,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                       tooltip: t('Przestań obserwować'),
                       icon: const Icon(Icons.close_rounded),
                       onPressed: () async {
-                        await node.unfollow(address);
+                        await FollowLedger.of(node).unfollow(address);
                         setDialog(() {});
                       },
                     ),
@@ -341,7 +362,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                 if (address.isEmpty) {
                   return;
                 }
-                await node.follow(address);
+                await FollowLedger.of(node).follow(address);
                 field.clear();
                 setDialog(() {});
               },
@@ -367,8 +388,11 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       for (final String account in node.friendAccounts.values)
         ...node.entriesOf(ofAccount: account),
     ];
-    if (await _reshares.checkAll(feeds) && mounted) {
-      setState(() {});
+    if (await _reshares.checkAll(feeds)) {
+      _feedRevision++;
+      if (mounted) {
+        setState(() {});
+      }
     }
   }
 
@@ -515,6 +539,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                                             reportContent(
                                               context,
                                               ref,
+                                              // §21.4: the comment's author.
+                                              authorAddress: c.authorAddress,
                                               text: c.text,
                                               header: t('Komentarz — {name}', {
                                                 'name': c.authorLabel,
@@ -603,49 +629,24 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     );
   }
 
+  /// Who likes it: you and friends first (§11).
   void _showLikers(FeedPost post) {
-    unawaited(
-      showModalBottomSheet<void>(
-        context: context,
-        showDragHandle: true,
-        builder: (BuildContext context) => SafeArea(
-          child: ListView(
-            key: const Key('feed-likers'),
-            shrinkWrap: true,
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            children: <Widget>[
-              _SheetTitle(
-                icon: Icons.favorite_rounded,
-                title: t('Polubili'),
-                count: post.likers.length,
-              ),
-              const SizedBox(height: 8),
-              if (post.likers.isEmpty)
-                ZenEmpty(
-                  icon: Icons.favorite_border_rounded,
-                  title: t('Jeszcze nikt.'),
-                ),
-              for (final String name in post.likers)
-                ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                  leading: _Initials(name: name, own: false, size: 36),
-                  title: Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
+    unawaited(showPostLikers(context, post));
   }
 
   String _nameOf(SocialHubState state, String address) {
     final FriendProfile? friend = state.friendByAddress(address);
     return friend == null ? address : state.nameFor(friend);
   }
+
+  /// Others' posts on the wall, built again only when needed ([FeedMemo]).
+  List<FeedPost> _feedFor(LedgerNode node, SocialHubState social) =>
+      _feedMemo.wallOf(
+        node,
+        revision: _feedRevision,
+        nameOf: (String address) => _nameOf(social, address),
+        reshares: _reshares,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -655,22 +656,138 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     _followPyramid();
     final Set<String> banned = bannedContentNow(ref);
     final HiddenByMe mine = ref.watch(hiddenByMeProvider);
-    List<FeedPost> posts = const <FeedPost>[];
-    if (node != null && node.isReady) {
-      posts = <FeedPost>[
-        for (final FeedPost p in buildFeed(
-          node,
-          nameOf: (String address) => _nameOf(social, address),
-          reshares: _reshares,
-        ))
-          if (!p.isOwn) p,
-      ];
+    final List<FeedPost> posts = node != null && node.isReady
+        ? _feedFor(node, social)
+        : const <FeedPost>[];
+    final List<Widget> header = <Widget>[
+      _ComposerPrompt(
+        onWrite: () => unawaited(_compose()),
+        onPhoto: () => unawaited(_compose(withPhotos: true)),
+      ),
+      if (_error != null)
+        Container(
+          margin: const EdgeInsets.only(top: 12),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: zen.danger.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: zen.danger.withValues(alpha: 0.30)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Icon(Icons.error_outline_rounded, color: zen.danger, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _error!,
+                  key: const Key('feed-error'),
+                  style: TextStyle(
+                    color: zen.danger,
+                    fontSize: 13.5,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      const SizedBox(height: 16),
+    ];
+
+    Widget postItem(LedgerNode node, FeedPost post) {
+      if (isContentHidden(
+        banned,
+        post.text,
+        id: post.id,
+        revealed: _revealed,
+        mine: mine,
+      )) {
+        return HiddenContentPlaceholder(
+          key: Key('feed-hidden-${post.id}'),
+          byMe: !isContentBanned(banned, post.text, id: post.id),
+          onShow: () {
+            showHiddenAnyway(ref, id: post.id);
+            setState(() => _revealed.add(post.id));
+          },
+        );
+      }
+      return _PostCard(
+        post: post,
+        node: node,
+        avatarPath: social.peerProfileOf(post.authorAddress)?.avatarPath,
+        onLike: () => unawaited(_toggleLike(post)),
+        onShowLikers: () => _showLikers(post),
+        onComments: () => _openComments(post),
+        onAuthor: () => _openAuthor(post),
+        onFollow:
+            !post.isOwn &&
+                post.authorAddress.isNotEmpty &&
+                node.knownAccountOf(post.authorAddress) == null &&
+                !node.isFollowing(post.authorAddress)
+            ? () => unawaited(_followAuthor(post))
+            : null,
+        onEdit: post.isOwn && post.resharedBy.isEmpty
+            ? () => unawaited(_editPost(post))
+            : null,
+        onDelete: post.isOwn && post.resharedBy.isEmpty
+            ? () => unawaited(_deletePost(post))
+            : null,
+        onReshare:
+            post.isOwn ||
+                post.audience != Audience.public ||
+                post.resharedBy.contains(t('Ty'))
+            ? null
+            : () => unawaited(_reshare(post)),
+        onReport: post.isOwn ? null : () => unawaited(_reportPost(post)),
+      );
     }
+
+    Widget feedEnd() {
+      if (posts.isEmpty) {
+        return ZenEmpty(
+          key: const Key('feed-end'),
+          icon: Icons.newspaper_rounded,
+          title: t('Nic tu jeszcze nie ma od znajomych.'),
+          text: t(
+            'Gdy znajomi coś opublikują, zobaczysz to tutaj — '
+            'po kolei, bez algorytmu.',
+          ),
+        );
+      }
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        child: Row(
+          children: <Widget>[
+            Expanded(child: Divider(color: zen.outlineSoft)),
+            const SizedBox(width: 12),
+            Icon(Icons.check_circle_rounded, size: 18, color: zen.success),
+            const SizedBox(width: 6),
+            Flexible(
+              flex: 3,
+              child: Text(
+                t('Jesteś na bieżąco'),
+                key: const Key('feed-end'),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: zen.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Divider(color: zen.outlineSoft)),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
       key: const Key('feed-screen'),
       appBar: ZenSectionBar(
         title: t('Tablica'),
         actions: <Widget>[
+          if (node != null) ReactionNoticesButton(node: node),
           if (node != null)
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -694,141 +811,37 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                   ),
                 ),
               )
-            : ListView(
+            : ListView.builder(
                 key: const Key('feed-list'),
                 padding: readableInsets(context, top: 12, bottom: 28),
-                children: <Widget>[
-                  _ComposerPrompt(
-                    onWrite: () => unawaited(_compose()),
-                    onPhoto: () => unawaited(_compose(withPhotos: true)),
-                  ),
-                  if (_error != null)
-                    Container(
-                      margin: const EdgeInsets.only(top: 12),
-                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                      decoration: BoxDecoration(
-                        color: zen.danger.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: zen.danger.withValues(alpha: 0.30),
-                        ),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Icon(
-                            Icons.error_outline_rounded,
-                            color: zen.danger,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              _error!,
-                              key: const Key('feed-error'),
-                              style: TextStyle(
-                                color: zen.danger,
-                                fontSize: 13.5,
-                                height: 1.35,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  const SizedBox(height: 16),
-                  for (final FeedPost post in posts)
-                    if (isContentHidden(
-                      banned,
-                      post.text,
-                      id: post.id,
-                      revealed: _revealed,
-                      mine: mine,
-                    ))
-                      HiddenContentPlaceholder(
-                        key: Key('feed-hidden-${post.id}'),
-                        byMe: !isContentBanned(banned, post.text),
-                        onShow: () {
-                          showHiddenAnyway(ref, id: post.id);
-                          setState(() => _revealed.add(post.id));
-                        },
-                      )
-                    else
-                      _PostCard(
-                        post: post,
-                        node: node,
-                        avatarPath: social
-                            .peerProfileOf(post.authorAddress)
-                            ?.avatarPath,
-                        onLike: () => unawaited(_toggleLike(post)),
-                        onShowLikers: () => _showLikers(post),
-                        onComments: () => _openComments(post),
-                        onAuthor: () => _openAuthor(post),
-                        onFollow:
-                            !post.isOwn &&
-                                post.authorAddress.isNotEmpty &&
-                                node.knownAccountOf(post.authorAddress) ==
-                                    null &&
-                                !node.isFollowing(post.authorAddress)
-                            ? () => unawaited(_followAuthor(post))
-                            : null,
-                        onEdit: post.isOwn && post.resharedBy.isEmpty
-                            ? () => unawaited(_editPost(post))
-                            : null,
-                        onDelete: post.isOwn && post.resharedBy.isEmpty
-                            ? () => unawaited(_deletePost(post))
-                            : null,
-                        onReshare:
-                            post.isOwn ||
-                                post.audience != Audience.public ||
-                                post.resharedBy.contains(t('Ty'))
-                            ? null
-                            : () => unawaited(_reshare(post)),
-                        onReport: post.isOwn
-                            ? null
-                            : () => unawaited(_reportPost(post)),
-                      ),
-                  if (posts.isEmpty)
-                    ZenEmpty(
-                      key: const Key('feed-end'),
-                      icon: Icons.newspaper_rounded,
-                      title: t('Nic tu jeszcze nie ma od znajomych.'),
-                      text: t(
-                        'Gdy znajomi coś opublikują, zobaczysz to tutaj — '
-                        'po kolei, bez algorytmu.',
-                      ),
-                    )
-                  else
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 20),
-                      child: Row(
-                        children: <Widget>[
-                          Expanded(child: Divider(color: zen.outlineSoft)),
-                          const SizedBox(width: 12),
-                          Icon(
-                            Icons.check_circle_rounded,
-                            size: 18,
-                            color: zen.success,
-                          ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            flex: 3,
-                            child: Text(
-                              t('Jesteś na bieżąco'),
-                              key: const Key('feed-end'),
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: zen.textSecondary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(child: Divider(color: zen.outlineSoft)),
-                        ],
-                      ),
-                    ),
-                ],
+                // Lazy: only the posts on screen are built.
+                itemCount: header.length + posts.length + 1,
+                // Keyed items keep their state when posts above them come
+                // and go, as they did in the eager list.
+                findChildIndexCallback: (Key key) {
+                  if (key is! ValueKey<String>) {
+                    return null;
+                  }
+                  if (key.value == 'feed-end') {
+                    return header.length + posts.length;
+                  }
+                  const String hidden = 'feed-hidden-';
+                  if (!key.value.startsWith(hidden)) {
+                    return null;
+                  }
+                  final String id = key.value.substring(hidden.length);
+                  final int at = posts.indexWhere((FeedPost p) => p.id == id);
+                  return at < 0 ? null : header.length + at;
+                },
+                itemBuilder: (BuildContext context, int index) {
+                  if (index < header.length) {
+                    return header[index];
+                  }
+                  final int at = index - header.length;
+                  return at < posts.length
+                      ? postItem(node, posts[at])
+                      : feedEnd();
+                },
               ),
       ),
     );
@@ -889,6 +902,7 @@ Future<bool> editOwnPost(
                   m.bytes,
                   mime: m.mime,
                   durationMs: m.durationMs,
+                  stripMetadata: true,
                 ),
         ];
         await node.publish(
@@ -971,6 +985,7 @@ Future<String?> publishDraft(WidgetRef ref, PostDraft draft) async {
           m.bytes,
           mime: m.mime,
           durationMs: m.durationMs,
+          stripMetadata: true,
         ),
     ];
     final Map<String, dynamic> body = newPostBody(
@@ -1011,7 +1026,6 @@ String postTimeLabel(int millis, {bool withYear = false}) {
   final DateTime at = DateTime.fromMillisecondsSinceEpoch(millis);
   final DateTime now = DateTime.now();
   final Duration ago = now.difference(at);
-  String two(int v) => v.toString().padLeft(2, '0');
   if (!ago.isNegative) {
     if (ago.inMinutes < 1) {
       return t('przed chwilą');
@@ -1023,10 +1037,10 @@ String postTimeLabel(int millis, {bool withYear = false}) {
       return t('{count} godz. temu', {'count': ago.inHours});
     }
   }
-  final String time = '${two(at.hour)}:${two(at.minute)}';
+  final String time = ZenFormat.time(at);
   final String date = withYear || at.year != now.year
-      ? '${two(at.day)}.${two(at.month)}.${at.year}'
-      : '${two(at.day)}.${two(at.month)}';
+      ? ZenFormat.date(at)
+      : ZenFormat.dayMonth(at);
   return '$date, $time';
 }
 
@@ -1411,6 +1425,24 @@ class _PostCard extends StatelessWidget {
                 ),
             ],
           ),
+          if (likeSummary(post) case final String summary)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 2, 8, 2),
+              child: InkWell(
+                key: Key('feed-like-summary-${post.id}'),
+                borderRadius: BorderRadius.circular(8),
+                onTap: onShowLikers,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    summary,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: zen.textSecondary, fontSize: 13),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -1464,7 +1496,7 @@ class _LikeButton extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(4, 9, 14, 9),
               child: Text(
-                '${post.likers.length}',
+                '${post.likeTotal}',
                 style: TextStyle(
                   color: liked ? zen.danger : zen.textSecondary,
                   fontWeight: FontWeight.w700,

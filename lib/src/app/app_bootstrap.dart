@@ -6,6 +6,7 @@ import 'package:zen/src/app/persistent_stores.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/features/account/account_secure_providers.dart';
 import 'package:zen/src/features/account/device_chat_sync.dart';
 import 'package:zen/src/features/chat/disappearing_messages.dart';
 import 'package:zen/src/features/groups/group_store.dart';
@@ -146,6 +147,13 @@ final class ZenBootstrapResult {
       // §25.2: the permissions and Bluetooth step once after the password;
       // skipped the same way where a script drives the app.
       permissionsSetupRequiredProvider.overrideWithValue(
+        zenStartupGatesRequired(
+          environment: Platform.environment,
+          hasTestProfile: ZenInstance.profile != null,
+        ),
+      ),
+      // §6.1, §6.3: the "Zabezpiecz konto" card once after that.
+      accountSecureStepRequiredProvider.overrideWithValue(
         zenStartupGatesRequired(
           environment: Platform.environment,
           hasTestProfile: ZenInstance.profile != null,

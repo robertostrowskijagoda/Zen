@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
 abstract interface class AppSettingsStore {
@@ -38,7 +39,10 @@ final class FileAppSettingsStore implements AppSettingsStore {
   Future<void> save(AppSettings settings) async {
     await store.write(
       storageKey,
-      Uint8List.fromList(utf8.encode(jsonEncode(settings.toJson()))),
+      // `v` since 1.11 (STAN §7); files without it are version 1 too.
+      Uint8List.fromList(
+        utf8.encode(jsonEncode(withFormatVersion(settings.toJson()))),
+      ),
     );
   }
 }

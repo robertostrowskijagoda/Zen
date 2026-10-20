@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -12,10 +13,11 @@ import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 
 /// "12,50" → 1250 (hundredths), or null. Spaces of any kind are ignored,
-/// so what [formatMoney] wrote ("1 000,00") reads back.
+/// so what [formatMoney] wrote ("1 000,00", "1,000.00" in English) reads
+/// back (see [ZenFormat.normalizeDecimal]).
 int? parseMoney(String text) {
-  final String t = text.replaceAll(RegExp(r'\s'), '').replaceAll('.', ',');
-  final List<String> parts = t.split(',');
+  final String t = ZenFormat.normalizeDecimal(text);
+  final List<String> parts = t.split('.');
   if (parts.isEmpty || parts.length > 2) {
     return null;
   }
@@ -305,6 +307,8 @@ class PyramidWallet extends StatelessWidget {
     }
     String kind = 'inbox';
     int steps = 1;
+    // A paid introduction (§24): to whom; that person decides on the money.
+    String? introduce;
     final TextEditingController text = TextEditingController();
     final bool? ok = await showDialog<bool>(
       context: context,
@@ -348,6 +352,50 @@ class PyramidWallet extends StatelessWidget {
                       alignLabelWithHint: true,
                     ),
                   ),
+                  if (kind == 'intro') ...<Widget>[
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      key: const Key('pyr-intro-target'),
+                      onPressed: () => unawaited(() async {
+                        final String? who = await pickMember(
+                          context,
+                          s,
+                          except: me,
+                          title: t('Komu ma Cię przedstawić?'),
+                        );
+                        if (who != null && who != to && context.mounted) {
+                          set(() => introduce = who);
+                        }
+                      }()),
+                      icon: const Icon(Icons.handshake_outlined),
+                      label: Text(
+                        introduce == null
+                            ? t('Komu ma Cię przedstawić?')
+                            : t('Przedstawienie: {name}', <String, Object?>{
+                                'name': s.members[introduce]?.name,
+                              }),
+                      ),
+                    ),
+                    if (introduce != null && price > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          t(
+                            'Pośrednik dostanie zapłatę dopiero, gdy {name} '
+                            'przyjmie przedstawienie; odmowa albo brak '
+                            'odpowiedzi w tydzień — pieniądze wracają do Ciebie.',
+                            <String, Object?>{
+                              'name': s.members[introduce]?.name,
+                            },
+                          ),
+                          style: TextStyle(
+                            color: ZenColors.of(context).textSecondary,
+                            fontSize: 12.5,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                  ],
                   if (kind == 'ad') ...<Widget>[
                     const SizedBox(height: 12),
                     Text(
@@ -438,6 +486,7 @@ class PyramidWallet extends StatelessWidget {
         kind,
         body,
         steps: kind == 'ad' ? steps : 1,
+        introduce: kind == 'intro' ? introduce : null,
       );
       if (context.mounted) {
         snack(
@@ -1467,10 +1516,22 @@ class PyramidWallet extends StatelessWidget {
                                   height: 1.3,
                                 ),
                               ),
-                              if (m.hops > 0 || m.level != null) ...<Widget>[
+                              if (m.hops > 0 ||
+                                  m.level != null ||
+                                  m.introduce != null) ...<Widget>[
                                 const SizedBox(height: 4),
                                 Text(
                                   <String>[
+                                    if (m.introduce != null)
+                                      t(
+                                        'przedstawienie: {name} (płatność po '
+                                        'jej/jego zgodzie)',
+                                        <String, Object?>{
+                                          'name':
+                                              s.members[m.introduce]?.name ??
+                                              '?',
+                                        },
+                                      ),
                                     if (m.level != null)
                                       t('cena dla: {level}', <String, Object?>{
                                         'level':
@@ -1528,7 +1589,11 @@ class PyramidWallet extends StatelessWidget {
                         TextButton(
                           onPressed: () =>
                               unawaited(pyr.answerMarket(m.id, accept: false)),
-                          child: Text(m.amount > 0 ? t('Zwróć') : t('Odrzuć')),
+                          child: Text(
+                            m.amount > 0 && m.introduce == null
+                                ? t('Zwróć')
+                                : t('Odrzuć'),
+                          ),
                         ),
                         if (m.kind == 'ad' && m.hops > 0)
                           OutlinedButton(
@@ -1553,7 +1618,11 @@ class PyramidWallet extends StatelessWidget {
                         FilledButton(
                           onPressed: () =>
                               unawaited(pyr.answerMarket(m.id, accept: true)),
-                          child: Text(t('Przyjmij')),
+                          child: Text(
+                            m.introduce != null
+                                ? t('Przekaż prośbę')
+                                : t('Przyjmij'),
+                          ),
                         ),
                       ]),
                     ],
@@ -1718,11 +1787,50 @@ class PyramidWallet extends StatelessWidget {
                       if (!context.mounted || amount == null || amount <= 0) {
                         return;
                       }
+                      // Above the rolling limit only by a referendum of the
+                      // whole pyramid (§23.4).
+                      final bool over = amount > s.params.emitLimit - emitted;
+                      if (over && s.params.rules < 2) {
+                        snack(context, t('To więcej niż limit 30 dni.'));
+                        return;
+                      }
+                      if (over &&
+                          !await confirm(
+                            context,
+                            t('Ponad limit 30 dni'),
+                            t(
+                              'Taka emisja wymaga referendum całej piramidy '
+                              '(co najmniej 72 h, ponad połowa aktywnych '
+                              'członków, „Tak” więcej niż reszta). Ogłosić je?',
+                            ),
+                          )) {
+                        return;
+                      }
+                      if (!context.mounted) {
+                        return;
+                      }
                       final String? why = await askText(
                         context,
                         title: t('Uzasadnienie (jawne)'),
                       );
                       if (why == null || !context.mounted) {
+                        return;
+                      }
+                      if (over) {
+                        await pyr.emitReferendum(
+                          to: to,
+                          amount: amount,
+                          why: why,
+                        );
+                        if (context.mounted) {
+                          snack(
+                            context,
+                            t(
+                              'Referendum o emisji czeka na podpis drugiej '
+                              'osoby ze szczytu.',
+                            ),
+                          );
+                        }
                         return;
                       }
                       // New money: asked again who this is.
@@ -1747,6 +1855,38 @@ class PyramidWallet extends StatelessWidget {
                     icon: const Icon(Icons.add_card_rounded),
                     label: Text(t('Zaproponuj emisję')),
                   ),
+                  // Referenda that allowed money above the limit and wait
+                  // for the top to emit it (§23.4).
+                  for (final PyrReferendum r in s.referenda.values.where(
+                    (PyrReferendum r) =>
+                        r.kind == 'emit' &&
+                        r.end < now &&
+                        !s.emissions.values.any(
+                          (PyrEmission e) => e.referendum == r.id && !e.vetoed,
+                        ) &&
+                        s.referendumPasses(r.id),
+                  ))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: FilledButton.tonalIcon(
+                        key: Key('pyr-emit-ref-${r.id}'),
+                        onPressed: () => unawaited(() async {
+                          if (await confirmSensitiveAccess(
+                            context,
+                            reason: t('Emisja pieniędzy. Potwierdź, że to Ty.'),
+                          )) {
+                            await pyr.emitByReferendum(r.id, r.question);
+                          }
+                        }()),
+                        icon: const Icon(Icons.how_to_vote_rounded),
+                        label: Text(
+                          t(
+                            'Emisja po referendum: {question}',
+                            <String, Object?>{'question': r.question},
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ],
             ),

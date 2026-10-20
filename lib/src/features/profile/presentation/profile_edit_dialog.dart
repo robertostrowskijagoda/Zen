@@ -14,10 +14,12 @@ import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/features/feed/presentation/rich_text_controller.dart';
+import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/profile/avatar_sanitizer.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
 import 'package:zen/src/features/profile/presentation/own_avatar.dart';
 import 'package:zen/src/features/profile/profile_cover.dart';
+import 'package:zen/src/features/profile/profile_fields.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 
 /// Edits your profile: photo, cover, name and bio (§9). The short status
@@ -50,6 +52,11 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
   bool _isProcessingImage = false;
   bool _isSaving = false;
 
+  /// Who sees each field (§9), as edited here.
+  late Map<String, String> _visibility;
+  late TextEditingController _nationalityController;
+  String? _nationalityError;
+
   /// Avatar copy created inside this dialog but not committed yet. It is
   /// deleted when the user picks another image or closes without saving, so
   /// abandoned picks do not pile up in the sandbox.
@@ -63,6 +70,10 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
     _bioController = RichTextController(text: profile.bio);
     _avatarPath = profile.avatarPath;
     _coverPath = profile.coverPath;
+    _visibility = Map<String, String>.of(profile.visibility);
+    _nationalityController = TextEditingController(
+      text: profile.nationalities.join(', '),
+    );
     if (!kIsWeb && Platform.isAndroid) {
       // Android can tear the activity down while the camera/gallery is in
       // front; without this the picked photo is simply lost on return.
@@ -91,6 +102,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
     }
     _nameController.dispose();
     _bioController.dispose();
+    _nationalityController.dispose();
     super.dispose();
   }
 
@@ -332,8 +344,18 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
       _showAvatarMessage(t('Podaj nazwę wyświetlaną.'), isError: true);
       return;
     }
+    final List<String> nationalities;
+    try {
+      nationalities = parseNationalities(_nationalityController.text);
+    } on ArgumentError catch (e) {
+      setState(() => _nationalityError = e.message as String?);
+      return;
+    }
 
-    setState(() => _isSaving = true);
+    setState(() {
+      _isSaving = true;
+      _nationalityError = null;
+    });
     try {
       final UserProfile prevProfile = ref.read(userProfileControllerProvider);
       final String? previousAvatarPath = prevProfile.avatarPath;
@@ -348,6 +370,8 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
             coverPath: _coverPath,
             clearCoverPath: _coverPath == null,
             bio: bio,
+            visibility: _visibility,
+            nationalities: nationalities,
           );
       // The new copy is committed, so the dialog no longer owns it.
       _stagedAvatarPath = null;
@@ -559,8 +583,9 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                         children: <Widget>[
                           if (_coverPath != null &&
                               File(_coverPath!).existsSync())
-                            Image.file(
-                              File(_coverPath!),
+                            Image(
+                              // A saved cover is in the vault (§14.1).
+                              image: mediaFileImage(_coverPath!),
                               key: const Key('profile-cover-preview'),
                               fit: BoxFit.cover,
                             )
@@ -663,6 +688,92 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                         borderRadius: BorderRadius.circular(16),
                         borderSide: BorderSide(color: zen.accent, width: 1.5),
                       ),
+                    ),
+                  ),
+                  _EditSection(
+                    icon: Icons.flag_outlined,
+                    title: t('Narodowość'),
+                  ),
+                  TextField(
+                    key: const Key('profile-nationality-field'),
+                    controller: _nationalityController,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: InputDecoration(
+                      hintText: 'PL',
+                      prefixIcon: const Icon(Icons.flag_outlined),
+                      helperText: t(
+                        'Kody krajów, np. PL, UA (najwyżej 3). Otwiera sekcję '
+                        'krajową. Możesz zostawić puste.',
+                      ),
+                      helperMaxLines: 3,
+                      errorText: _nationalityError,
+                    ),
+                  ),
+                  _EditSection(
+                    icon: Icons.lock_outline_rounded,
+                    title: t('Kto widzi'),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
+                    decoration: BoxDecoration(
+                      color: zen.surface,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: zen.outlineSoft),
+                    ),
+                    child: Column(
+                      children: <Widget>[
+                        for (final ProfileField field in ProfileField.values)
+                          Row(
+                            children: <Widget>[
+                              Expanded(
+                                child: Text(
+                                  kProfileFieldLabels[field]!,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: zen.textPrimary,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                              DropdownButtonHideUnderline(
+                                child: DropdownButton<FieldVisibility>(
+                                  key: Key('profile-visibility-${field.name}'),
+                                  value:
+                                      fieldVisibilityByName(
+                                        _visibility[field.name],
+                                      ) ??
+                                      kDefaultFieldVisibility[field],
+                                  borderRadius: BorderRadius.circular(16),
+                                  style: TextStyle(
+                                    color: zen.textSecondary,
+                                    fontSize: 13.5,
+                                  ),
+                                  onChanged: (FieldVisibility? v) {
+                                    if (v == null) {
+                                      return;
+                                    }
+                                    setState(
+                                      () => _visibility = withFieldVisibility(
+                                        _visibility,
+                                        field,
+                                        v,
+                                      ),
+                                    );
+                                  },
+                                  items: <DropdownMenuItem<FieldVisibility>>[
+                                    for (final FieldVisibility v
+                                        in FieldVisibility.values)
+                                      DropdownMenuItem<FieldVisibility>(
+                                        value: v,
+                                        child: Text(kFieldVisibilityLabels[v]!),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 16),

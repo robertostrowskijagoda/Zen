@@ -28,21 +28,41 @@ abstract interface class NodeSignalBridge implements NativeSignalBridge {
 /// (`flutter run`, `flutter test`) also try the working directory, where the
 /// freshly built bridge of the checkout lives. There is never a bare-name
 /// lookup through the system DLL search path.
+///
+/// The checkout keeps one DLL per architecture (build_windows.ps1): x64 in
+/// `bin\`, ARM64 (Windows on ARM, [arm64]) in `bin\windows-arm64\`; next to
+/// the executable there is only the one the build installed.
 @visibleForTesting
 List<String> windowsBridgeLibraryCandidates({
   required String exeDirectory,
   required String currentDirectory,
   required bool debugMode,
+  bool arm64 = false,
 }) {
+  const String checkout = r'native\yggdrasil_bridge\bin';
   return <String>[
     '$exeDirectory\\yggdrasil_bridge.dll',
     if (debugMode) ...<String>[
-      '$currentDirectory\\native\\yggdrasil_bridge\\bin\\yggdrasil_bridge.dll',
+      if (arm64)
+        '$currentDirectory\\$checkout\\windows-arm64\\yggdrasil_bridge.dll'
+      else
+        '$currentDirectory\\$checkout\\yggdrasil_bridge.dll',
       if (currentDirectory != exeDirectory)
         '$currentDirectory\\yggdrasil_bridge.dll',
     ],
   ];
 }
+
+/// What the Android loader says when the bridge cannot be opened.
+///
+/// The APK carries the bridge for arm64-v8a, armeabi-v7a and x86_64
+/// (android/app/build.gradle.kts); other ABIs (32-bit x86 emulators, MIPS)
+/// are not supported.
+@visibleForTesting
+String androidBridgeLoadError(Object cause) =>
+    'Could not load libyggdrasil_bridge.so — the ABI of this device may not '
+    'be supported (the app bundles arm64-v8a, armeabi-v7a and x86_64). '
+    'Cause: $cause';
 
 final class YggdrasilBridgeException implements Exception {
   const YggdrasilBridgeException(this.message);
@@ -140,12 +160,8 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
       try {
         return DynamicLibrary.open('libyggdrasil_bridge.so');
       } catch (error) {
-        // The APK only ships arm64-v8a native libs — surface a readable cause
-        // instead of a raw FFI lookup error.
-        throw YggdrasilBridgeException(
-          'Could not load libyggdrasil_bridge.so — the device ABI may not be '
-          'supported (the app bundles arm64-v8a only). Cause: $error',
-        );
+        // A readable cause instead of a raw FFI lookup error.
+        throw YggdrasilBridgeException(androidBridgeLoadError(error));
       }
     }
     if (Platform.isWindows) {
@@ -153,6 +169,7 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
         exeDirectory: File(Platform.resolvedExecutable).parent.absolute.path,
         currentDirectory: Directory.current.absolute.path,
         debugMode: kDebugMode,
+        arm64: Abi.current() == Abi.windowsArm64,
       );
       for (final String candidate in candidates) {
         if (File(candidate).existsSync()) {

@@ -5,12 +5,15 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/crypto/ring_signature.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_record_log.dart';
@@ -61,7 +64,13 @@ abstract final class PyramidTypes {
   /// the other pyramid (§23.5).
   static const String fxKey = 'pyr_fx';
 
+  /// Anonymous sums of a branch for the cell head above (§20.2a statistics,
+  /// §22.1a "Dotarło / przeczytało"). 1.10.0 phones do not know it: their
+  /// branches are simply not counted.
+  static const String sum = 'pyr_sum';
+
   static const Set<String> all = <String>{
+    sum,
     wantAll,
     fxKey,
     record,
@@ -106,6 +115,10 @@ const int kPyrRateWindowMs = 10 * 60 * 1000;
 /// one this long at most, this many per sender and in all (the oldest go
 /// first). They live under their own key, so the main state stays small.
 const int kPyrReportEvidenceChars = 8000;
+
+/// The largest signed original entry a report carries (S36), encoded; a
+/// bigger one goes without it (the text evidence stays).
+const int kPyrReportEntryBytes = 16 * 1024;
 const int kPyrAppealChars = 2000;
 const int kPyrReportsPerSender = 10;
 const int kPyrReportsTotal = 150;
@@ -139,6 +152,34 @@ const int kPyrFxKept = 200;
 /// An exchange payment that waited in vain goes back this long after its
 /// time (treasurers still sign an acceptance made just before it).
 const int kPyrFxRefundGraceMs = 60 * 60 * 1000;
+
+/// Political posts whose reach is counted (the newest, at most this old).
+const int kPyrReachPosts = 50;
+const int kPyrReachMaxAgeMs = 30 * 24 * 3600 * 1000;
+
+/// A branch's anonymous statistics are shown only from this many people
+/// (fewer would point at somebody).
+const int kPyrStatsMinPeople = 5;
+
+/// The topic of the anonymous statistics among the sums (§20.2a), and its
+/// buckets: gender (k, m, other) × age (under 25, 25–39, 40–59, 60+).
+const String kPyrStatsTopic = 'st';
+const int kPyrStatsBuckets = 12;
+const List<String> kPyrStatsGenders = <String>['k', 'm', ''];
+const List<int> kPyrStatsAgeFrom = <int>[0, 25, 40, 60];
+
+/// The bucket of a person born in [birthYear] with [gender] in [year].
+int pyrStatsBucket(int birthYear, String gender, int year) {
+  final int age = year - birthYear;
+  int a = 0;
+  for (int i = 0; i < kPyrStatsAgeFrom.length; i++) {
+    if (age >= kPyrStatsAgeFrom[i]) {
+      a = i;
+    }
+  }
+  final int g = gender == 'k' ? 0 : (gender == 'm' ? 1 : 2);
+  return g * kPyrStatsAgeFrom.length + a;
+}
 
 /// A record waiting for this person's signature.
 final class PyrProposal {
@@ -204,6 +245,10 @@ final class PyrReport {
     this.contentHash,
     this.from,
     this.escalated = false,
+    this.entryId,
+    this.entry,
+    this.stage = 0,
+    this.sentAt,
   });
 
   final String id;
@@ -214,11 +259,30 @@ final class PyrReport {
   final String target;
   final String evidence;
   final String? datingKey;
+
+  /// Hash of the reported text: what 1.10.0 phones ban by.
   final String? contentHash;
+
+  /// Id of the reported entry (a post, comment, message): what a content
+  /// ban names (S36).
+  final String? entryId;
+
+  /// The signed original entry, when the reporter had it (S36): evidence
+  /// nobody can make up. In an inbox only once its signatures checked out.
+  final Map<String, dynamic>? entry;
 
   /// Device that sent it (only in the delegate's inbox).
   final String? from;
+
+  /// Reached the top (the last step of escalation).
   bool escalated;
+
+  /// Escalation step (§21.4): 0 = the delegates of the narrowest branch
+  /// around the reporter, each step the next wider ones, then the top.
+  int stage;
+
+  /// When it went to the current step (own reports).
+  int? sentAt;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
@@ -230,6 +294,10 @@ final class PyrReport {
     if (contentHash != null) 'h': contentHash,
     if (from != null) 'f': from,
     if (escalated) 'esc': true,
+    if (entryId != null) 'eid': entryId,
+    if (entry != null) 'en': entry,
+    if (stage > 0) 'st': stage,
+    if (sentAt != null) 'sa': sentAt,
   };
 
   static PyrReport? fromJson(Object? json) {
@@ -250,6 +318,12 @@ final class PyrReport {
       contentHash: s('h'),
       from: s('f'),
       escalated: json['esc'] == true,
+      entryId: s('eid'),
+      entry: json['en'] is Map
+          ? Map<String, dynamic>.from(json['en'] as Map)
+          : null,
+      stage: json['st'] is int ? (json['st'] as int).clamp(0, 64) : 0,
+      sentAt: json['sa'] is int ? json['sa'] as int : null,
     );
   }
 }
@@ -277,6 +351,7 @@ final class PyrMarketMessage {
     this.hops = 0,
     this.origin,
     this.level,
+    this.introduce,
   });
 
   final String id;
@@ -303,6 +378,12 @@ final class PyrMarketMessage {
   /// The level of acquaintance the price was for ([kPriceLevels]).
   final String? level;
 
+  /// A paid introduction (§24): the member the payer asks to be introduced
+  /// to. The payment waits for their answer, not the intermediary's: the
+  /// intermediary passes the request on, and is paid only when that person
+  /// accepts it.
+  final String? introduce;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
     'k': kind,
@@ -316,6 +397,7 @@ final class PyrMarketMessage {
     if (hops > 0) 'h': hops,
     if (origin != null) 'o': origin,
     if (level != null) 'lv': level,
+    if (introduce != null) 'y': introduce,
   };
 
   static PyrMarketMessage? fromJson(Object? json) {
@@ -340,6 +422,7 @@ final class PyrMarketMessage {
       hops: json['h'] is int ? (json['h'] as int).clamp(0, kMaxAdHops) : 0,
       origin: json['o'] is String ? json['o'] as String : null,
       level: json['lv'] is String ? json['lv'] as String : null,
+      introduce: json['y'] is String ? json['y'] as String : null,
     );
   }
 }
@@ -366,6 +449,7 @@ final class PyramidService extends ChangeNotifier {
     required this.disk,
     this.crisisBroadcast,
     this.friendsOf,
+    this.friendLevelOf,
     int Function()? now,
     Random? random,
     this.tallyWait = const Duration(hours: 6),
@@ -384,6 +468,11 @@ final class PyramidService extends ChangeNotifier {
   /// Friends' friend lists (address → name), when they share them: tells
   /// a friend of a friend from a stranger for market prices (§24).
   final Map<String, String> Function(String friend)? friendsOf;
+
+  /// This person's private level for the friend at an address (§8): a
+  /// newcomer is admitted only at "Znajomy" or above (§20.2). Null: not
+  /// known here (tests, no ledger), so only friendship is checked.
+  final FriendLevel? Function(String address)? friendLevelOf;
 
   /// Sends a crisis wave over Bluetooth to phones around (§28.1).
   final Future<int> Function(Map<String, dynamic> wave)? crisisBroadcast;
@@ -483,6 +572,18 @@ final class PyramidService extends ChangeNotifier {
 
   /// Emissions this phone first saw late (id → when seen, §23.4).
   final Map<String, int> _lateEmits = <String, int>{};
+
+  /// Anonymous sums from the members right below (§20.2a, §22.1a): topic
+  /// ([kPyrStatsTopic], or 'r|' + a post id) → member → their branch's
+  /// numbers.
+  final Map<String, Map<String, List<int>>> _sumsBelow =
+      <String, Map<String, List<int>>>{};
+
+  /// What this person last sent up, per topic (sent again only changed).
+  final Map<String, List<int>> _sumsSent = <String, List<int>>{};
+
+  /// Political posts this person opened (id → when), for "przeczytało".
+  final Map<String, int> _readPosts = <String, int>{};
 
   /// Market messages whose payment has not arrived yet (§24).
   final List<Map<String, dynamic>> _marketHeld = <Map<String, dynamic>>[];
@@ -804,6 +905,36 @@ final class PyramidService extends ChangeNotifier {
                   )
                 : const <Map<String, dynamic>>[],
           );
+        _sumsBelow.clear();
+        if (json['sb'] is Map) {
+          for (final MapEntry<dynamic, dynamic> e
+              in (json['sb'] as Map).entries) {
+            if (e.key is String && e.value is Map) {
+              _sumsBelow[e.key as String] = <String, List<int>>{
+                for (final MapEntry<dynamic, dynamic> k
+                    in (e.value as Map).entries)
+                  if (k.key is String && k.value is List)
+                    k.key as String: (k.value as List)
+                        .whereType<int>()
+                        .toList(),
+              };
+            }
+          }
+        }
+        _sumsSent.clear();
+        if (json['ss'] is Map) {
+          for (final MapEntry<dynamic, dynamic> e
+              in (json['ss'] as Map).entries) {
+            if (e.key is String && e.value is List) {
+              _sumsSent[e.key as String] = (e.value as List)
+                  .whereType<int>()
+                  .toList();
+            }
+          }
+        }
+        _readPosts
+          ..clear()
+          ..addAll(_ints(json['rd']));
       }
       final List<Object?>? logged = await _log.readAll();
       try {
@@ -976,6 +1107,9 @@ final class PyramidService extends ChangeNotifier {
             for (final PyramidRecord r in _payments.values) r.toJson(),
           ],
           'mh': _marketHeld,
+          'sb': _sumsBelow,
+          'ss': _sumsSent,
+          'rd': _readPosts,
         }),
       ),
     );
@@ -1544,7 +1678,7 @@ final class PyramidService extends ChangeNotifier {
   // ---- identity, joining ----
 
   static String dataCommit(int birthYear, String gender, String salt) =>
-      sha256Hex(utf8.encode('zen-pyr-data|$birthYear|$gender|$salt'));
+      pyrDataCommit(birthYear, gender, salt);
 
   /// At most [n] UTF-16 units, never cutting an emoji in half (a lone
   /// half would make the record unreadable for everybody else).
@@ -1596,7 +1730,8 @@ final class PyramidService extends ChangeNotifier {
         'by': <String>[me.id],
         'name': name.trim(),
         'founder': _memberJson(me, myName, nat),
-        'params': PyrParams().toJson(),
+        // A new pyramid starts with the newest rules (rules 2, §21.7).
+        'params': PyrParams(rules: kPyrRules).toJson(),
       },
     ).signedBy(me);
     current = g.id;
@@ -1781,6 +1916,11 @@ final class PyramidService extends ChangeNotifier {
   /// and change what happened since): a fresh copy goes round instead, and
   /// those who signed the old one sign it again without being asked.
   Future<void> approve(String id) async {
+    final PyrProposal? waiting = proposals[id];
+    if (waiting != null && admitProblem(waiting) != null) {
+      // Stays waiting: the level can still be raised (§20.2).
+      return;
+    }
     final PyrProposal? p = proposals.remove(id);
     final LedgerKeyPair? me = _identity;
     if (p == null || me == null) {
@@ -1901,6 +2041,29 @@ final class PyramidService extends ChangeNotifier {
       'type': PyramidTypes.signature,
       'r': signed.toJson(),
     });
+  }
+
+  /// Why this person cannot admit the newcomer of [p] yet (§20.2), or
+  /// null (also for anything but an admission): the newcomer must be a
+  /// friend (met in person, the QR) at the level "Znajomy" or above.
+  String? admitProblem(PyrProposal p) {
+    if (p.record.type != PyrT.admit) {
+      return null;
+    }
+    if (!host.isFriend(p.from)) {
+      return t('Przyjąć można tylko znajomego spotkanego osobiście.');
+    }
+    final FriendLevel? Function(String address)? levelOf = friendLevelOf;
+    if (levelOf == null) {
+      return null;
+    }
+    final FriendLevel? level = levelOf(p.from);
+    if (level == null || level.index < FriendLevel.friend.index) {
+      return t(
+        'Najpierw ustaw tej osobie poziom co najmniej „Znajomy” — do piramidy przyjmuje się tylko bliższych znajomych.',
+      );
+    }
+    return null;
   }
 
   Future<void> reject(String id) async {
@@ -2194,6 +2357,7 @@ final class PyramidService extends ChangeNotifier {
     String? datingKey,
     String reason = '',
     String? via,
+    String? entryId,
   }) async {
     final PyramidState? s = state;
     final String? p = s?.pathOf(target);
@@ -2211,6 +2375,8 @@ final class PyramidService extends ChangeNotifier {
         'kind': kind,
         'until': ?until,
         'hash': ?hash,
+        // The entry itself (S36); the hash stays for 1.10.0 phones.
+        'eid': ?entryId,
         'dk': ?datingKey,
         'reason': reason,
       },
@@ -2279,7 +2445,8 @@ final class PyramidService extends ChangeNotifier {
     // New rules need at least 72 h of voting (§21.7); a day more, so a
     // late second signature (a fresh copy, §20.5) still leaves enough.
     final int minEnd = _now() + kPyrMinConstitutionMs + 24 * 3600 * 1000;
-    final int finalEnd = kind == 'constitution'
+    // Money above the limit is voted on the same way (§23.4).
+    final int finalEnd = kind == 'constitution' || kind == 'emit'
         ? (end < minEnd ? minEnd : end)
         : max(end, _now() + kPyrMinReferendumMs + 5000);
     // Through a branch delegation only the branch can be asked.
@@ -3002,12 +3169,18 @@ final class PyramidService extends ChangeNotifier {
   /// conditional payment that [to] keeps or returns (§24). An announcement
   /// ('ad') may go through [steps] intermediaries, each keeping [share]
   /// (at least what [to] asks); [to] is the first of them.
+  ///
+  /// A paid introduction ('intro') to member [introduce]: the payment goes
+  /// to [to], the intermediary, but waits for [introduce]'s answer (§24) —
+  /// paid when they accept, back to the payer when they refuse, or when
+  /// nobody answers in a week.
   Future<bool> sendMarket(
     String to,
     String kind,
     String text, {
     int steps = 1,
     int? share,
+    String? introduce,
   }) async {
     final PyramidState? s = state;
     final String? me = myKey;
@@ -3018,6 +3191,11 @@ final class PyramidService extends ChangeNotifier {
         m.addr.isEmpty ||
         text.trim().isEmpty ||
         to == me) {
+      return false;
+    }
+    final String? target = kind == 'intro' ? introduce : null;
+    if (target != null &&
+        (target == me || target == to || !s.isMember(target))) {
       return false;
     }
     final String body = text.trim();
@@ -3032,7 +3210,7 @@ final class PyramidService extends ChangeNotifier {
         to,
         each * (hops + 1),
         memo: kMarketKinds[kind] ?? kind,
-        condBy: to,
+        condBy: target ?? to,
         share: hops > 0 ? each : 0,
         hops: hops,
         hash: hops > 0 ? contentHash(body) : null,
@@ -3053,6 +3231,7 @@ final class PyramidService extends ChangeNotifier {
       mine: true,
       hops: hops,
       level: asked.level,
+      introduce: target,
     );
     market[msg.id] = msg;
     await _save();
@@ -3065,6 +3244,7 @@ final class PyramidService extends ChangeNotifier {
       'x': ?paymentId,
       'a': each,
       if (hops > 0) 'h': hops,
+      'y': ?target,
     });
     return true;
   }
@@ -3137,12 +3317,21 @@ final class PyramidService extends ChangeNotifier {
       return;
     }
     final String? payment = p['x'] is String ? p['x'] as String : null;
-    // The price for the sender's level, as this phone knows them (§24).
-    final String level = levelOfAddress(from) ?? 'stranger';
-    final int asked = s.priceFor(me, kind, level) ?? 0;
     final String? origin = p['o'] is String && s.members.containsKey(p['o'])
         ? p['o'] as String
         : null;
+    // A paid introduction (§24): at the intermediary it names the member
+    // to introduce to (who decides on the payment); at that member it
+    // comes from the intermediary, paid by [origin], and the money is the
+    // intermediary's once this person accepts.
+    final Object? y = p['y'];
+    final String? introduce =
+        kind == 'intro' && y is String && y != me && s.isMember(y) ? y : null;
+    final bool introducedHere = kind == 'intro' && y == me && origin != null;
+    // The price for the sender's level, as this phone knows them (§24);
+    // an introduction passed on was priced by the intermediary.
+    final String level = levelOfAddress(from) ?? 'stranger';
+    final int asked = introducedHere ? 0 : s.priceFor(me, kind, level) ?? 0;
     final PyrEscrow? escrow = payment == null ? null : s.escrows[payment];
     if (payment != null && escrow == null) {
       // The payment has not reached this phone yet: the message waits for
@@ -3159,6 +3348,7 @@ final class PyramidService extends ChangeNotifier {
             'x': payment,
             if (p['h'] is int) 'h': p['h'],
             'o': ?origin,
+            if (p['y'] is String) 'y': p['y'],
           },
           'at': _now(),
         });
@@ -3178,8 +3368,8 @@ final class PyramidService extends ChangeNotifier {
     if (escrow != null) {
       paid = escrow.isChain ? min(escrow.share, escrow.amount) : escrow.amount;
       forged =
-          escrow.condBy != me ||
-          escrow.to != me ||
+          escrow.condBy != (introduce ?? me) ||
+          escrow.to != (introducedHere ? sender : me) ||
           escrow.from != (origin ?? sender) ||
           escrow.settled != null ||
           escrow.until < _now() + kPyrMarketMinWaitMs ||
@@ -3211,6 +3401,7 @@ final class PyramidService extends ChangeNotifier {
       hops: hops,
       origin: origin,
       level: level,
+      introduce: introduce,
     );
     _trimMarket(sender);
     if (!market.containsKey(id)) {
@@ -3277,6 +3468,29 @@ final class PyramidService extends ChangeNotifier {
     }
     final PyramidState? s = state;
     final String? me = myKey;
+    final String? introduce = m.introduce;
+    if (m.kind == 'intro' && introduce != null) {
+      // The intermediary of a paid introduction (§24) does not take the
+      // money: it passes the request on, and the person asked decides.
+      m.done = true;
+      await _save();
+      final String addr = s?.members[introduce]?.addr ?? '';
+      if (!accept || addr.isEmpty || me == null) {
+        return;
+      }
+      await _send(addr, <String, dynamic>{
+        'type': PyramidTypes.dm,
+        'id': _newId(16),
+        'k': 'intro',
+        'f': me,
+        't': m.text,
+        'x': ?m.payment,
+        'a': m.amount,
+        'o': m.origin ?? m.from,
+        'y': introduce,
+      });
+      return;
+    }
     final PyrEscrow? held = m.payment == null ? null : s?.escrows[m.payment];
     final bool mayGoOn =
         m.kind == 'ad' && m.hops > 0 && (held == null || held.hops > 0);
@@ -3835,49 +4049,384 @@ final class PyramidService extends ChangeNotifier {
     return r;
   }
 
-  // ---- reports (§21.4) ----
+  // ---- emission above the limit (§23.4) ----
 
-  /// Who gets a report from this person: delegates for reports whose branch
-  /// covers this person, else the top.
-  List<String> _reportReceivers({bool escalate = false}) {
+  /// Asks the whole pyramid to allow emitting [amount] to [to] above the
+  /// 30-day limit (§23.4): a referendum of everybody, at least 72 h like
+  /// new rules, passed by more than half of the active members with "Tak"
+  /// above the rest. The emission itself follows ([emitByReferendum]); it
+  /// still waits its day and can be vetoed.
+  Future<PyramidRecord?> emitReferendum({
+    required String to,
+    required int amount,
+    required String why,
+    int? end,
+  }) async {
+    final PyramidState? s = state;
+    if (s == null ||
+        s.params.rules < 2 ||
+        !s.isMember(to) ||
+        amount <= 0 ||
+        amount > kPyrMaxAmount) {
+      return null;
+    }
+    return referendum(
+      question: t('Emisja {amount} dla {name} ponad limit: {why}', {
+        'amount': formatMoney(amount),
+        'name': s.members[to]?.name ?? '?',
+        'why': why,
+      }),
+      options: <String>[t('Tak'), t('Nie')],
+      end: end ?? 0,
+      kind: 'emit',
+      params: <String, dynamic>{'to': to, 'amount': amount},
+    );
+  }
+
+  /// The emission the referendum [refId] allowed (§23.4), proposed to the
+  /// top (2 of 3).
+  Future<PyramidRecord?> emitByReferendum(String refId, String why) async {
+    final PyrReferendum? r = state?.referenda[refId];
+    final Map<String, dynamic>? p = r?.params;
+    if (r == null || r.kind != 'emit' || p == null) {
+      return null;
+    }
+    return topDecision(<String, dynamic>{
+      't': PyrT.emit,
+      'to': p['to'],
+      'amount': p['amount'],
+      'why': why,
+      'ref': refId,
+    });
+  }
+
+  // ---- national section, badge (§22.2, §20.2a) ----
+
+  /// The section's lead pins (or unpins) a post of the section (§22.2).
+  Future<PyramidRecord?> pinNational(String postId, {bool on = true}) async {
     final PyramidState? s = state;
     final String? k = myKey;
+    final String? nat = s?.natPosts[postId]?.nat;
+    if (s == null || k == null || nat == null || s.nationalLead(nat) != k) {
+      return null;
+    }
+    return propose(
+      <String, dynamic>{'t': PyrT.natPin, 'nat': nat, 'post': postId, 'on': on},
+      candidates: <String>[k],
+      need: 1,
+    );
+  }
+
+  /// Shows (or hides) this person's age and gender badge (§20.2a): the
+  /// data confirmed at admission is opened publicly, so anybody can check
+  /// it against the commitment. Null when there is nothing to show.
+  Future<PyramidRecord?> showBadge(bool show) async {
+    final String? k = myKey;
+    final Object? year = myData['by'];
+    final Object? gender = myData['g'];
+    final Object? salt = myData['salt'];
+    if (k == null || !isMember) {
+      return null;
+    }
+    if (show && (year is! int || gender is! String || salt is! String)) {
+      return null;
+    }
+    return propose(
+      show
+          ? <String, dynamic>{
+              't': PyrT.badge,
+              'k': k,
+              'yr': year,
+              'g': gender,
+              'salt': salt,
+            }
+          : <String, dynamic>{'t': PyrT.badge, 'k': k, 'off': true},
+      candidates: <String>[k],
+      need: 1,
+    );
+  }
+
+  // ---- anonymous sums up the tree (§20.2a, §22.1a) ----
+
+  /// Notes that this person opened political posts [ids] ("przeczytało").
+  void markRead(Iterable<String> ids) {
+    final int t = _now();
+    for (final String id in ids) {
+      _readPosts.putIfAbsent(id, () => t);
+    }
+  }
+
+  /// This person's own numbers for [topic] in [s].
+  List<int>? _ownSum(PyramidState s, String me, String topic) {
+    if (topic == kPyrStatsTopic) {
+      final List<int> out = List<int>.filled(kPyrStatsBuckets, 0);
+      final Object? year = myData['by'];
+      final Object? gender = myData['g'];
+      if (year is int && gender is String) {
+        final int now = DateTime.fromMillisecondsSinceEpoch(_now()).year;
+        out[pyrStatsBucket(year, gender, now)] = 1;
+      }
+      return out;
+    }
+    final PyrPost? post = s.posts[topic.substring(2)];
+    final String? ap = post == null ? null : s.pathOf(post.author);
+    final String? mine = s.pathOf(me);
+    if (ap == null || mine == null) {
+      return null;
+    }
+    // The author does not count themself.
+    final bool got = mine != ap && PyrPath.within(mine, ap);
+    return <int>[
+      if (got) 1 else 0,
+      if (got && _readPosts.containsKey(topic.substring(2))) 1 else 0,
+    ];
+  }
+
+  /// The numbers of this person's branch for [topic]: their own and the
+  /// newest of each member right below (who is there now).
+  List<int>? _branchSum(PyramidState s, String me, String topic) {
+    final List<int>? own = _ownSum(s, me, topic);
+    final String? mine = s.pathOf(me);
+    if (own == null || mine == null) {
+      return null;
+    }
+    final List<int> sum = List<int>.of(own);
+    final Map<String, List<int>> below =
+        _sumsBelow[topic] ?? const <String, List<int>>{};
+    for (final String c in PyrPath.children(mine)) {
+      final List<int>? kid = below[s.occupant[c] ?? ''];
+      if (kid == null || kid.length != sum.length) {
+        continue;
+      }
+      for (int i = 0; i < sum.length; i++) {
+        sum[i] += kid[i];
+      }
+    }
+    return sum;
+  }
+
+  /// "Dotarło / przeczytało" for this person's own post [postId] (§22.1a):
+  /// how many in the branch have it and how many opened it, as the sums
+  /// came up the tree. Null for anybody else's post.
+  ({int got, int read})? reachOf(String postId) {
+    final PyramidState? s = state;
+    final String? me = myKey;
+    if (s == null || me == null || s.posts[postId]?.author != me) {
+      return null;
+    }
+    final List<int>? sum = _branchSum(s, me, 'r|$postId');
+    return sum == null ? null : (got: sum[0], read: sum[1]);
+  }
+
+  /// Anonymous statistics of this person's branch (§20.2a): people by
+  /// gender and age ([pyrStatsBucket]), null below [kPyrStatsMinPeople].
+  List<int>? branchStats() {
+    final PyramidState? s = state;
+    final String? me = myKey;
+    if (s == null || me == null || !s.isMember(me)) {
+      return null;
+    }
+    final List<int>? sum = _branchSum(s, me, kPyrStatsTopic);
+    if (sum == null ||
+        sum.fold(0, (int a, int b) => a + b) < kPyrStatsMinPeople) {
+      return null;
+    }
+    return sum;
+  }
+
+  /// The topics this person sends up now: the statistics, and the reach
+  /// of the newest political posts of the line above (§22.1a).
+  List<String> _sumTopics(PyramidState s, String mine) {
+    final int t = _now();
+    final List<PyrPost> posts = s.posts.values.where((PyrPost p) {
+      final String? ap = s.pathOf(p.author);
+      return t - p.at <= kPyrReachMaxAgeMs &&
+          ap != null &&
+          ap != mine &&
+          PyrPath.within(mine, ap);
+    }).toList()..sort((PyrPost a, PyrPost b) => b.at.compareTo(a.at));
+    return <String>[
+      kPyrStatsTopic,
+      for (final PyrPost p in posts.take(kPyrReachPosts)) 'r|${p.id}',
+    ];
+  }
+
+  /// Sends the branch's sums that changed to the cell head above, and
+  /// forgets the ones nobody counts any more.
+  Future<void> _sumDuties(PyramidState s, String me) async {
+    final String? mine = s.pathOf(me);
+    if (mine == null) {
+      return;
+    }
+    final int t = _now();
+    _readPosts.removeWhere((String _, int at) => t - at > kPyrReachMaxAgeMs);
+    final Set<String> live = <String>{
+      kPyrStatsTopic,
+      for (final PyrPost p in s.posts.values)
+        if (t - p.at <= kPyrReachMaxAgeMs) 'r|${p.id}',
+    };
+    _sumsBelow.removeWhere((String topic, _) => !live.contains(topic));
+    _sumsSent.removeWhere((String topic, _) => !live.contains(topic));
+    if (mine.isEmpty) {
+      return;
+    }
+    final String addr =
+        s.members[s.occupant[PyrPath.parent(mine)] ?? '']?.addr ?? '';
+    if (addr.isEmpty) {
+      return;
+    }
+    final Map<String, List<int>> changed = <String, List<int>>{};
+    for (final String topic in _sumTopics(s, mine)) {
+      final List<int>? sum = _branchSum(s, me, topic);
+      final List<int>? sent = _sumsSent[topic];
+      if (sum != null && !listEquals(sum, sent)) {
+        changed[topic] = sum;
+      }
+    }
+    if (changed.isEmpty) {
+      return;
+    }
+    _sumsSent.addAll(changed);
+    await _save();
+    await _send(addr, <String, dynamic>{
+      'type': PyramidTypes.sum,
+      'py': s.id,
+      's': changed,
+    });
+  }
+
+  /// Sums from a member right below this person: each topic checked (a
+  /// post of this person's line, numbers no bigger than the sender's
+  /// branch) and kept as that member's newest.
+  Future<void> _onSums(String from, Map<String, dynamic> p) async {
+    final PyramidState? s = state;
+    final String? me = myKey;
+    final String? mine = me == null ? null : s?.pathOf(me);
+    final Object? sums = p['s'];
+    if (s == null || mine == null || p['py'] != s.id || sums is! Map) {
+      return;
+    }
+    final String? child = _membersAt(s, from)
+        .where((String k) => PyrPath.parent(s.pathOf(k) ?? '') == mine)
+        .where((String k) => s.pathOf(k) != mine)
+        .firstOrNull;
+    if (child == null) {
+      return;
+    }
+    final int cap = s.branchSize(s.pathOf(child)!);
+    bool changed = false;
+    for (final MapEntry<dynamic, dynamic> e in sums.entries.take(
+      kPyrReachPosts + 1,
+    )) {
+      final Object? topic = e.key;
+      final Object? raw = e.value;
+      if (topic is! String || raw is! List) {
+        continue;
+      }
+      final int size;
+      if (topic == kPyrStatsTopic) {
+        size = kPyrStatsBuckets;
+      } else if (topic.startsWith('r|')) {
+        final PyrPost? post = s.posts[topic.substring(2)];
+        final String? ap = post == null ? null : s.pathOf(post.author);
+        if (ap == null || !PyrPath.within(mine, ap)) {
+          continue;
+        }
+        size = 2;
+      } else {
+        continue;
+      }
+      final List<int> v = raw.whereType<int>().toList();
+      if (v.length != size ||
+          v.any((int x) => x < 0 || x > cap) ||
+          v.fold(0, (int a, int b) => a + b) > (size == 2 ? 2 * cap : cap)) {
+        continue;
+      }
+      (_sumsBelow[topic] ??= <String, List<int>>{})[child] = v;
+      changed = true;
+    }
+    if (changed) {
+      await _save();
+    }
+  }
+
+  // ---- reports (§21.4) ----
+
+  /// The delegates for reports whose branch covers this person, by the
+  /// depth of that branch, the narrowest first: the steps a report climbs
+  /// (§21.4).
+  List<List<String>> _reportSteps(PyramidState s) {
+    final String? k = myKey;
+    final String myPath = k == null ? '' : s.pathOf(k) ?? '';
+    final Map<int, Set<String>> byDepth = <int, Set<String>>{};
+    for (final PyrDelegation d in s.delegations.values) {
+      if (d.power == 'reports' &&
+          !d.revoked &&
+          d.until > _now() &&
+          s.isMember(d.to) &&
+          PyrPath.within(myPath, d.scope)) {
+        (byDepth[d.scope.length] ??= <String>{}).add(d.to);
+      }
+    }
+    final List<int> depths = byDepth.keys.toList()
+      ..sort((int a, int b) => b.compareTo(a));
+    return <List<String>>[
+      for (final int d in depths) byDepth[d]!.toList()..sort(),
+    ];
+  }
+
+  /// Who gets a report of this person at escalation [stage] (§21.4): the
+  /// delegates of the narrowest branch around them first, then level by
+  /// level the wider ones, at last the top.
+  List<String> _reportReceivers(int stage) {
+    final PyramidState? s = state;
     if (s == null) {
       return const <String>[];
     }
-    final String myPath = k == null ? '' : s.pathOf(k) ?? '';
-    if (!escalate) {
-      final List<String> delegates = <String>[
-        for (final PyrDelegation d in s.delegations.values)
-          if (d.power == 'reports' &&
-              !d.revoked &&
-              d.until > _now() &&
-              PyrPath.within(myPath, d.scope))
-            d.to,
-      ];
-      if (delegates.isNotEmpty) {
-        return delegates;
-      }
-    }
-    return s.topCell;
+    final List<List<String>> steps = _reportSteps(s);
+    return stage < steps.length ? steps[stage] : s.topCell;
   }
 
+  /// Whether [stage] is the last step, the top (§21.4).
+  bool _reportAtTop(int stage) {
+    final PyramidState? s = state;
+    return s == null || stage >= _reportSteps(s).length;
+  }
+
+  /// Reports something (§21.4). [entryId] names the reported entry (a
+  /// post, comment or message) and [entry] is its signed original when
+  /// this phone has it (S36): a ban then names the entry, not only the
+  /// hash of its text.
   Future<PyrReport> report({
     required String reason,
     String target = '',
     String evidence = '',
     String? datingKey,
     String? contentHash,
+    String? entryId,
+    Map<String, dynamic>? entry,
   }) async {
+    final Map<String, dynamic>? original =
+        entry != null &&
+            utf8.encode(jsonEncode(entry)).length <= kPyrReportEntryBytes
+        ? entry
+        : null;
+    final int t = _now();
     final PyrReport r = PyrReport(
       id: _newId(16),
       reason: reason,
-      at: _now(),
+      at: t,
       target: target,
       evidence: _cut(evidence, kPyrReportEvidenceChars),
       datingKey: datingKey,
       contentHash: contentHash,
+      entryId: entryId != null && entryId.isNotEmpty && entryId.length <= 128
+          ? entryId
+          : null,
+      entry: original,
+      sentAt: t,
     );
+    r.escalated = _reportAtTop(0);
     myReports[r.id] = r;
     // Only the newest are remembered.
     while (myReports.length > kPyrMyReportsKept) {
@@ -3887,7 +4436,7 @@ final class PyramidService extends ChangeNotifier {
       myReports.remove(oldest.id);
     }
     await _save();
-    await _sendReport(r, _reportReceivers());
+    await _sendReport(r, _reportReceivers(0));
     return r;
   }
 
@@ -3898,7 +4447,11 @@ final class PyramidService extends ChangeNotifier {
       if (addr.isEmpty) {
         continue;
       }
-      final Map<String, dynamic> json = r.toJson()..remove('f');
+      // What the receiver needs, never this phone's own bookkeeping.
+      final Map<String, dynamic> json = r.toJson()
+        ..remove('f')
+        ..remove('st')
+        ..remove('sa');
       if (_n(addr) == _n(host.ownAddress())) {
         await _onReport(addr, json);
       } else {
@@ -3974,7 +4527,31 @@ final class PyramidService extends ChangeNotifier {
           : null,
       from: from is String && from.length <= 300 ? from : null,
       escalated: r.escalated,
+      entryId: r.entryId != null && r.entryId!.length <= 128 ? r.entryId : null,
+      entry:
+          r.entry != null &&
+              utf8.encode(jsonEncode(r.entry)).length <= kPyrReportEntryBytes
+          ? r.entry
+          : null,
     );
+  }
+
+  /// The signed original of a report (S36), when it holds: a well-formed
+  /// entry whose device signature and certificate check out, and — when
+  /// the report names an entry — that very one. Null otherwise.
+  static Future<LogEntry?> verifiedReportEntry(PyrReport r) async {
+    final Map<String, dynamic>? json = r.entry;
+    if (json == null) {
+      return null;
+    }
+    final LogEntry? e = LogEntry.fromJson(json);
+    if (e == null ||
+        (r.entryId != null && r.entryId != e.id) ||
+        !await e.verifySignature() ||
+        !await e.certificate.verify()) {
+      return null;
+    }
+    return e;
   }
 
   /// At most [kPyrReportsPerSender] reports per sender and
@@ -4067,6 +4644,9 @@ final class PyramidService extends ChangeNotifier {
     if (r == null || inbox.containsKey(r.id)) {
       return;
     }
+    // The signed original is kept only when it holds; it then names the
+    // entry a ban will name.
+    final LogEntry? original = await verifiedReportEntry(r);
     inbox[r.id] = PyrReport(
       id: r.id,
       reason: r.reason,
@@ -4076,6 +4656,8 @@ final class PyramidService extends ChangeNotifier {
       datingKey: r.datingKey,
       contentHash: r.contentHash,
       from: _n(from),
+      entryId: original?.id ?? r.entryId,
+      entry: original == null ? null : r.entry,
     );
     _trimReports();
     if (!inbox.containsKey(r.id)) {
@@ -4153,6 +4735,7 @@ final class PyramidService extends ChangeNotifier {
         kind: banKind,
         until: until,
         hash: r.contentHash,
+        entryId: banKind == 'content' ? r.entryId : null,
         datingKey: r.datingKey,
         reason: kReportReasons[r.reason] ?? r.reason,
         via: banVia ?? via,
@@ -4424,6 +5007,8 @@ final class PyramidService extends ChangeNotifier {
         await _onAppeal(from, p);
       case PyramidTypes.fxKey:
         await _onFxKey(p);
+      case PyramidTypes.sum:
+        await _onSums(from, p);
     }
   }
 
@@ -4764,17 +5349,22 @@ final class PyramidService extends ChangeNotifier {
             : t('Połączenie piramid'),
       PyrT.merged => t('Ta piramida staje się gałęzią innej'),
       PyrT.fxRate => t('Kurs wymiany'),
+      PyrT.natPin =>
+        r.body['on'] == false
+            ? t('Odpięcie posta w sekcji krajowej')
+            : t('Przypięcie posta w sekcji krajowej'),
+      PyrT.badge =>
+        r.body['off'] == true
+            ? t('Ukrycie odznaki wieku i płci')
+            : t('Odznaka wieku i płci'),
       _ => r.type,
     };
   }
 
-  static String _two(int v) => v.toString().padLeft(2, '0');
-
-  /// A time for people: "2026-10-13 18:05" (this phone's zone).
-  static String _when(int ms) {
-    final DateTime d = DateTime.fromMillisecondsSinceEpoch(ms);
-    return '${d.year}-${_two(d.month)}-${_two(d.day)} ${_two(d.hour)}:${_two(d.minute)}';
-  }
+  /// A time for people: "13.10.2026 18:05" (this phone's zone, in the
+  /// app's language).
+  static String _when(int ms) =>
+      ZenFormat.dateTime(DateTime.fromMillisecondsSinceEpoch(ms));
 
   /// A length of time for people: "25 min", "3 h", "2 dni".
   static String _span(int ms) {
@@ -4961,12 +5551,18 @@ final class PyramidService extends ChangeNotifier {
             }),
           );
         }
-        if (r.body['params'] is Map) {
+        final Object? params = r.body['params'];
+        if (params is Map && r.str('kind') == 'emit') {
           out.add(
-            t('Nowe zasady: {params}', {
-              'params': jsonEncode(r.body['params']),
+            t('Emisja ponad limit: {amount} dla {name}', {
+              'amount': formatMoney(
+                params['amount'] is int ? params['amount'] as int : 0,
+              ),
+              'name': name(params['to']),
             }),
           );
+        } else if (params is Map) {
+          out.add(t('Nowe zasady: {params}', {'params': jsonEncode(params)}));
         }
       case PyrT.constitution:
         out.add(
@@ -4983,6 +5579,14 @@ final class PyramidService extends ChangeNotifier {
             'why': r.str('why'),
           }),
         );
+        if (r.str('ref').isNotEmpty) {
+          out.add(
+            t('Ponad limit, po referendum: {question}', {
+              'question':
+                  s?.referenda[r.str('ref')]?.question ?? _short(r.str('ref')),
+            }),
+          );
+        }
       case PyrT.alarm:
         out.add(
           t('Zasięg: {scope} · ważne do {time}', {
@@ -5257,13 +5861,20 @@ final class PyramidService extends ChangeNotifier {
     }
     await _fxDuties();
     await _retryHeld();
+    await _sumDuties(s, me);
+    // A report without a decision climbs one step every
+    // [PyrParams.reportEscalateHours]: the next wider branch's delegates,
+    // at last the top (§21.4).
     for (final PyrReport r in myReports.values.toList()) {
       if (!r.escalated &&
           !s.decisions.containsKey(r.id) &&
-          t - r.at > s.params.reportEscalateHours * 3600 * 1000) {
-        r.escalated = true;
+          t - (r.sentAt ?? r.at) > s.params.reportEscalateHours * 3600 * 1000) {
+        r
+          ..stage += 1
+          ..sentAt = t
+          ..escalated = _reportAtTop(r.stage);
         await _save();
-        await _sendReport(r, _reportReceivers(escalate: true));
+        await _sendReport(r, _reportReceivers(r.stage));
       }
     }
     // A sign of life every 7 days, so nobody takes the place for empty.

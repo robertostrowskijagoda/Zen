@@ -2,8 +2,10 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
+import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/meet/ask/ask_service.dart';
 import 'package:zen/src/features/meet/circle/circle_service.dart';
 import 'package:zen/src/features/meet/events/event_model.dart';
@@ -202,7 +204,8 @@ void main() {
     final _Host ania = _Host(net, 'a1', <String>['b2', 'c3']);
     final _Host bob = _Host(net, 'b2', <String>['a1', 'c3']);
     final _Host cela = _Host(net, 'c3', <String>['a1', 'b2']);
-    ania.clock = bob.clock = cela.clock = DateTime(
+    final _Host dina = _Host(net, 'd4', <String>['a1', 'b2', 'c3']);
+    ania.clock = bob.clock = cela.clock = dina.clock = DateTime(
       2026,
       10,
       1,
@@ -210,7 +213,7 @@ void main() {
 
     final DinnerCircle c = await ania.circles.create(
       name: 'Czwartki',
-      friends: <String>[bob.address, cela.address],
+      friends: <String>[bob.address, cela.address, dina.address],
       weekday: DateTime.thursday,
       hour: 19,
       firstDinner: DateTime(2026, 10, 1),
@@ -222,7 +225,7 @@ void main() {
       'a1',
       'b2',
       'c3',
-      'a1',
+      'd4',
     ]);
     expect(s[1].$1, DateTime(2026, 10, 8, 19));
 
@@ -251,7 +254,7 @@ void main() {
           .members
           .map((CircleMember m) => m.name)
           .toList(),
-      <String>['b2', 'a1', 'c3'],
+      <String>['b2', 'a1', 'c3', 'd4'],
     );
 
     // Someone outside cannot change it.
@@ -351,6 +354,7 @@ void main() {
     final _Host ania = _Host(net, 'a1', <String>['b2', 'c3']);
     final _Host bob = _Host(net, 'b2', <String>['a1', 'c3']);
     final _Host cela = _Host(net, 'c3', <String>['a1', 'b2']);
+    final _Host dina = _Host(net, 'd4', <String>['a1', 'b2', 'c3']);
     for (final _Host h in net.values) {
       h.clock = DateTime(2026, 10, 1).millisecondsSinceEpoch;
     }
@@ -378,7 +382,7 @@ void main() {
 
     final DinnerCircle c = await ania.circles.create(
       name: 'Czwartki',
-      friends: <String>[bob.address, cela.address],
+      friends: <String>[bob.address, cela.address, dina.address],
       weekday: DateTime.thursday,
       hour: 19,
       firstDinner: DateTime(2026, 10, 1),
@@ -402,5 +406,133 @@ void main() {
     }
     await ania.circles.setMyPrefs(c.id, 'bez glutenu');
     expect(cela.circles.circle(c.id)!.prefs[ania.address], 'bez glutenu');
+  });
+
+  group('Zapytaj sieć: answers are signed by the answerer', () {
+    test('a signed answer comes back through a middle friend and checks '
+        'out; an unsigned one is kept but marked', () async {
+      final Map<String, _Host> net = <String, _Host>{};
+      final _Host kasia = _Host(net, 'k1', <String>['b2']);
+      final _Host bartek = _Host(net, 'b2', <String>['k1', 'c3']);
+      final _Host celina = _Host(net, 'c3', <String>['b2']);
+      await LedgerIdentity.loadOrCreate(celina.ask.disk);
+      await LedgerIdentity.loadOrCreate(bartek.ask.disk);
+
+      final Question q = (await kasia.ask.ask('Dobry dentysta?'))!;
+      await bartek.ask.forward(q.id, <String>[celina.address]);
+      await celina.ask.answer(q.id, 'dr Nowak', pyramidKey: 'kk');
+      await bartek.ask.answer(q.id, 'Kowalska');
+      final List<AskAnswer> got = kasia.ask.mine.single.answers;
+      expect(got, hasLength(2));
+      expect(got.every((AskAnswer a) => a.signed), isTrue);
+      expect(got.first.path, <String>['c3', 'b2']);
+      expect(got.first.pyramidKey, 'kk');
+
+      // It stays checked across a restart and a tip.
+      final AskAnswer back = AskAnswer.fromJson(
+        jsonDecode(jsonEncode(got.first.withTip(100).toJson())),
+      )!;
+      expect(back.signed, isTrue);
+
+      // Nobody signs without keys: kept, but marked.
+      final _Host ola = _Host(net, 'o5', <String>['k1']);
+      kasia.friendList.add(ola.address);
+      final Question q2 = (await kasia.ask.ask('Hydraulik?'))!;
+      await ola.ask.answer(q2.id, 'Pan Zenek');
+      final AskAnswer plain = kasia.ask.mine
+          .firstWhere((Question x) => x.id == q2.id)
+          .answers
+          .single;
+      expect(plain.signed, isFalse);
+      expect(plain.text, 'Pan Zenek');
+      expect(askUnsignedLabel(), contains('Niepodpisana'));
+
+      // Old stored answers have no flag: unsigned.
+      expect(
+        AskAnswer.fromJson(<String, dynamic>{
+          't': 'x',
+          'at': 1,
+          'f': bartek.address,
+        })!.signed,
+        isFalse,
+      );
+    });
+
+    test('changed words, name or tip key, or a signature for another '
+        'question, are dropped', () async {
+      final Map<String, _Host> net = <String, _Host>{};
+      final _Host kasia = _Host(net, 'k1', <String>['b2']);
+      final _Host bartek = _Host(net, 'b2', <String>['k1']);
+      final LedgerIdentity id = await LedgerIdentity.loadOrCreate(
+        bartek.ask.disk,
+      );
+      final Question q = (await kasia.ask.ask('Dobry dentysta?'))!;
+      final Question other = (await kasia.ask.ask('Hydraulik?'))!;
+
+      Future<Map<String, dynamic>> frame({
+        String? signId,
+        String? signedText,
+        String? signedName,
+        String? signedAddress,
+        String text = 'dr Nowak',
+        String name = 'b2',
+        String? key,
+      }) async {
+        final String who = signedAddress ?? bartek.address;
+        final List<int> sig = await id.deviceKey.sign(
+          askAnswerSignedBytes(
+            id: signId ?? q.id,
+            answerer: who,
+            name: signedName ?? name,
+            text: signedText ?? text,
+            pyramidKey: key,
+          ),
+        );
+        return <String, dynamic>{
+          'type': AskTypes.answer,
+          'id': q.id,
+          't': text,
+          'p': <String>[name],
+          'k': ?key,
+          'sg': <String, dynamic>{
+            'd': id.certificate.toJson(),
+            's': b64(sig),
+            'a': who,
+          },
+        };
+      }
+
+      // The genuine one.
+      await bartek.send(kasia.address, await frame());
+      expect(kasia.ask.question(q.id)!.answers.single.signed, isTrue);
+
+      Future<void> expectDropped(Map<String, dynamic> f) async {
+        final int before = kasia.ask.question(q.id)!.answers.length;
+        await bartek.send(kasia.address, f);
+        expect(kasia.ask.question(q.id)!.answers, hasLength(before));
+      }
+
+      // A relay (or anyone) changes the words, the name, the tip key, or
+      // replays a signature made for another question.
+      await expectDropped(await frame(signedText: 'dr Nowak, ale drogo'));
+      await expectDropped(await frame(signedName: 'Inna osoba'));
+      await expectDropped((await frame())..['k'] = 'zlodziej');
+      await expectDropped(await frame(signId: other.id));
+      await expectDropped((await frame())..['sg'] = 'śmieci');
+      await expectDropped(
+        (await frame())
+          ..['sg'] = <String, dynamic>{'s': 'x', 'a': bartek.address},
+      );
+
+      // Sound, but under another address than the friend who answered:
+      // kept, shown marked (it may be another device of theirs).
+      await bartek.send(
+        kasia.address,
+        await frame(signedAddress: addr('f7'), text: 'inna'),
+      );
+      final AskAnswer odd = kasia.ask.question(q.id)!.answers.last;
+      expect(odd.text, 'inna');
+      expect(odd.signed, isFalse);
+    });
   });
 }

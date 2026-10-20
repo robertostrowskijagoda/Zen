@@ -1,8 +1,10 @@
+import 'package:zen/src/features/update/canary.dart';
 import 'package:zen/src/features/update/release.dart';
 
 /// What this device knows about new versions (§14.2): trusted releases
-/// newer than itself, when each was first seen, and the maintainers'
-/// vetoes. Pure bookkeeping; [UpdateService] does the network and files.
+/// newer than itself, when each was first seen, the maintainers' vetoes,
+/// the newest signed donation details (§14.3) and the newest canary.
+/// Pure bookkeeping; [UpdateService] does the network and files.
 final class UpdateBook {
   UpdateBook({
     required this.currentBuild,
@@ -24,6 +26,11 @@ final class UpdateBook {
   final Map<String, ReleaseRevocation> _revocations =
       <String, ReleaseRevocation>{};
 
+  /// The newest trusted release that carries [OfficialInfo], whatever its
+  /// build (also this very build or an older one).
+  SignedRelease? _officialSource;
+  SignedCanary? _canary;
+
   /// Whether network updates are possible in this build at all.
   bool get enabled => maintainers.length >= threshold;
 
@@ -39,6 +46,51 @@ final class UpdateBook {
       .firstOrNull;
 
   SignedRelease? release(int build) => _releases[build];
+
+  /// The release the signed donation details come from.
+  SignedRelease? get officialSource => _officialSource;
+
+  /// The donation link, author and repository the maintainers signed.
+  OfficialInfo? get signedOfficial => _officialSource?.manifest.official;
+
+  /// The newest trusted canary.
+  SignedCanary? get canary => _canary;
+
+  /// The mirrors named by the newest signed release.
+  List<String> get mirrors =>
+      (newest ?? _officialSource)?.manifest.mirrors ?? const <String>[];
+
+  /// Remembers the signed donation details of [release] when it is trusted
+  /// and newer than what we have — even when the release itself is not
+  /// newer than this build. Returns whether anything changed.
+  Future<bool> offerOfficial(SignedRelease release) async {
+    if (!enabled ||
+        release.manifest.official == null ||
+        (_officialSource != null &&
+            _officialSource!.manifest.build >= release.manifest.build) ||
+        !await release.isTrusted(
+          maintainers: maintainers,
+          threshold: threshold,
+        )) {
+      return false;
+    }
+    _officialSource = release;
+    return true;
+  }
+
+  /// Takes [canary] when trusted and newer than the one we have.
+  Future<bool> offerCanary(SignedCanary canary) async {
+    if (!enabled ||
+        (_canary != null && _canary!.statement.at >= canary.statement.at) ||
+        !await canary.isTrusted(
+          maintainers: maintainers,
+          threshold: threshold,
+        )) {
+      return false;
+    }
+    _canary = canary;
+    return true;
+  }
 
   /// The newest release that is not vetoed.
   SignedRelease? get candidate {
@@ -96,6 +148,10 @@ final class UpdateBook {
     }
     _releases[build] = release;
     _firstSeen[build] = now;
+    if (release.manifest.official != null &&
+        (_officialSource == null || _officialSource!.manifest.build < build)) {
+      _officialSource = release;
+    }
     while (_releases.length > keep) {
       final int drop = _releases.keys.reduce((int a, int b) => a < b ? a : b);
       _releases.remove(drop);
@@ -130,6 +186,8 @@ final class UpdateBook {
     'rev': <Map<String, dynamic>>[
       for (final ReleaseRevocation r in _revocations.values) r.toJson(),
     ],
+    if (_officialSource != null) 'off': _officialSource!.toJson(),
+    if (_canary != null) 'can': _canary!.toJson(),
   };
 
   /// Puts back what was saved (our own disk: signatures were checked when
@@ -161,5 +219,10 @@ final class UpdateBook {
         }
       }
     }
+    final SignedRelease? official = SignedRelease.fromJson(json['off']);
+    if (official != null && official.manifest.official != null) {
+      _officialSource = official;
+    }
+    _canary = SignedCanary.fromJson(json['can']) ?? _canary;
   }
 }

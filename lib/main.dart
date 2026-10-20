@@ -16,7 +16,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/about/go_licenses.dart';
-import 'package:zen/src/features/media/unsupported_video_player.dart';
+import 'package:zen/src/features/media/linux_video_player.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 
 void main(List<String> args) {
@@ -27,8 +27,8 @@ void main(List<String> args) {
       _installGlobalErrorHandlers();
       // The Go bridge's licenses next to the Dart packages' ones.
       registerGoLicenses();
-      // Linux: video_player has no backend there; fail fast, not forever.
-      UnsupportedVideoPlayer.registerIfNeeded();
+      // Linux: video_player has no backend there; Zen's own on GStreamer.
+      LinuxVideoPlayer.registerIfNeeded();
       // A second desktop instance cannot bind the runtime's peering port, so
       // it would run permanently offline. Hand the launch over to the instance
       // that is already running instead.

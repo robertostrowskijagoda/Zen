@@ -1,5 +1,6 @@
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/dev/sim/sim_network.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/meet/ask/ask_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_record_log.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
@@ -59,8 +60,12 @@ final class PyramidWorld {
   final int recordSegmentEntries;
 
   /// A phone with the pyramid service, its data on [disk] (a fresh one in
-  /// memory by default).
-  SimPhone add(String name, {LedgerDisk? disk}) {
+  /// memory by default); [friendLevelOf] is its private friend levels.
+  SimPhone add(
+    String name, {
+    LedgerDisk? disk,
+    FriendLevel? Function(String address)? friendLevelOf,
+  }) {
     final SimPhone p = net.phone(name);
     final PyramidService s = PyramidService(
       host: p,
@@ -68,6 +73,7 @@ final class PyramidWorld {
       now: () => net.now,
       tallyWait: const Duration(minutes: 30),
       recordSegmentEntries: recordSegmentEntries,
+      friendLevelOf: friendLevelOf,
       // Friends' friend lists, as the app's address book shares them.
       friendsOf: (String f) => <String, String>{
         for (final String a in net.byAddress[f]?.friendSet ?? const <String>{})

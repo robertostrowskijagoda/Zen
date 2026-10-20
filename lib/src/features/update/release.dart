@@ -19,8 +19,15 @@ const Duration kReleaseEmbargo = Duration(days: 7);
 /// Public keys (Ed25519, base64url) of release maintainers. Deliberately
 /// empty: the project does not want anyone holding publishing keys (they
 /// can die, lose them or be coerced), so network updates stay off until
-/// another way to approve versions is decided (docs/PROJEKT_APLIKACJI.md,
-/// §14.2, "Otwarta decyzja").
+/// another way to approve versions is decided (docs/PLAN.md,
+/// §14.2, "Otwarta decyzja"). While it is empty nothing signed is taken:
+/// no releases, vetoes, canaries or signed donation details.
+///
+/// Turning it on (docs/RELEASES.md §8): each maintainer runs
+/// `dart run tool/zen_release.dart keygen <file>` on their own offline
+/// machine and sends only the public key; then
+/// `dart run tool/zen_release.dart maintainers --write <key1> <key2> <key3>`
+/// fills this list, and the next release built with it takes updates.
 const List<String> kReleaseMaintainers = <String>[];
 
 const String kReleaseApp = 'zen';
@@ -140,7 +147,123 @@ bool _safeFileName(String name) =>
     name.length <= 100 &&
     RegExp(r'^[A-Za-z0-9][A-Za-z0-9._+-]*$').hasMatch(name);
 
-/// What the maintainers sign.
+/// A link a signed file may carry (donation page, repository, mirror):
+/// `https://` with a host, or plain `http://` to a Tor `.onion` address.
+bool isSafeReleaseLink(Object? value) {
+  if (value is! String || value.isEmpty || value.length > 200) {
+    return false;
+  }
+  final Uri? uri = Uri.tryParse(value);
+  if (uri == null || uri.host.isEmpty || uri.userInfo.isNotEmpty) {
+    return false;
+  }
+  return uri.scheme == 'https' ||
+      (uri.scheme == 'http' && uri.host.endsWith('.onion'));
+}
+
+/// How many of [maintainers] signed [message]: [signatures] maps a
+/// maintainer key to its signature (base64url). Each key counts once.
+Future<int> countMaintainerSignatures({
+  required Uint8List message,
+  required Map<String, String> signatures,
+  required List<String> maintainers,
+}) async {
+  int valid = 0;
+  for (final String key in maintainers.toSet()) {
+    final String? sig = signatures[key];
+    if (sig != null &&
+        await verifyLedgerSignature(
+          publicKey: key,
+          message: message,
+          signature: sig,
+        )) {
+      valid++;
+    }
+  }
+  return valid;
+}
+
+/// Reads the `sigs` list of a signed file (`[{k, s}]`), or null.
+Map<String, String>? readSignatureList(Object? sigs) {
+  if (sigs is! List || sigs.length > 10) {
+    return null;
+  }
+  final Map<String, String> signatures = <String, String>{};
+  for (final Object? s in sigs) {
+    if (s is Map && s['k'] is String && s['s'] is String) {
+      signatures[s['k'] as String] = s['s'] as String;
+    }
+  }
+  return Map<String, String>.unmodifiable(signatures);
+}
+
+/// The fields of an official build that a modified copy would change to
+/// take the money or the credit (§14.3 point 6): signed in the release
+/// manifest, compared with what this build shows.
+@immutable
+final class OfficialInfo {
+  const OfficialInfo({this.donation, this.author, this.repository});
+
+  /// The only official collection (`kDonationUrl`).
+  final String? donation;
+
+  /// Who makes Zen.
+  final String? author;
+
+  /// The source repository.
+  final String? repository;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'donation': ?donation,
+    'author': ?author,
+    'repo': ?repository,
+  };
+
+  static OfficialInfo? fromJson(Object? json) {
+    if (json is! Map) {
+      return null;
+    }
+    final Object? donation = json['donation'];
+    final Object? author = json['author'];
+    final Object? repo = json['repo'];
+    if ((donation != null && !isSafeReleaseLink(donation)) ||
+        (repo != null && !isSafeReleaseLink(repo)) ||
+        (author != null &&
+            (author is! String || author.isEmpty || author.length > 100)) ||
+        (donation == null && author == null && repo == null)) {
+      return null;
+    }
+    return OfficialInfo(
+      donation: donation as String?,
+      author: author as String?,
+      repository: repo as String?,
+    );
+  }
+
+  /// Which of the signed fields [build] shows differently (`donation`,
+  /// `author`, `repo`); fields not signed are not compared.
+  List<String> differencesFrom(OfficialInfo build) {
+    String norm(String v) {
+      String out = v.trim().toLowerCase();
+      while (out.endsWith('/')) {
+        out = out.substring(0, out.length - 1);
+      }
+      return out;
+    }
+
+    bool differs(String? signed, String? shown) =>
+        signed != null && (shown == null || norm(signed) != norm(shown));
+    return <String>[
+      if (differs(donation, build.donation)) 'donation',
+      if (differs(author, build.author)) 'author',
+      if (differs(repository, build.repository)) 'repo',
+    ];
+  }
+}
+
+/// What the maintainers sign: the files (APK, ZIP… by SHA-256 and blob
+/// id), and optionally the official donation link and author (§14.3) and
+/// the mirrors of the repository (§14.2).
 @immutable
 final class ReleaseManifest {
   const ReleaseManifest({
@@ -149,6 +272,9 @@ final class ReleaseManifest {
     required this.publishedAt,
     required this.files,
     this.notes = '',
+    this.official,
+    this.mirrors = const <String>[],
+    this.extra = const <String, Object?>{},
   });
 
   final String version;
@@ -158,6 +284,28 @@ final class ReleaseManifest {
   final int publishedAt;
   final String notes;
   final List<ReleaseFile> files;
+
+  /// The signed donation link, author and repository.
+  final OfficialInfo? official;
+
+  /// Other places the source and releases can be found (Codeberg, …).
+  final List<String> mirrors;
+
+  /// Fields this version does not know, kept so that the signature of a
+  /// manifest written by a newer tool still verifies.
+  final Map<String, Object?> extra;
+
+  static const Set<String> _known = <String>{
+    't',
+    'app',
+    'version',
+    'build',
+    'at',
+    'notes',
+    'files',
+    'official',
+    'mirrors',
+  };
 
   ReleaseFile? fileFor(String platform) =>
       files.where((ReleaseFile f) => f.platform == platform).firstOrNull;
@@ -172,6 +320,9 @@ final class ReleaseManifest {
     'files': <Map<String, dynamic>>[
       for (final ReleaseFile f in files) f.toJson(),
     ],
+    if (official != null) 'official': official!.toJson(),
+    if (mirrors.isNotEmpty) 'mirrors': mirrors,
+    ...extra,
   };
 
   Uint8List signedBytes() => canonicalJsonBytes(toJson());
@@ -208,12 +359,49 @@ final class ReleaseManifest {
       }
       parsed.add(file);
     }
+    OfficialInfo? official;
+    if (json['official'] != null) {
+      official = OfficialInfo.fromJson(json['official']);
+      if (official == null) {
+        return null;
+      }
+    }
+    final Object? mirrors = json['mirrors'];
+    if (mirrors != null &&
+        (mirrors is! List ||
+            mirrors.length > 10 ||
+            !mirrors.every(isSafeReleaseLink))) {
+      return null;
+    }
+    final Map<String, Object?> extra = <String, Object?>{
+      for (final MapEntry<Object?, Object?> e in json.entries)
+        if (e.key is String && !_known.contains(e.key))
+          e.key as String: e.value,
+    };
+    if (extra.length > 8) {
+      return null;
+    }
+    if (extra.isNotEmpty) {
+      try {
+        // Must sign the same way as everything else (no fractions…).
+        if (canonicalJson(extra).length > 8 * 1024) {
+          return null;
+        }
+      } on ArgumentError {
+        return null;
+      }
+    }
     return ReleaseManifest(
       version: version,
       build: build,
       publishedAt: at,
       notes: (notes as String?) ?? '',
       files: List<ReleaseFile>.unmodifiable(parsed),
+      official: official,
+      mirrors: List<String>.unmodifiable(
+        (mirrors as List<Object?>?)?.cast<String>() ?? const <String>[],
+      ),
+      extra: Map<String, Object?>.unmodifiable(extra),
     );
   }
 }
@@ -243,20 +431,11 @@ final class SignedRelease {
       return null;
     }
     final ReleaseManifest? manifest = ReleaseManifest.fromJson(json['m']);
-    final Object? sigs = json['sigs'];
-    if (manifest == null || sigs is! List || sigs.length > 10) {
+    final Map<String, String>? signatures = readSignatureList(json['sigs']);
+    if (manifest == null || signatures == null) {
       return null;
     }
-    final Map<String, String> signatures = <String, String>{};
-    for (final Object? s in sigs) {
-      if (s is Map && s['k'] is String && s['s'] is String) {
-        signatures[s['k'] as String] = s['s'] as String;
-      }
-    }
-    return SignedRelease(
-      manifest,
-      Map<String, String>.unmodifiable(signatures),
-    );
+    return SignedRelease(manifest, signatures);
   }
 
   /// Adds the signature of [maintainer].
@@ -269,22 +448,12 @@ final class SignedRelease {
   }
 
   /// How many of [maintainers] really signed it.
-  Future<int> validSignatures(List<String> maintainers) async {
-    final Uint8List bytes = manifest.signedBytes();
-    int valid = 0;
-    for (final String key in maintainers.toSet()) {
-      final String? sig = signatures[key];
-      if (sig != null &&
-          await verifyLedgerSignature(
-            publicKey: key,
-            message: bytes,
-            signature: sig,
-          )) {
-        valid++;
-      }
-    }
-    return valid;
-  }
+  Future<int> validSignatures(List<String> maintainers) =>
+      countMaintainerSignatures(
+        message: manifest.signedBytes(),
+        signatures: signatures,
+        maintainers: maintainers,
+      );
 
   Future<bool> isTrusted({
     List<String> maintainers = kReleaseMaintainers,

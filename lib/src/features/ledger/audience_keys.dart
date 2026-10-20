@@ -52,6 +52,28 @@ Set<Audience> audiencesFor(FriendLevel level) => switch (level) {
   FriendLevel.close => <Audience>{Audience.all, Audience.mid, Audience.close},
 };
 
+/// Whether [level] is at least [min] (§8: "Znajomy" and up may see the
+/// friend list and statuses, invite to groups).
+bool levelAtLeast(FriendLevel level, FriendLevel min) =>
+    level.index >= min.index;
+
+/// [addresses] with "Przyjaciel" first, then "Znajomy", then "Słaby
+/// znajomy" (§7: the recovery circle and mailbox guardians prefer close
+/// friends). Stable: the order within a level is kept.
+List<String> closestFirst(
+  Iterable<String> addresses,
+  FriendLevel Function(String address) levelOf,
+) {
+  final List<(int, String)> ranked = <(int, String)>[
+    for (final (int i, String a) in addresses.indexed) (i, a),
+  ];
+  ranked.sort((x, y) {
+    final int byLevel = levelOf(y.$2).index.compareTo(levelOf(x.$2).index);
+    return byLevel != 0 ? byLevel : x.$1.compareTo(y.$1);
+  });
+  return <String>[for (final (int _, String a) in ranked) a];
+}
+
 Audience? audienceByName(Object? name) {
   for (final Audience a in Audience.values) {
     if (a.name == name) {

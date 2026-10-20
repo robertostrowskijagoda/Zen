@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/crypto/ring_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
@@ -24,6 +26,16 @@ const int kPyrTallyGraceMs = 6 * 3600 * 1000;
 /// whatever happens to terms in it.
 const int kPyrEmitWindowMs = 30 * 24 * 3600 * 1000;
 
+/// The generation of the fold's rules this code knows ([PyrParams.rules]).
+/// 1 = the rules of 1.10.0; 2 adds (§6 pt 11, §23.4, S18): the quorum of
+/// a constitution counted from active members, a branch sum that came
+/// after the top's sum (past the grace time) no longer voids the count,
+/// emission above the limit by a referendum, and a record that throws
+/// while being applied leaves no trace. A pyramid gets them only from its
+/// genesis or a constitutional referendum, so a 1.10.0 phone and a newer
+/// one never fold one pyramid differently by surprise.
+const int kPyrRules = 2;
+
 /// The largest amount one record may move or emit, in hundredths
 /// (10 bilionów, 10^13 points): far below the 64-bit limit, so no sum of
 /// amounts can wrap around, whatever a record claims.
@@ -41,18 +53,14 @@ int pyrAdd(int a, int b) {
   return min(kPyrMaxBalance, x + y);
 }
 
-/// 12345 → "123,45": money for people (Polish style, thousands grouped
-/// with a non-breaking space).
-String pyrMoney(int hundredths) {
-  final bool neg = hundredths < 0;
-  final int v = hundredths.abs();
-  final String whole = (v ~/ 100).toString().replaceAllMapped(
-    RegExp(r'\B(?=(\d{3})+(?!\d))'),
-    (Match m) => '\u00a0',
-  );
-  final String s = '$whole,${(v % 100).toString().padLeft(2, '0')}';
-  return neg ? '-$s' : s;
-}
+/// 12345 → "123,45": money for people in the app's language (in Polish
+/// thousands grouped with a non-breaking space; "123.45" in English).
+String pyrMoney(int hundredths) => ZenFormat.money(hundredths);
+
+/// The public commitment to a member's birth year and gender (§20.2a):
+/// only this hash is published; the member may open it later (a badge).
+String pyrDataCommit(int birthYear, String gender, String salt) =>
+    sha256Hex(utf8.encode('zen-pyr-data|$birthYear|$gender|$salt'));
 
 /// The largest numerator or denominator of an exchange rate.
 const int kPyrMaxRate = 1000000000;
@@ -134,9 +142,14 @@ final class PyrParams {
     this.nationalMin = 100,
     this.electionHours = 72,
     this.reportEscalateHours = 48,
+    this.rules = 1,
   });
 
   int version;
+
+  /// Which generation of the fold's rules applies ([kPyrRules]). Missing
+  /// in pyramids made before 1.11: 1, the old rules.
+  int rules;
   int absenceDays;
 
   /// Members above this depth need their own cell's consent to be banned
@@ -167,6 +180,7 @@ final class PyrParams {
     'nationalMin': nationalMin,
     'electionHours': electionHours,
     'reportEscalateHours': reportEscalateHours,
+    'rules': rules,
   };
 
   void apply(Object? json) {
@@ -189,6 +203,7 @@ final class PyrParams {
       1,
       24 * 30,
     );
+    rules = v('rules', rules, 1, 1 << 30);
   }
 }
 
@@ -297,6 +312,7 @@ final class PyrBan {
     this.hash,
     this.datingKey,
     this.reason = '',
+    this.entryId,
   });
 
   final String id;
@@ -306,9 +322,16 @@ final class PyrBan {
   final String kind;
   final int at;
   final int? until;
+
+  /// Hash of the banned text (kept for 1.10.0 phones, which hide by it).
   final String? hash;
   final String? datingKey;
   final String reason;
+
+  /// Id of the banned entry itself — a signed post, a comment, a message
+  /// (S36): a changed copy of the text (one space added) has another hash
+  /// but is still not this entry; the entry is banned whatever its text.
+  final String? entryId;
   bool lifted = false;
 
   bool activeAt(int t) => !lifted && (until == null || t < until!);
@@ -418,6 +441,7 @@ final class PyrEmission {
     required this.signers,
     this.vetoers = const <String>[],
     this.group,
+    this.referendum,
   });
 
   final String id;
@@ -436,6 +460,10 @@ final class PyrEmission {
   /// The merge record this is a part of: money of a joining pyramid,
   /// converted (§20.5). One veto stops every part.
   final String? group;
+
+  /// The referendum that allowed it above the limit (§23.4): it is not
+  /// counted in the rolling limit.
+  final String? referendum;
   bool vetoed = false;
   bool done = false;
 }
@@ -677,6 +705,15 @@ final class PyramidState {
 
   /// nationality → (key → until): who may post with priority.
   final Map<String, Map<String, int>> natGrants = <String, Map<String, int>>{};
+
+  /// nationality → pinned post → when pinned (§22.2): the section's lead
+  /// pins at most [maxNatPins]; the oldest pin goes first.
+  final Map<String, Map<String, int>> natPins = <String, Map<String, int>>{};
+
+  /// Badges members show themselves (§20.2a): key → birth year and gender,
+  /// checked against the data they were admitted with.
+  final Map<String, ({int birthYear, String gender})> badges =
+      <String, ({int birthYear, String gender})>{};
   final Map<String, PyrReferendum> referenda = <String, PyrReferendum>{};
   int term = 1;
   final Map<int, int> termStart = <int, int>{1: 0};
@@ -727,6 +764,11 @@ final class PyramidState {
   /// Acts of delegates that do not count: dated before a revocation that
   /// did not know them, i.e. made up afterwards (second pass of [fold]).
   Set<String> _void = const <String>{};
+
+  /// Records refused up front because their rule threw in an earlier round
+  /// of the fold (rules 2, S18), and those that threw in this round.
+  Set<String> _poison = const <String>{};
+  final Set<String> _threw = <String>{};
 
   /// The top as it stands with every record but the closing ones: a
   /// pyramid is closed ([PyrT.merged]) only by 2 of that top, so a top
@@ -899,6 +941,12 @@ final class PyramidState {
       if (b.kind == 'content' && b.hash != null && b.activeAt(t)) b.hash!,
   };
 
+  /// Ids of entries (posts, comments, messages) banned now (S36).
+  Set<String> bannedEntries(int t) => <String>{
+    for (final PyrBan b in bans.values)
+      if (b.kind == 'content' && b.entryId != null && b.activeAt(t)) b.entryId!,
+  };
+
   Set<String> bannedDatingKeys(int t) => <String>{
     for (final PyrBan b in bans.values)
       if (b.kind == 'dating' && b.datingKey != null && b.activeAt(t))
@@ -952,9 +1000,16 @@ final class PyramidState {
       return null;
     }
     if (strict) {
+      // Rules 2 (§6 pt 11): a sum counted by the top once the branches had
+      // their time stands; a branch's sum dated after it cannot void it
+      // (one slow or stubborn cell would block the count for good).
+      final bool timeBound =
+          params.rules >= 2 && best.at >= r.end + kPyrTallyGraceMs;
       for (final String c in PyrPath.children(root)) {
         final PyrTally? kid = latestTally(r, c);
-        if (kid != null && !best.kids.contains(kid.id)) {
+        if (kid != null &&
+            !best.kids.contains(kid.id) &&
+            !(timeBound && kid.at > best.at)) {
           return null;
         }
       }
@@ -962,24 +1017,52 @@ final class PyramidState {
     return best.counts;
   }
 
-  /// Whether the constitutional referendum [refId] passed (§21.7): a full
-  /// count, more than half of the members voted, and the first option
-  /// ("Tak") got more than all the others together.
-  bool constitutionPasses(String refId) {
+  /// Members who count towards the quorum of a vote that ended at [end]:
+  /// with rules 2 only those seen (a signed record; a sign of life goes
+  /// out every 7 days) within [PyrParams.absenceDays] before it — places
+  /// of the dead and of forgotten fake accounts do not block the pyramid
+  /// (§6 pt 11); with the old rules everybody in a place.
+  int quorumBase(int end) {
+    if (params.rules < 2) {
+      return position.length;
+    }
+    final int since = end - params.absenceDays * 24 * 3600 * 1000;
+    int n = 0;
+    for (final String k in position.keys) {
+      final int seen = max(lastSeen[k] ?? 0, members[k]?.joinedAt ?? 0);
+      if (seen >= since) {
+        n++;
+      }
+    }
+    return max(1, n);
+  }
+
+  /// Whether the referendum [refId] passed the way binding ones must
+  /// (§21.7, §23.4): a full count, more than half of the members (the
+  /// active ones, rules 2) voted, and the first option ("Tak") got more
+  /// than all the others together.
+  bool referendumPasses(String refId) {
+    final PyrReferendum? ref = referenda[refId];
     final List<int>? res = resultOf(refId, strict: true);
-    if (res == null || res.length < 2) {
+    if (ref == null || res == null || res.length < 2) {
       return false;
     }
     final int total = res.fold(0, (int a, int b) => a + b);
-    return total * 2 > position.length && res[0] * 2 > total;
+    return total * 2 > quorumBase(ref.end) && res[0] * 2 > total;
   }
+
+  /// Whether the constitutional referendum [refId] passed (§21.7).
+  bool constitutionPasses(String refId) => referendumPasses(refId);
 
   /// Emission in the [kPyrEmitWindowMs] up to [t] (vetoed ones do not
   /// count).
   int emittedWithin(int t) {
     int sum = 0;
     for (final PyrEmission e in emissions.values) {
-      if (!e.vetoed && e.at <= t && e.at > t - kPyrEmitWindowMs) {
+      if (!e.vetoed &&
+          e.referendum == null &&
+          e.at <= t &&
+          e.at > t - kPyrEmitWindowMs) {
         sum = pyrAdd(sum, e.amount);
       }
     }
@@ -1030,7 +1113,9 @@ final class PyramidState {
   /// - a pyramid that joined another with its money closes with the time
   ///   its money was counted: money records dated later do not count, so
   ///   nothing is spent twice, here and converted there (a second pass).
-  /// A record whose rule throws is skipped, never the whole pyramid.
+  /// A record whose rule throws is skipped, never the whole pyramid; with
+  /// rules 2 it leaves no trace either (S18): the fold runs again with it
+  /// refused before anything of it was applied.
   static PyramidState fold(
     String pyramidId,
     Iterable<PyramidRecord> records, {
@@ -1044,8 +1129,9 @@ final class PyramidState {
           r,
     ]..sort(_order);
     Set<String>? finalTop;
+    Set<String> poison = const <String>{};
     if (list.any((PyramidRecord r) => r.type == PyrT.merged)) {
-      finalTop = _run(
+      final PyramidState open = _runClean(
         pyramidId,
         <PyramidRecord>[
           for (final PyramidRecord r in list)
@@ -1056,9 +1142,12 @@ final class PyramidState {
         const <String>{},
         null,
         const <String>{},
-      ).topCell.toSet();
+        poison,
+      );
+      finalTop = open.topCell.toSet();
+      poison = open._poison;
     }
-    PyramidState s = _run(
+    PyramidState s = _runClean(
       pyramidId,
       list,
       now,
@@ -1066,6 +1155,7 @@ final class PyramidState {
       const <String>{},
       finalTop,
       const <String>{},
+      poison,
     );
     final Set<String> late = s._lateActs();
     final int? cut = s.mergedInto == null ? null : s.mergeCut;
@@ -1075,10 +1165,59 @@ final class PyramidState {
           if (moneyKinds.contains(r.type) && r.at > cut) r.id,
     };
     if (late.isNotEmpty || cutOff.isNotEmpty) {
-      s = _run(pyramidId, list, now, treasurerSigs, late, finalTop, cutOff);
+      s = _runClean(
+        pyramidId,
+        list,
+        now,
+        treasurerSigs,
+        late,
+        finalTop,
+        cutOff,
+        s._poison,
+      );
     }
     return s;
   }
+
+  /// [_run] until no record throws that was not already refused up front
+  /// (rules 2, S18): a record whose rule threw halfway may have changed the
+  /// state before throwing, so the fold starts again without it. Every
+  /// phone finds the same records, so every phone gets the same state. A
+  /// few rounds at most (each round adds at least one record).
+  static PyramidState _runClean(
+    String pyramidId,
+    List<PyramidRecord> list,
+    int now,
+    Map<String, Set<String>> treasurerSigs,
+    Set<String> voids,
+    Set<String>? finalTop,
+    Set<String> cutOff,
+    Set<String> poison,
+  ) {
+    Set<String> bad = poison;
+    int round = 0;
+    while (true) {
+      final PyramidState s = _run(
+        pyramidId,
+        list,
+        now,
+        treasurerSigs,
+        voids,
+        finalTop,
+        cutOff,
+        bad,
+      );
+      if (s._threw.isEmpty || ++round > 8) {
+        return s;
+      }
+      bad = <String>{...bad, ...s._threw};
+    }
+  }
+
+  /// Tests: runs after each record's rule, inside its guard — throwing
+  /// here is a rule that failed halfway, after changing the state (S18).
+  @visibleForTesting
+  static void Function(PyramidRecord r)? debugAfterApply;
 
   /// Time, then the genesis, then the id (ids are worked out once).
   static int _order(PyramidRecord a, PyramidRecord b) {
@@ -1101,11 +1240,13 @@ final class PyramidState {
     Map<String, Set<String>> treasurerSigs,
     Set<String> voids,
     Set<String>? finalTop,
-    Set<String> cutOff,
-  ) {
+    Set<String> cutOff, [
+    Set<String> poison = const <String>{},
+  ]) {
     final PyramidState s = PyramidState._(pyramidId)
       .._void = voids
-      .._finalTop = finalTop;
+      .._finalTop = finalTop
+      .._poison = poison;
     // Proposals already counted (content without the time): a fresh copy
     // of one, signed again late (§20.5), counts once.
     final Set<String> proposalsDone = <String>{};
@@ -1125,21 +1266,35 @@ final class PyramidState {
         s.rejected[r.id] = 'ta propozycja już weszła (inna kopia)';
         continue;
       }
+      if (poison.contains(r.id)) {
+        // It threw in an earlier round (rules 2): refused before anything
+        // of it happened.
+        s.rejected[r.id] = 'błędny rekord';
+        continue;
+      }
       String? why;
       try {
         why = s._apply(r, treasurerSigs[r.id] ?? const <String>{});
+        debugAfterApply?.call(r);
       } on Object {
         // A malformed record never breaks the pyramid: it does not count,
         // the same way on every phone.
         why = 'błędny rekord';
+        if (s.params.rules >= 2) {
+          s._threw.add(r.id);
+        }
       }
       if (why == null) {
         if (proposal != null) {
           proposalsDone.add(proposal);
         }
         s.applied.add(r.id);
-        for (final String k in r.signers) {
-          s.lastSeen[k] = max(s.lastSeen[k] ?? 0, r.at);
+        // Kinds a 1.10.0 phone does not know are no sign of life: the two
+        // would disagree on who is absent.
+        if (!PyrT.since111.contains(r.type)) {
+          for (final String k in r.signers) {
+            s.lastSeen[k] = max(s.lastSeen[k] ?? 0, r.at);
+          }
         }
       } else {
         s.rejected[r.id] = voids.contains(r.id)
@@ -1771,10 +1926,20 @@ final class PyramidState {
         if (amount > kPyrMaxAmount) {
           return 'za duża kwota';
         }
-        // A rolling 30-day limit: a new head (a new term) does not bring a
-        // fresh one.
-        if (amount > params.emitLimit ||
+        // Above the limit only what a referendum of the whole pyramid
+        // allowed, once (§23.4, rules 2).
+        final String? byRef = params.rules >= 2 && r.body['ref'] is String
+            ? r.body['ref'] as String
+            : null;
+        if (byRef != null) {
+          final String? why = _emitReferendumProblem(byRef, to, amount, r.at);
+          if (why != null) {
+            return why;
+          }
+        } else if (amount > params.emitLimit ||
             pyrAdd(emittedWithin(r.at), amount) > params.emitLimit) {
+          // A rolling 30-day limit: a new head (a new term) does not bring
+          // a fresh one.
           return 'przekroczony limit emisji (30 dni)';
         }
         emittedInTerm[term] = pyrAdd(emittedInTerm[term] ?? 0, amount);
@@ -1792,6 +1957,7 @@ final class PyramidState {
             for (final String k in topCell)
               if (!signers.contains(k)) k,
           ],
+          referendum: byRef,
         );
         return null;
       case PyrT.veto:
@@ -1984,8 +2150,101 @@ final class PyramidState {
         return null;
       case PyrT.fxRate:
         return _fxRate(r);
+      case PyrT.natPin:
+        return _natPin(r);
+      case PyrT.badge:
+        return _badge(r);
     }
     return 'nieznany rodzaj';
+  }
+
+  /// Why the referendum [refId] does not allow emitting [amount] to [to]
+  /// at [at] (§23.4), or null: a referendum of the whole pyramid about
+  /// exactly this emission, passed like new rules (full count, more than
+  /// half of the active members, "Tak" above the rest), counted, and not
+  /// used before.
+  String? _emitReferendumProblem(String refId, String to, int amount, int at) {
+    final PyrReferendum? ref = referenda[refId];
+    final Map<String, dynamic>? p = ref?.params;
+    if (ref == null || ref.kind != 'emit' || p == null) {
+      return 'emisja ponad limit tylko po referendum';
+    }
+    if (p['to'] != to || p['amount'] != amount) {
+      return 'emisja inna niż w referendum';
+    }
+    if (at < ref.end + kPyrTallyGraceMs) {
+      return 'za wcześnie: sumy gałęzi jeszcze spływają';
+    }
+    if (emissions.values.any(
+      (PyrEmission e) => e.referendum == refId && !e.vetoed,
+    )) {
+      return 'to referendum już wykorzystano';
+    }
+    if (!referendumPasses(refId)) {
+      return 'referendum nie przeszło';
+    }
+    return null;
+  }
+
+  /// The most posts one national section keeps pinned (§22.2).
+  static const int maxNatPins = 3;
+
+  /// The section's lead pins a post of the section ('on' false unpins).
+  String? _natPin(PyramidRecord r) {
+    final String nat = r.str('nat');
+    final String k = r.signers.length == 1 ? r.signers.first : '';
+    final String postId = r.str('post');
+    if (nat.isEmpty ||
+        !position.containsKey(k) ||
+        members[k]?.nat != nat ||
+        nationalLead(nat) != k) {
+      return 'przypina tylko osoba prowadząca sekcję';
+    }
+    final Map<String, int> pins = natPins[nat] ??= <String, int>{};
+    if (r.body['on'] == false) {
+      return pins.remove(postId) == null ? 'nie było przypięte' : null;
+    }
+    if (natPosts[postId]?.nat != nat) {
+      return 'nie ma takiego posta w sekcji';
+    }
+    pins[postId] = r.at;
+    while (pins.length > maxNatPins) {
+      final String oldest = pins.entries
+          .reduce(
+            (MapEntry<String, int> a, MapEntry<String, int> b) =>
+                b.value < a.value ? b : a,
+          )
+          .key;
+      pins.remove(oldest);
+    }
+    return null;
+  }
+
+  /// A member shows their badge (§20.2a): the birth year, gender and salt
+  /// must open the commitment their admission confirmed; 'off' hides it.
+  String? _badge(PyramidRecord r) {
+    final String k = r.signers.length == 1 ? r.signers.first : '';
+    final PyrMember? m = members[k];
+    if (m == null || !position.containsKey(k) || r.str('k') != k) {
+      return 'nie członek';
+    }
+    if (r.body['off'] == true) {
+      return badges.remove(k) == null ? 'nie było odznaki' : null;
+    }
+    final Object? year = r.body['yr'];
+    final Object? gender = r.body['g'];
+    final Object? salt = r.body['salt'];
+    if (year is! int ||
+        gender is! String ||
+        salt is! String ||
+        gender.length > 8 ||
+        salt.length > 64 ||
+        m.dataCommit.isEmpty ||
+        pyrDataCommit(year, gender, salt) != m.dataCommit) {
+      return 'odznaka nie zgadza się z danymi z przyjęcia';
+    }
+    badges[k] = (birthYear: year, gender: gender);
+    return null;
   }
 
   /// The most other pyramids one member exchanges with.
@@ -2460,6 +2719,10 @@ final class PyramidState {
       hash: r.body['hash'] is String ? r.body['hash'] as String : null,
       datingKey: r.body['dk'] is String ? r.body['dk'] as String : null,
       reason: _clip(r.str('reason'), 500),
+      entryId:
+          r.body['eid'] is String && (r.body['eid'] as String).length <= 128
+          ? r.body['eid'] as String
+          : null,
     );
     history.add(
       PyrHistory(
@@ -2493,7 +2756,9 @@ final class PyramidState {
         : const <String>[];
     // A minimum length nobody can lower (not even by new rules): new rules
     // need 72 h of voting, anything else two minutes.
-    final int minLength = refKind == 'constitution'
+    // Money above the limit (§23.4, rules 2) is voted on like new rules.
+    final bool emitVote = refKind == 'emit' && params.rules >= 2;
+    final int minLength = refKind == 'constitution' || emitVote
         ? kPyrMinConstitutionMs
         : kPyrMinReferendumMs;
     if (opts.length < 2 || r.integer('end') < r.at + minLength) {
@@ -2507,6 +2772,16 @@ final class PyramidState {
         : null;
     bool ok;
     if (refKind == 'constitution') {
+      ok = _twoOfTop(r) && kind == 'all';
+    } else if (emitVote) {
+      final Object? p = r.body['params'];
+      if (p is! Map ||
+          !PyramidRecord.isCanonicalKey(p['to']) ||
+          p['amount'] is! int ||
+          (p['amount'] as int) <= 0 ||
+          (p['amount'] as int) > kPyrMaxAmount) {
+        return 'złe referendum o emisji';
+      }
       ok = _twoOfTop(r) && kind == 'all';
     } else {
       ok =
