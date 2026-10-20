@@ -214,6 +214,12 @@ final class StrangerChatBook extends ChangeNotifier {
         (StrangerMessagesFrom f) => f.name == json['from'],
         orElse: () => StrangerMessagesFrom.friendsOfFriends,
       );
+      final Object? firsts = json['first'];
+      if (firsts is List) {
+        _firstContacts
+          ..clear()
+          ..addAll(firsts.whereType<int>().take(kStrangerFirstContactsPerDay));
+      }
       final Object? chats = json['chats'];
       if (chats is List) {
         for (final Object? c in chats) {
@@ -238,6 +244,8 @@ final class StrangerChatBook extends ChangeNotifier {
           utf8.encode(
             jsonEncode(<String, dynamic>{
               'from': _from.name,
+              // The day's budget of new strangers survives a restart.
+              'first': _firstContacts,
               'chats': <Map<String, dynamic>>[
                 for (final StrangerChat c in _chats.values) c.toJson(),
               ],

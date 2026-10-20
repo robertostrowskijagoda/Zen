@@ -310,13 +310,20 @@ Future<File> writeTemporaryMedia(
   return file;
 }
 
+/// The name of this instance's temporary media folder in the system's
+/// temporary folder: one per test profile on a computer. Everything Zen
+/// leaves in a shared temporary folder lives in it, so a wipe removes
+/// exactly this and nothing another program or profile made.
+String mediaTemporaryFolderName() {
+  final String? profile = ZenInstance.profile;
+  return '$kMediaTemporaryFolder${profile == null ? '' : '-$profile'}';
+}
+
 /// The temporary media folder (one per test profile on a computer).
 Future<Directory> mediaTemporaryDirectory() async {
   final Directory base = await getTemporaryDirectory();
-  final String? profile = ZenInstance.profile;
   final Directory folder = Directory(
-    '${base.path}${Platform.pathSeparator}$kMediaTemporaryFolder'
-    '${profile == null ? '' : '-$profile'}',
+    '${base.path}${Platform.pathSeparator}${mediaTemporaryFolderName()}',
   );
   await folder.create(recursive: true);
   return folder;

@@ -9,6 +9,10 @@ import 'package:path_provider/path_provider.dart';
 /// with others — each a separate person with its own keys and mesh node.
 /// Without it, the app behaves as always.
 abstract final class ZenInstance {
+  /// The folder, inside the default instance's data folder, that holds the
+  /// data of the test profiles.
+  static const String profilesFolder = 'profiles';
+
   static String? _profile;
 
   /// The profile name, or null for the normal app.
@@ -47,7 +51,8 @@ abstract final class ZenInstance {
       return base;
     }
     final Directory dir = Directory(
-      '${base.path}${Platform.pathSeparator}profiles${Platform.pathSeparator}$p',
+      '${base.path}${Platform.pathSeparator}$profilesFolder'
+      '${Platform.pathSeparator}$p',
     );
     await dir.create(recursive: true);
     return dir;

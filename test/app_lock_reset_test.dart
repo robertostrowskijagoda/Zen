@@ -38,7 +38,11 @@ void main() {
           ),
           appSecurityServiceProvider.overrideWithValue(security),
           unlockThrottleProvider.overrideWithValue(
-            UnlockThrottle(store, now: () => now),
+            UnlockThrottle(
+              store,
+              now: () => now,
+              monotonic: () => now.difference(DateTime.utc(2026)),
+            ),
           ),
           // The real wipe needs the whole runtime; this one only erases the
           // credentials like it does and then waits to be let go.

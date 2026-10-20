@@ -18,7 +18,8 @@ abstract interface class StreamedMedia {
   String get contentType;
 
   /// Segment [index] in plain bytes, or `null` while it has not arrived.
-  /// Throws when it never will open (damaged, not this key).
+  /// Throws when it never will open (damaged, not this key, not a film):
+  /// the server then stops serving the film.
   Future<Uint8List?> segment(int index);
 }
 
@@ -48,13 +49,32 @@ final class MediaStreamServer {
   Future<HttpServer>? _starting;
   final Map<String, StreamedMedia> _media = <String, StreamedMedia>{};
 
+  /// Calls to [publish] that wait for the server: it stays open for them
+  /// even when the last film is withdrawn meanwhile.
+  int _publishing = 0;
+
   /// Films being served now.
   @visibleForTesting
   int get serving => _media.length;
 
   /// The address the player opens [media] at, until [withdraw].
   Future<Uri> publish(StreamedMedia media) async {
-    final HttpServer server = await (_starting ??= _start());
+    _publishing++;
+    final HttpServer server;
+    try {
+      final Future<HttpServer> starting = _starting ??= _start();
+      try {
+        server = await starting;
+      } on Object {
+        // A start that failed is not remembered: the next call tries again.
+        if (identical(_starting, starting)) {
+          _starting = null;
+        }
+        rethrow;
+      }
+    } finally {
+      _publishing--;
+    }
     final String token = <String>[
       for (int i = 0; i < 32; i++) _random.nextInt(16).toRadixString(16),
     ].join();
@@ -70,7 +90,7 @@ final class MediaStreamServer {
   /// Stops serving the film at [uri]; the server closes with the last one.
   Future<void> withdraw(Uri uri) async {
     _media.remove(uri.path.replaceFirst('/', ''));
-    if (_media.isEmpty && _starting != null) {
+    if (_media.isEmpty && _publishing == 0 && _starting != null) {
       final Future<HttpServer> starting = _starting!;
       _starting = null;
       try {
@@ -96,9 +116,10 @@ final class MediaStreamServer {
 
   Future<void> _serve(HttpRequest request) async {
     final HttpResponse response = request.response;
+    String token = '';
     try {
-      final StreamedMedia? media =
-          _media[request.uri.path.replaceFirst('/', '')];
+      token = request.uri.path.replaceFirst('/', '');
+      final StreamedMedia? media = _media[token];
       final bool fromHere =
           request.connectionInfo?.remoteAddress.isLoopback ?? false;
       if (media == null ||
@@ -144,7 +165,15 @@ final class MediaStreamServer {
       }
       final int size = media.segmentBytes;
       for (int i = range.start ~/ size; i <= range.end ~/ size; i++) {
-        final Uint8List? plain = await _waitSegment(media, i);
+        final Uint8List? plain;
+        try {
+          plain = await _waitSegment(media, i);
+        } on Object {
+          // A segment that never opens (or is not a film): the film is not
+          // served any more, so the player stops instead of asking again.
+          _media.remove(token);
+          rethrow;
+        }
         if (plain == null) {
           // Not here in time: the response ends short, and the player asks
           // again for what it is missing.

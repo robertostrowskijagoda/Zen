@@ -66,8 +66,63 @@ int _indexOf(List<int> haystack, List<int> needle) {
   return -1;
 }
 
+/// A film held in memory, served as it is.
+final class _MemoryFilm implements StreamedMedia {
+  _MemoryFilm(this.bytes);
+
+  final Uint8List bytes;
+
+  @override
+  int? get length => bytes.length;
+
+  @override
+  int get segmentBytes => 64;
+
+  @override
+  String get contentType => 'video/mp4';
+
+  @override
+  Future<Uint8List?> segment(int index) async {
+    final int from = index * segmentBytes;
+    return Uint8List.sublistView(
+      bytes,
+      from,
+      from + segmentBytes > bytes.length ? bytes.length : from + segmentBytes,
+    );
+  }
+}
+
 void main() {
-  test('fast start: moov goes before the frames, offsets follow', () {
+  test(
+    'fast start: a crafted file with deeply nested boxes is left as it is',
+    () {
+      List<int> nest(int depth) => depth == 0
+          ? _box('stco', <int>[0, 0, 0, 0, ..._u32(1), ..._u32(40)])
+          : _box('trak', nest(depth - 1));
+      final List<int> ftyp = _box('ftyp', <int>[
+        ...ascii.encode('isom'),
+        ..._u32(512),
+      ]);
+      final List<int> mdat = _box('mdat', <int>[1, 2, 3, 4, 5, 6, 7, 8]);
+      final List<int> moov = _box('moov', nest(2000));
+      final Uint8List deep = Uint8List.fromList(<int>[
+        ...ftyp,
+        ...mdat,
+        ...moov,
+      ]);
+      expect(identical(moveMoovToFront(deep), deep), isTrue);
+
+      // The same shape at a real depth is moved.
+      final Uint8List shallow = Uint8List.fromList(<int>[
+        ...ftyp,
+        ...mdat,
+        ..._box('moov', nest(3)),
+      ]);
+      expect(identical(moveMoovToFront(shallow), shallow), isFalse);
+    },
+  );
+
+  test('fast start: moov goes goes before the frames, offsets follow', () {
     final Uint8List slow = _slowFilm();
     final Uint8List fast = moveMoovToFront(slow);
     expect(fast.length, slow.length);
@@ -135,6 +190,125 @@ void main() {
     expect(looksLikeSafeStreamStart(head, fast.length), isTrue);
     expect(looksLikeSafeStreamStart(head, 300), isFalse);
     expect(looksLikeSafeStreamStart(randomBytes(400), 5000), isFalse);
+  });
+
+  test(
+    'every segment of a streamed film is checked, not only the first',
+    () async {
+      final BlobStore sender = BlobStore();
+      // `free` runs on into the second segment, where a box with an
+      // unprintable name starts.
+      final List<int> ftyp = _box('ftyp', <int>[
+        ...ascii.encode('isom'),
+        ..._u32(512),
+        0,
+        0,
+        0,
+        0,
+      ]);
+      final int freeSize = kMediaSegmentBytes + 10 - ftyp.length;
+      final List<int> film = <int>[
+        ...ftyp,
+        ..._box('free', List<int>.filled(freeSize - 8, 0)),
+        ..._u32(1000),
+        1,
+        2,
+        3,
+        4,
+        ...List<int>.filled(kMediaSegmentBytes - 10 - 8, 9),
+      ];
+      expect(film.length, 2 * kMediaSegmentBytes);
+      final MediaRef ref = mediaRefFromJson(
+        await storeMedia(sender, Uint8List.fromList(film), mime: 'video/mp4'),
+      )!;
+      bool reported = false;
+      final BlobMediaStream stream = BlobMediaStream(
+        sender,
+        ref,
+        onUnsafe: () => reported = true,
+      );
+      expect(await stream.segment(0), isNotNull);
+      expect(reported, isFalse);
+      await expectLater(
+        stream.segment(1),
+        throwsA(isA<UnsafeMediaException>()),
+      );
+      expect(reported, isTrue);
+      // Once bad, always bad.
+      await expectLater(
+        stream.segment(0),
+        throwsA(isA<UnsafeMediaException>()),
+      );
+
+      // A good film passes segment after segment.
+      final Uint8List good = moveMoovToFront(
+        _slowFilm(padding: kBlobChunkSize + 500),
+      );
+      final MediaRef goodRef = mediaRefFromJson(
+        await storeMedia(sender, good, mime: 'video/mp4'),
+      )!;
+      final BlobMediaStream fine = BlobMediaStream(sender, goodRef);
+      expect(await fine.segment(1), isNotNull);
+      expect(await fine.segment(0), isNotNull);
+    },
+  );
+
+  test('a segment that does not open stops the film on the server', () async {
+    final BlobStore sender = BlobStore();
+    final Uint8List good = moveMoovToFront(
+      _slowFilm(padding: kBlobChunkSize + 500),
+    );
+    final MediaRef ref = mediaRefFromJson(
+      await storeMedia(sender, good, mime: 'video/mp4'),
+    )!;
+    final MediaRef wrong = MediaRef(
+      id: ref.id,
+      key: randomBytes(32),
+      nonce: ref.nonce,
+      mime: ref.mime,
+    );
+    final MediaStreamServer server = MediaStreamServer(
+      waitFor: const Duration(seconds: 2),
+      pollEvery: const Duration(milliseconds: 20),
+    );
+    final Uri uri = await server.publish(BlobMediaStream(sender, wrong));
+    final HttpClient client = HttpClient();
+    addTearDown(() => client.close(force: true));
+    try {
+      final HttpClientResponse first = await (await client.getUrl(uri)).close();
+      await first.drain<void>();
+    } on Object {
+      // The response ends short: the player sees an error, that is the point.
+    }
+    expect(server.serving, 0, reason: 'not served any more');
+    final HttpClientResponse again = await (await client.getUrl(uri)).close();
+    expect(again.statusCode, HttpStatus.notFound);
+    await again.drain<void>();
+    await server.withdraw(uri);
+  });
+
+  test('withdrawing the last film while another is published keeps the '
+      'server open', () async {
+    final MediaStreamServer server = MediaStreamServer();
+    final Uri first = await server.publish(
+      _MemoryFilm(Uint8List.fromList(List<int>.generate(200, (int i) => i))),
+    );
+    final Future<Uri> second = server.publish(
+      _MemoryFilm(Uint8List.fromList(List<int>.generate(100, (int i) => i))),
+    );
+    await server.withdraw(first);
+    final Uri uri = await second;
+    final HttpClient client = HttpClient();
+    addTearDown(() => client.close(force: true));
+    final HttpClientResponse response = await (await client.getUrl(
+      uri,
+    )).close();
+    expect(response.statusCode, HttpStatus.ok);
+    expect(<int>[
+      for (final List<int> part in await response.toList()) ...part,
+    ], List<int>.generate(100, (int i) => i));
+    await server.withdraw(uri);
+    expect(server.serving, 0);
   });
 
   test('byte ranges', () {

@@ -446,6 +446,42 @@ bool looksLikeSafeStreamStart(Uint8List head, int length) {
   return true;
 }
 
+/// Whether [head] starts an MP4/MOV file (its first box is `ftyp`).
+bool isIsoMedia(Uint8List head) => _isoBrand(head) != null;
+
+/// The size of the top-level box of an MP4/MOV file that starts at
+/// [offset] of a file of [length] bytes, from its first bytes [header] (16,
+/// fewer only at the very end of the file); -1 when the box does not add up
+/// (unprintable name, smaller than its header, reaching past the file).
+/// Checked piece by piece as a film that plays while it downloads arrives.
+int isoBoxSizeAt(Uint8List header, int offset, int length) {
+  if (header.length < 8 || offset < 0 || offset + 8 > length) {
+    return -1;
+  }
+  for (int i = 4; i < 8; i++) {
+    final int c = header[i];
+    if ((c < 0x20 || c > 0x7E) && c != 0xA9) {
+      return -1;
+    }
+  }
+  final ByteData data = ByteData.sublistView(header);
+  int size = data.getUint32(0);
+  int headerSize = 8;
+  if (size == 1) {
+    if (header.length < 16 || data.getUint32(8) != 0) {
+      return -1;
+    }
+    size = data.getUint32(12);
+    headerSize = 16;
+  } else if (size == 0) {
+    size = length - offset;
+  }
+  if (size < headerSize || offset + size > length) {
+    return -1;
+  }
+  return size;
+}
+
 bool _isoBoxesAddUp(Uint8List bytes) {
   final ByteData data = ByteData.sublistView(bytes);
   int offset = 0;

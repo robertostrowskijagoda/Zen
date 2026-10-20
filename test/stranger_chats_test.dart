@@ -83,6 +83,38 @@ void main() {
     });
   });
 
+  test('the day\'s budget of new strangers survives a restart', () async {
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    int now = 1000000;
+    StrangerChatBook open() => StrangerChatBook(disk: disk, now: () => now);
+    String stranger(int i) =>
+        '200:1111:2222:3333:4444:5555:6666:${(0x1000 + i).toRadixString(16)}';
+    final StrangerChatBook book = open();
+    await book.setFrom(StrangerMessagesFrom.everyone);
+    for (int i = 0; i < kStrangerFirstContactsPerDay; i++) {
+      expect(book.admits(stranger(i)), isTrue);
+      await book.noteReceived(
+        stranger(i),
+        'hej',
+        mini: const MiniProfileTag(name: 'Obcy'),
+      );
+    }
+    final String late = stranger(kStrangerFirstContactsPerDay);
+    expect(book.admits(late), isFalse);
+
+    // Restarting the app does not give a new budget ...
+    final StrangerChatBook again = open();
+    await again.load();
+    expect(again.admits(late), isFalse);
+    // ... and neither does dropping their conversations.
+    await again.forget(stranger(0));
+    expect(again.admits(late), isFalse);
+
+    // A day later it does.
+    now += 25 * 3600 * 1000;
+    expect(again.admits(late), isTrue);
+  });
+
   group('in the chats', () {
     late MemorySignalTransport transport;
     late MemoryMessageTimelineStore timelines;

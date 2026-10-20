@@ -1971,7 +1971,7 @@ class _PostVideoState extends State<PostVideo> {
       return false;
     }
     final Uri uri = await MediaStreamServer.instance.publish(
-      BlobMediaStream(widget.node.blobs, widget.ref),
+      BlobMediaStream(widget.node.blobs, widget.ref, onUnsafe: _streamWentBad),
     );
     _streamUri = uri;
     await _start(VideoPlayerController.networkUrl(uri));
@@ -1980,6 +1980,22 @@ class _PostVideoState extends State<PostVideo> {
       await MediaStreamServer.instance.withdraw(uri);
     }
     return true;
+  }
+
+  /// A segment of the streamed film turned out to be bad: playback stops.
+  void _streamWentBad() {
+    final VideoPlayerController? p = _player;
+    if (!mounted) {
+      return;
+    }
+    if (p != null) {
+      unawaited(p.dispose());
+    }
+    setState(() {
+      _player = null;
+      _loading = false;
+      _error = t('Nieprawidłowy plik filmu — nie otwarto go.');
+    });
   }
 
   Future<void> _start(VideoPlayerController p) async {

@@ -14,6 +14,9 @@ import 'dart:typed_data';
 /// Boxes inside `moov` that lead to the chunk offset tables.
 const Set<String> _path = <String>{'moov', 'trak', 'mdia', 'minf', 'stbl'};
 
+/// A real file nests these boxes four levels deep; more is a crafted file.
+const int _maxDepth = 8;
+
 typedef _Box = ({String type, int start, int size, int header});
 
 /// The boxes from [start] to [end] of [bytes], or `null` when they do not
@@ -97,8 +100,12 @@ bool _shiftOffsets(
   int end,
   int from,
   int until,
-  int shift,
-) {
+  int shift, [
+  int depth = 0,
+]) {
+  if (depth > _maxDepth) {
+    return false;
+  }
   final List<_Box>? boxes = _boxes(moov, start, end);
   if (boxes == null) {
     return false;
@@ -108,7 +115,15 @@ bool _shiftOffsets(
     final int payload = b.start + b.header;
     final int boxEnd = b.start + b.size;
     if (_path.contains(b.type)) {
-      if (!_shiftOffsets(moov, payload, boxEnd, from, until, shift)) {
+      if (!_shiftOffsets(
+        moov,
+        payload,
+        boxEnd,
+        from,
+        until,
+        shift,
+        depth + 1,
+      )) {
         return false;
       }
     } else if (b.type == 'stco' || b.type == 'co64') {

@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -19,6 +18,7 @@ import 'package:zen/src/features/calls/presentation/call_session_widgets.dart';
 import 'package:zen/src/features/calls/presentation/screen_share_guard.dart';
 import 'package:zen/src/features/calls/presentation/screen_source_picker.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
+import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -290,7 +290,7 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
     CallMediaSessionController callMedia,
   ) async {
     if (!callMedia.isRecording) {
-      final Directory temp = await getTemporaryDirectory();
+      final Directory temp = await mediaTemporaryDirectory();
       await callMedia.startRecording(
         '${temp.path}/zen_rec_${DateTime.now().millisecondsSinceEpoch}'
         '.${callMedia.recordingExtension}',

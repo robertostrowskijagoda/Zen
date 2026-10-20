@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
@@ -21,6 +20,7 @@ import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/calls/presentation/call_session_widgets.dart';
 import 'package:zen/src/features/calls/presentation/screen_share_guard.dart';
 import 'package:zen/src/features/calls/presentation/screen_source_picker.dart';
+import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -414,7 +414,7 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
   /// encrypted store by itself, also when the call ends while recording.
   Future<void> _toggleRecording(GroupCallMedia media, String label) async {
     if (!media.isRecording) {
-      final Directory temp = await getTemporaryDirectory();
+      final Directory temp = await mediaTemporaryDirectory();
       await media.startRecording(
         '${temp.path}/zen_rec_${DateTime.now().millisecondsSinceEpoch}'
         '.${media.recordingExtension}',

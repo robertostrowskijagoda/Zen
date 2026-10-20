@@ -7,12 +7,33 @@ import 'package:zen/src/features/security/app_security_service.dart';
 /// not reset it, and from the fifth failure on every further one makes the
 /// wait twice as long, up to [maxDelay]. There is never a permanent
 /// lock-out: "Nie pamiętam hasła" (erasing this device) is the way out.
+///
+/// The wait is counted with the wall clock (the only thing that survives a
+/// restart) and, while the app keeps running, also with a monotonic clock:
+/// the shorter of the two counts, so moving the system clock forward does
+/// not end a wait early, and moving it back never shortens it.
 final class UnlockThrottle {
-  UnlockThrottle(this._store, {DateTime Function()? now})
-    : _now = now ?? DateTime.now;
+  UnlockThrottle(
+    this._store, {
+    DateTime Function()? now,
+    Duration Function()? monotonic,
+  }) : _now = now ?? DateTime.now,
+       _monotonic = monotonic ?? _processClock();
 
   final AppSecurityCredentialsStore _store;
   final DateTime Function() _now;
+  final Duration Function() _monotonic;
+
+  /// When the last failure of this run was counted, on the monotonic clock,
+  /// and the failure count it made (so a count written by someone else is
+  /// not mistaken for it).
+  Duration? _monoAt;
+  int _monoFailures = 0;
+
+  static Duration Function() _processClock() {
+    final Stopwatch watch = Stopwatch()..start();
+    return () => watch.elapsed;
+  }
 
   /// Failures without any wait.
   static const int freeFailures = 5;
@@ -45,7 +66,14 @@ final class UnlockThrottle {
     if (wait == Duration.zero || at == null) {
       return Duration.zero;
     }
-    final Duration elapsed = _now().difference(at);
+    Duration elapsed = _now().difference(at);
+    final Duration? since = _monoAt;
+    if (since != null && _monoFailures == state.failures) {
+      final Duration steady = _monotonic() - since;
+      if (steady < elapsed) {
+        elapsed = steady;
+      }
+    }
     if (elapsed.isNegative) {
       // The clock was set back: the wait counts in full.
       return wait;
@@ -58,6 +86,8 @@ final class UnlockThrottle {
   Future<Duration> recordFailure() async {
     final ({int failures, DateTime? at}) state = await _read();
     final int failures = state.failures + 1;
+    _monoAt = _monotonic();
+    _monoFailures = failures;
     try {
       await _store.write(
         appSecurityUnlockFailuresStorageKey,
@@ -71,6 +101,7 @@ final class UnlockThrottle {
 
   /// The right password (or the fingerprint) was given.
   Future<void> clear() async {
+    _monoAt = null;
     try {
       await _store.delete(appSecurityUnlockFailuresStorageKey);
     } on Object catch (error, stackTrace) {

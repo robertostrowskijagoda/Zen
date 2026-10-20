@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
@@ -19,8 +21,8 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 /// slate. Used by the settings "reset data" panel and by the panic
 /// password flow, so both paths must stay perfectly in sync.
 Future<void> performZenLocalDataReset(WidgetRef ref) async {
-  // The background service holds the master key and writes the same files:
-  // it stops first, or it could write some of them back after the wipe.
+  // The background service runs the node and writes the sealed inbox: it
+  // stops first, or it could write some of it back after the wipe.
   try {
     await ref.read(androidBackgroundServiceControllerProvider).stop();
   } on Object catch (error, stackTrace) {
@@ -38,6 +40,10 @@ Future<void> performZenLocalDataReset(WidgetRef ref) async {
   await shredKeysThenDeleteLocalData(
     destroyKeys: ref.read(appSecurityServiceProvider).reset,
     supportDirectory: supportDirectory,
+    // The default profile's folder also holds the test profiles'.
+    keepInSupport: ZenInstance.profile == null
+        ? const <String>{ZenInstance.profilesFolder}
+        : const <String>{},
     scratch: await findZenScratchPlaces(),
     deleteExports: () => const ExportedFilesIndex().deleteAll(),
   );
@@ -68,8 +74,8 @@ final class ZenScratchPlaces {
   /// `Android/data/<package>/files`): emptied.
   final List<Directory> ownFolders;
 
-  /// A computer's temporary folder, shared with other programs: only what
-  /// Zen named (`zen-…`, `zen_…`) goes.
+  /// A computer's temporary folder, shared with other programs: only this
+  /// instance's own Zen folder in it (`mediaTemporaryFolderName`) goes.
   final List<Directory> sharedFolders;
 
   /// A phone app's Documents: only a `Zen` folder in it goes.
@@ -145,6 +151,7 @@ Future<Directory?> _tryFolder(Future<Directory?> Function() find) async {
 Future<void> shredKeysThenDeleteLocalData({
   required Future<void> Function() destroyKeys,
   required Directory supportDirectory,
+  Set<String> keepInSupport = const <String>{},
   ZenScratchPlaces scratch = const ZenScratchPlaces(),
   Future<void> Function()? deleteExports,
 }) async {
@@ -155,14 +162,19 @@ Future<void> shredKeysThenDeleteLocalData({
   } on Object catch (error, stackTrace) {
     logZenError('Destroying the data keys failed', error, stackTrace);
   }
-  await _deleteContentsBestEffort(supportDirectory);
+  if (keepInSupport.isEmpty) {
+    await _deleteContentsBestEffort(supportDirectory);
+  } else {
+    await _deleteEntriesExcept(supportDirectory, keepInSupport);
+  }
   for (final Directory folder in scratch.ownFolders) {
     if (_isSafeToEmpty(folder, supportDirectory)) {
       await _deleteContentsBestEffort(folder);
     }
   }
   for (final Directory folder in scratch.sharedFolders) {
-    await _deleteMatching(folder, _isZenScratchName);
+    final String own = mediaTemporaryFolderName();
+    await _deleteMatching(folder, (String name) => name == own);
   }
   for (final Directory folder in scratch.namedFolders) {
     await _deleteMatching(folder, (String name) => name.toLowerCase() == 'zen');
@@ -182,13 +194,6 @@ Future<void> shredKeysThenDeleteLocalData({
       logZenError('Destroying the data keys failed again', error, stackTrace);
     }
   }
-}
-
-/// What Zen names in a shared temporary folder: `zen-media`, `zen-audio-…`,
-/// `zen_rec_…` and the like.
-bool _isZenScratchName(String name) {
-  final String lower = name.toLowerCase();
-  return lower == 'zen' || lower.startsWith('zen-') || lower.startsWith('zen_');
 }
 
 /// Never a root, the support folder itself or a folder that holds it.
@@ -258,6 +263,35 @@ Future<void> _deleteContentsBestEffort(Directory directory) async {
     await directory.create(recursive: true);
   } on FileSystemException catch (error) {
     logZenWarning('Recreating ${directory.path} failed: $error');
+  }
+}
+
+/// Deletes the entries of [directory] except those named in [keep].
+Future<void> _deleteEntriesExcept(Directory directory, Set<String> keep) async {
+  final List<FileSystemEntity> entries;
+  try {
+    if (!await directory.exists()) {
+      return;
+    }
+    entries = await directory.list(followLinks: false).toList();
+  } on FileSystemException {
+    return;
+  }
+  for (final FileSystemEntity entry in entries) {
+    final String name = entry.path.substring(
+      entry.path.lastIndexOf(Platform.pathSeparator) + 1,
+    );
+    if (keep.contains(name)) {
+      continue;
+    }
+    try {
+      await entry.delete(recursive: true);
+    } on FileSystemException catch (error) {
+      logZenWarning('Could not delete ${entry.path}: $error');
+      if (entry is Directory) {
+        await _deleteEachEntry(entry);
+      }
+    }
   }
 }
 

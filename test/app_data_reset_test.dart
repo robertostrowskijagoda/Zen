@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app_data_reset.dart';
+import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 import 'package:zen/src/features/security/platform_key_vault.dart';
@@ -111,10 +112,14 @@ void main() {
     });
     final File cached = File('${cache.path}${sep}shared_apk${sep}zen.apk')
       ..createSync(recursive: true);
-    final File media = File('${sharedTemp.path}${sep}zen-media${sep}a.m4a')
-      ..createSync(recursive: true);
-    final File recording = File('${sharedTemp.path}${sep}zen_rec_1.webm')
+    final File media = File(
+      '${sharedTemp.path}$sep${mediaTemporaryFolderName()}${sep}a.m4a',
+    )..createSync(recursive: true);
+    final File otherZen = File('${sharedTemp.path}${sep}zen_rec_1.webm')
       ..createSync();
+    final File otherProfile = File(
+      '${sharedTemp.path}${sep}zen-media-other-profile${sep}b.m4a',
+    )..createSync(recursive: true);
     final File foreign = File('${sharedTemp.path}${sep}inny-program.tmp')
       ..createSync();
     final File saved = File('${documents.path}${sep}Zen${sep}raport.pdf')
@@ -141,12 +146,34 @@ void main() {
     expect(cached.existsSync(), isFalse);
     expect(cache.existsSync(), isTrue);
     expect(media.existsSync(), isFalse);
-    expect(recording.existsSync(), isFalse);
+    expect(otherZen.existsSync(), isTrue, reason: 'not this instance\'s');
+    expect(otherProfile.existsSync(), isTrue, reason: 'another profile');
     expect(foreign.existsSync(), isTrue, reason: 'not from Zen');
     expect(saved.existsSync(), isFalse);
     expect(notes.existsSync(), isTrue, reason: 'not from Zen');
     expect(exported.existsSync(), isFalse);
     expect(await exports.paths(), isEmpty);
+  });
+
+  test('the default profile\'s wipe leaves the test profiles alone', () async {
+    final String sep = Platform.pathSeparator;
+    final File other = File(
+      '${support.path}${sep}profiles${sep}anna${sep}k.bin',
+    )..createSync(recursive: true);
+    await shredKeysThenDeleteLocalData(
+      destroyKeys: () async {},
+      supportDirectory: support,
+      keepInSupport: const <String>{'profiles'},
+    );
+    expect(thread.existsSync(), isFalse);
+    expect(other.existsSync(), isTrue);
+
+    // A profile's own wipe (nothing to keep) takes its whole folder.
+    await shredKeysThenDeleteLocalData(
+      destroyKeys: () async {},
+      supportDirectory: Directory('${support.path}${sep}profiles${sep}anna'),
+    );
+    expect(other.existsSync(), isFalse);
   });
 
   test('a folder that holds the support folder is never emptied', () async {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -291,12 +292,24 @@ int? mediaPlainLength(BlobStore blobs, MediaRef ref) {
 }
 
 /// A film [ref] for the [MediaStreamServer]: played segment by segment as
-/// its pieces arrive.
+/// its pieces arrive. Every segment is checked as it is handed out: it must
+/// open, and for an MP4 / MOV file the chain of top-level boxes must add up
+/// as far as the segment reaches (not only in the first one). A bad segment
+/// stops the film for good and calls [onUnsafe] once.
 final class BlobMediaStream implements StreamedMedia {
-  BlobMediaStream(this.blobs, this.ref);
+  BlobMediaStream(this.blobs, this.ref, {this.onUnsafe});
 
   final BlobStore blobs;
   final MediaRef ref;
+
+  /// Called once, when a segment is not what a film of this kind may hold.
+  final void Function()? onUnsafe;
+
+  bool _unsafe = false;
+  bool? _iso;
+  int _walkAt = 0;
+  int _walkBoxes = 0;
+  Future<void> _turn = Future<void>.value();
 
   @override
   int? get length => mediaPlainLength(blobs, ref);
@@ -308,7 +321,112 @@ final class BlobMediaStream implements StreamedMedia {
   String get contentType => isVideoMime(ref.mime) ? ref.mime : 'video/mp4';
 
   @override
-  Future<Uint8List?> segment(int index) => openMediaSegment(blobs, ref, index);
+  Future<Uint8List?> segment(int index) async {
+    if (_unsafe) {
+      throw const UnsafeMediaException();
+    }
+    try {
+      final Uint8List? plain = await openMediaSegment(blobs, ref, index);
+      final int? total = length;
+      if (plain == null || total == null) {
+        return null;
+      }
+      final bool? fits = await _verified(index, plain, total);
+      if (fits == null) {
+        return null;
+      }
+      if (!fits) {
+        throw const UnsafeMediaException();
+      }
+      return plain;
+    } on Object {
+      if (!_unsafe) {
+        _unsafe = true;
+        onUnsafe?.call();
+      }
+      rethrow;
+    }
+  }
+
+  /// Whether the top-level boxes that start before the end of segment
+  /// [index] ([plain]) add up; `null` while a segment holding one of their
+  /// headers has not arrived. One check at a time.
+  Future<bool?> _verified(int index, Uint8List plain, int total) async {
+    final Future<void> before = _turn;
+    final Completer<void> mine = Completer<void>();
+    _turn = mine.future;
+    await before;
+    try {
+      final int limit = (index + 1) * kMediaSegmentBytes;
+      while (true) {
+        if (_walkAt >= limit || _walkAt + 8 > total) {
+          return true;
+        }
+        final Uint8List? header = await _bytesAt(
+          _walkAt,
+          math.min(16, total - _walkAt),
+          index,
+          plain,
+        );
+        if (header == null) {
+          return null;
+        }
+        _iso ??= isIsoMedia(header);
+        if (_iso != true) {
+          // WebM and the like: the start check on the first piece is all.
+          _walkAt = total;
+          return true;
+        }
+        final int size = isoBoxSizeAt(header, _walkAt, total);
+        if (size < 0 || ++_walkBoxes > 4096) {
+          return false;
+        }
+        _walkAt += size;
+      }
+    } finally {
+      mine.complete();
+    }
+  }
+
+  /// [count] plain bytes from [offset], or `null` while a segment they
+  /// touch has not arrived; [plain] is segment [index], already open.
+  Future<Uint8List?> _bytesAt(
+    int offset,
+    int count,
+    int index,
+    Uint8List plain,
+  ) async {
+    final BytesBuilder out = BytesBuilder(copy: false);
+    final int last = (offset + count - 1) ~/ kMediaSegmentBytes;
+    for (int i = offset ~/ kMediaSegmentBytes; i <= last; i++) {
+      final Uint8List? part = i == index
+          ? plain
+          : await openMediaSegment(blobs, ref, i);
+      if (part == null) {
+        return null;
+      }
+      final int from = math.max(offset, i * kMediaSegmentBytes);
+      final int to = math.min(
+        offset + count,
+        i * kMediaSegmentBytes + part.length,
+      );
+      if (to > from) {
+        out.add(
+          Uint8List.sublistView(
+            part,
+            from - i * kMediaSegmentBytes,
+            to - i * kMediaSegmentBytes,
+          ),
+        );
+      }
+    }
+    final Uint8List bytes = out.takeBytes();
+    if (bytes.length != count) {
+      // Every segment is here, yet the file is shorter than it says.
+      throw const UnsafeMediaException();
+    }
+    return bytes;
+  }
 }
 
 /// The beginning of the film [ref] when it may be streamed to the player
