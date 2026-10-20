@@ -127,3 +127,43 @@ func TestDefaultRuntimeConfigKeepsPasswordProtectedLanDiscovery(t *testing.T) {
 		t.Fatalf("password-protected LAN discovery was changed: %#v", got)
 	}
 }
+
+func TestApplyLanDiscoveryFromTheAppsSetting(t *testing.T) {
+	cfg := config.GenerateConfig()
+	ensureDefaultRuntimeConfig(cfg)
+	applyLanDiscovery(cfg, parseZenLanDiscovery(`{"Peers":[]}`))
+	if len(cfg.MulticastInterfaces) != 0 {
+		t.Fatalf("LAN discovery must stay off without the app's setting, got %+v", cfg.MulticastInterfaces)
+	}
+
+	setting := parseZenLanDiscovery(`{"ZenLanDiscovery":{"Enabled":true,"Secret":"` + testLanSecret + `"}}`)
+	applyLanDiscovery(cfg, setting)
+	if isPhoneOS() {
+		if len(cfg.MulticastInterfaces) != 0 {
+			t.Fatal("a phone needs Wi-Fi and an opt-in")
+		}
+		return
+	}
+	if len(cfg.MulticastInterfaces) != 1 {
+		t.Fatalf("expected one discovery entry, got %+v", cfg.MulticastInterfaces)
+	}
+	entry := cfg.MulticastInterfaces[0]
+	want, _ := lanDiscoveryPassword(testLanSecret)
+	if !entry.Beacon || !entry.Listen || entry.Password != want || entry.Password == "" {
+		t.Fatalf("unexpected entry %+v", entry)
+	}
+	// What ensureDefaultRuntimeConfig keeps on the next start: the entry
+	// has a password, so it survives.
+	if kept := lanDiscoveryInterfaces(cfg.MulticastInterfaces); len(kept) != 1 {
+		t.Fatalf("a passworded entry must be kept, got %+v", kept)
+	}
+}
+
+func TestDesktopPeerListenIsGuarded(t *testing.T) {
+	if defaultDesktopPeerListen != defaultDesktopPeerListenForTest {
+		t.Fatalf("peer_guard_test.go spells the listener %q, the bridge uses %q", defaultDesktopPeerListenForTest, defaultDesktopPeerListen)
+	}
+	if _, _, ok := guardedListenAddress(defaultDesktopPeerListen); !ok {
+		t.Fatal("the desktop bridge port must go through the connection and transfer limits")
+	}
+}

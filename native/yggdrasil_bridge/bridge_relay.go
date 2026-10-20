@@ -13,16 +13,27 @@ import (
 	"time"
 )
 
-// The relay listens on every IPv4 interface because the Dart side offers
-// WebRTC two relay candidates: 127.0.0.1 and this device's own LAN address
-// (_ensureRelayCandidate in call_media_session.dart / group_call_media_webrtc.dart),
-// the latter for WebRTC stacks that ignore the loopback adapter. Packets are
-// only accepted from addresses of this very device (see acceptLocalSource),
-// never from other machines on the LAN.
-const localRelayBindHost = "0.0.0.0"
+// Where the relay listens. On computers it is loopback only: nothing off
+// this device needs it. Phones keep every IPv4 interface because the Dart
+// side also offers WebRTC this device's own LAN address as a relay candidate
+// (_ensureRelayCandidate in call_media_session.dart /
+// group_call_media_webrtc.dart): Android's WebRTC binds its sockets to the
+// active network and may not reach the loopback adapter from there. Either
+// way packets are only taken from addresses of this very device (see
+// isLocalSourceLocked), and a socket is admitted only with the call's ICE
+// credentials (relay_admission.go), never because it spoke first.
+func relayBindHost() string {
+	if isPhoneOS() {
+		return "0.0.0.0"
+	}
+	return "127.0.0.1"
+}
 
 // Remembered verdicts per relay (cleared with it at the end of the call).
 const maxRelaySourceVerdicts = 64
+
+// Local sockets admitted per relay (audio and video may use separate ones).
+const maxRelayLocalTargets = 8
 
 func cloneUDPAddr(address *net.UDPAddr) *net.UDPAddr {
 	if address == nil {
@@ -35,29 +46,38 @@ func cloneUDPAddr(address *net.UDPAddr) *net.UDPAddr {
 	}
 }
 
-// acceptLocalSource records local WebRTC endpoints sending media through this
-// relay. Media may arrive from multiple local UDP ports (e.g. separate audio
-// and video RTP sockets), so all local sources are remembered and accepted.
-func (relay *relayState) acceptLocalSource(source *net.UDPAddr) bool {
+// admitLocalDatagram decides about a datagram that arrived on the relay
+// port from a local socket. Media may come from several local UDP ports
+// (separate audio and video sockets), so every admitted socket is
+// remembered; a new one is admitted only when its datagram carries the
+// call's ICE credentials (relayAdmission.judgeFirstDatagram).
+func (relay *relayState) admitLocalDatagram(source *net.UDPAddr, payload []byte) relayAdmissionVerdict {
 	if source == nil || source.IP == nil {
-		return false
+		return relayDrop
 	}
 	relay.mu.Lock()
 	defer relay.mu.Unlock()
 	if !relay.isLocalSourceLocked(source.IP) {
-		return false
+		return relayDrop
 	}
 	if relay.localTargets == nil {
 		relay.localTargets = make(map[string]*net.UDPAddr)
 	}
 	key := source.String()
-	if _, exists := relay.localTargets[key]; !exists {
-		if len(relay.localTargets) < 8 {
-			relay.localTargets[key] = cloneUDPAddr(source)
-		}
+	if _, admitted := relay.localTargets[key]; admitted {
+		relay.activeTarget = cloneUDPAddr(source)
+		return relayAdmit
 	}
+	verdict := relay.admission.judgeFirstDatagram(payload)
+	if verdict != relayAdmit {
+		return verdict
+	}
+	if len(relay.localTargets) >= maxRelayLocalTargets {
+		return relayDrop
+	}
+	relay.localTargets[key] = cloneUDPAddr(source)
 	relay.activeTarget = cloneUDPAddr(source)
-	return true
+	return relayAdmit
 }
 
 // isLocalSourceLocked reports whether ip belongs to this device: loopback,
@@ -114,7 +134,7 @@ func (node *bridgeNode) openRelay(callID string, remoteAddress string) (int, err
 	}
 
 	listener, err := net.ListenUDP("udp4", &net.UDPAddr{
-		IP:   net.ParseIP(localRelayBindHost),
+		IP:   net.ParseIP(relayBindHost()),
 		Port: 0,
 	})
 	if err != nil {
@@ -169,10 +189,19 @@ func (node *bridgeNode) runRelayLoop(relay *relayState) {
 		}
 
 		debugf("[ZEN-GO] relay %s: local→ygg %d bytes from %s\n", relay.callID, count, source)
-		if !relay.acceptLocalSource(source) {
-			// The relay is already pinned to the local WebRTC endpoint that
-			// started sending media. Ignore any other local process trying to
-			// hijack the relay mid-call.
+		switch relay.admitLocalDatagram(source, buffer[:count]) {
+		case relayDrop:
+			// Another host, or a local socket without this call's ICE
+			// credentials: never let it take the relay.
+			continue
+		case relayForwardOnly:
+			// An ICE check the relay cannot verify yet: the peer still needs
+			// it (it teaches the peer's relay our credentials), but its sender
+			// gets nothing back until it proves itself.
+			check := append([]byte(nil), buffer[:count]...)
+			if err := sendRelay(node, relay.remoteIP, relay.callID, check); err != nil {
+				debugf("[ZEN-GO] relay %s: unadmitted check not sent: %v\n", relay.callID, err)
+			}
 			continue
 		}
 		relay.mu.Lock()
@@ -285,6 +314,9 @@ func (node *bridgeNode) handleRelayPacket(source net.IP, payload []byte) {
 		}
 		return
 	}
+
+	// The peer's ICE checks name the credentials our local WebRTC must show.
+	relay.admission.learnFromPeer(framePayload)
 
 	relay.mu.Lock()
 	var targets []*net.UDPAddr

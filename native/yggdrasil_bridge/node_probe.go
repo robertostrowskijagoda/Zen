@@ -64,6 +64,25 @@ func lanDiscoveryInterfaces(configured []config.MulticastInterfaceConfig) []conf
 	return []config.MulticastInterfaceConfig{}
 }
 
+// applyLanDiscovery turns LAN discovery on when the app asked for it in
+// the node config (lan_discovery.go). Without that setting the node keeps
+// what ensureDefaultRuntimeConfig left: off, or an older config's own
+// password on a computer.
+func applyLanDiscovery(cfg *config.NodeConfig, setting zenLanDiscovery) {
+	regex, password, ok := currentLanDiscoveryPlan(setting)
+	if !ok {
+		return
+	}
+	cfg.MulticastInterfaces = []config.MulticastInterfaceConfig{
+		{
+			Regex:    regex,
+			Beacon:   true,
+			Listen:   true,
+			Password: password,
+		},
+	}
+}
+
 func multicastInterfaceRegex() string {
 	if runtime.GOOS == "android" {
 		return androidMulticastInterfaceRegex

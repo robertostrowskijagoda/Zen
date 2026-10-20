@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"runtime"
 	"time"
 	"unsafe"
 
@@ -24,6 +25,34 @@ func YggFreeString(pointer *C.char) {
 //export YggGetVersion
 func YggGetVersion() *C.char {
 	return C.CString(version.BuildVersion())
+}
+
+// YggGetBuildInfoJson tells which Yggdrasil and which Go this library was
+// built with (§5.2: a Go security fix needs a rebuild even when no source
+// changed).
+//
+//export YggGetBuildInfoJson
+func YggGetBuildInfoJson() *C.char {
+	return responseOK(map[string]any{
+		"yggdrasil": version.BuildVersion(),
+		"go":        runtime.Version(),
+		"os":        runtime.GOOS,
+		"arch":      runtime.GOARCH,
+	})
+}
+
+// YggSetDnsServersJson replaces the servers the bridge resolves names with
+// when the system resolver does not answer (Android, dns_fallback.go):
+// a JSON list such as ["tls://9.9.9.9:853#dns.quad9.net"], or
+// {"servers": [...], "useSystem": false}. An empty list restores the
+// defaults (public resolvers over DNS-over-TLS).
+//
+//export YggSetDnsServersJson
+func YggSetDnsServersJson(payload *C.char) *C.char {
+	if err := bridgeDNS.configureJSON(C.GoString(payload)); err != nil {
+		return responseError(err)
+	}
+	return responseOK(map[string]any{"configured": true})
 }
 
 //export YggGenerateConfigJson
@@ -69,6 +98,9 @@ func YggStopNode(handle C.int) *C.char {
 		node.stopLeafMonitor()
 		node.stopPeerProbeMonitor()
 		node.stopPeerNudge()
+		for _, guard := range node.peerGuards {
+			guard.close()
+		}
 		if node.multicast != nil {
 			if err := node.multicast.Stop(); err != nil {
 				return responseError(err)
