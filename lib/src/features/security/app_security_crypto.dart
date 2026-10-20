@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:cryptography/cryptography.dart';
+import 'package:zen/src/core/utils/background_work.dart';
 
 const String _securityVerifyTag = 'zen.security.verify';
 const String _securityMasterTag = 'zen.security.master';
@@ -58,32 +59,67 @@ bool securityConstantTimeEquals(List<int> left, List<int> right) {
 
 /// AES-256-GCM: `nonce | ciphertext | tag`. [aad] (authenticated, not
 /// stored) binds the result to its context, e.g. the storage key.
+///
+/// AES-GCM runs in pure Dart here, so payloads over
+/// [kBackgroundWorkThresholdBytes] are sealed in a short-lived isolate
+/// instead of blocking the UI thread; the result is the same.
 Future<Uint8List> encryptSecurityBytes(
   Uint8List plaintext,
   Uint8List key, {
   List<int> aad = const <int>[],
-}) async {
+}) {
+  final Uint8List nonce = randomSecurityBytes(12);
+  final List<int> boundAad = aad.isEmpty ? const <int>[] : _sendable(aad);
+  return runSizedWork<Uint8List>(
+    plaintext.length,
+    () => _encryptAesGcm(plaintext, key, nonce, boundAad),
+  );
+}
+
+Future<Uint8List> _encryptAesGcm(
+  Uint8List plaintext,
+  Uint8List key,
+  Uint8List nonce,
+  List<int> aad,
+) async {
   final SecretBox secretBox = await AesGcm.with256bits().encrypt(
     plaintext,
     secretKey: SecretKey(key),
-    nonce: randomSecurityBytes(12),
+    nonce: nonce,
     aad: aad,
   );
-  return Uint8List.fromList(<int>[
-    ...secretBox.nonce,
-    ...secretBox.cipherText,
-    ...secretBox.mac.bytes,
-  ]);
+  final List<int> cipherText = secretBox.cipherText;
+  final List<int> mac = secretBox.mac.bytes;
+  final Uint8List out = Uint8List(12 + cipherText.length + mac.length);
+  out
+    ..setRange(0, 12, secretBox.nonce)
+    ..setRange(12, 12 + cipherText.length, cipherText)
+    ..setRange(12 + cipherText.length, out.length, mac);
+  return out;
 }
 
 Future<Uint8List> decryptSecurityBytes(
   Uint8List ciphertext,
   Uint8List key, {
   List<int> aad = const <int>[],
-}) async {
+}) {
   if (ciphertext.length < 28) {
-    throw const FormatException('Encrypted payload is too short.');
+    return Future<Uint8List>.error(
+      const FormatException('Encrypted payload is too short.'),
+    );
   }
+  final List<int> boundAad = aad.isEmpty ? const <int>[] : _sendable(aad);
+  return runSizedWork<Uint8List>(
+    ciphertext.length - 28,
+    () => _decryptAesGcm(ciphertext, key, boundAad),
+  );
+}
+
+Future<Uint8List> _decryptAesGcm(
+  Uint8List ciphertext,
+  Uint8List key,
+  List<int> aad,
+) async {
   final int macOffset = ciphertext.length - 16;
   final SecretBox secretBox = SecretBox(
     ciphertext.sublist(12, macOffset),
@@ -97,6 +133,11 @@ Future<Uint8List> decryptSecurityBytes(
   );
   return Uint8List.fromList(plaintext);
 }
+
+/// [bytes] as a plain byte list, safe to hand to another isolate whatever
+/// list type the caller passed.
+Uint8List _sendable(List<int> bytes) =>
+    bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
 
 Uint8List randomSecurityBytes(int length) {
   final Random random = Random.secure();

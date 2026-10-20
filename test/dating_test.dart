@@ -27,16 +27,22 @@ final class _Net {
 }
 
 final class _Phone implements EventHost {
-  _Phone(this.net, this.name, {this.pyramid, this.payable = const <String>{}})
-    : address = PeerShareCodec.normalizeAddress(
-        '200::${(0xb0 + net.phones.length).toRadixString(16)}',
-      ) {
+  _Phone(
+    this.net,
+    this.name, {
+    this.pyramid,
+    this.payable = const <String>{},
+    this.position,
+  }) : address = PeerShareCodec.normalizeAddress(
+         '200::${(0xb0 + net.phones.length).toRadixString(16)}',
+       ) {
     net.phones[address] = this;
     service = DatingService(
       host: this,
       disk: disk,
       now: () => net.clock,
       raiseAlarm: (String note) async => alarms.add(note),
+      currentPosition: position == null ? null : () async => position,
       pyramidKey: () => pyramid,
       canPay: (String to) => pyramid != null && payable.contains(to),
       pay: (String to, int amount, String memo) async {
@@ -53,6 +59,9 @@ final class _Phone implements EventHost {
   /// they can pay.
   final String? pyramid;
   final Set<String> payable;
+
+  /// Where this phone is, for answering a request for the location.
+  final (double, double)? position;
   final List<(String, int, String)> payments = <(String, int, String)>[];
   final String address;
   final MemoryLedgerDisk disk = MemoryLedgerDisk();
@@ -417,6 +426,161 @@ void main() {
     expect(bob.service.safeDates, isEmpty);
     expect(bob.shown.last.title, 'ania: wszystko OK');
     expect(ania.service.mySafeDate, isNull);
+  });
+
+  test('the location of a date on request: the dater is asked for consent '
+      'and answers once', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone bob = _Phone(net, 'bob');
+    net.link(ania, bob);
+    await ania.service.load();
+    await bob.service.load();
+    await ania.service.startSafeDate(
+      friend: bob.address,
+      length: const Duration(hours: 2),
+    );
+    final SafeDate watched = bob.service.safeDates.single;
+    expect(watched.lat, isNull);
+
+    expect(await bob.service.requestSafeLocation(watched.id), isTrue);
+    expect(watched.locationPending, isTrue);
+    // Asked again at once: nothing goes out.
+    expect(await bob.service.requestSafeLocation(watched.id), isFalse);
+    final SafeDate mine = ania.service.mySafeDate!;
+    expect(mine.locationAsked, isTrue);
+    expect(ania.shown.last.title, 'bob prosi o Twoje położenie');
+    expect(mine.lat, isNull, reason: 'nothing is sent without consent');
+
+    // Refused: no location, no answer, the question is gone.
+    await ania.service.answerLocationRequest(allow: false);
+    expect(ania.service.mySafeDate!.locationAsked, isFalse);
+    expect(bob.service.safeDates.single.lat, isNull);
+
+    net.clock += kDatingLocationAskEvery.inMilliseconds + 1;
+    expect(await bob.service.requestSafeLocation(watched.id), isTrue);
+    await ania.service.answerLocationRequest(
+      allow: true,
+      lat: 52.25,
+      lon: 21.01,
+    );
+    expect(bob.service.safeDates.single.lat, 52.25);
+    expect(bob.service.safeDates.single.lon, 21.01);
+    expect(bob.service.safeDates.single.locationPending, isFalse);
+    expect(ania.service.mySafeDate!.locationAsked, isFalse);
+
+    // Only the watching friend can ask, and only for a running date.
+    final _Phone eve = _Phone(net, 'eve');
+    net.link(ania, eve);
+    await eve.service.load();
+    await ania.service.handle(
+      SignalTransportFrame(
+        from: eve.address,
+        payload: <String, dynamic>{
+          'type': DatingTypes.locationRequest,
+          'id': mine.id,
+        },
+        receivedAtMillis: 0,
+      ),
+    );
+    expect(ania.service.mySafeDate!.locationAsked, isFalse);
+  });
+
+  test('a request for the location is answered at once when the dater agreed '
+      'beforehand', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania', position: (50.06, 19.94));
+    final _Phone bob = _Phone(net, 'bob');
+    net.link(ania, bob);
+    await ania.service.load();
+    await bob.service.load();
+    await ania.service.startSafeDate(
+      friend: bob.address,
+      length: const Duration(hours: 2),
+      autoShareLocation: true,
+    );
+    final String id = bob.service.safeDates.single.id;
+    await bob.service.requestSafeLocation(id);
+    expect(ania.service.mySafeDate!.locationAsked, isFalse);
+    expect(bob.service.safeDates.single.lat, 50.06);
+    expect(bob.service.safeDates.single.lon, 19.94);
+    expect(
+      ania.shown.where(
+        (RuntimeSystemNotification n) => n.id.startsWith('date-loc-ask'),
+      ),
+      isEmpty,
+    );
+
+    // The agreement survives a restart.
+    final DatingService again = DatingService(
+      host: ania,
+      disk: ania.disk,
+      now: () => net.clock,
+    );
+    await again.load();
+    expect(again.mySafeDate!.autoShare, isTrue);
+  });
+
+  test('a report of a minor switches the profile off here at once; two '
+      'independent reports switch it off for the people around', () async {
+    final _Net net = _Net();
+    final _Phone hub = _Phone(net, 'hub');
+    final _Phone mia = _Phone(net, 'mia');
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone ewa = _Phone(net, 'ewa');
+    final _Phone darek = _Phone(net, 'darek');
+    final _Phone fred = _Phone(net, 'fred');
+    for (final _Phone p in <_Phone>[mia, ania, ewa, darek, fred]) {
+      net.link(hub, p);
+    }
+    await hub.service.load();
+    await mia.date(name: 'Mia', age: 19, gender: DatingGender.woman);
+    await ania.date(name: 'Ania', age: 30, gender: DatingGender.woman);
+    await ewa.date(name: 'Ewa', age: 31, gender: DatingGender.woman);
+    await darek.date(name: 'Darek', age: 32, gender: DatingGender.man);
+    await fred.date(name: 'Fred', age: 33, gender: DatingGender.man);
+    for (final _Phone p in <_Phone>[mia, ania, ewa, darek, fred]) {
+      await p.service.maybePublish(force: true);
+    }
+    final String miaKey = mia.service.myKey!;
+    bool sees(_Phone p) =>
+        p.service.toDecide.any((SeenProfile s) => s.profile.key == miaKey);
+    expect(sees(ania), isTrue);
+    expect(sees(darek), isTrue);
+
+    // Ania's report: gone from her phone at once, one report elsewhere.
+    await ania.service.reportMinor(miaKey);
+    expect(ania.service.isMinorOff(miaKey), isTrue);
+    expect(sees(ania), isFalse);
+    expect(sees(darek), isTrue, reason: 'one report is not enough');
+
+    // The same reporter again counts once.
+    await ania.service.maybePublish(force: true);
+    expect(sees(darek), isTrue);
+
+    // A second, independent reporter: the profile goes for everybody who
+    // sees the packages of both.
+    await ewa.service.reportMinor(miaKey);
+    expect(sees(ewa), isFalse);
+    expect(sees(darek), isFalse);
+    expect(sees(fred), isFalse);
+    expect(darek.service.isMinorOff(miaKey), isTrue);
+    expect(darek.service.hiddenProfiles, isEmpty);
+
+    // A profile switched off is not taken in again, and the state survives
+    // a restart.
+    await mia.service.maybePublish(force: true);
+    expect(sees(darek), isFalse);
+    final DatingService again = DatingService(
+      host: darek,
+      disk: darek.disk,
+      now: () => net.clock,
+    );
+    await again.load();
+    expect(again.isMinorOff(miaKey), isTrue);
+
+    // The reported person's own phone gets nothing out of it.
+    expect(mia.service.isMinorOff(miaKey), isFalse);
   });
 
   test('the dating key and decisions survive a restart', () async {

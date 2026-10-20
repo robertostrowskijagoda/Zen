@@ -5,7 +5,9 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
@@ -33,6 +35,9 @@ import 'package:zen/src/features/chat/conversation_history_preview.dart';
 import 'package:zen/src/features/chat/disappearing_messages.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/realtime_attachment_transfer.dart';
+import 'package:zen/src/features/groups/group_board.dart';
+import 'package:zen/src/features/health/clock_skew_tracker.dart';
+import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/profile/profile_card.dart';
@@ -50,6 +55,7 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
+import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
 
@@ -513,6 +519,7 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
           title: session.displayName,
           autoAccept: true,
           acceptToken: acceptToken,
+          callId: session.id,
         ),
       );
       return;
@@ -1135,9 +1142,12 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     required ChatMessage Function(ChatMessage? existing) build,
   });
 
+  /// A system line in the conversation with [peerAddress]: [event] (shown
+  /// in the language of the moment) or a plain [text].
   Future<void> _appendSystemMessage({
     required String peerAddress,
-    required String text,
+    String? text,
+    SocialEventText? event,
     required int timestamp,
   });
 

@@ -291,9 +291,16 @@ final class FlatProfile {
   }
 }
 
-/// What the QR on the door holds (§18.2): the flat's key, a door secret
-/// (a new QR makes the old one useless), where to knock and the name. Not
-/// the residents' accounts.
+/// What the QR on the door holds (§18.2): the flat's key, a door token
+/// (a new QR makes the old one useless), the name and where to knock.
+///
+/// Version 2 (the only one produced now) carries at most ONE address, the
+/// flat's "door inbox", never the residents' own addresses: a stranger who
+/// walks past the sticker must not learn who lives there. The inbox is a
+/// dedicated endpoint when the host has one ([dedicated]); else the address
+/// of the phone that is the flat's door phone (said honestly on the sticker
+/// screen). Version 1 stickers (no `v`, up to 3 residents' addresses) are
+/// still read, so already printed codes keep working, but never written.
 @immutable
 final class FlatDoorCode {
   const FlatDoorCode({
@@ -301,12 +308,28 @@ final class FlatDoorCode {
     required this.door,
     required this.members,
     required this.name,
+    this.version = currentVersion,
+    this.dedicated = false,
   });
 
   final String key;
+
+  /// The door token (secret of this sticker; "Nowy kod" replaces it).
   final String door;
+
+  /// Where to knock: the door inbox (v2, one address) or, in an old
+  /// sticker, up to three residents' phones.
   final List<String> members;
   final String name;
+
+  /// 1 = old sticker with residents' addresses, 2 = door inbox.
+  final int version;
+
+  /// The inbox is not a person's identity (a separate key or derived
+  /// identity).
+  final bool dedicated;
+
+  static const int currentVersion = 2;
 
   static const String qrPrefix = 'zen-flat:';
 
@@ -314,7 +337,29 @@ final class FlatDoorCode {
   /// a download page exists; everything after `#` stays on the phone.
   static const String linkMarker = '/m#';
 
+  /// An old sticker: it published residents' addresses.
+  bool get isLegacy => version < 2;
+
+  /// What goes into the code: the flat identifier and the door token, plus
+  /// at most one door address (v2); never a list of residents.
   String encode() => base64Url
+      .encode(
+        utf8.encode(
+          jsonEncode(<String, dynamic>{
+            'v': currentVersion,
+            'k': key,
+            'd': door,
+            'a': members.take(1).toList(),
+            if (dedicated) 'x': 1,
+            'n': name,
+          }),
+        ),
+      )
+      .replaceAll('=', '');
+
+  /// The old (v1) payload, for tests of backward compatibility only.
+  @visibleForTesting
+  String encodeLegacy() => base64Url
       .encode(
         utf8.encode(
           jsonEncode(<String, dynamic>{
@@ -328,6 +373,11 @@ final class FlatDoorCode {
       .replaceAll('=', '');
 
   String toQr() => '$qrPrefix${encode()}';
+
+  /// The link form for the printed sticker: an ordinary camera opens the
+  /// page (`/m#<code>`), which opens Zen or shows how to get it. The code
+  /// stays after `#`, so it never reaches the web server.
+  String toLink() => '${PeerShareCodec.invitePageUrl}m#${encode()}';
 
   static FlatDoorCode? parse(String text) {
     final String t = text.trim();
@@ -361,8 +411,11 @@ final class FlatDoorCode {
         json['a'] is! List) {
       return null;
     }
+    final int version = json['v'] is int ? json['v'] as int : 1;
     final List<String> members = <String>[
-      for (final String a in (json['a'] as List).whereType<String>().take(3))
+      for (final String a in (json['a'] as List).whereType<String>().take(
+        version >= 2 ? 1 : 3,
+      ))
         if (isRoutablePeerAddress(a)) PeerShareCodec.normalizeAddress(a),
     ];
     if (members.isEmpty || unb64(json['k'], length: 32) == null) {
@@ -374,6 +427,8 @@ final class FlatDoorCode {
       door: json['d'] as String,
       members: members,
       name: name.length > 150 ? name.substring(0, 150) : name,
+      version: version < 1 ? 1 : (version > 2 ? 2 : version),
+      dedicated: version >= 2 && json['x'] == 1,
     );
   }
 }
@@ -635,9 +690,15 @@ final class FlatMessage {
     required this.text,
     required this.at,
     this.by = '',
+    this.item = '',
   });
 
   final String id;
+
+  /// The invitation this message is about ("czat zaproszenia", §18.3); ''
+  /// = a plain message between the flats. Older phones ignore it and show
+  /// the message in the ordinary thread.
+  final String item;
 
   /// The other flat's key.
   final String flat;
@@ -657,6 +718,7 @@ final class FlatMessage {
     't': text,
     'at': at,
     if (by.isNotEmpty) 'by': by,
+    if (item.isNotEmpty) 'it': item,
   };
 
   static FlatMessage? fromJson(Object? json) {
@@ -674,6 +736,9 @@ final class FlatMessage {
       text: json['t'] as String,
       at: json['at'] as int,
       by: json['by'] is String ? json['by'] as String : '',
+      item: json['it'] is String && (json['it'] as String).length <= 40
+          ? json['it'] as String
+          : '',
     );
   }
 }

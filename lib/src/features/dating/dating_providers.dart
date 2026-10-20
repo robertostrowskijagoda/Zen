@@ -54,6 +54,12 @@ final Provider<DatingService> datingServiceProvider = Provider<DatingService>((
     pay: (String to, int amount, String memo) async =>
         await ref.read(pyramidServiceProvider).pay(to, amount, memo: memo) !=
         null,
+    // A friend's request for the location of a date, when the person agreed
+    // beforehand (§19.4).
+    currentPosition: () async {
+      final GeoFix? fix = await currentFix();
+      return fix == null ? null : (fix.lat, fix.lon);
+    },
     raiseAlarm: (String note) async {
       final GeoFix? fix = await currentFix();
       await meet.raiseAlarm(

@@ -8,6 +8,8 @@ import 'package:zen/src/features/pyramid/pyramid_service.dart';
 
 /// "Zgłoś" (§21.4): a reason and the evidence go to the delegates of this
 /// person's branch (or the top); the reported person never learns who.
+/// [entryId] names the reported entry for a content ban and [entry] is its
+/// signed original when the screen has one (S36).
 ///
 /// What was reported is hidden on this phone at once (a post, comment or
 /// message by [contentId], else by [contentHash]; a dating profile by
@@ -27,6 +29,8 @@ Future<void> showReportSheet(
   String? contentHash,
   String? onlyReason,
   String contentId = '',
+  String? entryId,
+  Map<String, dynamic>? entry,
   Future<void> Function()? deleteLocal,
 }) async {
   final HiddenByMeNotifier? hidden = hiddenByMeOf(context);
@@ -64,6 +68,9 @@ Future<void> showReportSheet(
     evidence: evidence,
     datingKey: datingKey,
     contentHash: contentHash,
+    // The entry itself (S36): a ban names it, not only its text's hash.
+    entryId: entryId,
+    entry: entry,
   );
   // The person asked for it, so it happens even when the screen is gone.
   await hidden?.hide(hideKeys);

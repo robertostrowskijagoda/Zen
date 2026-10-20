@@ -6,6 +6,8 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
+import 'package:zen/src/features/meet/alarm_sms.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/nearby_crypto.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
@@ -14,7 +16,11 @@ import 'package:zen/src/features/social/friend_display_name.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 export 'package:zen/src/features/meet/nearby_crypto.dart'
-    show AlarmWave, kAlarmWaveFreshFor, kAlarmWaveVersion;
+    show
+        AlarmWave,
+        kAlarmPairWaveVersion,
+        kAlarmWaveFreshFor,
+        kAlarmWaveVersion;
 
 /// Payload types of the meeting features on the mesh.
 abstract final class MeetTypes {
@@ -156,6 +162,35 @@ final class MeetService extends ChangeNotifier {
   /// when a friend asks (set by the app and the background service).
   Map<String, String> Function()? friendNames;
 
+  /// This person's private level for a friend (§8; set by the app and the
+  /// background service). Without it (or `null`: the ledger is not up)
+  /// every friend counts as "Znajomy".
+  FriendLevel? Function(String address)? levelOf;
+
+  /// Whether [friend] is only a weak acquaintance ("Słaby znajomy", §8):
+  /// no friend list and no statuses but "Nie przeszkadzać" by default.
+  bool isWeak(String friend) => levelOf?.call(friend) == FriendLevel.weak;
+
+  /// Whether [friend] may see the friend list now (§8, §24.1).
+  bool friendListVisibleTo(String friend) => _book.showsFriendListTo(
+    friend,
+    weak:
+        _book.friendListAudience == FriendListAudience.friends &&
+        isWeak(friend),
+  );
+
+  /// Whether [friend] may see [status] (§16.2): "przyjaciele" only when
+  /// [IntentStatus.onlyClose]; "Nie przeszkadzać" every friend; the rest
+  /// friends at level "Znajomy" and up.
+  bool statusVisibleTo(IntentStatus status, String friend) {
+    if (status.onlyClose) {
+      return host.closeFriends().any(
+        (String f) => PeerShareCodec.addressesEqual(f, friend),
+      );
+    }
+    return status.kind == IntentKind.dnd || !isWeak(friend);
+  }
+
   /// Frames from people who are not (yet) friends here: sender → frames
   /// with the time they came.
   final Map<String, List<(SignalTransportFrame, int)>> _parked =
@@ -285,10 +320,20 @@ final class MeetService extends ChangeNotifier {
         case MeetTypes.request:
           await _onRequest(from, frame.payload);
         case MeetTypes.nearbyKey:
+          // `z`: the friend's keys for this phone alone (S6); `k`: the
+          // legacy secret shared with all their friends, all a 1.10.0
+          // friend sends (transition). Keys win over the legacy secret.
+          final Object? z = frame.payload['z'];
           final Object? k = frame.payload['k'];
-          if (k is String && k.length <= 64) {
+          final String? keep =
+              z is String && (FriendNearbyKey.parse(z)?.paired ?? false)
+              ? z
+              : k is String && k.length <= 64
+              ? k
+              : null;
+          if (keep != null) {
             await _update<void>(
-              (MeetBook b) => b.friendNearbySecrets[from] = k,
+              (MeetBook b) => b.friendNearbySecrets[from] = keep,
             );
           }
       }
@@ -354,21 +399,20 @@ final class MeetService extends ChangeNotifier {
   Map<String, dynamic> helloFor(String friend) {
     final IntentStatus? mine = _book.myIntent;
     final bool showsStatus =
-        mine != null &&
-        mine.activeAt(_now()) &&
-        (!mine.onlyClose ||
-            host.closeFriends().any(
-              (String f) => PeerShareCodec.addressesEqual(f, friend),
-            ));
+        mine != null && mine.activeAt(_now()) && statusVisibleTo(mine, friend);
     return <String, dynamic>{
       // A friend who may not see the list holds the empty one (§24.1).
       if (_book.friendListSent.isNotEmpty)
         'mf': _short(
-          _book.showsFriendListTo(friend)
+          friendListVisibleTo(friend)
               ? _book.friendListSent
               : emptyFriendListDigest,
         ),
       if (_book.nearbySecret != null) 'mk': _secretDigest(_book.nearbySecret),
+      // What this friend holds of this phone's per-friend keys (S6); a
+      // 1.10.0 friend compares only `mk`.
+      if (nearbyKeysFor(friend) case final String keys)
+        'mz': _secretDigest(keys),
       'ms': showsStatus ? mine.setAt : 0,
     };
   }
@@ -386,7 +430,10 @@ final class MeetService extends ChangeNotifier {
         mf != _short(_book.friendListDigests[friend] ?? '')) {
       want.add('l');
     }
-    final Object? mk = payload['mk'];
+    // A friend with per-friend keys sends their digest (`mz`); a 1.10.0
+    // friend only the legacy one (`mk`).
+    final Object? mz = payload['mz'];
+    final Object? mk = mz is String && mz.isNotEmpty ? mz : payload['mk'];
     if (mk is String &&
         mk.isNotEmpty &&
         mk != _secretDigest(_book.friendNearbySecrets[friend])) {
@@ -766,12 +813,11 @@ final class MeetService extends ChangeNotifier {
       // Those who saw the old one must hear it is gone.
       to.addAll(host.friends());
     }
-    final List<String> close = host.closeFriends().map(_key).toList();
     for (final String friend in to) {
       final bool sees =
           status != null &&
           !except.contains(_key(friend)) &&
-          (!status.onlyClose || close.contains(_key(friend)));
+          statusVisibleTo(status, friend);
       await _send(friend, <String, dynamic>{
         'type': MeetTypes.intent,
         if (sees) 's': status.toJson(),
@@ -947,6 +993,21 @@ final class MeetService extends ChangeNotifier {
   Future<void> setAlarmPowerButton(bool on) =>
       _update<void>((MeetBook b) => b.alarmPowerButton = on);
 
+  /// The numbers of the alarm's backup SMS (§16.3); invalid ones and
+  /// repeats are dropped.
+  Future<void> setAlarmSmsNumbers(Iterable<String> numbers) {
+    final List<String> clean = <String>[];
+    for (final String raw in numbers) {
+      final String? n = normalizeSmsNumber(raw);
+      if (n != null &&
+          !clean.contains(n) &&
+          clean.length < kAlarmSmsMaxNumbers) {
+        clean.add(n);
+      }
+    }
+    return _update<void>((MeetBook b) => b.alarmSmsNumbers = clean);
+  }
+
   /// Sends this person's running alarm to the same friends again — after
   /// the Android background service took the network over (the shortcut
   /// fires just as the screen goes off, while the app hands the network
@@ -1090,7 +1151,29 @@ final class MeetService extends ChangeNotifier {
   /// know whose it is and that it is real; nobody else learns who it is.
   /// Without a secret yet it goes unsigned: phones around show only an
   /// unchecked note.
-  Map<String, dynamic> alarmWave(AlarmRecord alarm) => AlarmWave.build(
+  ///
+  /// With [to] (a friend who has this phone's per-friend keys) the wave is
+  /// signed with the key of that pair instead ([AlarmWave.buildPair], S6):
+  /// only that friend can check it. `NearbyService.waveAll` does the same
+  /// per phone, for friends recognised by their own per-friend keys.
+  Map<String, dynamic> alarmWave(AlarmRecord alarm, {String? to}) {
+    final String? private = _book.nearbyPrivate;
+    if (to != null && private != null) {
+      try {
+        return AlarmWave.buildPair(
+          id: alarm.id,
+          at: _now(),
+          ended: !alarm.isActive,
+          pairKey: NearbyOwnKeys(private).pairKey(_key(to)),
+        );
+      } on FormatException {
+        // a damaged key: the wave for everyone below
+      }
+    }
+    return _alarmWaveForAll(alarm);
+  }
+
+  Map<String, dynamic> _alarmWaveForAll(AlarmRecord alarm) => AlarmWave.build(
     id: alarm.id,
     at: _now(),
     ended: !alarm.isActive,
@@ -1369,11 +1452,39 @@ final class MeetService extends ChangeNotifier {
     return _update<String>((MeetBook b) => b.nearbySecret ??= made);
   }
 
-  /// Gives [friend] the nearby secret (so they recognise this phone).
+  /// This person's private nearby key (S6), made on first use; never sent.
+  Future<String> nearbyPrivateKey() async {
+    final String? had = _book.nearbyPrivate;
+    if (had != null) {
+      return had;
+    }
+    final String made = newNearbyPrivateKey(_random);
+    return _update<String>((MeetBook b) => b.nearbyPrivate ??= made);
+  }
+
+  /// What [friend] gets of this phone's per-friend keys now
+  /// ([NearbyOwnKeys.materialFor]); `null` before there is a private key.
+  String? nearbyKeysFor(String friend) {
+    final String? private = _book.nearbyPrivate;
+    if (private == null) {
+      return null;
+    }
+    try {
+      return NearbyOwnKeys(private).materialFor(_key(friend), _now());
+    } on FormatException {
+      return null;
+    }
+  }
+
+  /// Gives [friend] what recognises this phone: their own per-friend keys
+  /// (`z`), and the legacy secret for a 1.10.0 friend (`k`, transition).
   Future<void> shareNearbySecret(String friend) async {
+    final String legacy = await nearbySecret();
+    await nearbyPrivateKey();
     await _send(friend, <String, dynamic>{
       'type': MeetTypes.nearbyKey,
-      'k': await nearbySecret(),
+      'k': legacy,
+      if (nearbyKeysFor(friend) case final String keys) 'z': keys,
     });
     await _update<void>((MeetBook b) => b.nearbyGivenTo.add(_key(friend)));
   }
@@ -1384,8 +1495,10 @@ final class MeetService extends ChangeNotifier {
     final String made = base64Url.encode(
       List<int>.generate(32, (_) => _random.nextInt(256)),
     );
+    final String private = newNearbyPrivateKey(_random);
     await _update<void>((MeetBook b) {
       b.nearbySecret = made;
+      b.nearbyPrivate = private;
       b.nearbyGivenTo.clear();
     });
     for (final String f in host.friends()) {
@@ -1417,7 +1530,7 @@ final class MeetService extends ChangeNotifier {
     }
     for (final String friend in only ?? friendsWithNames.keys) {
       // Who may not see it (§24.1) gets an empty list and forgets theirs.
-      final bool sees = _book.showsFriendListTo(friend);
+      final bool sees = friendListVisibleTo(friend);
       await _send(friend, <String, dynamic>{
         'type': MeetTypes.friendList,
         'l': <Map<String, String>>[
@@ -1475,11 +1588,43 @@ final class MeetService extends ChangeNotifier {
     }
   }
 
+  /// Sends [friend] the current status again, or "none" when they may not
+  /// see it (after their level changed, §8).
+  Future<void> resendStatus(String friend) async {
+    final IntentStatus? mine = _book.myIntent;
+    final bool sees =
+        mine != null && mine.activeAt(_now()) && statusVisibleTo(mine, friend);
+    await _send(friend, <String, dynamic>{
+      'type': MeetTypes.intent,
+      if (sees) 's': mine.toJson(),
+    });
+  }
+
+  /// A friend's level changed (§8): what they may see is sent again.
+  Future<void> levelChanged(String friend) async {
+    if (!host.isFriend(friend)) {
+      return;
+    }
+    await resendFriendList(friend);
+    await resendStatus(friend);
+  }
+
   /// Friends who also know [address] (from shared friend lists).
   List<String> mutualFriends(String address) => <String>[
     for (final String f in host.friends())
       if (_book.friendsOf(f).containsKey(_key(address))) f,
   ];
+
+  /// Blocks [address] in "W pobliżu" for good (§15).
+  Future<void> blockNearby(String address) => _update<void>((MeetBook b) {
+    if (b.nearbyBlocked.length < 1000) {
+      b.nearbyBlocked.add(_key(address));
+    }
+  });
+
+  /// Lets everyone blocked in "W pobliżu" write again.
+  Future<void> unblockNearby() =>
+      _update<void>((MeetBook b) => b.nearbyBlocked.clear());
 
   Future<void> setNearbyVisible(bool on) =>
       _update<void>((MeetBook b) => b.nearbyVisible = on);

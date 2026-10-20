@@ -11,6 +11,7 @@ import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
+import 'package:zen/src/features/meet/presentation/met_level_prompt.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
 /// "Osoby w pobliżu" (§15).
@@ -121,10 +122,21 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
           children: <Widget>[
             ZenInfo(
               icon: Icons.privacy_tip_outlined,
-              text: t(
-                'Dostanie Twój pseudonim i tę wiadomość — nie Twoje konto. '
-                'Możesz napisać jedną wiadomość, dopóki nie odpowie.',
-              ),
+              // S5: say what really goes with the hello.
+              text: person.modern
+                  ? t(
+                      'Dostanie Twój pseudonim i tę wiadomość — bez imienia, '
+                      'konta i adresu w sieci. Adresy poznacie dopiero, gdy '
+                      'odpowie. Możesz napisać jedną wiadomość, dopóki nie '
+                      'odpowie.',
+                    )
+                  : t(
+                      'Ta osoba ma starszą wersję Zen: dostanie Twój '
+                      'pseudonim, tę wiadomość i Twój adres w sieci (bez '
+                      'imienia i profilu, ale po adresie da się Cię '
+                      'rozpoznać). Możesz napisać jedną wiadomość, dopóki '
+                      'nie odpowie.',
+                    ),
             ),
             const SizedBox(height: 8),
             TextField(
@@ -325,7 +337,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                     subtitle: Text(
                       t(
                         'Znajomi widzą Cię z imieniem, inni jako „{name}” '
-                        '(zmienia się co 15 minut, więc nikt Cię nie wyśledzi). '
+                        '(zmienia się co 10 minut, więc nikt Cię nie wyśledzi). '
                         'Telefon nadaje oszczędnie cały czas, także przy '
                         'zamkniętym Zen.',
                         {'name': _nearby.myPseudonym},
@@ -394,6 +406,23 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                 ),
               for (final NearbyPerson p in people)
                 _personTile(meet, p, zen, tone),
+              if (_nearby.blockedCount > 0)
+                ZenTile(
+                  key: const Key('nearby-blocked'),
+                  icon: Icons.block_rounded,
+                  tone: zen.textMuted,
+                  title: tn(
+                    _nearby.blockedCount,
+                    one: 'Zablokowana {n} osoba z pobliża',
+                    few: 'Zablokowane {n} osoby z pobliża',
+                    many: 'Zablokowanych {n} osób z pobliża',
+                  ),
+                  trailing: TextButton(
+                    key: const Key('nearby-unblock'),
+                    onPressed: () => unawaited(_nearby.unblockAll()),
+                    child: Text(t('Odblokuj')),
+                  ),
+                ),
               if (sessions.isNotEmpty) ...<Widget>[
                 ZenSection(t('Rozmowy z pobliża')),
                 for (final NearbySession s in sessions)
@@ -435,13 +464,31 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
         trailing: met ? Icon(Icons.verified_rounded, color: zen.success) : null,
       );
     }
+    // Badges (§15): what this phone knows of the stranger, nothing more.
+    final List<NearbySession> talks = _nearby.sessionsWith(p.token).toList();
+    final List<String> badges = <String>[
+      nearbyDistance(p.rssi),
+      if (talks.any((NearbySession s) => !s.startedByMe && !s.iAnswered))
+        t('napisał(a) do Ciebie')
+      else if (talks.any((NearbySession s) => s.startedByMe && !s.theyWrote))
+        t('czeka na odpowiedź')
+      else if (talks.isNotEmpty)
+        t('rozmawiacie'),
+      if (!p.modern) t('starsza wersja Zen'),
+    ];
     return ZenTile(
+      key: Key('nearby-stranger-${p.token}'),
       icon: Icons.person_outline_rounded,
       tone: tone,
       title: p.pseudonym,
-      subtitle: nearbyDistance(p.rssi),
+      subtitle: badges.join(' · '),
       trailing: FilledButton.tonal(
-        onPressed: () => unawaited(_wave(p)),
+        // Already talking: the conversation opens instead of a new hello.
+        onPressed: () => unawaited(
+          talks.isEmpty
+              ? _wave(p)
+              : NearbyChatScreen.open(context, talks.first.id),
+        ),
         style: FilledButton.styleFrom(
           minimumSize: const Size(0, 38),
           padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -498,6 +545,8 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
           ),
         ),
       );
+      // Met in person: how close are you (§8)?
+      await showMetLevelPrompt(context, address: address, name: s.pseudonym);
     }
   }
 
@@ -520,6 +569,23 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
             ),
           );
         }
+        final String? note = s.waitsForThem
+            ? t(
+                'Odpowiedź poszła przez Bluetooth. Teraz ta osoba może '
+                'napisać przez sieć — wtedy oboje poznacie swoje adresy.',
+              )
+            : !s.startedByMe && s.address == null && !s.iAnswered
+            ? t(
+                'Odpowiedź pójdzie przez Bluetooth, więc ta osoba musi być '
+                'jeszcze obok. Dostanie z nią Twój adres w sieci (bez imienia '
+                'i profilu).',
+              )
+            : s.legacy && !s.startedByMe && !s.iAnswered
+            ? t(
+                'Ta osoba ma starszą wersję Zen. Odpowiedź pójdzie przez sieć '
+                'i pokaże jej Twój adres (bez imienia i profilu).',
+              )
+            : null;
         return Scaffold(
           appBar: AppBar(
             title: Text(s.pseudonym),
@@ -553,6 +619,15 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
                   children: <Widget>[
+                    if (note != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: ZenInfo(
+                          key: const Key('nearby-chat-note'),
+                          icon: Icons.privacy_tip_outlined,
+                          text: note,
+                        ),
+                      ),
                     for (final NearbyLine l in s.lines)
                       Align(
                         alignment: l.mine
@@ -614,9 +689,24 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
                         icon: const Icon(Icons.send_rounded),
                         onPressed: s.canSend
                             ? () async {
-                                final String t = _text.text;
+                                final String text = _text.text;
                                 _text.clear();
-                                await nearby.send(s, t);
+                                final bool sent = await nearby.send(s, text);
+                                if (!sent && text.trim().isNotEmpty) {
+                                  _text.text = text;
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          t(
+                                            'Nie udało się — ta osoba mogła '
+                                            'się oddalić.',
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                }
                               }
                             : null,
                       ),

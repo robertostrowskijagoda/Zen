@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
@@ -103,11 +104,17 @@ final class NeighborsService extends ChangeNotifier {
     required this.disk,
     int Function()? now,
     Random? random,
+    this.doorInbox,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch),
        _random = random ?? Random.secure();
 
   final EventHost host;
   final LedgerDisk disk;
+
+  /// The address of a dedicated door inbox (a separate key or derived
+  /// identity that is not a person's), when the host has one. The door QR
+  /// carries it instead of any resident's phone (§18.2).
+  final String? Function()? doorInbox;
   final int Function() _now;
   final Random _random;
   static const String _key = 'neighbors/state';
@@ -197,16 +204,17 @@ final class NeighborsService extends ChangeNotifier {
     if (p == null) {
       return null;
     }
-    final String own = _n(host.ownAddress());
+    final String? dedicated = doorInbox?.call();
+    final bool hasDedicated =
+        dedicated != null && isRoutablePeerAddress(dedicated);
+    // Exactly one address and never the list of residents. Without a
+    // dedicated inbox it is the door phone (this one: surely online now).
     return FlatDoorCode(
       key: p.key,
       door: _door,
-      // This phone first: it is the one surely online right now.
-      members: <String>[
-        if (p.members.contains(own)) own,
-        ...p.members.where((String m) => m != own),
-      ],
+      members: <String>[hasDedicated ? _n(dedicated) : _n(host.ownAddress())],
       name: p.label,
+      dedicated: hasDedicated,
     );
   }
 
@@ -230,6 +238,10 @@ final class NeighborsService extends ChangeNotifier {
   List<FlatMessage> messagesWith(String key) =>
       _messages.values.where((FlatMessage m) => m.flat == key).toList()
         ..sort((FlatMessage a, FlatMessage b) => a.at.compareTo(b.at));
+
+  /// The small chat about one invitation ([itemId]) with the flat [key].
+  List<FlatMessage> threadAbout(String key, String itemId) =>
+      messagesWith(key).where((FlatMessage m) => m.item == itemId).toList();
 
   int unread(String key) {
     final int since = _lastRead[key] ?? 0;
@@ -1123,11 +1135,18 @@ final class NeighborsService extends ChangeNotifier {
     }
   }
 
-  Future<bool> sendMessage(String key, String text) async {
+  /// Writes to the flat [key]. With [itemId] the message belongs to the
+  /// small chat of that invitation (§18.3).
+  Future<bool> sendMessage(String key, String text, {String? itemId}) async {
     final NeighborFlat? f = _neighbors[key];
     if (f == null || text.trim().isEmpty || !hasFlat) {
       return false;
     }
+    final String about =
+        itemId != null &&
+            (f.profile.item(itemId) != null || _profile?.item(itemId) != null)
+        ? itemId
+        : '';
     final FlatMessage m = FlatMessage(
       id: _newId(16),
       flat: key,
@@ -1135,6 +1154,7 @@ final class NeighborsService extends ChangeNotifier {
       text: _clip(text, 2000),
       at: _now(),
       by: host.ownName(),
+      item: about,
     );
     _messages[m.id] = m;
     _lastRead[key] = m.at;
@@ -1143,7 +1163,13 @@ final class NeighborsService extends ChangeNotifier {
       f.profile.members,
       FlatTypes.message,
       key,
-      <String, dynamic>{'id': m.id, 't': m.text, 'at': m.at, 'by': m.by},
+      <String, dynamic>{
+        'id': m.id,
+        't': m.text,
+        'at': m.at,
+        'by': m.by,
+        if (about.isNotEmpty) 'it': about,
+      },
     );
     await _syncHouse();
     return true;
@@ -1194,11 +1220,8 @@ final class NeighborsService extends ChangeNotifier {
     };
   }
 
-  static String _shortDate(int millis) {
-    final DateTime d = DateTime.fromMillisecondsSinceEpoch(millis);
-    String two(int x) => x.toString().padLeft(2, '0');
-    return '${two(d.day)}.${two(d.month)} ${two(d.hour)}:${two(d.minute)}';
-  }
+  static String _shortDate(int millis) =>
+      ZenFormat.dayMonthTime(DateTime.fromMillisecondsSinceEpoch(millis));
 
   /// Someone nearby passed us an invitation.
   Future<void> onNearbyWave(Map<dynamic, dynamic> json) async {
@@ -1502,6 +1525,9 @@ final class NeighborsService extends ChangeNotifier {
       text: text.length > 2000 ? text.substring(0, 2000) : text,
       at: _now(),
       by: by is String ? _clip(by, 40) : '',
+      item: b['it'] is String && (b['it'] as String).length <= 40
+          ? b['it'] as String
+          : '',
     );
     _messages[id] = m;
     await _save();
@@ -2414,6 +2440,7 @@ final class NeighborsService extends ChangeNotifier {
           text: m.text,
           at: m.at,
           by: m.by,
+          item: m.item,
         );
       }
     }

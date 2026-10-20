@@ -500,14 +500,14 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         'An automatic friend_remove from a friend was not applied; the '
         'friendship stays.',
       );
-      final String note = t(
-        '{name} nie rozpoznaje teraz tego urządzenia — może utracił(a) dane '
-        'albo zmienił(a) telefon. Znajomość i rozmowa zostają bez zmian.',
-        {'name': state.nameFor(friend)},
+      final SocialEventText noteEvent = SocialEventText(
+        'chat.deviceUnknown',
+        <String, String>{'name': state.nameFor(friend)},
       );
+      final String note = noteEvent.render();
       await _appendSystemMessage(
         peerAddress: friend.address,
-        text: note,
+        event: noteEvent,
         timestamp: now,
       );
       if (_controllerDisposed || !ref.mounted) {
@@ -562,17 +562,24 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
           );
         })
         .join(', ');
+    final SocialEventText added = SocialEventText(
+      'group.added',
+      <String, String>{
+        'name': _labelFor(signal, friends: state.friends),
+        'members': names,
+      },
+    );
     await _messageTimelineStore.append(
       'group:${before.id}',
-      ChatMessage(
-        id: 'system-added-$timestamp-${newcomers.first}',
-        sender: 'system',
-        text: t('{name} dodał(a) do grupy: {members}.', {
-          'name': _labelFor(signal, friends: state.friends),
-          'members': names,
-        }),
-        sentAtMillis: timestamp,
-        direction: ChatMessageDirection.system,
+      chatMessageWithEvent(
+        ChatMessage(
+          id: 'system-added-$timestamp-${newcomers.first}',
+          sender: 'system',
+          text: added.render(),
+          sentAtMillis: timestamp,
+          direction: ChatMessageDirection.system,
+        ),
+        added,
       ),
     );
     _bumpTimelineRevision();
@@ -651,6 +658,21 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         if (_isGroupRejected(gid)) {
           // Tell the inviter to stop re-sending: it keeps the invite queued
           // until it hears back.
+          _replyToGroupSignal(
+            peerAddress: signal.sender,
+            type: 'group_leave',
+            groupId: gid,
+          );
+          return;
+        }
+        if (!state.groups.containsKey(gid) &&
+            !groupInviteAllowed(
+              ref.read(appSettingsControllerProvider).groupInviteFrom,
+              isFriend: knownPeer?.status == FriendRelationshipStatus.accepted,
+              level: ref.read(friendLevelLookupProvider).of(signal.sender),
+            )) {
+          // Below the level this person takes invitations from (§8): said
+          // no at once, so the inviter stops re-sending.
           _replyToGroupSignal(
             peerAddress: signal.sender,
             type: 'group_leave',
@@ -1134,6 +1156,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
           callToken != null &&
           callToken.isNotEmpty &&
           callToken == intent.acceptToken &&
+          intent.answersCall(call.id) &&
           PeerShareCodec.addressesEqual(
             call.peerAddress,
             intent.peerAddress ?? '',

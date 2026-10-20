@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
+import 'package:zen/src/core/utils/background_work.dart';
+import 'package:zen/src/features/feed/video_metadata.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 
 /// Photos per post and their longest side after sanitising.
@@ -35,27 +37,30 @@ Uint8List _sanitize(Uint8List bytes) {
 
 final Chacha20 _aead = Chacha20.poly1305Aead();
 
-/// Stores [plain] encrypted with a fresh key and returns the reference that
+/// Stores [media] encrypted with a fresh key and returns the reference that
 /// goes into the post body: `{id, k, n, mime}`. The blob itself is useless
 /// without the key, so it may be served to anyone who asks; the key travels
 /// only inside the post (sealed for non-public posts).
+///
+/// With [stripMetadata], films and recordings in MP4 / MOV / M4A lose
+/// their metadata first (place, dates, device: see `video_metadata.dart`),
+/// like photos lose EXIF. Posts and the gallery always ask for it.
 Future<Map<String, dynamic>> storeMedia(
   BlobStore blobs,
-  Uint8List plain, {
+  Uint8List media, {
   String mime = 'image/jpeg',
   int? durationMs,
+  bool stripMetadata = false,
 }) async {
+  final Uint8List plain = stripMetadata && !isPhotoMime(mime)
+      ? stripVideoMetadata(media)
+      : media;
   final Uint8List key = randomBytes(32);
   final Uint8List nonce = randomBytes(12);
-  final SecretBox box = await _aead.encrypt(
-    plain,
-    secretKey: SecretKey(key),
-    nonce: nonce,
-  );
-  final String id = await blobs.put(
-    Uint8List.fromList(<int>[...box.cipherText, ...box.mac.bytes]),
-    mime: 'application/octet-stream',
-  );
+  // ChaCha20-Poly1305 runs in pure Dart: a film or a big photo is sealed
+  // off the UI thread.
+  final Uint8List sealed = await _sealMediaSized(plain, key, nonce);
+  final String id = await blobs.put(sealed, mime: 'application/octet-stream');
   return <String, dynamic>{
     'id': id,
     'k': b64(key),
@@ -132,18 +137,65 @@ Future<Uint8List?> openMedia(BlobStore blobs, MediaRef ref) async {
     return null;
   }
   try {
-    final List<int> plain = await _aead.decrypt(
-      SecretBox(
-        sealed.sublist(0, sealed.length - 16),
-        nonce: ref.nonce,
-        mac: Mac(sealed.sublist(sealed.length - 16)),
-      ),
-      secretKey: SecretKey(ref.key),
-    );
-    return Uint8List.fromList(plain);
+    return await _openMediaSized(sealed, ref.key, ref.nonce);
   } on Object {
     return null;
   }
+}
+
+// Not async on purpose: a closure made in an async function may drag its
+// suspended frame along, which cannot be sent to another isolate.
+Future<Uint8List> _sealMediaSized(
+  Uint8List plain,
+  Uint8List key,
+  Uint8List nonce,
+) => runSizedWork<Uint8List>(plain.length, () => _sealMedia(plain, key, nonce));
+
+Future<Uint8List> _openMediaSized(
+  Uint8List sealed,
+  Uint8List key,
+  Uint8List nonce,
+) => runSizedWork<Uint8List>(
+  sealed.length - 16,
+  () => _openMedia(sealed, key, nonce),
+);
+
+/// `ciphertext | tag` of [plain] (ChaCha20-Poly1305).
+Future<Uint8List> _sealMedia(
+  Uint8List plain,
+  Uint8List key,
+  Uint8List nonce,
+) async {
+  final SecretBox box = await _aead.encrypt(
+    plain,
+    secretKey: SecretKey(key),
+    nonce: nonce,
+  );
+  final List<int> cipherText = box.cipherText;
+  final List<int> mac = box.mac.bytes;
+  final Uint8List out = Uint8List(cipherText.length + mac.length);
+  out
+    ..setRange(0, cipherText.length, cipherText)
+    ..setRange(cipherText.length, out.length, mac);
+  return out;
+}
+
+/// The plain bytes of `ciphertext | tag` [sealed]; throws when it does not
+/// open.
+Future<Uint8List> _openMedia(
+  Uint8List sealed,
+  Uint8List key,
+  Uint8List nonce,
+) async {
+  final List<int> plain = await _aead.decrypt(
+    SecretBox(
+      sealed.sublist(0, sealed.length - 16),
+      nonce: nonce,
+      mac: Mac(sealed.sublist(sealed.length - 16)),
+    ),
+    secretKey: SecretKey(key),
+  );
+  return Uint8List.fromList(plain);
 }
 
 /// A picture from someone's post or profile that could not be made safe to

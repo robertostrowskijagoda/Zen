@@ -5,11 +5,14 @@ import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/features/feed/post_media.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 
 /// Entry kind of a profile version in a `profile/<account>` space (§9).
 /// The newest entry wins. Public: followers and, through reshares, friends
-/// of friends see the name and the mesh address (to follow or write).
+/// of friends see the name. The mesh address (to follow or write) is in it
+/// only once the account published something that reaches people who are
+/// not friends ([profileNeedsAddress]); friends know it anyway.
 const String kProfileKind = 'profile';
 
 const int kMaxProfileName = 60;
@@ -66,10 +69,30 @@ Map<String, dynamic> profileBody({
   'name': _clip(name, kMaxProfileName),
   'status': _clip(status, kMaxProfileStatus),
   'bio': _clip(bio, kMaxProfileBio),
-  'addr': _clip(address, kMaxProfileAddress),
+  // Left out when not shared; older apps read a missing one as ''.
+  if (_clip(address, kMaxProfileAddress).isNotEmpty)
+    'addr': _clip(address, kMaxProfileAddress),
   'avatar': ?avatar,
   'cover': ?cover,
 };
+
+/// Whether this account's [entry] can bring people who are not friends to
+/// its profile (§9): a public post (not sealed for an audience) or a
+/// reshare (only public posts are reshared). Kinds as in `feed_model.dart`.
+bool reachesStrangers(LogEntry entry) =>
+    (entry.kind == 'post' && !isSealed(entry.body)) || entry.kind == 'reshare';
+
+/// Whether the public profile should carry the device address (§1.8, §9):
+/// only when something public of this account can bring strangers who
+/// want to follow or write. Call after the node started.
+bool profileNeedsAddress(LedgerNode node) {
+  for (final String kind in const <String>['feed', 'acts']) {
+    if (node.entriesOf(spaceKind: kind).any(reachesStrangers)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /// The profile carried by a single profile [entry], or `null`.
 LedgerProfile? profileFromEntry(LogEntry entry) {

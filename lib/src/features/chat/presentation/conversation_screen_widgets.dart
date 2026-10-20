@@ -62,9 +62,7 @@ class _DaySeparator extends StatelessWidget {
     if (diff == 1) {
       return t('Wczoraj');
     }
-    final String d = date.day.toString().padLeft(2, '0');
-    final String m = date.month.toString().padLeft(2, '0');
-    return '$d.$m.${date.year}';
+    return ZenFormat.date(date);
   }
 
   @override
@@ -309,7 +307,7 @@ class _MessageBubble extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               child: Text(
-                message.text,
+                chatMessageText(message),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: zen.textSecondary,
@@ -472,10 +470,7 @@ class _MessageBubble extends StatelessWidget {
   }
 
   String _timeLabel(int millis) {
-    final DateTime timestamp = DateTime.fromMillisecondsSinceEpoch(millis);
-    final String hours = timestamp.hour.toString().padLeft(2, '0');
-    final String minutes = timestamp.minute.toString().padLeft(2, '0');
-    return '$hours:$minutes';
+    return ZenFormat.time(DateTime.fromMillisecondsSinceEpoch(millis));
   }
 
   IconData _deliveryIcon(ChatMessageDeliveryState state) {

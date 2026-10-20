@@ -43,10 +43,15 @@ String reportEvidence(
   return h.isEmpty ? cut : '$h\n$cut';
 }
 
-/// Whether [text] is content the pyramid banned ([banned] are the hashes
-/// from `PyramidState.bannedContent`).
-bool isContentBanned(Set<String> banned, String text) =>
-    banned.isNotEmpty && text.isNotEmpty && banned.contains(contentHash(text));
+/// Whether content is banned by the pyramid: [banned] holds the ids of
+/// banned entries (`PyramidState.bannedEntries`, S36) and the hashes of
+/// banned texts (`PyramidState.bannedContent`, what 1.10.0 bans by). The
+/// entry [id] wins: a changed copy of the text is still not that entry,
+/// and the entry stays banned whatever its text.
+bool isContentBanned(Set<String> banned, String text, {String id = ''}) =>
+    banned.isNotEmpty &&
+    ((id.isNotEmpty && banned.contains(id)) ||
+        (text.isNotEmpty && banned.contains(contentHash(text))));
 
 /// Whether a post with [text] (id [id]) is hidden behind the placeholder:
 /// banned by the pyramid, or hidden by this person after a report ([mine]),
@@ -60,5 +65,5 @@ bool isContentHidden(
   HiddenByMe? mine,
 }) =>
     !revealed.contains(id) &&
-    (isContentBanned(banned, text) ||
+    (isContentBanned(banned, text, id: id) ||
         (mine?.hides(id: id, text: text) ?? false));

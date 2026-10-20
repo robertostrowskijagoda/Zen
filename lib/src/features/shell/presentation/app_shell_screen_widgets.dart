@@ -1144,7 +1144,7 @@ class _InboxCard extends ConsumerWidget {
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
-                        item.title,
+                        item.displayTitle,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -1155,10 +1155,10 @@ class _InboxCard extends ConsumerWidget {
                         ),
                       ),
                     ),
-                    if (item.body.trim().isNotEmpty) ...<Widget>[
+                    if (item.displayBody.trim().isNotEmpty) ...<Widget>[
                       const SizedBox(height: 4),
                       Text(
-                        item.body,
+                        item.displayBody,
                         maxLines: 4,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(

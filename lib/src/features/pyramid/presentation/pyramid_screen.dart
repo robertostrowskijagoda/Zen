@@ -1,14 +1,15 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
@@ -23,9 +24,7 @@ import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
 /// "12.10.2026 18:00".
 String pyrDate(int millis) {
-  final DateTime d = DateTime.fromMillisecondsSinceEpoch(millis);
-  String two(int x) => x.toString().padLeft(2, '0');
-  return '${two(d.day)}.${two(d.month)}.${d.year} ${two(d.hour)}:${two(d.minute)}';
+  return ZenFormat.dateTime(DateTime.fromMillisecondsSinceEpoch(millis));
 }
 
 /// A member's name, level and branch: "Kasia · poziom 3 · gałąź 12 os.".
@@ -480,6 +479,17 @@ Future<void> showProposals(
                           },
                         ),
                       ),
+                      // §20.2: only a friend at "Znajomy" or above.
+                      if (pyr.admitProblem(p)
+                          case final String problem) ...<Widget>[
+                        const SizedBox(height: 8),
+                        ZenInfo(
+                          key: const Key('pyr-admit-problem'),
+                          icon: Icons.person_search_rounded,
+                          tone: zen.danger,
+                          text: problem,
+                        ),
+                      ],
                     ],
                     const SizedBox(height: 10),
                     Row(
@@ -525,8 +535,9 @@ Future<void> showProposals(
                           ),
                           FilledButton.icon(
                             key: Key('pyr-approve-${p.record.type}'),
-                            onPressed: () =>
-                                unawaited(pyr.approve(p.record.id)),
+                            onPressed: pyr.admitProblem(p) != null
+                                ? null
+                                : () => unawaited(pyr.approve(p.record.id)),
                             icon: const Icon(Icons.draw_rounded, size: 18),
                             label: Text(t('Podpisz')),
                           ),
@@ -1007,8 +1018,7 @@ class _MeTab extends StatelessWidget {
           ),
           actions: <Widget>[
             TextButton.icon(
-              onPressed: () =>
-                  unawaited(Clipboard.setData(ClipboardData(text: code))),
+              onPressed: () => unawaited(copyWithExpiry(code)),
               icon: const Icon(Icons.copy_rounded, size: 18),
               label: Text(t('Kopiuj kod')),
             ),
@@ -1418,6 +1428,13 @@ class _MeTab extends StatelessWidget {
                                 tone: zen.success,
                                 icon: Icons.account_balance_rounded,
                               ),
+                            if (s.badges[me]
+                                case final ({int birthYear, String gender}) b)
+                              ZenPill(
+                                text: pyrBadgeText(b, pyr.now),
+                                tone: zen.textSecondary,
+                                icon: Icons.verified_rounded,
+                              ),
                           ],
                         ),
                       ],
@@ -1669,6 +1686,8 @@ class _MeTab extends StatelessWidget {
           icon: const Icon(Icons.swap_horiz_rounded),
           label: Text(t('Przejdź do innej komórki')),
         ),
+        const SizedBox(height: 12),
+        PyrBadgeAndStats(pyr: pyr, s: s, me: me),
         const SizedBox(height: 6),
         Center(
           child: TextButton.icon(
@@ -1690,6 +1709,100 @@ class _MeTab extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// A member's badge (§20.2a) for people: "34 l. · K".
+String pyrBadgeText(({int birthYear, String gender}) b, int nowMs) {
+  final int age = DateTime.fromMillisecondsSinceEpoch(nowMs).year - b.birthYear;
+  final String g = switch (b.gender) {
+    'k' => t('K'),
+    'm' => t('M'),
+    _ => t('inna'),
+  };
+  return t('{age} l. · {gender}', <String, Object?>{'age': age, 'gender': g});
+}
+
+/// The badge this person may show (§20.2a) and the anonymous statistics of
+/// their branch: gender and age, summed up the tree, shown only from
+/// [kPyrStatsMinPeople] people.
+class PyrBadgeAndStats extends StatelessWidget {
+  const PyrBadgeAndStats({
+    required this.pyr,
+    required this.s,
+    required this.me,
+    super.key,
+  });
+
+  final PyramidService pyr;
+  final PyramidState s;
+  final String me;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final bool shown = s.badges.containsKey(me);
+    final List<int>? stats = pyr.branchStats();
+    final List<String> ages = <String>[
+      t('do 24'),
+      t('25–39'),
+      t('40–59'),
+      t('60+'),
+    ];
+    final List<String> genders = <String>[
+      t('Kobiety'),
+      t('Mężczyźni'),
+      t('Inne'),
+    ];
+    return ZenCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          SwitchListTile(
+            key: const Key('pyr-badge'),
+            contentPadding: EdgeInsets.zero,
+            value: shown,
+            title: Text(t('Pokaż odznakę wieku i płci')),
+            subtitle: Text(
+              t(
+                'Dane potwierdzone przy wejściu; każdy może je sprawdzić. '
+                'Bez odznaki wiek i płeć trafiają tylko do anonimowych '
+                'statystyk.',
+              ),
+            ),
+            onChanged: (bool v) => unawaited(pyr.showBadge(v)),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            t('STATYSTYKI TWOJEJ GAŁĘZI (ANONIMOWE)'),
+            style: zen.label(color: zen.textMuted),
+          ),
+          const SizedBox(height: 6),
+          if (stats == null)
+            Text(
+              t(
+                'Pokażą się, gdy z gałęzi spłyną sumy co najmniej {count} osób.',
+                <String, Object?>{'count': kPyrStatsMinPeople},
+              ),
+              style: TextStyle(color: zen.textSecondary, fontSize: 13),
+            )
+          else
+            for (int g = 0; g < genders.length; g++)
+              if (stats
+                      .sublist(g * ages.length, (g + 1) * ages.length)
+                      .fold(0, (int a, int b) => a + b) >
+                  0)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text(
+                    '${genders[g]}: ${<String>[for (int a = 0; a < ages.length; a++)
+                      if (stats[g * ages.length + a] > 0) '${ages[a]} — ${stats[g * ages.length + a]}'].join(' · ')}',
+                    style: TextStyle(color: zen.textPrimary, fontSize: 13.5),
+                  ),
+                ),
+        ],
+      ),
     );
   }
 }
@@ -1721,6 +1834,11 @@ class PyrPostCard extends ConsumerWidget {
     }
     final ZenColors zen = ZenColors.of(context);
     final Color tone = pyrTone(zen);
+    final Set<String> bannedIds = s.bannedEntries(pyr.now);
+    final String? nat = post.nat;
+    final bool pinned =
+        nat != null && (s.natPins[nat]?.containsKey(post.id) ?? false);
+    final bool leadsSection = nat != null && s.nationalLead(nat) == me;
     final int? myLevel = s.levelOf(me);
     final String? authorPath = s.pathOf(post.author);
     final int above = myLevel == null ? 0 : myLevel - post.level;
@@ -1760,6 +1878,9 @@ class PyrPostCard extends ConsumerWidget {
                               'count': s.branchSize(authorPath),
                             }),
                           if (post.nat != null) post.nat!,
+                          if (s.badges[post.author]
+                              case final ({int birthYear, String gender}) b)
+                            pyrBadgeText(b, pyr.now),
                           pyrDate(post.at),
                         ].join(' · '),
                         style: TextStyle(
@@ -1799,6 +1920,23 @@ class PyrPostCard extends ConsumerWidget {
               ),
             ),
           ],
+          if (pinned) ...<Widget>[
+            const SizedBox(height: 6),
+            Row(
+              children: <Widget>[
+                Icon(Icons.push_pin_rounded, size: 15, color: zen.warning),
+                const SizedBox(width: 4),
+                Text(
+                  t('Przypięte w sekcji'),
+                  style: TextStyle(
+                    color: zen.warning,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 10),
           Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -1811,6 +1949,27 @@ class PyrPostCard extends ConsumerWidget {
               ),
             ),
           ),
+          // §22.1a: for the author, how far the post got in the branch
+          // (anonymous sums climbing the tree).
+          if (pyr.reachOf(post.id) case final ({int got, int read}) reach)
+            Padding(
+              padding: const EdgeInsets.only(top: 8, right: 8),
+              child: Text(
+                t('Dotarło: {got} z {count} · przeczytało: {read}', {
+                  'got': reach.got,
+                  'count': authorPath == null
+                      ? 0
+                      : s.branchSize(authorPath) - 1,
+                  'read': reach.read,
+                }),
+                key: Key('pyr-reach-${post.id}'),
+                style: TextStyle(
+                  color: zen.textMuted,
+                  fontSize: 12,
+                  height: 1.3,
+                ),
+              ),
+            ),
           if (post.comments.isNotEmpty)
             Container(
               width: double.infinity,
@@ -1824,28 +1983,50 @@ class PyrPostCard extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   for (final PyrComment c in post.comments)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: Text.rich(
-                        TextSpan(
-                          children: <InlineSpan>[
-                            TextSpan(
-                              text: '${s.members[c.author]?.name ?? '?'}  ',
-                              style: TextStyle(
-                                color: zen.textPrimary,
-                                fontWeight: FontWeight.w700,
+                    if (!bannedIds.contains(c.id) &&
+                        !ref.watch(hiddenByMeProvider).hides(id: c.id))
+                      InkWell(
+                        key: Key('pyr-comment-${c.id}'),
+                        // §21.4: a comment is reported with its author.
+                        onLongPress: c.author == me
+                            ? null
+                            : () => unawaited(
+                                showReportSheet(
+                                  context,
+                                  pyr,
+                                  target: c.author,
+                                  evidence: t('Komentarz — {name}\n{text}', {
+                                    'name': s.members[c.author]?.name ?? '?',
+                                    'text': c.text,
+                                  }),
+                                  contentHash: contentHash(c.text),
+                                  contentId: c.id,
+                                  entryId: c.id,
+                                ),
                               ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 3),
+                          child: Text.rich(
+                            TextSpan(
+                              children: <InlineSpan>[
+                                TextSpan(
+                                  text: '${s.members[c.author]?.name ?? '?'}  ',
+                                  style: TextStyle(
+                                    color: zen.textPrimary,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                TextSpan(text: c.text),
+                              ],
                             ),
-                            TextSpan(text: c.text),
-                          ],
-                        ),
-                        style: TextStyle(
-                          color: zen.textSecondary,
-                          fontSize: 13.5,
-                          height: 1.35,
+                            style: TextStyle(
+                              color: zen.textSecondary,
+                              fontSize: 13.5,
+                              height: 1.35,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
                 ],
               ),
             ),
@@ -1873,6 +2054,17 @@ class PyrPostCard extends ConsumerWidget {
                         }),
                 ),
               ),
+              if (leadsSection)
+                IconButton(
+                  key: Key('pyr-pin-${post.id}'),
+                  tooltip: pinned ? t('Odepnij') : t('Przypnij'),
+                  icon: Icon(
+                    pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+                    color: pinned ? zen.warning : zen.textMuted,
+                  ),
+                  onPressed: () =>
+                      unawaited(pyr.pinNational(post.id, on: !pinned)),
+                ),
               IconButton(
                 tooltip: t('Zgłoś'),
                 icon: Icon(Icons.flag_outlined, color: zen.textMuted),
@@ -1884,6 +2076,9 @@ class PyrPostCard extends ConsumerWidget {
                     evidence: post.text,
                     contentHash: contentHash(post.text),
                     contentId: post.id,
+                    // The post is a signed record every member keeps: its
+                    // id is the evidence and what a ban names (S36).
+                    entryId: post.id,
                   ),
                 ),
               ),
@@ -1908,6 +2103,7 @@ class _PoliticsTab extends StatelessWidget {
     final Color tone = pyrTone(zen);
     final Set<String> up = s.lineUp(me).toSet();
     final Set<String> banned = s.bannedContent(pyr.now);
+    final Set<String> bannedIds = s.bannedEntries(pyr.now);
     // §22.1: the top first, then the line up from the highest, newest first
     // within a level; then this person's own posts.
     final List<PyrPost> list =
@@ -1917,6 +2113,7 @@ class _PoliticsTab extends StatelessWidget {
                   (up.contains(p.author) ||
                       p.author == me ||
                       p.author == s.head) &&
+                  !bannedIds.contains(p.id) &&
                   !banned.contains(contentHash(p.text)),
             )
             .toList()
@@ -1926,6 +2123,8 @@ class _PoliticsTab extends StatelessWidget {
                 : b.at.compareTo(a.at),
           );
     final String myPath = s.pathOf(me)!;
+    // §22.1a: what is shown here counts as opened ("przeczytało").
+    pyr.markRead(list.map((PyrPost p) => p.id));
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: <Widget>[
@@ -2024,10 +2223,26 @@ class _NationTab extends StatelessWidget {
     final String nat = s.members[me]!.nat;
     final String? lead = s.nationalLead(nat);
     final Map<String, int> grants = s.natGrants[nat] ?? const <String, int>{};
+    final Map<String, int> pins = s.natPins[nat] ?? const <String, int>{};
     final int now = pyr.now;
+    final Set<String> banned = s.bannedContent(now);
+    final Set<String> bannedIds = s.bannedEntries(now);
     final List<PyrPost> posts =
-        s.natPosts.values.where((PyrPost p) => p.nat == nat).toList()
+        s.natPosts.values
+            .where(
+              (PyrPost p) =>
+                  p.nat == nat &&
+                  !bannedIds.contains(p.id) &&
+                  !banned.contains(contentHash(p.text)),
+            )
+            .toList()
           ..sort((PyrPost a, PyrPost b) {
+            // Pinned by the lead first, newest pin on top (§22.2).
+            final int pa = pins[a.id] ?? -1;
+            final int pb = pins[b.id] ?? -1;
+            if (pa != pb) {
+              return pb.compareTo(pa);
+            }
             int prio(PyrPost p) =>
                 p.author == lead ? 0 : ((grants[p.author] ?? 0) > now ? 1 : 2);
             final int c = prio(a).compareTo(prio(b));

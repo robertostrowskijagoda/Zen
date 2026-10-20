@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -9,8 +10,13 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
+import 'package:zen/src/features/account/account_secure_providers.dart';
+import 'package:zen/src/features/account/presentation/paper_backup_screen.dart';
+import 'package:zen/src/features/account/presentation/paper_restore_screen.dart';
+import 'package:zen/src/features/account/recovery_circle_pick.dart';
 import 'package:zen/src/features/account/recovery_providers.dart';
 import 'package:zen/src/features/account/recovery_service.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -93,20 +99,19 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     super.dispose();
   }
 
-  /// Who keeps the pieces: the mailbox circle, filled up with friends.
+  /// Who keeps the pieces: the mailbox circle and the other friends,
+  /// "Przyjaciel" first (§7).
   List<String> _helpers() {
     final RelayEngine? engine = ref.read(relayEngineProvider);
-    final List<String> circle = <String>[...?engine?.overview.value.relays];
     final SocialHubState social = ref.read(socialHubControllerProvider);
-    for (final FriendProfile f in social.acceptedFriends) {
-      if (circle.length >= 6) {
-        break;
-      }
-      if (!circle.contains(f.address)) {
-        circle.add(f.address);
-      }
-    }
-    return circle;
+    final LedgerNode? node = _node;
+    return pickRecoveryHelpers(
+      mailboxes: <String>[...?engine?.overview.value.relays],
+      friends: <String>[
+        for (final FriendProfile f in social.acceptedFriends) f.address,
+      ],
+      levelOf: (String a) => node?.levelOf(a) ?? FriendLevel.friend,
+    );
   }
 
   Future<void> _run(Future<String> Function() action) async {
@@ -173,6 +178,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     identity.lock();
     _password.clear();
     _repeat.clear();
+    ref.invalidate(accountSecureReminderProvider);
     return tn(
       helpers.length,
       one: 'Hasło ustawione. Klucze odzyskiwania wysłane do {n} osoby.',
@@ -603,9 +609,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
   );
 
   String _when(int millis) {
-    final DateTime t = DateTime.fromMillisecondsSinceEpoch(millis);
-    String two(int v) => v.toString().padLeft(2, '0');
-    return '${two(t.day)}.${two(t.month)} ${two(t.hour)}:${two(t.minute)}';
+    return ZenFormat.dayMonthTime(DateTime.fromMillisecondsSinceEpoch(millis));
   }
 
   @override
@@ -1090,6 +1094,44 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                           child: Text(t('Przerwij odzyskiwanie')),
                         ),
                       ],
+                    ],
+                  ),
+                ),
+                ZenSection(t('Kopia klucza na papierze')),
+                ZenCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      _paragraph(
+                        zen,
+                        t(
+                          'Klucz konta zapisany na kartce wraca konto na '
+                          'nowym telefonie, nawet gdy nikt z kręgu nie '
+                          'pomoże. Kto ma kartkę, ma konto.',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      FilledButton.icon(
+                        key: const Key('paper-backup-open'),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(48),
+                        ),
+                        onPressed: () =>
+                            unawaited(PaperBackupScreen.open(context)),
+                        icon: const Icon(Icons.history_edu_rounded),
+                        label: Text(t('Zapisz kopię na papierze')),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        key: const Key('paper-restore-open'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(48),
+                        ),
+                        onPressed: () =>
+                            unawaited(PaperRestoreScreen.open(context)),
+                        icon: const Icon(Icons.restore_page_outlined),
+                        label: Text(t('Mam kopię na papierze')),
+                      ),
                     ],
                   ),
                 ),

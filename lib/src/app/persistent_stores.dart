@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:zen/src/app/zen_instance.dart';
@@ -85,6 +86,8 @@ ZenPersistentStores buildZenPersistentStoresForDirectory(
     codec: codec,
     protector: dataProtector,
   );
+  // Leftovers of writes that were killed halfway (A20); best effort.
+  unawaited(binaryStore.sweepOrphanTemporaries().catchError((Object _) => 0));
   return ZenPersistentStores(
     signalQueueStore: FileSignalQueueStore(store: binaryStore),
     socialSnapshotStore: FileSocialSnapshotStore(store: binaryStore),

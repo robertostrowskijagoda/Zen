@@ -14,8 +14,19 @@ import 'package:zen/src/features/groups/group_store.dart';
 import 'package:zen/src/features/groups/presentation/create_group_sheet.dart';
 import 'package:zen/src/features/groups/presentation/group_conversation_screen.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+
+/// Invitations to groups from people who are not friends are taken (off
+/// by default, §8).
+final List _invitesFromAnyone = [
+  appSettingsInitialStateProvider.overrideWithValue(
+    const AppSettings(groupInviteFrom: GroupInviteFrom.everyone),
+  ),
+  appSettingsHydrationEnabledProvider.overrideWithValue(false),
+];
 
 void main() {
   group('GroupProfile & GroupStore', () {
@@ -407,58 +418,56 @@ void main() {
       );
     });
 
-    test(
-      'groupInvite is allowed from non-friend peer and appears in inbox',
-      () async {
-        final ProviderContainer container = ProviderContainer(
-          overrides: [
-            socialHubAutoHydrateProvider.overrideWithValue(false),
-            socialHubSeedProvider.overrideWithValue(SocialHubState.empty()),
-          ],
-        );
-        addTearDown(container.dispose);
+    test('groupInvite from a non-friend peer appears in inbox when invitations '
+        'from anyone are taken', () async {
+      final ProviderContainer container = ProviderContainer(
+        overrides: [
+          ..._invitesFromAnyone,
+          socialHubAutoHydrateProvider.overrideWithValue(false),
+          socialHubSeedProvider.overrideWithValue(SocialHubState.empty()),
+        ],
+      );
+      addTearDown(container.dispose);
 
-        final SocialHubController controller = container.read(
-          socialHubControllerProvider.notifier,
-        );
+      final SocialHubController controller = container.read(
+        socialHubControllerProvider.notifier,
+      );
 
-        // Peer 'stranger.ygg' is not in friends list
-        expect(container.read(socialHubControllerProvider).friends, isEmpty);
+      // Peer 'stranger.ygg' is not in friends list
+      expect(container.read(socialHubControllerProvider).friends, isEmpty);
 
-        const ZenSignal invite = ZenSignal(
-          type: ZenSignalType.groupInvite,
-          sender: 'stranger.ygg',
-          groupId: 'grp-public',
-          groupName: 'Nowa Grupa',
-          content: 'Zapraszamy',
-          memberAddresses: <String>['stranger.ygg'],
-        );
+      const ZenSignal invite = ZenSignal(
+        type: ZenSignalType.groupInvite,
+        sender: 'stranger.ygg',
+        groupId: 'grp-public',
+        groupName: 'Nowa Grupa',
+        content: 'Zapraszamy',
+        memberAddresses: <String>['stranger.ygg'],
+      );
 
-        await controller.receiveSignal(invite, receivedAtMillis: 1000);
+      await controller.receiveSignal(invite, receivedAtMillis: 1000);
 
-        final SocialHubState state = container.read(
-          socialHubControllerProvider,
-        );
-        // Group was created and invite was placed into inbox
-        expect(state.groups.containsKey('grp-public'), isTrue);
-        expect(state.groups['grp-public']?.name, 'Nowa Grupa');
-        expect(state.inbox.length, 1);
-        expect(state.inbox.first.type, InboxEntryType.groupInvite);
+      final SocialHubState state = container.read(socialHubControllerProvider);
+      // Group was created and invite was placed into inbox
+      expect(state.groups.containsKey('grp-public'), isTrue);
+      expect(state.groups['grp-public']?.name, 'Nowa Grupa');
+      expect(state.inbox.length, 1);
+      expect(state.inbox.first.type, InboxEntryType.groupInvite);
 
-        // Resending the invite should NOT duplicate the inbox entry
-        await controller.receiveSignal(invite, receivedAtMillis: 2000);
-        final SocialHubState stateAfterResend = container.read(
-          socialHubControllerProvider,
-        );
-        expect(stateAfterResend.inbox.length, 1);
-      },
-    );
+      // Resending the invite should NOT duplicate the inbox entry
+      await controller.receiveSignal(invite, receivedAtMillis: 2000);
+      final SocialHubState stateAfterResend = container.read(
+        socialHubControllerProvider,
+      );
+      expect(stateAfterResend.inbox.length, 1);
+    });
 
     test(
       'rejected group invite is not re-added on subsequent signals',
       () async {
         final ProviderContainer container = ProviderContainer(
           overrides: [
+            ..._invitesFromAnyone,
             socialHubAutoHydrateProvider.overrideWithValue(false),
             socialHubSeedProvider.overrideWithValue(SocialHubState.empty()),
           ],

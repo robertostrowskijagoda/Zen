@@ -6,11 +6,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/app_version.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/features/update/canary.dart';
 import 'package:zen/src/features/update/presentation/share_app_screen.dart';
 import 'package:zen/src/features/update/release.dart';
+import 'package:zen/src/features/update/store_build.dart';
 import 'package:zen/src/features/update/update_service.dart';
 
 /// "Aktualizacje i Podaj dalej" (§14.2).
@@ -81,7 +84,15 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
         children: <Widget>[
           _versionCard(zen),
           ZenSection(t('Aktualizacje'), top: 16),
-          if (service == null)
+          // A store build is updated by its store (STAN D12).
+          if (isStoreBuild)
+            ZenInfo(
+              key: const Key('updates-store'),
+              icon: Icons.storefront_rounded,
+              title: t('Aktualizacje ze sklepu'),
+              text: t('Tę wersję Zen aktualizuje sklep, z którego ją masz.'),
+            )
+          else if (service == null)
             ZenCard(
               child: Row(
                 children: <Widget>[
@@ -108,8 +119,13 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
           else
             ListenableBuilder(
               listenable: service,
-              builder: (BuildContext context, Widget? _) =>
+              builder: (BuildContext context, Widget? _) => Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
                   _statusCard(context, service),
+                  ..._integrity(context, service),
+                ],
+              ),
             ),
           if (_message != null)
             Container(
@@ -152,24 +168,27 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
             ),
           ],
           const SizedBox(height: 8),
-          ZenInfo(
-            icon: Icons.verified_user_outlined,
-            title: t('Bez sklepu i bez serwera'),
-            text: t(
-              'Nowe wersje przychodzą od znajomych, bez sklepu i bez serwera. '
-              'Zen czeka 7 dni od pierwszego zobaczenia wersji i nigdy nie '
-              'instaluje niczego sam.',
+          if (!isStoreBuild)
+            ZenInfo(
+              icon: Icons.verified_user_outlined,
+              title: t('Bez sklepu i bez serwera'),
+              text: t(
+                'Nowe wersje przychodzą od znajomych, bez sklepu i bez '
+                'serwera. Zen czeka 7 dni od pierwszego zobaczenia wersji '
+                'i nigdy nie instaluje niczego sam.',
+              ),
             ),
-          ),
           ZenSection(t('Podaj dalej'), top: 24),
           ZenHero(
             title: t('Daj Zen komuś obok'),
             icon: Icons.volunteer_activism_rounded,
             tone: zenTone(zen, 2),
-            text: t(
-              'Bez internetu i bez sklepu: z telefonu przez Wi-Fi albo '
-              'hotspot, z komputera także kablem USB.',
-            ),
+            text: isStoreBuild
+                ? t('Wyślij znajomemu link do Zen.')
+                : t(
+                    'Bez internetu i bez sklepu: z telefonu przez Wi-Fi albo '
+                    'hotspot, z komputera także kablem USB.',
+                  ),
             actions: <Widget>[
               FilledButton.icon(
                 key: const Key('updates-share-app'),
@@ -375,11 +394,100 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
     );
   }
 
+  /// The signed donation details, the canary and the mirrors (§14.2,
+  /// §14.3) — only once something signed by the maintainers is known.
+  List<Widget> _integrity(BuildContext context, UpdateService service) {
+    final ZenColors zen = ZenColors.of(context);
+    final List<String> differences = service.officialDifferences;
+    final SignedCanary? canary = service.canary;
+    final List<String> mirrors = service.book.enabled
+        ? service.book.mirrors
+        : const <String>[];
+    String fieldName(String field) => switch (field) {
+      'donation' => t('link do zbiórki'),
+      'author' => t('autor'),
+      _ => t('repozytorium'),
+    };
+    return <Widget>[
+      if (differences.isNotEmpty)
+        ZenInfo(
+          key: const Key('updates-official-differs'),
+          icon: Icons.gpp_bad_rounded,
+          tone: zen.danger,
+          title: t('To może nie być oficjalny Zen'),
+          text: t(
+            'Ta kopia pokazuje inne dane niż podpisane przez opiekunów '
+            '({fields}). Link do zbiórki mógł zostać podmieniony. '
+            'Podpisany link: {url}',
+            {
+              'fields': differences.map(fieldName).join(', '),
+              'url': service.book.signedOfficial?.donation ?? '—',
+            },
+          ),
+        )
+      else if (service.book.enabled && service.book.signedOfficial != null)
+        ZenInfo(
+          key: const Key('updates-official-ok'),
+          icon: Icons.verified_rounded,
+          tone: zen.success,
+          text: t(
+            'Link do zbiórki i autor zgadzają się z podpisanym wydaniem '
+            '{version}.',
+            {'version': service.book.officialSource!.manifest.version},
+          ),
+        ),
+      if (canary != null)
+        ZenInfo(
+          key: Key(
+            service.canaryExpired
+                ? 'updates-canary-expired'
+                : 'updates-canary-fresh',
+          ),
+          icon: service.canaryExpired
+              ? Icons.warning_amber_rounded
+              : Icons.campaign_rounded,
+          tone: service.canaryExpired ? zen.danger : zen.success,
+          title: service.canaryExpired
+              ? t('Oświadczenie opiekunów nie zostało odnowione')
+              : t('Oświadczenie opiekunów (kanarek)'),
+          text: service.canaryExpired
+              ? t(
+                  'Miało zostać odnowione do {date}. Opiekunowie mogli '
+                  'zostać zmuszeni do milczenia — ostrożnie z nowymi '
+                  'wersjami. Ostatnia treść: {text}',
+                  {
+                    'date': _date(
+                      DateTime.fromMillisecondsSinceEpoch(
+                        canary.statement.until,
+                      ),
+                    ),
+                    'text': canary.statement.text,
+                  },
+                )
+              : t('{text} (podpisane {date}, następne do {until})', {
+                  'text': canary.statement.text,
+                  'date': _date(
+                    DateTime.fromMillisecondsSinceEpoch(canary.statement.at),
+                  ),
+                  'until': _date(
+                    DateTime.fromMillisecondsSinceEpoch(canary.statement.until),
+                  ),
+                }),
+        ),
+      if (mirrors.isNotEmpty)
+        ZenInfo(
+          key: const Key('updates-mirrors'),
+          icon: Icons.alt_route_rounded,
+          title: t('Lustra repozytorium'),
+          text: mirrors.join('\n'),
+        ),
+    ];
+  }
+
   static String _date(DateTime d) {
-    String two(int v) => v.toString().padLeft(2, '0');
     return t('{date} o {time}', {
-      'date': '${two(d.day)}.${two(d.month)}.${d.year}',
-      'time': '${two(d.hour)}:${two(d.minute)}',
+      'date': ZenFormat.date(d),
+      'time': ZenFormat.time(d),
     });
   }
 }

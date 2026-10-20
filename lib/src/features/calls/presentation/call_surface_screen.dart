@@ -16,6 +16,7 @@ import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/calls/presentation/call_compact_layer.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/calls/presentation/call_session_widgets.dart';
+import 'package:zen/src/features/calls/presentation/screen_share_guard.dart';
 import 'package:zen/src/features/calls/presentation/screen_source_picker.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -301,6 +302,12 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
   ) async {
     if (callMedia.isScreenSharing) {
       await callMedia.stopScreenShare();
+      return;
+    }
+    if (!await confirmScreenShareStart(context)) {
+      return;
+    }
+    if (!context.mounted) {
       return;
     }
     final List<ScreenShareSource> sources = await callMedia.listScreenSources();
@@ -905,6 +912,7 @@ class _ScreenShareStrip extends StatelessWidget {
                 ],
               ),
             ),
+          if (sharing) ScreenShareReminderBanner(zen: zen),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
             child: sharing || remoteSharing

@@ -17,6 +17,7 @@ import 'package:zen/src/features/pyramid/presentation/wallet_screen.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
+import 'package:zen/src/features/settings/presentation/age_gate.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -472,8 +473,9 @@ class MyIntrosTile extends ConsumerWidget {
   }
 }
 
-/// "Kto widzi moją listę znajomych" (§24.1): everyone, only those this
-/// person let (after they asked; revocable here), or nobody.
+/// "Kto widzi moją listę znajomych" (§24.1): everyone, friends at level
+/// "Znajomy" and up (the default, §8), only those this person let (after
+/// they asked; revocable here), or nobody.
 class FriendListAudienceTile extends ConsumerWidget {
   const FriendListAudienceTile({super.key});
 
@@ -522,6 +524,10 @@ class FriendListAudienceTile extends ConsumerWidget {
                     'Znajomi widzą wspólnych znajomych i znajomych znajomych '
                     'w grafie i na wydarzeniach.',
                   ),
+                  FriendListAudience.friends => t(
+                    'Widzą ją znajomi i przyjaciele. Słaby znajomy może '
+                    'poprosić, a Ty zgadzasz się w Skrzynce.',
+                  ),
                   FriendListAudience.onRequest => t(
                     'Znajomy może poprosić, a Ty zgadzasz się w Skrzynce. '
                     'Zgodę cofniesz w każdej chwili.',
@@ -545,6 +551,10 @@ class FriendListAudienceTile extends ConsumerWidget {
                   for (final (FriendListAudience a, String label)
                       in <(FriendListAudience, String)>[
                         (FriendListAudience.all, t('Wszyscy znajomi')),
+                        (
+                          FriendListAudience.friends,
+                          t('Znajomi i przyjaciele'),
+                        ),
                         (FriendListAudience.onRequest, t('Tylko na prośbę')),
                         (FriendListAudience.nobody, t('Nikt')),
                       ])
@@ -557,7 +567,8 @@ class FriendListAudienceTile extends ConsumerWidget {
                     ),
                 ],
               ),
-              if (audience == FriendListAudience.onRequest &&
+              if ((audience == FriendListAudience.onRequest ||
+                      audience == FriendListAudience.friends) &&
                   allowed.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 12),
                 Text(
@@ -798,7 +809,7 @@ Future<void> askIntroduction(
                       nav.push(
                         MaterialPageRoute<void>(
                           builder: (BuildContext context) =>
-                              const WalletScreen(),
+                              const AgeGate(child: WalletScreen()),
                         ),
                       ),
                     );

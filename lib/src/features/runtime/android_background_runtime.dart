@@ -10,6 +10,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/i18n/zen_language_preference.dart';
+import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/app/persistent_stores.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
@@ -26,6 +27,7 @@ import 'package:zen/src/features/calls/call_platform_channel.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
 import 'package:zen/src/features/calls/group_call_media.dart';
 import 'package:zen/src/features/calls/noop_call_media_session.dart';
+import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/alarm_shortcut.dart';
@@ -1373,6 +1375,10 @@ final class HeadlessBackgroundRuntimeCoordinator {
       '(${_container.read(socialHubControllerProvider).friends.length} peers).',
     );
     await controller.setLifecycle(_backgroundLifecycleSnapshot());
+    // Weak acquaintances get no friend list and statuses (§8).
+    _meet.levelOf = (String a) => _ledger?.levelOf(a);
+    _container.read(friendLevelLookupProvider).levelOf = (String a) =>
+        _ledger?.levelOf(a);
     // A friend who lost this phone's friend list asks again (B1/B2).
     _meet.friendNames = () {
       final SocialHubState s = _container.read(socialHubControllerProvider);
@@ -1530,7 +1536,11 @@ final class HeadlessBackgroundRuntimeCoordinator {
     // The position, if Android lets the service have it (often only the
     // last known one); the app sends fresh ones once it is opened.
     unawaitedLogged(() async {
-      final GeoFix? fix = await currentFix(timeout: const Duration(seconds: 8));
+      // Fresh when the permission is there (read under a `location`
+      // foreground service); never asks: nobody is looking at the screen.
+      final GeoFix? fix = await currentFixInBackground(
+        timeout: const Duration(seconds: 15),
+      );
       if (fix != null && !_disposed) {
         await _meet.updateAlarmLocation(
           fix.lat,
@@ -1605,6 +1615,7 @@ final class HeadlessBackgroundRuntimeCoordinator {
             peerAddress: session.peerAddress,
             title: session.displayName,
             autoAccept: true,
+            callId: session.id,
           ),
         );
         try {
@@ -1646,6 +1657,19 @@ final class HeadlessBackgroundRuntimeCoordinator {
     );
   }
 
+  /// What app version a friend named (A17): only for the "newer Zen" hint.
+  Future<void> _notePeerVersion(
+    String from,
+    Map<String, dynamic> payload,
+  ) async {
+    final PeerVersion? version = PeerVersion.fromPayload(payload);
+    if (version != null) {
+      await _container
+          .read(socialHubControllerProvider.notifier)
+          .notePeerAppVersion(peerAddress: from, version: version.version);
+    }
+  }
+
   Future<void> _handleFrame(SignalTransportFrame frame) async {
     final String from = PeerShareCodec.normalizeAddress(frame.from);
     final String type = frame.payload['type'] as String? ?? '';
@@ -1677,11 +1701,13 @@ final class HeadlessBackgroundRuntimeCoordinator {
         payload: <String, dynamic>{
           'type': 'pong',
           'state': 'background',
+          if (isAcceptedFriend) ...versionHello(),
           if (isAcceptedFriend) ..._meetInbox.meet.helloFor(from),
         },
       );
       if (isAcceptedFriend) {
         await _meetInbox.meet.onHello(from, frame.payload);
+        await _notePeerVersion(from, frame.payload);
       }
       return;
     }
@@ -1700,6 +1726,7 @@ final class HeadlessBackgroundRuntimeCoordinator {
           );
       if (isAcceptedFriend) {
         await _meetInbox.meet.onHello(from, frame.payload);
+        await _notePeerVersion(from, frame.payload);
       }
       return;
     }
@@ -1776,7 +1803,10 @@ final class HeadlessBackgroundRuntimeCoordinator {
         remoteAddress: address,
         payload: <String, dynamic>{
           'type': 'ping',
-          if (_isAcceptedFriend(address)) ..._meetInbox.meet.helloFor(address),
+          if (_isAcceptedFriend(address)) ...<String, dynamic>{
+            ...versionHello(),
+            ..._meetInbox.meet.helloFor(address),
+          },
         },
       );
     }

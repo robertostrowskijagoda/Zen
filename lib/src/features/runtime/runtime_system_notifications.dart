@@ -8,6 +8,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
+import 'package:zen/src/features/calls/call_safety_cues.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -28,8 +29,10 @@ List buildRuntimeSystemNotificationProviderOverrides({
         serviceFactory?.call() ??
             FlutterLocalRuntimeSystemNotificationService(),
         // Read on every post, so flipping the setting applies at once.
+        // Also while this device shares its screen in a call (§13.1).
         hideContent: () =>
-            ref.read(appSettingsControllerProvider).hideNotificationContent,
+            ref.read(appSettingsControllerProvider).hideNotificationContent ||
+            screenShareHidesNotifications.value,
       ),
     ),
   ];
@@ -1061,6 +1064,7 @@ final class _RuntimeSystemNotificationsBridgeState
             peerAddress: peerAddress,
             title: activeCall?.displayName,
             autoAccept: true,
+            callId: activeCall?.id,
           ),
         );
       }

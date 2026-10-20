@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -51,8 +52,7 @@ String intentTimeLeft(IntentStatus s, int now) {
     return t('jeszcze {minutes} min', {'minutes': minutes < 1 ? 1 : minutes});
   }
   final DateTime d = DateTime.fromMillisecondsSinceEpoch(s.until);
-  String two(int v) => v.toString().padLeft(2, '0');
-  return t('do {time}', {'time': '${two(d.hour)}:${two(d.minute)}'});
+  return t('do {time}', {'time': ZenFormat.time(d)});
 }
 
 /// How much of a status's time is left (1 = just set), or `null` for one

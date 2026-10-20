@@ -78,6 +78,26 @@ class _StatusBar extends ConsumerWidget {
                     ),
                     const SizedBox(width: 8),
                   ],
+                  if (!state.isConnected) ...<Widget>[
+                    // Not connected: "Dlaczego nie działa?" (A22).
+                    IconButton(
+                      key: const Key('status-health'),
+                      tooltip: t('Dlaczego nie działa?'),
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints(
+                        minWidth: 36,
+                        minHeight: 36,
+                      ),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => unawaited(HealthScreen.open(context)),
+                      icon: Icon(
+                        Icons.help_outline_rounded,
+                        size: 20,
+                        color: zen.warning,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
                   Container(
                     padding: const EdgeInsets.all(7),
                     decoration: BoxDecoration(
@@ -658,6 +678,8 @@ class _SettingsScreen extends ConsumerWidget {
           children: <Widget>[
             // Your profile is edited on the profile tab, not here (§9).
             const _QuickLockPanel(),
+            // Friends run a newer Zen (A17): a quiet hint, gone otherwise.
+            const FriendsNewerVersionBanner(),
             _SettingsGroup(
               title: t('Prywatność i bezpieczeństwo'),
               tiles: <Widget>[
@@ -691,9 +713,12 @@ class _SettingsScreen extends ConsumerWidget {
                     icon: Icons.key_outlined,
                     toneIndex: 2,
                     title: t('Konto i odzyskiwanie'),
-                    subtitle: t(
-                      'Hasło konta, krąg odzyskiwania, nowe urządzenie',
-                    ),
+                    subtitle: ref.watch(accountSecureReminderProvider)
+                        ? t(
+                            'Zabezpiecz konto na wypadek zgubionego telefonu: '
+                            'krąg odzyskiwania albo kopia na papierze',
+                          )
+                        : t('Hasło konta, krąg odzyskiwania, nowe urządzenie'),
                     onTap: () => unawaited(AccountRecoveryScreen.open(context)),
                   ),
                 if (ref.watch(ledgerNodeEnabledProvider))
@@ -719,6 +744,15 @@ class _SettingsScreen extends ConsumerWidget {
                           'count': blockedCount,
                         }),
                   onTap: () => _openBlockedFriendsScreen(context),
+                ),
+                _SettingsNavTile(
+                  key: const Key('settings-nav-group-invites'),
+                  icon: Icons.group_add_outlined,
+                  toneIndex: 5,
+                  title: t('Zaproszenia do grup'),
+                  subtitle: settings.groupInviteFrom.label,
+                  pageTitle: t('Zaproszenia do grup'),
+                  pageChildren: const <Widget>[GroupInviteFromTile()],
                 ),
               ],
             ),
@@ -762,6 +796,33 @@ class _SettingsScreen extends ConsumerWidget {
                         .setAutoDownloadMedia(value),
                   ),
                 ),
+                _SettingsSwitchTile(
+                  key: const Key('settings-media-wifi-only'),
+                  icon: Icons.wifi_rounded,
+                  toneIndex: 1,
+                  title: t('Media tylko przez Wi-Fi'),
+                  subtitle: t(
+                    'Zdjęcia i filmy nie pobierają się same przez dane '
+                    'komórkowe. Można je pobrać dotknięciem.',
+                  ),
+                  value: settings.mediaOnlyOnWifi,
+                  onChanged: (bool value) => unawaited(
+                    ref
+                        .read(appSettingsControllerProvider.notifier)
+                        .setMediaOnlyOnWifi(value),
+                  ),
+                ),
+                _SettingsNavTile(
+                  key: const Key('settings-nav-storage-limits'),
+                  icon: Icons.sd_storage_outlined,
+                  toneIndex: 2,
+                  title: t('Limity przechowywania'),
+                  subtitle: t(
+                    'Największe dozwolone rozmiary w każdej kategorii',
+                  ),
+                  pageTitle: t('Limity przechowywania'),
+                  pageChildren: const <Widget>[StorageLimitsSection()],
+                ),
                 if (Platform.isAndroid)
                   _SettingsNavTile(
                     key: const Key('settings-nav-delivery'),
@@ -795,6 +856,16 @@ class _SettingsScreen extends ConsumerWidget {
                       ? t('Powiadomienia, Bluetooth, praca w tle, mikrofon')
                       : t('Powiadomienia, mikrofon i kamera'),
                   onTap: () => unawaited(PermissionsScreen.open(context)),
+                ),
+                _SettingsNavTile(
+                  key: const Key('settings-nav-health'),
+                  icon: Icons.health_and_safety_outlined,
+                  toneIndex: 2,
+                  title: t('Dlaczego nie działa?'),
+                  subtitle: t(
+                    'Sieć, praca w tle, powiadomienia, zegar, miejsce',
+                  ),
+                  onTap: () => unawaited(HealthScreen.open(context)),
                 ),
                 _SettingsNavTile(
                   key: const Key('settings-nav-appearance'),
@@ -848,6 +919,16 @@ class _SettingsScreen extends ConsumerWidget {
                   }),
                   onTap: () => unawaited(UpdatesScreen.open(context)),
                 ),
+                if (!kFeatureFlagsLocked)
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-experimental'),
+                    icon: Icons.science_outlined,
+                    toneIndex: 6,
+                    title: t('Funkcje eksperymentalne'),
+                    subtitle: t('Piramida, portfel, randki, sąsiedzi'),
+                    onTap: () =>
+                        unawaited(ExperimentalFeaturesScreen.open(context)),
+                  ),
               ],
             ),
             _SettingsGroup(
@@ -2100,7 +2181,7 @@ class _BackgroundAlertsBannerState
           if (!_collapsed) ...<Widget>[
             const SizedBox(height: 10),
             Text(
-              latest.title,
+              latest.displayTitle,
               style: TextStyle(
                 color: zen.textPrimary,
                 fontSize: 14.5,
@@ -2110,7 +2191,7 @@ class _BackgroundAlertsBannerState
             ),
             const SizedBox(height: 4),
             Text(
-              latest.body,
+              latest.displayBody,
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -3262,6 +3343,15 @@ class _BatteryOptimizationSectionState
                 label: Text(t('Otwórz ustawienia aplikacji')),
               ),
             ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const Key('settings-battery-vendor-help'),
+                onPressed: () => unawaited(PermissionsScreen.open(context)),
+                icon: const Icon(Icons.menu_book_outlined, size: 18),
+                label: Text(t('Instrukcja dla Twojego telefonu')),
+              ),
+            ),
           ],
         ),
       ),
@@ -3751,9 +3841,16 @@ class _ResetDataPanelState extends ConsumerState<_ResetDataPanel>
 }
 
 final class _AddFriendResult {
-  const _AddFriendResult({required this.target, required this.nickname});
+  const _AddFriendResult({
+    required this.target,
+    required this.nickname,
+    this.metInPerson = false,
+  });
 
   final PeerDialTarget target;
+
+  /// The code came from a scanned QR: the two met in person (§8).
+  final bool metInPerson;
 
   /// What the user wants to call them ('' for nothing); their own name
   /// comes with their answer.
@@ -3784,6 +3881,17 @@ Future<void> showAddFriendSheet(
       ),
     ),
   );
+  if (result.metInPerson) {
+    // Met in person: how close are you (§8)? "Znajomy" when skipped.
+    await showMetLevelPrompt(
+      context,
+      address: result.target.address,
+      name: result.nickname,
+    );
+    if (!context.mounted) {
+      return;
+    }
+  }
   _openConversationScreen(
     context,
     peerAddress: result.target.address,
@@ -3819,6 +3927,9 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
   final TextEditingController _messageController = TextEditingController();
   String? _errorText;
   bool _submitting = false;
+
+  /// The code in the field came from the camera (a QR shown in person).
+  String? _scannedCode;
 
   @override
   void initState() {
@@ -3875,6 +3986,7 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
       return;
     }
     _applyTargetInput(normalized);
+    _scannedCode = _targetController.text;
   }
 
   Future<void> _submit() async {
@@ -3933,9 +4045,14 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
       if (!mounted) {
         return;
       }
-      Navigator.of(
-        context,
-      ).pop(_AddFriendResult(target: target, nickname: nickname));
+      Navigator.of(context).pop(
+        _AddFriendResult(
+          target: target,
+          nickname: nickname,
+          metInPerson:
+              _scannedCode != null && _scannedCode == _targetController.text,
+        ),
+      );
     } on FormatException catch (error) {
       if (!mounted) {
         return;

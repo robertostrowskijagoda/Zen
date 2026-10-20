@@ -1,8 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/feed/rich_text.dart';
 
 /// Style of one run, shared by the post view and the editor.
@@ -100,7 +102,7 @@ class _RichPostBodyState extends State<RichPostBody> {
         ..onTap = () {
           // No browser jumps from a post: the link is copied, the user
           // decides where to open it.
-          Clipboard.setData(ClipboardData(text: r.text));
+          unawaited(copyWithExpiry(r.text));
           ScaffoldMessenger.maybeOf(context)?.showSnackBar(
             SnackBar(
               content: Text(t('Skopiowano link: {link}', {'link': r.text})),

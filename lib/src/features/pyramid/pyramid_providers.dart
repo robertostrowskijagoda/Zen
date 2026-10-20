@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
@@ -18,6 +19,10 @@ final Provider<PyramidService> pyramidServiceProvider =
         crisisBroadcast: nearby.waveAll,
         // Friends of friends get their own market prices (§24).
         friendsOf: (String f) => meet.book.friendsOf(f),
+        // Admission needs the level "Znajomy" or above (§20.2); without
+        // the ledger the level is unknown and only friendship counts.
+        friendLevelOf: (String a) =>
+            ref.read(ledgerNodeProvider)?.levelOf(a) ?? FriendLevel.friend,
       );
       unawaitedLogged(
         pyramid.load().then((_) => pyramid.greet()),

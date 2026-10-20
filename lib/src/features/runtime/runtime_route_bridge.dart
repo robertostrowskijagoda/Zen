@@ -95,7 +95,10 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
         }
         final bool ringingIncoming =
             session.isIncoming && session.status == CallSessionStatus.ringing;
-        if (ringingIncoming && !intent.autoAcceptCall) {
+        if (ringingIncoming &&
+            (!intent.autoAcceptCall || !intent.answersCall(session.id))) {
+          // Not answered from the card, or answered for another call from
+          // the same person (STAN S17): the overlay asks.
           // `IncomingCallLayer` already covers every route with the
           // accept/decline overlay; pushing under it would only leave a stray
           // surface behind once the user decides.

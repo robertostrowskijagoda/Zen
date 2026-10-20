@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -38,6 +39,7 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
     final SocialHubState social = ref.read(socialHubControllerProvider);
     final TextEditingController name = TextEditingController(text: t('Obiady'));
     final Set<String> chosen = <String>{};
+    bool pairs = false;
     DateTime first = DateTime.now().add(const Duration(days: 7));
     TimeOfDay time = const TimeOfDay(hour: 19, minute: 0);
     final bool? ok = await showDialog<bool>(
@@ -128,11 +130,40 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                       ],
                     ),
                   ),
+                  SwitchListTile(
+                    key: const Key('circle-pairs'),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    value: pairs,
+                    title: Text(t('Kółko par')),
+                    subtitle: Text(
+                      t('Każda osoba z listy przychodzi w parze.'),
+                    ),
+                    onChanged: (bool v) => set(() => pairs = v),
+                  ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(4, 14, 0, 4),
                     child: Text(
-                      t('KTO (4–8 OSÓB LUB PAR)'),
+                      pairs ? t('KTO (4–8 PAR)') : t('KTO (4–8 OSÓB LUB PAR)'),
                       style: zen.label(color: zen.textMuted),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 0, 4),
+                    child: Text(
+                      DinnerCircle.validSize(chosen.length + 1)
+                          ? t('W kółku: {n} (z Tobą)', {'n': chosen.length + 1})
+                          : t(
+                              'W kółku musi być od 4 do 8 osób, z Tobą. '
+                              'Teraz: {n}.',
+                              {'n': chosen.length + 1},
+                            ),
+                      key: const Key('circle-size-hint'),
+                      style: TextStyle(
+                        color: DinnerCircle.validSize(chosen.length + 1)
+                            ? zen.textSecondary
+                            : zen.warning,
+                        fontSize: 12.5,
+                      ),
                     ),
                   ),
                   if (social.acceptedFriends.isEmpty)
@@ -172,7 +203,10 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                 child: Text(t('Anuluj')),
               ),
               FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
+                key: const Key('circle-create'),
+                onPressed: DinnerCircle.validSize(chosen.length + 1)
+                    ? () => Navigator.of(context).pop(true)
+                    : null,
                 child: Text(t('Utwórz')),
               ),
             ],
@@ -182,7 +216,7 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
     );
     final String n = name.text.trim();
     disposeLater(name);
-    if (ok != true || chosen.isEmpty || !mounted) {
+    if (ok != true || !DinnerCircle.validSize(chosen.length + 1) || !mounted) {
       return;
     }
     final DinnerCircle c = await ref
@@ -193,6 +227,7 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
           weekday: first.weekday,
           hour: time.hour,
           firstDinner: first,
+          pairs: pairs,
         );
     if (mounted) {
       await CircleScreen.open(context, c.id);
@@ -373,12 +408,39 @@ class CircleScreen extends ConsumerWidget {
     } else {
       name = await _ask(context, t('Imię osoby, którą przyprowadzisz'));
     }
-    if (name == null || name.trim().isEmpty) {
+    if (name == null || name.trim().isEmpty || !context.mounted) {
+      return;
+    }
+    final String who = name.trim();
+    final bool? vouch = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(t('Ręczysz za {name}?', {'name': who})),
+        content: Text(
+          t(
+            'Kto kogoś przyprowadza, ręczy za niego przed resztą kółka. '
+            'Ta informacja będzie widoczna przy gościu.',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('circle-vouch'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('Ręczę')),
+          ),
+        ],
+      ),
+    );
+    if (vouch != true || !context.mounted) {
       return;
     }
     final bool ok = await ref
         .read(circleServiceProvider)
-        .bringGuest(c.id, day, name: name, address: address);
+        .bringGuest(c.id, day, name: name, address: address, vouch: true);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -598,7 +660,7 @@ class CircleScreen extends ConsumerWidget {
                     icon: Icons.person_add_alt_1_rounded,
                     tone: tone,
                     title: g.name,
-                    subtitle: t('Gość na {date} · przyprowadza {name}', {
+                    subtitle: t('Gość na {date} · ręczy {name}', {
                       'date': eventDate(next.millisecondsSinceEpoch),
                       'name': by == me ? t('Ty') : nameOf(by),
                     }),
@@ -620,10 +682,7 @@ class CircleScreen extends ConsumerWidget {
                               'W tym miesiącu przyprowadzasz: {name} ({date})',
                               {
                                 'name': myGuest.name,
-                                'date': myGuest.day
-                                    .split('-')
-                                    .reversed
-                                    .join('.'),
+                                'date': _dayKeyDate(myGuest.day),
                               },
                             ),
                             style: TextStyle(
@@ -661,6 +720,62 @@ class CircleScreen extends ConsumerWidget {
                       ),
                     ),
                   ),
+              ],
+              ZenSection(
+                t('Wspólna kasa'),
+                action: t('Dorzuć'),
+                onAction: () async {
+                  final String? v = await _ask(
+                    context,
+                    t('Ile dorzucasz do kasy (zł)?'),
+                  );
+                  final int? cents = parseKittyCents(v);
+                  if (cents == null) {
+                    return;
+                  }
+                  await circles.addToKitty(c.id, cents);
+                },
+              ),
+              if (c.kitty.isEmpty)
+                ZenInfo(
+                  icon: Icons.savings_rounded,
+                  tone: tone,
+                  text: t(
+                    'Kasa na składniki jest pusta. Wpisz, ile dorzuciłeś '
+                    'na zakupy — wszyscy widzą, kto ile.',
+                  ),
+                )
+              else ...<Widget>[
+                ZenCard(
+                  key: const Key('circle-kitty'),
+                  tone: tone,
+                  child: Text(
+                    t('Razem {total} zł · po {share} zł na osobę', {
+                      'total': formatKitty(c.kittyTotal),
+                      'share': formatKitty(c.kittyShare),
+                    }),
+                    style: TextStyle(
+                      color: zen.textPrimary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14.5,
+                    ),
+                  ),
+                ),
+                ZenGroup(
+                  children: <Widget>[
+                    for (final CircleMember m in c.members)
+                      ListTile(
+                        title: Text(
+                          m.address == me ? t('Ty') : m.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: Text(
+                          t('{n} zł', {'n': formatKitty(c.paidBy(m.address))}),
+                        ),
+                      ),
+                  ],
+                ),
               ],
               ZenSection(t('Preferencje i alergie')),
               ZenGroup(
@@ -707,6 +822,36 @@ class CircleScreen extends ConsumerWidget {
     );
   }
 }
+
+/// A [DinnerCircle.dayKey] ("2026-10-15") for people: "15.10.2026" in
+/// Polish, in the app's language otherwise.
+String _dayKeyDate(String key) {
+  final DateTime? d = DateTime.tryParse(key);
+  return d == null ? key.split('-').reversed.join('.') : ZenFormat.date(d);
+}
+
+/// Parses "12", "12,50" or "12.5" złoty into grosze (also as written in
+/// the app's language, see [ZenFormat.normalizeDecimal]); null when invalid
+/// or zero.
+int? parseKittyCents(String? text) {
+  final String v = ZenFormat.normalizeDecimal((text ?? '').trim());
+  final RegExpMatch? m = RegExp(
+    r'^(-?)(\d{1,7})(?:\.(\d{1,2}))?$',
+  ).firstMatch(v);
+  if (m == null) {
+    return null;
+  }
+  final int zl = int.parse(m.group(2)!);
+  final String frac = (m.group(3) ?? '').padRight(2, '0');
+  final int cents = zl * 100 + (frac.isEmpty ? 0 : int.parse(frac));
+  if (cents == 0) {
+    return null;
+  }
+  return m.group(1) == '-' ? -cents : cents;
+}
+
+/// 2550 → "25,50" (in the app's language: "25.50" in English).
+String formatKitty(int cents) => ZenFormat.money(cents, grouped: false);
 
 String _initial(String name) {
   final String t = name.trim();

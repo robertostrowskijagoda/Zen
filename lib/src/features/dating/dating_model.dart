@@ -548,6 +548,9 @@ final class SafeDate {
     this.okAt,
     this.remindedAt,
     this.alarmedAt,
+    this.autoShare = false,
+    this.askedAt,
+    this.requestedAt,
   });
 
   final String id;
@@ -566,6 +569,27 @@ final class SafeDate {
   int? remindedAt;
   int? alarmedAt;
 
+  /// The person on the date agreed beforehand that their phone answers a
+  /// friend's request for the location by itself (own dates only).
+  final bool autoShare;
+
+  /// Own date: the watching friend asked for the location and the person
+  /// has not answered yet.
+  int? askedAt;
+
+  /// Watched date: when this person asked for the location.
+  int? requestedAt;
+
+  /// Own date: a request for the location waits for an answer.
+  bool get locationAsked => mine && askedAt != null && !isOver;
+
+  /// Watched date: the location was asked for and has not come yet.
+  bool get locationPending =>
+      !mine &&
+      requestedAt != null &&
+      (locatedAt ?? 0) < requestedAt! &&
+      !isOver;
+
   bool get isOver => okAt != null;
 
   static const Duration grace = Duration(minutes: 15);
@@ -582,6 +606,9 @@ final class SafeDate {
     if (okAt != null) 'ok': okAt,
     if (remindedAt != null) 'rem': remindedAt,
     if (alarmedAt != null) 'al': alarmedAt,
+    if (autoShare) 'as': true,
+    if (askedAt != null) 'ask': askedAt,
+    if (requestedAt != null) 'req': requestedAt,
   };
 
   static SafeDate? fromJson(Object? json) {
@@ -605,6 +632,9 @@ final class SafeDate {
       okAt: i(json['ok']),
       remindedAt: i(json['rem']),
       alarmedAt: i(json['al']),
+      autoShare: json['as'] == true,
+      askedAt: i(json['ask']),
+      requestedAt: i(json['req']),
     );
   }
 }

@@ -17,24 +17,34 @@ import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/feed/presentation/feed_screen.dart';
 import 'package:zen/src/features/feed/presentation/post_editor_screen.dart'
     show kAudienceIcons;
+import 'package:zen/src/features/feed/presentation/post_reactions_sheet.dart';
 import 'package:zen/src/features/feed/presentation/rich_post_body.dart';
 import 'package:zen/src/features/feed/rich_text.dart';
 import 'package:zen/src/features/feed/thanks_model.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/media/media_vault.dart';
+import 'package:zen/src/features/meet/friend_levels.dart';
+import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/moderation/content_moderation.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/local_delete.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
+import 'package:zen/src/features/profile/follows.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
+import 'package:zen/src/features/profile/presentation/followers_sheet.dart';
 import 'package:zen/src/features/profile/presentation/gallery_add_screen.dart';
+import 'package:zen/src/features/profile/presentation/ledger_picture.dart';
+import 'package:zen/src/features/profile/presentation/mini_profile.dart';
 import 'package:zen/src/features/profile/presentation/own_avatar.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
 import 'package:zen/src/features/profile/presentation/profile_edit_dialog.dart';
 import 'package:zen/src/features/profile/presentation/status_sheet.dart';
+import 'package:zen/src/features/profile/profile_fields.dart';
 import 'package:zen/src/features/profile/profile_gallery.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/pyramid/presentation/pyramid_price_list.dart';
 import 'package:zen/src/features/social/presentation/friend_nickname_prompt.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -63,6 +73,7 @@ class ProfileScreen extends ConsumerStatefulWidget {
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   StreamSubscription<LogEntry>? _updates;
   StreamSubscription<void>? _opened;
+  StreamSubscription<void>? _followers;
   LedgerNode? _node;
 
   /// Posts hidden by a pyramid content ban that the user chose to see.
@@ -79,6 +90,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         setState(() {});
       }
     });
+    final LedgerNode? node = _node;
+    _followers = node == null
+        ? null
+        : FollowLedger.of(node).changes.listen((_) {
+            if (mounted) {
+              setState(() {});
+            }
+          });
     _updates = _node?.store.added.listen((_) {
       if (mounted) {
         setState(() {});
@@ -97,6 +116,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   void dispose() {
     unawaited(_updates?.cancel());
     unawaited(_opened?.cancel());
+    unawaited(_followers?.cancel());
     super.dispose();
   }
 
@@ -211,6 +231,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final LedgerProfile? public = !_isOwn && node != null && account != null
         ? latestProfile(node, account)
         : null;
+    // With the sealed parts this device may read (fields shown only to
+    // some friends, §9).
+    final ProfileView? view = !_isOwn && node != null && account != null
+        ? readProfile(node, account)
+        : null;
     String pick(String? a, String? b) => (a ?? '').isNotEmpty ? a! : (b ?? '');
 
     final String name = _isOwn
@@ -220,9 +245,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               : pick(public?.name, address));
     final String status = _isOwn
         ? me.customStatus
-        : pick(peer?.status, public?.status);
-    final String bio = _isOwn ? me.bio : pick(peer?.bio, public?.bio);
-    final bool canFollow = !_isOwn && friend == null && node != null;
+        : pick(peer?.status, view?.status);
+    final String bio = _isOwn ? me.bio : pick(peer?.bio, view?.bio);
+    // Not (yet) a friend: "Dodaj" and "Obserwuj" (§9, §12).
+    final bool canFollow =
+        !_isOwn &&
+        friend?.status != FriendRelationshipStatus.accepted &&
+        node != null;
     final bool following = canFollow && node.isFollowing(other);
     List<FeedPost> posts = const <FeedPost>[];
     List<ThanksCard> thanks = const <ThanksCard>[];
@@ -246,8 +275,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final Widget avatar;
     if (_isOwn) {
       avatar = const OwnAvatar(size: 92);
-    } else if (friend == null && public?.avatar != null && node != null) {
-      avatar = _LedgerAvatar(node: node, ref: public!.avatar!);
+    } else if (friend == null && view?.avatar != null && node != null) {
+      avatar = _LedgerAvatar(node: node, ref: view!.avatar!);
     } else {
       avatar = PeerAvatar(address: other, name: name, size: 92);
     }
@@ -257,17 +286,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         : null;
     final Widget cover;
     final String? coverPath = me.coverPath;
+    final MediaRef? theirCover = view?.cover ?? card?.cover;
     if (_isOwn && coverPath != null && File(coverPath).existsSync()) {
-      cover = Image.file(
-        File(coverPath),
+      // Kept encrypted in the vault (§14.1); an older plain file still
+      // shows until it is moved.
+      cover = Image(
+        image: mediaFileImage(coverPath),
         key: const Key('profile-cover'),
         fit: BoxFit.cover,
       );
-    } else if (card?.cover != null && node != null) {
-      cover = _LedgerImage(
+    } else if (theirCover != null && node != null) {
+      cover = LedgerCover(
         key: const Key('profile-cover'),
         node: node,
-        ref: card!.cover!,
+        media: theirCover,
       );
     } else {
       cover = const _DefaultCover();
@@ -283,6 +315,24 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ))
               for (final MediaRef r in g.media) (ref: r, entry: g.entry),
         ];
+    final List<({MediaRef ref, LogEntry? entry})> photos =
+        <({MediaRef ref, LogEntry? entry})>[
+          for (final ({MediaRef ref, LogEntry? entry}) m in media)
+            if (isPhotoMime(m.ref.mime)) m,
+        ];
+    final List<({MediaRef ref, LogEntry? entry})> films =
+        <({MediaRef ref, LogEntry? entry})>[
+          for (final ({MediaRef ref, LogEntry? entry}) m in media)
+            if (!isPhotoMime(m.ref.mime)) m,
+        ];
+    // Friends and followers (§9, §12): your own from this device, someone
+    // else's as far as they show them.
+    final int? friendCount = _isOwn
+        ? social.acceptedFriends.length
+        : view?.friendCount;
+    final int? followerCount = _isOwn
+        ? (node == null ? null : FollowLedger.of(node).followerCount)
+        : view?.followerCount;
 
     final Widget header = Center(
       child: ConstrainedBox(
@@ -475,8 +525,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       constraints: const BoxConstraints(maxWidth: 560),
                       child: _ProfileStats(
                         posts: posts.length,
-                        media: media.length,
+                        friends: friendCount,
+                        followers: followerCount,
                         thanks: thanks.length,
+                        onFollowers: _isOwn && node != null
+                            ? () => unawaited(showFollowersSheet(context, node))
+                            : null,
                       ),
                     ),
                   ],
@@ -506,34 +560,73 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ],
                     )
                   else if (canFollow)
-                    following
-                        ? FilledButton.tonalIcon(
-                            key: const Key('profile-follow'),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        if (friend?.status !=
+                                FriendRelationshipStatus.pendingOutgoing &&
+                            friend?.status != FriendRelationshipStatus.blocked)
+                          FilledButton.icon(
+                            key: const Key('profile-add-friend'),
                             onPressed: () => unawaited(
-                              node.unfollow(other).then((_) {
-                                if (mounted) {
-                                  setState(() {});
-                                }
-                              }),
-                            ),
-                            icon: const Icon(Icons.check_rounded, size: 18),
-                            label: Text(t('Obserwujesz')),
-                          )
-                        : FilledButton.icon(
-                            key: const Key('profile-follow'),
-                            onPressed: () => unawaited(
-                              node.follow(other).then((_) {
-                                if (mounted) {
-                                  setState(() {});
-                                }
-                              }),
+                              inviteAsFriend(
+                                context,
+                                ref,
+                                other,
+                                knownName: name == other ? '' : name,
+                              ),
                             ),
                             icon: const Icon(
-                              Icons.person_add_alt_rounded,
+                              Icons.person_add_alt_1_rounded,
                               size: 18,
                             ),
-                            label: Text(t('Obserwuj')),
+                            label: Text(t('Dodaj')),
                           )
+                        else if (friend?.status ==
+                            FriendRelationshipStatus.pendingOutgoing)
+                          FilledButton.tonalIcon(
+                            key: const Key('profile-add-friend'),
+                            onPressed: null,
+                            icon: const Icon(
+                              Icons.hourglass_top_rounded,
+                              size: 18,
+                            ),
+                            label: Text(t('Zaproszono')),
+                          ),
+                        following
+                            ? FilledButton.tonalIcon(
+                                key: const Key('profile-follow'),
+                                onPressed: () => unawaited(
+                                  FollowLedger.of(node).unfollow(other).then((
+                                    _,
+                                  ) {
+                                    if (mounted) {
+                                      setState(() {});
+                                    }
+                                  }),
+                                ),
+                                icon: const Icon(Icons.check_rounded, size: 18),
+                                label: Text(t('Obserwujesz')),
+                              )
+                            : OutlinedButton.icon(
+                                key: const Key('profile-follow'),
+                                onPressed: () => unawaited(
+                                  FollowLedger.of(node).follow(other).then((_) {
+                                    if (mounted) {
+                                      setState(() {});
+                                    }
+                                  }),
+                                ),
+                                icon: const Icon(
+                                  Icons.visibility_outlined,
+                                  size: 18,
+                                ),
+                                label: Text(t('Obserwuj')),
+                              ),
+                      ],
+                    )
                   else if (account != null)
                     Wrap(
                       alignment: WrapAlignment.center,
@@ -541,6 +634,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       runSpacing: 8,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: <Widget>[
+                        if (friend?.status == FriendRelationshipStatus.accepted)
+                          FilledButton.icon(
+                            key: const Key('profile-message'),
+                            onPressed: () => unawaited(
+                              openConversationWith(context, other, name),
+                            ),
+                            icon: const Icon(
+                              Icons.chat_bubble_rounded,
+                              size: 18,
+                            ),
+                            label: Text(t('Wiadomość')),
+                          ),
                         Container(
                           padding: const EdgeInsets.only(left: 14, right: 6),
                           decoration: BoxDecoration(
@@ -566,8 +671,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                 if (level == null) {
                                   return;
                                 }
+                                // What the level lets them see goes out
+                                // again (§8: friend list, statuses).
                                 unawaited(
-                                  node.setLevel(other, level).then((_) {
+                                  setFriendLevel(
+                                    node: node,
+                                    meet: ref.read(meetServiceProvider),
+                                    address: other,
+                                    level: level,
+                                  ).then((_) {
                                     if (mounted) {
                                       setState(() {});
                                     }
@@ -615,8 +727,42 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       ),
     );
 
+    Widget mediaTab(
+      Key key,
+      List<({MediaRef ref, LogEntry? entry})> items, {
+      required bool isFilm,
+    }) => ListView(
+      key: key,
+      padding: readableInsets(context, bottom: 32),
+      children: <Widget>[
+        if (items.isEmpty)
+          ZenEmpty(
+            icon: isFilm
+                ? Icons.video_library_outlined
+                : Icons.photo_library_outlined,
+            tone: zenTone(zen, 2),
+            title: isFilm ? t('Brak filmów.') : t('Brak zdjęć.'),
+            text: _isOwn
+                ? t(
+                    'Dodaj je przyciskiem „Dodaj zdjęcie lub '
+                    'film” — domyślnie widzą je tylko '
+                    'znajomi.',
+                  )
+                : null,
+          )
+        else if (node != null)
+          ProfileMediaGrid(
+            items: items,
+            node: node,
+            onRemove: _isOwn
+                ? (LogEntry e) => unawaited(_mediaOptions(e))
+                : null,
+          ),
+      ],
+    );
+
     return DefaultTabController(
-      length: 3,
+      length: 5,
       child: Scaffold(
         key: const Key('profile-screen'),
         appBar: ZenSectionBar(title: _isOwn ? t('Mój profil') : t('Profil')),
@@ -637,9 +783,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         Tab(text: t('Posty')),
                         Tab(
                           key: const Key('profile-tab-media'),
-                          text: t('Galeria'),
+                          text: t('Zdjęcia'),
+                        ),
+                        Tab(
+                          key: const Key('profile-tab-films'),
+                          text: t('Filmy'),
                         ),
                         Tab(text: t('Podziękowania')),
+                        Tab(
+                          key: const Key('profile-tab-info'),
+                          text: t('Informacje'),
+                        ),
                       ],
                     ),
                   ),
@@ -665,6 +819,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       key: const Key('profile-posts'),
                       padding: readableInsets(context, bottom: 32),
                       children: <Widget>[
+                        // §24: the person's price list in the pyramid.
+                        PyramidPriceList(address: other, own: _isOwn),
                         if (posts.isEmpty)
                           ZenEmpty(
                             icon: Icons.article_outlined,
@@ -690,7 +846,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           ))
                             HiddenContentPlaceholder(
                               key: Key('profile-hidden-${p.id}'),
-                              byMe: !isContentBanned(banned, p.text),
+                              byMe: !isContentBanned(banned, p.text, id: p.id),
                               onShow: () {
                                 showHiddenAnyway(ref, id: p.id);
                                 setState(() => _revealed.add(p.id));
@@ -730,35 +886,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             ),
                       ],
                     ),
-                    ListView(
-                      key: const Key('profile-media'),
-                      padding: readableInsets(context, bottom: 32),
-                      children: <Widget>[
-                        if (media.isEmpty)
-                          ZenEmpty(
-                            icon: Icons.photo_library_outlined,
-                            tone: zenTone(zen, 2),
-                            title: _isOwn
-                                ? t('Nie masz jeszcze zdjęć ani filmów')
-                                : t('Brak zdjęć i filmów.'),
-                            text: _isOwn
-                                ? t(
-                                    'Dodaj je przyciskiem „Dodaj zdjęcie lub '
-                                    'film” — domyślnie widzą je tylko '
-                                    'znajomi.',
-                                  )
-                                : null,
-                          )
-                        else if (node != null)
-                          ProfileMediaGrid(
-                            items: media,
-                            node: node,
-                            onRemove: _isOwn
-                                ? (LogEntry e) => unawaited(_mediaOptions(e))
-                                : null,
-                          ),
-                      ],
-                    ),
+                    mediaTab(const Key('profile-media'), photos, isFilm: false),
+                    mediaTab(const Key('profile-films'), films, isFilm: true),
                     ListView(
                       key: const Key('profile-thanks-list'),
                       padding: readableInsets(context, bottom: 32),
@@ -774,6 +903,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                             ),
                           ),
                         for (final ThanksCard c in thanks) _ThanksTile(card: c),
+                      ],
+                    ),
+                    ListView(
+                      key: const Key('profile-info'),
+                      padding: readableInsets(context, bottom: 32),
+                      children: <Widget>[
+                        _ProfileInfo(
+                          own: _isOwn ? me : null,
+                          status: status,
+                          nationalities: _isOwn
+                              ? me.nationalities
+                              : view?.nationalities ?? const <String>[],
+                          friends: friendCount,
+                          followers: followerCount,
+                        ),
                       ],
                     ),
                   ],
@@ -1077,19 +1221,33 @@ class _DefaultCover extends StatelessWidget {
 class _ProfileStats extends StatelessWidget {
   const _ProfileStats({
     required this.posts,
-    required this.media,
     required this.thanks,
+    this.friends,
+    this.followers,
+    this.onFollowers,
   });
 
   final int posts;
-  final int media;
   final int thanks;
+
+  /// `null` when the person does not show it.
+  final int? friends;
+  final int? followers;
+
+  /// Your own profile: the list of followers.
+  final VoidCallback? onFollowers;
 
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    Widget stat(int value, String label, Color tone) => Expanded(
-      child: Padding(
+    Widget stat(
+      int value,
+      String label,
+      Color tone, {
+      Key? key,
+      VoidCallback? onTap,
+    }) {
+      final Widget body = Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 9),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1113,9 +1271,22 @@ class _ProfileStats extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
+      );
+      return Expanded(
+        child: onTap == null
+            ? KeyedSubtree(key: key, child: body)
+            : InkWell(
+                key: key,
+                borderRadius: BorderRadius.circular(16),
+                onTap: onTap,
+                child: body,
+              ),
+      );
+    }
+
     Widget divider() => Container(width: 1, height: 28, color: zen.outlineSoft);
+    final int? f = friends;
+    final int? o = followers;
     return Container(
       decoration: BoxDecoration(
         color: zen.surface,
@@ -1125,10 +1296,114 @@ class _ProfileStats extends StatelessWidget {
       child: Row(
         children: <Widget>[
           stat(posts, t('Wpisy'), zenTone(zen, 0)),
-          divider(),
-          stat(media, t('W galerii'), zenTone(zen, 2)),
+          if (f != null) ...<Widget>[
+            divider(),
+            stat(
+              f,
+              t('Znajomi'),
+              zenTone(zen, 1),
+              key: const Key('profile-friend-count'),
+            ),
+          ],
+          if (o != null) ...<Widget>[
+            divider(),
+            stat(
+              o,
+              t('Obserwujący'),
+              zenTone(zen, 3),
+              key: const Key('profile-follower-count'),
+              onTap: onFollowers,
+            ),
+          ],
           divider(),
           stat(thanks, t('Dzięki'), zenTone(zen, 5)),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Informacje" (§9): what the profile says beyond the posts. On your own
+/// profile each field also says who sees it.
+class _ProfileInfo extends StatelessWidget {
+  const _ProfileInfo({
+    required this.own,
+    required this.status,
+    required this.nationalities,
+    this.friends,
+    this.followers,
+  });
+
+  /// Your own profile (for who sees what), `null` for someone else's.
+  final UserProfile? own;
+  final String status;
+  final List<String> nationalities;
+  final int? friends;
+  final int? followers;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final UserProfile? me = own;
+    Widget row(IconData icon, ProfileField field, String value) => ListTile(
+      key: Key('profile-info-${field.name}'),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+      leading: Icon(icon, color: zen.accent),
+      title: Text(kProfileFieldLabels[field]!),
+      subtitle: Text(
+        value,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: zen.textSecondary),
+      ),
+      trailing: me == null
+          ? null
+          : ZenPill(
+              icon: Icons.lock_outline_rounded,
+              text: kFieldVisibilityLabels[fieldVisibility(me, field)]!,
+            ),
+    );
+    final String hidden = t('Nie pokazuje');
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+      decoration: BoxDecoration(
+        color: zen.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: zen.outlineSoft),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          row(
+            Icons.mood_rounded,
+            ProfileField.status,
+            status.isEmpty ? '—' : status,
+          ),
+          row(
+            Icons.flag_outlined,
+            ProfileField.nationality,
+            nationalities.isEmpty
+                ? (me == null ? hidden : t('Nie podano'))
+                : nationalities.map(nationalityLabel).join(', '),
+          ),
+          row(
+            Icons.people_alt_outlined,
+            ProfileField.friendCount,
+            friends == null ? hidden : friendCountLabel(friends!),
+          ),
+          row(
+            Icons.visibility_outlined,
+            ProfileField.followerCount,
+            followers == null ? hidden : followerCountLabel(followers!),
+          ),
+          if (me != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+              child: Text(
+                t('Kto widzi każde pole, zmienisz w „Edytuj profil”.'),
+                style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+              ),
+            ),
         ],
       ),
     );
@@ -1187,60 +1462,6 @@ class _ThanksTile extends StatelessWidget {
 }
 
 /// A picture from someone's profile entry (the cover), once downloaded.
-class _LedgerImage extends StatefulWidget {
-  const _LedgerImage({required this.node, required this.ref, super.key});
-
-  final LedgerNode node;
-  final MediaRef ref;
-
-  @override
-  State<_LedgerImage> createState() => _LedgerImageState();
-}
-
-class _LedgerImageState extends State<_LedgerImage> {
-  Uint8List? _bytes;
-  StreamSubscription<String>? _done;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_load());
-    _done = widget.node.mediaCompleted.listen((String id) {
-      if (id == widget.ref.id) {
-        unawaited(_load());
-      }
-    });
-  }
-
-  Future<void> _load() async {
-    try {
-      final Uint8List? bytes = await openSafeImage(
-        widget.node.blobs,
-        widget.ref,
-      );
-      if (bytes != null && mounted) {
-        setState(() => _bytes = bytes);
-      }
-    } on UnsafeMediaException {
-      // Not a picture: the placeholder stays.
-    }
-  }
-
-  @override
-  void dispose() {
-    unawaited(_done?.cancel());
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final Uint8List? bytes = _bytes;
-    return bytes == null
-        ? ColoredBox(color: ZenColors.of(context).surfaceSunk)
-        : Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true);
-  }
-}
-
 /// Photo from someone's public profile (not a friend: no profile_update).
 class _LedgerAvatar extends StatefulWidget {
   const _LedgerAvatar({required this.node, required this.ref});
@@ -1433,16 +1654,38 @@ class _ProfilePost extends StatelessWidget {
             spacing: 8,
             runSpacing: 6,
             children: <Widget>[
-              ZenPill(
-                icon: Icons.favorite_rounded,
-                text: '${post.likers.length}',
-                tone: zen.danger,
+              InkWell(
+                key: Key('profile-post-likes-${post.id}'),
+                borderRadius: BorderRadius.circular(999),
+                onTap: () => unawaited(showPostLikers(context, post)),
+                child: ZenPill(
+                  icon: Icons.favorite_rounded,
+                  text: '${post.likeTotal}',
+                  tone: zen.danger,
+                ),
               ),
-              ZenPill(
-                icon: Icons.mode_comment_rounded,
-                text: '${post.comments.length}',
-                tone: zen.accent,
+              InkWell(
+                key: Key('profile-post-comments-${post.id}'),
+                borderRadius: BorderRadius.circular(999),
+                onTap: n == null
+                    ? null
+                    : () => unawaited(showPostComments(context, n, post)),
+                child: ZenPill(
+                  icon: Icons.mode_comment_rounded,
+                  text: '${post.commentTotal}',
+                  tone: zen.accent,
+                ),
               ),
+              if (likeSummary(post) case final String summary)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    summary,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: zen.textSecondary, fontSize: 12.5),
+                  ),
+                ),
             ],
           ),
         ],

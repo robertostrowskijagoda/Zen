@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
+import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/relay/reliable_signal_transport.dart';
@@ -35,6 +37,11 @@ List buildRelayTransportProviderOverrides({
         peers: _SocialRelayPeerSource(ref),
         send: (String to, Map<String, dynamic> payload) =>
             runtime.send(remoteAddress: to, payload: payload),
+        // Attachments through mailboxes, where the store can keep chunks.
+        blobStore: switch (relayStateStore) {
+          final RelayBlobStore blobs => blobs,
+          _ => null,
+        },
       );
     }),
     signalTransportProvider.overrideWith((Ref ref) {
@@ -83,6 +90,7 @@ final class _SocialRelayPeerSource implements RelayPeerSource {
 
   @override
   List<RelayFriend> acceptedFriends() {
+    final FriendLevelLookup levels = _ref.read(friendLevelLookupProvider);
     return _ref
         .read(socialHubControllerProvider)
         .acceptedFriends
@@ -90,6 +98,7 @@ final class _SocialRelayPeerSource implements RelayPeerSource {
           (FriendProfile friend) => RelayFriend(
             address: friend.address,
             lastSeenAtMillis: friend.lastPresenceAtMillis,
+            closeness: (levels.of(friend.address) ?? FriendLevel.friend).index,
           ),
         )
         .toList(growable: false);

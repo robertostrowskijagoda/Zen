@@ -150,8 +150,13 @@ void main() {
       expect(bob.service.book.alarms, isEmpty);
       expect(bob.ringing, 0);
 
-      // A changed field breaks the signature.
-      final Map<String, dynamic> wave = ania.service.alarmWave(alarm);
+      // A changed field breaks the signature. Bob has Ania's keys for him
+      // alone (S6): her wave to him is signed for this pair.
+      final Map<String, dynamic> wave = ania.service.alarmWave(
+        alarm,
+        to: 'bob',
+      );
+      expect(wave['v'], kAlarmPairWaveVersion);
       await bob.service.onAlarmWave(<String, dynamic>{
         ...wave,
         'id': 'abc124',
@@ -184,6 +189,7 @@ void main() {
     await ania.service.shareNearbySecret('bob');
     final Map<String, dynamic> wave = ania.service.alarmWave(
       const AlarmRecord(id: 'x1', from: 'self', at: 1),
+      to: 'bob',
     );
     final int at = ania.clock;
 
@@ -239,7 +245,10 @@ void main() {
     final _Host bob = _Host(net, 'bob', <String>['ania']);
     await ania.service.shareNearbySecret('bob');
     await bob.service.onAlarmWave(
-      ania.service.alarmWave(const AlarmRecord(id: 'bt1', from: 'self', at: 1)),
+      ania.service.alarmWave(
+        const AlarmRecord(id: 'bt1', from: 'self', at: 1),
+        to: 'bob',
+      ),
       friend: 'ania',
     );
     expect(bob.service.book.alarm('bt1')!.isActive, isTrue);

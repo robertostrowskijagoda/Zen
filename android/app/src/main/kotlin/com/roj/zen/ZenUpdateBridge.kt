@@ -84,10 +84,10 @@ object ZenUpdateBridge {
                     "install" -> {
                         val path = call.argument<String>("path")
                         if (path == null || !File(path).exists()) {
-                            result.error("install", "Brak pliku", null)
+                            result.error("install", "File missing", null)
                         } else {
                             install(activity, File(path))
-                            result.success("Otwarto instalator systemu — potwierdź instalację.")
+                            result.success(activity.getString(R.string.update_installer_opened))
                         }
                     }
                     "signingCertificates" -> {
@@ -220,7 +220,7 @@ object ZenUpdateBridge {
             clipData = ClipData.newRawUri(file.name, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        activity.startActivity(Intent.createChooser(send, "Wyślij Zen"))
+        activity.startActivity(Intent.createChooser(send, activity.getString(R.string.share_zen_chooser)))
     }
 
     /** SHA-256 of each certificate: the fingerprint `apksigner` prints. */

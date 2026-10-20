@@ -210,3 +210,88 @@ final class RelayCipher {
     );
   }
 }
+
+/// Chunk sealing for blobs: attachments too large for one relayed envelope.
+///
+/// Each blob gets a fresh random 32-byte key. The key — with the blob's size,
+/// chunk count and digest — travels to the recipient in a small *manifest*,
+/// an ordinary reliable payload: sent directly, or sealed with [RelayCipher]
+/// for the mailboxes. The chunks themselves are sealed once with
+/// ChaCha20-Poly1305 under the blob key and can then be handed to any number
+/// of mailboxes, which hold only ciphertext:
+///
+/// * a mailbox cannot read, forge or alter a chunk (no key);
+/// * the nonce is the chunk index, unique under a key that is never reused;
+/// * blob id, sender, recipient, index and count are bound as associated
+///   data, so a chunk cannot be moved to another blob, position or person,
+///   and a blob cannot be cut short.
+final class RelayBlobCipher {
+  RelayBlobCipher._();
+
+  static final Chacha20 _aead = Chacha20.poly1305Aead();
+  static const int _macLength = 16;
+
+  /// Bytes a sealed chunk adds to its plaintext.
+  static const int overheadBytes = _macLength;
+
+  static Uint8List newKey() => RelayCipher._randomBytes(32);
+
+  static Uint8List associatedDataFor({
+    required String blobId,
+    required String sender,
+    required String recipient,
+    required int index,
+    required int count,
+  }) {
+    return Uint8List.fromList(
+      utf8.encode('zen.relay.blob.v1|$blobId|$sender|$recipient|$index|$count'),
+    );
+  }
+
+  static Uint8List _nonceFor(int index) {
+    final Uint8List nonce = Uint8List(12);
+    for (int i = 0; i < 6; i++) {
+      nonce[11 - i] = (index >> (8 * i)) & 0xff;
+    }
+    return nonce;
+  }
+
+  static Future<Uint8List> sealChunk({
+    required Uint8List key,
+    required int index,
+    required Uint8List plaintext,
+    required Uint8List associatedData,
+  }) async {
+    final SecretBox box = await _aead.encrypt(
+      plaintext,
+      secretKey: SecretKey(key),
+      nonce: _nonceFor(index),
+      aad: associatedData,
+    );
+    return Uint8List.fromList(<int>[...box.cipherText, ...box.mac.bytes]);
+  }
+
+  /// Opens a sealed chunk; throws when it was not sealed under [key] for
+  /// exactly this [associatedData] and [index].
+  static Future<Uint8List> openChunk({
+    required Uint8List key,
+    required int index,
+    required Uint8List sealed,
+    required Uint8List associatedData,
+  }) async {
+    if (sealed.length < _macLength) {
+      throw const FormatException('Blob chunk is malformed.');
+    }
+    final int macOffset = sealed.length - _macLength;
+    final List<int> plaintext = await _aead.decrypt(
+      SecretBox(
+        sealed.sublist(0, macOffset),
+        nonce: _nonceFor(index),
+        mac: Mac(sealed.sublist(macOffset)),
+      ),
+      secretKey: SecretKey(key),
+      aad: associatedData,
+    );
+    return Uint8List.fromList(plaintext);
+  }
+}

@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/storage_health.dart';
 import 'package:zstandard/zstandard.dart';
 
 const int kZenBinaryCompressionLevel = 4;
@@ -48,11 +50,35 @@ abstract interface class BinaryStoreNameKeySource {
 /// friend's address is part of the key). In a store whose protector is a
 /// [BinaryStoreNameKeySource] their files are named by a keyed hash
 /// (HMAC-SHA256 with a key derived from the data key) in
-/// [kHiddenNamesFolder]. `transfers/` is not here: the attachment store
+/// [kHiddenNamesFolder]. `meet/list/` (a friend's friend list) and
+/// `ledger/` (logs named after the accounts in them) were once named by a
+/// plain SHA-256 of an address, which anyone who can read the folder can
+/// test a guess against; their old readable files are moved to the hidden
+/// names on first use. `transfers/` is not here: the attachment store
 /// lists its folders
 /// (resuming uploads, per-friend limits, the stale sweep), so it names its
 /// keys with [FileBinaryStore.nameSegmentFor] instead.
-const Set<String> kZenHiddenNamePrefixes = <String>{'threads/', 'relay/mail/'};
+const Set<String> kZenHiddenNamePrefixes = <String>{
+  'threads/',
+  'relay/mail/',
+  'meet/list/',
+  'ledger/',
+};
+
+/// A stored file bigger than this part of the size limit is reported to
+/// [ZenStorageHealth] (and logged) while it can still be written.
+const double kStorageWarnFraction = 0.5;
+
+/// Past this part of the limit a payload is recompressed harder before it
+/// is written (the file format is the same).
+const double kStorageCompactFraction = 0.75;
+
+/// Zstd level used when a payload is close to the limit.
+const int kZenBinaryHeavyCompressionLevel = 12;
+
+/// `*.tmp` files left by a write that was killed are removed once they are
+/// older than this.
+const Duration kOrphanTemporaryAge = Duration(hours: 1);
 
 /// The folder of the files whose names are hidden.
 const String kHiddenNamesFolder = 'hidden';
@@ -100,15 +126,15 @@ final class BinaryCodec {
 
   int get maxEnvelopeBytes => maxPayloadBytes + maxEnvelopeOverheadBytes;
 
-  Future<Uint8List> encode(Uint8List payload) async {
+  Future<Uint8List> encode(
+    Uint8List payload, {
+    int level = kZenBinaryCompressionLevel,
+  }) async {
     _validatePayloadLength(
       payload.length,
       message: 'Binary payload exceeds the configured limit.',
     );
-    final Uint8List? compressed = await _compressor.compress(
-      payload,
-      kZenBinaryCompressionLevel,
-    );
+    final Uint8List? compressed = await _compressor.compress(payload, level);
     final bool isCompressed =
         compressed != null &&
         compressed.isNotEmpty &&
@@ -127,7 +153,7 @@ final class BinaryCodec {
       ..setUint8(3, _magic[3])
       ..setUint8(4, currentVersion)
       ..setUint8(5, isCompressed ? 1 : 0)
-      ..setUint8(6, kZenBinaryCompressionLevel)
+      ..setUint8(6, level)
       ..setUint8(7, _headerLength)
       ..setUint32(8, payload.length, Endian.little)
       ..setUint32(12, body.length, Endian.little);
@@ -331,8 +357,22 @@ final class FileBinaryStore {
   Future<File> _writeLocked(_StorePlace place, Uint8List payload) async {
     final File file = place.file;
     await file.parent.create(recursive: true);
-    final Uint8List encoded = await _codec.encode(payload);
+    if (payload.length > _codec.maxPayloadBytes) {
+      _reportSize(place.canonicalKey, payload.length, _codec.maxPayloadBytes);
+    }
+    Uint8List encoded = await _codec.encode(payload);
+    if (encoded.length > _maxFileBytes * kStorageCompactFraction) {
+      // Close to the limit: squeeze harder before giving up space.
+      final Uint8List tighter = await _codec.encode(
+        payload,
+        level: kZenBinaryHeavyCompressionLevel,
+      );
+      if (tighter.length < encoded.length) {
+        encoded = tighter;
+      }
+    }
     final Uint8List sealed = await _seal(place.canonicalKey, encoded);
+    _reportSize(place.canonicalKey, sealed.length, _maxFileBytes);
     if (sealed.length > _maxFileBytes) {
       throw const FormatException(
         'Stored binary payload exceeds the configured limit.',
@@ -411,6 +451,61 @@ final class FileBinaryStore {
       }
     }
     return file;
+  }
+
+  void _reportSize(String canonicalKey, int bytes, int limit) {
+    final StorageFill before = ZenStorageHealth.instance.fillOf(canonicalKey);
+    final StorageFill after = ZenStorageHealth.instance.record(
+      canonicalKey,
+      bytes: bytes,
+      limit: limit,
+      warnFraction: kStorageWarnFraction,
+    );
+    if (after.index > before.index && after != StorageFill.ok) {
+      // Only the first part of the key: the rest may be a friend's address.
+      final String area = ZenStorageHealth.categoryOf(canonicalKey);
+      logZenWarning(
+        after == StorageFill.full
+            ? 'Magazyn "$area" przekroczył limit pliku '
+                  '($bytes z $limit B); zapis się nie uda.'
+            : 'Magazyn "$area" zajmuje ${bytes * 100 ~/ limit}% limitu '
+                  'pliku ($bytes z $limit B).',
+      );
+    }
+  }
+
+  /// Removes `*.tmp` files under the store older than [olderThan]: what a
+  /// write killed between creating and moving its file leaves behind.
+  /// Returns how many were removed.
+  Future<int> sweepOrphanTemporaries({
+    Duration olderThan = kOrphanTemporaryAge,
+  }) async {
+    if (!await rootDirectory.exists()) {
+      return 0;
+    }
+    final DateTime cutoff = DateTime.now().subtract(olderThan);
+    int removed = 0;
+    try {
+      await for (final FileSystemEntity entity in rootDirectory.list(
+        recursive: true,
+        followLinks: false,
+      )) {
+        if (entity is! File || !entity.path.endsWith('.tmp')) {
+          continue;
+        }
+        try {
+          if ((await entity.lastModified()).isBefore(cutoff)) {
+            await entity.delete();
+            removed += 1;
+          }
+        } on FileSystemException {
+          // In use or already gone.
+        }
+      }
+    } on FileSystemException {
+      // The folder changed while it was walked.
+    }
+    return removed;
   }
 
   Future<Uint8List?> read(String key) async {
@@ -574,7 +669,42 @@ final class FileBinaryStore {
         '$rootPath$separator$kHiddenNamesFolder$separator$name.zenbin',
       ),
     );
+    // The key is the same as before the name was hidden, so the sealed
+    // bytes stay valid: the old readable file is just moved.
+    if (readable.path != hidden.path) {
+      await (_legacyMoves[canonical] ??= _moveLegacy(readable, hidden)
+          .catchError((Object error) {
+            _legacyMoves.remove(canonical);
+            throw error;
+          }));
+    }
     return _StorePlace(canonicalKey: canonical, file: hidden);
+  }
+
+  /// Keys whose readable-name file was already moved to its hidden name
+  /// (or had none) in this run.
+  final Map<String, Future<void>> _legacyMoves = <String, Future<void>>{};
+
+  Future<void> _moveLegacy(File readable, File hidden) async {
+    for (final String suffix in const <String>['', '.bak']) {
+      final File old = File('${readable.path}$suffix');
+      if (!await old.exists()) {
+        continue;
+      }
+      final File target = File('${hidden.path}$suffix');
+      if (await target.exists()) {
+        // The hidden copy is the newer one; the readable one only leaks.
+        await old.delete();
+        continue;
+      }
+      await target.parent.create(recursive: true);
+      try {
+        await old.rename(target.path);
+      } on FileSystemException {
+        await old.copy(target.path);
+        await old.delete();
+      }
+    }
   }
 
   File _fileFor(String key) {

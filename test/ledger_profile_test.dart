@@ -6,6 +6,7 @@ import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/post_media.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
@@ -177,5 +178,27 @@ void main() {
     final LedgerProfile? seen = latestProfile(c, a.account);
     expect(seen?.avatar, isNotNull);
     expect(await openMedia(c.blobs, seen!.avatar!), photo);
+  });
+
+  test('the address is in the profile only once something is public', () async {
+    final LedgerNode a = await make(ada, const <String>[]);
+    expect(profileBody(name: 'Ada').containsKey('addr'), isFalse);
+    expect(profileNeedsAddress(a), isFalse);
+
+    // A post for friends brings nobody new: no address yet.
+    await a.publish(
+      kPostKind,
+      await a.seal(
+        Audience.all,
+        newPostBody('Dla znajomych', audience: Audience.all),
+      ),
+    );
+    expect(profileNeedsAddress(a), isFalse);
+    await publishProfileIfChanged(a, profileBody(name: 'Ada'));
+    expect(latestProfile(a, a.account)?.address, '');
+
+    // A public post can bring followers: now it is needed.
+    await a.publish(kPostKind, newPostBody('Dla wszystkich'));
+    expect(profileNeedsAddress(a), isTrue);
   });
 }

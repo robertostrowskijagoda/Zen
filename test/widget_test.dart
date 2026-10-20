@@ -1404,6 +1404,11 @@ void main() {
     await tester.tap(find.byKey(const Key('submit-add-friend-button')));
     await tester.pumpAndSettle();
 
+    // Scanned in person: the app asks how close you are (§8).
+    expect(find.byKey(const Key('met-level-dialog')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('met-level-skip')));
+    await tester.pumpAndSettle();
+
     expect(find.textContaining('Czekasz na akceptację'), findsOneWidget);
 
     await tester.tap(find.byType(BackButton).last);

@@ -94,9 +94,14 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 400));
 
-    // The invitation lives in the rail now (QR and code), not in chats.
-    await tester.tap(find.byKey(const Key('side-tab-invite')));
-    await tester.pump(const Duration(milliseconds: 300));
+    // The invitation (QR and code) is a rarely used tab: under "Więcej".
+    expect(find.byKey(const Key('side-tab-invite')), findsNothing);
+    await tester.tap(find.byKey(const Key('side-tab-more')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byKey(const Key('more-tab-invite')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Zaproś'), findsOneWidget);
     // Someone without the app gets it from hand to hand.
     expect(find.byKey(const Key('invite-share-app')), findsOneWidget);
@@ -139,8 +144,8 @@ void main() {
     expect(find.byKey(const Key('side-tabs-lock')), findsOneWidget);
 
     const List<String> ids = <String>[
-      'graph', 'profile', 'chats', 'feed', 'meet', 'dating', 'neighbors', //
-      'pyramid', 'wallet', 'nearby', 'invite', 'about', 'alarm',
+      'graph', 'profile', 'chats', 'feed', 'meet', 'neighbors', 'more', //
+      'alarm',
     ];
     double bottom = 0;
     for (final String id in ids) {
@@ -159,6 +164,55 @@ void main() {
         .call();
     expect(security.isLocked, isTrue);
 
+    await _tearDown(tester);
+  });
+
+  testWidgets('rarely used tabs sit in groups under "Więcej"', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(420, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await _pumpApp(tester);
+
+    for (final String id in <String>[
+      'dating', 'pyramid', 'wallet', 'nearby', 'invite', 'about', //
+    ]) {
+      expect(find.byKey(Key('side-tab-$id')), findsNothing, reason: id);
+    }
+    await tester.tap(find.byKey(const Key('side-tab-more')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('more-sheet')), findsOneWidget);
+    for (final String id in <String>[
+      'dating', 'pyramid', 'wallet', 'nearby', 'invite', 'about', //
+    ]) {
+      expect(find.byKey(Key('more-tab-$id')), findsOneWidget, reason: id);
+    }
+    // Grouped as in the plan (§25).
+    expect(find.text('WSPÓLNOTA'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('more-tab-about')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('more-sheet')), findsNothing);
+    expect(find.byKey(const Key('tab-page-about')), findsOneWidget);
+    await _tearDown(tester);
+  });
+
+  testWidgets('every rail icon has a label for screen readers', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await _pumpApp(tester);
+    final SemanticsHandle handle = tester.ensureSemantics();
+    for (final String label in <String>[
+      'Graf znajomych', 'Więcej', 'Alarm', //
+    ]) {
+      expect(find.bySemanticsLabel(label), findsOneWidget, reason: label);
+    }
+    handle.dispose();
     await _tearDown(tester);
   });
 

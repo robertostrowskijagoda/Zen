@@ -47,6 +47,55 @@ void main() {
     expect(intent.actionLabel, 'Dodaj znajomego');
   });
 
+  test('an answering route is bound to its call (S17)', () {
+    const String peer = '200:1111:2222:3333:4444:5555:6666:7777';
+    final String routeKey = buildCallRouteKey(
+      peerAddress: peer,
+      title: 'Ada',
+      autoAccept: true,
+      callId: 'call-1',
+    );
+    final RuntimeRouteIntent intent = runtimeRouteIntentFromRouteKey(
+      id: 'launch-5',
+      routeKey: routeKey,
+    )!;
+    expect(intent.target, RuntimeRouteTarget.call);
+    expect(intent.autoAcceptCall, isTrue);
+    expect(intent.callId, 'call-1');
+    expect(intent.answersCall('call-1'), isTrue);
+    expect(intent.answersCall('call-2'), isFalse);
+    expect(intent.withAutoAcceptCall().callId, 'call-1');
+
+    // The same token with another call id (or none) answers nothing.
+    final String token = Uri.parse(routeKey).queryParameters['accept']!;
+    expect(isIssuedCallAcceptToken(token, peer, callId: 'call-1'), isTrue);
+    expect(isIssuedCallAcceptToken(token, peer, callId: 'call-2'), isFalse);
+    expect(isIssuedCallAcceptToken(token, peer), isFalse);
+    final RuntimeRouteIntent forged = runtimeRouteIntentFromRouteKey(
+      id: 'launch-6',
+      routeKey: routeKey.replaceAll('call=call-1', 'call=call-2'),
+    )!;
+    expect(forged.autoAcceptCall, isFalse);
+  });
+
+  test('a token issued without a call id keeps working (older routes)', () {
+    const String peer = '200:1111:2222:3333:4444:5555:6666:7777';
+    final String token = issueCallAcceptToken(peer);
+    expect(isIssuedCallAcceptToken(token, peer), isTrue);
+    expect(isIssuedCallAcceptToken(token, peer, callId: 'any'), isTrue);
+    const RuntimeRouteIntent intent = RuntimeRouteIntent(
+      id: 'launch-7',
+      target: RuntimeRouteTarget.call,
+      peerAddress: peer,
+      autoAcceptCall: true,
+    );
+    expect(intent.answersCall('call-9'), isTrue);
+    expect(
+      buildCallRouteKey(peerAddress: peer, title: 'Ada'),
+      isNot(contains('call=')),
+    );
+  });
+
   test('older add-friend links with an address and a name are ignored', () {
     for (final String routeKey in <String>[
       // base64url of `ada.ygg|Ada`, and the old `peer` host.

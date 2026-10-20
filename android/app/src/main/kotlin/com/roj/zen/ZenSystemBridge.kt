@@ -11,7 +11,8 @@ import io.flutter.plugin.common.MethodChannel
 
 /**
  * Small system actions (`zen/system`): open the dialer with a number (the
- * person presses call; no permission needed), open a map at a place, tell
+ * person presses call; no permission needed), open the SMS app with a
+ * ready text (no SEND_SMS permission), open a map at a place, tell
  * the Android API level (which foreground-service type the background
  * service may use), open this app's page in the system settings (where
  * phone makers keep their own battery limits), open the "open by default"
@@ -30,6 +31,18 @@ object ZenSystemBridge {
                             val number = call.argument<String>("number") ?: ""
                             activity.startActivity(
                                 Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(number))),
+                            )
+                            result.success(true)
+                        }
+                        "sms" -> {
+                            // The system SMS app with the text ready; the
+                            // person presses send (no SEND_SMS permission).
+                            val numbers = call.argument<List<String>>("numbers") ?: emptyList()
+                            val body = call.argument<String>("body") ?: ""
+                            val to = numbers.joinToString(";") { Uri.encode(it, "+") }
+                            activity.startActivity(
+                                Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$to"))
+                                    .putExtra("sms_body", body),
                             )
                             result.success(true)
                         }

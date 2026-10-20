@@ -94,6 +94,10 @@ final class PlanService extends ChangeNotifier {
   /// This person's answers to plans of others.
   final Map<String, PlanAnswerKind> _mine = <String, PlanAnswerKind>{};
 
+  /// What this person takes on in "Wspólna sprawa" plans of others
+  /// (plan id → need key → how many).
+  final Map<String, Map<String, int>> _claims = <String, Map<String, int>>{};
+
   /// Plans this phone passed on to its friends.
   final Set<String> _forwarded = <String>{};
 
@@ -118,6 +122,10 @@ final class PlanService extends ChangeNotifier {
 
   /// This person's answer to someone else's plan.
   PlanAnswerKind? myAnswer(String id) => _mine[id];
+
+  /// What this person takes on in someone else's "Wspólna sprawa" [id].
+  Map<String, int> myClaims(String id) =>
+      Map<String, int>.unmodifiable(_claims[id] ?? const <String, int>{});
 
   /// The friend someone else's plan came through (`null`: from the
   /// organizer, a friend).
@@ -161,6 +169,19 @@ final class PlanService extends ChangeNotifier {
           _mine[k] = kind;
         }
       });
+      _claims.clear();
+      (json['claims'] as Map?)?.forEach((Object? k, Object? v) {
+        if (k is String && v is Map) {
+          final Map<String, int> c = <String, int>{
+            for (final MapEntry<dynamic, dynamic> e in v.entries)
+              if (e.key is String && e.value is int && (e.value as int) > 0)
+                e.key as String: e.value as int,
+          };
+          if (c.isNotEmpty) {
+            _claims[k] = c;
+          }
+        }
+      });
       _forwarded
         ..clear()
         ..addAll(
@@ -181,6 +202,9 @@ final class PlanService extends ChangeNotifier {
     _via.removeWhere((String id, String _) => !_plans.containsKey(id));
     _mine.removeWhere((String id, PlanAnswerKind _) => !_plans.containsKey(id));
     _forwarded.removeWhere((String id) => !_plans.containsKey(id));
+    _claims.removeWhere(
+      (String id, Map<String, int> _) => !_plans.containsKey(id),
+    );
     await disk.write(
       _key,
       Uint8List.fromList(
@@ -195,6 +219,7 @@ final class PlanService extends ChangeNotifier {
                 e.key: e.value.name,
             },
             'fwd': _forwarded.toList(),
+            if (_claims.isNotEmpty) 'claims': _claims,
           }),
         ),
       ),
@@ -241,6 +266,7 @@ final class PlanService extends ChangeNotifier {
     String place = '',
     PlanReach reach = PlanReach.friends,
     int threshold = kPlanDefaultThreshold,
+    List<PlanNeed> needs = const <PlanNeed>[],
   }) async {
     final String t = title.trim();
     final String pl = place.trim();
@@ -254,6 +280,21 @@ final class PlanService extends ChangeNotifier {
       reach: reach,
       threshold: threshold.clamp(kPlanMinThreshold, kPlanMaxThreshold),
       updatedAt: _now(),
+      // "Wspólna sprawa": the list, re-keyed so claims always match it.
+      needs: <PlanNeed>[
+        for (final (int i, PlanNeed n)
+            in needs
+                .where((PlanNeed n) => n.label.trim().isNotEmpty)
+                .take(kPlanMaxNeeds)
+                .indexed)
+          PlanNeed(
+            key: 'n$i',
+            label: n.label.trim().length > kPlanMaxNeedLabel
+                ? n.label.trim().substring(0, kPlanMaxNeedLabel)
+                : n.label.trim(),
+            wanted: n.wanted.clamp(1, kPlanMaxNeedQty),
+          ),
+      ],
     );
     _plans[p.id] = p;
     await _save();
@@ -385,22 +426,62 @@ final class PlanService extends ChangeNotifier {
 
   /// "Dołączam" / "Może" to someone else's plan [id] (`null`: taken back).
   /// It goes to the organizer, or to the friend the plan came through.
-  Future<void> answer(String id, PlanAnswerKind? kind) async {
+  /// In a "Wspólna sprawa" a "Dołączam" may carry [claims] (need key → how
+  /// many); left out, the earlier ones stay.
+  Future<void> answer(
+    String id,
+    PlanAnswerKind? kind, {
+    Map<String, int>? claims,
+  }) async {
     final WeekendPlan? p = _plans[id];
     if (p == null || p.isMine || p.cancelled || p.isEvent) {
       return;
     }
+    Map<String, int> sent = const <String, int>{};
     if (kind == null) {
       _mine.remove(id);
+      _claims.remove(id);
     } else {
       _mine[id] = kind;
+      if (kind == PlanAnswerKind.join && p.isCause) {
+        sent = <String, int>{
+          for (final MapEntry<String, int> e
+              in (claims ?? _claims[id] ?? const <String, int>{}).entries)
+            if (e.value > 0 && p.needs.any((PlanNeed n) => n.key == e.key))
+              e.key: e.value.clamp(1, kPlanMaxNeedQty),
+        };
+      }
+      if (sent.isEmpty) {
+        _claims.remove(id);
+      } else {
+        _claims[id] = sent;
+      }
     }
     await _save();
     await _send(_via[id] ?? p.organizer, <String, dynamic>{
       'type': PlanTypes.answer,
       'id': id,
       if (kind != null) 's': kind.name,
+      if (sent.isNotEmpty) 'c': sent,
     });
+  }
+
+  /// "Biorę": takes on [qty] of the need [needKey] in someone else's
+  /// "Wspólna sprawa" [id] (0 gives it up). It counts as joining.
+  Future<void> setClaim(String id, String needKey, int qty) async {
+    final WeekendPlan? p = _plans[id];
+    if (p == null ||
+        !p.isCause ||
+        !p.needs.any((PlanNeed n) => n.key == needKey)) {
+      return;
+    }
+    final Map<String, int> next = <String, int>{...?_claims[id]};
+    if (qty <= 0) {
+      next.remove(needKey);
+    } else {
+      next[needKey] = qty;
+    }
+    await answer(id, PlanAnswerKind.join, claims: next);
   }
 
   // ---- incoming ----
@@ -553,6 +634,7 @@ final class PlanService extends ChangeNotifier {
         'type': PlanTypes.answer,
         'id': p.id,
         if (kind != null) 's': kind.name,
+        if (payload['c'] is Map) 'c': payload['c'],
         'by': from,
         'n': host.nameOf(from),
       });
@@ -602,7 +684,11 @@ final class PlanService extends ChangeNotifier {
         return;
       }
     } else {
-      if (answers[who]?.kind == kind ||
+      final Map<String, int> claims = kind == PlanAnswerKind.join
+          ? _acceptClaims(p, who, payload['c'])
+          : const <String, int>{};
+      if ((answers[who]?.kind == kind &&
+              mapEquals(answers[who]?.claims, claims)) ||
           (!answers.containsKey(who) &&
               answers.length >= WeekendPlan.maxAnswers)) {
         return;
@@ -611,9 +697,10 @@ final class PlanService extends ChangeNotifier {
         address: who,
         name: name,
         kind: kind,
-        at: _now(),
+        at: answers[who]?.kind == kind ? answers[who]!.at : _now(),
         via: via,
         viaName: via == null ? '' : host.nameOf(via),
+        claims: claims,
       );
     }
     final WeekendPlan updated = p.copyWith(
@@ -639,6 +726,29 @@ final class PlanService extends ChangeNotifier {
     }
     await _broadcast(updated);
     await _maybeConvert(updated);
+  }
+
+  /// What [who] may take on in the "Wspólna sprawa" [p]: only things on the
+  /// list, at most what is still wanted after everybody else's share.
+  Map<String, int> _acceptClaims(WeekendPlan p, String who, Object? raw) {
+    if (!p.isCause || raw is! Map) {
+      return const <String, int>{};
+    }
+    final Map<String, int> out = <String, int>{};
+    for (final PlanNeed n in p.needs) {
+      final Object? v = raw[n.key];
+      if (v is! int || v <= 0) {
+        continue;
+      }
+      final int others = p.answers.values
+          .where((PlanAnswer a) => a.address != who)
+          .fold(0, (int s, PlanAnswer a) => s + (a.claims[n.key] ?? 0));
+      final int take = min(v, n.wanted - others);
+      if (take > 0) {
+        out[n.key] = take;
+      }
+    }
+    return out;
   }
 
   Future<void> _send(String to, Map<String, dynamic> payload) async {

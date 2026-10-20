@@ -179,12 +179,20 @@ class PyramidPower extends StatelessWidget {
                 t('Dowód: {evidence}', <String, Object?>{
                   'evidence': r.evidence.isEmpty ? t('(brak)') : r.evidence,
                 }),
+                // S36: the signed original came with it and checked out.
+                if (r.entry != null)
+                  t('Dołączony podpisany oryginał wpisu (sprawdzony).'),
+                if (r.stage > 0 || r.escalated)
+                  t('Przekazane wyżej: brak decyzji niżej.'),
               ].join('\n'),
             ),
           ),
           for (final MapEntry<String, String> o in <String, String>{
             'none': t('Bez naruszenia'),
-            'pause': t('Przerwa 7 dni'),
+            // §21.1: breaks of 24 h, 7 days or 30 days.
+            'pause1': t('Przerwa 24 h'),
+            'pause7': t('Przerwa 7 dni'),
+            'pause30': t('Przerwa 30 dni'),
             'content': t('Ban treści'),
             'dating': t('Wyłącz profil randkowy'),
             'noadmit': t('Zakaz przyjmowania do piramidy (90 dni)'),
@@ -203,17 +211,22 @@ class PyramidPower extends StatelessWidget {
     }
     final String outcome = switch (choice) {
       'none' => t('Bez naruszenia'),
-      'pause' => t('Przerwa 7 dni'),
+      'pause1' => t('Przerwa 24 h'),
+      'pause7' => t('Przerwa 7 dni'),
+      'pause30' => t('Przerwa 30 dni'),
       'content' => t('Ban treści'),
       'dating' => t('Wyłączony profil randkowy'),
       'noadmit' => t('Zakaz przyjmowania na 90 dni'),
       _ => t('Ban stały'),
     };
     final int? until = switch (choice) {
-      'pause' => pyr.now + 7 * 24 * 3600 * 1000,
+      'pause1' => pyr.now + 24 * 3600 * 1000,
+      'pause7' => pyr.now + 7 * 24 * 3600 * 1000,
+      'pause30' => pyr.now + 30 * 24 * 3600 * 1000,
       'noadmit' => pyr.now + 90 * 24 * 3600 * 1000,
       _ => null,
     };
+    final bool pause = choice.startsWith('pause');
     await pyr.decide(
       r.id,
       outcome,
@@ -221,11 +234,11 @@ class PyramidPower extends StatelessWidget {
       banVia: _top
           ? null
           : _myDelegation(<String>[
-              if (choice == 'pause') 'pause',
+              if (pause) 'pause',
               if (choice == 'content' || choice == 'dating') 'content',
               'ban',
             ]),
-      banKind: choice == 'none' ? null : choice,
+      banKind: choice == 'none' ? null : (pause ? 'pause' : choice),
       until: until,
     );
   }

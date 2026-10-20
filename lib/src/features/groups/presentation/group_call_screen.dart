@@ -19,6 +19,7 @@ import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/calls/presentation/call_compact_layer.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/calls/presentation/call_session_widgets.dart';
+import 'package:zen/src/features/calls/presentation/screen_share_guard.dart';
 import 'package:zen/src/features/calls/presentation/screen_source_picker.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -239,6 +240,11 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
                       ],
                     ),
                   ),
+                  if (media.isScreenSharing)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 2),
+                      child: ScreenShareReminderBanner(zen: zen),
+                    ),
                   if (media.isRecording || media.recordingPeers.isNotEmpty)
                     Container(
                       key: const Key('group-call-recording-banner'),
@@ -406,6 +412,12 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
   Future<void> _toggleScreenShare(GroupCallMedia media) async {
     if (media.isScreenSharing) {
       await media.stopScreenShare();
+      return;
+    }
+    if (!await confirmScreenShareStart(context)) {
+      return;
+    }
+    if (!mounted) {
       return;
     }
     final List<ScreenShareSource> sources = await media.listScreenSources();

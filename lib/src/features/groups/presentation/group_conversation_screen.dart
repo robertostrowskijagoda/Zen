@@ -18,9 +18,11 @@ import 'package:zen/src/features/chat/disappearing_messages.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/disappearing_timer_dialog.dart';
+import 'package:zen/src/features/groups/presentation/group_board_view.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
+import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -54,6 +56,9 @@ class _GroupConversationScreenState
   final TextEditingController _composerController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   bool _messageEntrancePlayed = false;
+
+  /// "Tablica" tab (posts pinned to the group) instead of the chat.
+  bool _boardTab = false;
   late final SocialHubController _socialHub;
 
   @override
@@ -158,7 +163,11 @@ class _GroupConversationScreenState
     try {
       await ref
           .read(socialHubControllerProvider.notifier)
-          .sendGroupMessage(groupId: widget.groupId, text: text);
+          .sendGroupMessage(
+            groupId: widget.groupId,
+            text: text,
+            board: _boardTab,
+          );
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -496,210 +505,273 @@ class _GroupConversationScreenState
                     )
                   : _joinRunningCall,
             ),
+          if (isMember)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+              child: SegmentedButton<bool>(
+                key: const Key('group-tabs'),
+                showSelectedIcon: false,
+                segments: <ButtonSegment<bool>>[
+                  ButtonSegment<bool>(
+                    value: false,
+                    icon: const Icon(Icons.forum_outlined, size: 18),
+                    label: Text(t('Czat')),
+                  ),
+                  ButtonSegment<bool>(
+                    value: true,
+                    icon: const Icon(Icons.push_pin_outlined, size: 18),
+                    label: Text(t('Tablica')),
+                  ),
+                ],
+                selected: <bool>{_boardTab},
+                onSelectionChanged: (Set<bool> value) =>
+                    setState(() => _boardTab = value.first),
+              ),
+            ),
           // Message List
           Expanded(
-            child: messagesAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (Object err, _) => Center(
-                child: Text(t('Błąd ładowania: {error}', {'error': err})),
-              ),
-              data: (List<ChatMessage> messages) {
-                final bool animateEntrance =
-                    !_messageEntrancePlayed && messages.isNotEmpty;
-                if (messages.isNotEmpty) {
-                  _messageEntrancePlayed = true;
-                }
-                if (messages.isEmpty) {
-                  return Center(
-                    child: SingleChildScrollView(
-                      child: ZenEmpty(
-                        icon: Icons.forum_outlined,
-                        title: t('Brak wiadomości w tej grupie'),
-                        text: isMember
-                            ? t('Napisz pierwszą wiadomość do uczestników grupy.')
-                            : t('Tu pojawią się wiadomości grupy.'),
-                      ),
+            child: _boardTab && isMember
+                ? messagesAsync.when(
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (Object err, _) => Center(
+                      child: Text(t('Błąd ładowania: {error}', {'error': err})),
                     ),
-                  );
-                }
-
-                // Reversed, so the chat opens at the newest message and new
-                // ones appear without the user having to scroll down.
-                return ListView.builder(
-                  controller: _scrollController,
-                  reverse: true,
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-                  itemCount: messages.length,
-                  itemBuilder: (BuildContext context, int reversedIndex) {
-                    final int index = messages.length - 1 - reversedIndex;
-                    final ChatMessage msg = messages[index];
-                    if (msg.isSystem) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Center(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: zen.surfaceRaised.withValues(alpha: 0.85),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: zen.outlineSoft),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 5,
-                              ),
-                              child: Text(
-                                msg.text,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: zen.textSecondary,
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
+                    data: (List<ChatMessage> messages) => GroupBoardView(
+                      messages: messages
+                          .where(
+                            (ChatMessage m) =>
+                                m.isOutgoing || !hiddenByMe.hides(id: m.id),
+                          )
+                          .toList(),
+                      canPost: isMember,
+                      senderName: (ChatMessage m) =>
+                          friends[m.sender]?.displayLabel ??
+                          ref
+                              .read(socialHubControllerProvider)
+                              .friendByAddress(m.sender)
+                              ?.displayLabel ??
+                          group.memberNames[m.sender] ??
+                          t('Uczestnik'),
+                    ),
+                  )
+                : messagesAsync.when(
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (Object err, _) => Center(
+                      child: Text(t('Błąd ładowania: {error}', {'error': err})),
+                    ),
+                    data: (List<ChatMessage> messages) {
+                      final bool animateEntrance =
+                          !_messageEntrancePlayed && messages.isNotEmpty;
+                      if (messages.isNotEmpty) {
+                        _messageEntrancePlayed = true;
+                      }
+                      if (messages.isEmpty) {
+                        return Center(
+                          child: SingleChildScrollView(
+                            child: ZenEmpty(
+                              icon: Icons.forum_outlined,
+                              title: t('Brak wiadomości w tej grupie'),
+                              text: isMember
+                                  ? t(
+                                      'Napisz pierwszą wiadomość do uczestników grupy.',
+                                    )
+                                  : t('Tu pojawią się wiadomości grupy.'),
                             ),
                           ),
-                        ),
-                      );
-                    }
-                    final bool isSelf = msg.isOutgoing || msg.sender == 'self';
-                    if (!isSelf && hiddenByMe.hides(id: msg.id)) {
-                      return HiddenContentPlaceholder(
-                        key: Key('group-hidden-${msg.id}'),
-                        byMe: true,
-                        compact: true,
-                        onShow: () => showHiddenAnyway(ref, id: msg.id),
-                      );
-                    }
-                    final String senderName = isSelf
-                        ? t('Ty')
-                        : friends[msg.sender]?.displayLabel ??
-                              ref
-                                  .read(socialHubControllerProvider)
-                                  .friendByAddress(msg.sender)
-                                  ?.displayLabel ??
-                              group?.memberNames[msg.sender] ??
-                              t('Uczestnik');
+                        );
+                      }
 
-                    final Color senderTone = zenTone(
-                      zen,
-                      (msg.sender.hashCode & 0x7FFFFFFF) % 8,
-                    );
-                    final Widget bubble = Align(
-                      alignment: isSelf
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 6),
-                        constraints: BoxConstraints(
-                          maxWidth: (MediaQuery.of(context).size.width * 0.78)
-                              .clamp(160.0, 440.0),
-                        ),
-                        decoration: isSelf
-                            ? BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: <Color>[
-                                    zen.accent,
-                                    Color.lerp(
-                                      zen.accent,
-                                      zen.accentSecondary,
-                                      0.35,
-                                    )!,
-                                  ],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                borderRadius: ZenRadii.dropEnd,
-                                boxShadow: <BoxShadow>[
-                                  BoxShadow(
-                                    color: zen.accent.withValues(alpha: 0.18),
-                                    blurRadius: 12,
-                                    offset: const Offset(0, 4),
+                      // Reversed, so the chat opens at the newest message and new
+                      // ones appear without the user having to scroll down.
+                      return ListView.builder(
+                        controller: _scrollController,
+                        reverse: true,
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                        itemCount: messages.length,
+                        itemBuilder: (BuildContext context, int reversedIndex) {
+                          final int index = messages.length - 1 - reversedIndex;
+                          final ChatMessage msg = messages[index];
+                          if (msg.isSystem) {
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Center(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: zen.surfaceRaised.withValues(
+                                      alpha: 0.85,
+                                    ),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: zen.outlineSoft),
                                   ),
-                                ],
-                              )
-                            : BoxDecoration(
-                                color: zen.surfaceRaised,
-                                borderRadius: ZenRadii.drop,
-                                border: Border.all(color: zen.outlineSoft),
-                              ),
-                        padding: const EdgeInsets.fromLTRB(14, 9, 14, 10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            if (!isSelf)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 3),
-                                child: Text(
-                                  senderName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: senderTone,
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            CopyableText(
-                              msg.text,
-                              style: TextStyle(
-                                color: isSelf ? zen.onAccent : zen.textPrimary,
-                                fontSize: 15,
-                                height: 1.4,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              // §21.4: what others wrote can be reported.
-                              onReport: isSelf
-                                  ? null
-                                  : () => unawaited(
-                                      reportContent(
-                                        context,
-                                        ref,
-                                        authorAddress: msg.sender,
-                                        text: msg.text,
-                                        header: t(
-                                          'Wiadomość w grupie {group} — {name}',
-                                          {
-                                            'group': widget.groupName,
-                                            'name': senderName,
-                                          },
-                                        ),
-                                        contentId: msg.id,
-                                        deleteLocal: () async {
-                                          await ref
-                                              .read(
-                                                socialHubControllerProvider
-                                                    .notifier,
-                                              )
-                                              .deleteMessageLocally(
-                                                key: 'group:${widget.groupId}',
-                                                messageId: msg.id,
-                                              );
-                                        },
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 5,
+                                    ),
+                                    child: Text(
+                                      chatMessageText(msg),
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: zen.textSecondary,
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w500,
                                       ),
                                     ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+                          final bool isSelf =
+                              msg.isOutgoing || msg.sender == 'self';
+                          if (!isSelf && hiddenByMe.hides(id: msg.id)) {
+                            return HiddenContentPlaceholder(
+                              key: Key('group-hidden-${msg.id}'),
+                              byMe: true,
+                              compact: true,
+                              onShow: () => showHiddenAnyway(ref, id: msg.id),
+                            );
+                          }
+                          final String senderName = isSelf
+                              ? t('Ty')
+                              : friends[msg.sender]?.displayLabel ??
+                                    ref
+                                        .read(socialHubControllerProvider)
+                                        .friendByAddress(msg.sender)
+                                        ?.displayLabel ??
+                                    group?.memberNames[msg.sender] ??
+                                    t('Uczestnik');
+
+                          final Color senderTone = zenTone(
+                            zen,
+                            (msg.sender.hashCode & 0x7FFFFFFF) % 8,
+                          );
+                          final Widget bubble = Align(
+                            alignment: isSelf
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 6),
+                              constraints: BoxConstraints(
+                                maxWidth:
+                                    (MediaQuery.of(context).size.width * 0.78)
+                                        .clamp(160.0, 440.0),
+                              ),
+                              decoration: isSelf
+                                  ? BoxDecoration(
+                                      gradient: LinearGradient(
+                                        colors: <Color>[
+                                          zen.accent,
+                                          Color.lerp(
+                                            zen.accent,
+                                            zen.accentSecondary,
+                                            0.35,
+                                          )!,
+                                        ],
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                      ),
+                                      borderRadius: ZenRadii.dropEnd,
+                                      boxShadow: <BoxShadow>[
+                                        BoxShadow(
+                                          color: zen.accent.withValues(
+                                            alpha: 0.18,
+                                          ),
+                                          blurRadius: 12,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
+                                    )
+                                  : BoxDecoration(
+                                      color: zen.surfaceRaised,
+                                      borderRadius: ZenRadii.drop,
+                                      border: Border.all(
+                                        color: zen.outlineSoft,
+                                      ),
+                                    ),
+                              padding: const EdgeInsets.fromLTRB(14, 9, 14, 10),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  if (!isSelf)
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 3),
+                                      child: Text(
+                                        senderName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: senderTone,
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  CopyableText(
+                                    msg.text,
+                                    style: TextStyle(
+                                      color: isSelf
+                                          ? zen.onAccent
+                                          : zen.textPrimary,
+                                      fontSize: 15,
+                                      height: 1.4,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    // §21.4: what others wrote can be reported.
+                                    onReport: isSelf
+                                        ? null
+                                        : () => unawaited(
+                                            reportContent(
+                                              context,
+                                              ref,
+                                              authorAddress: msg.sender,
+                                              text: msg.text,
+                                              header: t(
+                                                'Wiadomość w grupie {group} — {name}',
+                                                {
+                                                  'group': widget.groupName,
+                                                  'name': senderName,
+                                                },
+                                              ),
+                                              contentId: msg.id,
+                                              deleteLocal: () async {
+                                                await ref
+                                                    .read(
+                                                      socialHubControllerProvider
+                                                          .notifier,
+                                                    )
+                                                    .deleteMessageLocally(
+                                                      key:
+                                                          'group:${widget.groupId}',
+                                                      messageId: msg.id,
+                                                    );
+                                              },
+                                            ),
+                                          ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ],
-                        ),
-                      ),
-                    );
-                    // Stagger from the newest bubble up — those are the ones
-                    // visible when the conversation opens.
-                    final int fromEnd = messages.length - 1 - index;
-                    if (animateEntrance && fromEnd < _entranceStaggerLimit) {
-                      return ZenFadeSlide(
-                        duration: const Duration(milliseconds: 300),
-                        delay: Duration(milliseconds: 30 * fromEnd),
-                        offset: Offset(isSelf ? 10 : -10, 6),
-                        child: bubble,
+                          );
+                          // Stagger from the newest bubble up — those are the ones
+                          // visible when the conversation opens.
+                          final int fromEnd = messages.length - 1 - index;
+                          if (animateEntrance &&
+                              fromEnd < _entranceStaggerLimit) {
+                            return ZenFadeSlide(
+                              duration: const Duration(milliseconds: 300),
+                              delay: Duration(milliseconds: 30 * fromEnd),
+                              offset: Offset(isSelf ? 10 : -10, 6),
+                              child: bubble,
+                            );
+                          }
+                          return bubble;
+                        },
                       );
-                    }
-                    return bubble;
-                  },
-                );
-              },
-            ),
+                    },
+                  ),
           ),
           // Composer Bar
           if (!isMember)
@@ -747,7 +819,9 @@ class _GroupConversationScreenState
                               height: 1.35,
                             ),
                             decoration: InputDecoration(
-                              hintText: t('Napisz wiadomość do grupy...'),
+                              hintText: _boardTab
+                                  ? t('Napisz post na tablicę grupy...')
+                                  : t('Napisz wiadomość do grupy...'),
                               hintStyle: TextStyle(
                                 color: zen.textMuted,
                                 fontSize: 14.5,

@@ -1074,8 +1074,9 @@ final class IntroService extends ChangeNotifier {
         await _result(from, id, 'ok');
       case FriendListAudience.nobody:
         await _result(from, id, 'no');
-      case FriendListAudience.onRequest:
-        if (m.book.showsFriendListTo(from)) {
+      // A weak acquaintance asks like everybody does "on request" (§8).
+      case FriendListAudience.onRequest || FriendListAudience.friends:
+        if (m.friendListVisibleTo(from)) {
           await m.resendFriendList(from);
           await _result(from, id, 'ok');
           return;

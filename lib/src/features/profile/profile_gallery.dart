@@ -127,7 +127,7 @@ Future<void> addToGallery(
     for (final ({Uint8List bytes, String mime}) m in media.take(
       kMaxGalleryBatch,
     ))
-      await storeMedia(node.blobs, m.bytes, mime: m.mime),
+      await storeMedia(node.blobs, m.bytes, mime: m.mime, stripMetadata: true),
   ];
   await node.publish(
     kGalleryKind,

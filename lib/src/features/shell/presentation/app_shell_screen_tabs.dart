@@ -9,6 +9,7 @@ class _ShellTab {
     required this.icon,
     required this.selectedIcon,
     this.glyph,
+    this.group,
   });
 
   final String id;
@@ -18,7 +19,32 @@ class _ShellTab {
 
   /// A drawn icon instead of [icon] (color, size, selected).
   final Widget Function(Color color, double size, bool selected)? glyph;
+
+  /// `null`: a button on the rail. Otherwise the tab lives under "Więcej"
+  /// (§25), in this group.
+  final _MoreGroup? group;
 }
+
+/// Sections of the "Więcej" sheet for the rarely used tabs (§25).
+enum _MoreGroup {
+  meetings,
+  community,
+  other;
+
+  String get title => switch (this) {
+    _MoreGroup.meetings => t('Spotkania'),
+    _MoreGroup.community => t('Wspólnota'),
+    _MoreGroup.other => t('Inne'),
+  };
+}
+
+/// The rail button that opens the sheet with the grouped tabs.
+_ShellTab get _moreButtonTab => _ShellTab(
+  id: 'more',
+  label: t('Więcej'),
+  icon: Icons.more_horiz_rounded,
+  selectedIcon: Icons.more_horiz_rounded,
+);
 
 Widget _pyramidGlyph(Color color, double size, bool selected) =>
     PyramidGlyph(color: color, size: size, filled: selected);
@@ -62,6 +88,7 @@ List<_ShellTab> get _shellTabs => <_ShellTab>[
     label: t('Randki'),
     icon: Icons.favorite_outline_rounded,
     selectedIcon: Icons.favorite_rounded,
+    group: _MoreGroup.meetings,
   ),
   _ShellTab(
     id: 'neighbors',
@@ -75,6 +102,7 @@ List<_ShellTab> get _shellTabs => <_ShellTab>[
     icon: kPyramidIcon,
     selectedIcon: kPyramidIcon,
     glyph: _pyramidGlyph,
+    group: _MoreGroup.community,
   ),
   // The points wallet, right before Bluetooth (§18).
   _ShellTab(
@@ -82,6 +110,7 @@ List<_ShellTab> get _shellTabs => <_ShellTab>[
     label: t('Portfel'),
     icon: Icons.attach_money_rounded,
     selectedIcon: Icons.attach_money_rounded,
+    group: _MoreGroup.community,
   ),
   // Bluetooth "people nearby" sits right before the invite QR (§12).
   _ShellTab(
@@ -89,18 +118,21 @@ List<_ShellTab> get _shellTabs => <_ShellTab>[
     label: t('Osoby w pobliżu'),
     icon: Icons.bluetooth_searching_rounded,
     selectedIcon: Icons.bluetooth_connected_rounded,
+    group: _MoreGroup.meetings,
   ),
   _ShellTab(
     id: 'invite',
     label: t('Zaproś'),
     icon: Icons.qr_code_2_rounded,
     selectedIcon: Icons.qr_code_2_rounded,
+    group: _MoreGroup.other,
   ),
   _ShellTab(
     id: 'about',
     label: t('O aplikacji'),
     icon: Icons.info_outline_rounded,
     selectedIcon: Icons.info_rounded,
+    group: _MoreGroup.other,
   ),
   // Last, at the bottom of the rail and in red (§16.3).
   _ShellTab(
@@ -173,7 +205,8 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
     }
     _shellTabRequest.value = null;
     final int i = _shellTabs.indexWhere((_ShellTab t) => t.id == id);
-    if (i >= 0) {
+    // A feature switched off (A15) has no tab to go to.
+    if (i >= 0 && ref.read(featureFlagsProvider).showsTab(id)) {
       _select(i);
     }
   }
@@ -201,6 +234,24 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
     });
   }
 
+  /// "Więcej": the rarely used tabs, grouped (§25).
+  Future<void> _openMore(int current) async {
+    final String? id = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (BuildContext context) =>
+          _MoreSheet(selectedId: _shellTabs[current].id),
+    );
+    if (id == null || !mounted) {
+      return;
+    }
+    final int i = _shellTabs.indexWhere((_ShellTab t) => t.id == id);
+    if (i >= 0) {
+      _select(i);
+    }
+  }
+
   Widget _page(int index) => switch (_shellTabs[index].id) {
     // The chat list shows the last messages, dating who meets whom (S-9).
     'chats' => const SecureScreen(child: _ChatsPage(key: Key('chats-page'))),
@@ -209,17 +260,23 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
     'graph' => const GraphScreen(),
     'nearby' => const NearbyScreen(),
     'about' => const AboutScreen(),
-    'dating' => const SecureScreen(child: DatingScreen()),
+    // Adults only (§26.1, §27): the age gate asks first.
+    'dating' => const AgeGate(child: SecureScreen(child: DatingScreen())),
     'neighbors' => const NeighborsScreen(),
     'alarm' => const AlarmScreen(),
-    'pyramid' => const PyramidScreen(),
-    'wallet' => const WalletScreen(),
+    'pyramid' => const AgeGate(child: PyramidScreen()),
+    'wallet' => const AgeGate(child: WalletScreen()),
     'invite' => const _MyCodeScreen(),
     _ => const ProfileScreen(),
   };
 
   @override
   Widget build(BuildContext context) {
+    final FeatureFlags flags = ref.watch(featureFlagsProvider);
+    // The open tab's feature was just switched off: back to the start tab.
+    final int index = flags.showsTab(_shellTabs[_index].id)
+        ? _index
+        : _startTab;
     return Scaffold(
       key: const Key('tabbed-shell'),
       body: SafeArea(
@@ -227,13 +284,16 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
           children: <Widget>[
             // Connection status stays across the top; a tap opens settings.
             const _StatusBar(),
+            // This phone's clock is off (A21): a bar, tap for the report.
+            const ClockSkewBanner(),
             Expanded(
               child: Row(
                 children: <Widget>[
                   if (!_hidden)
                     _SideTabs(
-                      index: _index,
+                      index: index,
                       onSelect: _select,
+                      onMore: () => unawaited(_openMore(index)),
                       onHide: () => _setHidden(true),
                     ),
                   Expanded(
@@ -245,14 +305,17 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
                             children: <Widget>[
                               Positioned.fill(
                                 child: IndexedStack(
-                                  index: _index,
+                                  index: index,
                                   children: <Widget>[
                                     for (int i = 0; i < _shellTabs.length; i++)
                                       // "W pobliżu" scans Bluetooth while it is
                                       // built, so it lives only while it is shown.
                                       _visited.contains(i) &&
+                                              flags.showsTab(
+                                                _shellTabs[i].id,
+                                              ) &&
                                               (_shellTabs[i].id != 'nearby' ||
-                                                  i == _index)
+                                                  i == index)
                                           ? KeyedSubtree(
                                               key: Key(
                                                 'tab-page-${_shellTabs[i].id}',
@@ -369,17 +432,29 @@ class _SideTabs extends ConsumerWidget {
   const _SideTabs({
     required this.index,
     required this.onSelect,
+    required this.onMore,
     required this.onHide,
   });
 
   final int index;
   final ValueChanged<int> onSelect;
+  final VoidCallback onMore;
   final VoidCallback onHide;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ZenColors zen = ZenColors.of(context);
     final AppSecurityService security = ref.watch(appSecurityServiceProvider);
+    final FeatureFlags flags = ref.watch(featureFlagsProvider);
+    // The rail buttons, plus "Więcej" when something is grouped under it.
+    final bool hasMore = _shellTabs.any(
+      (_ShellTab t) => t.group != null && flags.showsTab(t.id),
+    );
+    final int visibleTabs =
+        _shellTabs
+            .where((_ShellTab t) => t.group == null && flags.showsTab(t.id))
+            .length +
+        (hasMore ? 1 : 0);
     final int unread = ref.watch(
       socialHubControllerProvider.select(
         (SocialHubState s) =>
@@ -449,8 +524,10 @@ class _SideTabs extends ConsumerWidget {
                   // slimmer (down to a still comfortable tap target) instead
                   // of the last ones sliding out of sight. Only below that
                   // (a phone on its side) does the rail scroll.
-                  final double extent = ((c.maxHeight - 8) / _shellTabs.length)
-                      .clamp(_sideTabMinExtent, _sideTabMaxExtent);
+                  final double extent = ((c.maxHeight - 8) / visibleTabs).clamp(
+                    _sideTabMinExtent,
+                    _sideTabMaxExtent,
+                  );
                   return SingleChildScrollView(
                     child: ConstrainedBox(
                       constraints: BoxConstraints(minHeight: c.maxHeight),
@@ -458,7 +535,9 @@ class _SideTabs extends ConsumerWidget {
                         child: Column(
                           children: <Widget>[
                             for (int i = 0; i < _shellTabs.length; i++)
-                              if (_shellTabs[i].id != 'alarm')
+                              if (_shellTabs[i].id != 'alarm' &&
+                                  _shellTabs[i].group == null &&
+                                  flags.showsTab(_shellTabs[i].id))
                                 _SideTabButton(
                                   tab: _shellTabs[i],
                                   extent: extent,
@@ -468,6 +547,14 @@ class _SideTabs extends ConsumerWidget {
                                       : 0,
                                   onTap: () => onSelect(i),
                                 ),
+                            if (hasMore)
+                              _SideTabButton(
+                                tab: _moreButtonTab,
+                                extent: extent,
+                                selected: _shellTabs[index].group != null,
+                                badge: 0,
+                                onTap: onMore,
+                              ),
                             const Spacer(),
                             for (int i = 0; i < _shellTabs.length; i++)
                               if (_shellTabs[i].id == 'alarm')
@@ -543,9 +630,16 @@ class _SideTabButton extends StatelessWidget {
     return Semantics(
       selected: selected,
       button: true,
-      label: tab.label,
+      label: badge > 0
+          ? t('{label}, nieprzeczytane: {n}', {
+              'label': tab.label,
+              'n': badge > 99 ? '99+' : badge,
+            })
+          : tab.label,
+      hint: tab.id == 'more' ? t('Pokaż pozostałe zakładki') : null,
       child: Tooltip(
         message: tab.label,
+        excludeFromSemantics: true,
         child: Padding(
           padding: EdgeInsets.symmetric(horizontal: 6, vertical: gap),
           child: Material(
@@ -594,6 +688,55 @@ class _SideTabButton extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The sheet behind "Więcej": the rarely used tabs, grouped.
+class _MoreSheet extends ConsumerWidget {
+  const _MoreSheet({required this.selectedId});
+
+  final String selectedId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ZenColors zen = ZenColors.of(context);
+    final FeatureFlags flags = ref.watch(featureFlagsProvider);
+    final List<_ShellTab> tabs = <_ShellTab>[
+      for (final _ShellTab tab in _shellTabs)
+        if (tab.group != null && flags.showsTab(tab.id)) tab,
+    ];
+    return SafeArea(
+      child: SingleChildScrollView(
+        key: const Key('more-sheet'),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            for (final _MoreGroup group in _MoreGroup.values) ...<Widget>[
+              if (tabs.any((_ShellTab t) => t.group == group))
+                ZenSection(group.title, top: 4),
+              for (final _ShellTab tab in tabs)
+                if (tab.group == group)
+                  ListTile(
+                    key: Key('more-tab-${tab.id}'),
+                    selected: tab.id == selectedId,
+                    selectedColor: zen.accent,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                    leading:
+                        tab.glyph?.call(
+                          tab.id == selectedId ? zen.accent : zen.textSecondary,
+                          24,
+                          tab.id == selectedId,
+                        ) ??
+                        Icon(tab.icon),
+                    title: Text(tab.label),
+                    onTap: () => Navigator.of(context).pop(tab.id),
+                  ),
+            ],
+          ],
         ),
       ),
     );

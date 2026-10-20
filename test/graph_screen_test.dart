@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/intro/intro_service.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
@@ -289,6 +290,136 @@ void main() {
     );
     await tester.pump();
     expect(meet.book.friendListAudience, FriendListAudience.onRequest);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  test('communities: people who know each other share a cluster, the '
+      'biggest first, friends of friends join those who connect them', () {
+    final String a = addr('a1');
+    final String b = addr('b2');
+    final String c = addr('c3');
+    final String d = addr('d4');
+    final String e = addr('e5');
+    final String f = addr('f6');
+    final String loner = addr('f7');
+    final String far = addr('99');
+    final SocialHubState social = SocialHubState.empty().copyWith(
+      friends: <String, FriendProfile>{
+        for (final String x in <String>[a, b, c, d, e, f, loner])
+          x: _friend(x, 'N$x'),
+      },
+    );
+    final MeetBook book = MeetBook()
+      ..friendLists[a] = <String, String>{b: 'B', c: 'C', d: 'D'}
+      ..friendLists[b] = <String, String>{a: 'A', c: 'C', d: 'D'}
+      ..friendLists[c] = <String, String>{a: 'A', b: 'B'}
+      ..friendLists[e] = <String, String>{f: 'F', far: 'Far'}
+      ..friendLists[f] = <String, String>{e: 'E', far: 'Far'};
+    final List<GraphNode> nodes = buildGraph(
+      social: social,
+      book: book,
+      levelOf: (String _) => FriendLevel.friend,
+    );
+    final Map<String, int> cl = graphClusters(nodes, book);
+    expect(<int>{cl[a]!, cl[b]!, cl[c]!, cl[d]!}, <int>{0}, reason: 'biggest');
+    expect(<int>{cl[e]!, cl[f]!, cl[far]!}, <int>{1});
+    expect(cl[loner], -1);
+    // The same input gives the same groups.
+    expect(graphClusters(nodes, book), cl);
+    expect(graphClusters(const <GraphNode>[], book), isEmpty);
+  });
+
+  testWidgets('graph: pinch-zoom buttons zoom the picture and a friend opens '
+      'with a profile button', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(480, 2600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final _Host host = _Host(<String, String>{
+      _ania: 'Ania',
+      _bartek: 'Bartek',
+    });
+    final MeetService meet = MeetService(
+      host: host,
+      store: MeetStore(MemoryLedgerDisk()),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          socialHubAutoHydrateProvider.overrideWithValue(false),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              friends: <String, FriendProfile>{
+                _ania: _friend(_ania, 'Ania'),
+                _bartek: _friend(_bartek, 'Bartek'),
+              },
+            ),
+          ),
+          signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+          ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+          meetServiceProvider.overrideWithValue(meet),
+          pyramidServiceProvider.overrideWithValue(
+            PyramidService(
+              host: MeetEventHost(host, address: () => '', name: () => 'Ja'),
+              disk: MemoryLedgerDisk(),
+            ),
+          ),
+        ],
+        child: MaterialApp(theme: ZenTheme.dark(), home: const GraphScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    double scale() => tester
+        .widget<InteractiveViewer>(find.byKey(const Key('graph-viewer')))
+        .transformationController!
+        .value
+        .getMaxScaleOnAxis();
+    expect(scale(), 1);
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('graph-zoom-out')))
+          .onPressed,
+      isNull,
+      reason: 'nothing to zoom out of',
+    );
+    await tester.ensureVisible(find.byKey(const Key('graph-zoom-in')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('graph-zoom-in')));
+    await tester.pump();
+    expect(scale(), closeTo(1.6, 0.001));
+    await tester.tap(find.byKey(const Key('graph-zoom-in')));
+    await tester.pump();
+    expect(scale(), closeTo(2.56, 0.001));
+    for (int i = 0; i < 12; i++) {
+      await tester.tap(
+        find.byKey(const Key('graph-zoom-in')),
+        warnIfMissed: false,
+      );
+      await tester.pump();
+    }
+    expect(scale(), lessThanOrEqualTo(8.0001));
+    for (int i = 0; i < 12; i++) {
+      await tester.tap(
+        find.byKey(const Key('graph-zoom-out')),
+        warnIfMissed: false,
+      );
+      await tester.pump();
+    }
+    expect(scale(), closeTo(1, 0.001));
+
+    // A friend found by search: the card leads to their profile.
+    await tester.ensureVisible(find.byKey(const Key('graph-search')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('graph-search')), 'ani');
+    await tester.pump();
+    await tester.tap(find.byKey(Key('graph-hit-$_ania')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byKey(const Key('graph-person-sheet')), findsOneWidget);
+    expect(find.byKey(const Key('graph-profile')), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 5));

@@ -20,7 +20,10 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
+import 'package:zen/src/features/update/canary.dart';
+import 'package:zen/src/features/update/official_info.dart';
 import 'package:zen/src/features/update/release.dart';
+import 'package:zen/src/features/update/store_build.dart';
 import 'package:zen/src/features/update/update_book.dart';
 
 /// What [UpdateService] needs from the ledger node (a fake in tests).
@@ -132,14 +135,19 @@ final class UpdateService extends ChangeNotifier {
     UpdateBook? book,
     String? platform,
     int Function()? now,
+    OfficialInfo? buildInfo,
     this.announceEvery = const Duration(hours: 6),
   }) : book = book ?? UpdateBook(currentBuild: kAppBuild),
        platform = platform ?? currentReleasePlatform(),
+       buildInfo = buildInfo ?? thisBuildOfficialInfo(),
        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final UpdateHost host;
   final UpdateBook book;
   final String platform;
+
+  /// What this build shows as donation link, author and repository.
+  final OfficialInfo buildInfo;
   final Duration announceEvery;
   final int Function() _now;
 
@@ -256,17 +264,45 @@ final class UpdateService extends ChangeNotifier {
     );
   }
 
+  /// Which signed details this build shows differently (`donation`,
+  /// `author`, `repo`): non-empty means this copy is probably modified
+  /// (§14.3). Empty while nothing signed is known.
+  List<String> get officialDifferences {
+    final OfficialInfo? signed = book.enabled ? book.signedOfficial : null;
+    return signed == null
+        ? const <String>[]
+        : signed.differencesFrom(buildInfo);
+  }
+
+  /// The newest trusted canary (null while none is known or updates are
+  /// off).
+  SignedCanary? get canary => book.enabled ? book.canary : null;
+
+  /// Whether [canary] was not renewed in time.
+  bool get canaryExpired => canary?.isExpired(_now()) ?? false;
+
   // ---- network ----
 
-  Map<String, dynamic> _offerPayload() => <String, dynamic>{
-    'type': kReleaseOfferType,
-    if (book.candidate != null) 'rel': book.candidate!.toJson(),
-    'rev': <Map<String, dynamic>>[
-      for (final ReleaseRevocation r in book.revocations) r.toJson(),
-    ],
-  };
+  /// Sent to friends: the newest release (or, when none is newer than this
+  /// build, the one with the signed donation details), vetoes and the
+  /// canary. 1.10.0 peers read only `rel` and `rev`.
+  Map<String, dynamic> _offerPayload() {
+    final SignedRelease? release = book.candidate ?? book.officialSource;
+    return <String, dynamic>{
+      'type': kReleaseOfferType,
+      if (release != null) 'rel': release.toJson(),
+      'rev': <Map<String, dynamic>>[
+        for (final ReleaseRevocation r in book.revocations) r.toJson(),
+      ],
+      if (book.canary != null) 'can': book.canary!.toJson(),
+    };
+  }
 
-  bool get _hasNews => book.candidate != null || book.revocations.isNotEmpty;
+  bool get _hasNews =>
+      book.candidate != null ||
+      book.officialSource != null ||
+      book.canary != null ||
+      book.revocations.isNotEmpty;
 
   Future<void> _announce(String peer, {bool force = false}) async {
     if (!book.enabled || !_hasNews) {
@@ -320,9 +356,16 @@ final class UpdateService extends ChangeNotifier {
       if (await book.offerRelease(release, now: _now())) {
         changed = true;
       }
+      if (await book.offerOfficial(release)) {
+        changed = true;
+      }
       if (book.release(release.manifest.build) != null) {
         (_sources[release.manifest.build] ??= <String>{}).add(from);
       }
+    }
+    final SignedCanary? canary = SignedCanary.fromJson(payload['can']);
+    if (canary != null && await book.offerCanary(canary)) {
+      changed = true;
     }
     if (changed) {
       await _save();
@@ -331,7 +374,11 @@ final class UpdateService extends ChangeNotifier {
     _resumeDownload();
     final int theirs = release?.manifest.build ?? 0;
     final int ours = book.candidate?.manifest.build ?? 0;
-    if (ours > theirs || (changed && book.revocations.isNotEmpty)) {
+    final int theirCanary = canary?.statement.at ?? 0;
+    final int ourCanary = book.canary?.statement.at ?? 0;
+    if (ours > theirs ||
+        ourCanary > theirCanary ||
+        (changed && book.revocations.isNotEmpty)) {
       // They are behind: tell them what we know.
       await _announce(from);
     }
@@ -390,6 +437,11 @@ final class UpdateService extends ChangeNotifier {
         'Aktualizacja nie ma wymaganych podpisów opiekunów — odrzucona.',
       );
     }
+    if (await book.offerOfficial(release)) {
+      await _save();
+      _enqueue(_announceToAll);
+      notifyListeners();
+    }
     if (release.manifest.build <= book.currentBuild) {
       return t('Masz już tę albo nowszą wersję.');
     }
@@ -440,6 +492,27 @@ final class UpdateService extends ChangeNotifier {
             )
           : t('To wstrzymanie było już znane.');
     }
+    final SignedCanary? canary = SignedCanary.fromJson(json);
+    if (canary != null) {
+      if (!await canary.isTrusted(
+        maintainers: book.maintainers,
+        threshold: book.threshold,
+      )) {
+        return t(
+          'Oświadczenie nie ma wymaganych podpisów opiekunów — odrzucone.',
+        );
+      }
+      if (!await book.offerCanary(canary)) {
+        return t('To oświadczenie było już znane albo jest starsze.');
+      }
+      await _save();
+      _enqueue(_announceToAll);
+      notifyListeners();
+      return t(
+        'Wczytano oświadczenie opiekunów. Zostanie przekazane '
+        'znajomym.',
+      );
+    }
     final SignedRelease? release = SignedRelease.fromJson(json);
     if (release == null) {
       return t('To nie jest plik aktualizacji Zen.');
@@ -452,6 +525,7 @@ final class UpdateService extends ChangeNotifier {
         'Aktualizacja nie ma wymaganych podpisów opiekunów — odrzucona.',
       );
     }
+    final bool official = await book.offerOfficial(release);
     final bool added = await book.offerRelease(release, now: _now());
     await _save();
     _enqueue(_announceToAll);
@@ -459,6 +533,10 @@ final class UpdateService extends ChangeNotifier {
     notifyListeners();
     return added
         ? t('Wczytano wersję {version}; pliki przyjdą od znajomych.', {
+            'version': release.manifest.version,
+          })
+        : official
+        ? t('Wczytano podpisane dane wydania {version}.', {
             'version': release.manifest.version,
           })
         : t('Ta wersja jest już znana albo nie jest nowsza.');
@@ -570,6 +648,10 @@ Future<String?> ownApkPath() async {
 /// The running update service, or `null` while the ledger is off.
 final Provider<UpdateService?> updateServiceProvider = Provider<UpdateService?>(
   (Ref ref) {
+    // A store build is updated by its store (STAN D12).
+    if (isStoreBuild) {
+      return null;
+    }
     final LedgerNode? node = ref.watch(ledgerNodeProvider);
     if (node == null) {
       return null;

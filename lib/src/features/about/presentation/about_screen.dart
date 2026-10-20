@@ -15,6 +15,12 @@ import 'package:zen/src/features/update/presentation/share_app_screen.dart';
 /// Where donations for Zen go (the only official collection).
 const String kDonationUrl = 'https://buycoffee.to/zen';
 
+/// The privacy policy and the terms of use (English, in the repository).
+const String kPrivacyPolicyUrl =
+    'https://github.com/robertostrowskijagoda/Zen/blob/main/docs/PRIVACY.md';
+const String kTermsOfUseUrl =
+    'https://github.com/robertostrowskijagoda/Zen/blob/main/docs/TERMS.md';
+
 /// The Yggdrasil project (the network Zen runs on).
 const String kYggdrasilUrl = 'https://yggdrasil-network.github.io/';
 
@@ -216,6 +222,23 @@ class AboutScreen extends StatelessWidget {
               'hasła — pomocą 4 z nich (po 7 dniach; stare urządzenia dostają '
               'ostrzeżenie). Jedna osoba sama nic nie zobaczy.',
             ),
+          ),
+          const SizedBox(height: 8),
+          ZenTile(
+            key: const Key('about-privacy-policy'),
+            icon: Icons.privacy_tip_rounded,
+            tone: zen.success,
+            title: t('Polityka prywatności'),
+            subtitle: t('Co dzieje się z Twoimi danymi (po angielsku, GitHub)'),
+            onTap: () => _openLink(context, kPrivacyPolicyUrl),
+          ),
+          ZenTile(
+            key: const Key('about-terms'),
+            icon: Icons.gavel_rounded,
+            tone: zenTone(zen, 6),
+            title: t('Regulamin'),
+            subtitle: t('Zasady korzystania z Zen (po angielsku, GitHub)'),
+            onTap: () => _openLink(context, kTermsOfUseUrl),
           ),
           ZenSection(t('Na czym to zbudowane')),
           ZenInfo(

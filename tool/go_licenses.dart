@@ -7,7 +7,7 @@
 // "O aplikacji → Licencje") and native/yggdrasil_bridge/LICENSES-GO.txt
 // (attached to releases). Run it after changing go.mod. It needs Go (for
 // `go env GOMODCACHE GOROOT`) and the modules downloaded, which any build of
-// the bridge does. See docs/WYDANIA.md.
+// the bridge does. See docs/RELEASES.md.
 import 'dart:io';
 
 const String _bridgeDir = 'native/yggdrasil_bridge';

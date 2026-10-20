@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:zen/src/core/utils/background_work.dart';
 import 'package:zen/src/features/runtime/zstd_frame_guard.dart';
 import 'package:zstandard/zstandard.dart';
 
@@ -81,7 +82,9 @@ Future<Map<String, dynamic>?> decodeRuntimeSignalPayload(
   if (rawPayload.length > kRuntimeSignalMaxBytes) {
     throw const FormatException('Signal payload exceeds 2MB limit.');
   }
-  final Object? parsed = jsonDecode(rawPayload);
+  // A big signal (an attachment chunk, a long history) is parsed off the UI
+  // thread; small ones are not worth an isolate.
+  final Object? parsed = await _parseJson(rawPayload);
   if (parsed is! Map<String, dynamic>) {
     return null;
   }
@@ -106,6 +109,14 @@ Future<Map<String, dynamic>?> decodeRuntimeSignalPayload(
     maxBytes: kRuntimeSignalMaxBytes,
     decompress: compressor.decompress,
   );
-  final Object? decoded = jsonDecode(utf8.decode(decodedBytes));
+  final Object? decoded = await _parseJsonBytes(decodedBytes);
   return decoded is Map<String, dynamic> ? decoded : null;
 }
+
+// Not async on purpose: a closure made in an async function may drag its
+// suspended frame along, which cannot be sent to another isolate.
+Future<Object?> _parseJson(String raw) =>
+    runSizedWork<Object?>(raw.length, () => jsonDecode(raw));
+
+Future<Object?> _parseJsonBytes(Uint8List bytes) =>
+    runSizedWork<Object?>(bytes.length, () => jsonDecode(utf8.decode(bytes)));

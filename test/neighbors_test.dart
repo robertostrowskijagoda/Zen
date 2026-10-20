@@ -53,7 +53,12 @@ final class _Phone implements EventHost {
   _Phone(this.net, this.name)
     : address = addr((0xa0 + net.length).toRadixString(16)) {
     net[address] = this;
-    service = NeighborsService(host: this, disk: disk, now: () => clock);
+    service = NeighborsService(
+      host: this,
+      disk: disk,
+      now: () => clock,
+      doorInbox: () => inbox,
+    );
   }
 
   final Map<String, _Phone> net;
@@ -62,6 +67,9 @@ final class _Phone implements EventHost {
   final MemoryLedgerDisk disk = MemoryLedgerDisk();
   late NeighborsService service;
   int clock = 1000;
+
+  /// A dedicated door inbox, when the test gives the flat one.
+  String? inbox;
   bool online = true;
   final List<RuntimeSystemNotification> shown = <RuntimeSystemNotification>[];
   final List<Map<String, dynamic>> sent = <Map<String, dynamic>>[];
@@ -114,7 +122,9 @@ void main() {
       final FlatDoorCode back = FlatDoorCode.parse(code.toQr())!;
       expect(back.key, code.key);
       expect(back.door, 'abc');
-      expect(back.members, hasLength(3), reason: 'at most 3 addresses');
+      expect(back.members, hasLength(1), reason: 'one door address only');
+      expect(back.members.single, addr('a1'));
+      expect(back.isLegacy, isFalse);
       expect(back.name, 'Nowakowie, m. 12');
       expect(
         FlatDoorCode.parse('https://example.org/m#${code.encode()}')!.name,
@@ -131,6 +141,92 @@ void main() {
       expect(FlatHomeCode.parse(code.toQr()), isNull);
     },
   );
+
+  test('the door code never carries the residents addresses (§18.2)', () async {
+    final Map<String, _Phone> net = <String, _Phone>{};
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone ola = _Phone(net, 'ola');
+    final _Phone bartek = _Phone(net, 'bartek');
+    await ania.service.createFlat('Nowakowie', place: 'm. 12');
+    await ola.service.joinFlat(ania.service.homeCode!);
+    expect(ania.service.profile!.members, hasLength(2));
+
+    String payload(String qr) => utf8.decode(
+      base64Url.decode(
+        base64Url.normalize(qr.substring(FlatDoorCode.qrPrefix.length)),
+      ),
+    );
+    FlatDoorCode code = ania.service.doorCode!;
+    String raw = payload(code.toQr());
+    expect(jsonDecode(raw)['v'], 2);
+    expect((jsonDecode(raw)['a'] as List), hasLength(1));
+    expect(raw.contains(ola.address), isFalse, reason: 'housemate not in QR');
+    expect(code.toLink(), contains('/m#'));
+    expect(FlatDoorCode.parse(code.toLink())!.key, code.key);
+    expect(code.dedicated, isFalse);
+
+    // A dedicated inbox replaces every person's address.
+    ania.inbox = addr('d00');
+    code = ania.service.doorCode!;
+    raw = payload(code.toQr());
+    expect(raw.contains(ania.address), isFalse);
+    expect(raw.contains(ola.address), isFalse);
+    final FlatDoorCode back = FlatDoorCode.parse(code.toQr())!;
+    expect(back.members, <String>[addr('d00')]);
+    expect(back.dedicated, isTrue);
+
+    // Old stickers (no version, up to 3 residents) still decode and knock,
+    // but are never produced again.
+    ania.inbox = null;
+    final FlatDoorCode legacy = FlatDoorCode(
+      key: ania.service.profile!.key,
+      door: ania.service.door,
+      members: <String>[ania.address, ola.address],
+      name: 'Nowakowie, m. 12',
+    );
+    final FlatDoorCode old = FlatDoorCode.parse(
+      '${FlatDoorCode.qrPrefix}${legacy.encodeLegacy()}',
+    )!;
+    expect(old.isLegacy, isTrue);
+    expect(old.members, <String>[ania.address, ola.address]);
+    await bartek.service.createFlat('Bartkowie');
+    expect(await bartek.service.scanDoor(old), FlatScan.sent);
+    expect(bartek.service.neighbors.single.profile.name, 'Nowakowie');
+  });
+
+  test('the small chat about an invitation stays on its thread', () async {
+    final Map<String, _Phone> net = <String, _Phone>{};
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone bartek = _Phone(net, 'bartek');
+    await ania.service.createFlat('Nowakowie');
+    await bartek.service.createFlat('Bartkowie');
+    await bartek.service.scanDoor(ania.service.doorCode!);
+    await ania.service.setShareWithScanners(true);
+    final String grill = (await ania.service.addItem(
+      FlatItemKind.invite,
+      'Zapraszamy na grilla',
+    ))!;
+    final String aniaKey = ania.service.profile!.key;
+    final String bartekKey = bartek.service.profile!.key;
+    expect(bartek.service.neighbor(aniaKey)!.profile.item(grill), isNotNull);
+
+    expect(
+      await bartek.service.sendMessage(aniaKey, 'Co przynieść?', itemId: grill),
+      isTrue,
+    );
+    await bartek.service.sendMessage(aniaKey, 'Cześć');
+    expect(ania.service.threadAbout(bartekKey, grill), hasLength(1));
+    expect(
+      ania.service.threadAbout(bartekKey, grill).single.text,
+      'Co przynieść?',
+    );
+    expect(ania.service.messagesWith(bartekKey), hasLength(2));
+    await ania.service.sendMessage(bartekKey, 'Sałatkę', itemId: grill);
+    expect(bartek.service.threadAbout(aniaKey, grill), hasLength(2));
+    // An unknown invitation falls back to the plain thread.
+    await bartek.service.sendMessage(aniaKey, 'x', itemId: 'nope');
+    expect(bartek.service.threadAbout(aniaKey, 'nope'), isEmpty);
+  });
 
   test('scanning a door makes two flats neighbours; invitations, sign-ups '
       'and places', () async {

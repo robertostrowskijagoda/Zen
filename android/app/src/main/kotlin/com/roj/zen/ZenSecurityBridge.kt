@@ -89,7 +89,7 @@ object ZenSecurityBridge {
                     }
                     "open" -> {
                         val data = call.argument<ByteArray>("data")
-                        val reason = call.argument<String>("reason") ?: "Odblokuj Zen"
+                        val reason = call.argument<String>("reason") ?: activity.getString(R.string.biometric_unlock_reason)
                         if (data == null) {
                             result.success(null)
                         } else {
@@ -279,7 +279,7 @@ object ZenSecurityBridge {
             val info = BiometricPrompt.PromptInfo.Builder()
                 .setTitle("Zen")
                 .setSubtitle(reason)
-                .setNegativeButtonText("Użyj hasła")
+                .setNegativeButtonText(activity.getString(R.string.biometric_use_password))
                 .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                 .build()
             prompt.authenticate(info, BiometricPrompt.CryptoObject(cipher))
