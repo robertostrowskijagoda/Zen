@@ -179,6 +179,12 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
                       remoteSharing: callMedia.remoteScreenSharing,
                       recording: callMedia.isRecording,
                       remoteRecording: callMedia.remoteRecording,
+                      onLeave: () => runCallAction(
+                        context,
+                        () => ref
+                            .read(socialHubControllerProvider.notifier)
+                            .endActiveCall(peerAddress: widget.peerAddress),
+                      ),
                       onToggle: () => runCallAction(
                         context,
                         () => _toggleScreenShare(context, callMedia),
@@ -943,6 +949,7 @@ class _ScreenShareStrip extends StatelessWidget {
     required this.remoteSharing,
     required this.recording,
     required this.remoteRecording,
+    required this.onLeave,
     required this.onToggle,
     this.onToggleRecording,
   });
@@ -953,6 +960,7 @@ class _ScreenShareStrip extends StatelessWidget {
   final bool remoteSharing;
   final bool recording;
   final bool remoteRecording;
+  final VoidCallback onLeave;
   final VoidCallback onToggle;
   final VoidCallback? onToggleRecording;
 
@@ -993,6 +1001,15 @@ class _ScreenShareStrip extends StatelessWidget {
                         fontSize: 13.5,
                       ),
                     ),
+                  ),
+                  TextButton(
+                    key: const Key('call-recording-leave'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: zen.danger,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: onLeave,
+                    child: Text(t('Opuść rozmowę')),
                   ),
                 ],
               ),

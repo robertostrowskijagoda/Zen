@@ -127,12 +127,14 @@ object ZenNearbyBridge {
 
     /**
      * Alarm waves whose friend signature checked out (main thread): their
-     * own budget, apart from [MAX_WAVES], and each one is let through once
-     * per [WAVE_WINDOW_MS] (a recorded wave played back from many addresses
-     * costs nothing more).
+     * own budget per friend (the key that signed), apart from [MAX_WAVES] and
+     * apart from every other friend, so neither a flood of unsigned waves nor
+     * one noisy friend can drown another friend's real alarm. Each wave is
+     * let through once per [WAVE_WINDOW_MS] (a recorded wave played back from
+     * many addresses costs nothing more).
      */
-    private val verifiedWaves = ArrayDeque<Pair<Long, String>>()
-    private const val MAX_VERIFIED_WAVES = 60
+    private val verifiedWaves = HashMap<String, ArrayDeque<Pair<Long, String>>>()
+    private const val MAX_VERIFIED_WAVES_PER_FRIEND = 12
 
     /**
      * Must match `kAlarmWaveVersion`, `kAlarmWaveFreshFor`, `kNearbySlot`,
@@ -685,24 +687,33 @@ object ZenNearbyBridge {
     }
 
     /**
-     * Whether an alarm wave whose friend signature checked out ([mac]) is
-     * taken now: [MAX_VERIFIED_WAVES] per minute, apart from everything
-     * else. `null`: that budget is spent (the wave may still go through the
-     * one for anyone); `false`: this very wave went through within the
-     * window already (played back), so it is dropped. Main thread only.
+     * Whether an alarm wave whose friend signature checked out ([mac], signed
+     * by the friend [sender]) is taken now: [MAX_VERIFIED_WAVES_PER_FRIEND]
+     * per minute for that friend, apart from everything else. `null`: that
+     * friend's budget is spent (the wave may still go through the one for
+     * anyone); `false`: this very wave went through within the window
+     * already (played back), so it is dropped. Main thread only.
      */
-    private fun allowVerifiedWave(mac: String): Boolean? {
+    private fun allowVerifiedWave(sender: String, mac: String): Boolean? {
         val now = SystemClock.elapsedRealtime()
-        while (verifiedWaves.isNotEmpty() && now - verifiedWaves.first().first > WAVE_WINDOW_MS) {
-            verifiedWaves.removeFirst()
+        val iterator = verifiedWaves.entries.iterator()
+        while (iterator.hasNext()) {
+            val times = iterator.next().value
+            while (times.isNotEmpty() && now - times.first().first > WAVE_WINDOW_MS) {
+                times.removeFirst()
+            }
+            if (times.isEmpty()) {
+                iterator.remove()
+            }
         }
-        if (verifiedWaves.any { it.second == mac }) {
+        val mine = verifiedWaves.getOrPut(sender) { ArrayDeque() }
+        if (mine.any { it.second == mac }) {
             return false
         }
-        if (verifiedWaves.size >= MAX_VERIFIED_WAVES) {
+        if (mine.size >= MAX_VERIFIED_WAVES_PER_FRIEND) {
             return null
         }
-        verifiedWaves.addLast(now to mac)
+        mine.addLast(now to mac)
         return true
     }
 
@@ -755,13 +766,13 @@ object ZenNearbyBridge {
     }
 
     /**
-     * The signature of [data] when it is a fresh alarm wave signed with the
-     * key of a friend some engine knows (the same check as Dart's
-     * `AlarmWave.verify`), else `null`. Dart checks it again (and who the
-     * friend is) before anything rings; this only decides which budget the
-     * wave is counted against.
+     * Who signed [data] (a short id of the friend's key) and the signature,
+     * when it is a fresh alarm wave signed with the key of a friend some
+     * engine knows (the same check as Dart's `AlarmWave.verify`), else
+     * `null`. Dart checks it again (and who the friend is) before anything
+     * rings; this only decides which budget the wave is counted against.
      */
-    private fun verifiedAlarmMac(data: ByteArray): String? {
+    private fun verifiedAlarmMac(data: ByteArray): Pair<String, String>? {
         if (data.isEmpty() || data[0] != '{'.code.toByte()) {
             return null
         }
@@ -809,7 +820,11 @@ object ZenNearbyBridge {
                 expected.toByteArray(Charsets.US_ASCII),
                 mac.toByteArray(Charsets.US_ASCII),
             )
-            return if (same) mac else null
+            return if (same) {
+                hex(MessageDigest.getInstance("SHA-256").digest(key).copyOf(8)) to mac
+            } else {
+                null
+            }
         } catch (_: Exception) {
             return null
         }
@@ -822,8 +837,8 @@ object ZenNearbyBridge {
      * anything else goes through the limits per phone and in all.
      */
     private fun dispatchWave(device: String, data: ByteArray) {
-        val mac = verifiedAlarmMac(data)
-        val verified = if (mac == null) null else allowVerifiedWave(mac)
+        val signed = verifiedAlarmMac(data)
+        val verified = if (signed == null) null else allowVerifiedWave(signed.first, signed.second)
         if (verified == false) {
             return // the same signed wave went through a moment ago
         }

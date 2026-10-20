@@ -288,6 +288,17 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
                               ),
                             ),
                           ),
+                          TextButton(
+                            key: const Key('group-call-recording-leave'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: zen.danger,
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            onPressed: () => _leaveCall(
+                              ref.read(socialHubControllerProvider.notifier),
+                            ),
+                            child: Text(t('Opuść rozmowę')),
+                          ),
                         ],
                       ),
                     ),
@@ -387,6 +398,16 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
         );
       },
     );
+  }
+
+  void _leaveCall(SocialHubController controller) {
+    unawaited(
+      runCallAction(
+        context,
+        () => controller.endActiveCall(peerAddress: widget.groupId),
+      ),
+    );
+    Navigator.of(context).maybePop();
   }
 
   /// Recording is announced to everyone first; the file goes into the
@@ -555,15 +576,7 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
             shape: const CircleBorder(),
           ),
           icon: const Icon(Icons.call_end_rounded, size: 26),
-          onPressed: () {
-            unawaited(
-              runCallAction(
-                context,
-                () => controller.endActiveCall(peerAddress: widget.groupId),
-              ),
-            );
-            Navigator.of(context).maybePop();
-          },
+          onPressed: () => _leaveCall(controller),
         ),
       ],
     );

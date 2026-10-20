@@ -200,8 +200,19 @@ final class FakeGroupCallMedia extends GroupCallMedia {
   int startCount = 0;
   int closeCount = 0;
 
+  Set<String> _remoteRecorders = const <String>{};
+
   @override
   String? get activeCallId => _callId;
+
+  @override
+  Set<String> get recordingPeers => _remoteRecorders;
+
+  /// Pretends that these peers announced a recording.
+  void setRecordingPeers(Set<String> peers) {
+    _remoteRecorders = peers;
+    notifyListeners();
+  }
 
   @override
   RTCVideoRenderer? get localRenderer => null;

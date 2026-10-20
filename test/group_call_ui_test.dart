@@ -140,7 +140,20 @@ void main() {
       // No media leg yet: shown as connecting, not as a broken tile.
       expect(find.text('Łączenie…'), findsNWidgets(2));
 
-      await tester.tap(find.byKey(const Key('group-call-leave')));
+      // The red recording bar has its own "Opuść rozmowę" next to it.
+      expect(
+        find.byKey(const Key('group-call-recording-banner')),
+        findsNothing,
+      );
+      media.setRecordingPeers(<String>{_bob});
+      await tester.pump();
+      expect(
+        find.byKey(const Key('group-call-recording-banner')),
+        findsOneWidget,
+      );
+      expect(find.text('Opuść rozmowę'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('group-call-recording-leave')));
       await tester.pump(const Duration(milliseconds: 500));
       await tester.pump(const Duration(milliseconds: 500));
 
