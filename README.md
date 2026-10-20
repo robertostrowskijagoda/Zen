@@ -23,6 +23,9 @@
   <a href="#support-zen"><b>💜 Support</b></a>
 </p>
 
+> The download buttons work once the first release is published (they point to
+> the latest release on GitHub).
+
 > **Did someone show you a QR code?** The code opens an invitation page: if you
 > have Zen, the page opens it right away with the invitation; if you don't, it
 > shows the download buttons. After installing, come back to that page and tap
@@ -64,7 +67,7 @@ shut down.
 - **Alarm** — call your closest people with one move, with your location and confirmation of who saw it.
 - **People nearby** — over Bluetooth, even without internet, with per-friend keys so nobody can fake another friend's presence.
 - **Offline mailboxes** — photos, videos and files for a friend who is offline wait at their mailboxes (your mutual friends), encrypted, and arrive when they return.
-- **Pyramid** — grassroots voting, delegated trust, a common purse and points.
+- **Pyramid** — grassroots voting, delegated trust, a common purse and points. Joining asks for your birth year (minors are accepted); your age shows in your pyramid profile, confirmed by the person who admitted you.
 - **Account safety** — account recovery through trusted friends or a paper backup of the key; friendship levels (weak friend / friend / close friend) that decide who sees your friend list, statuses and group invitations.
 - **"Why is it not working?"** — a built-in diagnostic screen (network, background work, notifications, battery, clock, free space).
 - **21 languages** — Zen speaks the language of your phone or computer (English if it doesn't know it); change it in **Settings → Language**.
@@ -150,7 +153,10 @@ for Raspberry Pi 4/5 and other ARM computers with a 64-bit system), unpack it
 and run `Zen/zen`; `Zen/install-desktop-entry.sh` adds Zen to the menu
 and makes it open `zen://` links. On Debian, Ubuntu and Mint it is simpler:
 [Zen-Linux-x64.deb](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.deb)
-(or `Zen-Linux-arm64.deb`) and `sudo apt install ./Zen-Linux-x64.deb`.
+(or `Zen-Linux-arm64.deb`) and `sudo apt install ./Zen-Linux-x64.deb`. For x64
+there is also a Flatpak,
+[Zen-Linux-x64.flatpak](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.flatpak)
+(`flatpak install --user ./Zen-Linux-x64.flatpak`; not on Flathub).
 Needed: GNOME Keyring or KWallet (the encryption key lives there), for the tray
 icon `libayatana-appindicator3-1`, and for voice notes and videos GStreamer
 with plugins (`gstreamer1.0-plugins-good`, `gstreamer1.0-libav`).
@@ -203,8 +209,9 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
 - There is no cloud account or phone number — your code is your address.
 - The legal texts are in English: the [privacy policy](docs/PRIVACY.md), the
   [terms of use](docs/TERMS.md) and, for the technically minded, the
-  [protocol specification](docs/PROTOCOL.md). Dating, the pyramid and the wallet
-  are 18+.
+  [protocol specification](docs/PROTOCOL.md). Zen has no age gate and asks no
+  one for their age, except the pyramid, which asks for the birth year at entry
+  (see below); Dating and the wallet never ask about age.
 - **Photos, videos and files from others are checked.** Zen unpacks and re-saves
   every photo before showing it, so a "poisoned" photo never reaches the phone.
   A video or recording must be a real video or recording, otherwise it stays an
@@ -275,7 +282,7 @@ when its sources changed (details: `docs/RELEASES.md`, point 3.1).
 | System | You need | Command |
 |---|---|---|
 | Android (one APK: arm64-v8a, armeabi-v7a, x86_64) | Android Studio (SDK and NDK), JDK 17 | `flutter build apk --release` |
-| Android for a store only (Google Play, Galaxy Store; no self-update; app name "Zen (sklep)", file `Zen-APP-STORE-ONLY-do-not-install-manually`; never sideload it) | as above | `flutter build appbundle --release --flavor appStoreOnly` |
+| Android for a store only (Google Play, Galaxy Store; no self-update; app name "Zen (store)", "Zen (sklep)" in Polish; the build writes `Zen-APP-STORE-ONLY-do-not-install-manually.aab` and `.apk` to `build/app/outputs/app-store-only/`; never install this build by hand) | as above | `flutter build appbundle --release --flavor appStoreOnly` |
 | Windows | Visual Studio 2022 ("Desktop development with C++"), gcc for Go (e.g. Strawberry Perl) | `flutter build windows --release` |
 | Windows on ARM (on an ARM64 computer) | as above, with ARM64 tools; for Go [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) instead of gcc | `flutter build windows --release` |
 | Linux | packages below | `flutter build linux --release` |

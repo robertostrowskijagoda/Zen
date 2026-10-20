@@ -39,12 +39,12 @@ A ready-made world: `test/support/pyramid_world.dart` (`PyramidWorld.six()`,
 | `test/dating_test.dart`, `test/neighbors_test.dart` | dating and neighbors on several phones |
 | `test/wire/golden_frames_test.dart` | protocol golden samples: frozen ping/pong frames (1.10.0 and 1.11), message, group_invite and a signed journal entry (fixed keys, fixed id). Never edit a sample to make a test pass — add a new one for a new format |
 | `test/version_exchange_test.dart` | version exchange (`ver` / `build` / `caps` in ping/pong), remembering friends' versions, snapshot compatibility (`peerVersions`), the "friends have a newer version" bar, forward-compatible journal spaces of unknown kinds (owner-only, 1000 entries per device journal) |
-| `test/feature_flags_test.dart` | feature flags (pyramid, wallet, dating, neighbors): defaults, `--dart-define` values, locking, hiding tabs |
+| `test/feature_flags_test.dart` | feature flags (pyramid, wallet, dating; neighbors have none): defaults, `--dart-define` values, locking, hiding tabs |
 | `test/format_version_test.dart` | `v: 1` format versions of settings, profile and flags; files without `v` read as version 1 |
 | `test/release_integrity_test.dart` | signed release manifest: `official` (donation link, author, repository) and `mirrors`, unknown fields preserved, canary (`zen_canary`: signatures, expiry, replay of old or known statements), warning on mismatched data |
 | `test/apk_signature_test.dart` | reading APK certificates (`apk_signing_block.dart`) and the pinned fingerprint |
 | `test/network_update_test.dart` | update over the network (disabled while `kReleaseMaintainers` is empty), loading from a file |
-| `test/store_build_test.dart` | the store build: only `appFlavor == 'store'` or `ZEN_STORE` make a store build, tests run as the direct build, the shared link defaults to the project page |
+| `test/store_build_test.dart` | the store build: only `appFlavor == 'appStoreOnly'` or `ZEN_STORE` make a store build, tests run as the direct build, the shared link defaults to the project page |
 | `test/about_screen_test.dart` | "O aplikacji" (About), including the Privacy policy and Terms tiles with GitHub links |
 
 Security regression tests: `STATUS.md` §4.4.
@@ -118,7 +118,7 @@ network. The universal APK carries arm64-v8a, armeabi-v7a and x86_64; the
 exporting the bridge (section 6), not run — try an older 32-bit phone or an
 emulator by hand.
 
-The store variant: `flutter run --flavor store` (or
+The store variant: `flutter run --flavor appStoreOnly` (or
 `--dart-define=ZEN_STORE=true`) — the update service is off, "Podaj dalej"
 shows a link dialog, and the manifest has no `REQUEST_INSTALL_PACKAGES`.
 
@@ -201,7 +201,7 @@ job for Linux additionally checks the bridge and GStreamer linkage and runs
 - App tests run in CI only on Windows; on Linux, macOS and Windows on ARM CI
   only builds and (Linux, macOS) runs the app for 20 s. There is no APK build
   on push (only the Go bridge for the three ABIs) and no emulator test; the
-  `store` flavor is covered only by the Dart-level `store_build_test.dart`, not
+  `appStoreOnly` flavor is covered only by the Dart-level `store_build_test.dart`, not
   by a Gradle build in CI.
 - The Linux GStreamer player (`zen_media_player.cc`) is not tested beyond
   linking and starting; playback is checked by hand.

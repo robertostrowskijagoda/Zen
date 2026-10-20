@@ -1,16 +1,17 @@
 <!--
 MAINTAINER NOTE (remove before publishing if you like):
 This is not legal advice; review with a lawyer. It is a plain-language draft
-written from how the code works in version 1.10.0 (20.10.2026). It makes no
+written from how the code works in version 1.11.0 (20.10.2026). It makes no
 promise the app cannot keep: the author runs no servers and cannot see,
 change or delete what is on other people's devices. Points that most need a
 lawyer's eye: (1) whether the author counts as a "controller" or "joint
 controller" under the GDPR for an app that has no operator-side data at all;
 (2) special-category data (political opinions in the pyramid, sexual life and
-orientation in dating) and the explicit-consent wording; (3) the minimum age
-(16 is used here because the plan, docs/PLAN.md section 27, says
-"parental consent below 16" and 16 is the Polish age of digital consent;
-other EU states set 13-16); (4) the klipy.com paragraph - check Klipy's own
+orientation in dating) and the explicit-consent wording; (3) the absence of
+any age gate (the owner's decision; docs/PLAN.md section 27) against the
+GDPR rules on children's consent (the age of digital consent is 13-16 in the
+EU) and against the Pyramid, which asks for a birth year and accepts minors;
+(4) the klipy.com paragraph - check Klipy's own
 terms and privacy policy before every release; (5) the contact route (no
 e-mail address is published yet - only GitHub). Keep this file, docs/TERMS.md
 and docs/DPIA.md in step with the code (see docs/PROTOCOL.md for what goes
@@ -19,7 +20,7 @@ over the wire).
 
 # Zen - Privacy Policy
 
-*Version for Zen 1.10.0 - last updated 20 October 2026.*
+*Version for Zen 1.11.0 - last updated 20 October 2026.*
 *The app's primary language is Polish; this document is in English. If a
 translation differs, ask on GitHub.*
 
@@ -85,9 +86,9 @@ Contact: see section 13.
 
 Almost everything above is stored encrypted (AES-256-GCM, with a master key
 protected by a key derived from your password with Argon2id and, where
-available, by hardware-backed storage). **Exceptions:** your own avatar and
-profile background are kept as plain files (documented limitation), and media
-you export or save on purpose is saved as an ordinary file.
+available, by hardware-backed storage). **Exceptions:** media you export or
+save on purpose is saved as an ordinary file, and the language you chose is
+kept in a plain file (it is needed before you unlock).
 
 ### 3.2 What other people receive
 
@@ -98,16 +99,17 @@ Everything below is sent device to device over the Yggdrasil network.
 |---|---|
 | Send a friend request | The other person: your Zen address, display name and the note you wrote. |
 | Be a friend | Friends can see your profile (name, status, bio, avatar), when you are online / in the foreground (presence pings every ~45 s while the app runs), your current status ("na teraz") if its audience allows it, and - depending on your setting - your friend list. Your "closeness level" for a friend is private; they never learn it. |
+| Like, comment or write to someone who is not your friend | The author of the post and the friends who passed it on get your signed like or comment together with a small signed copy of your profile (name and photo). A first message to a non-friend (only if their settings allow it) carries the same. |
 | Chat | The recipient: message text, attachments, timestamps, typing indicator, delivery and read receipts, disappearing-message timers. |
 | Groups | Every member (up to 256) gets each message. Members learn the group's member list. |
 | Calls | The other participants: call signalling and the media stream (WebRTC). Participants learn your network address and, through WebRTC, network details needed to connect. |
 | Post on your board | The ledger replicates your post to the devices of the chosen audience. Posts with the audience "Wszyscy znajomi", "Znajomi i przyjaciele" or "Tylko przyjaciele" are encrypted so only friends of a high enough level can read them; **public posts and public profile fields can be read by anyone who obtains them**, including people who follow you and anyone they were passed on to. The existence, time and size of entries and your account key are visible to anyone who holds the entry, even for encrypted posts. |
-| Offline mailboxes | Up to six friends you pick (or the app picks) hold **encrypted** copies of mail addressed to you for up to 14 days, only for messages up to 48 KB. They see who it is from and to, size and time, not the content. |
+| Offline mailboxes | Up to six friends you pick (or the app picks) hold **encrypted** copies of mail addressed to you for up to 14 days, including attachments (up to 24 MB each, within a per-sender quota). They see who it is from and to, size and time, not the content. |
 | Alarm | The friends chosen for alarms: your location (if allowed), a note, recorded sound, and delivery confirmations. Phones nearby may receive a signed Bluetooth "wave" (alarm id and time; only friends can tell whose it is). Tapping a map link opens openstreetmap.org in your browser with the coordinates. |
-| "People nearby" (Android) | If you turn it on, your phone advertises a token over Bluetooth that changes every 15 minutes; only friends can tell it is you. Anyone nearby can see that *a* Zen phone is there and its approximate signal strength. If you "wave", the person gets your pseudonym, your short text and your mesh address - not your account. |
+| "People nearby" (Android) | If you turn it on, your phone advertises a token over Bluetooth that changes every 10 minutes; only friends can tell it is you. Anyone nearby can see that *a* Zen phone is there and its approximate signal strength. If you "wave", the person gets your pseudonym, your short text and your mesh address - not your account. |
 | Neighbours | Flat or building members you join: what you choose to reveal in that feature. |
-| Dating (18+) | Small "lanterns" (your dating key, age, gender and preferences, the same shape whether or not you date) are passed up to two hops through friends' phones; your profile itself is sent sealed only to a person whose lantern fits yours and who asks for it, so the phones on the way cannot read it. People who can read your profile see what you put in it. Your "Yes" is sent only as an unlinkable token; "No" sends nothing. |
-| Pyramid | Members of the pyramids you join receive the signed records you create (votes, proposals, posts, payments, reports). Some votes and requests are signed anonymously within a ring of members. |
+| Dating | Small "lanterns" (a one-off key and nothing else: no age, name, gender or preferences; the same shape whether or not you date) are passed up to two hops through friends' phones. A phone that sees a lantern runs a sealed match test; only if the two of you fit does it ask for the profile, which is sent sealed, so the phones on the way cannot read it. Dating never asks about your age. People who can read your profile see what you put in it. Your "Yes" is sent only as an unlinkable token; "No" sends nothing. |
+| Pyramid | When you join, you give your birth year, nationality and gender; the person who admits you signs that this is true. Members of the pyramid see your pseudonym, nationality and **age** in your pyramid profile (gender only if you choose to show it). Members also receive the signed records you create (votes, proposals, posts, payments, reports). Some votes and requests are signed anonymously within a ring of members. |
 | Introductions | The friend who introduces you and the person you are introduced to. |
 
 Anything you send can be copied, screenshotted, forwarded or kept by the
@@ -198,7 +200,7 @@ another Zen user.
   when you download Zen or open that page, under GitHub's own policy. An invite
   code in a link is placed after `#` and is therefore not sent to the server by
   your browser. Zen itself does not contact GitHub in the background (network
-  self-update is not active in 1.10.0).
+  self-update is not active in 1.11.0).
 - **Links you tap** (the Yggdrasil site, the public-peers list, maps) open in
   your browser and are governed by those sites.
 - **Operating system and stores.** Your phone vendor, the Android / iOS / Windows
@@ -279,17 +281,19 @@ account because none exists.
 
 ## 11. Children and age limits
 
-- **Minimum age for Zen: 16.** If you are under 16 (or under the age of digital
-  consent in your country, which can be 13-16), you may use Zen only with a
-  parent's or guardian's permission, and the author recommends you do not use
-  it. Zen does not ask for your age (except an optional birth year in the
-  pyramid) and cannot verify age or consent; it is the responsibility of users
-  and parents.
-- **Dating: 18+ only.** The dating profile requires an age of at least 18
-  (what you type, no documents are checked; there is no separate age question).
-  Do not use dating if you are under 18. If you see someone who is clearly a minor in the dating feature,
-  report and block them and tell a trusted adult; you can report illegal
-  content as described in docs/TERMS.md.
+- **Zen has no age gate.** It does not check anyone's age, and it does not
+  ask for it, with one exception: the **Pyramid** asks for your birth year when
+  you join, accepts members of any age, and shows the age in your pyramid
+  profile to the other members, confirmed by the person who admitted you
+  (section 3.2). What you type is not checked against any document, and the
+  author cannot verify age or parental consent; that is the responsibility of
+  users and parents.
+- **Dating and the wallet never ask about age**, and dating lanterns carry no
+  age. The terms say that dating is meant for adults, but the app does not
+  check it. If you see someone who is clearly a minor in the dating feature,
+  use "report an underage person" (it hides the profile on your phone at once),
+  block them and tell a trusted adult; you can report illegal content as
+  described in docs/TERMS.md.
 - Zen is not designed for or marketed to children. If you believe a child is
   using the app in a harmful way, tell the child's parents or the authorities;
   the author has no way to identify or contact users.

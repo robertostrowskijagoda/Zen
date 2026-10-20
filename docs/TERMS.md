@@ -1,6 +1,6 @@
 <!--
 MAINTAINER NOTE: This is not legal advice; review with a lawyer. Draft written
-from how Zen 1.10.0 works (20.10.2026). Points to check: governing law and
+from how Zen 1.11.0 works (20.10.2026). Points to check: governing law and
 venue clause (section 13: Polish law is assumed because the author is in
 Poland; consumer law of the user's country may override it); the
 limitation-of-liability wording against mandatory consumer law; the DSA
@@ -12,7 +12,7 @@ The LICENSE file is the binding licence text; this document does not change it.
 
 # Zen - Terms of Use
 
-*Version for Zen 1.10.0 - last updated 20 October 2026.*
+*Version for Zen 1.11.0 - last updated 20 October 2026.*
 
 By installing or using Zen you agree to these terms. If you do not agree, do
 not use Zen. Read them together with the [Privacy Policy](PRIVACY.md) and the
@@ -42,11 +42,13 @@ is binding; this paragraph is only a summary.
 
 ## 3. Who may use Zen
 
-- You must be at least **16 years old**, or have a parent's or guardian's
-  permission if the law of your country sets a higher age for digital consent
-  (section 11 of the Privacy Policy).
-- The **dating** feature is for people **18 and over only**. Do not use it if
-  you are under 18, and do not use it to look for minors.
+- Zen has no age gate and does not check anyone's age (section 11 of the
+  Privacy Policy). If the law of your country requires a parent's or
+  guardian's permission for a service like this, getting it is your (or your
+  parents') responsibility.
+- The **dating** feature is meant for people **18 and over**. Do not use it if
+  you are under 18, and do not use it to look for minors. The app does not
+  ask your age in dating and does not check this.
 - You must not use Zen where its use is unlawful for you.
 - You are responsible for your device, your password, the recovery circle you
   choose, and for keeping your copy of Zen up to date and obtained from a trusted

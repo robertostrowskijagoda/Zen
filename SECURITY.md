@@ -65,15 +65,3 @@ so there are no cash rewards.
 - Describe weaknesses of the release process in the report; do not try to
   exploit them against this repository (pull requests, tags, attempts to
   reach secrets).
-
----
-
-## Po polsku (skrót)
-
-Podatności zgłaszaj **prywatnie** przez GitHuba (link na górze, zakładka
-Security → *Report a vulnerability*); nie zakładaj publicznego Issue ani
-pull requesta przed poprawką. Można pisać po polsku. Zakres: aplikacja Zen,
-most Go, proces wydań i strona zaproszeń; poprawki dostaje tylko najnowsze
-wydanie. Zen tworzy jedna osoba, więc odpowiedzi są bez gwarantowanych
-terminów, a **programu bug bounty nie ma**. Testuj tylko na własnych
-urządzeniach, kontach i sieciach.

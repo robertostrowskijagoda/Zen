@@ -159,7 +159,7 @@ overwritten by one signed with a different key. Changing the package to
    `flutter build appbundle --release --flavor appStoreOnly` (Play AAB),
    `flutter build apk --release --flavor appStoreOnly` (Galaxy Store). The
    copies named `Zen-APP-STORE-ONLY-do-not-install-manually.aab|apk` appear in
-   `build/app/outputs/app-store-only/`; the app is called "Zen (sklep)". Never
+   `build/app/outputs/app-store-only/`; the app is called "Zen (store)" ("Zen (sklep)" in Polish; no icon camouflage). Never
    attach them to a GitHub release or hand them to people to sideload.
 
    The README links to `…/releases/latest/download/Zen.apk`,
@@ -386,7 +386,7 @@ links from the camera.
 Model: Signal — **the same package `com.roj.zen` and the same key**, two
 flavors: `full` (the default; the full app with self-update, what GitHub
 ships) and `appStoreOnly` without it (named so that nobody sideloads it by
-accident: the label is "Zen (sklep)", the files are called
+accident: the label is "Zen (store)" ("Zen (sklep)" in Polish), the files are called
 `Zen-APP-STORE-ONLY-do-not-install-manually.*`); users move between channels without losing
 data. Yggdrasil runs in Zen as a library, without `VpnService` (VPN would
 require an organization account).
@@ -394,7 +394,7 @@ require an organization account).
 **Done (the `appStoreOnly` flavor, D12):**
 
 - the manifest in `src/appStoreOnly` removes `REQUEST_INSTALL_PACKAGES` and
-  sets the label "Zen (sklep)";
+  sets the label "Zen (store)" ("Zen (sklep)" in Polish) and removes the camouflage alias;
 - Dart (`appFlavor == 'appStoreOnly'` or `--dart-define=ZEN_STORE=true`) turns off
   the update service, shows "Aktualizacje ze sklepu" ("Updates from the
   store") and replaces "Podaj dalej" with a dialog containing a link
@@ -465,9 +465,9 @@ section description in the store build.
 - **Japan** (from iOS 26.2) and **Brazil** (from iOS 26.5) allow alternative
   stores; AltStore PAL works in both with the same package.
 - **In every iOS channel:** no persistent background connection; notifications
-  about messages and calls need a server sending APNs (PushKit + CallKit) —
-  decision: no background notifications or an optional content-free "push
-  relay"; self-update and "Podaj dalej" are impossible. The Enterprise program
+  about messages and calls would need a server sending APNs (PushKit +
+  CallKit) — owner's decision: none, so Zen on iPhone receives only while it is
+  open; self-update and "Podaj dalej" are impossible. The Enterprise program
   and "signers" using corporate certificates — no.
 
 ### 6.4 Costs and entity
@@ -641,7 +641,7 @@ reworked after the decision in §14.2.
 `create` adds to the manifest `official` (the donation link, author and
 repository — by default the same as in the app; change with `--donation`,
 `--author`, `--repo`, disable with `--no-official`) and `mirrors`
-(`--mirror URL`, repeatable; only `https://` or `http://…onion`). The
+(`--mirror URL`, repeatable; only `https://`). The
 signature covers these together with the APK/ZIP sums. Unknown manifest fields
 are preserved, so the signature of newer manifests still verifies. The app
 remembers the latest signed data (also from a release equal to its own, e.g. a
@@ -663,7 +663,7 @@ dart run tool/zen_release.dart verify canary.json
 Format: `{"m": {"t": "zen_canary", "app": "zen", "at", "until", "text"},
 "sigs": [{"k", "s"}]}` (an Ed25519 signature of the canonical JSON of `m`, as
 in a release). It is loaded like an update and passes from friend to friend
-(the `can` field in `zen_rel`; 1.10.0 ignores it); the app shows the text and,
+(the `can` field in `zen_rel`); the app shows the text and,
 after `until`, a warning that the statement was not renewed. A new canary must
 be signed before `until` passes.
 

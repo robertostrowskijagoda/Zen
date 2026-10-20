@@ -1,4 +1,4 @@
-# Zen protocol specification (draft, from the code of 1.10.0)
+# Zen protocol specification (draft, from the code of 1.11.0)
 
 *Written 20.10.2026 by reading the code. Not a standard; the code is the
 reference. Markers: **[V]** read directly in code and consistent; **[P]**
@@ -212,8 +212,8 @@ Only between friends, except the flooded lantern.
 
 | type | Notes |
 |---|---|
-| `date_lantern` | `{id, hops, path, l}`: a lantern (a decoy when dating is off) flooded to friends, `kDatingMaxHops = 2` (`hops` starts at 1). `l` is `{v:3, k: dating key, h: base64url of 6 bytes: age, gender, min age, max age, gender mask, steps}` (`DatingLantern`), about 100 bytes. |
-| `date_back` | A `DatingBox`-sealed message travelling back along `path` (profile request `fetch` / answer `prof`, replies, "Yes" token). The `prof` answer carries the profile or a cover, padded to 4096-byte buckets. |
+| `date_lantern` | `{id, hops, path, l}`: a lantern flooded to friends weekly by every phone, dating on or off, `kDatingMaxHops = 2` (`hops` starts at 1). `l` is `{v:4, k: one-off X25519 key, new every lantern}` (`DatingLantern`), about 55 bytes. |
+| `date_back` | A `DatingBox`-sealed message travelling back along `path`: to the lantern key, the match test `match` `{id, d, q: 3 blinded points}` and the profile request `fetch` `{id, a, b: the question's blinding secret as proof of fit}`; back, `match_re` `{id, a: answer id, r, o: 3 + 3 points, new owner secret each}` (`DatingMatch`, a DH private set intersection over gender tags) and `prof` (the profile or a cover, padded to 4096-byte buckets, with `lp`, an HMAC proof from the lantern key); replies, "Yes" token. |
 | `date_ask`, `date_ask_re` | "What do you think about X?" and the answer, between friends. |
 | `date_vouch_req`, `date_vouch` | Ask for / give a few words for a profile. |
 | `date_safe`, `date_safe_ok`, `date_loc_req` | "I'm going on a date", "All OK", a one-shot location request. |
@@ -449,20 +449,20 @@ comes from additive changes and tolerant parsing:
    new field or type. Old peers keep working because they ignore it.
 3. Where a format needs a version it has its own: ledger entry `v` (1; entries
    with a higher `v` are still stored and passed on; only this build's own checks
-   apply), dating lantern `v:3`, alarm wave `v:6`,
+   apply), dating lantern `v:4`, alarm wave `v:6`,
    BLE hello `v:7`, relay and dating KDF/AAD labels `*.v1`, blob manifest
    `chunk` size, `profile_update.v` (monotonic counter), relay announcement
    version `v`.
 4. The compression wire formats are all accepted: plain JSON, `ZSTD:` + base64,
    and the Dart `_zenEncoding` wrapper.
-5. Legacy names: call end is `hangup` or `call_end`; old peers' automatic
-   `friend_remove` reply is treated as "unconfirmed" and ignored.
+5. Two names for one frame: call end is `hangup` or `call_end`.
 6. Persisted indices (for example the order of `ZenSignalType` in the signal
    queue) must only be appended to.
-7. Changes to disk or wire formats must stay backward compatible with 1.10.0
-   (project rule).
-8. The app version is `kAppVersion` (1.10.0, equal to `pubspec.yaml`); it is not
-   sent in frames.
+7. No formats of earlier versions are kept: the app has not been released, so
+   there are no migrations and no readers for older peers (`STATUS.md` §7).
+8. The app version is `kAppVersion` (1.11.0, equal to `pubspec.yaml`); friends
+   exchange it, the build and a short list of capabilities in ping/pong (a
+   declaration, nothing security-related depends on it).
 
 ## 6. Security properties and known limits
 
