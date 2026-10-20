@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/features/neighbors/flat_model.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -106,6 +109,42 @@ void main() {
       expect(
         runtimeRouteIntentFromRouteKey(id: 'launch-4', routeKey: routeKey),
         isNull,
+        reason: routeKey,
+      );
+    }
+  });
+
+  test('door sticker links open the neighbours knock (§18.2)', () {
+    final FlatDoorCode door = FlatDoorCode(
+      key: base64Url.encode(List<int>.filled(32, 7)),
+      door: 'abc',
+      inbox: PeerShareCodec.normalizeAddress('200::d1'),
+      name: 'Nowakowie, m. 12',
+    );
+    final String code = door.encode();
+    for (final String routeKey in <String>[
+      'zen://m/$code',
+      door.toLink(),
+      '${PeerShareCodec.invitePageUrl}m#$code',
+    ]) {
+      final RuntimeRouteIntent? intent = runtimeRouteIntentFromRouteKey(
+        id: 'door',
+        routeKey: routeKey,
+      );
+      expect(intent?.target, RuntimeRouteTarget.flatDoor, reason: routeKey);
+      final FlatDoorCode? back = FlatDoorCode.parse(intent!.rawInput!);
+      expect(back?.key, door.key, reason: routeKey);
+      expect(back?.inbox, door.inbox, reason: routeKey);
+    }
+    for (final String routeKey in <String>[
+      'zen://m/nonsense',
+      'zen://m/',
+      'https://example.org/m#$code',
+      '${PeerShareCodec.invitePageUrl}m#nonsense',
+    ]) {
+      expect(
+        runtimeRouteIntentFromRouteKey(id: 'door', routeKey: routeKey)?.target,
+        isNot(RuntimeRouteTarget.flatDoor),
         reason: routeKey,
       );
     }

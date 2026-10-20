@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/features/neighbors/flat_model.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 enum RuntimeRouteTarget {
@@ -10,6 +11,10 @@ enum RuntimeRouteTarget {
   call,
   addFriend,
   groupConversation,
+
+  /// A flat's door code (`zen://m/<code>`, the sticker's `/m#<code>` page):
+  /// the neighbours section knocks on that door.
+  flatDoor,
 }
 
 @immutable
@@ -85,6 +90,19 @@ final class RuntimeRouteIntent {
     );
   }
 
+  /// A door code from a sticker link; [rawInput] holds it as
+  /// `zen-flat:<code>` ([FlatDoorCode.parse] reads it).
+  factory RuntimeRouteIntent.flatDoor({
+    required String id,
+    required String rawInput,
+  }) {
+    return RuntimeRouteIntent(
+      id: id,
+      target: RuntimeRouteTarget.flatDoor,
+      rawInput: rawInput,
+    );
+  }
+
   final String id;
   final RuntimeRouteTarget target;
   final String? peerAddress;
@@ -141,6 +159,7 @@ final class RuntimeRouteIntent {
     RuntimeRouteTarget.call => t('Otwórz połączenie'),
     RuntimeRouteTarget.addFriend => t('Dodaj znajomego'),
     RuntimeRouteTarget.groupConversation => t('Otwórz grupę'),
+    RuntimeRouteTarget.flatDoor => t('Zapukaj do sąsiadów'),
   };
 }
 
@@ -228,6 +247,10 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
   // A universal invite link (https://…#CODE) opened in Zen: go straight to
   // adding that friend, the same as an in-app QR scan.
   if (uri.scheme == 'https' || uri.scheme == 'http') {
+    // The door sticker's page (`…/m#<code>`) opened in Zen: knock there.
+    if (trimmed.startsWith('${PeerShareCodec.invitePageUrl}m#')) {
+      return _flatDoorIntent(id, uri.fragment);
+    }
     return PeerShareCodec.inviteCodeFromLink(trimmed) == null
         ? null
         : RuntimeRouteIntent.addFriend(id: id, rawInput: trimmed);
@@ -271,6 +294,10 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
       title: uri.queryParameters['title'],
     );
   }
+  // `zen://m/CODE`: a flat's door code (the sticker page's "Otwórz w Zen").
+  if (uri.host == 'm' && uri.pathSegments.isNotEmpty) {
+    return _flatDoorIntent(id, uri.pathSegments.first);
+  }
   // `zen://c/CODE`: only an invitation code (older links that carried an
   // address and a name are not taken).
   if (uri.host == 'c' &&
@@ -279,6 +306,14 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
     return RuntimeRouteIntent.addFriend(id: id, rawInput: trimmed);
   }
   return null;
+}
+
+/// The knock route for a door [code], when it is one.
+RuntimeRouteIntent? _flatDoorIntent(String id, String code) {
+  final String text = '${FlatDoorCode.qrPrefix}${code.trim()}';
+  return FlatDoorCode.parse(text) == null
+      ? null
+      : RuntimeRouteIntent.flatDoor(id: id, rawInput: text);
 }
 
 /// How long an accept token issued by [issueCallAcceptToken] stays valid.

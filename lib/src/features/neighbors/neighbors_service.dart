@@ -111,9 +111,10 @@ final class NeighborsService extends ChangeNotifier {
   final EventHost host;
   final LedgerDisk disk;
 
-  /// The address of a dedicated door inbox (a separate key or derived
-  /// identity that is not a person's), when the host has one. The door QR
-  /// carries it instead of any resident's phone (§18.2).
+  /// The address of the flat's door while it runs: a node of its own that
+  /// this phone runs with [doorKey] (door_node.go in the bridge). The door
+  /// QR carries it and never a resident's address (§18.2); without it there
+  /// is no door QR.
   final String? Function()? doorInbox;
   final int Function() _now;
   final Random _random;
@@ -124,6 +125,13 @@ final class NeighborsService extends ChangeNotifier {
   FlatProfile? _profile;
   String _door = '';
   int _doorAt = 0;
+
+  /// This phone's door key (a 32-byte ed25519 seed, hex) and the door token
+  /// it was made for: a new token ("Nowy kod", here or at a housemate's) is
+  /// a new key, so an old sticker's address stops answering. Kept on this
+  /// phone only: two phones never run one key on the mesh.
+  String? _doorKey;
+  String _doorKeyFor = '';
   bool shareWithScanners = false;
   int _shareAt = 0;
 
@@ -199,23 +207,47 @@ final class NeighborsService extends ChangeNotifier {
   bool get hasFlat => _profile != null && _pair != null;
   String get door => _door;
 
+  /// The door QR, once the door runs ([doorInbox]); `null` before.
   FlatDoorCode? get doorCode {
     final FlatProfile? p = _profile;
-    if (p == null) {
+    final String? inbox = doorInbox?.call();
+    if (p == null || inbox == null || !isRoutablePeerAddress(inbox)) {
       return null;
     }
-    final String? dedicated = doorInbox?.call();
-    final bool hasDedicated =
-        dedicated != null && isRoutablePeerAddress(dedicated);
-    // Exactly one address and never the list of residents. Without a
-    // dedicated inbox it is the door phone (this one: surely online now).
     return FlatDoorCode(
       key: p.key,
       door: _door,
-      members: <String>[hasDedicated ? _n(dedicated) : _n(host.ownAddress())],
+      inbox: _n(inbox),
       name: p.label,
-      dedicated: hasDedicated,
     );
+  }
+
+  /// The key this phone runs the flat's door with ([doorInbox]); `null`
+  /// without a flat.
+  String? get doorKey =>
+      hasFlat && _door.isNotEmpty && _doorKeyFor == _door ? _doorKey : null;
+
+  /// The door came up, went down or moved ([doorInbox]): the door QR
+  /// changes with it.
+  void doorInboxChanged() => notifyListeners();
+
+  /// Makes [_doorKey] match the door token; true when it changed.
+  bool _syncDoorKey() {
+    if (_door.isEmpty || !hasFlat) {
+      final bool had = _doorKey != null;
+      _doorKey = null;
+      _doorKeyFor = '';
+      return had;
+    }
+    if (_doorKey != null && _doorKeyFor == _door) {
+      return false;
+    }
+    _doorKey = List<String>.generate(
+      32,
+      (_) => _random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
+    _doorKeyFor = _door;
+    return true;
   }
 
   /// What a housemate scans to join (inside the flat only).
@@ -368,6 +400,9 @@ final class NeighborsService extends ChangeNotifier {
       if (json is Map) {
         await _fromJson(json);
       }
+      if (_syncDoorKey()) {
+        await _save();
+      }
       notifyListeners();
     } on Object catch (error, stack) {
       logZenError('Odczyt sąsiadów', error, stack);
@@ -385,6 +420,8 @@ final class NeighborsService extends ChangeNotifier {
     _profile = FlatProfile.fromJson(json['p']);
     _door = json['door'] is String ? json['door'] as String : '';
     _doorAt = json['doorAt'] is int ? json['doorAt'] as int : 0;
+    _doorKey = json['dk'] is String ? json['dk'] as String : null;
+    _doorKeyFor = json['dkFor'] is String ? json['dkFor'] as String : '';
     shareWithScanners = json['share'] == true;
     _shareAt = json['shareAt'] is int ? json['shareAt'] as int : 0;
     joining = json['joining'] == true;
@@ -551,6 +588,7 @@ final class NeighborsService extends ChangeNotifier {
       return;
     }
     final int t = _now();
+    _syncDoorKey();
     _nearby.removeWhere(
       (NearbyFlatInvite i) => t - i.at >= kNearbyInviteLife.inMilliseconds,
     );
@@ -582,6 +620,8 @@ final class NeighborsService extends ChangeNotifier {
           if (_profile != null) 'p': _profile!.toJson(),
           'door': _door,
           'doorAt': _doorAt,
+          'dk': ?_doorKey,
+          'dkFor': _doorKeyFor,
           if (shareWithScanners) 'share': true,
           'shareAt': _shareAt,
           if (joining) 'joining': true,
@@ -1063,7 +1103,7 @@ final class NeighborsService extends ChangeNotifier {
     pending[code.key] = code;
     notifyListeners();
     await _sendToFlat(
-      code.members,
+      <String>[code.inbox],
       FlatTypes.hello,
       code.key,
       <String, dynamic>{
@@ -1266,6 +1306,10 @@ final class NeighborsService extends ChangeNotifier {
     if (type is! String || !FlatTypes.all.contains(type)) {
       return Future<bool>.value(false);
     }
+    if (frame.door && type != FlatTypes.hello) {
+      // The door takes knocks only (the bridge lets nothing else in).
+      return Future<bool>.value(false);
+    }
     final Completer<bool> done = Completer<bool>();
     _queue = _queue.then((_) async {
       try {
@@ -1335,7 +1379,7 @@ final class NeighborsService extends ChangeNotifier {
     }
     switch (type) {
       case FlatTypes.hello:
-        await _onHello(from, sender, b);
+        await _onHello(from, sender, b, atDoor: frame.door);
       case FlatTypes.nope:
         final FlatDoorCode? code = pending.remove(from);
         if (code != null) {
@@ -1400,13 +1444,20 @@ final class NeighborsService extends ChangeNotifier {
   Future<void> _onHello(
     String from,
     String sender,
-    Map<String, dynamic> b,
-  ) async {
+    Map<String, dynamic> b, {
+    bool atDoor = false,
+  }) async {
     final FlatProfile? theirs = await _verifiedProfile(from, b['p']);
     if (theirs == null) {
       return;
     }
     if (b['door'] != _door) {
+      if (atDoor) {
+        // Anyone can knock at the door address; an answer from this phone
+        // would tell them whose door it is. (An old sticker's door has a
+        // key that no longer runs, so its knocks reach nobody anyway.)
+        return;
+      }
       await _sendToFlat(
         <String>{sender, ...theirs.members}.toList(),
         FlatTypes.nope,

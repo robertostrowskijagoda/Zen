@@ -189,7 +189,7 @@ final class FlatProfile {
     'i': <Map<String, dynamic>>[for (final FlatItem i in items) i.toJson()],
     'm': members,
     'r': rev,
-    // Only when set, so older profiles keep their signatures.
+    // Only when set.
     if (photo.isNotEmpty) 'ph': photo,
   };
 
@@ -294,22 +294,18 @@ final class FlatProfile {
 /// What the QR on the door holds (§18.2): the flat's key, a door token
 /// (a new QR makes the old one useless), the name and where to knock.
 ///
-/// Version 2 (the only one produced now) carries at most ONE address, the
-/// flat's "door inbox", never the residents' own addresses: a stranger who
-/// walks past the sticker must not learn who lives there. The inbox is a
-/// dedicated endpoint when the host has one ([dedicated]); else the address
-/// of the phone that is the flat's door phone (said honestly on the sticker
-/// screen). Version 1 stickers (no `v`, up to 3 residents' addresses) are
-/// still read, so already printed codes keep working, but never written.
+/// Where to knock is the flat's door: a node of its own with a random key
+/// that one resident's phone runs next to its own node (door_node.go in
+/// the bridge). It is nobody's identity, so a stranger who walks past the
+/// sticker does not learn who lives there; "Nowy kod" gives the door a new
+/// key and so a new address.
 @immutable
 final class FlatDoorCode {
   const FlatDoorCode({
     required this.key,
     required this.door,
-    required this.members,
+    required this.inbox,
     required this.name,
-    this.version = currentVersion,
-    this.dedicated = false,
   });
 
   final String key;
@@ -317,19 +313,11 @@ final class FlatDoorCode {
   /// The door token (secret of this sticker; "Nowy kod" replaces it).
   final String door;
 
-  /// Where to knock: the door inbox (v2, one address) or, in an old
-  /// sticker, up to three residents' phones.
-  final List<String> members;
+  /// Where to knock: the address of the flat's door.
+  final String inbox;
   final String name;
 
-  /// 1 = old sticker with residents' addresses, 2 = door inbox.
-  final int version;
-
-  /// The inbox is not a person's identity (a separate key or derived
-  /// identity).
-  final bool dedicated;
-
-  static const int currentVersion = 2;
+  static const int currentVersion = 3;
 
   static const String qrPrefix = 'zen-flat:';
 
@@ -337,11 +325,8 @@ final class FlatDoorCode {
   /// a download page exists; everything after `#` stays on the phone.
   static const String linkMarker = '/m#';
 
-  /// An old sticker: it published residents' addresses.
-  bool get isLegacy => version < 2;
-
-  /// What goes into the code: the flat identifier and the door token, plus
-  /// at most one door address (v2); never a list of residents.
+  /// What goes into the code: the flat identifier, the door token and the
+  /// door's address; never a resident's.
   String encode() => base64Url
       .encode(
         utf8.encode(
@@ -349,23 +334,7 @@ final class FlatDoorCode {
             'v': currentVersion,
             'k': key,
             'd': door,
-            'a': members.take(1).toList(),
-            if (dedicated) 'x': 1,
-            'n': name,
-          }),
-        ),
-      )
-      .replaceAll('=', '');
-
-  /// The old (v1) payload, for tests of backward compatibility only.
-  @visibleForTesting
-  String encodeLegacy() => base64Url
-      .encode(
-        utf8.encode(
-          jsonEncode(<String, dynamic>{
-            'k': key,
-            'd': door,
-            'a': members.take(3).toList(),
+            'a': inbox,
             'n': name,
           }),
         ),
@@ -375,8 +344,8 @@ final class FlatDoorCode {
   String toQr() => '$qrPrefix${encode()}';
 
   /// The link form for the printed sticker: an ordinary camera opens the
-  /// page (`/m#<code>`), which opens Zen or shows how to get it. The code
-  /// stays after `#`, so it never reaches the web server.
+  /// page (`/m#<code>`), which opens Zen (`zen://m/<code>`) or shows how to
+  /// get it. The code stays after `#`, so it never reaches the web server.
   String toLink() => '${PeerShareCodec.invitePageUrl}m#${encode()}';
 
   static FlatDoorCode? parse(String text) {
@@ -408,27 +377,20 @@ final class FlatDoorCode {
         json['k'] is! String ||
         json['d'] is! String ||
         json['n'] is! String ||
-        json['a'] is! List) {
+        json['a'] is! String ||
+        json['v'] != currentVersion) {
       return null;
     }
-    final int version = json['v'] is int ? json['v'] as int : 1;
-    final List<String> members = <String>[
-      for (final String a in (json['a'] as List).whereType<String>().take(
-        version >= 2 ? 1 : 3,
-      ))
-        if (isRoutablePeerAddress(a)) PeerShareCodec.normalizeAddress(a),
-    ];
-    if (members.isEmpty || unb64(json['k'], length: 32) == null) {
+    final String inbox = json['a'] as String;
+    if (!isRoutablePeerAddress(inbox) || unb64(json['k'], length: 32) == null) {
       return null;
     }
     final String name = json['n'] as String;
     return FlatDoorCode(
       key: json['k'] as String,
       door: json['d'] as String,
-      members: members,
+      inbox: PeerShareCodec.normalizeAddress(inbox),
       name: name.length > 150 ? name.substring(0, 150) : name,
-      version: version < 1 ? 1 : (version > 2 ? 2 : version),
-      dedicated: version >= 2 && json['x'] == 1,
     );
   }
 }
@@ -696,8 +658,7 @@ final class FlatMessage {
   final String id;
 
   /// The invitation this message is about ("czat zaproszenia", §18.3); ''
-  /// = a plain message between the flats. Older phones ignore it and show
-  /// the message in the ordinary thread.
+  /// = a plain message between the flats.
   final String item;
 
   /// The other flat's key.

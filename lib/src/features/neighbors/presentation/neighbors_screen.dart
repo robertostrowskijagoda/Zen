@@ -188,6 +188,63 @@ Future<String?> scanOrPaste(
   return text == null || text.isEmpty ? null : text;
 }
 
+/// Knocks on the door [code] (§18.2) and tells how it went. With [ask] it
+/// asks first: a door link can come from any page or app, and a knock
+/// sends this flat's profile.
+Future<void> knockOnFlatDoor(
+  BuildContext context,
+  NeighborsService service,
+  FlatDoorCode code, {
+  bool ask = false,
+}) async {
+  if (ask && service.hasFlat && code.key != service.profile?.key) {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(
+          t('Zapukać do „{name}”?', <String, Object?>{'name': code.name}),
+        ),
+        content: Text(
+          t('Wyślecie im profil Waszego mieszkania, a oni odeślą swój.'),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('flat-knock-confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('Zapukaj')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) {
+      return;
+    }
+  }
+  final FlatScan r = await service.scanDoor(code);
+  if (!context.mounted) {
+    return;
+  }
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(switch (r) {
+        FlatScan.sent => t(
+          'Pukamy do „{name}”… Profil pojawi się, gdy ich telefon odpowie.',
+          <String, Object?>{'name': code.name},
+        ),
+        FlatScan.own => t('To Wasz własny kod.'),
+        FlatScan.noFlat => t('Najpierw załóż profil mieszkania.'),
+        FlatScan.alreadyNeighbor => t('„{name}” już są na liście.', {
+          'name': code.name,
+        }),
+      }),
+    ),
+  );
+}
+
 /// "Sąsiedzi" (§18): this flat, its door QR, "Moi sąsiedzi" and
 /// invitations heard nearby.
 class NeighborsScreen extends ConsumerWidget {
@@ -543,27 +600,8 @@ class _FlatHome extends ConsumerWidget {
     await _knock(context, code);
   }
 
-  Future<void> _knock(BuildContext context, FlatDoorCode code) async {
-    final FlatScan r = await service.scanDoor(code);
-    if (!context.mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(switch (r) {
-          FlatScan.sent => t(
-            'Pukamy do „{name}”… Profil pojawi się, gdy ich telefon odpowie.',
-            <String, Object?>{'name': code.name},
-          ),
-          FlatScan.own => t('To Wasz własny kod.'),
-          FlatScan.noFlat => t('Najpierw załóż profil mieszkania.'),
-          FlatScan.alreadyNeighbor => t('„{name}” już są na liście.', {
-            'name': code.name,
-          }),
-        }),
-      ),
-    );
-  }
+  Future<void> _knock(BuildContext context, FlatDoorCode code) =>
+      knockOnFlatDoor(context, service, code);
 
   Future<void> _edit(BuildContext context) async {
     final FlatProfile p = service.profile!;

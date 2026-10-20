@@ -140,6 +140,20 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
         listenable: service,
         builder: (BuildContext context, Widget? _) {
           final FlatDoorCode? code = service.doorCode;
+          if (code == null && service.hasFlat) {
+            // The door is a node of its own; it runs with the network.
+            return Center(
+              child: SingleChildScrollView(
+                child: ZenEmpty(
+                  icon: Icons.door_front_door_rounded,
+                  title: t('Otwieram drzwi…'),
+                  text: t(
+                    'Kod na drzwi pojawi się, gdy Zen połączy się z siecią.',
+                  ),
+                ),
+              ),
+            );
+          }
           if (code == null) {
             return Center(
               child: SingleChildScrollView(
@@ -260,25 +274,23 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
                 tone: tone,
                 title: t('Co jest w kodzie?'),
                 text: t(
-                  'Klucz mieszkania, hasło tej naklejki i jeden adres, pod '
-                  'który pukać — nie lista Waszych kont. Kto go zeskanuje, '
-                  'wysyła Wam swój profil mieszkania i dostaje Wasz. Sąsiad '
-                  'bez aplikacji dostanie ją od kogoś, kto ją ma („Podaj '
-                  'dalej”).',
+                  'Klucz mieszkania, hasło tej naklejki i adres drzwi, pod '
+                  'który pukać — osobny adres, nie adres żadnego z Was. Kto '
+                  'go zeskanuje, wysyła Wam swój profil mieszkania i dostaje '
+                  'Wasz. Sąsiad bez aplikacji dostanie ją od kogoś, kto ją ma '
+                  '(„Podaj dalej”).',
                 ),
               ),
-              if (!code.dedicated) ...<Widget>[
-                const SizedBox(height: 10),
-                ZenInfo(
-                  icon: Icons.info_outline_rounded,
-                  tone: tone,
-                  text: t(
-                    'Adres w kodzie to adres tego telefonu (telefonu od '
-                    'drzwi): kto zeskanuje naklejkę, może go zobaczyć. '
-                    '„Nowy kod” zmienia hasło naklejki, ale nie ten adres.',
-                  ),
+              const SizedBox(height: 10),
+              ZenInfo(
+                icon: Icons.info_outline_rounded,
+                tone: tone,
+                text: t(
+                  'Drzwi działają na tym telefonie: naklejka odpowiada, gdy '
+                  'Zen jest tu włączony i w sieci. „Nowy kod” zmienia hasło '
+                  'naklejki i adres drzwi.',
                 ),
-              ],
+              ),
             ],
           );
         },
