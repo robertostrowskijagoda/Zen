@@ -26,8 +26,9 @@ migrate_working_dir/
 /android/app/profile
 /android/app/release
 
-# Go bridge: built from native/yggdrasil_bridge by every Android, Windows
-# and iOS build (with a hash stamp next to each library)
+# Go bridge: built from native/yggdrasil_bridge by every Android, Windows,
+# Linux, iOS and macOS build (with a hash stamp next to each library; the
+# iOS and macOS ones are ignored in ios/.gitignore and macos/.gitignore)
 /android/app/src/main/jniLibs/
 /native/yggdrasil_bridge/bin/
 

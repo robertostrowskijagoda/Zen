@@ -1,0 +1,23 @@
+// Go bridge (native/yggdrasil_bridge) linked statically into the app, as on
+// iOS (ios/Flutter/GoBridge.xcconfig). The library is built by
+// native/yggdrasil_bridge/build_macos.sh (the "Go bridge" build phase runs it
+// when the Go sources change). Included by AppInfo.xcconfig.
+
+ZEN_GO_BRIDGE_LIB = $(PROJECT_DIR)/GoBridge/libyggdrasil_bridge.a
+
+// Frameworks and libraries the Go runtime, net and crypto/x509 import.
+ZEN_GO_BRIDGE_SYSTEM = -framework Foundation -framework CoreFoundation -framework Security -lresolv
+
+// Dart looks the functions up at run time (DynamicLibrary.process()), so
+// nothing in the app calls them: -u keeps the linker from dropping them.
+// Every //export in the Go sources needs an entry (build_macos.sh checks).
+ZEN_GO_BRIDGE_KEEP_1 = -Wl,-u,_YggFreeString -Wl,-u,_YggGetVersion -Wl,-u,_YggGenerateConfigJson -Wl,-u,_YggSummarizeConfigJson -Wl,-u,_YggStartNode -Wl,-u,_YggStopNode -Wl,-u,_YggGetNodeInfo
+ZEN_GO_BRIDGE_KEEP_2 = -Wl,-u,_YggGetPeersJson -Wl,-u,_YggGetPathsJson -Wl,-u,_YggGetTreeJson -Wl,-u,_YggGetSessionsJson -Wl,-u,_YggRetryPeersNow -Wl,-u,_YggAddPeer -Wl,-u,_YggRemovePeer
+ZEN_GO_BRIDGE_KEEP_3 = -Wl,-u,_YggCallPeer -Wl,-u,_YggStartSignaling -Wl,-u,_YggSendSignal -Wl,-u,_YggPollSignal -Wl,-u,_YggWaitSignal -Wl,-u,_YggOpenRelayJson -Wl,-u,_YggCloseRelay
+
+ZEN_GO_BRIDGE_LDFLAGS = -force_load "$(ZEN_GO_BRIDGE_LIB)" $(ZEN_GO_BRIDGE_SYSTEM) $(ZEN_GO_BRIDGE_KEEP_1) $(ZEN_GO_BRIDGE_KEEP_2) $(ZEN_GO_BRIDGE_KEEP_3)
+
+OTHER_LDFLAGS = $(inherited) $(ZEN_GO_BRIDGE_LDFLAGS)
+
+// Stripping keeps the exported functions dlsym() looks up.
+STRIP_STYLE = non-global
