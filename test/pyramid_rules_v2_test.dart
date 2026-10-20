@@ -38,7 +38,8 @@ Map<String, dynamic> member(
   String name, {
   String nat = 'PL',
   String dc = 'x',
-}) => <String, dynamic>{'k': k.id, 'n': name, 'nat': nat, 'dc': dc};
+  Object? yr = 1990,
+}) => <String, dynamic>{'k': k.id, 'n': name, 'nat': nat, 'yr': ?yr, 'dc': dc};
 
 /// Each member met in person by the two after them (§6.2), so all six may
 /// vote in referenda (§20.6).
@@ -274,7 +275,8 @@ void main() {
           await w.alive(w.a1, at - 5 * day),
         ];
 
-    test('half of those seen in the last 60 days is enough', () async {
+    test('a constitution needs more than half of ALL members, silent ones too '
+        '(§21.7)', () async {
       final World w = await World.make();
       const int at = t0 + 200 * day;
       const int end = at + 72 * h;
@@ -283,10 +285,13 @@ void main() {
         ...await vote(w, at, end),
       ];
       final PyramidState st = w.fold(rs);
+      // Other binding votes count from those seen lately (3 of 6)…
       expect(st.quorumBase(end), 3);
-      expect(st.constitutionPasses(rs[3].id), isTrue);
-      expect(st.applied, contains(rs.last.id));
-      expect(st.params.emitLimit, 5);
+      // …the constitution from all six: 3 is not more than half.
+      expect(st.resultOf(rs[3].id, strict: true), <int>[3, 0]);
+      expect(st.constitutionPasses(rs[3].id), isFalse);
+      expect(st.rejected[rs.last.id], 'referendum nie przeszło');
+      expect(st.params.emitLimit, isNot(5));
     });
   });
 
@@ -429,6 +434,48 @@ void main() {
     });
   });
 
+  group('the birth year at entry (§20.2a)', () {
+    test('required and plausible; minors are admitted; the year is public '
+        'in the member data', () async {
+      final World w = await World.make();
+      Future<PyramidRecord> admit(int at, LedgerKeyPair z, Object? yr) => rec(
+        PyrT.admit,
+        w.py,
+        at,
+        <LedgerKeyPair>[w.a2, z],
+        <String, dynamic>{'head': w.a2.id, 'm': member(z, 'Z', yr: yr)},
+      );
+      final LedgerKeyPair z = await LedgerKeyPair.generate();
+      final PyramidRecord none = await admit(t0 + day, z, null);
+      final PyramidRecord zero = await admit(t0 + day + 1, z, 0);
+      final PyramidRecord old = await admit(t0 + day + 2, z, 1850);
+      final PyramidRecord future = await admit(t0 + day + 3, z, 2100);
+      final PyramidRecord text = await admit(t0 + day + 4, z, '2010');
+      // Born the year before: a child, admitted all the same.
+      final PyramidRecord child = await admit(t0 + day + 5, z, 2022);
+      final PyramidState st = w.fold(<PyramidRecord>[
+        none,
+        zero,
+        old,
+        future,
+        text,
+        child,
+      ]);
+      for (final PyramidRecord r in <PyramidRecord>[
+        none,
+        zero,
+        old,
+        future,
+        text,
+      ]) {
+        expect(st.rejected[r.id], contains('rok urodzenia'));
+      }
+      expect(st.applied, contains(child.id));
+      expect(st.members[z.id]!.birthYear, 2022);
+      expect(pyrAge(2022, t0 + day), 1);
+    });
+  });
+
   group('national pins, badges, entry bans', () {
     test('the national lead pins posts; nobody else can', () async {
       final World w = await World.make(
@@ -471,38 +518,36 @@ void main() {
       expect(st.natPins['PL'], isEmpty);
     });
 
-    test(
-      'a badge opens the data confirmed at admission, nothing else',
-      () async {
-        final String commit = pyrDataCommit(1990, 'k', 'sol');
-        final World w = await World.make(a1Commit: commit);
-        Future<PyramidRecord> badge(int at, Map<String, dynamic> f) => rec(
-          PyrT.badge,
-          w.py,
-          at,
-          <LedgerKeyPair>[w.a1],
-          <String, dynamic>{'k': w.a1.id, ...f},
-        );
-        final PyramidRecord lie = await badge(t0 + day, <String, dynamic>{
-          'yr': 2000,
-          'g': 'k',
-          'salt': 'sol',
-        });
-        final PyramidRecord truth = await badge(t0 + day + 1, <String, dynamic>{
-          'yr': 1990,
-          'g': 'k',
-          'salt': 'sol',
-        });
-        PyramidState st = w.fold(<PyramidRecord>[lie, truth]);
-        expect(st.rejected[lie.id], contains('odznaka'));
-        expect(st.badges[w.a1.id], (birthYear: 1990, gender: 'k'));
-        final PyramidRecord off = await badge(t0 + 2 * day, <String, dynamic>{
-          'off': true,
-        });
-        st = w.fold(<PyramidRecord>[truth, off]);
-        expect(st.badges, isEmpty);
-      },
-    );
+    test('a gender badge opens the data confirmed at admission, nothing '
+        'else', () async {
+      final String commit = pyrDataCommit(1990, 'k', 'sol');
+      final World w = await World.make(a1Commit: commit);
+      Future<PyramidRecord> badge(int at, Map<String, dynamic> f) => rec(
+        PyrT.badge,
+        w.py,
+        at,
+        <LedgerKeyPair>[w.a1],
+        <String, dynamic>{'k': w.a1.id, ...f},
+      );
+      final PyramidRecord lie = await badge(t0 + day, <String, dynamic>{
+        'g': 'm',
+        'salt': 'sol',
+      });
+      final PyramidRecord truth = await badge(t0 + day + 1, <String, dynamic>{
+        'g': 'k',
+        'salt': 'sol',
+      });
+      PyramidState st = w.fold(<PyramidRecord>[lie, truth]);
+      expect(st.rejected[lie.id], contains('odznaka'));
+      expect(st.badges[w.a1.id], 'k');
+      // The age needs no badge: the confirmed year is in the member data.
+      expect(st.members[w.a1.id]!.birthYear, 1990);
+      final PyramidRecord off = await badge(t0 + 2 * day, <String, dynamic>{
+        'off': true,
+      });
+      st = w.fold(<PyramidRecord>[truth, off]);
+      expect(st.badges, isEmpty);
+    });
 
     test('a content ban names the entry', () async {
       final World w = await World.make();

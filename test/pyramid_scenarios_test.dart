@@ -1,8 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/dev/sim/sim_network.dart';
+import 'package:zen/src/features/feed/feed_model.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
+import 'package:zen/src/features/ledger/bridge_book.dart';
+import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
+import 'package:zen/src/features/runtime/signal_transport.dart';
 
 import 'support/pyramid_world.dart';
 
@@ -90,12 +97,15 @@ void main() {
       await w.approve('B', PyrT.ban);
       expect(w['A2'].state!.silencedAt(a, now()), isTrue);
 
-      // Revoked, the delegation stops working.
+      // Revoked, the delegation stops working, and what B did with it
+      // falls too: B1's pause is void (§21.2).
       final int bansBefore = w['S'].state!.bans.length;
       await s.topDecision(<String, dynamic>{'t': PyrT.revoke, 'd': d.id});
       await w.net.run();
       await w.approve('A', PyrT.revoke);
       expect(w['B'].state!.delegations[d.id]!.revoked, isTrue);
+      expect(w['S'].state!.bans, hasLength(bansBefore - 1));
+      expect(w['S'].state!.silencedAt(b1, now()), isFalse);
       await w['B'].ban(
         target: b1,
         kind: 'pause',
@@ -103,7 +113,7 @@ void main() {
         via: d.id,
       );
       await w.net.run();
-      expect(w['S'].state!.bans, hasLength(bansBefore));
+      expect(w['S'].state!.bans, hasLength(bansBefore - 1));
 
       // A dating report ends in a dating ban the app applies (§19.6).
       await w['A2'].report(
@@ -299,15 +309,52 @@ void main() {
     expect(w['S'].state!.balanceOf(b1), 500);
     expect(w['S'].state!.balanceOf(a1), 99500);
 
-    // A free reshare: accepted, B1 posts it to its branch.
-    expect(await w['A1'].sendMarket(b1, 'reshare', 'Sprzedam rower'), isTrue);
+    // A reshare on order (§24): A1's own signed public post, which B1
+    // sees before deciding and shares with B1's friends; paid after.
+    final MemorySignalTransport transport = MemorySignalTransport();
+    await transport.start();
+    final LedgerNode ledger = LedgerNode(
+      transport: transport,
+      disk: MemoryLedgerDisk(),
+      friendAddresses: () => const <String>[],
+      bridges: BridgeBook(probe: (String _) async => null),
+    );
+    addTearDown(ledger.stop);
+    await ledger.start();
+    final LogEntry post = await ledger.publish(
+      kPostKind,
+      newPostBody('Sprzedam rower'),
+    );
+    final LogEntry secret = await ledger.publish(
+      kPostKind,
+      newPostBody('Tylko dla znajomych', audience: Audience.all),
+    );
+    expect(
+      await w['A1'].sendMarket(b1, 'reshare', '', post: secret.toJson()),
+      isFalse,
+      reason: 'only a public post can be reshared',
+    );
+    await w['B1'].setOffers(<String, int>{'inbox': 500, 'reshare': 300});
+    await w.net.run();
+    expect(
+      await w['A1'].sendMarket(b1, 'reshare', '', post: post.toJson()),
+      isTrue,
+    );
     await w.net.run();
     final PyrMarketMessage reshare = w['B1'].market.values.firstWhere(
       (PyrMarketMessage m) => m.kind == 'reshare',
     );
+    expect(reshare.text, 'Sprzedam rower', reason: 'the preview');
+    expect(reshare.amount, 300);
     await w['B1'].answerMarket(reshare.id, accept: true);
     await w.net.run();
-    expect(w['A2'].state!.posts.values.single.text, 'Sprzedam rower');
+    expect(LogEntry.fromJson(w.reshared['B1']!.single)!.id, post.id);
+    expect(w['S'].state!.balanceOf(b1), 800);
+    expect(
+      w['A2'].state!.posts,
+      isEmpty,
+      reason: 'a reshare goes to friends, not to the branch',
+    );
     expect(w.views().values.toSet(), hasLength(1));
   });
 

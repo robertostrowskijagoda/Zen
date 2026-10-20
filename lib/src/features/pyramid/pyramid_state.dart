@@ -48,9 +48,24 @@ int pyrAdd(int a, int b) {
 String pyrMoney(int hundredths) => ZenFormat.money(hundredths);
 
 /// The public commitment to a member's birth year and gender (§20.2a):
-/// only this hash is published; the member may open it later (a badge).
+/// the year is published in the member data too, the gender only as this
+/// hash; the member may open it later (a gender badge).
 String pyrDataCommit(int birthYear, String gender, String salt) =>
     sha256Hex(utf8.encode('zen-pyr-data|$birthYear|$gender|$salt'));
+
+/// The earliest birth year the pyramid takes (§20.2a).
+const int kPyrMinBirthYear = 1900;
+
+/// Whether [year] is a plausible birth year at [atMs]: from
+/// [kPyrMinBirthYear] to that year itself. Age is never a condition —
+/// minors of any age are admitted (§20.2a).
+bool pyrBirthYearValid(int year, int atMs) =>
+    year >= kPyrMinBirthYear &&
+    year <= DateTime.fromMillisecondsSinceEpoch(atMs, isUtc: true).year;
+
+/// The age of someone born in [birthYear] at [atMs] (by the year only).
+int pyrAge(int birthYear, int atMs) =>
+    DateTime.fromMillisecondsSinceEpoch(atMs).year - birthYear;
 
 /// The largest numerator or denominator of an exchange rate.
 const int kPyrMaxRate = 1000000000;
@@ -201,6 +216,7 @@ final class PyrMember {
     required this.key,
     required this.name,
     required this.nat,
+    required this.birthYear,
     required this.dataCommit,
     required this.joinedAt,
     this.admittedBy,
@@ -213,7 +229,11 @@ final class PyrMember {
   /// Nationality, confirmed at entry by the one who admitted (§20.2a).
   final String nat;
 
-  /// Hash of birth year + gender + salt: public, the data itself is not.
+  /// Birth year, confirmed at entry by the one who admitted (§20.2a):
+  /// public to the pyramid, so the age shows in the member's profile.
+  final int birthYear;
+
+  /// Hash of birth year + gender + salt: the gender itself is not public.
   final String dataCommit;
   final int joinedAt;
   final String? admittedBy;
@@ -693,10 +713,9 @@ final class PyramidState {
   /// pins at most [maxNatPins]; the oldest pin goes first.
   final Map<String, Map<String, int>> natPins = <String, Map<String, int>>{};
 
-  /// Badges members show themselves (§20.2a): key → birth year and gender,
+  /// Gender badges members show themselves (§20.2a): key → gender,
   /// checked against the data they were admitted with.
-  final Map<String, ({int birthYear, String gender})> badges =
-      <String, ({int birthYear, String gender})>{};
+  final Map<String, String> badges = <String, String>{};
   final Map<String, PyrReferendum> referenda = <String, PyrReferendum>{};
 
   /// Member → the members who said they met them in person ([PyrT.met]).
@@ -742,14 +761,14 @@ final class PyramidState {
   final Map<String, String> rejected = <String, String>{};
   final Set<String> applied = <String>{};
 
-  /// Revocations that said which acts they knew of: delegation id → when,
-  /// and the acts (§21.2).
-  final Map<String, ({int at, Set<String> acts})> _revokeLists =
-      <String, ({int at, Set<String> acts})>{};
-
-  /// Acts of delegates that do not count: dated before a revocation that
-  /// did not know them, i.e. made up afterwards (second pass of [fold]).
+  /// Delegations revoked in the first pass of [fold]: nothing done through
+  /// them, or through one passed on from them, counts — whenever it was
+  /// done. A revocation invalidates everything that resulted from it
+  /// (§21.2; the second pass runs without those acts and what followed).
   Set<String> _void = const <String>{};
+
+  /// Records refused in this pass because their delegation was revoked.
+  final Set<String> _revokedHit = <String>{};
 
   /// Records refused up front because their rule threw in an earlier round
   /// of the fold (rules 2, S18), and those that threw in this round.
@@ -1032,8 +1051,18 @@ final class PyramidState {
     return total * 2 > quorumBase(ref.end) && res[0] * 2 > total;
   }
 
-  /// Whether the constitutional referendum [refId] passed (§21.7).
-  bool constitutionPasses(String refId) => referendumPasses(refId);
+  /// Whether the constitutional referendum [refId] passed (§21.7): a full
+  /// count, more than half of ALL members voted (silent seats too — the
+  /// constitution's floor), and "Tak" got more than all the others.
+  bool constitutionPasses(String refId) {
+    final PyrReferendum? ref = referenda[refId];
+    final List<int>? res = resultOf(refId, strict: true);
+    if (ref == null || res == null || res.length < 2) {
+      return false;
+    }
+    final int total = res.fold(0, (int a, int b) => a + b);
+    return total * 2 > max(1, position.length) && res[0] * 2 > total;
+  }
 
   /// Emission in the [kPyrEmitWindowMs] up to [t] (vetoed ones do not
   /// count).
@@ -1051,7 +1080,7 @@ final class PyramidState {
   }
 
   /// The applied acts done through delegation [delegationId] or anything
-  /// delegated from it (what a revocation lists as known, §21.2).
+  /// delegated from it: what its revocation invalidates (§21.2).
   Set<String> actsOf(String delegationId) {
     final Set<String> out = <String>{};
     for (final PyrDelegation d in delegations.values) {
@@ -1153,20 +1182,20 @@ final class PyramidState {
       const <String>{},
       poison,
     );
-    final Set<String> late = s._lateActs();
+    final Set<String> revoked = s._revokedWithActs();
     final int? cut = s.mergedInto == null ? null : s.mergeCut;
     final Set<String> cutOff = <String>{
       if (cut != null)
         for (final PyramidRecord r in list)
           if (moneyKinds.contains(r.type) && r.at > cut) r.id,
     };
-    if (late.isNotEmpty || cutOff.isNotEmpty) {
+    if (revoked.isNotEmpty || cutOff.isNotEmpty) {
       s = _runClean(
         pyramidId,
         list,
         now,
         treasurerSigs,
-        late,
+        revoked,
         finalTop,
         cutOff,
         s._poison,
@@ -1287,8 +1316,9 @@ final class PyramidState {
           s.lastSeen[k] = max(s.lastSeen[k] ?? 0, r.at);
         }
       } else {
-        s.rejected[r.id] = voids.contains(r.id)
-            ? 'akt delegata spoza listy z cofnięcia (dopisany później)'
+        s.rejected[r.id] = s._revokedHit.contains(r.id)
+            ? 'akt z cofniętej delegacji (cofnięcie unieważnia wszystko, '
+                  'co z niej wynikało)'
             : why;
       }
     }
@@ -1296,31 +1326,24 @@ final class PyramidState {
     return s;
   }
 
-  /// Applied acts dated before a revocation of their delegation (or of one
-  /// above it) that did not list them.
-  Set<String> _lateActs() {
-    final Set<String> out = <String>{};
-    if (_revokeLists.isEmpty) {
-      return out;
+  /// The revoked delegations, when an act done through one of them (or
+  /// through one passed on from it) counted: the second pass of [fold]
+  /// runs without such acts, whenever they were done, so whatever followed
+  /// from them falls too (§21.2). Empty when nothing needs undoing.
+  Set<String> _revokedWithActs() {
+    final Set<String> revoked = <String>{
+      for (final PyrDelegation d in delegations.values)
+        if (d.revoked) d.id,
+    };
+    if (revoked.isEmpty) {
+      return const <String>{};
     }
-    for (final PyrDelegation x in delegations.values) {
-      final List<PyrDelegation> chain = _chainOf(x);
-      for (final MapEntry<String, int> act in x.acts.entries) {
-        if (!applied.contains(act.key)) {
-          continue;
-        }
-        for (final PyrDelegation y in chain) {
-          final ({int at, Set<String> acts})? list = _revokeLists[y.id];
-          if (list != null &&
-              act.value < list.at &&
-              !list.acts.contains(act.key)) {
-            out.add(act.key);
-            break;
-          }
-        }
-      }
-    }
-    return out;
+    final bool undo = delegations.values.any(
+      (PyrDelegation x) =>
+          x.acts.keys.any(applied.contains) &&
+          _chainOf(x).any((PyrDelegation y) => revoked.contains(y.id)),
+    );
+    return undo ? revoked : const <String>{};
   }
 
   /// Things that happen by time: elections end, emissions take effect.
@@ -1502,7 +1525,10 @@ final class PyramidState {
         final String headKey = r.str('head');
         final String? headPath = position[headKey];
         final PyrMember? m = _memberFrom(b['m'], r.at, headKey);
-        if (headPath == null || m == null) {
+        if (m == null) {
+          return 'złe dane przyjmowanego (rok urodzenia)';
+        }
+        if (headPath == null) {
           return 'przyjmujący nie jest w piramidzie';
         }
         if (!(by.length == 2 && by.contains(headKey) && by.contains(m.key))) {
@@ -1757,15 +1783,10 @@ final class PyramidState {
         if (!_twoOfTop(r) && !byIssuer) {
           return 'cofnąć może szczyt albo wystawca';
         }
-        // The acts the revokers knew of (§21.2): any other act dated before
-        // now appeared later — back-dated by the delegate — and does not
-        // count.
-        final Object? acts = b['acts'];
-        if (acts is! List) {
-          return 'cofnięcie bez listy aktów';
-        }
+        // Everything done through it (and through delegations passed on
+        // from it) is void, earlier acts too (§21.2): [fold] runs again
+        // without them.
         d.revoked = true;
-        _revokeLists[d.id] = (at: r.at, acts: acts.whereType<String>().toSet());
         history.add(
           PyrHistory(
             r.at,
@@ -2212,8 +2233,9 @@ final class PyramidState {
     return null;
   }
 
-  /// A member shows their badge (§20.2a): the birth year, gender and salt
-  /// must open the commitment their admission confirmed; 'off' hides it.
+  /// A member shows their gender badge (§20.2a): the gender and salt, with
+  /// the published birth year, must open the commitment their admission
+  /// confirmed; 'off' hides it.
   String? _badge(PyramidRecord r) {
     final String k = r.signers.length == 1 ? r.signers.first : '';
     final PyrMember? m = members[k];
@@ -2223,20 +2245,17 @@ final class PyramidState {
     if (r.body['off'] == true) {
       return badges.remove(k) == null ? 'nie było odznaki' : null;
     }
-    final Object? year = r.body['yr'];
     final Object? gender = r.body['g'];
     final Object? salt = r.body['salt'];
-    if (year is! int ||
-        year <= 0 ||
-        gender is! String ||
+    if (gender is! String ||
         salt is! String ||
         gender.length > 8 ||
         salt.length > 64 ||
         m.dataCommit.isEmpty ||
-        pyrDataCommit(year, gender, salt) != m.dataCommit) {
+        pyrDataCommit(m.birthYear, gender, salt) != m.dataCommit) {
       return 'odznaka nie zgadza się z danymi z przyjęcia';
     }
-    badges[k] = (birthYear: year, gender: gender);
+    badges[k] = gender;
     return null;
   }
 
@@ -2362,11 +2381,16 @@ final class PyramidState {
 
   /// A member from a record: the key in its one canonical spelling (an
   /// alias would make a second identity of the same person, e.g. a banned
-  /// one coming back).
+  /// one coming back), and the birth year, required and plausible
+  /// (§20.2a).
   PyrMember? _memberFrom(Object? json, int at, String? admittedBy) {
     if (json is! Map ||
         !PyramidRecord.isCanonicalKey(json['k']) ||
         json['n'] is! String) {
+      return null;
+    }
+    final Object? year = json['yr'];
+    if (year is! int || !pyrBirthYearValid(year, at)) {
       return null;
     }
     return PyrMember(
@@ -2375,6 +2399,7 @@ final class PyramidState {
       nat: json['nat'] is String
           ? _clip(json['nat'] as String, 8).toUpperCase()
           : '',
+      birthYear: year,
       dataCommit: json['dc'] is String ? json['dc'] as String : '',
       joinedAt: at,
       admittedBy: admittedBy,
@@ -2544,7 +2569,9 @@ final class PyramidState {
   /// through delegation [via] (§21.2): the holder signed, the whole chain
   /// is in force (not revoked, not expired, every holder still in the
   /// pyramid), the target is in scope, and no limit on the way up is used
-  /// up. Records nothing; [_use] does once the act counts.
+  /// up, and nothing on the way up was revoked in the first pass of [fold]
+  /// (then the act is void, §21.2). Records no use; [_use] does once the
+  /// act counts.
   bool _canUse(String via, String power, String targetPath, PyramidRecord r) {
     final PyrDelegation? d = delegations[via];
     if (d == null ||
@@ -2553,7 +2580,11 @@ final class PyramidState {
         !_validChain(d, r.at)) {
       return false;
     }
-    if (_void.contains(r.id) || !PyrPath.within(targetPath, d.scope)) {
+    if (_chainOf(d).any((PyrDelegation x) => _void.contains(x.id))) {
+      _revokedHit.add(r.id);
+      return false;
+    }
+    if (!PyrPath.within(targetPath, d.scope)) {
       return false;
     }
     const int month = 30 * 24 * 3600 * 1000;

@@ -42,7 +42,13 @@ Map<String, dynamic> member(
   LedgerKeyPair k,
   String name, {
   String nat = 'PL',
-}) => <String, dynamic>{'k': k.id, 'n': name, 'nat': nat, 'dc': 'x'};
+}) => <String, dynamic>{
+  'k': k.id,
+  'n': name,
+  'nat': nat,
+  'yr': 1990,
+  'dc': 'x',
+};
 
 /// Each member met in person by the two after them (§6.2), so all six may
 /// vote in referenda (§20.6).
@@ -935,27 +941,24 @@ void main() {
     });
 
     test(
-      'acts dated back before a revocation that did not know them do not count',
+      'a revocation invalidates everything that resulted from the delegation, '
+      'earlier acts too (§21.2)',
       () async {
         const int at = t0 + day;
         final PyramidRecord d = await delegate(at, w.b, 'content');
         final PyramidRecord ban1 = await contentBan(at + h, w.b, d.id, 'h1');
+        final PyramidRecord ban2 = await contentBan(
+          at + 90 * 60000,
+          w.b,
+          d.id,
+          'h2',
+        );
         final PyramidRecord revoke = await rec(
           PyrT.revoke,
           w.py,
           at + 2 * h,
           <LedgerKeyPair>[w.s, w.a],
-          <String, dynamic>{
-            'd': d.id,
-            'acts': <String>[ban1.id],
-          },
-        );
-        // Made after the revocation, dated before it.
-        final PyramidRecord backdated = await contentBan(
-          at + 90 * 60000,
-          w.b,
-          d.id,
-          'h2',
+          <String, dynamic>{'d': d.id},
         );
         final PyramidRecord after = await contentBan(
           at + 3 * h,
@@ -963,17 +966,23 @@ void main() {
           d.id,
           'h3',
         );
+        // Before the revocation both bans count.
+        final PyramidState before = w.fold(<PyramidRecord>[d, ban1, ban2]);
+        expect(before.bannedEntries(at + 4 * h), <String>{'h1', 'h2'});
+        expect(before.actsOf(d.id), <String>{ban1.id, ban2.id});
         final PyramidState st = w.fold(<PyramidRecord>[
           d,
           ban1,
+          ban2,
           revoke,
-          backdated,
           after,
         ]);
-        expect(st.bannedEntries(at + 4 * h), <String>{'h1'});
-        expect(st.rejected[backdated.id], contains('cofnięcia'));
+        expect(st.applied, contains(revoke.id));
+        expect(st.bannedEntries(at + 4 * h), isEmpty);
+        expect(st.rejected[ban1.id], contains('cofniętej delegacji'));
+        expect(st.rejected[ban2.id], contains('cofniętej delegacji'));
         expect(st.rejected[after.id], isNotNull);
-        expect(st.actsOf(d.id), <String>{ban1.id});
+        expect(st.actsOf(d.id), isEmpty);
       },
     );
   });
@@ -1034,6 +1043,7 @@ void main() {
           'k': k,
           'n': 'X',
           'nat': 'PL',
+          'yr': 1990,
           'dc': '',
           'addr': '',
         };
@@ -1117,6 +1127,7 @@ void main() {
               'k': alias,
               'n': 'X',
               'nat': 'PL',
+              'yr': 1990,
               'dc': 'x',
             },
           },

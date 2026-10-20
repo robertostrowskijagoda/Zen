@@ -5,6 +5,7 @@ import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_screen.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
@@ -34,6 +35,16 @@ int? parseMoney(String text) {
     return null;
   }
   return whole * 100 + frac;
+}
+
+/// A line of the post [entry] (a signed entry's JSON) to pick it by.
+String marketPostPreview(Map<String, dynamic> entry) {
+  final Object? text = LogEntry.fromJson(entry)?.body['text'];
+  final String line = text is String ? text.trim().replaceAll('\n', ' ') : '';
+  if (line.isEmpty) {
+    return t('(zdjęcia)');
+  }
+  return line.length > 90 ? '${line.substring(0, 90)}…' : line;
 }
 
 /// Asks again who this is before money leaves (§14.1 point 4): the app
@@ -309,6 +320,10 @@ class PyramidWallet extends StatelessWidget {
     int steps = 1;
     // A paid introduction (§24): to whom; that person decides on the money.
     String? introduce;
+    // A reshare on order (§24): which of my public posts.
+    final List<Map<String, dynamic>> myPosts =
+        pyr.ownPublicPosts?.call() ?? const <Map<String, dynamic>>[];
+    Map<String, dynamic>? sharedPost;
     final TextEditingController text = TextEditingController();
     final bool? ok = await showDialog<bool>(
       context: context,
@@ -341,17 +356,53 @@ class PyramidWallet extends StatelessWidget {
                       onTap: () => set(() => kind = k.key),
                     ),
                   const SizedBox(height: 14),
-                  TextField(
-                    controller: text,
-                    minLines: 3,
-                    maxLines: 5,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: InputDecoration(
-                      labelText: t('Treść'),
-                      hintText: t('Napisz, o co chodzi…'),
-                      alignLabelWithHint: true,
+                  if (kind == 'reshare') ...<Widget>[
+                    Text(
+                      t('KTÓRY POST UDOSTĘPNIĆ'),
+                      style: ZenColors.of(
+                        context,
+                      ).label(color: ZenColors.of(context).textSecondary),
                     ),
-                  ),
+                    const SizedBox(height: 6),
+                    if (myPosts.isEmpty)
+                      ZenInfo(
+                        icon: Icons.article_outlined,
+                        text: t(
+                          'Nie masz publicznych postów. Udostępnić na '
+                          'zamówienie można tylko post publiczny.',
+                        ),
+                      ),
+                    for (final Map<String, dynamic> post in myPosts.take(10))
+                      PyrOption(
+                        text: marketPostPreview(post),
+                        selected: identical(sharedPost, post),
+                        onTap: () => set(() => sharedPost = post),
+                      ),
+                    const SizedBox(height: 6),
+                    Text(
+                      t(
+                        'Odbiorca zobaczy post przed decyzją i udostępni go '
+                        'swoim znajomym; zapłata przechodzi dopiero po '
+                        'udostępnieniu.',
+                      ),
+                      style: TextStyle(
+                        color: ZenColors.of(context).textSecondary,
+                        fontSize: 12.5,
+                        height: 1.35,
+                      ),
+                    ),
+                  ] else
+                    TextField(
+                      controller: text,
+                      minLines: 3,
+                      maxLines: 5,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: InputDecoration(
+                        labelText: t('Treść'),
+                        hintText: t('Napisz, o co chodzi…'),
+                        alignLabelWithHint: true,
+                      ),
+                    ),
                   if (kind == 'intro') ...<Widget>[
                     const SizedBox(height: 12),
                     OutlinedButton.icon(
@@ -487,6 +538,7 @@ class PyramidWallet extends StatelessWidget {
         body,
         steps: kind == 'ad' ? steps : 1,
         introduce: kind == 'intro' ? introduce : null,
+        post: kind == 'reshare' ? sharedPost : null,
       );
       if (context.mounted) {
         snack(
@@ -1621,6 +1673,8 @@ class PyramidWallet extends StatelessWidget {
                           child: Text(
                             m.introduce != null
                                 ? t('Przekaż prośbę')
+                                : m.kind == 'reshare'
+                                ? t('Udostępnij znajomym')
                                 : t('Przyjmij'),
                           ),
                         ),

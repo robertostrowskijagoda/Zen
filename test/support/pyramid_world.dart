@@ -67,7 +67,20 @@ final class PyramidWorld {
       () async => _seeds[disk] ??= Uint8List.fromList(
         List<int>.generate(32, (_) => _seedRandom.nextInt(256)),
       );
+
+  /// The phone on [linked] is another device of the account on [of]: the
+  /// same pyramid key (§6.1).
+  void linkDevice(LedgerDisk of, LedgerDisk linked) {
+    _seeds[linked] = _seeds[of] ??= Uint8List.fromList(
+      List<int>.generate(32, (_) => _seedRandom.nextInt(256)),
+    );
+  }
+
   final Map<String, List<Map<String, dynamic>>> waves =
+      <String, List<Map<String, dynamic>>>{};
+
+  /// Posts each phone shared with its friends on order (§24), by name.
+  final Map<String, List<Map<String, dynamic>>> reshared =
       <String, List<Map<String, dynamic>>>{};
 
   /// Records per segment of each phone's record log.
@@ -98,6 +111,10 @@ final class PyramidWorld {
       crisisBroadcast: (Map<String, dynamic> wave) async {
         (waves[name] ??= <Map<String, dynamic>>[]).add(wave);
         return 1;
+      },
+      resharePost: (Map<String, dynamic> post) async {
+        (reshared[name] ??= <Map<String, dynamic>>[]).add(post);
+        return true;
       },
     );
     p.services['pyr'] = s;

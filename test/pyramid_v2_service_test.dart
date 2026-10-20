@@ -95,40 +95,82 @@ void main() {
     expect(w['S'].state!.isMember(w['Z'].myKey!), isTrue);
   });
 
-  test('the birth year is optional: joining works without it, but there is '
-      'no badge (§20.2a)', () async {
+  test('the birth year is required; a minor is admitted and the confirmed '
+      'year is public in the pyramid (§20.2a)', () async {
     final PyramidWorld w = PyramidWorld();
     final SimPhone s = w.add(
       'S',
       friendLevelOf: (String a) => FriendLevel.friend,
     );
     await w.pyr(s).load();
+    await expectLater(
+      w
+          .pyr(s)
+          .createPyramid(
+            name: 'Ruch',
+            myName: 'S',
+            nat: 'PL',
+            birthYear: 0,
+            gender: 'm',
+          ),
+      throwsArgumentError,
+    );
     await w
         .pyr(s)
-        .createPyramid(name: 'Ruch', myName: 'S', nat: 'PL', gender: 'm');
+        .createPyramid(
+          name: 'Ruch',
+          myName: 'S',
+          nat: 'PL',
+          birthYear: 1970,
+          gender: 'm',
+        );
     final SimPhone z = w.add('Z');
     w.net.befriend(s, z);
     await w.pyr(z).load();
-    await w
-        .pyr(z)
-        .askToJoin(
-          invite: w['S'].inviteCode()!,
-          myName: 'Z',
-          nat: 'PL',
-          gender: 'k',
-        );
+    final int thisYear = DateTime.fromMillisecondsSinceEpoch(
+      w.net.now,
+      isUtc: true,
+    ).year;
+    for (final int bad in <int>[0, 1850, thisYear + 1]) {
+      expect(
+        await w
+            .pyr(z)
+            .askToJoin(
+              invite: w['S'].inviteCode()!,
+              myName: 'Z',
+              nat: 'PL',
+              birthYear: bad,
+              gender: 'k',
+            ),
+        isFalse,
+        reason: '$bad',
+      );
+    }
+    expect(
+      await w
+          .pyr(z)
+          .askToJoin(
+            invite: w['S'].inviteCode()!,
+            myName: 'Z',
+            nat: 'PL',
+            birthYear: thisYear - 12,
+            gender: 'k',
+          ),
+      isTrue,
+    );
     await w.net.run();
     final PyrProposal p = w['S'].proposals.values.single;
+    // The admitting person signs the year itself.
+    expect((p.record.body['m'] as Map)['yr'], thisYear - 12);
     expect(w['S'].admitProblem(p), isNull);
     await w['S'].approve(p.record.id);
     await w.net.run();
-    expect(w['S'].state!.isMember(w['Z'].myKey!), isTrue);
-
-    // Nothing to show: no badge, and no age in the anonymous numbers.
-    expect(await w['Z'].showBadge(true), isNull);
-    expect(await w['S'].showBadge(true), isNull);
+    final String zk = w['Z'].myKey!;
+    expect(w['S'].state!.isMember(zk), isTrue);
+    expect(w['S'].state!.members[zk]!.birthYear, thisYear - 12);
+    expect(pyrAge(thisYear - 12, w.net.now), 12);
+    // The gender stays a hash until shown.
     expect(w['S'].state!.badges, isEmpty);
-    expect(w['Z'].state!.badges, isEmpty);
   });
 
   test('a report climbs level by level to the top (§21.4)', () async {
@@ -294,15 +336,19 @@ void main() {
     },
   );
 
-  test('a badge shows the data confirmed at admission (§20.2a)', () async {
-    final PyramidWorld w = await PyramidWorld.six();
-    final String a = w['A'].myKey!;
-    expect(await w['A'].showBadge(true), isNotNull);
-    await w.net.run();
-    expect(w['S'].state!.badges[a], (birthYear: 1990, gender: 'k'));
-    await w['A'].showBadge(false);
-    await w.net.run();
-    expect(w['S'].state!.badges, isEmpty);
-    expect(w.views().values.toSet(), hasLength(1));
-  });
+  test(
+    'a gender badge shows the data confirmed at admission (§20.2a)',
+    () async {
+      final PyramidWorld w = await PyramidWorld.six();
+      final String a = w['A'].myKey!;
+      expect(w['S'].state!.members[a]!.birthYear, 1990);
+      expect(await w['A'].showBadge(true), isNotNull);
+      await w.net.run();
+      expect(w['S'].state!.badges[a], 'k');
+      await w['A'].showBadge(false);
+      await w.net.run();
+      expect(w['S'].state!.badges, isEmpty);
+      expect(w.views().values.toSet(), hasLength(1));
+    },
+  );
 }

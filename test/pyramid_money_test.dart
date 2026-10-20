@@ -185,6 +185,7 @@ void main() {
           'k': k.id,
           'n': 'X',
           'nat': 'PL',
+          'yr': 1990,
           'dc': '',
           'addr': '',
           if (bal > 0) 'bal': bal,

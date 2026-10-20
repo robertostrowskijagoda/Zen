@@ -34,7 +34,14 @@ Map<String, dynamic> member(
   LedgerKeyPair k,
   String name, {
   String nat = 'PL',
-}) => <String, dynamic>{'k': k.id, 'n': name, 'nat': nat, 'dc': 'x'};
+}) => <String, dynamic>{
+  'k': k.id,
+  'n': name,
+  'nat': nat,
+  // The records here are dated in 1970.
+  'yr': 1950,
+  'dc': 'x',
+};
 
 void main() {
   test('the Ed25519 scalar of a seed gives its public key', () async {

@@ -474,9 +474,7 @@ Future<void> showProposals(
                           <String, Object?>{
                             'name': (p.record.body['m'] as Map?)?['n'],
                             'nat': (p.record.body['m'] as Map?)?['nat'],
-                            'year': (p.extra['by'] is int && p.extra['by'] > 0)
-                                ? p.extra['by']
-                                : t('nie podano'),
+                            'year': (p.record.body['m'] as Map?)?['yr'],
                             'gender': p.extra['g'],
                           },
                         ),
@@ -572,6 +570,12 @@ class _JoinViewState extends ConsumerState<_JoinView> {
     final TextEditingController nat = TextEditingController(text: 'PL');
     final TextEditingController year = TextEditingController();
     String gender = 'k';
+    // Required (§20.2a): any plausible year, minors too.
+    int? yearOf() {
+      final int? y = int.tryParse(year.text.trim());
+      return y != null && pyrBirthYearValid(y, widget.pyr.now) ? y : null;
+    }
+
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => StatefulBuilder(
@@ -600,6 +604,7 @@ class _JoinViewState extends ConsumerState<_JoinView> {
                   TextField(
                     key: const Key('pyr-pseudonym'),
                     controller: name,
+                    onChanged: (_) => set(() {}),
                     textCapitalization: TextCapitalization.sentences,
                     decoration: InputDecoration(
                       labelText: t('Pseudonim w piramidzie'),
@@ -628,15 +633,16 @@ class _JoinViewState extends ConsumerState<_JoinView> {
                     key: const Key('pyr-birth-year'),
                     controller: year,
                     keyboardType: TextInputType.number,
+                    onChanged: (_) => set(() {}),
                     decoration: InputDecoration(
-                      labelText: t('Rok urodzenia (opcjonalnie)'),
+                      labelText: t('Rok urodzenia'),
                       hintText: t('np. 1990'),
                       prefixIcon: const Icon(Icons.cake_outlined),
-                      helperText: t(
-                        'Możesz pominąć — wtedy bez odznaki wieku i bez '
-                        'wieku w statystykach.',
-                      ),
+                      helperText: t('Wiek widać w Twoim profilu w piramidzie.'),
                       helperMaxLines: 3,
+                      errorText: year.text.trim().isNotEmpty && yearOf() == null
+                          ? t('Podaj prawdziwy rok urodzenia, np. 1990.')
+                          : null,
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -670,8 +676,9 @@ class _JoinViewState extends ConsumerState<_JoinView> {
                     tone: zen.warning,
                     text: t(
                       'Tych danych nie da się później zmienić. Osoba, '
-                      'która Cię przyjmuje, potwierdza je podpisem. Publicznie '
-                      'widać tylko narodowość; rok i płeć — tylko jako skrót.',
+                      'która Cię przyjmuje, potwierdza je podpisem. W '
+                      'piramidzie widać narodowość i wiek; płeć — tylko jako '
+                      'skrót, chyba że pokażesz odznakę.',
                     ),
                   ),
                 ],
@@ -684,7 +691,9 @@ class _JoinViewState extends ConsumerState<_JoinView> {
               ),
               FilledButton(
                 key: const Key('pyr-data-next'),
-                onPressed: () => Navigator.of(context).pop(true),
+                onPressed: name.text.trim().isEmpty || yearOf() == null
+                    ? null
+                    : () => Navigator.of(context).pop(true),
                 child: Text(t('Dalej')),
               ),
             ],
@@ -692,15 +701,14 @@ class _JoinViewState extends ConsumerState<_JoinView> {
         },
       ),
     );
-    // The birth year is optional: skipped or unreadable means "not given".
-    final int? parsed = int.tryParse(year.text.trim());
-    final int? y = parsed != null && parsed > 1900 ? parsed : null;
-    final Map<String, Object>? out = ok == true && name.text.trim().isNotEmpty
+    final int? y = yearOf();
+    final Map<String, Object>? out =
+        ok == true && name.text.trim().isNotEmpty && y != null
         ? <String, Object>{
             'pname': pname.text.trim(),
             'name': name.text.trim(),
             'nat': nat.text.trim(),
-            'year': ?y,
+            'year': y,
             'g': gender,
           }
         : null;
@@ -736,7 +744,7 @@ class _JoinViewState extends ConsumerState<_JoinView> {
       invite: code,
       myName: d['name']! as String,
       nat: d['nat']! as String,
-      birthYear: d['year'] as int?,
+      birthYear: d['year']! as int,
       gender: d['g']! as String,
     );
     if (mounted) {
@@ -758,7 +766,7 @@ class _JoinViewState extends ConsumerState<_JoinView> {
           : d['pname']! as String,
       myName: d['name']! as String,
       nat: d['nat']! as String,
-      birthYear: d['year'] as int?,
+      birthYear: d['year']! as int,
       gender: d['g']! as String,
     );
   }
@@ -1135,9 +1143,14 @@ class _MeTab extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          s.occupant[cell] == k
-                              ? t('szef komórki')
-                              : t('członek'),
+                          <String>[
+                            if (s.occupant[cell] == k)
+                              t('szef komórki')
+                            else
+                              t('członek'),
+                            if (s.members[k] case final PyrMember m)
+                              pyrAgeText(m.birthYear, pyr.now),
+                          ].join(' · '),
                           style: TextStyle(
                             color: s.occupant[cell] == k
                                 ? tone
@@ -1438,10 +1451,14 @@ class _MeTab extends StatelessWidget {
                                 tone: zen.success,
                                 icon: Icons.account_balance_rounded,
                               ),
-                            if (s.badges[me]
-                                case final ({int birthYear, String gender}) b)
+                            ZenPill(
+                              text: pyrAgeText(m.birthYear, pyr.now),
+                              tone: zen.textSecondary,
+                              icon: Icons.cake_outlined,
+                            ),
+                            if (s.badges[me] case final String g)
                               ZenPill(
-                                text: pyrBadgeText(b, pyr.now),
+                                text: pyrGenderText(g),
                                 tone: zen.textSecondary,
                                 icon: Icons.verified_rounded,
                               ),
@@ -1724,15 +1741,16 @@ class _MeTab extends StatelessWidget {
 }
 
 /// A member's badge (§20.2a) for people: "34 l. · K".
-String pyrBadgeText(({int birthYear, String gender}) b, int nowMs) {
-  final int age = DateTime.fromMillisecondsSinceEpoch(nowMs).year - b.birthYear;
-  final String g = switch (b.gender) {
-    'k' => t('K'),
-    'm' => t('M'),
-    _ => t('inna'),
-  };
-  return t('{age} l. · {gender}', <String, Object?>{'age': age, 'gender': g});
-}
+/// A member's age, from the birth year confirmed at entry (§20.2a).
+String pyrAgeText(int birthYear, int nowMs) =>
+    t('{age} l.', <String, Object?>{'age': pyrAge(birthYear, nowMs)});
+
+/// A gender badge a member shows (§20.2a).
+String pyrGenderText(String gender) => switch (gender) {
+  'k' => t('K'),
+  'm' => t('M'),
+  _ => t('inna'),
+};
 
 /// The badge this person may show (§20.2a) and the anonymous statistics of
 /// their branch: gender and age, summed up the tree, shown only from
@@ -1753,8 +1771,6 @@ class PyrBadgeAndStats extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final bool shown = s.badges.containsKey(me);
-    final Object? year = pyr.myData['by'];
-    final bool hasYear = year is int && year > 0;
     final List<int>? stats = pyr.branchStats();
     final List<String> ages = <String>[
       t('do 24'),
@@ -1775,18 +1791,15 @@ class PyrBadgeAndStats extends StatelessWidget {
             key: const Key('pyr-badge'),
             contentPadding: EdgeInsets.zero,
             value: shown,
-            title: Text(t('Pokaż odznakę wieku i płci')),
+            title: Text(t('Pokaż odznakę płci')),
             subtitle: Text(
               t(
-                'Dane potwierdzone przy wejściu; każdy może je sprawdzić. '
-                'Bez odznaki wiek i płeć trafiają tylko do anonimowych '
-                'statystyk.',
+                'Płeć potwierdzona przy wejściu; każdy może ją sprawdzić. '
+                'Bez odznaki trafia tylko do anonimowych statystyk. Wiek '
+                'widać zawsze.',
               ),
             ),
-            // Without a birth year given at entry there is no badge.
-            onChanged: !shown && !hasYear
-                ? null
-                : (bool v) => unawaited(pyr.showBadge(v)),
+            onChanged: (bool v) => unawaited(pyr.showBadge(v)),
           ),
           const SizedBox(height: 4),
           Text(
@@ -1893,9 +1906,10 @@ class PyrPostCard extends ConsumerWidget {
                               'count': s.branchSize(authorPath),
                             }),
                           if (post.nat != null) post.nat!,
-                          if (s.badges[post.author]
-                              case final ({int birthYear, String gender}) b)
-                            pyrBadgeText(b, pyr.now),
+                          if (s.members[post.author] case final PyrMember m)
+                            pyrAgeText(m.birthYear, pyr.now),
+                          if (s.badges[post.author] case final String g)
+                            pyrGenderText(g),
                           pyrDate(post.at),
                         ].join(' · '),
                         style: TextStyle(

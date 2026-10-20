@@ -12,7 +12,9 @@ import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
+import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
@@ -326,9 +328,29 @@ final class PyrReport {
 Map<String, String> get kMarketKinds => <String, String>{
   'inbox': t('Wiadomość (płatna skrzynka)'),
   'intro': t('Prośba o przedstawienie'),
-  'reshare': t('Udostępnij moje ogłoszenie swojej gałęzi'),
+  'reshare': t('Udostępnienie mojego posta Twoim znajomym'),
   'ad': t('Ogłoszenie w sieci'),
 };
+
+/// Largest signed post a reshare on order may carry (its JSON).
+const int kMarketPostMaxBytes = 32 * 1024;
+
+/// The text of [post] when it is a post that may be reshared on order
+/// (§24): a signed entry of its author's feed, public, not sealed.
+/// Null for anything else. A post of photos only reads as "(zdjęcia)".
+Future<String?> marketPostText(Map<String, dynamic>? post) async {
+  final LogEntry? entry = post == null ? null : await verifiedEntry(post);
+  if (entry == null ||
+      entry.kind != kPostKind ||
+      entry.space != accountSpace('feed', entry.account) ||
+      isSealed(entry.body) ||
+      entry.body['aud'] != Audience.public.name) {
+    return null;
+  }
+  final Object? text = entry.body['text'];
+  final String shown = text is String ? text.trim() : '';
+  return shown.isEmpty ? t('(zdjęcia)') : shown;
+}
 
 /// A message from the access market (§24), with the payment attached.
 final class PyrMarketMessage {
@@ -346,6 +368,7 @@ final class PyrMarketMessage {
     this.origin,
     this.level,
     this.introduce,
+    this.post,
   });
 
   final String id;
@@ -378,6 +401,11 @@ final class PyrMarketMessage {
   /// accepts it.
   final String? introduce;
 
+  /// A reshare on order (§24): the payer's signed public post (a ledger
+  /// entry) that the one paid shares with their own friends. [text] is the
+  /// post's text, the preview the one paid accepts or refuses.
+  final Map<String, dynamic>? post;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
     'k': kind,
@@ -392,6 +420,7 @@ final class PyrMarketMessage {
     if (origin != null) 'o': origin,
     if (level != null) 'lv': level,
     if (introduce != null) 'y': introduce,
+    if (post != null) 'en': post,
   };
 
   static PyrMarketMessage? fromJson(Object? json) {
@@ -417,6 +446,9 @@ final class PyrMarketMessage {
       origin: json['o'] is String ? json['o'] as String : null,
       level: json['lv'] is String ? json['lv'] as String : null,
       introduce: json['y'] is String ? json['y'] as String : null,
+      post: json['en'] is Map
+          ? Map<String, dynamic>.from(json['en'] as Map)
+          : null,
     );
   }
 }
@@ -447,6 +479,8 @@ final class PyramidService extends ChangeNotifier {
     this.identitySeed,
     this.metInPerson,
     this.otherDevices,
+    this.resharePost,
+    this.ownPublicPosts,
     int Function()? now,
     Random? random,
     this.tallyWait = const Duration(hours: 6),
@@ -489,6 +523,15 @@ final class PyramidService extends ChangeNotifier {
 
   /// Sends a crisis wave over Bluetooth to phones around (§28.1).
   final Future<int> Function(Map<String, dynamic> wave)? crisisBroadcast;
+
+  /// Shares a signed public post (a reshare on order, §24) with this
+  /// person's friends, as their own reshare in the feed; true when done.
+  /// Null (tests without a ledger): such an order cannot be accepted.
+  final Future<bool> Function(Map<String, dynamic> post)? resharePost;
+
+  /// This person's own public posts (signed entries, newest first): what
+  /// they can order a reshare of (§24).
+  final List<Map<String, dynamic>> Function()? ownPublicPosts;
 
   /// How long a cell head waits for the sums below before counting anyway.
   final Duration tallyWait;
@@ -1721,12 +1764,18 @@ final class PyramidService extends ChangeNotifier {
         'k': me.id,
         'n': _cut(name.trim(), 40),
         'nat': nat.trim().toUpperCase(),
+        // Public to the pyramid, confirmed by the admitting signature.
+        'yr': myData['by'],
         'dc': myData['dc'],
         'addr': _n(host.ownAddress()),
       };
 
-  /// The birth year is optional (§20.2a): 0 means "not given".
+  /// The birth year is required at entry (§20.2a), any plausible one
+  /// ([pyrBirthYearValid]): minors are admitted, age is never a condition.
   void _setData(int birthYear, String gender) {
+    if (!pyrBirthYearValid(birthYear, _now())) {
+      throw ArgumentError.value(birthYear, 'birthYear', 'not a birth year');
+    }
     final String salt = _newId(16);
     myData = <String, dynamic>{
       'by': birthYear,
@@ -1741,11 +1790,11 @@ final class PyramidService extends ChangeNotifier {
     required String name,
     required String myName,
     required String nat,
-    int? birthYear,
+    required int birthYear,
     required String gender,
   }) async {
     final LedgerKeyPair me = await _ensureIdentity();
-    _setData(birthYear ?? 0, gender);
+    _setData(birthYear, gender);
     final PyramidRecord g = await PyramidRecord(
       body: <String, dynamic>{
         't': PyrT.genesis,
@@ -1803,15 +1852,15 @@ final class PyramidService extends ChangeNotifier {
     required String invite,
     required String myName,
     required String nat,
-    int? birthYear,
+    required int birthYear,
     required String gender,
   }) async {
     final Map<String, String>? inv = parseInvite(invite);
-    if (inv == null) {
+    if (inv == null || !pyrBirthYearValid(birthYear, _now())) {
       return false;
     }
     final LedgerKeyPair me = await _ensureIdentity();
-    _setData(birthYear ?? 0, gender);
+    _setData(birthYear, gender);
     final PyramidRecord r = await PyramidRecord(
       body: <String, dynamic>{
         't': PyrT.admit,
@@ -1833,8 +1882,9 @@ final class PyramidService extends ChangeNotifier {
       'type': PyramidTypes.proposal,
       'r': r.toJson(),
       'need': 2,
+      // The gender for the admitting person to confirm (the year is in
+      // the member data itself).
       'x': <String, dynamic>{
-        'by': birthYear ?? 0,
         'g': gender,
         'salt': myData['salt'],
         'what': 'admit',
@@ -1892,14 +1942,6 @@ final class PyramidService extends ChangeNotifier {
       if (candidates.any((String k) => k != me.id) && body['pn'] == null)
         'pn': _newId(16),
     };
-    // A revocation lists the acts of the delegate it knows of: anything
-    // dated earlier that is not on the list was made up later (§21.2).
-    if (full['t'] == PyrT.revoke &&
-        full['acts'] == null &&
-        full['d'] is String) {
-      full['acts'] = (state?.actsOf(full['d'] as String).toList() ?? <String>[])
-        ..sort();
-    }
     final PyramidRecord r = await PyramidRecord(body: full).signedBy(me);
     _agree(r);
     if (_ready(r, need)) {
@@ -3207,15 +3249,24 @@ final class PyramidService extends ChangeNotifier {
     int steps = 1,
     int? share,
     String? introduce,
+    Map<String, dynamic>? post,
   }) async {
     final PyramidState? s = state;
     final String? me = myKey;
     final PyrMember? m = s?.members[to];
+    // A reshare on order carries the post itself; its text is the preview.
+    final String? postText = kind == 'reshare'
+        ? await marketPostText(post)
+        : null;
+    if (kind == 'reshare' && postText == null) {
+      return false;
+    }
+    final String content = postText ?? text;
     if (s == null ||
         me == null ||
         m == null ||
         m.addr.isEmpty ||
-        text.trim().isEmpty ||
+        content.trim().isEmpty ||
         to == me) {
       return false;
     }
@@ -3224,7 +3275,7 @@ final class PyramidService extends ChangeNotifier {
         (target == me || target == to || !s.isMember(target))) {
       return false;
     }
-    final String body = text.trim();
+    final String body = content.trim();
     final ({int price, String? level}) asked = priceToSend(to, kind);
     final int hops = kind == 'ad' ? steps.clamp(1, kMaxAdHops) - 1 : 0;
     final int each = hops > 0
@@ -3258,6 +3309,7 @@ final class PyramidService extends ChangeNotifier {
       hops: hops,
       level: asked.level,
       introduce: target,
+      post: postText == null ? null : post,
     );
     market[msg.id] = msg;
     await _save();
@@ -3271,6 +3323,7 @@ final class PyramidService extends ChangeNotifier {
       'a': each,
       if (hops > 0) 'h': hops,
       'y': ?target,
+      if (postText != null) 'en': post,
     });
     return true;
   }
@@ -3342,6 +3395,22 @@ final class PyramidService extends ChangeNotifier {
     if (_n(s.members[sender]?.addr ?? '') != _n(from)) {
       return;
     }
+    // A reshare on order (§24) brings the post to share: it has to be a
+    // signed public post, and what this person sees is its own text.
+    final Object? en = p['en'];
+    Map<String, dynamic>? post;
+    String body = text;
+    if (kind == 'reshare') {
+      if (en is! Map || jsonEncode(en).length > kMarketPostMaxBytes) {
+        return;
+      }
+      post = Map<String, dynamic>.from(en);
+      final String? shown = await marketPostText(post);
+      if (shown == null) {
+        return;
+      }
+      body = shown;
+    }
     final String? payment = p['x'] is String ? p['x'] as String : null;
     final String? origin = p['o'] is String && s.members.containsKey(p['o'])
         ? p['o'] as String
@@ -3370,11 +3439,12 @@ final class PyramidService extends ChangeNotifier {
             'id': id,
             'k': kind,
             'f': sender,
-            't': _cut(text, 4000),
+            't': _cut(body, 4000),
             'x': payment,
             if (p['h'] is int) 'h': p['h'],
             'o': ?origin,
             if (p['y'] is String) 'y': p['y'],
+            'en': ?post,
           },
           'at': _now(),
         });
@@ -3400,7 +3470,7 @@ final class PyramidService extends ChangeNotifier {
           escrow.settled != null ||
           escrow.until < _now() + kPyrMarketMinWaitMs ||
           escrow.lock != null ||
-          (escrow.hash != null && escrow.hash != contentHash(text));
+          (escrow.hash != null && escrow.hash != contentHash(body));
     }
     if (forged || paid < asked) {
       if (escrow != null && escrow.condBy == me && escrow.settled == null) {
@@ -3420,7 +3490,7 @@ final class PyramidService extends ChangeNotifier {
       id: id,
       kind: kind,
       from: sender,
-      text: _cut(text, 4000),
+      text: _cut(body, 4000),
       at: _now(),
       payment: payment,
       amount: paid,
@@ -3428,6 +3498,7 @@ final class PyramidService extends ChangeNotifier {
       origin: origin,
       level: level,
       introduce: introduce,
+      post: post,
     );
     _trimMarket(sender);
     if (!market.containsKey(id)) {
@@ -3441,7 +3512,7 @@ final class PyramidService extends ChangeNotifier {
           'kind': kMarketKinds[kind] ?? kind,
           'name': s.members[origin ?? sender]?.name ?? '?',
         }),
-        body: text,
+        body: body,
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.message,
         slotKey: 'pyr-dm',
@@ -3479,8 +3550,9 @@ final class PyramidService extends ChangeNotifier {
     }
   }
 
-  /// Keeps the payment (and, for a reshare or an announcement, posts it to
-  /// this person's branch) or returns it. An announcement that may go
+  /// Keeps the payment (for a reshare on order, once the post is shared with
+  /// this person's friends; for an announcement, posting it to this
+  /// person's branch) or returns it. An announcement that may go
   /// further is passed on to [next] (a member), with the rest of the money
   /// waiting for them.
   Future<void> answerMarket(
@@ -3534,6 +3606,18 @@ final class PyramidService extends ChangeNotifier {
         : s?.members[onward]?.addr ?? '';
     m.done = true;
     await _save();
+    if (m.kind == 'reshare') {
+      // Shared first, paid after (§24): the money is kept only when the
+      // post really went out to this person's friends.
+      final Map<String, dynamic>? shared = m.post;
+      final Future<bool> Function(Map<String, dynamic>)? share = resharePost;
+      final bool done =
+          accept && shared != null && share != null && await share(shared);
+      if (m.payment != null) {
+        await settle(m.payment!, done);
+      }
+      return;
+    }
     PyramidRecord? settled;
     if (m.payment != null) {
       settled = await settle(
@@ -3542,7 +3626,7 @@ final class PyramidService extends ChangeNotifier {
         next: onwardAddr.isEmpty ? null : onward,
       );
     }
-    if (accept && (m.kind == 'reshare' || m.kind == 'ad')) {
+    if (accept && m.kind == 'ad') {
       await post(m.text);
     }
     if (onward == null || onwardAddr.isEmpty || me == null) {
@@ -4037,6 +4121,7 @@ final class PyramidService extends ChangeNotifier {
           'k': e.value,
           'n': s.members[e.value]?.name ?? '',
           'nat': s.members[e.value]?.nat ?? '',
+          'yr': s.members[e.value]?.birthYear ?? 0,
           'dc': s.members[e.value]?.dataCommit ?? '',
           'addr': s.members[e.value]?.addr ?? '',
           if (withMoney && (money[e.value] ?? 0) > 0) 'bal': money[e.value],
@@ -4172,19 +4257,18 @@ final class PyramidService extends ChangeNotifier {
     );
   }
 
-  /// Shows (or hides) this person's age and gender badge (§20.2a): the
-  /// data confirmed at admission is opened publicly, so anybody can check
-  /// it against the commitment. Null when there is nothing to show.
+  /// Shows (or hides) this person's gender badge (§20.2a): the gender
+  /// confirmed at admission is opened publicly, so anybody can check it
+  /// against the commitment (the age shows anyway). Null when there is
+  /// nothing to show.
   Future<PyramidRecord?> showBadge(bool show) async {
     final String? k = myKey;
-    final Object? year = myData['by'];
     final Object? gender = myData['g'];
     final Object? salt = myData['salt'];
     if (k == null || !isMember) {
       return null;
     }
-    if (show &&
-        (year is! int || year <= 0 || gender is! String || salt is! String)) {
+    if (show && (gender is! String || salt is! String)) {
       return null;
     }
     return propose(
@@ -4192,7 +4276,6 @@ final class PyramidService extends ChangeNotifier {
           ? <String, dynamic>{
               't': PyrT.badge,
               'k': k,
-              'yr': year,
               'g': gender,
               'salt': salt,
             }
@@ -5274,11 +5357,12 @@ final class PyramidService extends ChangeNotifier {
       return;
     }
     if (r.type == PyrT.admit) {
-      final Object? by = extra['by'];
       final Object? g = extra['g'];
       final Object? salt = extra['salt'];
       final Object? m = r.body['m'];
+      final Object? by = m is Map ? m['yr'] : null;
       if (by is! int ||
+          !pyrBirthYearValid(by, r.at) ||
           g is! String ||
           salt is! String ||
           m is! Map ||
@@ -5405,9 +5489,7 @@ final class PyramidService extends ChangeNotifier {
         'other': name(r.str('k')),
       }),
       PyrT.badge =>
-        r.body['off'] == true
-            ? t('Ukrycie odznaki wieku i płci')
-            : t('Odznaka wieku i płci'),
+        r.body['off'] == true ? t('Ukrycie odznaki płci') : t('Odznaka płci'),
       _ => r.type,
     };
   }
@@ -5562,14 +5644,12 @@ final class PyramidService extends ChangeNotifier {
           );
         }
       case PyrT.revoke:
-        final Object? acts = r.body['acts'];
+        // Everything done through it falls with it (§21.2).
         out.add(
-          acts is List
-              ? t('Delegacja {id} · znane akty: {count}', {
-                  'id': _short(r.str('d')),
-                  'count': acts.length,
-                })
-              : t('Delegacja {id}', {'id': _short(r.str('d'))}),
+          t('Delegacja {id} · unieważnia akty: {count}', {
+            'id': _short(r.str('d')),
+            'count': s?.actsOf(r.str('d')).length ?? 0,
+          }),
         );
       case PyrT.ban:
         out.add(
@@ -5960,6 +6040,228 @@ final class PyramidService extends ChangeNotifier {
         need: 1,
       );
     }
+  }
+
+  // ---- the account's own devices (§6.3) ----
+
+  /// At most this many records signed by this person go to the account's
+  /// other devices with [sharedState] (the rest comes from friends).
+  static const int sharedRecordsLimit = 200;
+
+  /// What the account's other devices take over (they hold the same
+  /// pyramid key, §6.1): membership (the data confirmed at entry, the
+  /// pyramids followed), the newest records this person signed and the
+  /// votes in progress — what this person voted, the votes it holds as a
+  /// head, sent tallies, signed treasury orders and agreements. `null`
+  /// before the key and the stored state are known.
+  Map<String, dynamic>? sharedState() {
+    final String? me = myKey;
+    if (me == null || _diskUnreadable) {
+      return null;
+    }
+    final List<PyramidRecord> own = <PyramidRecord>[
+      for (final PyramidRecord r in _records.values)
+        if (r.sigs.containsKey(me)) r,
+    ]..sort((PyramidRecord a, PyramidRecord b) => b.at.compareTo(a.at));
+    // A copy: the maps here keep changing while it is sent.
+    return Map<String, dynamic>.from(
+      jsonDecode(
+            jsonEncode(<String, dynamic>{
+              'k': me,
+              'data': myData,
+              'cur': ?current,
+              'fol': _follow,
+              'mv': myVotes,
+              'hv': _headVotes,
+              'xv': <String, List<String>>{
+                for (final MapEntry<String, Set<String>> e
+                    in _extraVotes.entries)
+                  e.key: e.value.toList()..sort(),
+              },
+              'ts': _tallySent,
+              'so': _signedOrders,
+              'cs': _consent,
+              'apl': sentAppeals,
+              'rs': <Map<String, dynamic>>[
+                for (final PyramidRecord r
+                    in own.take(sharedRecordsLimit).toList().reversed)
+                  r.toJson(),
+              ],
+            }),
+          )
+          as Map,
+    );
+  }
+
+  /// Takes in [sharedState] of another device of this account: everything
+  /// is added, nothing this device knows is replaced, so a vote cast on
+  /// one device is never cast again on another (one vote per member key,
+  /// whichever device it comes from). Runs in turn with incoming frames.
+  /// Returns whether anything was new.
+  Future<bool> mergeFromOwnDevice(Map<String, dynamic> shared) {
+    final Completer<bool> done = Completer<bool>();
+    _queue = _queue.then((_) async {
+      bool changed = false;
+      try {
+        changed = await _mergeShared(shared);
+      } on Object catch (error, stack) {
+        logZenError('Piramida: stan z innego urządzenia', error, stack);
+      }
+      done.complete(changed);
+    });
+    return done.future;
+  }
+
+  Future<bool> _mergeShared(Map<String, dynamic> shared) async {
+    await _loadIdentity();
+    final String? me = myKey;
+    // Another key is another person (not linked yet, or recovered apart).
+    if (me == null || _diskUnreadable || shared['k'] != me) {
+      return false;
+    }
+    bool changed = false;
+    final Object? data = shared['data'];
+    if (myData.isEmpty && data is Map && data.isNotEmpty) {
+      myData = Map<String, dynamic>.from(data);
+      changed = true;
+    }
+    changed = _addInts(_follow, shared['fol']) | changed;
+    final Object? cur = shared['cur'];
+    if (current == null && cur is String && cur.isNotEmpty) {
+      current = cur;
+      _followPyramid(cur);
+      changed = true;
+    }
+    changed = _addInts(myVotes, shared['mv']) | changed;
+    changed = _addStrs(_tallySent, shared['ts']) | changed;
+    changed = _addStrs(_signedOrders, shared['so']) | changed;
+    changed = _addInts(sentAppeals, shared['apl']) | changed;
+    final Object? consent = shared['cs'];
+    if (consent is Map) {
+      final int t = _now();
+      for (final MapEntry<dynamic, dynamic> e in consent.entries) {
+        final Object? until = e.value;
+        if (e.key is String &&
+            until is int &&
+            until > t &&
+            (_consent[e.key as String] ?? 0) < until) {
+          _consent[e.key as String] = until;
+          changed = true;
+        }
+      }
+    }
+    final Object? hv = shared['hv'];
+    if (hv is Map) {
+      for (final MapEntry<dynamic, dynamic> e in hv.entries) {
+        if (e.key is! String || e.value is! Map) {
+          continue;
+        }
+        for (final MapEntry<dynamic, dynamic> v in (e.value as Map).entries) {
+          if (v.key is String && v.value is int) {
+            final Map<String, int> votes = _headVotes[e.key as String] ??=
+                <String, int>{};
+            if (!votes.containsKey(v.key)) {
+              votes[v.key as String] = v.value as int;
+              changed = true;
+            }
+          }
+        }
+      }
+    }
+    final Object? xv = shared['xv'];
+    if (xv is Map) {
+      for (final MapEntry<dynamic, dynamic> e in xv.entries) {
+        if (e.key is! String || e.value is! List) {
+          continue;
+        }
+        for (final String v in (e.value as List).whereType<String>()) {
+          final int cut = v.lastIndexOf(':');
+          if (cut <= 0) {
+            continue;
+          }
+          final String voter = v.substring(0, cut + 1);
+          final Set<String> votes = _extraVotes[e.key as String] ??= <String>{};
+          // One vote per voter: the one this device holds stays.
+          if (!votes.any((String x) => x.startsWith(voter))) {
+            votes.add(v);
+            changed = true;
+          }
+        }
+      }
+    }
+    if (changed) {
+      _dirty();
+      if (current == null) {
+        _choose();
+      }
+      await _save();
+    }
+    // The records this person signed, after the pyramids they belong to
+    // are followed (records of other pyramids are not taken).
+    final Object? rs = shared['rs'];
+    if (rs is List) {
+      final List<PyramidRecord> list = <PyramidRecord>[
+        for (final Object? j in rs.take(sharedRecordsLimit))
+          ?PyramidRecord.fromJson(j),
+      ]..sort((PyramidRecord a, PyramidRecord b) => a.at.compareTo(b.at));
+      // Already known to the pyramid's people: not passed on again.
+      if ((await _ingestAll(list, spread: false)).isNotEmpty) {
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /// Asks friends for the records of [pyramids] this phone follows but
+  /// keeps nothing of yet (another device of the account is in them): the
+  /// hello names them with an empty digest, which a friend who keeps one
+  /// answers with its ids.
+  Future<void> askFriendsFor(Iterable<String> pyramids) async {
+    final List<String> known = knownPyramids;
+    final List<String> wanted = <String>[
+      for (final String py in pyramids.toSet())
+        if (_follow.containsKey(py) && !known.contains(py)) py,
+    ];
+    if (wanted.isEmpty) {
+      return;
+    }
+    for (final String f in host.friends()) {
+      await _send(f, <String, dynamic>{
+        'type': PyramidTypes.hello,
+        'py': <Map<String, dynamic>>[
+          for (final String py in known)
+            <String, dynamic>{'id': py, 'd': _digest(py)},
+          for (final String py in wanted)
+            <String, dynamic>{'id': py, 'd': const <String, String>{}},
+        ],
+      });
+    }
+  }
+
+  static bool _addInts(Map<String, int> into, Object? from) {
+    bool changed = false;
+    if (from is Map) {
+      for (final MapEntry<dynamic, dynamic> e in from.entries) {
+        if (e.key is String && e.value is int && !into.containsKey(e.key)) {
+          into[e.key as String] = e.value as int;
+          changed = true;
+        }
+      }
+    }
+    return changed;
+  }
+
+  static bool _addStrs(Map<String, String> into, Object? from) {
+    bool changed = false;
+    if (from is Map) {
+      for (final MapEntry<dynamic, dynamic> e in from.entries) {
+        if (e.key is String && e.value is String && !into.containsKey(e.key)) {
+          into[e.key as String] = e.value as String;
+          changed = true;
+        }
+      }
+    }
+    return changed;
   }
 }
 
