@@ -1,9 +1,9 @@
 import 'dart:io';
 
-/// Hosts that may serve remote media rendered by the app. Incoming messages
-/// may carry a `gifUrl`; restricting it to this allow-list (https only, no IP
-/// literals) stops peers from forcing the client to fetch arbitrary URLs
-/// (tracking pixels, internal-network probes, public-IP leaks).
+/// Hosts the app itself may download a GIF from: only the sender's own device
+/// fetches one, after picking it in the GIF picker, and only from the catalog
+/// host (https only, no IP literals, redirects re-checked). Nothing a peer
+/// sends is ever fetched.
 const Set<String> kAllowedRemoteMediaHostSuffixes = <String>{'klipy.com'};
 
 bool isAllowedRemoteMediaUrl(String? raw) {

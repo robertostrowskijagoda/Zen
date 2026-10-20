@@ -34,7 +34,6 @@ final class QueuedSignal {
       ..writeNullableString(signal.mimeType)
       ..writeNullableUint32(signal.attachmentSizeBytes)
       ..writeNullableInt64(signal.durationMs)
-      ..writeNullableString(signal.gifUrl)
       ..writeBool(signal.isPlaceholder)
       ..writeNullableUint32(signal.attachmentTransferBytes)
       ..writeNullableUint32(signal.chunkIndex)
@@ -68,7 +67,6 @@ final class QueuedSignal {
       mimeType: reader.readNullableString(),
       attachmentSizeBytes: reader.readNullableUint32(),
       durationMs: reader.readNullableInt64(),
-      gifUrl: reader.readNullableString(),
       isPlaceholder: reader.readBool(),
       attachmentTransferBytes: reader.readNullableUint32(),
       chunkIndex: reader.readNullableUint32(),
@@ -120,7 +118,6 @@ ZenSignal _withExtras(ZenSignal base, Map<String, dynamic> extras) {
     mimeType: base.mimeType,
     attachmentSizeBytes: base.attachmentSizeBytes,
     durationMs: base.durationMs,
-    gifUrl: base.gifUrl,
     isPlaceholder: base.isPlaceholder,
     attachmentTransferBytes: base.attachmentTransferBytes,
     chunkIndex: base.chunkIndex,

@@ -16,6 +16,11 @@ final class _GroupLeg {
   /// stream the renderer would otherwise get.
   MediaStream? videoStream;
 
+  /// The remote shared screen: the leg's second video slot, on a renderer
+  /// of its own so the camera keeps showing next to it.
+  RTCVideoRenderer? screenRenderer;
+  MediaStream? screenStream;
+
   /// Identifies one offer/answer exchange (offering side's clock): stale
   /// copies of older exchanges are recognised and ignored.
   int exchange = 0;
@@ -146,8 +151,16 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
   MediaStreamTrack? _screenTrack;
   final Set<String> _remoteScreens = <String>{};
 
-  /// What goes out on the video slot: the shared screen, else the camera.
-  MediaStreamTrack? get _outgoingVideo => _screenTrack ?? _cameraTrack;
+  /// What goes out on video slot [slot]: the camera on the first, the
+  /// shared screen on the second.
+  MediaStreamTrack? _outgoingVideo(int slot) =>
+      slot == _screenSlot ? _screenTrack : _cameraTrack;
+
+  /// Video slots of every leg: the camera's, then the screen's. Both are
+  /// negotiated when the leg is built, so sharing is a track swap like the
+  /// camera and never renegotiates.
+  static const int _cameraSlot = 0;
+  static const int _screenSlot = 1;
 
   @override
   bool get isScreenSharing => _screenTrack != null;
@@ -184,12 +197,13 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     _notify();
   }
 
-  Future<void> _announceScreen(bool on) async {
+  Future<void> _announceScreen(bool on, {String? only}) async {
     final String? callId = _callId;
     if (callId == null) {
       return;
     }
-    for (final String peer in _legs.keys.toList()) {
+    for (final String peer
+        in only == null ? _legs.keys.toList() : <String>[only]) {
       try {
         await transport.send(
           remoteAddress: peer,
@@ -279,10 +293,8 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     screenShareHidesNotifications.value = true;
     track.onEnded = () => unawaited(stopScreenShare());
     for (final _GroupLeg leg in _legs.values.toList()) {
-      await _replaceVideo(leg, track, local);
+      await _replaceVideo(leg, track, screen, slot: _screenSlot);
     }
-    await _ensureLocalRenderer();
-    _localRenderer?.srcObject = screen;
     await _announceScreen(true);
     _notify();
   }
@@ -297,12 +309,8 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     _screenTrack = null;
     androidScreenCaptureActive.value = false;
     screenShareHidesNotifications.value = false;
-    final MediaStream? local = _localStream;
-    if (local != null) {
-      for (final _GroupLeg leg in _legs.values.toList()) {
-        await _replaceVideo(leg, _cameraTrack, local);
-      }
-      _localRenderer?.srcObject = _cameraTrack == null ? null : local;
+    for (final _GroupLeg leg in _legs.values.toList()) {
+      await _replaceVideo(leg, null, screen, slot: _screenSlot);
     }
     await _stopStream(screen);
     await _announceScreen(false);
@@ -334,10 +342,10 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
 
   @override
   RTCVideoRenderer? get localRenderer =>
-      _localRendererReady && _outgoingVideo != null ? _localRenderer : null;
+      _localRendererReady && _cameraTrack != null ? _localRenderer : null;
 
   @override
-  bool get hasLocalVideo => _outgoingVideo != null;
+  bool get hasLocalVideo => _cameraTrack != null;
 
   @override
   Map<String, GroupCallPeerView> get peers => <String, GroupCallPeerView>{
@@ -347,11 +355,14 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
         state: leg.state,
         renderer: leg.renderer,
         hasVideo:
-            ((_remoteCamera[leg.peer] ?? false) ||
-                _remoteScreens.contains(leg.peer)) &&
+            (_remoteCamera[leg.peer] ?? false) &&
             leg.renderer != null &&
             leg.videoStream != null,
         sharingScreen: _remoteScreens.contains(leg.peer),
+        screenRenderer:
+            _remoteScreens.contains(leg.peer) && leg.screenStream != null
+            ? leg.screenRenderer
+            : null,
       ),
   };
 
@@ -522,6 +533,10 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
           if (joined && _recordingPath != null) {
             unawaited(_announceRecording(true, only: leg.peer));
           }
+          // Same for a screen being shared: its slot is live already.
+          if (joined && _screenTrack != null) {
+            unawaited(_announceScreen(true, only: leg.peer));
+          }
         case RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
           // Often just a hiccup on the mesh; give it a moment.
           leg.disconnectTimer?.cancel();
@@ -570,10 +585,14 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
           : null;
       return;
     }
-    MediaStream? stream = leg.videoStream;
+    final String? mid = event.transceiver?.mid;
+    final bool screen = mid != null && _videoSlotOfMid(leg, mid) == _screenSlot;
+    MediaStream? stream = screen ? leg.screenStream : leg.videoStream;
     if (stream == null) {
       try {
-        stream = await createLocalMediaStream('group_video_${leg.relayId}');
+        stream = await createLocalMediaStream(
+          '${screen ? 'group_screen' : 'group_video'}_${leg.relayId}',
+        );
       } catch (error) {
         logZenWarning('Creating a video stream for ${leg.peer} failed: $error');
         return;
@@ -591,17 +610,27 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     if (leg.closed) {
       return;
     }
-    leg.videoStream = stream;
-    if (leg.renderer == null) {
-      final RTCVideoRenderer renderer = RTCVideoRenderer();
-      await renderer.initialize();
+    if (screen) {
+      leg.screenStream = stream;
+    } else {
+      leg.videoStream = stream;
+    }
+    RTCVideoRenderer? renderer = screen ? leg.screenRenderer : leg.renderer;
+    if (renderer == null) {
+      final RTCVideoRenderer created = RTCVideoRenderer();
+      await created.initialize();
       if (leg.closed) {
-        await renderer.dispose();
+        await created.dispose();
         return;
       }
-      leg.renderer = renderer;
+      renderer = created;
+      if (screen) {
+        leg.screenRenderer = created;
+      } else {
+        leg.renderer = created;
+      }
     }
-    leg.renderer!.srcObject = stream;
+    renderer.srcObject = stream;
     _notify();
   }
 
@@ -624,7 +653,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
       for (final MediaStreamTrack track in local.getAudioTracks()) {
         await connection.addTrack(track, local);
       }
-      final MediaStreamTrack? camera = _outgoingVideo;
+      final MediaStreamTrack? camera = _cameraTrack;
       if (camera != null) {
         await connection.addTrack(camera, local);
       } else {
@@ -636,6 +665,26 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
             direction: TransceiverDirection.SendRecv,
             streams: <MediaStream>[local],
           ),
+        );
+      }
+      // The screen slot, the second video section: carries the shared
+      // screen whenever this side shares, on top of the camera.
+      final MediaStream? screen = _screenStream;
+      final MediaStreamTrack? screenTrack = _screenTrack;
+      final RTCRtpTransceiverInit screenInit = RTCRtpTransceiverInit(
+        direction: TransceiverDirection.SendRecv,
+        streams: screen == null ? <MediaStream>[] : <MediaStream>[screen],
+      );
+      if (screenTrack == null) {
+        await connection.addTransceiver(
+          kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
+          init: screenInit,
+        );
+      } else {
+        await connection.addTransceiver(
+          track: screenTrack,
+          kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
+          init: screenInit,
         );
       }
       final RTCSessionDescription offer = _forceVideoSendRecv(
@@ -759,19 +808,25 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     bool audioBound = false;
     for (final RTCRtpTransceiver transceiver
         in await connection.getTransceivers()) {
-      final bool isVideo = _isVideoSlot(leg, transceiver);
+      final int slot = _videoSlot(leg, transceiver);
+      final bool isVideo = slot >= 0;
+      final MediaStream? screen = _screenStream;
       try {
         await transceiver.setDirection(TransceiverDirection.SendRecv);
       } catch (error) {
         logZenWarning('Setting a group transceiver direction failed: $error');
       }
-      try {
-        await transceiver.sender.setStreams(<MediaStream>[local]);
-      } catch (_) {
-        // Older platforms: the stream id only matters for grouping.
+      if (slot != _screenSlot || screen != null) {
+        try {
+          await transceiver.sender.setStreams(<MediaStream>[
+            if (slot == _screenSlot) screen! else local,
+          ]);
+        } catch (_) {
+          // Older platforms: the stream id only matters for grouping.
+        }
       }
       final MediaStreamTrack? track = isVideo
-          ? _outgoingVideo
+          ? _outgoingVideo(slot)
           : (audio.isEmpty ? null : audio.first);
       if (track == null) {
         continue;
@@ -786,15 +841,40 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     }
   }
 
-  bool _isVideoSlot(_GroupLeg leg, RTCRtpTransceiver transceiver) {
-    final String mid = transceiver.mid;
-    for (final ({String mid, int mLineIndex, String kind}) entry in leg.mids) {
-      if (entry.mid == mid) {
-        return entry.kind == 'video';
-      }
+  /// Which video slot [transceiver] is ([_cameraSlot], [_screenSlot]), or
+  /// -1 for audio. By the order of the video sections in the negotiated
+  /// SDP; a mid not seen there yet counts as the camera's.
+  int _videoSlot(_GroupLeg leg, RTCRtpTransceiver transceiver) {
+    final int slot = _videoSlotOfMid(leg, transceiver.mid);
+    if (slot != -2) {
+      return slot;
     }
     return transceiver.sender.track?.kind == 'video' ||
-        transceiver.receiver.track?.kind == 'video';
+            transceiver.receiver.track?.kind == 'video'
+        ? _cameraSlot
+        : -1;
+  }
+
+  /// The video slot of [mid] (-1 for audio), or -2 when the leg's SDP does
+  /// not name it.
+  int _videoSlotOfMid(_GroupLeg leg, String mid) {
+    final List<({String mid, int mLineIndex, String kind})> sections =
+        List<({String mid, int mLineIndex, String kind})>.from(leg.mids)..sort(
+          (
+            ({String mid, int mLineIndex, String kind}) a,
+            ({String mid, int mLineIndex, String kind}) b,
+          ) => a.mLineIndex.compareTo(b.mLineIndex),
+        );
+    int videoIndex = 0;
+    for (final ({String mid, int mLineIndex, String kind}) entry in sections) {
+      if (entry.mid == mid) {
+        return entry.kind == 'video' ? videoIndex : -1;
+      }
+      if (entry.kind == 'video') {
+        videoIndex += 1;
+      }
+    }
+    return -2;
   }
 
   void _captureMids(_GroupLeg leg, String? sdp) {
@@ -920,16 +1000,32 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
         // Already gone with the connection.
       }
     }
+    final RTCVideoRenderer? screenRenderer = leg.screenRenderer;
+    leg.screenRenderer = null;
+    if (screenRenderer != null) {
+      try {
+        screenRenderer.srcObject = null;
+        await screenRenderer.dispose();
+      } catch (_) {
+        // Already gone with the connection.
+      }
+    }
     leg.remoteStream = null;
-    final MediaStream? video = leg.videoStream;
-    leg.videoStream = null;
-    if (video != null) {
+    for (final MediaStream? video in <MediaStream?>[
+      leg.videoStream,
+      leg.screenStream,
+    ]) {
+      if (video == null) {
+        continue;
+      }
       try {
         await video.dispose();
       } catch (_) {
         // Released with the connection already.
       }
     }
+    leg.videoStream = null;
+    leg.screenStream = null;
     try {
       await transport.closeRelay(leg.relayId);
     } catch (error, stackTrace) {
@@ -999,19 +1095,15 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
       await local.addTrack(track);
       _cameraTrack = track;
       await _ensureLocalRenderer();
-      if (_screenTrack == null) {
-        _localRenderer?.srcObject = local;
-        for (final _GroupLeg leg in _legs.values.toList()) {
-          await _replaceVideo(leg, track, local);
-        }
+      _localRenderer?.srcObject = local;
+      for (final _GroupLeg leg in _legs.values.toList()) {
+        await _replaceVideo(leg, track, local, slot: _cameraSlot);
       }
     } else {
       final MediaStreamTrack? track = _cameraTrack;
       _cameraTrack = null;
-      if (_screenTrack == null) {
-        for (final _GroupLeg leg in _legs.values.toList()) {
-          await _replaceVideo(leg, null, local);
-        }
+      for (final _GroupLeg leg in _legs.values.toList()) {
+        await _replaceVideo(leg, null, local, slot: _cameraSlot);
       }
       if (track != null) {
         try {
@@ -1021,18 +1113,19 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
           logZenWarning('Stopping the group call camera failed: $error');
         }
       }
-      if (_screenTrack == null) {
-        _localRenderer?.srcObject = null;
-      }
+      _localRenderer?.srcObject = null;
     }
     _notify();
   }
 
+  /// Puts [track] (null: nothing) on video slot [slot] of [leg], grouped
+  /// under [stream].
   Future<void> _replaceVideo(
     _GroupLeg leg,
     MediaStreamTrack? track,
-    MediaStream local,
-  ) async {
+    MediaStream stream, {
+    required int slot,
+  }) async {
     final RTCPeerConnection? connection = leg.connection;
     if (connection == null || leg.closed) {
       return;
@@ -1040,12 +1133,12 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     try {
       for (final RTCRtpTransceiver transceiver
           in await connection.getTransceivers()) {
-        if (!_isVideoSlot(leg, transceiver)) {
+        if (_videoSlot(leg, transceiver) != slot) {
           continue;
         }
         if (track != null) {
           try {
-            await transceiver.sender.setStreams(<MediaStream>[local]);
+            await transceiver.sender.setStreams(<MediaStream>[stream]);
           } catch (_) {
             // Grouping only.
           }

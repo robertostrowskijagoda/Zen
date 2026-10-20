@@ -71,7 +71,6 @@ final class ZenSignal {
     this.mimeType,
     this.attachmentSizeBytes,
     this.durationMs,
-    this.gifUrl,
     this.isPlaceholder = false,
     this.attachmentTransferBytes,
     this.chunkIndex,
@@ -104,7 +103,6 @@ final class ZenSignal {
   final String? mimeType;
   final int? attachmentSizeBytes;
   final int? durationMs;
-  final String? gifUrl;
   final bool isPlaceholder;
   final int? attachmentTransferBytes;
   final int? chunkIndex;
@@ -154,7 +152,6 @@ final class ZenSignal {
       mimeType: mimeType,
       attachmentSizeBytes: attachmentSizeBytes,
       durationMs: durationMs,
-      gifUrl: gifUrl,
       isPlaceholder: isPlaceholder,
       attachmentTransferBytes: attachmentTransferBytes,
       chunkIndex: chunkIndex,

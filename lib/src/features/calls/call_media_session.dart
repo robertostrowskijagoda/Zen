@@ -100,11 +100,16 @@ abstract class CallMediaSessionController extends ChangeNotifier {
 
   Future<void> switchCamera() async {}
 
-  /// This side shares its screen (or one app/window) instead of the camera.
+  /// This side shares its screen (or one app/window) on a second video track;
+  /// the camera keeps going on its own.
   bool get isScreenSharing => false;
 
   /// The other side shares its screen.
   bool get remoteScreenSharing => false;
+
+  /// The other side's shared screen, while it shares and the picture is
+  /// there; [remoteRenderer] keeps showing its camera.
+  RTCVideoRenderer? get remoteScreenRenderer => null;
 
   /// Screens and windows to pick from (desktop); empty on phones, where the
   /// system asks (whole screen or one app, Android 14+).
@@ -191,7 +196,21 @@ final class WebRtcCallMediaSessionController
 
   StreamSubscription<SignalTransportFrame>? _callFrames;
   MediaStream? _screenStream;
+  MediaStreamTrack? _screenTrack;
   bool _remoteScreenSharing = false;
+
+  /// The mid of the screen slot: the second `m=video` section (see
+  /// [screenShareSlotInSdp]), the same on both sides once an SDP carrying
+  /// it has been seen.
+  String? _screenMid;
+
+  /// The msid stream id the other side sends its screen under, read from
+  /// its SDP before it is applied: that stream must never be taken for the
+  /// camera.
+  String? _remoteScreenStreamId;
+  String? _remoteScreenTrackId;
+  MediaStream? _remoteScreenStream;
+  final RTCVideoRenderer _remoteScreenRenderer = RTCVideoRenderer();
   final CallRecorder _recorder;
   String? _recordingPath;
   String _recordingLabel = '';
@@ -270,6 +289,110 @@ final class WebRtcCallMediaSessionController
   @override
   bool get remoteScreenSharing => _remoteScreenSharing;
 
+  @override
+  RTCVideoRenderer? get remoteScreenRenderer =>
+      _remoteScreenSharing &&
+          _renderersInitialized &&
+          _remoteScreenRenderer.textureId != null &&
+          _remoteScreenStream != null
+      ? _remoteScreenRenderer
+      : null;
+
+  /// The transceiver of the screen slot, by mid once negotiated, else by
+  /// the screen track it already carries.
+  bool _isScreenTransceiver(RTCRtpTransceiver transceiver) {
+    final String? mid = _screenMid;
+    if (mid != null && mid.isNotEmpty && transceiver.mid == mid) {
+      return true;
+    }
+    final String? screenTrackId = _screenTrack?.id;
+    return screenTrackId != null &&
+        transceiver.sender.track?.id == screenTrackId;
+  }
+
+  Future<RTCRtpTransceiver?> _screenTransceiver(
+    RTCPeerConnection connection,
+  ) async {
+    for (final RTCRtpTransceiver transceiver
+        in await connection.getTransceivers()) {
+      if (_isScreenTransceiver(transceiver)) {
+        return transceiver;
+      }
+    }
+    return null;
+  }
+
+  /// A remote stream that carries the other side's screen, not its camera.
+  bool _isRemoteScreenStream(MediaStream? stream) {
+    if (stream == null) {
+      return false;
+    }
+    if (identical(stream, _remoteScreenStream)) {
+      return true;
+    }
+    final String? streamId = _remoteScreenStreamId;
+    if (streamId != null && stream.id == streamId) {
+      return true;
+    }
+    final String? trackId = _remoteScreenTrackId;
+    return trackId != null &&
+        stream.getVideoTracks().any((MediaStreamTrack t) => t.id == trackId);
+  }
+
+  bool _isRemoteScreenTrack(RTCTrackEvent event) {
+    final String? mid = _screenMid;
+    final String? eventMid = event.transceiver?.mid;
+    if (mid != null && mid.isNotEmpty && eventMid == mid) {
+      return true;
+    }
+    final String? trackId = _remoteScreenTrackId;
+    final String? streamId = _remoteScreenStreamId;
+    return (trackId != null && event.track.id == trackId) ||
+        (streamId != null &&
+            event.streams.any((MediaStream s) => s.id == streamId));
+  }
+
+  /// Puts the other side's screen track into a stream of its own, bound to
+  /// [_remoteScreenRenderer].
+  Future<void> _bindRemoteScreen(MediaStreamTrack track) async {
+    MediaStream? stream = _remoteScreenStream;
+    if (stream == null) {
+      try {
+        stream = await createLocalMediaStream('remote_screen_${track.id}');
+      } catch (error) {
+        logZenWarning('Creating the remote screen stream failed: $error');
+        return;
+      }
+    }
+    for (final MediaStreamTrack old in List<MediaStreamTrack>.from(
+      stream.getVideoTracks(),
+    )) {
+      if (old.id != track.id) {
+        try {
+          await stream.removeTrack(old);
+        } catch (_) {
+          // Gone with its receiver already.
+        }
+      }
+    }
+    if (!stream.getVideoTracks().any(
+      (MediaStreamTrack t) => t.id == track.id,
+    )) {
+      try {
+        await stream.addTrack(track, addToNative: true);
+      } catch (_) {
+        await stream.addTrack(track, addToNative: false);
+      }
+    }
+    if (_disposed || _peerConnection == null) {
+      return;
+    }
+    _remoteScreenStream = stream;
+    _remoteScreenTrackId = track.id;
+    _safeSetRendererSrcObject(_remoteScreenRenderer, stream);
+    _notify();
+  }
+
   void _onCallFrame(SignalTransportFrame frame) {
     final Object? type = frame.payload['type'];
     if (type != kCallScreenSignal && type != kCallRecordingSignal) {
@@ -347,27 +470,6 @@ final class WebRtcCallMediaSessionController
     }
   }
 
-  Future<RTCRtpSender?> _videoSender(RTCPeerConnection connection) async {
-    final List<RTCRtpTransceiver> transceivers = await connection
-        .getTransceivers();
-    for (int i = 0; i < transceivers.length; i++) {
-      if (_isVideoTransceiver(transceivers[i], i)) {
-        try {
-          await transceivers[i].setDirection(TransceiverDirection.SendRecv);
-        } catch (error) {
-          logZenWarning('Setting video transceiver direction failed: $error');
-        }
-        return transceivers[i].sender;
-      }
-    }
-    for (final RTCRtpSender sender in await connection.getSenders()) {
-      if (sender.track?.kind == 'video') {
-        return sender;
-      }
-    }
-    return null;
-  }
-
   @override
   Future<void> startScreenShare({String? sourceId}) async {
     final RTCPeerConnection? connection = _peerConnection;
@@ -416,23 +518,54 @@ final class WebRtcCallMediaSessionController
     // Stopped from the system UI ("Zatrzymaj udostępnianie").
     track.onEnded = () => unawaited(stopScreenShare());
     _screenStream = screen;
+    _screenTrack = track;
     screenShareHidesNotifications.value = true;
-    await _ensureRenderers();
-    final RTCRtpSender? sender = await _videoSender(connection);
-    if (sender != null) {
-      try {
-        await sender.setStreams(<MediaStream>[localStream]);
-      } catch (_) {}
-      await sender.replaceTrack(track);
-    } else {
-      await connection.addTrack(track, localStream);
+    try {
+      await _attachScreenTrack(connection, screen, track);
+    } catch (error) {
+      _screenStream = null;
+      _screenTrack = null;
+      androidScreenCaptureActive.value = false;
+      screenShareHidesNotifications.value = false;
+      await _disposeStream(screen);
+      rethrow;
     }
     _activeKind = CallInviteKind.video;
-    await _pinLocalVideoDirection(sending: true);
-    _safeSetRendererSrcObject(_localRenderer, screen);
     _sendScreenSignal(true);
     _notify();
     await _renegotiateWhenStable(CallInviteKind.video);
+  }
+
+  /// The screen goes out on its own video slot, next to the camera: the
+  /// slot already negotiated for screens when there is one (either side may
+  /// have opened it), else a new transceiver. Sends and receives, so both
+  /// sides can share at once; negotiated against a side that does not
+  /// share, it ends up send-only.
+  Future<void> _attachScreenTrack(
+    RTCPeerConnection connection,
+    MediaStream screen,
+    MediaStreamTrack track,
+  ) async {
+    final RTCRtpTransceiver? slot = await _screenTransceiver(connection);
+    if (slot == null) {
+      await connection.addTransceiver(
+        track: track,
+        kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
+        init: RTCRtpTransceiverInit(
+          direction: TransceiverDirection.SendRecv,
+          streams: <MediaStream>[screen],
+        ),
+      );
+      return;
+    }
+    try {
+      // The msid tells the other side which stream is the screen.
+      await slot.sender.setStreams(<MediaStream>[screen]);
+    } catch (error) {
+      logZenWarning('Setting the screen sender stream failed: $error');
+    }
+    await slot.sender.replaceTrack(track);
+    await slot.setDirection(TransceiverDirection.SendRecv);
   }
 
   @override
@@ -445,33 +578,24 @@ final class WebRtcCallMediaSessionController
     androidScreenCaptureActive.value = false;
     screenShareHidesNotifications.value = false;
     final RTCPeerConnection? connection = _peerConnection;
-    final MediaStream? localStream = _localStream;
     if (connection != null) {
       try {
-        final RTCRtpSender? sender = await _videoSender(connection);
-        final List<MediaStreamTrack> camera =
-            localStream?.getVideoTracks() ?? const <MediaStreamTrack>[];
-        if (sender != null) {
-          await sender.replaceTrack(
-            _localCameraWanted && camera.isNotEmpty ? camera.first : null,
-          );
-        }
-        if (!_localCameraWanted) {
-          await _pinLocalVideoDirection(sending: false);
+        // Found while [_screenTrack] still names it; the camera slot is
+        // never touched.
+        final RTCRtpTransceiver? slot = await _screenTransceiver(connection);
+        if (slot != null) {
+          await slot.sender.replaceTrack(null);
+          await slot.setDirection(TransceiverDirection.RecvOnly);
         }
       } catch (error, stackTrace) {
-        logZenError(
-          'Restoring the camera after sharing failed',
-          error,
-          stackTrace,
-        );
+        logZenError('Clearing the screen slot failed', error, stackTrace);
       }
     }
+    _screenTrack = null;
     await _disposeStream(screen);
-    _safeSetRendererSrcObject(_localRenderer, localStream);
     _sendScreenSignal(false);
     _notify();
-    if (connection != null) {
+    if (connection != null && identical(connection, _peerConnection)) {
       await _renegotiateWhenStable(_activeKind ?? CallInviteKind.audio);
     }
   }
@@ -573,7 +697,9 @@ final class WebRtcCallMediaSessionController
     final List<MediaStream?>? streams = _peerConnection?.getRemoteStreams();
     if (streams != null && streams.isNotEmpty) {
       for (final MediaStream? s in streams) {
-        if (s != null && s.getVideoTracks().isNotEmpty) {
+        if (s != null &&
+            !_isRemoteScreenStream(s) &&
+            s.getVideoTracks().isNotEmpty) {
           target = s;
           _remoteStream = s;
           break;
@@ -658,7 +784,9 @@ final class WebRtcCallMediaSessionController
         ?.getRemoteStreams();
     if (remoteStreams != null) {
       for (final MediaStream? stream in remoteStreams) {
-        if (stream != null && stream.getVideoTracks().any(_isLiveVideoTrack)) {
+        if (stream != null &&
+            !_isRemoteScreenStream(stream) &&
+            stream.getVideoTracks().any(_isLiveVideoTrack)) {
           return true;
         }
       }
@@ -1025,7 +1153,12 @@ final class WebRtcCallMediaSessionController
     _notify();
   }
 
+  /// The camera's video transceiver. The screen slot is a video
+  /// transceiver too, but never this one.
   bool _isVideoTransceiver(RTCRtpTransceiver transceiver, [int? index]) {
+    if (_isScreenTransceiver(transceiver)) {
+      return false;
+    }
     if (transceiver.sender.track?.kind == 'video' ||
         transceiver.receiver.track?.kind == 'video') {
       return true;
@@ -1102,7 +1235,8 @@ final class WebRtcCallMediaSessionController
       if (videoSender == null) {
         final List<RTCRtpSender> senders = await connection.getSenders();
         for (final RTCRtpSender sender in senders) {
-          if (sender.track?.kind == 'video') {
+          if (sender.track?.kind == 'video' &&
+              sender.track?.id != _screenTrack?.id) {
             videoSender = sender;
             break;
           }
@@ -1150,7 +1284,9 @@ final class WebRtcCallMediaSessionController
       try {
         final List<RTCRtpSender> senders = await connection.getSenders();
         for (final RTCRtpSender sender in senders) {
-          if (sender.track?.kind == 'video') {
+          // The shared screen keeps going without the camera.
+          if (sender.track?.kind == 'video' &&
+              sender.track?.id != _screenTrack?.id) {
             try {
               await sender.replaceTrack(null);
             } catch (error, stackTrace) {
@@ -1211,6 +1347,19 @@ final class WebRtcCallMediaSessionController
           .getTransceivers();
       for (int i = 0; i < transceivers.length; i++) {
         final RTCRtpTransceiver transceiver = transceivers[i];
+        if (_isScreenTransceiver(transceiver)) {
+          final MediaStream? screen = _screenStream;
+          final MediaStreamTrack? screenTrack = _screenTrack;
+          if (screen != null && screenTrack != null) {
+            try {
+              await _attachScreenTrack(connection, screen, screenTrack);
+            } catch (error) {
+              logZenWarning('Binding the screen to its slot failed: $error');
+            }
+          }
+          // Not sharing: the slot stays receive-only.
+          continue;
+        }
         if (_isVideoTransceiver(transceiver, i)) {
           if (_localCameraWanted && videoTracks.isNotEmpty) {
             try {
@@ -1385,6 +1534,15 @@ final class WebRtcCallMediaSessionController
       }
       if (track.kind == 'video') {
         await _ensureRenderers();
+        if (_isRemoteScreenStream(stream) ||
+            (_remoteScreenTrackId != null &&
+                track.id == _remoteScreenTrackId)) {
+          // The other side's screen, never its camera.
+          track.onMute = _notify;
+          track.onUnMute = _notify;
+          await _bindRemoteScreen(track);
+          return;
+        }
       }
       track.onMute = () {
         _syncRemoteRenderer();
@@ -1430,6 +1588,14 @@ final class WebRtcCallMediaSessionController
       final MediaStreamTrack track = event.track;
       if (track.kind == 'video') {
         await _ensureRenderers();
+        if (_isRemoteScreenTrack(event)) {
+          // The second video slot: the other side's screen, shown on its
+          // own renderer while the camera stays on [_remoteRenderer].
+          track.onMute = _notify;
+          track.onUnMute = _notify;
+          await _bindRemoteScreen(track);
+          return;
+        }
       }
       track.onMute = () {
         _syncRemoteRenderer();
@@ -1450,7 +1616,7 @@ final class WebRtcCallMediaSessionController
       if (stream == null) {
         final List<MediaStream?> remoteStreams = connection.getRemoteStreams();
         for (final MediaStream? s in remoteStreams) {
-          if (s == null) {
+          if (s == null || _isRemoteScreenStream(s)) {
             continue;
           }
           if (track.kind == 'video' && s.getVideoTracks().isNotEmpty) {
@@ -1463,7 +1629,7 @@ final class WebRtcCallMediaSessionController
         }
         if (stream == null) {
           for (final MediaStream? s in remoteStreams) {
-            if (s != null) {
+            if (s != null && !_isRemoteScreenStream(s)) {
               stream = s;
               break;
             }
@@ -1512,6 +1678,9 @@ final class WebRtcCallMediaSessionController
     };
     connection.onAddStream = (MediaStream stream) {
       if (_disposed) {
+        return;
+      }
+      if (_isRemoteScreenStream(stream)) {
         return;
       }
       if (stream.getVideoTracks().isNotEmpty || _remoteStream == null) {
@@ -1703,6 +1872,7 @@ final class WebRtcCallMediaSessionController
     try {
       await _localRenderer.initialize();
       await _remoteRenderer.initialize();
+      await _remoteScreenRenderer.initialize();
       _renderersInitialized = true;
       _syncRemoteRenderer();
     } catch (error, stackTrace) {
@@ -1900,54 +2070,15 @@ final class WebRtcCallMediaSessionController
     }
     RTCSessionDescription desc = original;
     if (_localCameraWanted) {
-      desc = _ensureVideoSendRecv(desc);
+      desc = RTCSessionDescription(
+        forceCameraSectionSendRecv(desc.sdp ?? ''),
+        desc.type,
+      );
     }
     await connection.setLocalDescription(desc);
     _captureRelayMetadata(desc.sdp);
+    _screenMid ??= screenShareSlotInSdp(desc.sdp ?? '')?.mid;
     return desc;
-  }
-
-  RTCSessionDescription _ensureVideoSendRecv(
-    RTCSessionDescription description,
-  ) {
-    final String sdp = description.sdp ?? '';
-    if (sdp.isEmpty) {
-      return description;
-    }
-    final String separator = sdp.contains('\r\n') ? '\r\n' : '\n';
-    final List<String> lines = sdp.split(RegExp(r'\r?\n'));
-    final List<String> result = <String>[];
-    bool inVideo = false;
-    bool foundDirection = false;
-
-    for (int i = 0; i < lines.length; i++) {
-      final String raw = lines[i];
-      final String line = raw.trim();
-      if (line.startsWith('m=')) {
-        if (inVideo && !foundDirection) {
-          result.add('a=sendrecv');
-        }
-        inVideo = line.startsWith('m=video');
-        foundDirection = false;
-        result.add(raw);
-        continue;
-      }
-      if (inVideo) {
-        if (line == 'a=recvonly' ||
-            line == 'a=sendonly' ||
-            line == 'a=inactive' ||
-            line == 'a=sendrecv') {
-          result.add('a=sendrecv');
-          foundDirection = true;
-          continue;
-        }
-      }
-      result.add(raw);
-    }
-    if (inVideo && !foundDirection) {
-      result.add('a=sendrecv');
-    }
-    return RTCSessionDescription(result.join(separator), description.type);
   }
 
   Future<void> _setRemoteDescriptionPinned(
@@ -1958,6 +2089,15 @@ final class WebRtcCallMediaSessionController
       throw StateError(t('Brak aktywnej sesji WebRTC.'));
     }
     final RTCSessionDescription original = _descriptionFromMap(description);
+    // Known before the description lands: its tracks arrive while it is
+    // being applied, and the screen must not be taken for the camera.
+    final ({String mid, String? streamId})? screenSlot = screenShareSlotInSdp(
+      original.sdp ?? '',
+    );
+    if (screenSlot != null) {
+      _screenMid ??= screenSlot.mid;
+      _remoteScreenStreamId = screenSlot.streamId ?? _remoteScreenStreamId;
+    }
     // Never the peer's original SDP: its candidates carry LAN/public
     // addresses, and ICE could then route the media around the mesh.
     await applyRemoteSdpViaLocalRelay(
@@ -2016,7 +2156,23 @@ final class WebRtcCallMediaSessionController
     _remoteRecording = false;
     final MediaStream? screen = _screenStream;
     _screenStream = null;
+    _screenTrack = null;
     _remoteScreenSharing = false;
+    _screenMid = null;
+    _remoteScreenStreamId = null;
+    _remoteScreenTrackId = null;
+    final MediaStream? remoteScreen = _remoteScreenStream;
+    _remoteScreenStream = null;
+    if (_renderersInitialized) {
+      _safeSetRendererSrcObject(_remoteScreenRenderer, null);
+    }
+    if (remoteScreen != null) {
+      try {
+        await remoteScreen.dispose();
+      } catch (_) {
+        // Released with the connection already.
+      }
+    }
     androidScreenCaptureActive.value = false;
     screenShareHidesNotifications.value = false;
     await _disposeStream(screen);
@@ -2219,6 +2375,11 @@ final class WebRtcCallMediaSessionController
     } catch (error, stackTrace) {
       logZenError('Disposing remote video renderer failed', error, stackTrace);
     }
+    try {
+      await _remoteScreenRenderer.dispose();
+    } catch (error, stackTrace) {
+      logZenError('Disposing remote screen renderer failed', error, stackTrace);
+    }
   }
 }
 
@@ -2241,6 +2402,90 @@ const Map<String, dynamic> _peerConstraints = <String, dynamic>{
 final RegExp _hostCandidatePattern = RegExp(
   r'candidate:\S+ \d+ udp \d+ (\S+) \d+ typ host',
 );
+
+/// The screen-share slot of a 1:1 call SDP: the second `m=video` section
+/// (the first one is always the camera's). Returns its mid and the stream
+/// id of its `a=msid` line (null while nothing is sent on it), or null when
+/// the SDP has no second video section.
+({String mid, String? streamId})? screenShareSlotInSdp(String sdp) {
+  if (sdp.isEmpty) {
+    return null;
+  }
+  int videoSections = 0;
+  bool inSlot = false;
+  String? mid;
+  String? streamId;
+  for (final String raw in sdp.split(RegExp(r'\r?\n'))) {
+    final String line = raw.trim();
+    if (line.startsWith('m=')) {
+      if (inSlot) {
+        break;
+      }
+      if (line.startsWith('m=video')) {
+        videoSections += 1;
+        inSlot = videoSections == 2;
+      }
+      continue;
+    }
+    if (!inSlot) {
+      continue;
+    }
+    if (line.startsWith('a=mid:')) {
+      mid = line.substring('a=mid:'.length).trim();
+    } else if (line.startsWith('a=msid:')) {
+      final String id = line.substring('a=msid:'.length).trim().split(' ')[0];
+      if (id.isNotEmpty && id != '-') {
+        streamId = id;
+      }
+    }
+  }
+  if (mid == null || mid.isEmpty) {
+    return null;
+  }
+  return (mid: mid, streamId: streamId);
+}
+
+/// Forces the camera's video section (the first `m=video`) to `sendrecv`,
+/// leaving every other section — the screen slot among them — as WebRTC
+/// produced it.
+String forceCameraSectionSendRecv(String sdp) {
+  if (sdp.isEmpty) {
+    return sdp;
+  }
+  final String separator = sdp.contains('\r\n') ? '\r\n' : '\n';
+  final List<String> lines = sdp.split(RegExp(r'\r?\n'));
+  final List<String> result = <String>[];
+  bool seenVideo = false;
+  bool inCamera = false;
+  bool foundDirection = false;
+  for (final String raw in lines) {
+    final String line = raw.trim();
+    if (line.startsWith('m=')) {
+      if (inCamera && !foundDirection) {
+        result.add('a=sendrecv');
+      }
+      inCamera = !seenVideo && line.startsWith('m=video');
+      seenVideo = seenVideo || line.startsWith('m=video');
+      foundDirection = false;
+      result.add(raw);
+      continue;
+    }
+    if (inCamera &&
+        (line == 'a=recvonly' ||
+            line == 'a=sendonly' ||
+            line == 'a=inactive' ||
+            line == 'a=sendrecv')) {
+      result.add('a=sendrecv');
+      foundDirection = true;
+      continue;
+    }
+    result.add(raw);
+  }
+  if (inCamera && !foundDirection) {
+    result.add('a=sendrecv');
+  }
+  return result.join(separator);
+}
 
 /// Rewrites a WebRTC SDP so RTP/RTCP targets the local Yggdrasil UDP relay.
 /// Both peers pin independently to `127.0.0.1:<their relay port>`; the Go

@@ -90,52 +90,40 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     int? sentAtMillis,
     ChatMessageType? type,
     int? durationMs,
-    String? gifUrl,
   }) async {
-    final String? normalizedGifUrl = gifUrl?.trim().isNotEmpty == true
-        ? gifUrl!.trim()
-        : null;
-    final bool isGifMessage = normalizedGifUrl != null;
-    final String normalizedFileName = fileName.trim().isNotEmpty
-        ? fileName.trim()
-        : isGifMessage
-        ? 'gif.gif'
-        : '';
+    final String normalizedFileName = fileName.trim();
     final Uint8List? initialBytes = bytes == null || bytes.isEmpty
         ? null
         : bytes;
     final String? normalizedPath = attachmentPath?.trim().isNotEmpty == true
         ? attachmentPath!.trim()
         : null;
-    if ((!isGifMessage && initialBytes == null && normalizedPath == null) ||
+    if ((initialBytes == null && normalizedPath == null) ||
         normalizedFileName.isEmpty) {
       return;
     }
     final int timestamp = sentAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     final String messageId = 'outgoing-$timestamp-$peerAddress';
     final bool requiresDeliveryAck = isRoutablePeerAddress(peerAddress);
-    final String? resolvedMimeType = isGifMessage ? 'image/gif' : mimeType;
-    final ChatMessageType resolvedType = isGifMessage
-        ? ChatMessageType.image
-        : type ??
-              _attachmentTransport.inferType(
-                mimeType: resolvedMimeType,
-                fileName: normalizedFileName,
-              );
-    final int? attachmentSizeBytes;
-    if (isGifMessage) {
-      attachmentSizeBytes = null;
-    } else if (initialBytes != null) {
+    final String? resolvedMimeType = mimeType;
+    final ChatMessageType resolvedType =
+        type ??
+        _attachmentTransport.inferType(
+          mimeType: resolvedMimeType,
+          fileName: normalizedFileName,
+        );
+    final int attachmentSizeBytes;
+    if (initialBytes != null) {
       attachmentSizeBytes = initialBytes.length;
     } else {
       attachmentSizeBytes = await _mediaVault.length(normalizedPath!);
     }
     EncodedChatAttachment? encoded;
     Uint8List? inlineBytes = initialBytes;
-    bool sendInline = !requiresDeliveryAck || isGifMessage;
-    if (requiresDeliveryAck && !isGifMessage) {
+    bool sendInline = !requiresDeliveryAck;
+    if (requiresDeliveryAck) {
       try {
-        inlineBytes ??= attachmentSizeBytes! <= 1024 * 1024
+        inlineBytes ??= attachmentSizeBytes <= 1024 * 1024
             ? await _readAttachmentBytesFromPath(normalizedPath!)
             : null;
         if (inlineBytes == null || inlineBytes.isEmpty) {
@@ -162,7 +150,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     final ChatMessage message = ChatMessage(
       id: messageId,
       sender: 'self',
-      text: isGifMessage ? '' : normalizedFileName,
+      text: normalizedFileName,
       sentAtMillis: timestamp,
       direction: ChatMessageDirection.outgoing,
       type: resolvedType,
@@ -172,7 +160,6 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       mimeType: resolvedMimeType,
       attachmentSizeBytes: attachmentSizeBytes,
       durationMs: durationMs,
-      gifUrl: normalizedGifUrl,
       deliveryState: requiresDeliveryAck
           ? (sendInline
                 ? ChatMessageDeliveryState.sending
@@ -185,14 +172,11 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     _updateFriendPreview(
       peerAddress: peerAddress,
       displayName: displayName,
-      preview: isGifMessage
-          ? '🎞 GIF'
-          : chatMessageLabelForType(
-              resolvedType,
-              fileName: normalizedFileName,
-              mimeType: resolvedMimeType,
-              gifUrl: normalizedGifUrl,
-            ),
+      preview: chatMessageLabelForType(
+        resolvedType,
+        fileName: normalizedFileName,
+        mimeType: resolvedMimeType,
+      ),
     );
 
     if (!requiresDeliveryAck) {
@@ -201,20 +185,6 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     }
 
     try {
-      if (isGifMessage) {
-        await _sendNetworkAttachmentMessage(
-          peerAddress: peerAddress,
-          message: message,
-        );
-        await _updateMessageDeliveryState(
-          peerAddress: peerAddress,
-          messageId: messageId,
-          deliveryState: requiresDeliveryAck
-              ? ChatMessageDeliveryState.sent
-              : ChatMessageDeliveryState.delivered,
-        );
-        return;
-      }
       if (sendInline) {
         await _sendNetworkAttachmentMessage(
           peerAddress: peerAddress,
@@ -234,7 +204,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           message: message,
           attachmentBytes: initialBytes,
           attachmentPath: normalizedPath,
-          attachmentSizeBytes: attachmentSizeBytes!,
+          attachmentSizeBytes: attachmentSizeBytes,
         );
       }
     } catch (error, stackTrace) {
@@ -284,7 +254,6 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
                 resolvedType,
                 fileName: signal.fileName,
                 mimeType: signal.mimeType,
-                gifUrl: signal.gifUrl,
               );
         if (resolvedText.isEmpty) {
           return;
@@ -362,7 +331,6 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
                   signal.attachmentSizeBytes ??
                   attachmentByteCount,
               durationMs: signal.durationMs,
-              gifUrl: signal.gifUrl,
             ),
           );
           _bumpTimelineRevision();
@@ -904,7 +872,6 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       if (message.attachmentSizeBytes != null)
         'attachmentSizeBytes': message.attachmentSizeBytes,
       if (message.durationMs != null) 'durationMs': message.durationMs,
-      if (message.gifUrl != null) 'gifUrl': message.gifUrl,
     };
     if (attachmentEncoding != null) {
       payload['attachmentEncoding'] = attachmentEncoding;

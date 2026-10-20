@@ -45,7 +45,6 @@ String _describe(ChatMessage m) => <Object?>[
   m.attachmentPath,
   m.readAtMillis,
   m.durationMs,
-  m.gifUrl,
   m.expiresAtMillis,
 ].join('|');
 
@@ -82,7 +81,8 @@ List<ChatMessage> _rich() => <ChatMessage>[
     sentAtMillis: 4500,
     direction: ChatMessageDirection.incoming,
     type: ChatMessageType.image,
-    gifUrl: 'https://cdn.example.com/zen.gif',
+    fileName: 'gif.gif',
+    mimeType: 'image/gif',
   ),
   const ChatMessage(
     id: 'voice-4',

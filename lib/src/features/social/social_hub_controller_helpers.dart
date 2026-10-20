@@ -1370,7 +1370,6 @@ int _messageStorageBytes(ChatMessage message) {
       utf8.encode(message.text).length +
       utf8.encode(message.fileName ?? '').length +
       utf8.encode(message.mimeType ?? '').length +
-      utf8.encode(message.gifUrl ?? '').length +
       (message.attachmentSizeBytes ?? message.attachmentBytes?.length ?? 0) +
       (message.durationMs != null ? 8 : 0) +
       (message.readAtMillis != null ? 8 : 0) +

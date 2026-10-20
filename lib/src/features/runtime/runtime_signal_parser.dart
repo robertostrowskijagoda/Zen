@@ -3,7 +3,6 @@ import 'package:zen/src/core/utils/safe_file_name.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/signals/zen_signal.dart';
-import 'package:zen/src/features/chat/remote_media_guard.dart';
 
 /// Longest name a peer may give itself in a signal (a profile name is at
 /// most 60 characters).
@@ -122,15 +121,8 @@ ZenSignal? zenSignalFromTransportPayload({
     case 'message':
       final String? text = _readString(payload['text']);
       final String? attachmentData = _readString(payload['attachmentData']);
-      final String? rawGifUrl = _readString(payload['gifUrl']);
-      // Untrusted peers control this URL; drop anything outside the remote
-      // media allow-list before it can reach storage or an HTTP client.
-      final String? gifUrl = isAllowedRemoteMediaUrl(rawGifUrl)
-          ? rawGifUrl
-          : null;
       if ((text == null || text.isEmpty) &&
-          (attachmentData == null || attachmentData.isEmpty) &&
-          (gifUrl == null || gifUrl.isEmpty)) {
+          (attachmentData == null || attachmentData.isEmpty)) {
         return null;
       }
       return ZenSignal(
@@ -146,7 +138,6 @@ ZenSignal? zenSignalFromTransportPayload({
         mimeType: _readString(payload['mimeType']),
         attachmentSizeBytes: _readInt(payload['attachmentSizeBytes']),
         durationMs: _readInt(payload['durationMs']),
-        gifUrl: gifUrl,
         sentAtMillis: _readTimestamp(payload['createdAt']),
         disappearSeconds: _readInt(payload['ttl']),
       );

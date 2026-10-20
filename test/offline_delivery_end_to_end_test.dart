@@ -173,7 +173,7 @@ final class _Device implements RelayPeerSource {
         ),
       ],
     );
-    // What RuntimeSignalBridge does in the app.
+    // What RuntimeSignalModule does in the app.
     _subscription = transport.frames.listen((SignalTransportFrame frame) {
       final ZenSignal? signal = zenSignalFromTransportPayload(
         sender: frame.from,

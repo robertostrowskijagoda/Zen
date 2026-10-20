@@ -34,7 +34,77 @@ Uint8List _jpegWithGps() {
   return img.encodeJpg(picture);
 }
 
+Uint8List _twoFrameGif() {
+  final img.Image first = img.Image(width: 8, height: 8, numChannels: 4)
+    ..frameDuration = 40;
+  img.fill(first, color: img.ColorRgba8(255, 0, 0, 255));
+  final img.Image second = img.Image(width: 8, height: 8, numChannels: 4)
+    ..frameDuration = 40;
+  img.fill(second, color: img.ColorRgba8(0, 0, 255, 255));
+  first.addFrame(second);
+  return img.encodeGif(first);
+}
+
 void main() {
+  group('animated GIFs', () {
+    test('a well-formed GIF is kept as it is, with all its frames', () async {
+      final Uint8List gif = _twoFrameGif();
+      expect(isAcceptableGif(gif), isTrue);
+      final GuardedMedia g = await guardIncomingMedia(
+        gif,
+        declared: MediaKind.image,
+        fileName: 'kot.gif',
+      );
+      expect(g.kind, MediaKind.image);
+      expect(g.mimeType, 'image/gif');
+      expect(g.fileName, 'kot.gif');
+      expect(g.bytes, gif, reason: 're-encoding would flatten it');
+      expect(img.decodeGif(g.bytes)!.numFrames, 2);
+    });
+
+    test('a truncated GIF becomes a plain file', () async {
+      final Uint8List gif = _twoFrameGif();
+      final Uint8List cut = Uint8List.sublistView(gif, 0, gif.length - 5);
+      expect(isAcceptableGif(cut), isFalse);
+      final GuardedMedia g = await guardIncomingMedia(
+        cut,
+        declared: MediaKind.image,
+        fileName: 'kot.gif',
+      );
+      expect(g.kind, MediaKind.file);
+    });
+
+    test('a GIF with trailing bytes or an oversized canvas is refused', () {
+      final Uint8List gif = _twoFrameGif();
+      expect(isAcceptableGif(Uint8List.fromList(<int>[...gif, 0, 0])), isFalse);
+      final Uint8List huge = Uint8List.fromList(gif);
+      huge[6] = 0xB8; // 3000 px wide
+      huge[7] = 0x0B;
+      expect(isAcceptableGif(huge), isFalse);
+    });
+
+    test('not a GIF, or a GIF with a bad block, is refused', () {
+      expect(isAcceptableGif(Uint8List.fromList(<int>[1, 2, 3])), isFalse);
+      final Uint8List gif = _twoFrameGif();
+      final Uint8List broken = Uint8List.fromList(gif);
+      broken[broken.length - 1] = 0x01; // no trailer
+      expect(isAcceptableGif(broken), isFalse);
+    });
+
+    test('a PNG named .gif is still re-encoded as a picture', () async {
+      final Uint8List png = img.encodePng(
+        img.Image(width: 8, height: 8, numChannels: 4),
+      );
+      final GuardedMedia g = await guardIncomingMedia(
+        png,
+        declared: MediaKind.image,
+        fileName: 'kot.gif',
+      );
+      expect(g.mimeType, 'image/png');
+      expect(g.fileName, 'kot.png');
+    });
+  });
+
   group('photos', () {
     test('a photo is decoded and made again, without its location', () async {
       final Uint8List original = _jpegWithGps();

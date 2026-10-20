@@ -323,13 +323,10 @@ class _MessageBubble extends StatelessWidget {
     }
 
     final bool outgoing = message.isOutgoing;
-    final bool isPureGif =
-        message.type == ChatMessageType.image &&
-        (message.gifUrl?.isNotEmpty ?? false);
     // Text bubbles we send get the accent gradient; media we send sit on an
     // accent-tinted surface so their own colours stay readable.
     final bool isTextMessage = message.type == ChatMessageType.text;
-    final bool onGradient = outgoing && isTextMessage && !isPureGif;
+    final bool onGradient = outgoing && isTextMessage;
     final Color metaColor = onGradient
         ? zen.onAccent.withValues(alpha: 0.72)
         : zen.textMuted;
@@ -354,12 +351,7 @@ class _MessageBubble extends StatelessWidget {
     };
 
     final BoxDecoration decoration;
-    if (isPureGif) {
-      decoration = BoxDecoration(
-        color: zen.surfaceRaised,
-        borderRadius: BorderRadius.circular(20),
-      );
-    } else if (onGradient) {
+    if (onGradient) {
       decoration = BoxDecoration(
         gradient: LinearGradient(
           colors: <Color>[
@@ -407,9 +399,7 @@ class _MessageBubble extends StatelessWidget {
             child: DecoratedBox(
               decoration: decoration,
               child: Padding(
-                padding: isPureGif
-                    ? const EdgeInsets.all(4)
-                    : const EdgeInsets.fromLTRB(14, 9, 12, 7),
+                padding: const EdgeInsets.fromLTRB(14, 9, 12, 7),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -417,9 +407,7 @@ class _MessageBubble extends StatelessWidget {
                     body,
                     const SizedBox(height: 3),
                     Padding(
-                      padding: isPureGif
-                          ? const EdgeInsets.fromLTRB(0, 0, 6, 2)
-                          : EdgeInsets.zero,
+                      padding: EdgeInsets.zero,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: <Widget>[
@@ -533,18 +521,7 @@ class _ImageAttachmentContent extends StatelessWidget {
     final bool isGifFile =
         (message.mimeType?.toLowerCase() == 'image/gif') ||
         (message.fileName?.toLowerCase().endsWith('.gif') ?? false);
-    final Widget image =
-        message.gifUrl != null && isAllowedRemoteMediaUrl(message.gifUrl)
-        // A peer's GIF waits for a tap: fetching it on sight would tell the
-        // GIF host this device's IP address and when the chat was opened.
-        ? ZenRemoteGif(
-            url: message.gifUrl!,
-            chosenByUser: message.isOutgoing,
-            width: double.infinity,
-            height: 220,
-            errorBuilder: _buildImageError,
-          )
-        : isGifFile && message.attachmentBytes != null
+    final Widget image = isGifFile && message.attachmentBytes != null
         ? ZenAnimatedImage(
             bytes: message.attachmentBytes,
             width: double.infinity,

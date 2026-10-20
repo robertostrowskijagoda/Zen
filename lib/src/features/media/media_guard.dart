@@ -15,7 +15,10 @@ import 'package:zen/src/core/utils/safe_file_name.dart';
 ///   phone's own image decoder (where image exploits live, like the WebP
 ///   hole of 2023) only ever sees a fresh file made here, without metadata.
 ///   Pictures too large to be a photo (decompression bombs) are refused
-///   before they are decoded.
+///   before they are decoded. An animated GIF is not re-encoded (that would
+///   flatten it to one frame): its blocks are walked and it is accepted only
+///   when complete and within [kMaxGifBytes], [kMaxGifSide], [kMaxGifFrames]
+///   and [kMaxGifTotalPixels]; otherwise it becomes a plain file.
 /// * **Videos and audio** cannot be re-encoded on the phone, so their
 ///   container is checked: a known format, and a structure that adds up
 ///   (no boxes reaching past the end of the file). Anything else becomes a
@@ -30,6 +33,19 @@ const int kMaxIncomingImagePixels = 40 * 1000 * 1000;
 
 /// The longest side of a picture after it is re-encoded.
 const int kMaxIncomingImageSide = 2560;
+
+/// The largest animated GIF accepted, in bytes.
+const int kMaxGifBytes = 12 * 1024 * 1024;
+
+/// The largest GIF canvas accepted, in pixels per side.
+const int kMaxGifSide = 2560;
+
+/// The most frames an accepted GIF may have.
+const int kMaxGifFrames = 400;
+
+/// The most pixels an accepted GIF may have summed over all its frames
+/// (frames x canvas): bounds the memory and time of playing it.
+const int kMaxGifTotalPixels = 200 * 1000 * 1000;
 
 /// Pictures above this many bytes are re-encoded in a separate isolate.
 const int _isolateThresholdBytes = 32 * 1024;
@@ -72,7 +88,15 @@ Future<GuardedMedia> guardIncomingMedia(
   final MediaKind actual = sniffMediaKind(bytes);
   switch (declared) {
     case MediaKind.image:
-      if (actual == MediaKind.image) {
+      if (isAcceptableGif(bytes)) {
+        return GuardedMedia(
+          bytes: bytes,
+          kind: MediaKind.image,
+          mimeType: 'image/gif',
+          fileName: _withExtension(name, 'gif'),
+        );
+      }
+      if (actual == MediaKind.image && !_isGif(bytes)) {
         final Uint8List? clean = bytes.length > _isolateThresholdBytes
             ? await Isolate.run(() => reencodeIncomingImage(bytes))
             : reencodeIncomingImage(bytes);
@@ -235,6 +259,91 @@ String? sniffMimeType(Uint8List bytes) {
     return 'application/pdf';
   }
   return null;
+}
+
+/// Whether [bytes] are a well-formed GIF within the limits: the `GIF87a` or
+/// `GIF89a` signature, a canvas of at most [kMaxGifSide] a side, between 1
+/// and [kMaxGifFrames] frames, at most [kMaxGifTotalPixels] pixels over all
+/// frames, every block inside the file, and the trailer at the end.
+/// Checked by walking the blocks, without decoding any pixels.
+bool isAcceptableGif(Uint8List bytes) {
+  final int length = bytes.length;
+  if (length < 14 || length > kMaxGifBytes) {
+    return false;
+  }
+  final bool signature =
+      _isGif(bytes) &&
+      (bytes[4] == 0x37 || bytes[4] == 0x39) &&
+      bytes[5] == 0x61;
+  if (!signature) {
+    return false;
+  }
+  final int width = bytes[6] | (bytes[7] << 8);
+  final int height = bytes[8] | (bytes[9] << 8);
+  if (width <= 0 ||
+      height <= 0 ||
+      width > kMaxGifSide ||
+      height > kMaxGifSide) {
+    return false;
+  }
+  final int packed = bytes[10];
+  int offset = 13;
+  if ((packed & 0x80) != 0) {
+    offset += 3 * (1 << ((packed & 0x07) + 1));
+  }
+  // Skips a chain of data sub-blocks; the new offset, or -1 if truncated.
+  int skipSubBlocks(int at) {
+    int i = at;
+    while (true) {
+      if (i >= length) {
+        return -1;
+      }
+      final int size = bytes[i];
+      i += 1 + size;
+      if (size == 0) {
+        return i <= length ? i : -1;
+      }
+    }
+  }
+
+  int frames = 0;
+  while (offset < length) {
+    final int block = bytes[offset];
+    if (block == 0x3B) {
+      // Trailer: must be the last byte.
+      return offset == length - 1 &&
+          frames >= 1 &&
+          frames * width * height <= kMaxGifTotalPixels;
+    }
+    if (block == 0x21) {
+      if (offset + 2 > length) {
+        return false;
+      }
+      offset = skipSubBlocks(offset + 2);
+    } else if (block == 0x2C) {
+      if (offset + 10 > length || ++frames > kMaxGifFrames) {
+        return false;
+      }
+      final int framePacked = bytes[offset + 9];
+      final int frameWidth = bytes[offset + 5] | (bytes[offset + 6] << 8);
+      final int frameHeight = bytes[offset + 7] | (bytes[offset + 8] << 8);
+      if (frameWidth > width || frameHeight > height) {
+        return false;
+      }
+      offset += 10;
+      if ((framePacked & 0x80) != 0) {
+        offset += 3 * (1 << ((framePacked & 0x07) + 1));
+      }
+      // The LZW minimum code size byte, then the pixel data.
+      offset = offset >= length ? -1 : skipSubBlocks(offset + 1);
+    } else {
+      return false;
+    }
+    if (offset < 0) {
+      return false;
+    }
+  }
+  return false;
 }
 
 /// Re-encodes a picture from someone else: decoded here (pure Dart), only
