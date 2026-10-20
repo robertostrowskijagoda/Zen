@@ -141,6 +141,11 @@ final class FlatProfile {
   /// Longest photo accepted in a profile (base64 characters).
   static const int maxPhotoChars = 100 * 1024;
 
+  /// Most residents' phones a profile may name: everything for a flat
+  /// goes to each of them, so a longer list would make other phones send
+  /// to addresses the profile's maker picked.
+  static const int maxMembers = 32;
+
   /// The household's public key (its identity).
   final String key;
 
@@ -262,7 +267,8 @@ final class FlatProfile {
     final Object? about = json['ab'];
     final Object? place = json['pl'];
     final Object? photo = json['ph'];
-    if (photo is String && photo.length > maxPhotoChars) {
+    if ((photo is String && photo.length > maxPhotoChars) ||
+        (members is List && members.length > maxMembers)) {
       return null;
     }
     return FlatProfile(
@@ -775,6 +781,59 @@ final class NearbyFlatInvite {
         : NearbyFlatInvite(
             door: door,
             text: json['t'] as String,
+            at: json['at'] as int,
+          );
+  }
+}
+
+/// Someone scanned our door and knocked (§18.2): nothing goes back to them
+/// until a resident lets them in, so the knock alone tells them nothing
+/// about who lives here.
+@immutable
+final class FlatKnock {
+  const FlatKnock({
+    required this.profile,
+    required this.sender,
+    required this.roster,
+    required this.at,
+  });
+
+  /// The knocking flat's profile (signed, checked when it came).
+  final FlatProfile profile;
+
+  /// The phone that knocked.
+  final String sender;
+
+  /// Their residents' own keys, pinned when they are let in.
+  final Map<String, String> roster;
+  final int at;
+
+  String get key => profile.key;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'p': profile.toJson(),
+    'a': sender,
+    'rk': roster,
+    'at': at,
+  };
+
+  static FlatKnock? fromJson(Object? json) {
+    if (json is! Map || json['a'] is! String || json['at'] is! int) {
+      return null;
+    }
+    final FlatProfile? profile = FlatProfile.fromJson(json['p']);
+    final Object? roster = json['rk'];
+    return profile == null
+        ? null
+        : FlatKnock(
+            profile: profile,
+            sender: json['a'] as String,
+            roster: <String, String>{
+              if (roster is Map)
+                for (final MapEntry<dynamic, dynamic> e in roster.entries)
+                  if (e.key is String && e.value is String)
+                    e.key as String: e.value as String,
+            },
             at: json['at'] as int,
           );
   }

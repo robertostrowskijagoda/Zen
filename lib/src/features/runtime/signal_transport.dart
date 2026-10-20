@@ -45,9 +45,14 @@ final class SignalTransportFrame {
   final int receivedAtMillis;
 
   /// It came to the flat's door address (a knock on the door sticker,
-  /// §18.2), not to this phone's own address.
+  /// §18.2), not to this phone's own address. Such frames go only to the
+  /// neighbours section (`RuntimeNodeRuntime.doorFrames`), never to
+  /// [SignalTransport.frames].
   final bool door;
 }
+
+/// The only frame the flat's door takes: a knock (`flat_hello`, §18.2).
+const String kFlatKnockType = 'flat_hello';
 
 abstract interface class SignalTransport {
   Stream<SignalTransportFrame> get frames;
@@ -123,6 +128,7 @@ class MemorySignalTransport implements SignalTransport {
     required String from,
     required Map<String, dynamic> payload,
     int? receivedAtMillis,
+    bool door = false,
   }) async {
     if (!_started) {
       return;
@@ -133,6 +139,7 @@ class MemorySignalTransport implements SignalTransport {
         payload: Map<String, dynamic>.from(payload),
         receivedAtMillis:
             receivedAtMillis ?? DateTime.now().millisecondsSinceEpoch,
+        door: door,
       ),
     );
   }

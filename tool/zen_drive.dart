@@ -345,13 +345,14 @@ Future<void> flatsScenario(List<int> ports) async {
   for (final int p in ports.skip(1)) {
     await call(p, '/x/flat/scan', <String, dynamic>{'code': door['code']});
   }
-  await until(
-    'wszyscy są sąsiadami pierwszego',
-    ports.skip(1).toList(),
-    (int p) async =>
-        (((await call(p, '/x/state'))['flat']
-                    as Map<String, dynamic>)['neighbors']
-                as List<dynamic>)
-            .isNotEmpty,
-  );
+  await until('wszyscy są sąsiadami pierwszego', ports.skip(1).toList(), (
+    int p,
+  ) async {
+    // The first flat lets in whoever knocked.
+    await call(ports.first, '/x/flat/accept');
+    return (((await call(p, '/x/state'))['flat']
+                as Map<String, dynamic>)['neighbors']
+            as List<dynamic>)
+        .isNotEmpty;
+  });
 }

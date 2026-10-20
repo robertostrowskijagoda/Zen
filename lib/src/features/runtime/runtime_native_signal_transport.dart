@@ -485,6 +485,24 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   final bool _previewMode;
   final StreamController<SignalTransportFrame> _frames =
       StreamController<SignalTransportFrame>.broadcast();
+  final StreamController<SignalTransportFrame> _doorFrames =
+      StreamController<SignalTransportFrame>.broadcast();
+
+  /// Knocks on the flat's door (§18.2), for the neighbours section only.
+  /// They never reach [frames]: nothing else in the app (the ledger, the
+  /// relay layer, friends, calls) may answer what came to the door, or the
+  /// answer would tell the knocker whose door it is.
+  Stream<SignalTransportFrame> get doorFrames => _doorFrames.stream;
+
+  void _forward(SignalTransportFrame frame) {
+    if (!frame.door) {
+      _frames.add(frame);
+    } else if (frame.payload['type'] == kFlatKnockType) {
+      // The bridge lets only knocks through the door; anything else that
+      // claims to come from it is dropped here too.
+      _doorFrames.add(frame);
+    }
+  }
 
   /// Backoff schedule for the self-healing restart loop. The node binds a
   /// fixed peering port, so a start can fail for a while after a crash or a
@@ -765,7 +783,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
           return;
         }
         _forwardingSubscription = session.transport.frames.listen(
-          _frames.add,
+          _forward,
           onError: _frames.addError,
         );
         _session = session;
@@ -937,6 +955,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       context: 'Runtime transport shutdown failed',
     );
     _frames.close();
+    _doorFrames.close();
     super.dispose();
   }
 }

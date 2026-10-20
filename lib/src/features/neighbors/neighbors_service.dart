@@ -11,6 +11,7 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/neighbors/flat_model.dart';
+import 'package:zen/src/features/relay/relay_engine.dart' show kReliableIdKey;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -85,6 +86,18 @@ const Duration kNearbyInviteLife = Duration(days: 3);
 /// What happened to a scanned door code.
 enum FlatScan { sent, own, noFlat, alreadyNeighbor }
 
+/// How long a knock on the door waits for a resident to let them in or
+/// not (§18.2); after that it is gone, as if refused.
+const Duration kKnockLife = Duration(minutes: 10);
+
+/// How long a knock already answered (let in, refused, expired) is
+/// remembered, so the knocker's retries of the same knock do not ask again:
+/// as long as a sender retries it (`RelayConfig.messageTtl`).
+const Duration kKnockMemory = Duration(days: 14);
+
+/// At most this many knocks wait at once; the oldest goes first.
+const int kMaxKnocks = 20;
+
 /// A resident key a neighbour has known at least this long counts when a
 /// household announces a new key (§18.1). A key that showed up just before
 /// could have been slipped in by the phone being removed.
@@ -155,6 +168,14 @@ final class NeighborsService extends ChangeNotifier {
 
   /// Doors scanned, waiting for the flat's answer (key → code).
   final Map<String, FlatDoorCode> pending = <String, FlatDoorCode>{};
+
+  /// Knocks on our door waiting for a resident (flat key → knock), see
+  /// [knocks].
+  final Map<String, FlatKnock> _knocks = <String, FlatKnock>{};
+
+  /// Knocks already seen ("sender|retry id" → until when), see
+  /// [kKnockMemory].
+  final Map<String, int> _knocksSeen = <String, int>{};
 
   /// Doors that turned out stale (key → name).
   final Map<String, String> staleDoors = <String, String>{};
@@ -375,6 +396,17 @@ final class NeighborsService extends ChangeNotifier {
       ..sort((NearbyFlatInvite a, NearbyFlatInvite b) => b.at.compareTo(a.at));
   }
 
+  /// Knocks on our door waiting for a resident: "{name} puka do drzwi",
+  /// let in ([acceptKnock]) or not ([rejectKnock]). Each one waits
+  /// [kKnockLife].
+  List<FlatKnock> get knocks {
+    final int t = _now();
+    return _knocks.values
+        .where((FlatKnock k) => t - k.at < kKnockLife.inMilliseconds)
+        .toList()
+      ..sort((FlatKnock a, FlatKnock b) => a.at.compareTo(b.at));
+  }
+
   String _newId([int length = 12]) => List<String>.generate(
     length,
     (_) => _random.nextInt(36).toRadixString(36),
@@ -422,6 +454,19 @@ final class NeighborsService extends ChangeNotifier {
     _doorAt = json['doorAt'] is int ? json['doorAt'] as int : 0;
     _doorKey = json['dk'] is String ? json['dk'] as String : null;
     _doorKeyFor = json['dkFor'] is String ? json['dkFor'] as String : '';
+    _knocks.clear();
+    final Object? knocks = json['knock'];
+    if (knocks is List) {
+      for (final Object? item in knocks) {
+        final FlatKnock? k = FlatKnock.fromJson(item);
+        if (k != null) {
+          _knocks[k.key] = k;
+        }
+      }
+    }
+    _knocksSeen
+      ..clear()
+      ..addAll(_intMap(json['knockSeen']));
     shareWithScanners = json['share'] == true;
     _shareAt = json['shareAt'] is int ? json['shareAt'] as int : 0;
     joining = json['joining'] == true;
@@ -592,6 +637,10 @@ final class NeighborsService extends ChangeNotifier {
     _nearby.removeWhere(
       (NearbyFlatInvite i) => t - i.at >= kNearbyInviteLife.inMilliseconds,
     );
+    _knocks.removeWhere(
+      (String _, FlatKnock k) => t - k.at >= kKnockLife.inMilliseconds,
+    );
+    _knocksSeen.removeWhere((String _, int until) => until <= t);
     // Keep the newest 300 messages per neighbour.
     final Map<String, List<FlatMessage>> byFlat = <String, List<FlatMessage>>{};
     for (final FlatMessage m in _messages.values) {
@@ -638,6 +687,10 @@ final class NeighborsService extends ChangeNotifier {
           'near': <Map<String, dynamic>>[
             for (final NearbyFlatInvite i in _nearby) i.toJson(),
           ],
+          'knock': <Map<String, dynamic>>[
+            for (final FlatKnock k in _knocks.values) k.toJson(),
+          ],
+          'knockSeen': _knocksSeen,
           'names': _names,
           'kick': <String, dynamic>{
             for (final MapEntry<String, Set<String>> e in _kickVotes.entries)
@@ -1065,6 +1118,7 @@ final class NeighborsService extends ChangeNotifier {
     _nearby.clear();
     pending.clear();
     staleDoors.clear();
+    _knocks.clear();
     _reveals.clear();
     _revealedTo.clear();
     _switches.clear();
@@ -1307,7 +1361,8 @@ final class NeighborsService extends ChangeNotifier {
       return Future<bool>.value(false);
     }
     if (frame.door && type != FlatTypes.hello) {
-      // The door takes knocks only (the bridge lets nothing else in).
+      // The door takes knocks only (the bridge and the runtime let nothing
+      // else in).
       return Future<bool>.value(false);
     }
     final Completer<bool> done = Completer<bool>();
@@ -1379,7 +1434,13 @@ final class NeighborsService extends ChangeNotifier {
     }
     switch (type) {
       case FlatTypes.hello:
-        await _onHello(from, sender, b, atDoor: frame.door);
+        await _onHello(
+          from,
+          sender,
+          b,
+          atDoor: frame.door,
+          retryId: p[kReliableIdKey],
+        );
       case FlatTypes.nope:
         final FlatDoorCode? code = pending.remove(from);
         if (code != null) {
@@ -1446,6 +1507,7 @@ final class NeighborsService extends ChangeNotifier {
     String sender,
     Map<String, dynamic> b, {
     bool atDoor = false,
+    Object? retryId,
   }) async {
     final FlatProfile? theirs = await _verifiedProfile(from, b['p']);
     if (theirs == null) {
@@ -1466,21 +1528,84 @@ final class NeighborsService extends ChangeNotifier {
       );
       return;
     }
-    final NeighborFlat f = _addNeighbor(theirs)..scannedUs = true;
-    _pinResidents(f, theirs.members, b['rk']);
+    // The knocker's phone retries the same knock until it hears back; one
+    // already let in, refused or expired does not ask again.
+    final int now = _now();
+    if (retryId is String && retryId.isNotEmpty) {
+      final String seen = '$sender|$retryId';
+      if ((_knocksSeen[seen] ?? 0) > now) {
+        return;
+      }
+      _knocksSeen.remove(seen);
+      _knocksSeen[seen] = now + kKnockMemory.inMilliseconds;
+      while (_knocksSeen.length > 500) {
+        _knocksSeen.remove(_knocksSeen.keys.first);
+      }
+    }
+    if (_neighbors.containsKey(from)) {
+      // Neighbours already: they have our profile, so answering tells them
+      // nothing new.
+      final NeighborFlat f = _addNeighbor(theirs)..scannedUs = true;
+      _pinResidents(f, theirs.members, b['rk']);
+      await _save();
+      await _pushProfile(to: <NeighborFlat>[f]);
+      await _syncHouse();
+      return;
+    }
+    final FlatKnock? waiting = _knocks[from];
+    final bool fresh =
+        waiting == null || now - waiting.at >= kKnockLife.inMilliseconds;
+    _knocks[from] = FlatKnock(
+      profile: theirs,
+      sender: sender,
+      roster: _keyMap(b['rk']),
+      at: waiting == null || fresh ? now : waiting.at,
+    );
+    while (_knocks.length > kMaxKnocks) {
+      final FlatKnock oldest = _knocks.values.reduce(
+        (FlatKnock a, FlatKnock c) => a.at <= c.at ? a : c,
+      );
+      _knocks.remove(oldest.key);
+    }
+    await _save();
+    if (!fresh) {
+      return;
+    }
+    await host.notify(
+      RuntimeSystemNotification(
+        id: 'flat-knock-${from.hashCode}-$now',
+        title: t('{name} puka do drzwi', {'name': theirs.name}),
+        body: t('Otwórz Sąsiadów, żeby ich wpuścić albo odmówić.'),
+        createdAtMillis: now,
+        category: RuntimeSystemNotificationCategory.social,
+        slotKey: 'flat-knock',
+      ),
+    );
+  }
+
+  /// Lets in the flat that knocked ([knocks]): only now do both flats
+  /// exchange profiles. False when the knock is gone (expired, or another
+  /// answer came first).
+  Future<bool> acceptKnock(String key) async {
+    final FlatKnock? k = _knocks.remove(key);
+    if (k == null || _now() - k.at >= kKnockLife.inMilliseconds) {
+      await _save();
+      return false;
+    }
+    final NeighborFlat f = _addNeighbor(k.profile)..scannedUs = true;
+    _pinResidents(f, k.profile.members, k.roster);
     await _save();
     await _pushProfile(to: <NeighborFlat>[f]);
     await _syncHouse();
-    await host.notify(
-      RuntimeSystemNotification(
-        id: 'flat-hello-${from.hashCode}-${_now()}',
-        title: t('Nowi sąsiedzi'),
-        body: t('{name} zeskanowali Wasz kod z drzwi.', {'name': theirs.name}),
-        createdAtMillis: _now(),
-        category: RuntimeSystemNotificationCategory.social,
-        slotKey: 'flat-hello',
-      ),
-    );
+    return true;
+  }
+
+  /// Leaves the knock unanswered: the knocker learns nothing, not even
+  /// that someone said no.
+  Future<void> rejectKnock(String key) async {
+    if (_knocks.remove(key) != null) {
+      await _save();
+    }
   }
 
   NeighborFlat _addNeighbor(FlatProfile p) {
@@ -1701,7 +1826,11 @@ final class NeighborsService extends ChangeNotifier {
   Future<void> _onJoin(String sender, Map<String, dynamic> b) async {
     final Object? a = b['a'];
     final FlatProfile? p = _profile;
-    if (p == null || a is! String || _n(a) != sender) {
+    if (p == null ||
+        a is! String ||
+        _n(a) != sender ||
+        (!p.members.contains(sender) &&
+            p.members.length >= FlatProfile.maxMembers)) {
       return;
     }
     final Object? name = b['n'];

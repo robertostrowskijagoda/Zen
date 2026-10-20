@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -6,6 +8,7 @@ import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/runtime/signal_transport.dart';
 
 /// "Sekcja sąsiedzka" (§18).
 final Provider<NeighborsService> neighborsServiceProvider =
@@ -32,6 +35,12 @@ final Provider<NeighborsService> neighborsServiceProvider =
       runtime.addListener(onRuntime);
       unawaitedLogged(neighbors.load(), context: 'Odczyt sąsiadów');
       listenFrames(ref, neighbors.handle, 'Sąsiedzi');
+      // Knocks on the door come only here (never to the other services).
+      final StreamSubscription<SignalTransportFrame> knocks = runtime.doorFrames
+          .listen(
+            (SignalTransportFrame f) =>
+                unawaitedLogged(neighbors.handle(f), context: 'Pukanie'),
+          );
       // Invitations from flats nearby come over Bluetooth.
       final NearbyService nearby = ref.watch(nearbyServiceProvider);
       void onWave(Map<dynamic, dynamic> json) => unawaitedLogged(
@@ -40,6 +49,7 @@ final Provider<NeighborsService> neighborsServiceProvider =
       );
       nearby.otherWaveHandlers.add(onWave);
       ref.onDispose(() {
+        unawaited(knocks.cancel());
         nearby.otherWaveHandlers.remove(onWave);
         runtime.removeListener(onRuntime);
         neighbors.removeListener(syncDoorKey);

@@ -765,6 +765,7 @@ class _FlatHome extends ConsumerWidget {
     final Color tone = neighborsTone(zen);
     final List<NeighborFlat> neighbors = service.neighbors;
     final List<NearbyFlatInvite> near = service.nearbyInvites;
+    final List<FlatKnock> knocks = service.knocks;
     final int members = p.members.length;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
@@ -928,6 +929,75 @@ class _FlatHome extends ConsumerWidget {
             ],
           ),
         ),
+        if (knocks.isNotEmpty) ...<Widget>[
+          ZenSection(t('Pukają do drzwi')),
+          for (final FlatKnock k in knocks)
+            ZenCard(
+              key: Key('flat-knock-${k.profile.label}'),
+              tone: tone,
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      if (k.profile.photo.isNotEmpty)
+                        FlatAvatar(profile: k.profile, size: 40)
+                      else
+                        ZenIconBadge(
+                          icon: Icons.doorbell_rounded,
+                          tone: tone,
+                          size: 40,
+                        ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _TwoLines(
+                          title: t('{name} puka do drzwi', {
+                            'name': k.profile.label,
+                          }),
+                          subtitle: t(
+                            'Dopiero gdy ich wpuścisz, wymienicie się profilami.',
+                          ),
+                          maxSubtitleLines: 3,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.end,
+                    children: <Widget>[
+                      TextButton(
+                        key: Key('flat-knock-reject-${k.profile.label}'),
+                        onPressed: () => unawaited(service.rejectKnock(k.key)),
+                        child: Text(t('Odmów')),
+                      ),
+                      FilledButton.tonalIcon(
+                        key: Key('flat-knock-accept-${k.profile.label}'),
+                        onPressed: () => unawaited(() async {
+                          final bool done = await service.acceptKnock(k.key);
+                          if (!done && context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(t('To pukanie już wygasło.')),
+                              ),
+                            );
+                          }
+                        }()),
+                        icon: const Icon(
+                          Icons.door_front_door_rounded,
+                          size: 18,
+                        ),
+                        label: Text(t('Wpuść')),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+        ],
         if (near.isNotEmpty) ...<Widget>[
           ZenSection(t('Zaproszenia w pobliżu')),
           for (final NearbyFlatInvite i in near)
@@ -1033,7 +1103,7 @@ class _FlatHome extends ConsumerWidget {
                 Expanded(
                   child: _TwoLines(
                     title: c.name,
-                    subtitle: t('Czekam, aż ich telefon odpowie…'),
+                    subtitle: t('Czekam, aż domownicy otworzą…'),
                   ),
                 ),
               ],

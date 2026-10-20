@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/rand/v2"
 	"strings"
@@ -29,6 +30,19 @@ func TestDoorKnockFilter(t *testing.T) {
 		`["flat_hello"]`,
 		`{"type":"flat_hello","_zenEncoding":"zstd","_zenPayload":"AAAA"}`,
 		`{"_zenEncoding":"gzip","_zenPayload":"AAAA"}`,
+		// The app reads "type" exactly; encoding/json's struct decoding
+		// matched these as a knock (Z2-2).
+		`{"type":"lg_heads","TYPE":"flat_hello"}`,
+		`{"TYPE":"flat_hello"}`,
+		`{"Type":"flat_hello","b":{}}`,
+		`{"type":"flat_hello","Type":"lg_want"}`,
+		`{"type":"lg_hello","type":"flat_hello"}`,
+		`{"type":"flat_hello","type":"lg_hello"}`,
+		`{"type":"flat_hello","tYpE":"x"}`,
+		`{"type":"flat_hello"} {"type":"lg_hello"}`,
+		`{"type":"flat_hello"}x`,
+		`{"type":["flat_hello"]}`,
+		`{"_zenEncoding":7,"type":"flat_hello"}`,
 	} {
 		if isDoorKnock(other) {
 			t.Fatalf("%s must not pass the door", other)
@@ -58,6 +72,20 @@ func TestDoorKnockFilter(t *testing.T) {
 	}
 	if isDoorKnock(wrap(`{"type":"flat_msg","p":"` + photo + `"}`)) {
 		t.Fatal("a compressed frame of another type must not pass")
+	}
+	if isDoorKnock(wrap(`{"type":"lg_hello","TYPE":"flat_hello"}`)) {
+		t.Fatal("a compressed frame with a case-variant type must not pass")
+	}
+	if !isDoorKnock(`{"type":"flat_hello","_zenEncoding":""}`) || !isDoorKnock(`{"type":"flat_\u0068ello"}`) {
+		t.Fatal("the app reads these as plain knocks")
+	}
+	caseWrapped, _ := json.Marshal(map[string]string{
+		"_ZENENCODING": "zstd",
+		"_zenPayload":  base64.StdEncoding.EncodeToString(zstdEncoder.EncodeAll([]byte(`{"type":"flat_hello"}`), nil)),
+		"type":         "lg_hello",
+	})
+	if isDoorKnock(string(caseWrapped)) {
+		t.Fatal("a case-variant wrapper key must not pass")
 	}
 	if isDoorKnock(wrap(`{"type":"flat_hello","p":"` + strings.Repeat("a", maxDoorKnockBytes) + `"}`)) {
 		t.Fatal("a knock inflating past the limit must not pass")
@@ -182,6 +210,29 @@ func TestDoorTakesOnlyKnocksAndHandsThemToTheApp(t *testing.T) {
 		t.Fatalf("the door let another frame in: %+v", extra)
 	}
 
+	// Mesh queries to the door (any node's debug_remoteGet*, getNodeInfo)
+	// get no answer: its peers would name the resident's main node.
+	admin := capturedAdmin{}
+	if err := node.core.SetAdmin(admin); err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+	query := json.RawMessage(`{"key":"` + hex.EncodeToString(door.core.PublicKey()) + `"}`)
+	answers := make(chan string, len(admin))
+	for name, handler := range admin {
+		go func() {
+			if reply, err := handler(query); err == nil {
+				answers <- fmt.Sprintf("%s answered: %v", name, reply)
+				return
+			}
+			answers <- ""
+		}()
+	}
+	for range admin {
+		if answer := <-answers; answer != "" {
+			t.Fatal(answer)
+		}
+	}
+
 	// A new key ("Nowy kod") is a new door; the old address is gone.
 	rotated, err := node.startDoor(strings.Repeat("43", 32))
 	if err != nil {
@@ -206,6 +257,14 @@ func TestDoorTakesOnlyKnocksAndHandsThemToTheApp(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// capturedAdmin keeps the core's admin handlers so a test can call them.
+type capturedAdmin map[string]core.AddHandlerFunc
+
+func (admin capturedAdmin) AddHandler(name, _ string, _ []string, handler core.AddHandlerFunc) error {
+	admin[name] = handler
+	return nil
 }
 
 func stillPeered(node *bridgeNode, uri string) bool {

@@ -78,6 +78,10 @@ final class _Phone implements EventHost {
   }
 
   bool online = true;
+
+  /// A resident lets in whoever knocks right away (§18.2); off, knocks wait
+  /// for [NeighborsService.acceptKnock].
+  bool autoOpen = true;
   final List<RuntimeSystemNotification> shown = <RuntimeSystemNotification>[];
   final List<Map<String, dynamic>> sent = <Map<String, dynamic>>[];
 
@@ -107,6 +111,10 @@ final class _Phone implements EventHost {
         door: door,
       ),
     );
+    final Object? knocker = payload['f'];
+    if (door && other.autoOpen && knocker is String) {
+      await other.service.acceptKnock(knocker);
+    }
   }
 
   @override
@@ -208,6 +216,99 @@ void main() {
     expect(bartek.service.neighbors.single.profile.name, 'Nowakowie');
   });
 
+  test('a knock waits for a resident: nothing goes back before "Wpuść", '
+      'refused and expired knocks stay unanswered (§18.2)', () async {
+    final Map<String, _Phone> net = <String, _Phone>{};
+    final _Phone ania = _Phone(net, 'ania')..autoOpen = false;
+    final _Phone bartek = _Phone(net, 'bartek');
+    final _Phone cyryl = _Phone(net, 'cyryl');
+    await ania.service.createFlat('Nowakowie', place: 'm. 12');
+    await bartek.service.createFlat('Bartkowie');
+    await cyryl.service.createFlat('Cyryl');
+    final String bartekKey = bartek.service.profile!.key;
+
+    final int before = ania.sent.length;
+    expect(
+      await bartek.service.scanDoor(ania.service.doorCode!),
+      FlatScan.sent,
+    );
+    // Not a word from Ania's phone yet: an answer would say whose door it is.
+    expect(ania.sent.length, before);
+    expect(ania.service.neighbors, isEmpty);
+    expect(bartek.service.neighbors, isEmpty);
+    expect(bartek.service.pending.keys, <String>[ania.service.profile!.key]);
+    expect(ania.service.knocks.single.key, bartekKey);
+    expect(ania.shown.last.title, 'Bartkowie puka do drzwi');
+    // The knock waits on disk too (the background service took it).
+    final NeighborsService again = NeighborsService(
+      host: ania,
+      disk: ania.disk,
+      now: () => ania.clock,
+    );
+    await again.load();
+    expect(again.knocks.single.profile.name, 'Bartkowie');
+
+    // "Wpuść": now the profiles go both ways.
+    expect(await ania.service.acceptKnock(bartekKey), isTrue);
+    expect(ania.service.knocks, isEmpty);
+    expect(ania.service.neighbors.single.scannedUs, isTrue);
+    expect(bartek.service.neighbors.single.profile.name, 'Nowakowie');
+    expect(bartek.service.pending, isEmpty);
+
+    // "Odmów": nothing goes back, and the knocker's retries of the same
+    // knock (same retry id) do not ask again.
+    await cyryl.service.scanDoor(ania.service.doorCode!);
+    final Map<String, dynamic> knock = <String, dynamic>{
+      ...cyryl.sent.last,
+      '_rid': 'r1',
+    };
+    final String cyrylKey = cyryl.service.profile!.key;
+    final SignalTransportFrame retried = SignalTransportFrame(
+      from: cyryl.address,
+      payload: knock,
+      receivedAtMillis: 0,
+      door: true,
+    );
+    await ania.service.handle(retried);
+    expect(ania.service.knocks.single.key, cyrylKey);
+    final int sentBefore = ania.sent.length;
+    await ania.service.rejectKnock(cyrylKey);
+    expect(ania.service.knocks, isEmpty);
+    await ania.service.handle(retried);
+    expect(ania.service.knocks, isEmpty);
+    expect(ania.sent.length, sentBefore);
+    expect(cyryl.service.neighbors, isEmpty);
+
+    // A new scan (a new retry id) asks again; after ten minutes it is gone.
+    await ania.service.handle(
+      SignalTransportFrame(
+        from: cyryl.address,
+        payload: <String, dynamic>{...knock, '_rid': 'r2'},
+        receivedAtMillis: 0,
+        door: true,
+      ),
+    );
+    expect(ania.service.knocks.single.key, cyrylKey);
+    ania.clock += kKnockLife.inMilliseconds;
+    expect(ania.service.knocks, isEmpty);
+    expect(await ania.service.acceptKnock(cyrylKey), isFalse);
+    expect(ania.service.neighbors, hasLength(1));
+    expect(cyryl.service.neighbors, isEmpty);
+
+    // A knock that is not one is never taken at the door.
+    expect(
+      await ania.service.handle(
+        SignalTransportFrame(
+          from: cyryl.address,
+          payload: <String, dynamic>{...knock, 'type': FlatTypes.message},
+          receivedAtMillis: 0,
+          door: true,
+        ),
+      ),
+      isFalse,
+    );
+  });
+
   test('the small chat about an invitation stays on its thread', () async {
     final Map<String, _Phone> net = <String, _Phone>{};
     final _Phone ania = _Phone(net, 'ania');
@@ -268,7 +369,7 @@ void main() {
     expect(atAnia.profile.name, 'Bartkowie, m. 14');
     expect(atAnia.scannedUs, isTrue);
     expect(atAnia.weScanned, isFalse);
-    expect(ania.shown.last.title, 'Nowi sąsiedzi');
+    expect(ania.shown.last.title, 'Bartkowie, m. 14 puka do drzwi');
     expect(await bartek.service.scanDoor(door), FlatScan.alreadyNeighbor);
     await cyryl.service.scanDoor(door);
 
@@ -664,6 +765,14 @@ void main() {
     final Map<String, dynamic> huge = seen.toJson()
       ..['ph'] = 'A' * (FlatProfile.maxPhotoChars + 4);
     expect(FlatProfile.fromJson(huge), isNull);
+    // So is a list of residents' phones long enough to make other phones
+    // send to addresses its maker picked.
+    final Map<String, dynamic> crowded = seen.toJson()
+      ..['m'] = <String>[
+        for (int i = 0; i <= FlatProfile.maxMembers; i++)
+          addr(i.toRadixString(16)),
+      ];
+    expect(FlatProfile.fromJson(crowded), isNull);
 
     expect(await ania.service.setPhoto(null), isTrue);
     expect(ania.service.profile!.photo, isEmpty);

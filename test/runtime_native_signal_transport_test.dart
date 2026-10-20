@@ -182,6 +182,57 @@ void main() {
     await runtime.stop();
   });
 
+  test('knocks on the door reach only the door stream; nothing else comes '
+      'through the door (§18.2)', () async {
+    final MemorySignalTransport node = MemorySignalTransport();
+    final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.live(
+      bootstrap: () async => RuntimeNodeSession(
+        transport: node,
+        snapshot: RuntimeTransportSnapshot.started(
+          localAddress: '200:1111:2222:3333:4444:5555:6666:7777',
+          peers: 1,
+        ),
+      ),
+    );
+    addTearDown(runtime.dispose);
+    final List<SignalTransportFrame> frames = <SignalTransportFrame>[];
+    final List<SignalTransportFrame> knocks = <SignalTransportFrame>[];
+    final StreamSubscription<SignalTransportFrame> a = runtime.frames.listen(
+      frames.add,
+    );
+    final StreamSubscription<SignalTransportFrame> b = runtime.doorFrames
+        .listen(knocks.add);
+    addTearDown(a.cancel);
+    addTearDown(b.cancel);
+    await runtime.start();
+
+    await node.injectIncoming(
+      from: '200::1',
+      payload: <String, dynamic>{'type': kFlatKnockType},
+      door: true,
+    );
+    await node.injectIncoming(
+      from: '200::1',
+      payload: <String, dynamic>{'type': 'lg_hello'},
+      door: true,
+    );
+    await node.injectIncoming(
+      from: '200::1',
+      payload: <String, dynamic>{'type': 'lg_hello'},
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(knocks.map((SignalTransportFrame f) => f.payload['type']), <String>[
+      kFlatKnockType,
+    ]);
+    expect(knocks.single.door, isTrue);
+    expect(frames.map((SignalTransportFrame f) => f.payload['type']), <String>[
+      'lg_hello',
+    ]);
+    expect(frames.single.door, isFalse);
+    await runtime.stop();
+  });
+
   test('loadOrCreateNodeConfigJson returns a readable stored config', () async {
     final Directory directory = await Directory.systemTemp.createTemp(
       'zen_node_config',
