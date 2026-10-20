@@ -1,8 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/settings/launcher_disguise.dart';
 
 final Provider<AppSettings> appSettingsInitialStateProvider =
     Provider<AppSettings>((Ref ref) {
@@ -124,12 +126,30 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(secureScreens: value));
   }
 
+  /// Android: switches the launcher icon and name (§14.2) and remembers the
+  /// choice. Returns `false`, changing nothing, when the phone did not take
+  /// the switch.
+  Future<bool> setDisguiseIcon(bool value) async {
+    if (!await ref.read(launcherDisguiseProvider).set(enabled: value)) {
+      return false;
+    }
+    await _save(state.copyWith(disguiseIcon: value));
+    return true;
+  }
+
   Future<void> setAllowNoAppPassword(bool value) async {
     await _save(state.copyWith(allowNoAppPassword: value));
   }
 
   Future<void> setBridgeEnabled(bool value) async {
     await _save(state.copyWith(bridgeEnabled: value));
+  }
+
+  /// "Szukaj znajomych w tej samej sieci Wi-Fi" (§5.1 item 6). The node
+  /// reads it at start, so a running node restarts.
+  Future<void> setLanDiscovery(bool value) async {
+    await _save(state.copyWith(lanDiscovery: value));
+    await ref.read(runtimeNodeRuntimeProvider).restartIfRunning();
   }
 
   /// The first-start permissions step is done (§25.2).
@@ -150,23 +170,6 @@ final class AppSettingsController extends Notifier<AppSettings> {
   /// Who may invite this person to a new group (§8).
   Future<void> setGroupInviteFrom(GroupInviteFrom value) async {
     await _save(state.copyWith(groupInviteFrom: value));
-  }
-
-  /// The age gate's answer (§26.1, §27): a date of birth, or only the
-  /// 18+ confirmation ([birth] `null`). Kept on this device only.
-  Future<void> setAgeGate({DateTime? birth, bool adult = false}) async {
-    await _save(
-      state.copyWith(
-        birthDateMillis: birth == null
-            ? 0
-            : DateTime(
-                birth.year,
-                birth.month,
-                birth.day,
-              ).millisecondsSinceEpoch,
-        adultConfirmed: birth == null && adult,
-      ),
-    );
   }
 
   Future<void> setAutoDownloadMedia(bool value) async {

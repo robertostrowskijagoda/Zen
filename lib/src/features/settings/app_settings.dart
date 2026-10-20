@@ -225,13 +225,13 @@ final class AppSettings {
     this.hideNotificationContent = true,
     this.secureScreens = true,
     this.allowNoAppPassword = false,
+    this.disguiseIcon = false,
     this.bridgeEnabled = true,
     this.permissionsSetupDone = false,
     this.accountSecureOffered = false,
     this.paperBackupDone = false,
     this.groupInviteFrom = GroupInviteFrom.friends,
-    this.birthDateMillis = 0,
-    this.adultConfirmed = false,
+    this.lanDiscovery,
   });
 
   static const int defaultInboxLimitMb = 100;
@@ -272,8 +272,7 @@ final class AppSettings {
   final bool autoDownloadMedia;
 
   /// Automatic downloads (above) happen only on Wi-Fi or a wired network,
-  /// not on mobile data. On for new installs; a settings file written
-  /// before this setting existed keeps its behaviour (off).
+  /// not on mobile data. On by default.
   final bool mediaOnlyOnWifi;
 
   /// Whether media may download on their own right now, given whether the
@@ -289,6 +288,10 @@ final class AppSettings {
   /// account screens, and their content is hidden in the recent-apps view
   /// (§14.1). On by default.
   final bool secureScreens;
+
+  /// Android: the launcher shows a neutral "Notatki" icon and name instead
+  /// of Zen's (§14.2, camouflage). Off by default.
+  final bool disguiseIcon;
 
   /// The user chose to run without an app password (§14.1: it is required
   /// by default). Off by default.
@@ -312,38 +315,13 @@ final class AppSettings {
   /// Who may invite this person to a new group (§8).
   final GroupInviteFrom groupInviteFrom;
 
-  /// Date of birth from the age gate (§26.1, §27), local midnight in
-  /// milliseconds; 0 when not given. Never leaves the device.
-  final int birthDateMillis;
+  /// "Szukaj znajomych w tej samej sieci Wi-Fi" (§5.1 item 6): the
+  /// account's own devices on one network connect directly. `null` until
+  /// the person chooses: then on for computers, off for phones.
+  final bool? lanDiscovery;
 
-  /// The person confirmed being 18 or older instead of giving the date.
-  final bool adultConfirmed;
-
-  /// The age gate was answered (a date or the 18+ confirmation).
-  bool get ageAnswered => adultConfirmed || birthDateMillis != 0;
-
-  /// Whether the person is 18 or older on [now] (Dating and the adult
-  /// sections, §19, §20, §27).
-  bool isAdultAt(DateTime now) {
-    if (adultConfirmed) {
-      return true;
-    }
-    if (birthDateMillis == 0) {
-      return false;
-    }
-    return ageOn(DateTime.fromMillisecondsSinceEpoch(birthDateMillis), now) >=
-        18;
-  }
-
-  /// Full years between [birth] and [now].
-  static int ageOn(DateTime birth, DateTime now) {
-    int years = now.year - birth.year;
-    if (now.month < birth.month ||
-        (now.month == birth.month && now.day < birth.day)) {
-      years--;
-    }
-    return years;
-  }
+  /// Whether LAN discovery runs on this device ([phone]: Android or iOS).
+  bool lanDiscoveryOn({required bool phone}) => lanDiscovery ?? !phone;
 
   /// Longest key accepted; real keys are ~64 characters.
   static const int maximumGifApiKeyLength = 200;
@@ -385,13 +363,13 @@ final class AppSettings {
     bool? hideNotificationContent,
     bool? secureScreens,
     bool? allowNoAppPassword,
+    bool? disguiseIcon,
     bool? bridgeEnabled,
     bool? permissionsSetupDone,
     bool? accountSecureOffered,
     bool? paperBackupDone,
     GroupInviteFrom? groupInviteFrom,
-    int? birthDateMillis,
-    bool? adultConfirmed,
+    bool? lanDiscovery,
   }) {
     return AppSettings(
       inboxLimitMb: normalizeInboxLimitMb(inboxLimitMb ?? this.inboxLimitMb),
@@ -415,13 +393,13 @@ final class AppSettings {
           hideNotificationContent ?? this.hideNotificationContent,
       secureScreens: secureScreens ?? this.secureScreens,
       allowNoAppPassword: allowNoAppPassword ?? this.allowNoAppPassword,
+      disguiseIcon: disguiseIcon ?? this.disguiseIcon,
       bridgeEnabled: bridgeEnabled ?? this.bridgeEnabled,
       permissionsSetupDone: permissionsSetupDone ?? this.permissionsSetupDone,
       accountSecureOffered: accountSecureOffered ?? this.accountSecureOffered,
       paperBackupDone: paperBackupDone ?? this.paperBackupDone,
       groupInviteFrom: groupInviteFrom ?? this.groupInviteFrom,
-      birthDateMillis: birthDateMillis ?? this.birthDateMillis,
-      adultConfirmed: adultConfirmed ?? this.adultConfirmed,
+      lanDiscovery: lanDiscovery ?? this.lanDiscovery,
     );
   }
 
@@ -441,13 +419,13 @@ final class AppSettings {
     'hideNotificationContent': hideNotificationContent,
     'secureScreens': secureScreens,
     'allowNoAppPassword': allowNoAppPassword,
+    'disguiseIcon': disguiseIcon,
     'bridgeEnabled': bridgeEnabled,
     'permissionsSetupDone': permissionsSetupDone,
     'accountSecureOffered': accountSecureOffered,
     'paperBackupDone': paperBackupDone,
     'groupInviteFrom': groupInviteFrom.name,
-    'birthDateMillis': birthDateMillis,
-    'adultConfirmed': adultConfirmed,
+    'lanDiscovery': ?lanDiscovery,
   };
 
   static AppSettings fromJson(Map<String, dynamic> json) {
@@ -476,19 +454,17 @@ final class AppSettings {
       accentTheme: byName(AppAccentTheme.values, 'accentTheme'),
       gifApiKey: pick<String>('gifApiKey'),
       autoDownloadMedia: pick<bool>('autoDownloadMedia'),
-      // A file from before this setting: downloads keep working on mobile
-      // data as they did.
-      mediaOnlyOnWifi: pick<bool>('mediaOnlyOnWifi') ?? false,
+      mediaOnlyOnWifi: pick<bool>('mediaOnlyOnWifi'),
       hideNotificationContent: pick<bool>('hideNotificationContent'),
       secureScreens: pick<bool>('secureScreens'),
       allowNoAppPassword: pick<bool>('allowNoAppPassword'),
+      disguiseIcon: pick<bool>('disguiseIcon'),
       bridgeEnabled: pick<bool>('bridgeEnabled'),
       permissionsSetupDone: pick<bool>('permissionsSetupDone'),
       accountSecureOffered: pick<bool>('accountSecureOffered'),
       paperBackupDone: pick<bool>('paperBackupDone'),
       groupInviteFrom: byName(GroupInviteFrom.values, 'groupInviteFrom'),
-      birthDateMillis: pick<int>('birthDateMillis'),
-      adultConfirmed: pick<bool>('adultConfirmed'),
+      lanDiscovery: pick<bool>('lanDiscovery'),
     );
   }
 

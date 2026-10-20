@@ -88,4 +88,22 @@ void main() {
       expect(persisted.themeMode, AppThemeMode.light);
     },
   );
+
+  test('the LAN discovery choice is saved', () async {
+    final MemoryAppSettingsStore store = MemoryAppSettingsStore();
+    final ProviderContainer container = ProviderContainer(
+      overrides: [appSettingsStoreProvider.overrideWithValue(store)],
+    );
+    addTearDown(container.dispose);
+    container.read(appSettingsControllerProvider);
+    await Future<void>.delayed(Duration.zero);
+
+    // The preview runtime (no node) is not restarted.
+    await container
+        .read(appSettingsControllerProvider.notifier)
+        .setLanDiscovery(false);
+
+    expect(container.read(appSettingsControllerProvider).lanDiscovery, false);
+    expect((await store.load())!.lanDiscoveryOn(phone: false), isFalse);
+  });
 }
