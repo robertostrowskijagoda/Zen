@@ -1,852 +1,336 @@
-# Zmiany
+# Changelog
 
-## 1.10.0 — 14.10.2026 (pierwsze publiczne wydanie)
+## 1.11.0 — 20.10.2026
 
-### Runda 2: języki, Linux i macOS, drugi audyt
-- **21 języków:** polski, angielski, niemiecki, francuski, hiszpański,
-  włoski, portugalski, niderlandzki, czeski, węgierski, rumuński, turecki,
-  rosyjski, ukraiński, arabski (od prawej do lewej), hindi, indonezyjski,
-  wietnamski, chiński, japoński, koreański. Zen sam wybiera język systemu
-  (gdy go nie zna — angielski); **Ustawienia → Język** zmienia go od razu,
-  bez restartu. Ten sam język ma ekran blokady i powiadomienia z usługi
-  w tle. Teksty w kodzie po polsku w `t()` / `tn()` (liczba mnoga według
-  języka), tłumaczenia w `assets/i18n/<kod>.json`; zgodność pilnują
-  `dart run tool/i18n.dart` i `test/i18n_test.dart`.
-- **Linux i macOS:** nowe pliki wydania `Zen-Linux-x64.tar.gz`,
-  `Zen-Linux-arm64.tar.gz` i `Zen-macOS.zip` (Apple Silicon i Intel, od
-  macOS 12), budowane w GitHub Actions, bez podpisu; `SHA256SUMS` liczone ze
-  wszystkich plików wydania (także `.ipa`). CI buduje i na chwilę uruchamia
-  Linuksa przy każdym pushu i pull requeście, macOS przy pushu na `main`.
-  Most Go buduje się sam (`build_linux.sh`, `build_macos.sh`). macOS: Touch
-  ID przez Secure Enclave, ochrona ekranu, bez piaskownicy; Linux: klucz
-  w GNOME Keyring / KWallet, zasobnik przez AppIndicator. Na obu bez
-  Bluetooth, nagrywania rozmów i aparatu; na Linuksie bez odtwarzania
-  głosówek i filmów. Niesprawdzone przed pierwszym przebiegiem CI.
-- **Poprawki z drugiego audytu bezpieczeństwa** (`docs/STAN.md` §4.2):
-  odzyskiwanie konta związane z kontem (S19), limity pamięci mostu (S20),
-  dowód adresu urządzeń (S21), ostrzeżenia o plikach (S22), skrzynki tylko
-  dla znajomych (S23), uszkodzone dane nie usuwają znajomych (B11),
-  prywatność powiadomień i ekranu (S27, S30), GIF-y po dotknięciu (S29),
-  przypięte akcje CI i klucz APK tylko dla tagów po zatwierdzeniu (S24),
-  `SECURITY.md` — jak zgłaszać podatności.
-- **„Zgłoś”:** zgłoszoną treść da się ukryć u siebie, od decyzji można się
-  odwołać przyciskiem, okno zgłoszenia nie obiecuje już „Usuń z mojego
-  urządzenia” (B13).
-- **Dokumentacja:** `docs/STAN.md` z drugim audytem, przeglądem
-  architektury, zgodnością kodu z planem i stanem dystrybucji; plan
-  (`docs/PROJEKT_APLIKACJI.md`, wersja 13) zgodny z kodem; `docs/WYDANIA.md`
-  z kanałami, wymaganiami sklepów, weryfikacją twórców Androida, iPhone'em,
-  kosztami i planem; README z językami, Linuksem i macOS oraz uczciwą
-  informacją o GIF-ach z klipy.com.
+### Platforms
+- **Android: three ABIs in one universal APK** — arm64-v8a, **armeabi-v7a** (older 32-bit phones) and **x86_64** (ChromeOS, emulators). The Go bridge is built per ABI and rebuilt only when it changed; native libraries are stored compressed so the APK stays about the same size. (x86 32-bit is not available: Flutter has no release engine for it.)
+- **Android "store" flavor** (`flutter build appbundle --release --flavor store`; for Google Play and Galaxy Store, built manually): no `REQUEST_INSTALL_PACKAGES`, no self-update (the screen says "Updates come from the store"), and "Pass it on" becomes a dialog with a link.
+- **Windows ARM64** (`Zen-Windows-arm64.zip`, experimental): native build on `windows-11-arm`, Go bridge through llvm-mingw. It does not block a release until its first green run; the x64 build also runs on Windows 11 ARM under emulation.
+- **Linux x64 and arm64: `.tar.gz` plus new `.deb`** (`Zen-Linux-x64.deb`, `Zen-Linux-arm64.deb`; Debian, Ubuntu, Mint). Audio and video playback through GStreamer (own `video_player` backend), a `.desktop` file (menu, `zen://` links, Wayland icon), AppStream metadata, `install-desktop-entry.sh` in the tarball, single-instance runner so a link from the browser reaches the running Zen. Flatpak: not done.
+- iOS (`Zen-unsigned.ipa`, iOS 15+), Windows x64 and universal macOS (12+, `Zen-macOS.zip`) unchanged.
 
-### Przed wydaniem: bezpieczeństwo, waluta, iPhone
-- **Pierwsze uruchomienie:** po haśle ekran „Uprawnienia i Bluetooth” —
-  po kolei powiadomienia, Bluetooth (na Androidzie 11 i starszym
-  z lokalizacją), włączenie Bluetooth, alarm na pełnym ekranie, praca
-  w tle, opcjonalnie mikrofon i aparat; na koniec telefon staje się
-  widoczny w pobliżu. Ten sam ekran jest w Ustawieniach. Koniec z serią
-  okienek systemowych przy każdym starcie.
-- **Bluetooth:** przy włączonej widoczności telefon nadaje stale
-  i oszczędnie (także z usługi w tle) i wraca sam po wyłączeniu i włączeniu
-  Bluetooth. Szukanie tylko na ekranie „W pobliżu” (rozglądanie się w tle
-  domyślnie wyłączone); naprawiony skan z „Sąsiadów”, który się nie
-  wyłączał.
-- **Znajomi znajomych (B1, B2):** listy znajomych w osobnych plikach,
-  z limitami; ramki od kogoś, kto jeszcze nie jest znajomym, czekają na
-  akceptację; ping/pong niosą skróty listy, klucza „W pobliżu” i statusu,
-  a to, co zginęło po drodze, jest zamawiane ponownie; lista idzie raz,
-  tylko po zmianie.
-- **Graf:** wyszukiwanie (także bez polskich znaków), filtry (znajomi,
-  znajomi znajomych, piramida, status, w pobliżu), najkrótsza droga do
-  osoby, linie między znajomymi, którzy się znają, i „Listy znajomych: od
-  X z Y znajomych” z przyciskiem „Poproś”.
-- **Ekonomia kontaktów bez piramidy — walutą jest zgoda:** „Kto widzi moją
-  listę znajomych” (wszyscy znajomi / tylko na prośbę / nikt, zgoda
-  w Skrzynce, cofana w Grafie); „Poproś o przedstawienie” (wspólny znajomy
-  przekazuje albo odmawia, druga osoba decyduje, po „tak” oboje dostajecie
-  zwykłe zaproszenie); „Napisz list” przez wspólnego znajomego (najwyżej
-  3 tygodniowo przez jedną osobę); „Zapytaj o opinię”. W jednej piramidzie
-  pośrednik może dodatkowo wycenić przedstawienie na jej rynku.
-- **Piramida:** bez partii (usunięte zakładanie partii i prawybory).
-  Zgłoszenia i odwołania tylko od członków, z limitami i w osobnym zapisie
-  (S1); podpisu skarbnika nie da się zastąpić ani usunąć (S12); limity dla
-  propozycji i wiadomości rynku.
-- **Waluta:** kwoty i salda z twardymi limitami (10^15 setnych na kwotę,
-  2^60 na saldo), sumy nasycają się zamiast przekręcać 64 bity; ponowne
-  potwierdzenie (hasło albo biometria) przed każdym wysłaniem pieniędzy;
-  blokada zrzutów ekranu w portfelu; uczciwy opis pustego portfela;
-  wszystkie pola kwot w setnych (także napiwek i podziękowanie swatowi).
-- **Pieniądze z różnych piramid:** przy łączeniu salda przechodzą po
-  uzgodnionym kursie (jak emisja: 2 z 3 szczytu, limit 30 dni, doba
-  czekania, weto); wymiana przez „kantor” — osobę z obu piramid — z obiema
-  płatnościami zablokowanymi tym samym kluczem i zwrotem, gdy wymiana się
-  nie uda.
-- **Alarm przez Bluetooth podpisany (S2):** HMAC-SHA256 sekretem
-  „W pobliżu”, ważny ±10 min, powtórki odrzucane; dzwoni tylko sprawdzony
-  alarm znajomego, reszta to cicha notka „Niesprawdzone…”. Alarm wychodzi
-  przed zapisem stanu (B10), z limitami pól i liczby alarmów.
-- **Załączniki, głosówki i zdjęcia znajomych zaszyfrowane na dysku (S3)**,
-  pod losowymi nazwami; zdjęcia odszyfrowywane tylko w pamięci, nagrania
-  i filmy w krótkotrwałej kopii.
-- **Magazyny tylko w aktualnej kopercie (S4):** jawnego pliku nie da się
-  podłożyć; konfiguracja węzła i pamięć sprawdzonych podpisów chronione.
-- **Hasło paniki kasuje wszystko (S7):** najpierw zatrzymuje usługę w tle,
-  potem cache, pliki tymczasowe, `Android/data/…/files`, foldery Zen
-  w Dokumentach i Pobranych oraz zapisane kopie.
-- **Podpis APK (S9):** „Podaj dalej” i ADB sprawdzają certyfikat przed
-  wysłaniem i instalacją; ADB nie radzi już odinstalowania przy innym
-  podpisie, tylko ostrzega przed podróbką.
-- **Stare formaty zaproszeń usunięte (S14);** działa kod, link z kodem po
-  `#` i `zen://c/KOD`.
-- **Bez kodu zgodności:** przed wydaniem usunięto obsługę starszych formatów
-  i wersji protokołu (łączenie urządzeń tylko z zobowiązaniem, randki tylko
-  z zapieczętowanymi paczkami i podpisanymi poręczeniami, bilety zawsze
-  przypięte, podpisane głosy w „Sąsiadach”, stara koperta magazynu, stare
-  hasło PBKDF2, jednorazowe porządki). Zostaje jedno: przepieczętowanie
-  konfiguracji węzła, żeby nie zmienił się adres.
-- **Płynność (B3, B5):** obecność w pamięci, zapis z opóźnieniem, ekrany
-  obserwują tylko to, co pokazują, graf przerysowuje się tylko po zmianie.
-- **Nazwa znajomego zawsze z jego najnowszego profilu.**
-- **Randki jak w Tinderze:** stos kart, w prawo „Tak”, w lewo „Nie”;
-  pierwsza „fotka” to opis osoby; „Swatuj” i „Zapytaj o opinię” na karcie.
-- **Statusy od nowa:** wyróżniona karta „Twój status” z czasem do
-  zgaśnięcia; statusy znajomych pogrupowane według rodzaju.
-- **Plan na weekend** — czwarta forma w Spotkaniach: luźny plan z zasięgiem,
-  „Dołączam” / „Może”, po zebraniu progu chętnych sam staje się
-  wydarzeniem z czatem.
-- **iPhone:** Zen działa na iOS (SideStore / AltStore z darmowym Apple ID);
-  plik `Zen-unsigned.ipa` buduje GitHub Actions. Funkcje, na które iOS nie
-  pozwala (praca w tle, Bluetooth w tle, alarm z przycisku), są oznaczone
-  jako niedostępne.
-- **Budowanie:** most Go buduje się sam przy `flutter build apk`
-  / `flutter build windows` (tylko gdy zmieniły się źródła); gotowych
-  bibliotek nie ma w repozytorium. GitHub Actions: testy przy każdym
-  pushu, pliki wydania przy tagu, strona zaproszeń na Pages.
-- **Licencje** modułów Go i fontów w „O aplikacji → Licencje”.
-- **Strona zaproszeń** `robertostrowskijagoda.github.io/Zen/#KOD` otwiera
-  Zen albo pokazuje pobieranie; zbiórka: **buycoffee.to/zen**; w „O
-  aplikacji” kilka słów od autora.
-- **Hasło przy pierwszym uruchomieniu:** po ustawieniu hasła ekran nie
-  znikał (krok uprawnień przejmował jego nawigację), więc wyglądało, że
-  hasła nie da się ustawić. Naprawione, z testem.
-- **Biometria uczciwie:** pytanie przy pierwszym haśle mówi, że odcisk
-  i twarz da się wymusić i że Zen otworzy każdy odcisk zapisany
-  w telefonie; domyślny przycisk to „Tylko hasło”. Na Windows Zen nie
-  pyta (Windows Hello to zwykle PIN); w Ustawieniach to „Odblokowanie
-  Windows Hello” z ostrzeżeniem. Przycisk biometrii na ekranie blokady
-  jest tylko wtedy, gdy ją włączono.
-- **Ikony:** Tablica znów jako gazeta, Portfel jako znak dolara; piramida
-  wszędzie tym samym rysunkiem (pasek, nagłówki, filtry grafu).
-- **Licencja:** PolyForm Strict 1.0.0 z dodatkowymi zezwoleniami — każdy,
-  także firma, może używać Zen do każdego celu; nie wolno go sprzedawać ani
-  dołączać do płatnych produktów; autor i zbiórka muszą zostać, pull requesty
-  mile widziane, forki i przerobione wersje zakazane.
-- Pakiet Dart nazywa się `zen`, wersja **1.10.0 (10)**.
+### Translations
+- **21 languages everywhere**, not only in the Dart UI: the invite page (`tool/pages`, language from the browser or `?lang=xx`, right-to-left for Arabic), iOS and macOS `Info.plist` strings (21 `<code>.lproj` folders), Android resources (`values-<lang>`; incoming-call screen, notifications, PiP, biometrics, installer, share), Linux `.desktop` comments. Everything outside the app UI now defaults to English.
+- The new `docs/PRIVACY.md`, `docs/TERMS.md`, `docs/DPIA.md` and `docs/PROTOCOL.md` are in English; the About screen links to the privacy policy and the terms.
 
+### Security
+- **Network:** no more hard-coded 8.8.8.8 / 1.1.1.1 on Android — the bridge asks the system resolver (including Private DNS) first and falls back to a DNS-over-TLS list (S38). The call UDP relay accepts a local socket only if its first datagram is an ICE check with the call's own username (desktop: listens on 127.0.0.1 only). The public bridge port goes through a Go limiter (4 connections per IPv4 or /64, 128 total, 1 MiB/s and 2 GiB per source per day, 32 GiB total). "Pass it on" serves on one chosen or best network and skips cellular, VPN and virtual interfaces (S13). The "Answer" route is tied to one call number (S17). Optional local-network (multicast) discovery exists in the bridge, off by default and without a Dart side yet.
+- **Nearby (S5, S6):** a private per-phone key that never leaves the phone; friends get only a mask key, one-way hash-chain anchors and their own pair key, so nobody can forge another friend's presence. Alarm waves are signed with the pair key. The BLE token rotates every 10 minutes together with the MAC address. Greeting to a stranger carries no address — the reply goes over Bluetooth, and addresses are exchanged only between people who answered each other. Temporary compatibility with 1.10.0 phones.
+- **Releases (S15):** the signed release manifest now covers the donation link, author and repository, plus mirrors; the app warns in red when its own values differ. New signed **canary** statement, 2-of-3 like a release; `tool/zen_release.dart` gets `maintainers`, `canary`, `sums` and `fingerprint`. Network updates stay off until maintainers are configured.
+- **Pyramid rules generation 2** (`rules = 2` for new pyramids; old ones switch by constitutional referendum): a record that throws is rejected deterministically (S18), quorum counted from active members, over-limit issuance by whole-pyramid referendum, content bans by entry id with the signed original attached (S36). New record types `natpin` and `badge`.
+- **Storage:** hidden file names for `meet/list/` and `ledger/` as well (old files migrate); Windows data moved from Roaming to `%LOCALAPPDATA%` with a one-time safe move; 20 MB limit warns from 50% and compresses harder from 75%; stale `*.tmp` files are cleaned up; clipboard copies expire after 60 s everywhere.
+- **Mailbox attachments** are chunked and encrypted with a fresh key (ChaCha20-Poly1305); mailboxes see only ciphertext (see Features).
+- **Profile images** (avatar, background) are moved into the encrypted media vault.
+- **Forward compatibility:** unknown log spaces are kept for the owner (max 1000 entries per device log); golden protocol frames pinned in `test/wire/golden_frames_test.dart`.
 
-### Nazwy z profilu, bezpieczne media, nagrania w postach
-- **Nazwa znajomego pochodzi z jego profilu** i nie da się jej zmienić
-  (przychodzi z zaproszeniem, odpowiedzią i każdą zmianą profilu; nowsza
-  wygrywa). Zamiast „Zmień nazwę” jest **pseudonim**: widoczny tylko u
-  Ciebie, małą kursywą pod nazwą (lista rozmów, nagłówek rozmowy, profil),
-  wspólny dla Twoich urządzeń. Przy dodawaniu znajomego nie ma już pola
-  nazwy (jest opcjonalny pseudonim), akceptacja to jedno stuknięcie. Nazwy
-  od innych są czyszczone ze znaków sterujących i zmieniających kierunek
-  tekstu (podszywanie się) i przycinane do 60 znaków.
-- **Ochrona przed wirusami w zdjęciach i filmach** (`media_guard.dart`):
-  każde przychodzące zdjęcie (czat, posty, profile, randki) jest dekodowane
-  czystym kodem Dart i kodowane od nowa, więc systemowy dekoder obrazów
-  nigdy nie widzi oryginału (tak działały ataki w rodzaju dziury w WebP
-  z 2023); zdjęcia „za duże, by były zdjęciem” są odrzucane przed
-  dekodowaniem. Filmy i nagrania muszą mieć poprawny kontener (MP4/MOV/
-  M4A/WebM/Ogg/MP3/WAV — pudełka nie wychodzą poza plik), inaczej stają się
-  zwykłym plikiem, którego Zen nie odtwarza. Typ, MIME i nazwa pliku są
-  ustalane z zawartości, nie z tego, co twierdzi nadawca. Plik, który
-  mógłby uruchomić program (EXE, APK, skrypty, skróty, makra), dostaje
-  ostrzeżenie przed „Zapisz kopię”; Zen nigdy nie otwiera plików sam.
-  Zdjęcie z aparatu wysyłane w czacie traci położenie GPS (nowy JPEG).
-- **Głosówki i nagrania audio w postach:** w edytorze „Nagraj głosówkę”
-  i „Wstaw nagranie z pliku” (do 25 MB); w czacie nowa opcja „Nagranie
-  audio z pliku”. Odtwarzanie dopiero po stuknięciu.
-- **Repozytorium nazywa się `Zen`:** linki zaproszeń
-  `https://github.com/robertostrowskijagoda/zen#KOD`.
-- **Kody Zen prosto do aplikacji (Android):** Zen obsługuje linki do swojej
-  strony na GitHubie; po włączeniu „Otwieraj obsługiwane linki” (Zaproś →
-  „Kody Zen prosto do aplikacji”) kod zeskanowany zwykłym aparatem otwiera
-  się od razu w Zen. Wyłączone wbudowane linki Fluttera (próbowały otwierać
-  ścieżkę jako stronę aplikacji).
-- **„O aplikacji” → Własny most Yggdrasil:** jak postawić stały węzeł bez
-  Zen (komputer z publicznym IP, instalacja, `Listen`, zgłoszenie na listę
-  publicznych węzłów), z linkami otwieranymi w przeglądarce.
+### Privacy
+- **Friendship levels have teeth:** a weak friend sees neither the friend list (they can ask via "Introduce me") nor statuses other than "Do not disturb"; the new default list audience is "Friends and close friends". Changing a level resends the list and status right away. People met in person are asked "How close are you?".
+- **Group invites:** "Who can invite me to groups" (Anyone / All friends / Friends and close friends (default) / Close friends only); an invite below the threshold is rejected immediately.
+- **Per-field profile visibility:** status, About me, photo, background, nationality, friend count, follower count — each Public / All friends / Friends and close / Close / Only me. Public fields go in the public entry, the rest in encrypted per-audience entries.
+- Your device address goes into the public profile only when you have a public post or share.
+- **Age gate:** before Dating, Pyramid and Wallet the app asks for a date of birth or "I am 18 or older"; the answer stays on the device, and under-18s see the sections closed.
+- **Dating:** "I'm going on a date" can request your location on demand (the friend asks, your phone asks you or answers automatically if you agreed); "Report a minor" disables a profile locally at once and reports it to the pyramid, and a phone that receives reports from 2+ different reporters disables it too; re-confirmation with password or biometrics when entering Dating and after returning from the background.
+- **Screen sharing:** system notifications are shown without content, a permanent red banner says the whole screen is visible, and Android older than 14 gets a warning first.
+- Offline mailbox attachments use per-sender quotas and ciphertext only; recorded calls beep for all participants.
+- "Media over Wi-Fi only" (default for new installs).
 
-### Ostatnia runda: wygoda, bezpieczeństwo, wydanie
-- **Biometria domyślnie wyłączona.** Przy ustawianiu pierwszego hasła Zen
-  raz pyta „Odblokowywać odciskiem lub twarzą?”; później włącza się ją
-  w Ustawieniach → Bezpieczeństwo. Naprawione przy okazji: ekran pierwszego
-  hasła nie mógł otworzyć żadnego okienka (ani tego pytania, ani „Bez
-  hasła?”), bo stał nad nawigacją aplikacji. Naprawione 4 zepsute testy,
-  dopisane nowe.
-- **Domyślna blokada po 5 minutach w tle** (wcześniej tylko po restarcie
-  telefonu). Teksty ekranu blokady mówią prawdę: usługa w tle dalej odbiera
-  wiadomości.
-- **Poprawka bezpieczeństwa:** nazwy plików załączników od innych są
-  oczyszczane przy odbiorze i zapisie — wcześniej „Zapisz kopię” mogło
-  nadpisać pliki w katalogu aplikacji (path traversal).
-- **Ustawienia aplikacji zapisywane jako JSON z nazwanymi polami** zamiast
-  dziesięciu wersji formatu binarnego; nieczytelny stary plik oznacza
-  ustawienia domyślne.
-- **Domyślny motyw: systemowy.** W jasnym motywie logo jest czarne (ekran
-  startowy i „O aplikacji”).
-- **Panel po lewej:** graf znajomych pierwszy; nowa zakładka „Portfel”
-  przed Bluetooth; Bluetooth tuż przed „Zaproś”; nowa rysowana ikona
-  piramidy (trójkąt z kółkami w rogach) i nowa ikona tablicy; „Zablokuj
-  teraz” przeniesione z ustawień na panel (widoczne, gdy jest hasło).
-  Przyciski same się zwężają, więc nawet mały telefon mieści wszystko
-  (sprawdzone na 360×568: 13 zakładek i blokada).
-- **Zaokrąglona ikona w zasobniku Windows** naprawdę używana (wcześniej
-  zmieniona była tylko nieużywana ikona zapasowa); wydanie Windows
-  przebudowane.
-- **„Podaj dalej” łatwiej znaleźć:** w zakładce Zaproś („Znajomy nie ma
-  Zen?”) i w „O aplikacji”.
-- **„O aplikacji” od nowa:** najpierw zbiórka, potem czym jest Zen (także
-  piramida i oddolna polityka), „Po co to jest” (z „Także nowa polityka”),
-  jak używać, prywatność z kręgiem odzyskiwania (do 6 znajomych: hasło + 2
-  z nich po 24 h albo 4 z nich bez hasła po 7 dniach), platformy (Android
-  i Windows gotowe; macOS, Linux, iPhone w planie), Yggdrasil, dlaczego nie
-  ma w sklepach, jak sprawdzić, że to nie wirus (jedno źródło,
-  virustotal.com, skan Androida, jawny kod i ten sam klucz podpisu),
-  oficjalny link do GitHuba, na końcu licencje.
-- **Własny status wyraźnie oznaczony** („TWÓJ WŁASNY STATUS”, pigułka
-  „Własny”).
-- **Most na komputerze** zostaje domyślnie włączony, bez komunikatu dla
-  użytkownika; przełącznik „Pomagaj innym się łączyć” na dole ustawień (Zaawansowane →
-  Sieć i usługa).
-- **Jeden kod QR dla wszystkich:** zaproszenie to link
-  `https://github.com/robertostrowskijagoda/zen#KOD`. Kod
-  jest po `#`, więc nie trafia na serwer. Aparat bez Zen otwiera README
-  („zainstaluj, potem zeskanuj ten sam kod w aplikacji”), skaner w Zen
-  dodaje znajomego od razu. Stare kody `zen://` dalej działają.
-- **Pakiet Androida `com.roj.zen`** (był `com.HuraganKodu.zen`). To nowa
-  aplikacja dla systemu: stara instalacja zostaje obok ze swoimi danymi.
-- **Licencja** (`LICENSE`, Zen Source-Available License 1.0): wolno budować
-  z niezmienionego kodu także dla innych osób i rozpowszechniać każdą kopię,
-  której SHA-256 zgadza się z opublikowaną (z dowolnego źródła); własną
-  kompilację można dać innym, ale nie publikować jako „Zen”.
-- **README dla zwykłych ludzi** (strona repozytorium na GitHubie):
-  pobieranie, co zrobić po zeskanowaniu kodu, instalacja (także ścieżka
-  2027 dla niezweryfikowanego twórcy z 24 h czekania), Windows SmartScreen,
-  sprawdzanie wirusów, dlaczego nie w sklepach, prywatność, Yggdrasil,
-  zbiórka, licencja w skrócie, część dla programistów.
-- **Porządki:** usunięte `zen-site/` i workflow GitHub Pages (nie ma
-  osobnej strony), `screenshots/shots_test.dart`,
-  `tool/ui_tour/ui_tour_test.dart` z `run.ps1` i nieużywane
-  `assets/branding/logo_rounded.png`; cały kod sformatowany `dart format`.
-- **Dokumentacja:** plan (`docs/PROJEKT_APLIKACJI.md`) zaktualizowany
-  i skrócony; nowy `docs/STAN.md` (stan, znane błędy, bezpieczeństwo,
-  kolejność prac) zamiast `KIERUNKI.md` i `AUDYT_BEZPIECZENSTWA.md`;
-  `PUBLIKACJA.md` włączona do `docs/WYDANIA.md`.
+### Features
+- **Calls:** a "Board" tab in groups (a board post is an ordinary group message with a `grp-board-` id, so older versions show it as a message); an audible signal for everyone when recording starts. Camera and screen at the same time: not done, the screen still replaces the camera.
+- **Mailboxes and attachments:** photos, videos, files and longer voice notes for an offline friend wait at their mailboxes and arrive when they return, even if the sender is offline too. Per-sender limit 20 MB by default (Settings → Offline mailboxes → Attachments: off/5/10/20/50 MB), 200 MB total, 14-day expiry; live WebRTC stays the fast path. Compatible with 1.10.0 devices.
+- **Profile and feed:** per-field visibility, nationality (up to 3 country codes), mini-profile card, other-person profile with Add / Follow / Message and tabs Posts · Photos · Videos · Thanks · Info; signed follows with a followers list and blocking; "Liked by you, Bob and 1,284 others"; the author can hide comments and block people in their threads; paged reaction bundles (up to 2000 likes, 300 comments); grouped bell notifications; metadata stripped from MP4/MOV/M4A; a deleted post's tombstone reaches resharers.
+- **Meetings:** the friend graph zooms (1–8x), groups into clusters and shows friends-of-friends labels; Alarm gets a fresh location from the background and a backup SMS to up to 5 numbers; dinner circles of 4–8 people, "vouching" for guests, shared pot; "Ask the network" answers are signed by the answering device; a "shared cause" plan with "I'll take it" claims.
+- **Neighbours:** door code v2 with exactly one door-inbox address (old stickers still read), a link `https://…/Zen/m#<code>` and a web page `/m`; "Ask" about an invitation.
+- **Pyramid:** pinned posts in the national section, age and gender badge, anonymous branch statistics (from 5 people), "Delivered / read" counts, price card in the profile, paid introduction (the broker is paid only after the introduced person agrees), escalation of reports level by level, 24 h / 7 d / 30 d breaks, only a friend of at least level "Friend" can be admitted.
+- **Onboarding and recovery:** paper backup of the account key (56 characters in 14 groups, QR `zen-key:<code>`, with a check of two random groups) and restore from paper; a "Secure your account" card after the permission step and a reminder in Settings.
+- **Permissions and diagnostics:** location, background location, exact alarms and vendor-specific battery instructions (Xiaomi, Samsung, Huawei, OnePlus, Oppo/Realme, Vivo); a "Welcome to Zen" card; **"Why is it not working?"** screen (network, background, notifications, battery, clock, free space, "Copy report"); clock-skew bar; six tabs plus "More"; accessibility labels.
+- **Versions:** friends exchange app versions, and Settings shows a quiet "Friends have a newer Zen" bar; feature flags ("Experimental features": Pyramid, Wallet, Dating, Neighbours); `v: 1` format versions for settings and profile.
+- **Performance:** heavy encryption of data over 64 KB runs in a short-lived isolate (byte-identical output), the feed is recomputed only when the log changes and is built lazily.
+- **Android bridge/Linux notes:** Go build info export (`YggGetBuildInfoJson`).
 
-### Po teście z telefonem
-- **Więcej statusów „na teraz”:** Pilnie potrzebuję pomocy (głośniejsze
-  powiadomienie u znajomych, osobny czerwony przycisk), Mogę pomóc, Idę na
-  spacer, Chcę coś zjeść razem, Chcę pograć — oraz **własny status**
-  (własne słowa i emoji). Statusy to zwarte „pigułki”, a nie duże kafle.
-  Starsze wersje nowych statusów nie pokazują.
-- **„Osoby w pobliżu” mają własny przycisk w panelu po lewej** (zniknęły ze
-  Spotkań). Pełne skanowanie Bluetooth działa przy otwartym ekranie; poza
-  nim krótkie rozejrzenie się co 5 minut (niżej: „Rozglądaj się też w tle”).
-- **Alarm z potwierdzeniami:** telefon znajomego odsyła „dotarło”
-  i „zobaczone”; na ekranie alarmu widać, do kogo dotarł, kto zobaczył i kto
-  odpowiedział, z możliwością ponowienia.
-- **Bez przepisywania całych plików:** rozmowy w segmentach po 200
-  wiadomości, rekordy piramidy w dzienniku dopisywanym na końcu (stary zapis
-  przenoszony automatycznie).
-- **Mniej zawieszeń:** sprawdzone podpisy pierścieniowe piramidy są
-  zapamiętywane na dysku, a pierwsze sprawdzenie idzie w tle.
-- **Android nie ubija usługi po 6 godzinach** (Android 14+: typ usługi
-  „specialUse” bez limitu czasu); gdy system ją jednak zatrzyma, przychodzi
-  powiadomienie „Zen nie odbiera w tle — otwórz na chwilę”.
-- **Udostępnianie aplikacji przez Quick Share / Bluetooth** (nowy przycisk
-  w „Podaj dalej”).
-- **Te same kolory w jasnym i ciemnym motywie** (wcześniej jasny miał
-  ciemnoniebieski akcent zamiast fioletu); znak „ZEN” z logo na ekranie
-  startowym.
-- Kto należy do dwóch piramid, widzi tę, do której dołączył ostatnio
-  (wcześniej telefon zostawał przy starej).
-- **Tożsamość w sieci nie przepada przy uszkodzonym pliku**: konfiguracja
-  węzła zapisywana atomowo i z kopią; wcześniej uszkodzony plik oznaczał
-  nowy adres i utratę kontaktu ze znajomymi.
-- Stan „Spotkań” z nieznanej (nowszej) wersji nie jest już nadpisywany
-  pustym.
+### Docs
+- New in English: `docs/PRIVACY.md`, `docs/TERMS.md`, `docs/DPIA.md` (draft impact assessment), `docs/PROTOCOL.md` (protocol specification derived from the code, with [V]/[P]/[?] markers).
+- Renamed: `STATUS.md` → `docs/STATUS.md`, `PLAN.md` → `docs/PLAN.md`, `RELEASES.md` → `docs/RELEASES.md`, `TESTING.md` → `docs/TESTING.md`.
+- README and CHANGELOG are now in English (README also in Polish: `README.pl.md`); `SECURITY.md` is English-first.
 
-### Sieć niesie się sama: komputery są mostami (etap 2 dokończony)
-- **Każdy komputer jest mostem** (§5.1; domyślnie włączone, wyłącznik
-  w ustawieniach). Aplikacja na PC
-  sama otwiera port w routerze (UPnP, a gdy go nie ma — NAT-PMP), prosi
-  znajomych o sprawdzenie z zewnątrz, że naprawdę da się połączyć, i
-  dopiero wtedy ogłasza most. Port i ogłoszenie są odnawiane co pół
-  godziny; gdy komputer przestaje być osiągalny, ogłoszenie jest wycofywane,
-  a port zamykany przy wyjściu z aplikacji.
-- Komputer z publicznym adresem (bez routera albo z IPv6) też jest mostem.
-  Węzeł na PC nasłuchuje teraz na IPv4 i IPv6 (`tls://[::]:32913`), także na
-  Linuksie i macOS.
-- **Stan mostu w Ustawieniach → Sieć i usługa**: działa / router nie
-  otworzył portu / router odmówił (UPnP wyłączone) / brak publicznego
-  adresu (CGNAT) / zapora blokuje / czekam na znajomego online, z
-  przyciskiem „Sprawdź teraz” i podpowiedzią, co zrobić.
-- Port przekierowany w routerze ręcznie też działa: gdy router nie otwiera
-  portu, ale podaje swój adres, aplikacja i tak prosi znajomych o
-  sprawdzenie `adres:32913`.
-- **Sprawdzanie mostów**: zamiast samego połączenia TCP aplikacja czeka na
-  powitanie węzła Yggdrasil, więc ogłoszenie wskazujące cudzy serwer odpada
-  od razu. Mosty muszą mieć publiczny adres IP (żadnych nazw, żadnych sieci
-  domowych), więc nikt nie wyśle aplikacji „do pukania” w urządzenia
-  w Twojej sieci. Znajomy sprawdza za innych najwyżej 4 adresy na minutę.
-- **Wybór mostów po szybkości i sieciach**: najszybsze działające mosty,
-  rozłożone na różne bloki adresów (różni dostawcy). Działające są
-  sprawdzane ponownie co 6 h, martwe dostają drugą szansę po dobie i znikają
-  po trzech porażkach.
+## 1.10.0 — 14.10.2026 (first public release)
 
-### Audyt bezpieczeństwa (`docs/STAN.md`)
-- **Obcy nie zostanie już Twoim znajomym jednym pakietem** (`friend_accept`
-  bez zaproszenia z Twojej strony trafia do zaproszeń do potwierdzenia).
-- **Zablokowana aplikacja nie zrywa znajomości** i nie gubi zaproszeń:
-  sygnał, który przyszedł przy zablokowanym Zen, trafiał na pusty jeszcze
-  stan, więc znajomy wyglądał jak obcy i dostawał „usuń znajomość”. Teraz
-  sygnały czekają, aż zapis zostanie odczytany po odblokowaniu.
-- Dwie osoby, które zaprosiły się nawzajem w tej samej chwili, od razu
-  zostają znajomymi (wcześniej akceptacja jednej strony przepadała).
-- Ochrona przed zalewaniem i „bombami”: kompresja zstd, fragmenty sygnałów,
-  zdjęcia i obrazy, załączniki, prośby o znajomość, zaproszenia do grup,
-  wydarzenia, paczki randkowe, skrzynki offline, alarmy, pytania.
-- Piramida: odporność na zły podpis pierścieniowy, podwójne głosy,
-  cofanie dat, obejście weta i limitu emisji, zmianę konstytucji bez
-  kworum; synchronizacja tylko ze znajomymi.
-- Windows: klucz danych pieczętowany tylko po włączeniu Windows Hello.
-- Hasła: zmiana wymaga potwierdzenia, hasło i hasło panic nie mogą być
-  takie same; panic najpierw niszczy klucze.
-- Łączenie urządzeń z zobowiązaniem (kod nie do „wygrindowania”); nazwy
-  plików rozmów nie zdradzają kontaktów; zapis wiązany z kluczem pliku.
-- Link nie odbierze już połączenia ani nie podmieni imienia rozmówcy;
-  treść powiadomień ukryta też dla randek i piramidy.
-- Android: brak kopii zapasowych danych, ekran połączenia niedostępny dla
-  innych aplikacji, przygotowany własny klucz podpisu wydań
-  (`android/key.properties`). „Podaj dalej” pokazuje SHA-256 pliku.
-- Pilot testowy tylko w wersji debug; brak logów w logcat w wydaniu.
+### Round 2: languages, Linux and macOS, second audit
+- **21 languages:** Polish, English, German, French, Spanish, Italian, Portuguese, Dutch, Czech, Hungarian, Romanian, Turkish, Russian, Ukrainian, Arabic (right to left), Hindi, Indonesian, Vietnamese, Chinese, Japanese, Korean. Zen picks the system language (English if unknown); **Settings → Language** changes it instantly. Source strings are Polish in `t()` / `tn()`, translations in `assets/i18n/<code>.json`, checked by `dart run tool/i18n.dart` and `test/i18n_test.dart`.
+- **Linux and macOS:** new release files `Zen-Linux-x64.tar.gz`, `Zen-Linux-arm64.tar.gz`, `Zen-macOS.zip` (Apple Silicon and Intel, macOS 12+), unsigned, built by GitHub Actions; `SHA256SUMS` covers all release files. macOS: Touch ID through the Secure Enclave, screen protection, no sandbox. Linux: key in GNOME Keyring / KWallet, tray through AppIndicator. No Bluetooth, call recording or camera on either; no voice-note or video playback on Linux. Untested before the first CI run.
+- **Second security audit fixes** (`docs/STATUS.md` §4.2): account recovery bound to the account (S19), bridge memory limits (S20), proof of device address (S21), file warnings (S22), mailboxes only for friends (S23), corrupted data no longer removes friends (B11), notification and screen privacy (S27, S30), GIFs on tap (S29), pinned CI actions and APK key only for approved tags (S24), `SECURITY.md`.
+- **"Report":** reported content can be hidden locally, decisions can be appealed, the dialog no longer promises "Remove from my device" (B13).
+- **Docs:** `docs/STATUS.md` with the second audit and architecture review, plan `docs/PLAN.md` (version 13) matching the code, `docs/RELEASES.md` (channels, store requirements, Android developer verification, iPhone, costs); README with languages, Linux, macOS and an honest note about GIFs from klipy.com.
 
-### Dopracowany wygląd (przegląd na 320–412 dp, tekst do 150%, jasny/ciemny, komputer)
-- Graf znajomych przewija się razem z legendą i nie nachodzi na nic na
-  małym ekranie; znajomi nie zasłaniają już środka („Ty”).
-- Kafelki „Spotkań” i statusy „Na co masz ochotę” przechodzą w jedną
-  kolumnę, zamiast łamać słowa w połowie.
-- Na komputerze każdy ekran (także otwierane z menu i okna) trzyma ten
-  sam wąski układ, zamiast rozciągać się na całe okno.
-- Kwoty z odstępami tysięcy (1 000 000,00), poziomy piramidy liczone od 1,
-  bez odnośników „§” w tekstach, dni tygodnia w „Stole na sześć” w jednym
-  rzędzie, pusty ekran kodu na drzwi zastąpiony podpowiedzią, spójne
-  „gotuje Ty”, krótsze „Zamień” w kółku.
+### Before release: security, currency, iPhone
+- **First launch:** after the password, a "Permissions and Bluetooth" screen (notifications, Bluetooth, full-screen alarm, background work, optional microphone and camera), also available in Settings. No more series of system dialogs.
+- **Bluetooth:** steady, frugal advertising while visible (also from the background service), restored after Bluetooth toggles; scanning only on the "Nearby" screen (background scanning off by default).
+- **Friends of friends (B1, B2):** friend lists in separate files with limits; frames from non-friends wait for approval; ping/pong carry digests and missing data is re-requested.
+- **Graph:** search (diacritics-insensitive), filters, shortest path to a person, lines between friends who know each other, "Friend lists: from X of Y friends" with "Ask".
+- **Consent as currency:** "Who sees my friend list" (all / on request / nobody), "Ask for an introduction" (a mutual friend passes it on, the other person decides), "Write a letter" through a mutual friend (max 3 per week per person), "Ask for an opinion". Within a pyramid a broker can price an introduction.
+- **Pyramid:** no parties (party founding and primaries removed). Reports and appeals only from members, with limits (S1); the treasurer signature cannot be replaced or removed (S12); limits for proposals and market messages.
+- **Currency:** hard limits (10^15 hundredths per amount, 2^60 per balance), saturating sums, re-confirmation (password or biometrics) before sending money, screenshot block in the wallet, all amounts in hundredths.
+- **Money across pyramids:** merging converts balances at an agreed rate (like issuance: 2 of 3 of the top, 30-day limit, 24 h wait, veto); exchange through an "exchange agent" in both pyramids with both payments locked by one key and refunded on failure.
+- **Signed Bluetooth alarm (S2):** HMAC-SHA256 with the Nearby secret, valid ±10 min, replays rejected; only a verified friend alarm rings. Sent before state is saved (B10).
+- **Friends' attachments, voice notes and photos encrypted on disk (S3)** under random names; photos decrypted only in memory.
+- **Stores only in the current envelope (S4)**, node configuration and verified-signature memory protected.
+- **Panic password wipes everything (S7):** stops the background service, then clears cache, temporary files, `Android/data/…/files`, Zen folders in Documents and Downloads, and saved copies.
+- **APK signature (S9):** "Pass it on" and ADB check the certificate before sending and installing.
+- Old invite formats removed (S14); a code, a link with the code after `#` and `zen://c/CODE` work. All older-format and protocol-version compatibility code removed before release (one exception: re-sealing the node configuration so the address does not change).
+- **Smoothness (B3, B5):** in-memory presence, delayed writes, screens watch only what they show.
+- A friend's name always comes from their latest profile.
+- **Dating like Tinder:** card stack, right "Yes", left "No"; "Match-make" and "Ask for an opinion" on the card.
+- **Statuses redone:** highlighted "Your status" card with a countdown; friends' statuses grouped by kind.
+- **Weekend plan:** a fourth form in Meetings — a loose plan with a reach, "Joining" / "Maybe"; once enough people join it becomes an event with a chat.
+- **iPhone:** Zen runs on iOS (SideStore / AltStore, free Apple ID); `Zen-unsigned.ipa` built by GitHub Actions. Features iOS forbids (background work, background Bluetooth, button alarm) are marked unavailable.
+- **Building:** the Go bridge builds itself on `flutter build apk` / `windows` (only when sources changed). GitHub Actions: tests on every push, release files on tag, invite page on Pages.
+- **Licenses** of Go modules and fonts in "About → Licenses".
+- **Invite page** `robertostrowskijagoda.github.io/Zen/#CODE` opens Zen or shows downloads; donations: **buycoffee.to/zen**; a few words from the author in "About".
+- **First-launch password fix:** the screen did not close after setting a password (the permissions step took over its navigation). Fixed, with a test.
+- **Honest biometrics:** the first-password question says any fingerprint stored on the phone will unlock Zen; the default is "Password only". Windows: "Windows Hello unlock" with a warning in Settings.
+- **Icons:** Feed as a newspaper, Wallet as a dollar sign; one pyramid drawing everywhere.
+- **License:** PolyForm Strict 1.0.0 with additional permissions — anyone, including companies, may use Zen for any purpose; it may not be sold or bundled into paid products; the author and donation link must stay; pull requests welcome, forks and modified versions forbidden.
+- Dart package `zen`, version **1.10.0 (10)**.
 
-### Uzupełnione braki z planu
-- **„Zgłoś” wszędzie**: przy postach tablicy, wiadomościach (także w grupach)
-  i profilach. Zgłoszoną treść można od razu ukryć u siebie; w piramidzie
-  zgłoszenie trafia do delegata od zgłoszeń albo na szczyt.
-- **Randki**: paczki profilu szyfrowane osobnym kluczem (ChaCha20-Poly1305),
-  klucz dostaje się na prośbę; poręczenia podpisane kluczem poręczeń;
-  kilka zdjęć w profilu; status „Randkuję” 💘; „Podziękuj swatowi”;
-  terminy „Idę na randkę” pilnowane też w tle.
-- **Wydarzenia**: wspólny album (zdjęcia od tych, którzy przyszli, od 15 min
-  przed startem), karty wdzięczności dla organizatora, napiwek dla
-  organizatora w walucie piramidy.
-- **Alarm**: nagranie dźwięku dla przyjaciół i opcjonalna fala Bluetooth do
-  telefonów w pobliżu (znajomi widzą kto, obcy — „ktoś w pobliżu”).
-- **Alarm: skrót 5× przycisk zasilania** (Android, opcja na ekranie alarmu,
-  domyślnie wyłączona). Pięć szybkich naciśnięć (ok. 4 s) — także przy
-  wygaszonym ekranie i zamkniętym Zen — podnosi zwykły alarm, ten sam co
-  przycisk: odwołuje go tylko PIN, PIN paniczny działa jak zawsze. Telefon
-  potwierdza wibracją (długo–krótko–długo). Ostrzeżenie o systemowym
-  „Alarmowym SOS”, które na wielu telefonach reaguje na ten sam gest.
-- **Alarm do pobliża przy zamkniętej aplikacji**: z włączoną opcją usługa
-  Androida w tle pokazuje telefon w pobliżu i odbiera fale alarmu —
-  powiadomienie jest to samo co przy alarmie z sieci (u znajomych dzwoni),
-  a każda fala dzwoni tylko raz, także gdy aplikacja działa w tle. Alarm
-  podniesiony w tle (skrót, termin randki) też idzie falą.
-- **„Rozglądaj się też w tle”** (ekran „W pobliżu”; przed wydaniem
-  domyślnie wyłączone — wyżej, „Bluetooth”):
-  co 5 minut 10 sekund oszczędnego skanowania, tylko po to, żeby zaznaczyć
-  znajomych w zasięgu jako „spotkanych osobiście” — w aplikacji i w usłudze
-  w tle. Skanowanie z ekranu „W pobliżu” ma pierwszeństwo.
-- **Sąsiedzi**: zdjęcie mieszkania, usuwanie sąsiada z nowym kluczem dla
-  reszty, odsłanianie się sąsiadom.
-- **Bilet na wydarzenie przypięty do telefonu**: „Będę” wysyła
-  organizatorowi klucz, który ma tylko ten telefon; przy wejściu telefon
-  pokazuje żywy kod (odświeżany co 20 s), a skaner przyjmuje go tylko
-  z bieżącym czasem (±90 s) i tylko raz — zrzut ekranu przekazany komuś
-  innemu przestaje działać po ok. półtorej minuty. Goście ze starszą
-  wersją mają dalej zwykły bilet, a organizator widzi „bilet bez
-  przypięcia” (przycisk „Przypnij do tego telefonu” to naprawia).
-- **Sąsiedzi: usunięty domownik nie podrobi nowego klucza mieszkania.**
-  Każdy telefon domownika ma własny klucz, który sąsiedzi znają z profilu;
-  głosy za usunięciem i komunikat o nowym kluczu są nim podpisane, a sąsiad
-  przyjmuje nowy klucz tylko z podpisem domownika, który zostaje, i głosami
-  większości. Dwa różne nowe klucze nie są już rozstrzygane „kto pierwszy”:
-  sąsiad widzi ostrzeżenie „Dwa różne nowe klucze mieszkania — zapytaj
-  sąsiadów osobiście”, a skan ich nowego kodu z drzwi rozstrzyga spór.
-- Poprawka: wspólny album wydarzenia znika z dysku razem z wydarzeniem
-  także wtedy, gdy aplikacja nigdy go nie wczytała (np. zapisała go usługa
-  w tle).
-- **Waluta**: napiwek za odpowiedź w „Zapytaj sieć”; ceny wg poziomu znajomości;
-  ogłoszenia przez łańcuch pośredników; przejście całej piramidy jako gałęzi
-  do większej.
+### Names from profiles, safe media, recordings in posts
+- **A friend's name comes from their profile** and cannot be changed (newer wins). Instead of "Rename" there is a **nickname** visible only to you, shown in small italics under the name and shared across your devices. Names from others are stripped of control and direction-changing characters and trimmed to 60.
+- **Virus protection for photos and videos** (`media_guard.dart`): every incoming photo is decoded in pure Dart and re-encoded, so the system image decoder never sees the original (the class of WebP-2023 attacks); oversized "photos" are rejected before decoding. Videos and recordings must have a valid container (MP4/MOV/M4A/WebM/Ogg/MP3/WAV), otherwise they become a plain file Zen will not play. Type, MIME and file name come from the content. Files that could run a program (EXE, APK, scripts, shortcuts, macros) get a warning before "Save a copy"; Zen never opens files itself. Camera photos sent in chat lose GPS.
+- **Voice notes and audio recordings in posts:** "Record a voice note" and "Insert a recording from file" (up to 25 MB); in chat, "Audio recording from file". Playback only on tap.
+- **The repository is named `Zen`:** invite links `https://github.com/robertostrowskijagoda/zen#CODE`.
+- **Zen codes straight into the app (Android):** with "Open supported links" enabled (Invite → "Zen codes straight into the app"), a code scanned with the ordinary camera opens in Zen. Flutter's built-in deep links disabled.
+- **About → Your own Yggdrasil bridge:** how to run a permanent node without Zen.
 
-### Nowy wygląd całej aplikacji
-- **Nowa paleta**: głęboka ciemna (albo jasna) baza lekko zabarwiona kolorem
-  akcentu i akcent z gradientem. **Wybór koloru wrócił** (Ustawienia →
-  Wygląd: 27 kolorów + tryb jasny/ciemny/systemowy); domyślny to fiolet „Zen”.
-- **Czytelna typografia**: koniec z szeroko rozstrzelonym drukiem
-  maszynowym, który nie mieścił się na telefonie — przyciski, etykiety
-  i nagłówki w kroju bezszeryfowym, zdania zamiast WIELKICH LITER.
-- **Każdy ekran przerobiony**: Skrzynka i rozmowy (dymki z gradientem,
-  nowy pasek pisania), profil (okładka, avatar w gradientowym pierścieniu,
-  liczniki), Tablica, Spotkania (kafelki w kolorach, karta alarmu), wydarzenia,
-  Stół na sześć, kółka obiadowe, Zapytaj sieć, osoby w pobliżu, alarm, randki
-  (karty profili z dużymi „Tak/Nie”), sąsiedzi, graf, piramida (portfel,
-  głosowania z wynikami na paskach, historia jako oś czasu), Zaproś,
-  ustawienia, ekran blokady, połączenia, ekran startowy.
-- **Własne przyciski na pasku po lewej** mają Randki, Sąsiedzi, Graf znajomych
-  i Alarm (na dole, na czerwono). „Spotkania” są przez to krótsze, a przełącznik
-  „Pokazuj znajomym moją listę znajomych” i „Zapytaj sieć” są teraz
-  na ekranie grafu.
-- Elementy nie nachodzą już na siebie i mieszczą się na wąskich telefonach
-  (sprawdzane zrzutami ekranu w rozmiarze telefonu: `tool/ui_tour`).
+### Last round: convenience, security, release
+- **Biometrics off by default;** asked once when setting the first password. Fixed: the first-password screen could not open any dialog. Four broken tests fixed.
+- **Default lock after 5 minutes in the background.** Lock-screen texts say the background service still receives messages.
+- **Security fix:** attachment file names from others are sanitized — previously "Save a copy" could overwrite files in the app directory (path traversal).
+- **Settings stored as JSON with named fields** instead of ten binary format versions; an unreadable old file means defaults.
+- **Default theme: system.** Black logo in the light theme.
+- **Left panel:** friend graph first; Wallet before Bluetooth; Bluetooth before Invite; new pyramid and feed icons; "Lock now" on the panel. Buttons shrink to fit (checked at 360×568: 13 tabs and lock).
+- **Windows tray icon** really rounded now; Windows release rebuilt.
+- **"Pass it on"** easier to find: Invite ("Friend has no Zen?") and About.
+- **"About" rewritten:** donations first, then what Zen is (including the pyramid and grassroots politics), "Why", how to use, privacy with the recovery circle (up to 6 friends: password + 2 of them after 24 h, or 4 of them without a password after 7 days), platforms, Yggdrasil, why not in stores, how to check it is not a virus, official GitHub link, licenses.
+- **Own status clearly marked** ("YOUR OWN STATUS", "Own" pill).
+- **Desktop bridge** stays on by default, silently; the "Help others connect" switch is at the bottom of Settings (Advanced → Network and service).
+- **One QR code for everyone:** an invite is a link `https://github.com/robertostrowskijagoda/zen#CODE`; the code is after `#`, so it never reaches the server. A camera without Zen opens the README, the Zen scanner adds the friend at once. Old `zen://` codes still work.
+- **Android package `com.roj.zen`** (was `com.HuraganKodu.zen`) — a new app to the system; the old install stays beside it with its data.
+- **License** (`LICENSE`): builds from unmodified code may be redistributed if SHA-256 matches the published one; your own build may be given to others but not published as "Zen".
+- **README for ordinary people:** download, what to do after scanning a code, installation (including the 2027 path for unverified developers with a 24 h wait), Windows SmartScreen, virus checking, why not in stores, privacy, Yggdrasil, donations, license summary, developer part.
+- **Cleanup:** removed `zen-site/` and the Pages workflow, `screenshots/shots_test.dart`, `tool/ui_tour/ui_tour_test.dart` with `run.ps1` and the unused `logo_rounded.png`; all code `dart format`-ed.
+- **Docs:** plan (`docs/PLAN.md`) updated and shortened; new `docs/STATUS.md` (state, known bugs, security, work order) replaces `KIERUNKI.md` and `AUDYT_BEZPIECZENSTWA.md`; `PUBLIKACJA.md` merged into `docs/RELEASES.md`.
 
-### Poprawki
-- **Blokada po wyjściu z aplikacji** do ustawienia: Ustawienia →
-  Bezpieczeństwo → „Po wyjściu z aplikacji” i czas: 5 s, 30 s, 1 min, 5 min,
-  15 min, 1 h (domyślnie 5 min).
-- Wydarzenia: „Posiłek” zamiast „Obiad / kolacja”, „Znajomi znajomych
-  znajomych” zamiast „2 kroki dalej”; przy tworzeniu wydarzenia wyjaśnienie,
-  czym jest Stół na sześć (i skrót do niego).
-- Sąsiedzi: zamiast przełącznika „zaproszenia także dla tych, którzy
-  zeskanowali nasz kod” — przycisk „Dodaj” przy mieszkaniu, które
-  zeskanowało Wasz kod.
-- Randki: bez pola „Mam ukończone 18 lat” (wystarcza wiek).
-- Zakładka „Podziękowania” w profilu mieści się na ekranie.
-- Zakładanie piramidy (i inne okna z polami tekstowymi) już się nie wysypuje.
-- **Ważne:** dane wczytane przy zablokowanej aplikacji nie nadpisują już
-  znajomych i rozmów pustym stanem (zapis czeka na odblokowanie); to samo
-  dla spotkań, randek, sąsiadów i piramidy. Usługa w tle znów startuje
-  (błąd zależności przy uruchamianiu).
+### After the phone test
+- **More "right now" statuses:** Need help urgently (louder notification, separate red button), Can help, Going for a walk, Want to eat together, Want to play — and a **custom status** (own words and emoji). Compact pills instead of big tiles. Older versions do not show the new statuses.
+- **"People nearby" has its own button** in the left panel. Full Bluetooth scanning with the screen open; otherwise a short look-around every 5 minutes.
+- **Alarm with confirmations:** the friend's phone replies "arrived" and "seen"; the alarm screen shows who got it, who saw it and who responded, with retry.
+- **No whole-file rewrites:** conversations in segments of 200 messages, pyramid records in an append-only log (old format migrated automatically).
+- **Fewer freezes:** verified pyramid ring signatures cached on disk, first verification in the background.
+- **Android no longer kills the service after 6 hours** (Android 14+: `specialUse` service type); if the system stops it anyway, a "Zen is not receiving in the background — open it for a moment" notification appears.
+- **App sharing through Quick Share / Bluetooth** (new button in "Pass it on").
+- **Same colors in light and dark themes;** the "ZEN" mark on the start screen.
+- Someone in two pyramids sees the one they joined most recently.
+- **Network identity survives a corrupted file:** node configuration written atomically with a backup (previously a corrupted file meant a new address and losing contact with friends).
+- "Meetings" state from an unknown (newer) version is no longer overwritten with an empty one.
 
-### Piramida, władza, waluta (etapy 9–11, §20–24, §28) — nowa zakładka „Piramida”
-Wszystko zaimplementowane; **używanie zacznie się później** (po audycie
-i gdy będzie społeczność).
-- **Dołączenie osobiście**: kod QR szefa komórki, rok urodzenia i płeć
-  potwierdzone przy wejściu (publicznie tylko skrót).
-- **Komórki**: zamiana szefa 2 z 3, **anonimowe żądanie głosowania i
-  anonimowy głos** (podpis pierścieniowy — nikt nie wie, kto głosował jak),
-  wyjście, zajęcie wolnego miejsca, nieobecność po 60 dniach, usunięcie
-  tylko przez własną komórkę, przejście pod innego szefa, **łączenie
-  piramid** (mniejsza wchodzi jako gałąź, stara się zamyka).
-- **Władza**: decyzje szczytu 2 z 3, delegacje (zakres, limit, termin,
-  dalsze delegowanie, cofanie), bany z **immunitetem** wyższych poziomów,
-  **„Zgłoś”** w randkach i piramidzie (delegat albo szczyt, jawna decyzja,
-  odwołanie, ban randkowy działa w Randkach).
-- **Referenda liczone drzewem** (głos tylko do szefa komórki, w górę
-  sprawdzalne sumy), **konstytucja** zmieniana referendum, **sekcja
-  krajowa** z prowadzącym, posty polityczne i krajowe.
-- **Waluta**: emisja z 24 h na weto i limitem kadencji, 15 skarbników
-  (przelew ważny z podpisami większości, bez podwójnego wydania),
-  płatności warunkowe; **rynek dostępu** — płatna skrzynka,
-  przedstawienia, udostępnienie, ogłoszenia.
-- **Tryb kryzysowy**: alarm z zasięgiem i fala Bluetooth do telefonów
-  w pobliżu, także bez internetu.
+### The network carries itself: computers are bridges (stage 2 finished)
+- **Every computer is a bridge** (§5.1; on by default). The PC app opens a router port itself (UPnP, else NAT-PMP), asks friends to verify from outside that it is reachable, and only then announces the bridge. Port and announcement are renewed every half hour, withdrawn when unreachable, closed on exit.
+- A computer with a public address (no router, or IPv6) is a bridge too. The PC node listens on IPv4 and IPv6 (`tls://[::]:32913`), also on Linux and macOS.
+- **Bridge status in Settings → Network and service:** working / router did not open the port / router refused (UPnP off) / no public address (CGNAT) / firewall blocks / waiting for a friend online, with "Check now" and hints. A manually forwarded port works too.
+- **Bridge checks:** the app waits for the Yggdrasil handshake instead of a bare TCP connection; bridges must have a public IP (no names, no home networks), so nobody can send the app "knocking" on devices in your network. A friend checks at most 4 addresses per minute for others.
+- **Bridge choice by speed and networks:** fastest working bridges spread across address blocks; rechecked every 6 h, dead ones get a second chance after a day and are dropped after three failures.
 
-### Testowanie na wielu klientach (`docs/TESTOWANIE.md`)
-- **Symulator sieci** (`SimNetwork`): wirtualny zegar, opóźnienia, straty,
-  wyłączone telefony, rozcięcie sieci; 20+ scenariuszy piramidy, randek
-  i sąsiadów w `flutter test`, w tym chaos z naprawą.
-- **Kilka aplikacji na jednym komputerze**: `zen.exe --zen-profile=NAZWA`
-  (osobne dane i klucze), `tool\multi_client.ps1 -Count 4`.
-- **Pilot** `/x/…` (piramida, randki, sąsiedzi) i skrypt
-  `dart run tool/zen_drive.dart pyramid 48888 48889 48890 48891`;
-  telefon przez `adb forward` (`-Phone`).
-- Poprawki znalezione testami: propozycje z mieszanymi wymaganiami
-  (szczyt + komórka) nie wychodzą już w połowie podpisane; nieobecność da
-  się stwierdzić także u osoby z jednym sąsiadem.
+### Security audit (`docs/STATUS.md`)
+- A stranger can no longer become your friend with one packet (`friend_accept` without your invite goes to confirmations).
+- A locked app no longer breaks friendships or loses invites: signals wait until state is loaded after unlocking.
+- Two people who invite each other at the same moment become friends at once.
+- Flood and "bomb" protection: zstd, signal fragments, photos and images, attachments, friend requests, group invites, events, dating bundles, offline mailboxes, alarms, questions.
+- Pyramid: resilience to bad ring signatures, double votes, date rollback, veto and issuance-limit bypass, constitutional change without quorum; sync only with friends.
+- Windows: data key sealed only when Windows Hello is enabled.
+- Passwords: changing needs confirmation, password and panic password cannot match; panic destroys keys first.
+- Device linking with a commitment; conversation file names do not reveal contacts; writes bound to the file key.
+- A link can no longer answer a call or replace the caller's name; notification content hidden for dating and pyramid too.
+- Android: no data backups, call screen unavailable to other apps, own release signing key prepared (`android/key.properties`). "Pass it on" shows the file's SHA-256.
+- Test pilot only in debug builds; no logcat logs in release.
 
-### Randki przez znajomych (etap 8, §19) — „Spotkania → Randki”
-- **Tylko do 3 kroków znajomości**, zawsze z kimś wspólnym: „Znacie się
-  przez: Bob → Kasia”.
-- **Nikt nie wie, że randkujesz**: każdy telefon co tydzień wysyła i
-  przekazuje dalej takie same paczki — z profilem albo pustą przykrywkę.
-  Telefon bez randek przekazuje je, nie otwierając.
-- **Profil randkowy** zbudowany jednym dotknięciem z profilu głównego, z
-  preferencjami (płeć, wiek, 1–3 kroki) i ukrywaniem przed wybranymi
-  znajomymi albo całymi grupami (np. rodzina, praca).
-- **„Tak / Nie”**: para powstaje tylko przy „Tak” + „Tak”. „Nie” nie
-  wysyła niczego — nikt się o nim nie dowie.
-- **Rozmowy par, przedstawienia i polubienia są zaszyfrowane** i idą przez
-  znajomych; telefony po drodze nie wiedzą nawet, od kogo są.
-- **Zapytaj o opinię** wspólnego znajomego, **swatanie** (przedstaw sobie
-  dwie osoby), **poręczenia** znajomych na profilu.
-- **„Idę na randkę”**: przyjaciel widzi, gdzie jesteś; jeśli nie potwierdzisz
-  „Wszystko OK”, dostaje przypomnienie, a potem alarm.
+### Polished look (reviewed at 320–412 dp, text up to 150%, light/dark, desktop)
+- Friend graph scrolls with its legend and no longer overlaps at small sizes; friends do not cover "You".
+- "Meetings" tiles and "What do you feel like" statuses collapse to one column instead of breaking words.
+- On desktop every screen keeps the same narrow layout.
+- Amounts with thousands separators, pyramid levels from 1, no "§" in texts, and other small fixes.
 
-### Sąsiedzi (etap 7, §18) — „Spotkania → Sąsiedzi”
-- **Profil sąsiedzki rodziny / grupy w mieszkaniu**: „Nowakowie · m. 12”,
-  „O nas”, zaproszenia (termin, miejsca), „Oferujemy”, „Potrzebujemy”.
-  Sąsiedzi nie widzą Waszych kont.
-- **Domownicy** (bez limitu): kolejny telefon dołącza, skanując kod
-  domownika (pokazuj go tylko w mieszkaniu). Każdy domownik może zmieniać
-  profil i odpisywać; wszystko synchronizuje się między Wami.
-- **Przeprowadzka**: stary kod na drzwiach przestaje działać, sąsiedzi
-  dostają informację, a Wy zaczynacie od nowa w nowym miejscu. Nowi
-  lokatorzy zakładają własny profil od zera.
-- **Kod na drzwi**: naklejka A6 do wydrukowania (PNG), z własnym hasłem.
-  „Nowy kod” unieważnia stary.
-- **Moi sąsiedzi**: zeskanuj drzwi sąsiada — oba mieszkania mają się na
-  liście. Wiadomości między mieszkaniami, zapisy na zaproszenia z
-  pilnowaniem liczby miejsc, wyciszanie, usuwanie.
-- **Zaproszenie w pobliżu**: wyślij zaproszenie przez Bluetooth do ludzi
-  z Zen w zasięgu (klatka, podwórko); oni jednym dotknięciem dodają Was do
-  sąsiadów.
-- Poprawka: po powrocie do aplikacji wydarzenia, pytania, Stół na sześć
-  i kółka obiadowe wczytują to, co w tym czasie odebrała usługa w tle.
+### Gaps from the plan filled in
+- **"Report" everywhere:** posts, messages (also in groups) and profiles; reported content can be hidden at once; in the pyramid it goes to the reports delegate or the top.
+- **Dating:** bundles encrypted with a separate key (ChaCha20-Poly1305), key given on request; vouches signed with a vouching key; several photos; "Dating" status 💘; "Thank the matchmaker"; "I'm going on a date" deadlines watched in the background.
+- **Events:** shared album (photos from attendees, from 15 min before start), thank-you cards, organizer tips in pyramid currency.
+- **Alarm:** audio recording for close friends and an optional Bluetooth wave to nearby phones.
+- **Alarm shortcut: 5× power button** (Android, off by default): five quick presses (~4 s), also with the screen off and Zen closed, raise the ordinary alarm; only the PIN cancels it, the panic PIN works as always; vibration confirms. Warning about the system "Emergency SOS" that reacts to the same gesture.
+- **Nearby alarm with the app closed:** with the option on, the Android background service shows nearby phones and receives alarm waves; each wave rings only once.
+- **"Also look around in the background"** (off by default): every 5 minutes 10 s of frugal scanning, only to mark friends in range as "met in person".
+- **Neighbours:** flat photo, removing a neighbour with a new key for the rest, revealing yourself to neighbours.
+- **Event ticket pinned to the phone:** "I'll come" sends the organizer a key held only by that phone; at the door the phone shows a live code (refreshed every 20 s), accepted once within ±90 s. Guests on older versions get an ordinary ticket, and the organizer sees "unpinned ticket".
+- **Neighbours: a removed household member cannot forge a new flat key.** Each member phone has its own key known from the profile; removal votes and the new-key notice are signed by it; neighbours accept a new key only with the signature of a remaining member and a majority. Two competing new keys produce a warning, and scanning the new door code settles it.
+- Fix: a shared event album disappears from disk with the event even if the app never loaded it.
+- **Currency:** tip for an answer in "Ask the network", prices by friendship level, announcements through broker chains, moving a whole pyramid as a branch into a larger one.
 
-### Spotkania (etap 6, §15–17) — nowa zakładka „Spotkania”
-- **Na teraz**: „Chcę pogadać”, „Chcę wyjść”, „Potrzebuję pomocy”, „Nie
-  przeszkadzać” — na godzinę, do końca dnia albo do odwołania, z
-  dopiskiem, dla wszystkich znajomych albo tylko przyjaciół. Widzisz, kto
-  ze znajomych ma teraz na co ochotę, i jednym dotknięciem do niego piszesz.
-- **Alarm**: przytrzymaj 3 sekundy — przyjaciele dostają go od razu, na
-  pełnym ekranie, z dźwiękiem alarmu i Twoim położeniem (odświeżanym co
-  minutę). Widać, kto jedzie. Odwołanie zwykłym PIN-em; osobny PIN
-  paniczny odwołuje alarm na ekranie, ale przyjaciele dostają ostrzeżenie,
-  że możesz być zmuszony(-a). Pomyłka w PIN-ie niczego nie odwołuje.
-  Przycisk „Zadzwoń na 112”. Działa także przy zamkniętej aplikacji.
-- **Osoby w pobliżu** (Android, Bluetooth): znajomi obok z imieniem, obcy
-  jako pseudonim zmieniający się co 15 minut, odległość, „Napisz” do obcego
-  bez zdradzania konta, „Zaproś do znajomych” z pieczątką „spotkani
-  osobiście”. Znajomi spotkani na żywo dostają ją sami.
-- **Wydarzenia po znajomości**: impreza, obiad, spotkanie — dla wybranych,
-  znajomych, znajomych znajomych albo 2 kroki dalej. Lista gości pokazuje,
-  ilu znasz i kto kogo przyprowadził. Limit miejsc, „+1” za zgodą, bilety
-  QR sprawdzane przy wejściu bez internetu, „Poznaliśmy się” po wydarzeniu.
-- **Stół na sześć**: kolacja z ludźmi oddalonymi o 2 kroki znajomości —
-  Zen sam dobiera 5 gości, którzy jak najmniej się znają.
-- **Kółka obiadowe**: kolejka gotujących, zamiany za zgodą, alergie,
-  lista „kto co przynosi”.
-- **Zapytaj sieć**: pytanie do znajomych (i dalej, ale tylko ręcznie),
-  odpowiedzi wracają z informacją „znajomy(-a) Bartka”.
-- **Graf znajomych**: Ty w środku, przyjaciele, znajomi i znajomi znajomych,
-  kolory statusów, wspólni znajomi. Nowe ustawienie „Pokazuj znajomym moją
-  listę znajomych”.
-- Android: nowe uprawnienia Bluetooth (bez lokalizacji) i lokalizacji
-  (tylko dla alarmu); nowa biblioteka geolocator 14 (z `dependency_overrides: uuid ^4`,
-  bo system_tray 2.0.3 trzyma uuid 3).
+### New look for the whole app
+- **New palette:** deep dark (or light) base tinted with the accent and a gradient accent. **Color choice is back** (Settings → Appearance: 27 colors + light/dark/system); the default is "Zen" purple.
+- **Readable typography:** sans-serif everywhere, sentences instead of ALL CAPS.
+- **Every screen redone:** Inbox and chats (gradient bubbles, new composer), profile (cover, avatar in a gradient ring), Feed, Meetings, events, Table for Six, dinner circles, Ask the network, nearby, alarm, dating, neighbours, graph, pyramid, Invite, settings, lock screen, calls, start screen.
+- **Own buttons in the left panel** for Dating, Neighbours, Friend graph and Alarm (red, at the bottom).
+- Elements no longer overlap and fit narrow phones (checked with phone-size screenshots: `tool/ui_tour`).
 
-### Odporność: aktualizacje przez sieć i „Podaj dalej” (etap 5, §14.2)
-- **Aktualizacje od znajomych, bez sklepu i serwera** — przesyłanie
-  gotowe, **zatwierdzanie do ustalenia**. Nowa wersja rozchodzi się jak
-  zwykły plik od znajomego do znajomego, czeka **7 dni** od pierwszego
-  zobaczenia i **nigdy nie instaluje się sama** — na Androidzie otwiera się
-  systemowy instalator, na komputerze instalator trafia do Pobranych.
-  Zatwierdzanie jest na razie zrobione podpisami opiekunów, ale nie chcemy
-  osób z kluczami do publikacji, więc aktualizacje przez sieć są
-  **wyłączone**, dopóki nie ustalimy innego sposobu (§14.2).
-- **Ustawienia → Aktualizacje i Podaj dalej**: wersja, stan nowej wersji
-  (pobieranie, czas ochronny, gotowa), „Wczytaj aktualizację z pliku”
-  (`.zenupdate` ze strony albo pendrive'a, także samo wstrzymanie).
-- Narzędzie `tool/zen_release.dart` i opis `docs/WYDANIA.md` — dla
-  obecnego (wyłączonego) mechanizmu; zostaną przerobione po decyzji.
-- **Podaj dalej**: telefon daje Zen komuś obok bez internetu — włącza
-  własny hotspot (kod QR do połączenia z Wi-Fi), a drugi kod QR otwiera
-  stronę z plikiem do pobrania. Działa też w tej samej sieci Wi-Fi.
-  Udostępniany jest tylko ten jeden plik, pod losowym adresem, najwyżej
-  20 minut.
-- **Z komputera kablem USB**: „Zainstaluj” przy podłączonym telefonie
-  (przez narzędzie adb z Android SDK), także nowszą, podpisaną wersję
-  z aktualizacji.
-- **Ruch wyglądający jak HTTPS**: komputer-most prosi router najpierw
-  o zewnętrzny port 443.
-- Android: nowe uprawnienia — instalowanie aplikacji (aktualizacje) oraz
-  Wi-Fi / urządzenia w pobliżu (hotspot do „Podaj dalej”).
+### Fixes
+- **Lock after leaving the app** is configurable: Settings → Security → "After leaving the app": 5 s, 30 s, 1 min, 5 min, 15 min, 1 h (default 5 min).
+- Events: "Meal" instead of "Dinner / supper", "Friends of friends of friends" instead of "2 steps away"; explanation of Table for Six when creating an event.
+- Neighbours: an "Add" button next to a flat that scanned your code replaces the toggle.
+- Dating: no "I am 18" field (age is enough). "Thanks" tab fits the screen. Creating a pyramid (and other dialogs with text fields) no longer crashes.
+- **Important:** data loaded while the app is locked no longer overwrites friends and conversations with an empty state (the write waits for unlock); same for meetings, dating, neighbours, pyramid. The background service starts again (dependency error at startup).
 
-### Ochrona danych na urządzeniu (etap 4 dokończony, §14.1)
-- **Hasło aplikacji domyślnie wymagane**: przy pierwszym uruchomieniu Zen
-  prosi o hasło (co najmniej 8 znaków). Pominąć można tylko świadomie,
-  a w Ustawieniach jest przełącznik „Pozwól używać aplikacji bez hasła”.
-- **Argon2id** dla hasła i hasła paniki; stare hasła przechodzą na nie same
-  przy najbliższym odblokowaniu.
-- **Odblokowanie biometrią przez sprzęt**: klucz jest zamknięty w Android
-  Keystore (StrongBox, gdy jest) albo w TPM na Windows (bez TPM: DPAPI),
-  otwiera go dopiero odcisk palca / twarz / Windows Hello. Nowy odcisk
-  w telefonie unieważnia klucz — wtedy raz wpisujesz hasło. Ustawienia
-  pokazują, co chroni klucz.
-- **Klucz konta znika z pamięci** razem z kluczem danych, gdy aplikacja się
-  blokuje.
-- **Ponowne potwierdzenie** (biometria albo hasło) przed wejściem w Konto
-  i odzyskiwanie, Urządzenia i Nagrania rozmów; ważne minutę.
-- **Blokada zrzutów i nagrywania ekranu** na czatach, grupach, nagraniach,
-  koncie i urządzeniach (Android i Windows); można wyłączyć w Ustawieniach.
-- **Znikające wiadomości** w menu czatu i grupy: 1 godzina, 1 dzień albo
-  7 dni. Rozmówcy i Twoje inne urządzenia dostają to samo ustawienie;
-  wiadomości znikają u wszystkich razem z plikami i nie trafiają do trwałych
-  kopii konta.
-- **Hasło paniki** kasuje też klucz w układzie bezpieczeństwa.
-- **Ostrzeżenie o zrootowanym telefonie** w Ustawieniach → Bezpieczeństwo
-  (su, Magisk, LSPosed, Frida, klucze testowe) — bez blokowania.
-- Android: aplikacja działa teraz na `FlutterFragmentActivity` (potrzebne
-  do systemowego okna biometrii).
+### Pyramid, power, currency (stages 9–11, §20–24, §28) — new "Pyramid" tab
+Everything is implemented; **use will start later** (after the audit, once there is a community).
+- **Joining in person:** the cell leader's QR code, year of birth and gender confirmed at entry (only a hash is public).
+- **Cells:** leader swap 2 of 3, **anonymous vote request and anonymous vote** (ring signature — nobody knows who voted how), leaving, taking a free seat, absence after 60 days, removal only by one's own cell, moving under another leader, **merging pyramids** (the smaller one joins as a branch).
+- **Power:** top decisions 2 of 3, delegations (scope, limit, deadline, sub-delegation, revoking), bans with **immunity** of higher levels, **"Report"** in dating and the pyramid (delegate or top, open decision, appeal).
+- **Referenda counted by tree** (votes go only to the cell leader, verifiable sums upward), **constitution** changed by referendum, **national section** with a lead, political and national posts.
+- **Currency:** issuance with a 24 h veto window and term limit, 15 treasurers (transfer valid with majority signatures, no double spend), conditional payments; **access market** — paid mailbox, introductions, sharing, announcements.
+- **Crisis mode:** alarm with reach and a Bluetooth wave to nearby phones, also without internet.
 
-### Konto na kilku urządzeniach (etap 4)
-- **Ustawienia → Urządzenia**: lista urządzeń konta, „Podłącz nowe
-  urządzenie”, „To nowe urządzenie: dołącz do konta” i „Odłącz” przy
-  każdym urządzeniu.
-- **Podłączanie bezpieczne**: nowe urządzenie pokazuje swój kod (QR albo
-  do przepisania), na obu ekranach pojawia się te same 6 cyfr — dopiero po
-  ich potwierdzeniu klucz konta idzie, zaszyfrowany jednorazowymi kluczami.
-- **Znajomi widzą jedną osobę**: wiadomości i połączenia trafiają na każde
-  Twoje urządzenie; odebranie rozmowy na jednym wycisza pozostałe; to, co
-  napiszesz na jednym urządzeniu, pojawia się w rozmowie na pozostałych.
-- **Znajomi i grupy są wszędzie te same**: zapisane w koncie,
-  zaszyfrowane tak, że czytają je tylko Twoje urządzenia. Znajomi trzymają
-  zaszyfrowaną kopię, więc **odzyskane konto wraca ze znajomymi i
-  grupami** (wcześniej przepadały).
-- **Odłączenie zgubionego lub skradzionego urządzenia**: od tej chwili
-  nic z niego nie jest przyjmowane i nie dostaje wiadomości; samo
-  urządzenie pokazuje, że zostało odłączone.
-- Poprawka w silniku: punkt odcięcia urządzenia liczony osobno dla każdej
-  przestrzeni (wcześniej długi dziennik jednej przestrzeni mógł zostawić
-  furtkę w innej).
-- **Historia czatów na nowym urządzeniu**: po podłączeniu dostaje ono
-  wszystkie dotychczasowe rozmowy (z plikami do 25 MB każdy),
-  zaszyfrowane tak, że czytają je tylko Twoje urządzenia.
-- **Wysłane zdjęcia, pliki i wiadomości głosowe** (także w grupach)
-  pojawiają się na pozostałych urządzeniach, nie tylko tekst.
-- **Usunięcie znajomego, wyjście z grupy, zmiana nazwy i blokada** na
-  jednym urządzeniu dzieją się na wszystkich.
-- **Członek grupy z kilkoma urządzeniami** (także ktoś, kto nie jest
-  Twoim znajomym) jest jedną osobą: jego wiadomości z każdego urządzenia
-  są od niego, a Twoje trafiają na wszystkie jego urządzenia.
-- **Bezpieczeństwo**: powitanie między urządzeniami ma teraz podpis
-  potwierdzający adres, więc nikt nie podszyje się pod drugie urządzenie
-  znajomego, żeby czytać jego wiadomości.
+### Multi-client testing (`docs/TESTING.md`)
+- **Network simulator** (`SimNetwork`): virtual clock, delays, loss, offline phones, partitions; 20+ pyramid, dating and neighbours scenarios in `flutter test`, including chaos with repair.
+- **Several apps on one computer:** `zen.exe --zen-profile=NAME` (separate data and keys), `tool\multi_client.ps1 -Count 4`.
+- **Pilot** `/x/…` and `dart run tool/zen_drive.dart pyramid 48888 48889 48890 48891`; phone through `adb forward`.
+- Fixes found by tests: proposals with mixed requirements (top + cell) no longer go out half-signed; absence can be declared for a person with a single neighbour.
 
-### Jeden kod zaproszenia
-- Jest już tylko jeden kod: 25 znaków (`XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`).
-  Kod QR niesie ten sam kod (dziś w linku do README, patrz wyżej; wcześniej
-  osobny, dłuższy zapis z adresem i nazwą), więc QR jest mniejszy i łatwiej
-  się skanuje.
-  Nazwę przynosi samo zaproszenie. Kody QR ze starszych wersji nadal
-  działają.
+### Dating through friends (stage 8, §19) — "Meetings → Dating"
+- **Only up to 3 steps**, always with someone in common: "You know each other through: Bob → Kasia".
+- **Nobody knows you are dating:** every phone weekly sends and forwards identical bundles — with a profile or an empty decoy.
+- **Dating profile** built in one tap from the main profile, with preferences (gender, age, 1–3 steps) and hiding from chosen friends or whole groups.
+- **"Yes / No":** a pair forms only on "Yes" + "Yes"; "No" sends nothing.
+- **Pair chats, introductions and likes are encrypted** and travel through friends who do not even know whom they are from.
+- **Ask for an opinion** from a mutual friend, **matchmaking**, **vouches** on the profile.
+- **"I'm going on a date":** a friend sees where you are; if you do not confirm "All OK", they get a reminder, then an alarm.
+
+### Neighbours (stage 7, §18) — "Meetings → Neighbours"
+- **Neighbour profile of a family / flat group:** "Novaks · flat 12", "About us", invitations (date, seats), "We offer", "We need". Neighbours do not see your accounts.
+- **Household members** (no limit): another phone joins by scanning the member code. Anyone can edit the profile and reply; everything syncs.
+- **Moving out:** the old door code stops working, neighbours are informed, new tenants start from scratch.
+- **Door code:** printable A6 sticker (PNG) with its own password; "New code" invalidates the old one.
+- **My neighbours:** scan a neighbour's door — both flats are on each other's list. Messages between flats, sign-ups with seat limits, muting, removing.
+- **Nearby invitation:** send an invitation over Bluetooth to Zen users in range; they add you as neighbours with one tap.
+- Fix: after returning to the app, events, questions, Table for Six and dinner circles load what the background service received.
+
+### Meetings (stage 6, §15–17) — new "Meetings" tab
+- **Right now:** "Want to talk", "Want to go out", "Need help", "Do not disturb" — for an hour, until end of day or until cancelled, with a note, for all friends or only close ones.
+- **Alarm:** hold for 3 seconds — close friends get it at once, full screen, with sound and your location (refreshed every minute); you see who is coming. Cancel with the ordinary PIN; a separate panic PIN cancels it on screen but friends are warned you may be coerced. A wrong PIN cancels nothing. "Call 112" button. Works with the app closed.
+- **People nearby** (Android, Bluetooth): friends with names, strangers as a pseudonym rotating every 15 minutes, distance, "Write" to a stranger without revealing your account, "Invite as friend" with the "met in person" stamp.
+- **Events through friends:** party, meal, meeting — for chosen people, friends, friends of friends or further. Guest list shows how many you know and who brought whom. Seat limit, "+1" with consent, QR tickets checked offline at the door, "We met" after the event.
+- **Table for Six:** a dinner with people two steps away — Zen picks 5 guests who know each other the least.
+- **Dinner circles:** cooking rota, swaps with consent, allergies, "who brings what".
+- **Ask the network:** a question to friends (further only manually), answers come back with "friend of Bartek".
+- **Friend graph:** you in the centre, close friends, friends and friends of friends, status colors, mutual friends. New setting "Show my friend list to friends".
+- Android: new Bluetooth permissions (no location) and location (alarm only); geolocator 14 (with `dependency_overrides: uuid ^4`).
+
+### Resilience: network updates and "Pass it on" (stage 5, §14.2)
+- **Updates from friends, without a store or server** — transfer ready, **approval to be decided**. A new version travels as an ordinary file from friend to friend, waits **7 days** after first seen and **never installs itself** (Android opens the system installer; on a computer the installer lands in Downloads). Approval is currently done with maintainer signatures, but we do not want people holding publishing keys, so network updates are **off** until another method is decided (§14.2).
+- **Settings → Updates and Pass it on:** version, state of a new version, "Load update from file" (`.zenupdate`).
+- `tool/zen_release.dart` and `docs/RELEASES.md` describe the current (disabled) mechanism.
+- **Pass it on:** the phone hands Zen to someone nearby without internet — own hotspot (Wi-Fi QR) plus a second QR with a download page. Also works on the same Wi-Fi. Only that one file is served, at a random address, for at most 20 minutes.
+- **From a computer by USB:** "Install" with a connected phone (via `adb`), including a newer signed version.
+- **HTTPS-looking traffic:** a computer bridge asks the router for external port 443 first.
+- Android: new permissions — installing apps (updates) and Wi-Fi / nearby devices (hotspot).
+
+### On-device data protection (stage 4 finished, §14.1)
+- **App password required by default** (at least 8 characters); skipping is a conscious choice with a Settings switch.
+- **Argon2id** for password and panic password; old passwords upgrade at the next unlock.
+- **Hardware-backed biometric unlock:** the key lives in Android Keystore (StrongBox if present) or a Windows TPM (DPAPI without), opened by fingerprint / face / Windows Hello. A new fingerprint invalidates the key — you type the password once.
+- **Account key leaves memory** together with the data key when the app locks.
+- **Re-confirmation** (biometrics or password) before Account and recovery, Devices and Call recordings; valid for a minute.
+- **Screenshot and screen-recording block** in chats, groups, recordings, account and devices (Android and Windows); can be turned off.
+- **Disappearing messages** in chat and group menus: 1 hour, 1 day or 7 days; the same setting reaches the other side and your other devices; messages vanish everywhere together with files and never enter durable account backups.
+- **Panic password** also deletes the key in the security chip.
+- **Rooted-phone warning** in Settings → Security (su, Magisk, LSPosed, Frida, test keys), without blocking.
+- Android: the app now runs on `FlutterFragmentActivity` (needed for the system biometric prompt).
+
+### Account on several devices (stage 4)
+- **Settings → Devices:** list, "Link a new device", "This is the new device: join the account", "Unlink".
+- **Safe linking:** the new device shows its code (QR or typed); both screens show the same 6 digits; only after confirmation the account key travels, encrypted with one-time keys.
+- **Friends see one person:** messages and calls reach every device; answering a call on one silences the others; what you write on one device appears on the rest.
+- **Friends and groups are the same everywhere:** stored in the account, encrypted so only your devices read them. Friends keep an encrypted copy, so a **recovered account comes back with friends and groups**.
+- **Unlinking a lost or stolen device:** from then on nothing from it is accepted and it gets no messages; the device itself shows it was unlinked.
+- Engine fix: the device cut-off point is counted per space.
+- **Chat history on a new device:** all conversations so far (files up to 25 MB each), encrypted for your devices only.
+- **Sent photos, files and voice notes** (also in groups) appear on other devices, not just text.
+- **Removing a friend, leaving a group, renaming and blocking** on one device happen on all.
+- **A group member with several devices** is one person.
+- **Security:** the greeting between devices carries an address-proving signature, so nobody can impersonate a friend's second device.
+
+### One invite code
+- There is only one code: 25 characters (`XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`). The QR carries the same code (today in a link to the README), so it is smaller and easier to scan. The name comes with the invite. QR codes from older versions still work.
 
 ## 1.9.0
 
-### Usunięty asystent AI
-- **Cała sekcja „Asystent” znika z aplikacji**: model językowy na
-  urządzeniu (razem z pakietem llamadart), rozmowa z asystentem,
-  „Na pewno chcesz to wysłać?” przed wysłaniem wiadomości i posta,
-  ostrzeżenia przed oszustwami pod wiadomościami, tłumaczenia (w czacie,
-  grupach, komentarzach, postach i w „O mnie”, także przycisk tłumaczenia
-  w polu pisania), „Zenek czuwa”, podsumowanie dnia, stworek
-  (tamagotchi) i Notatnik (przypomnienia i pamięć o znajomych). Model
-  obciążał urządzenie tak bardzo, że potrafił zawiesić system.
-- **Sprzątanie po aktualizacji**: przy starcie aplikacja kasuje dane
-  asystenta (rozmowę, stworka, Notatnik, ustawienia, ostrzeżenia) i
-  pobrane modele (do 2,6 GB).
-- Wiadomości w czacie i w grupach oraz komentarze nadal można skopiować:
-  przytrzymanie albo prawy klik → „Kopiuj”.
+### AI assistant removed
+- **The whole "Assistant" section is gone:** the on-device language model (with the llamadart package), the assistant chat, "Are you sure you want to send this?", scam warnings under messages, translations (chat, groups, comments, posts, "About me", the translate button), "Zenek is watching", daily summary, the tamagotchi pet and the Notebook (reminders and memory about friends). The model strained the device so much it could freeze the system.
+- **Cleanup after the update:** at startup the app deletes assistant data and downloaded models (up to 2.6 GB).
+- Messages and comments can still be copied: long-press or right-click → "Copy".
 
-### Rozmowy w pływającym okienku
-- **Android**: wyjście z aplikacji w trakcie rozmowy (gest „do domu”,
-  przejście do innej aplikacji) zmniejsza ją do okienka obraz w obrazie
-  nad innymi aplikacjami: obraz rozmówcy przy wideo, imię i czas przy
-  audio, przycisk „Rozłącz”. Działa też w rozmowach grupowych.
-- **Komputer**: przycisk „Mini okno” na ekranie rozmowy, a także
-  zminimalizowanie albo zamknięcie okna w trakcie rozmowy zmienia Zen
-  w małe okienko w prawym dolnym rogu, zawsze na wierzchu (wycisz,
-  wróć do pełnego okna, rozłącz; okienko można przeciągać). Po
-  rozmowie okno wraca do zwykłego rozmiaru.
+### Calls in a floating window
+- **Android:** leaving the app during a call shrinks it into a picture-in-picture window: the other person's video, or name and time for audio, with "Hang up". Works in group calls too.
+- **Desktop:** a "Mini window" button, and minimizing or closing the window during a call turns Zen into a small always-on-top window in the bottom-right corner (mute, back to full window, hang up; draggable).
 
-### Działanie w tle bez ikony na pasku stanu (Android)
-- Powiadomienie, którego Android wymaga od usługi w tle, ma nowy kanał
-  „Zen — działanie w tle” o **minimalnej ważności**: bez ikony na górnym
-  pasku, zwinięte na dole listy powiadomień, niewidoczne na ekranie
-  blokady. Stary kanał (z V1.2, który Android zostawiał jako „niski”, z
-  ikoną) jest usuwany. Na Androidzie 13+ powiadomienie można przesunąć
-  albo wyłączyć kanał w ustawieniach — Zen działa dalej.
+### Background work without a status-bar icon (Android)
+- The notification Android requires for the background service has a new channel "Zen — background" of **minimal importance**: no status-bar icon, collapsed at the bottom, hidden on the lock screen. The old channel is removed. On Android 13+ the notification can be swiped away.
 
-### Nagrywanie rozmów — dokończone (etap 3a)
-- **Rozmowy grupowe**: przycisk „Nagrywaj” w rozmowie grupowej. Wszyscy
-  dostają sygnał przed startem i widzą czerwony pasek „● Ada nagrywa”
-  (z imionami); ktoś, kto dołączy w trakcie, też go od razu widzi.
-- **Windows**: nagrywanie działa także na komputerze — dźwięk samej
-  aplikacji Zen (głos rozmówców) zmiksowany z mikrofonem, zapisany jako WAV
-  (`windows/runner/call_recorder.cpp`, WASAPI). Sprawdzone testem na
-  prawdziwym komputerze (`integration_test/call_recorder_test.dart`).
-  Nagrywa tylko rozmowę: przechwytuje dźwięk procesu Zen (WASAPI process
-  loopback), więc muzyka, filmy, inne aplikacje i dźwięki systemu nie trafiają
-  do nagrania. Wymaga Windows 10 2004 lub nowszego — na starszym nagrywanie
-  odmawia zamiast nagrywać cały komputer. Przy głośnikach mikrofon może
-  złapać dźwięki z pokoju; najczyściej nagrywa się na słuchawkach.
-- **Nagranie nie ginie, gdy rozmowa się skończy**: wcześniej zapisywało
-  się tylko po ręcznym „Zatrzymaj”; teraz także po rozłączeniu trafia
-  zaszyfrowane do „Nagrania rozmów”.
-- Lista nagrań pokazuje, czy to obraz, czy sam dźwięk; eksport zapisuje
-  właściwe rozszerzenie (`.mp4` / `.wav`).
+### Call recording — finished (stage 3a)
+- **Group calls:** a "Record" button; everyone gets a signal before the start and sees a red bar "● Ada is recording"; late joiners see it at once.
+- **Windows:** recording the app's own audio (the other people's voices) mixed with the microphone, saved as WAV (`windows/runner/call_recorder.cpp`, WASAPI process loopback), so music, videos and other apps do not get in. Needs Windows 10 2004+; older versions refuse. Tested on a real computer. With speakers the microphone may pick up room sound; headphones are cleanest.
+- **A recording is not lost when the call ends:** it is saved encrypted to "Call recordings" after hang-up too.
+- The recordings list shows video or audio only; export uses the right extension (`.mp4` / `.wav`).
 
-### Edycja i usuwanie postów
-- Na swoim profilu przy każdym poście jest menu **⋯ → Edytuj / Usuń**
-  (własne posty nie są już na Tablicy, więc wcześniej nie było jak ich
-  zmienić).
-- **Edycja obejmuje też zdjęcia i filmy**: w edytorze widać obecne
-  zdjęcia na swoich miejscach, można je usuwać, przestawiać tekst wokół
-  nich i dodawać nowe. Odbiorcy posta zostają bez zmian. Nowa wersja
-  dociera do znajomych jak każdy wpis („edytowano”).
-- Usunięcie pyta o potwierdzenie; post znika z profilu i z tablic
-  znajomych.
+### Editing and deleting posts
+- On your profile every post has **⋯ → Edit / Delete**.
+- **Editing covers photos and videos:** remove, reorder text around them, add new. Recipients stay unchanged; the new version reaches friends as any entry ("edited").
+- Deleting asks for confirmation; the post disappears from your profile and friends' feeds.
 
-### Treści dostępne, gdy autor jest offline
-- **Znajomi przekazują sobie posty, zdjęcia i filmy**: kto ma kopię
-  (podpisaną, a nie-publiczną zaszyfrowaną jak u autora), ten ją podaje
-  dalej. Gdy autor jest offline, jego posty i zdjęcia przychodzą od
-  wspólnych znajomych. Sprawdzone testem trzech urządzeń
-  (`test/offline_content_test.dart`).
-- **Telefon w tle też podaje dalej (Android)**: usługa w tle przejmuje na
-  ten czas dziennik — odpowiada znajomym postami i plikami i zapisuje to,
-  co przyszło. Po powrocie do aplikacji wszystko jest od razu na miejscu.
-  Wcześniej telefon z aplikacją w tle nikomu nic nie podawał.
-- **Pobieranie zdjęć i filmów nie urywa się**: po ponownym uruchomieniu
-  aplikacja dopytuje o brakujące pliki autora i wszystkich znajomych;
-  znajomy, który właśnie się pojawił, od razu jest pytany o to, czego
-  brakuje; kawałki plików idą od tych, którzy odpowiadają, a nie od
-  kogoś offline.
-- Co 10 minut aplikacja sama sprawdza u znajomych nowości (wcześniej
-  tylko przy starcie albo przy wiadomości od znajomego).
-- Uczciwie: gdy nikt z osób, które mają kopię, nie jest online, nie ma od
-  kogo pobrać — Zen nie ma serwera. Im więcej znajomych (i komputerów z
-  Zen w zasobniku), tym pewniej.
+### Content available when the author is offline
+- **Friends pass posts, photos and videos to each other:** whoever has a copy (signed; non-public encrypted as at the author) serves it. When the author is offline, posts and photos come from mutual friends. Tested with three devices.
+- **A background phone serves too (Android):** the background service takes over the log, answers friends with posts and files and stores what arrives.
+- **Photo and video downloads do not stop halfway:** after a restart the app asks for missing files from the author and all friends; a friend who just appeared is asked at once; chunks come from responders, not from someone offline.
+- Every 10 minutes the app checks friends for news.
+- Honestly: if nobody who has a copy is online, there is nobody to download from — Zen has no server. The more friends (and computers with Zen in the tray), the better.
 
-### Edytor postów jak w Discordzie
-- Formatowanie z paska albo skrótami: **pogrubienie** (Ctrl+B), *kursywa*
-  (Ctrl+I), podkreślenie (Ctrl+U), przekreślenie (Ctrl+Shift+X), `kod`
-  (Ctrl+E), spoiler, nagłówki, cytaty, listy, bloki kodu. Formatowanie
-  widać już w trakcie pisania (znaczniki są przygaszone).
-- **Zdjęcia i filmy w dowolnym miejscu posta**: wstawiają się tam, gdzie
-  stoi kursor (do 10 na post; film do 50 MB, na telefonie także z aparatu).
-- **Podgląd** posta przed publikacją.
-- Posty wyświetlają formatowanie, zdjęcia i filmy w miejscach wybranych
-  przez autora — także u znajomych i obserwujących (sprawdzone testem
-  dwóch węzłów) oraz na profilu. Linki kopiują się po dotknięciu, spoiler
-  odsłania się po dotknięciu.
-- **Filmy odtwarzają się same** (bez dźwięku), po kolei: gra pierwszy
-  widoczny, następny startuje po jego końcu. Dotknięcie włącza dźwięk.
+### Post editor like Discord
+- Formatting from the toolbar or shortcuts: **bold** (Ctrl+B), *italic* (Ctrl+I), underline (Ctrl+U), strikethrough (Ctrl+Shift+X), `code` (Ctrl+E), spoiler, headings, quotes, lists, code blocks; visible while typing.
+- **Photos and videos anywhere in a post** (up to 10 per post; video up to 50 MB, from the camera on a phone).
+- **Preview** before publishing.
+- Posts show formatting, photos and videos where the author put them — for friends, followers and on the profile. Links copy on tap, spoilers reveal on tap.
+- **Videos autoplay** (muted), one after another; a tap enables sound.
 
-### Profil
-- **Zdjęcie w tle** (3:1, przycinane i zmniejszane na urządzeniu, bez
-  EXIF) — widzą je znajomi i obserwujący.
-- **O mnie** z formatowaniem jak w postach (pogrubienie, kursywa,
-  nagłówek, cytat, listy) widocznym od razu w polu; do 1000 znaków. U znajomych bio
-  wyświetla się sformatowane.
-- **Status** ustawia się na swoim profilu (dotknij statusu pod imieniem):
-  19 gotowych statusów w trzech grupach — „Czy można do mnie pisać”
-  (dostępny, w pracy, zaraz wracam, nie przeszkadzać, rzadko zaglądam,
-  śpię), „Co robię” (w drodze, w podróży, na urlopie, uczę się, na
-  treningu, gotuję, oglądam film, gram) i „Jak się mam” (odpoczywam,
-  chętnie pogadam, świętuję, choruję, potrzebuję chwili dla siebie) —
-  albo własny. Nie ma go już w edycji profilu; górna belka
-  wygląda jak wcześniej.
-- **Galeria** to osobne zdjęcia i filmy profilu, **niezależne od
-  postów** (zdjęcia z postów do niej nie trafiają, a galeria nie pojawia
-  się na tablicy). „Dodaj zdjęcie lub film” → wybór plików i widoczności,
-  domyślnie **dla wszystkich znajomych**; opcja **„Wszyscy (także
-  obserwujący)”** pokazuje je też obserwującym. Przytrzymanie zdjęcia w
-  galerii → zmiana widoczności (pliki szyfrują się na nowo nowymi
-  kluczami) albo usunięcie. Nowe posty na
-  tablicy też domyślnie idą do znajomych, nie publicznie.
-- Okrągłe zdjęcia profilowe wszędzie (wcześniej w środku ramki widać było
-  rogi kwadratu); własny awatar bez zdjęcia pokazuje pierwszą literę
-  imienia zamiast ikonki.
+### Profile
+- **Background photo** (3:1, cropped and shrunk on the device, no EXIF) — seen by friends and followers.
+- **About me** with post-style formatting, up to 1000 characters.
+- **Status** set on your profile: 19 ready statuses in three groups — "Can I write to you" (available, at work, back soon, do not disturb, rarely here, sleeping), "What I'm doing" (on the way, travelling, on holiday, studying, training, cooking, watching a film, gaming), "How I am" (resting, happy to chat, celebrating, ill, need a moment) — or custom.
+- **Gallery:** separate profile photos and videos, **independent of posts**. "Add photo or video" with visibility, default **all friends**; **"Everyone (also followers)"** shows them to followers too. Long-press → change visibility (re-encrypts with new keys) or delete. New feed posts also default to friends, not public.
+- Round profile pictures everywhere; an own avatar without a photo shows the first letter of the name.
 
-### Wygląd i porządki
-- **Zaproś** — nowa pozycja w pasku po lewej: Twój kod QR, kod
-  zaproszenia, prośby od osób, które go właśnie zeskanowały, i dodanie
-  znajomego po jego kodzie. Z ekranu wiadomości zniknął przycisk „MÓJ
-  KOD”.
-- Ustawienia bez karty profilu (profil edytuje się w zakładce Profil).
-- Przycisk wysuwania ukrytego paska leży na treści (nie zabiera
-  szerokości ekranu) i jest półprzezroczysty.
-- Poprawione opisy: zamiast „Windows i Android” — „na telefonach i
-  komputerach”; brakujące polskie znaki w kilku komunikatach.
-- Pasek po lewej: **Profil → Czaty → Tablica → Zaproś** (bez Asystenta).
-- **Tablica nie pokazuje własnych postów** — są na Twoim profilu. Po
-  publikacji pojawia się „Opublikowano” z przyciskiem „Pokaż”.
-- **Jednakowe nagłówki sekcji**: Profil, Skrzynka, Tablica, Zaproś i
-  Ustawienia mają ten sam pasek tytułu (krój, rozmiar, miejsce na
-  przyciski).
-- Pole „O mnie” ma delikatnie zaokrąglone rogi.
-- Pasek formatowania w edytorze postów zawija się do drugiego rzędu
-  zamiast chować przyciski za krawędzią.
-- Zaproszenie do grupy zawsze ma swoją kartę z „Dołącz / Odrzuć”, nawet
-  gdy przyszło, kiedy aplikacja była w tle; urządzenie nie wysyła sygnałów
-  obecności członkom grupy, do której jeszcze nie dołączyłeś.
+### Look and cleanup
+- **Invite** — a new left-panel item: your QR code, invite code, requests from people who just scanned it, and adding a friend by code. The "MY CODE" button left the messages screen.
+- Settings without the profile card. The hidden-bar handle floats over content.
+- Fixed descriptions ("on phones and computers"), missing Polish diacritics.
+- Left panel: **Profile → Chats → Feed → Invite** (no Assistant).
+- **The Feed no longer shows your own posts** — they are on your profile; after publishing "Published" with a "Show" button.
+- **Uniform section headers.** Rounded "About me" field. Formatting toolbar wraps to a second row.
+- A group invite always has its card with "Join / Decline", even if it arrived in the background; the device sends no presence signals to a group you have not joined.
 
-### Poprawki
-- Nowa ikona Tablicy (gazeta).
-- Poprawione kodowanie znaku § w `call_recordings.dart`.
+### Fixes
+- New Feed icon (newspaper). Fixed encoding of "§" in `call_recordings.dart`.
 
 ## 1.8.0
 
-### Nowe
-- **Asystent na urządzeniu (§29)** – nowa zakładka „Asystent” w belce:
-  - stworek Zenek (rysowany, oddycha, mruga, podskakuje przy głaskaniu,
-    śpi w nocy); nastrój bez serii i bez obwiniania, imię do zmiany;
-  - „Na pewno chcesz to wysłać?” przed wysłaniem w czacie, w grupie i na
-    tablicy, z łagodniejszą wersją do wstawienia jednym dotknięciem
-    (czułość: wył. / obelgi / też krzyk);
-  - odpowiedzi automatyczne według własnych reguł (opcjonalnie w
-    godzinach), oznaczone 🤖, najwyżej raz na 3 h na osobę.
-  Na razie ocenia wbudowany model regułowy; prawdziwy model językowy
-  dojdzie w kolejnej wersji.
-- **Udostępnianie ekranu w rozmowach** 1:1 i grupowych (na Androidzie także
-  pojedynczej aplikacji, Android 14+), z oznaczeniem u pozostałych.
-- **Nagrywanie rozmów** 1:1 (Android) z informacją dla rozmówcy, kto
-  nagrywa; nagrania zaszyfrowane w aplikacji (Ustawienia → Nagrania rozmów).
-- **Tablica i profil** (sieć społeczna na ledgerze): posty ze zdjęciami,
-  odbiorcy według poziomu znajomości, polubienia, komentarze,
-  udostępnienia, edycja i usuwanie, obserwowanie, karty wdzięczności.
-- **Konto i odzyskiwanie**: hasło konta, krąg odzyskiwania (2 z n + hasło,
-  awaryjnie 4 z n), opóźnienia i alarm.
-- Prywatność: domyślnie powiadomienia bez treści, schowek czyszczony po
-  60 s przy kopiowaniu poufnych danych.
-
-### Wygląd i wygoda
-- **Edytor posta** na pełnym ekranie: duże pole tekstu z licznikiem znaków,
-  wybór odbiorców z opisem („kto zobaczy ten post?”), do 4 zdjęć z
-  podglądem, usuwaniem i wskaźnikiem przetwarzania (galeria; na telefonie
-  także aparat), pytanie przed porzuceniem szkicu, Ctrl+Enter publikuje.
-  Ten sam edytor służy do poprawiania posta.
-- Dodawanie zdjęć: gdy okno wyboru plików zwraca tylko ścieżkę, zdjęcie
-  wczytuje się z dysku (wcześniej mogło zostać pominięte bez słowa),
-  a błędy są pokazywane. Zdjęcia
-  w postach układają się w siatkę i otwierają na pełnym ekranie
-  (przesuwanie, przybliżanie). Posty na profilu pokazują zdjęcia,
-  datę, polubienia i komentarze.
-- Na szerokim oknie posty i asystent mają czytelną szerokość kolumny.
-- Belka: kolejność **Profil → Czaty → Tablica → Asystent**. Usunięte
-  dublujące się skróty (Ustawienia otwiera pasek stanu, „Mój kod” jest
-  w Skrzynce, profil we własnej zakładce).
-- Pionowa belka z zakładkami: wąska (same ikony), da się ją **całkiem
-  schować**; przycisk chowania i pokazywania jest **u góry**, w zasięgu
-  kciuka; działa też przesunięcie palcem. Belka pamięta, czy była schowana.
-- Pasek stanu połączenia zostaje na górze ekranu, na całej szerokości;
-  dotknięcie otwiera ustawienia.
-- Skrzynka: filtry w jednym przewijanym rzędzie, krótsze przyciski
-  „Znajomy” / „Grupa” (nie łamią się na telefonie).
-- Spójne nagłówki (Skrzynka, Tablica, Mój profil, Asystent).
-
-### Techniczne
-- Yggdrasil v0.5.14 w mostku natywnym.
-- `screenshots/shots_test.dart` – zrzuty głównych ekranów do podglądu
-  (`flutter test screenshots/shots_test.dart --update-goldens`).
+### New
+- **On-device assistant (§29)** — a new "Assistant" tab:
+  - a drawn pet, Zenek (breathes, blinks, jumps when stroked, sleeps at night); mood without streaks or guilt, renamable;
+  - "Are you sure you want to send this?" before sending in chat, group and feed, with a gentler rewrite in one tap (sensitivity: off / insults / also shouting);
+  - automatic replies by your own rules (optionally in set hours), marked 🤖, at most once per 3 h per person.
+  For now a built-in rule model judges; a real language model comes in the next version.
+- **Screen sharing in calls**, 1:1 and group (on Android also a single app, Android 14+), with a marker for the others.
+- **Call recording** 1:1 (Android) informing the other side who records; recordings encrypted in the app (Settings → Call recordings).
