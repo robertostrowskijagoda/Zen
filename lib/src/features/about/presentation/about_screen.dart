@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/app_version.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
@@ -35,8 +36,8 @@ class AboutScreen extends StatelessWidget {
     await Clipboard.setData(ClipboardData(text: url));
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Link skopiowany — otwórz go w przeglądarce.'),
+        SnackBar(
+          content: Text(t('Link skopiowany — otwórz go w przeglądarce.')),
         ),
       );
     }
@@ -45,9 +46,9 @@ class AboutScreen extends StatelessWidget {
   Future<void> _copyLink(BuildContext context) async {
     await Clipboard.setData(const ClipboardData(text: kDonationUrl));
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Link do zbiórki skopiowany.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(t('Link do zbiórki skopiowany.'))));
     }
   }
 
@@ -56,32 +57,34 @@ class AboutScreen extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     return Scaffold(
       key: const Key('about-screen'),
-      appBar: const ZenSectionBar(title: 'O aplikacji'),
+      appBar: ZenSectionBar(title: t('O aplikacji')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: <Widget>[
           const _LogoCard(),
 
           // §21: the collection comes first.
-          const ZenSection('Wesprzyj Zen'),
+          ZenSection(t('Wesprzyj Zen')),
           _DonateCard(
             onOpen: () => _openLink(context, kDonationUrl),
             onCopy: () => _copyLink(context),
           ),
 
-          const ZenSection('Czym jest Zen'),
+          ZenSection(t('Czym jest Zen')),
           ZenCard(
             child: Text(
-              'Zen to komunikator i sieć dla ludzi, którzy się znają — ale bez '
-              'firmy pośrodku. Nie ma serwera, który wszystko widzi, nie ma '
-              'reklam ani algorytmu, który decyduje, co zobaczysz. Wiadomości, '
-              'zdjęcia i posty idą wprost między telefonami i komputerami '
-              'znajomych, zaszyfrowane, a dane zostają na Twoim urządzeniu.\n\n'
-              'Poza czatami i połączeniami Zen pomaga spotykać się naprawdę: '
-              'status „na teraz”, wydarzenia i kolacje przez znajomych, sąsiedzi '
-              'z bloku, randki przez wspólnych znajomych, pomoc od najbliższych '
-              'i alarm. A „piramida” pozwala ludziom samym organizować się i '
-              'decydować — oddolnie, bez partii i instytucji z góry.',
+              t(
+                'Zen to komunikator i sieć dla ludzi, którzy się znają — ale bez '
+                'firmy pośrodku. Nie ma serwera, który wszystko widzi, nie ma '
+                'reklam ani algorytmu, który decyduje, co zobaczysz. Wiadomości, '
+                'zdjęcia i posty idą wprost między telefonami i komputerami '
+                'znajomych, zaszyfrowane, a dane zostają na Twoim urządzeniu.\n\n'
+                'Poza czatami i połączeniami Zen pomaga spotykać się naprawdę: '
+                'status „na teraz”, wydarzenia i kolacje przez znajomych, sąsiedzi '
+                'z bloku, randki przez wspólnych znajomych, pomoc od najbliższych '
+                'i alarm. A „piramida” pozwala ludziom samym organizować się i '
+                'decydować — oddolnie, bez partii i instytucji z góry.',
+              ),
               style: TextStyle(
                 color: zen.textSecondary,
                 fontSize: 14.5,
@@ -95,28 +98,28 @@ class AboutScreen extends StatelessWidget {
             runSpacing: 8,
             children: <Widget>[
               ZenPill(
-                text: 'Bez serwerów',
+                text: t('Bez serwerów'),
                 tone: zenTone(zen, 0),
                 icon: Icons.hub_rounded,
               ),
               ZenPill(
-                text: 'Bez reklam',
+                text: t('Bez reklam'),
                 tone: zenTone(zen, 1),
                 icon: Icons.block_rounded,
               ),
               ZenPill(
-                text: 'Bez algorytmu',
+                text: t('Bez algorytmu'),
                 tone: zenTone(zen, 2),
                 icon: Icons.timeline_rounded,
               ),
               ZenPill(
-                text: 'Szyfrowane',
+                text: t('Szyfrowane'),
                 tone: zen.success,
                 icon: Icons.lock_rounded,
               ),
             ],
           ),
-          const ZenSection('Jak używać'),
+          ZenSection(t('Jak używać')),
           ZenCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -124,67 +127,75 @@ class AboutScreen extends StatelessWidget {
                 _Step(
                   n: 1,
                   tone: zenTone(zen, 0),
-                  title: 'Dodaj znajomego',
-                  text:
-                      'W zakładce „Zaproś” pokaż swój kod QR, a znajomy niech go zeskanuje (albo odwrotnie). Nie trzeba numeru telefonu ani e-maila.',
+                  title: t('Dodaj znajomego'),
+                  text: t(
+                    'W zakładce „Zaproś” pokaż swój kod QR, a znajomy niech go zeskanuje (albo odwrotnie). Nie trzeba numeru telefonu ani e-maila.',
+                  ),
                 ),
                 _Step(
                   n: 2,
                   tone: zenTone(zen, 2),
-                  title: 'Pisz i dzwoń',
-                  text:
-                      'Czaty, grupy, połączenia audio i wideo — wszystko zaszyfrowane, prosto między Wami.',
+                  title: t('Pisz i dzwoń'),
+                  text: t(
+                    'Czaty, grupy, połączenia audio i wideo — wszystko zaszyfrowane, prosto między Wami.',
+                  ),
                 ),
                 _Step(
                   n: 3,
                   tone: zenTone(zen, 5),
-                  title: 'Umawiaj się',
-                  text:
-                      'Ustaw status „na teraz” (np. Idę na spacer), zrób wydarzenie albo zajrzyj, kto z Twoich znajomych jest wolny.',
+                  title: t('Umawiaj się'),
+                  text: t(
+                    'Ustaw status „na teraz” (np. Idę na spacer), zrób wydarzenie albo zajrzyj, kto z Twoich znajomych jest wolny.',
+                  ),
                 ),
                 _Step(
                   n: 4,
                   tone: zenTone(zen, 4),
-                  title: 'Poznawaj przez znajomych',
-                  text:
-                      'Znajomi znajomych pojawiają się sami na grafie i w wydarzeniach — a przez „Sąsiadów” i „Randki” poznajesz nowych ludzi bezpiecznie.',
+                  title: t('Poznawaj przez znajomych'),
+                  text: t(
+                    'Znajomi znajomych pojawiają się sami na grafie i w wydarzeniach — a przez „Sąsiadów” i „Randki” poznajesz nowych ludzi bezpiecznie.',
+                  ),
                   last: true,
                 ),
               ],
             ),
           ),
-          const ZenSection('Po co to jest'),
+          ZenSection(t('Po co to jest')),
           ZenInfo(
             icon: Icons.public_rounded,
             tone: zenTone(zen, 0),
-            title: 'Oddać ludziom ich sieć',
-            text:
-                'Dzisiejsze sieci należą do firm, które zarabiają na Twojej uwadze i '
-                'danych, i podsuwają to, co je dłużej zatrzyma przy ekranie. Zen jest '
-                'odwrotnością: żadnego właściciela, żadnego algorytmu, który Tobą '
-                'steruje. Technologia ma robić jedno — pomagać ludziom, którzy się '
-                'znają, trzymać się razem i spotykać naprawdę.',
+            title: t('Oddać ludziom ich sieć'),
+            text: t(
+              'Dzisiejsze sieci należą do firm, które zarabiają na Twojej uwadze i '
+              'danych, i podsuwają to, co je dłużej zatrzyma przy ekranie. Zen jest '
+              'odwrotnością: żadnego właściciela, żadnego algorytmu, który Tobą '
+              'steruje. Technologia ma robić jedno — pomagać ludziom, którzy się '
+              'znają, trzymać się razem i spotykać naprawdę.',
+            ),
           ),
           ZenInfo(
             icon: Icons.how_to_vote_rounded,
             tone: zenTone(zen, 3),
-            title: 'Także nowa polityka',
-            text:
-                'Zen ma zmienić nie tylko media społecznościowe, ale i sposób, w jaki '
-                'ludzie podejmują wspólne decyzje. „Piramida” buduje się z komórek po '
-                'kilka osób, które znają się osobiście; głosy, delegowanie zaufania i '
-                'wspólna kasa płyną oddolnie, anonimowo wobec reszty, bez centrali, '
-                'którą dałoby się przekupić albo wyłączyć. To próba demokracji, która '
-                'naprawdę należy do ludzi.',
+            title: t('Także nowa polityka'),
+            text: t(
+              'Zen ma zmienić nie tylko media społecznościowe, ale i sposób, w jaki '
+              'ludzie podejmują wspólne decyzje. „Piramida” buduje się z komórek po '
+              'kilka osób, które znają się osobiście; głosy, delegowanie zaufania i '
+              'wspólna kasa płyną oddolnie, anonimowo wobec reszty, bez centrali, '
+              'którą dałoby się przekupić albo wyłączyć. To próba demokracji, która '
+              'naprawdę należy do ludzi.',
+            ),
           ),
-          const ZenSection('Prywatność'),
+          ZenSection(t('Prywatność')),
           ZenCard(
             child: Text(
-              'Zen nie ma konta w chmurze. Twój telefon łączy się wprost z telefonami '
-              'znajomych przez sieć mesh. Wiadomości są szyfrowane end-to-end, a wszystko '
-              'na urządzeniu jest zaszyfrowane hasłem. Nikt — ani autor, ani żadna firma — '
-              'nie może odczytać Twoich rozmów. Zgubienie telefonu nie wystarczy, żeby ktoś '
-              'dostał się do danych bez Twojego hasła.',
+              t(
+                'Zen nie ma konta w chmurze. Twój telefon łączy się wprost z telefonami '
+                'znajomych przez sieć mesh. Wiadomości są szyfrowane end-to-end, a wszystko '
+                'na urządzeniu jest zaszyfrowane hasłem. Nikt — ani autor, ani żadna firma — '
+                'nie może odczytać Twoich rozmów. Zgubienie telefonu nie wystarczy, żeby ktoś '
+                'dostał się do danych bez Twojego hasła.',
+              ),
               style: TextStyle(
                 color: zen.textSecondary,
                 fontSize: 14.5,
@@ -196,39 +207,43 @@ class AboutScreen extends StatelessWidget {
           ZenInfo(
             icon: Icons.group_rounded,
             tone: zen.success,
-            title: 'Odzyskiwanie przez 6 zaufanych osób',
-            text:
-                'Skoro nie ma serwera, nie ma też „zapomniałem hasła” przez e-mail. '
-                'Zamiast tego wybierasz krąg do 6 zaufanych znajomych i każdy dostaje '
-                'zaszyfrowany kawałek klucza. Po zgubieniu telefonu odzyskujesz konto '
-                'hasłem i pomocą 2 z nich (po 24 godzinach), a gdy nie pamiętasz '
-                'hasła — pomocą 4 z nich (po 7 dniach; stare urządzenia dostają '
-                'ostrzeżenie). Jedna osoba sama nic nie zobaczy.',
+            title: t('Odzyskiwanie przez 6 zaufanych osób'),
+            text: t(
+              'Skoro nie ma serwera, nie ma też „zapomniałem hasła” przez e-mail. '
+              'Zamiast tego wybierasz krąg do 6 zaufanych znajomych i każdy dostaje '
+              'zaszyfrowany kawałek klucza. Po zgubieniu telefonu odzyskujesz konto '
+              'hasłem i pomocą 2 z nich (po 24 godzinach), a gdy nie pamiętasz '
+              'hasła — pomocą 4 z nich (po 7 dniach; stare urządzenia dostają '
+              'ostrzeżenie). Jedna osoba sama nic nie zobaczy.',
+            ),
           ),
-          const ZenSection('Na czym to zbudowane'),
+          ZenSection(t('Na czym to zbudowane')),
           ZenInfo(
             icon: Icons.lan_rounded,
             tone: zenTone(zen, 0),
-            title: 'Sieć Yggdrasil',
-            text:
-                'Zen nie ma własnych serwerów. Telefony i komputery łączą się '
-                'przez Yggdrasil — otwartą, szyfrowaną sieć, w której każde '
-                'urządzenie ma swój adres, a ruch idzie wprost albo przez inne '
-                'urządzenia, które nie widzą treści. Zen dokłada do tego własne '
-                'szyfrowanie każdej wiadomości.',
+            title: t('Sieć Yggdrasil'),
+            text: t(
+              'Zen nie ma własnych serwerów. Telefony i komputery łączą się '
+              'przez Yggdrasil — otwartą, szyfrowaną sieć, w której każde '
+              'urządzenie ma swój adres, a ruch idzie wprost albo przez inne '
+              'urządzenia, które nie widzą treści. Zen dokłada do tego własne '
+              'szyfrowanie każdej wiadomości.',
+            ),
           ),
-          const ZenSection('Własny most Yggdrasil'),
+          ZenSection(t('Własny most Yggdrasil')),
           ZenCard(
             key: const Key('about-own-bridge'),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  'Dla zaawansowanych. Zen na komputerze sam pomaga innym się '
-                  'łączyć, gdy router na to pozwala. Możesz też postawić stały '
-                  'most bez Zen: zwykły węzeł Yggdrasil, który działa całą '
-                  'dobę. Pomaga wszystkim, nie tylko Twoim znajomym, i nie '
-                  'widzi treści wiadomości.',
+                  t(
+                    'Dla zaawansowanych. Zen na komputerze sam pomaga innym się '
+                    'łączyć, gdy router na to pozwala. Możesz też postawić stały '
+                    'most bez Zen: zwykły węzeł Yggdrasil, który działa całą '
+                    'dobę. Pomaga wszystkim, nie tylko Twoim znajomym, i nie '
+                    'widzi treści wiadomości.',
+                  ),
                   style: TextStyle(
                     color: zen.textSecondary,
                     fontSize: 14.5,
@@ -239,39 +254,43 @@ class AboutScreen extends StatelessWidget {
                 _Step(
                   n: 1,
                   tone: zenTone(zen, 0),
-                  title: 'Komputer, który stale działa',
-                  text:
-                      'Serwer VPS albo domowy komputer czy Raspberry Pi. Musi '
-                      'mieć publiczny adres IP — w domu przekieruj port w '
-                      'routerze.',
+                  title: t('Komputer, który stale działa'),
+                  text: t(
+                    'Serwer VPS albo domowy komputer czy Raspberry Pi. Musi '
+                    'mieć publiczny adres IP — w domu przekieruj port w '
+                    'routerze.',
+                  ),
                 ),
                 _Step(
                   n: 2,
                   tone: zenTone(zen, 0),
-                  title: 'Zainstaluj Yggdrasil',
-                  text:
-                      'Paczki i instrukcje dla Linuksa, Windows, macOS i '
-                      'routerów są na stronie projektu (link niżej). Plik '
-                      'ustawień tworzy polecenie yggdrasil -genconf.',
+                  title: t('Zainstaluj Yggdrasil'),
+                  text: t(
+                    'Paczki i instrukcje dla Linuksa, Windows, macOS i '
+                    'routerów są na stronie projektu (link niżej). Plik '
+                    'ustawień tworzy polecenie yggdrasil -genconf.',
+                  ),
                 ),
                 _Step(
                   n: 3,
                   tone: zenTone(zen, 0),
-                  title: 'Otwórz nasłuch',
-                  text:
-                      'W pliku yggdrasil.conf wpisz w Listen np. '
-                      'tls://0.0.0.0:443, a w Peers kilka publicznych węzłów. '
-                      'Uruchom usługę ponownie i otwórz ten port w zaporze.',
+                  title: t('Otwórz nasłuch'),
+                  text: t(
+                    'W pliku yggdrasil.conf wpisz w Listen np. '
+                    'tls://0.0.0.0:443, a w Peers kilka publicznych węzłów. '
+                    'Uruchom usługę ponownie i otwórz ten port w zaporze.',
+                  ),
                 ),
                 _Step(
                   n: 4,
                   tone: zenTone(zen, 0),
-                  title: 'Zgłoś go jako publiczny',
-                  text:
-                      'Dopisz jego adres do listy publicznych węzłów '
-                      '(github.com/yggdrasil-network/public-peers). Zen bierze '
-                      'węzły z tej listy, więc kolejne wersje Zen połączą się '
-                      'także przez Twój most.',
+                  title: t('Zgłoś go jako publiczny'),
+                  text: t(
+                    'Dopisz jego adres do listy publicznych węzłów '
+                    '(github.com/yggdrasil-network/public-peers). Zen bierze '
+                    'węzły z tej listy, więc kolejne wersje Zen połączą się '
+                    'także przez Twój most.',
+                  ),
                   last: true,
                 ),
               ],
@@ -282,29 +301,33 @@ class AboutScreen extends StatelessWidget {
             key: const Key('about-yggdrasil-site'),
             icon: Icons.open_in_new_rounded,
             tone: zenTone(zen, 0),
-            title: 'Strona Yggdrasil',
-            subtitle: 'yggdrasil-network.github.io — instalacja i ustawienia',
+            title: t('Strona Yggdrasil'),
+            subtitle: t(
+              'yggdrasil-network.github.io — instalacja i ustawienia',
+            ),
             onTap: () => _openLink(context, kYggdrasilUrl),
           ),
           ZenTile(
             key: const Key('about-public-peers'),
             icon: Icons.public_rounded,
             tone: zenTone(zen, 0),
-            title: 'Lista publicznych węzłów',
+            title: t('Lista publicznych węzłów'),
             subtitle: 'github.com/yggdrasil-network/public-peers',
             onTap: () => _openLink(context, kYggdrasilPublicPeersUrl),
           ),
-          const ZenSection('Dlaczego nie ma Zen w sklepach'),
+          ZenSection(t('Dlaczego nie ma Zen w sklepach')),
           ZenCard(
             child: Text(
-              'Zen celowo nie jest w Google Play ani w App Store. Sklep może w '
-              'każdej chwili usunąć aplikację albo zażądać zmian — a Zen ma być '
-              'niezależny, także od wielkich firm i od polityki. Sklepy wymagają '
-              'też firmy, opłat i zgody na swoje zasady, a Zen tworzy jedna '
-              'osoba, za darmo. Przy okazji nikt, nawet sklep, nie wie, że '
-              'masz Zen.\n\n'
-              'Dlatego Zen pobierasz z oficjalnej strony projektu na GitHubie '
-              'albo dostajesz od znajomego („Podaj dalej”).',
+              t(
+                'Zen celowo nie jest w Google Play ani w App Store. Sklep może w '
+                'każdej chwili usunąć aplikację albo zażądać zmian — a Zen ma być '
+                'niezależny, także od wielkich firm i od polityki. Sklepy wymagają '
+                'też firmy, opłat i zgody na swoje zasady, a Zen tworzy jedna '
+                'osoba, za darmo. Przy okazji nikt, nawet sklep, nie wie, że '
+                'masz Zen.\n\n'
+                'Dlatego Zen pobierasz z oficjalnej strony projektu na GitHubie '
+                'albo dostajesz od znajomego („Podaj dalej”).',
+              ),
               style: TextStyle(
                 color: zen.textSecondary,
                 fontSize: 14.5,
@@ -312,7 +335,7 @@ class AboutScreen extends StatelessWidget {
               ),
             ),
           ),
-          const ZenSection('Jak sprawdzić, że to nie wirus'),
+          ZenSection(t('Jak sprawdzić, że to nie wirus')),
           ZenCard(
             key: const Key('about-safety'),
             child: Column(
@@ -321,36 +344,40 @@ class AboutScreen extends StatelessWidget {
                 _Step(
                   n: 1,
                   tone: zen.success,
-                  title: 'Pobieraj z jednego miejsca',
-                  text:
-                      'Tylko z oficjalnej strony na GitHubie (link niżej) albo '
-                      'od znajomego, który ma Zen. Nie z innych stron.',
+                  title: t('Pobieraj z jednego miejsca'),
+                  text: t(
+                    'Tylko z oficjalnej strony na GitHubie (link niżej) albo '
+                    'od znajomego, który ma Zen. Nie z innych stron.',
+                  ),
                 ),
                 _Step(
                   n: 2,
                   tone: zen.success,
-                  title: 'Sprawdź plik za darmo',
-                  text:
-                      'Przed instalacją wrzuć plik na virustotal.com — '
-                      'kilkadziesiąt programów antywirusowych sprawdzi go naraz.',
+                  title: t('Sprawdź plik za darmo'),
+                  text: t(
+                    'Przed instalacją wrzuć plik na virustotal.com — '
+                    'kilkadziesiąt programów antywirusowych sprawdzi go naraz.',
+                  ),
                 ),
                 _Step(
                   n: 3,
                   tone: zen.success,
-                  title: 'Telefon też sprawdza',
-                  text:
-                      'Android skanuje aplikację przy instalacji. Może '
-                      'ostrzec, że jest „nieznana” — to normalne dla aplikacji '
-                      'spoza sklepu.',
+                  title: t('Telefon też sprawdza'),
+                  text: t(
+                    'Android skanuje aplikację przy instalacji. Może '
+                    'ostrzec, że jest „nieznana” — to normalne dla aplikacji '
+                    'spoza sklepu.',
+                  ),
                 ),
                 _Step(
                   n: 4,
                   tone: zen.success,
-                  title: 'Kod jest jawny',
-                  text:
-                      'Każdy może przejrzeć, co Zen robi. Każda oficjalna wersja '
-                      'jest podpisana tym samym kluczem, więc telefon nie '
-                      'zainstaluje podróbki „na” prawdziwy Zen.',
+                  title: t('Kod jest jawny'),
+                  text: t(
+                    'Każdy może przejrzeć, co Zen robi. Każda oficjalna wersja '
+                    'jest podpisana tym samym kluczem, więc telefon nie '
+                    'zainstaluje podróbki „na” prawdziwy Zen.',
+                  ),
                   last: true,
                 ),
               ],
@@ -361,11 +388,11 @@ class AboutScreen extends StatelessWidget {
             key: const Key('about-repository'),
             icon: Icons.code_rounded,
             tone: zenTone(zen, 6),
-            title: 'Oficjalna strona projektu',
+            title: t('Oficjalna strona projektu'),
             subtitle: 'github.com/robertostrowskijagoda/Zen',
             onTap: () => _openLink(context, PeerShareCodec.repositoryUrl),
           ),
-          const ZenSection('Na czym działa'),
+          ZenSection(t('Na czym działa')),
           ZenCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -374,34 +401,35 @@ class AboutScreen extends StatelessWidget {
                   icon: Icons.android_rounded,
                   tone: zen.success,
                   name: 'Android',
-                  note: 'Gotowe — telefon i tablet.',
+                  note: t('Gotowe — telefon i tablet.'),
                 ),
                 _Platform(
                   icon: Icons.desktop_windows_rounded,
                   tone: zenTone(zen, 0),
                   name: 'Windows',
-                  note: 'Gotowe — pełna wersja na komputer.',
+                  note: t('Gotowe — pełna wersja na komputer.'),
                 ),
                 _Platform(
                   icon: Icons.laptop_mac_rounded,
                   tone: zenTone(zen, 5),
-                  name: 'macOS i Linux',
-                  note: 'W planie — ten sam rdzeń, co na Windows.',
+                  name: t('macOS i Linux'),
+                  note: t('W planie — ten sam rdzeń, co na Windows.'),
                 ),
                 _Platform(
                   icon: Icons.phone_iphone_rounded,
                   tone: zenTone(zen, 3),
-                  name: 'iPhone i iPad',
-                  note:
-                      'Przez SideStore albo AltStore, z darmowym Apple ID '
-                      '(instrukcja na GitHubie). iOS nie pozwala na pracę w '
-                      'tle, więc wiadomości dochodzą przy otwartym Zen.',
+                  name: t('iPhone i iPad'),
+                  note: t(
+                    'Przez SideStore albo AltStore, z darmowym Apple ID '
+                    '(instrukcja na GitHubie). iOS nie pozwala na pracę w '
+                    'tle, więc wiadomości dochodzą przy otwartym Zen.',
+                  ),
                   last: true,
                 ),
               ],
             ),
           ),
-          const ZenSection('Kto to robi'),
+          ZenSection(t('Kto to robi')),
           ZenCard(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -426,10 +454,12 @@ class AboutScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Cześć! Zen tworzę sam, bez inwestorów i bez firmy, która '
-                        'zarabiałaby na Twoich danych. Chcę, żeby ludzie mogli się '
-                        'poznawać, spotykać i pomagać sobie przez tych, którym ufają '
-                        '— a nie przez platformę, która na tym zarabia.',
+                        t(
+                          'Cześć! Zen tworzę sam, bez inwestorów i bez firmy, która '
+                          'zarabiałaby na Twoich danych. Chcę, żeby ludzie mogli się '
+                          'poznawać, spotykać i pomagać sobie przez tych, którym ufają '
+                          '— a nie przez platformę, która na tym zarabia.',
+                        ),
                         style: TextStyle(
                           color: zen.textSecondary,
                           fontSize: 14,
@@ -442,21 +472,23 @@ class AboutScreen extends StatelessWidget {
               ],
             ),
           ),
-          const ZenSection('Więcej'),
+          ZenSection(t('Więcej')),
           ZenTile(
             key: const Key('about-share-app'),
             icon: Icons.install_mobile_rounded,
             tone: zen.success,
-            title: 'Podaj Zen dalej',
-            subtitle: 'Wyślij aplikację znajomemu z ręki do ręki, bez sklepu',
+            title: t('Podaj Zen dalej'),
+            subtitle: t(
+              'Wyślij aplikację znajomemu z ręki do ręki, bez sklepu',
+            ),
             onTap: () => unawaited(ShareAppScreen.open(context)),
           ),
           ZenTile(
             key: const Key('about-licenses'),
             icon: Icons.description_outlined,
             tone: zenTone(zen, 6),
-            title: 'Licencje',
-            subtitle: 'Biblioteki, z których korzysta Zen',
+            title: t('Licencje'),
+            subtitle: t('Biblioteki, z których korzysta Zen'),
             onTap: () => showLicensePage(
               context: context,
               applicationName: 'Zen',
@@ -663,12 +695,15 @@ class _LogoCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Wersja $kAppVersion · kompilacja $kAppBuild',
+                  t('Wersja {version} · kompilacja {build}', {
+                    'version': kAppVersion,
+                    'build': kAppBuild,
+                  }),
                   style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Sieć ludzi, którzy się znają.',
+                  t('Sieć ludzi, którzy się znają.'),
                   style: TextStyle(color: zen.textMuted, fontSize: 13),
                 ),
               ],
@@ -681,13 +716,14 @@ class _LogoCard extends StatelessWidget {
 }
 
 /// Who makes Zen, in the author's own words (shown with the collection).
-const String kAuthorNote =
-    'Nazywam się Robert Ostrowski-Jagoda, jestem programistą. W chwili, gdy '
-    'to piszę, pracuję na taksówce, ponieważ zabrakło dla mnie pracy. '
-    'Stworzyłem tę aplikację za darmo, ale też chcę mieć dom i lamborghini — '
-    'proszę, rzuć mi chociaż te 5 \$. W aplikacji nie ma reklam, jest za '
-    'darmo, nie zarabiam na niej bezpośrednio. Jeżeli masz dla mnie pracę, '
-    'daj znać — znajdziesz mnie między innymi na LinkedInie.';
+String get kAuthorNote => t(
+  'Nazywam się Robert Ostrowski-Jagoda, jestem programistą. W chwili, gdy '
+  'to piszę, pracuję na taksówce, ponieważ zabrakło dla mnie pracy. '
+  'Stworzyłem tę aplikację za darmo, ale też chcę mieć dom i lamborghini — '
+  'proszę, rzuć mi chociaż te 5 \$. W aplikacji nie ma reklam, jest za '
+  'darmo, nie zarabiam na niej bezpośrednio. Jeżeli masz dla mnie pracę, '
+  'daj znać — znajdziesz mnie między innymi na LinkedInie.',
+);
 
 /// Why and how to give, the link, and its QR code for another phone.
 class _DonateCard extends StatelessWidget {
@@ -721,7 +757,7 @@ class _DonateCard extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  'Zen jest za darmo i bez reklam',
+                  t('Zen jest za darmo i bez reklam'),
                   style: zen.display(
                     color: zen.textPrimary,
                     size: 18,
@@ -733,9 +769,11 @@ class _DonateCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            'Utrzymuje się wyłącznie z dobrowolnych wpłat. Jeśli Zen Ci się '
-            'przydaje, możesz dorzucić się do dalszej pracy — każda kwota '
-            'pomaga, a aplikacja zawsze zostanie darmowa dla wszystkich.',
+            t(
+              'Utrzymuje się wyłącznie z dobrowolnych wpłat. Jeśli Zen Ci się '
+              'przydaje, możesz dorzucić się do dalszej pracy — każda kwota '
+              'pomaga, a aplikacja zawsze zostanie darmowa dla wszystkich.',
+            ),
             style: TextStyle(
               color: zen.textSecondary,
               fontSize: 14,
@@ -754,7 +792,7 @@ class _DonateCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  'O autorze',
+                  t('O autorze'),
                   style: TextStyle(
                     color: zen.textPrimary,
                     fontSize: 14,
@@ -791,7 +829,7 @@ class _DonateCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Zeskanuj aparatem innego telefonu albo skopiuj link.',
+            t('Zeskanuj aparatem innego telefonu albo skopiuj link.'),
             textAlign: TextAlign.center,
             style: TextStyle(color: zen.textMuted, fontSize: 12.5),
           ),
@@ -809,7 +847,7 @@ class _DonateCard extends StatelessWidget {
               minimumSize: const Size.fromHeight(50),
             ),
             icon: const Icon(Icons.coffee_rounded, size: 18),
-            label: const Text('Postaw kawę na buycoffee.to'),
+            label: Text(t('Postaw kawę na buycoffee.to')),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
@@ -819,7 +857,7 @@ class _DonateCard extends StatelessWidget {
               minimumSize: const Size.fromHeight(46),
             ),
             icon: const Icon(Icons.copy_rounded, size: 18),
-            label: const Text('Skopiuj link do zbiórki'),
+            label: Text(t('Skopiuj link do zbiórki')),
           ),
         ],
       ),

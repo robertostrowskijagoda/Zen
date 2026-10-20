@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
@@ -139,7 +140,7 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
         final GroupProfile? group = socialState.groups[groupId];
         final String title = group != null && group.name.trim().isNotEmpty
             ? group.name
-            : 'Grupa';
+            : t('Grupa');
         if (group == null || group.isInvitePending) {
           // A group this device has since left or declined, or an invitation
           // not answered yet: that one waits in the inbox at the top of the

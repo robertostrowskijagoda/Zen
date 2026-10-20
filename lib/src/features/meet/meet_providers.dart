@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
@@ -69,7 +70,7 @@ final class AppMeetHost implements MeetHost {
   @override
   String nameOf(String address) {
     final FriendProfile? f = _state.friendByAddress(address);
-    return f == null ? 'Ktoś' : _state.nameFor(f);
+    return f == null ? t('Ktoś') : _state.nameFor(f);
   }
 
   @override
@@ -254,7 +255,7 @@ final class ContainerMeetHost implements MeetHost {
   @override
   String nameOf(String address) {
     final FriendProfile? f = _state.friendByAddress(address);
-    return f == null ? 'Ktoś' : _state.nameFor(f);
+    return f == null ? t('Ktoś') : _state.nameFor(f);
   }
 
   @override
@@ -342,7 +343,7 @@ final class MeetEventHost implements EventHost {
   @override
   String ownName() {
     final String n = name().trim();
-    return n.isEmpty ? 'Ktoś' : n;
+    return n.isEmpty ? t('Ktoś') : n;
   }
 
   @override

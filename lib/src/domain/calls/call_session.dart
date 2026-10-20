@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 
 enum CallSessionStatus { ringing, active, connecting }
@@ -41,7 +42,8 @@ final class CallSession {
   /// can pick the call up. Local only, never sent to the peer.
   final String? acceptToken;
 
-  String get kindLabel => kind == CallInviteKind.video ? 'wideo' : 'audio';
+  String get kindLabel =>
+      kind == CallInviteKind.video ? t('wideo') : t('audio');
 
   CallSession copyWith({
     String? id,

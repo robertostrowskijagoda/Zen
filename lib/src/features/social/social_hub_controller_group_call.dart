@@ -555,16 +555,23 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
       await _appendGroupSystemMessage(
         groupId,
         missed
-            ? 'Nieodebrane połączenie grupowe (${session.kindLabel}).'
-            : 'Odrzucono połączenie grupowe (${session.kindLabel}).',
+            ? t('Nieodebrane połączenie grupowe ({kind}).', {
+                'kind': _callKindWord(session.kind),
+              })
+            : t('Odrzucono połączenie grupowe ({kind}).', {
+                'kind': _callKindWord(session.kind),
+              }),
       );
       if (missed && !_isUiFocused()) {
         final int now = _nowMillis;
         await _systemNotifications.show(
           RuntimeSystemNotification(
             id: 'group-call-missed-$now-$groupId',
-            title: 'Nieodebrane połączenie grupowe',
-            body: '${session.displayName}: połączenie ${session.kindLabel}.',
+            title: t('Nieodebrane połączenie grupowe'),
+            body: t('{name}: połączenie {kind}.', {
+              'name': session.displayName,
+              'kind': _callKindWord(session.kind),
+            }),
             createdAtMillis: now,
             routeKey: buildGroupRouteKey(
               groupId: groupId,
@@ -652,10 +659,10 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
     return _enqueueStateWork(() async {
       final GroupProfile? group = state.groups[groupId];
       if (group == null) {
-        throw const FormatException('Nie znaleziono grupy.');
+        throw FormatException(t('Nie znaleziono grupy.'));
       }
       if (group.isInvitePending) {
-        throw const FormatException('Najpierw dołącz do grupy.');
+        throw FormatException(t('Najpierw dołącz do grupy.'));
       }
       final CallSession? current = state.activeCall;
       if (current != null) {
@@ -664,8 +671,8 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
             current.status != CallSessionStatus.ringing) {
           return;
         }
-        throw const FormatException(
-          'Zakończ aktualną rozmowę, zanim zaczniesz nową.',
+        throw FormatException(
+          t('Zakończ aktualną rozmowę, zanim zaczniesz nową.'),
         );
       }
       final OngoingGroupCall? running = state.groupCalls[groupId];
@@ -678,7 +685,7 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
         return;
       }
       if (_otherMembers(group).isEmpty) {
-        throw const FormatException('W grupie nie ma nikogo poza Tobą.');
+        throw FormatException(t('W grupie nie ma nikogo poza Tobą.'));
       }
       final int now = _nowMillis;
       // Unpredictable: the call id is what a group call's signals are matched
@@ -704,7 +711,7 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
       final GroupProfile? group = state.groups[groupId];
       final OngoingGroupCall? running = state.groupCalls[groupId];
       if (group == null || running == null || running.isEmpty) {
-        throw const FormatException('To połączenie już się zakończyło.');
+        throw FormatException(t('To połączenie już się zakończyło.'));
       }
       final CallSession? current = state.activeCall;
       if (current != null) {
@@ -714,9 +721,7 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
           }
           return;
         }
-        throw const FormatException(
-          'Zakończ aktualną rozmowę, zanim dołączysz.',
-        );
+        throw FormatException(t('Zakończ aktualną rozmowę, zanim dołączysz.'));
       }
       await _joinGroupCallNow(group, running, cameraOn: video);
     });
@@ -772,8 +777,8 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
       }
       await _groupMedia.close();
       await _persistState();
-      throw const FormatException(
-        'Nie udało się włączyć mikrofonu. Sprawdź uprawnienia aplikacji.',
+      throw FormatException(
+        t('Nie udało się włączyć mikrofonu. Sprawdź uprawnienia aplikacji.'),
       );
     }
     if (muted) {
@@ -804,8 +809,10 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
     await _appendGroupSystemMessage(
       group.id,
       starting
-          ? 'Rozpoczęto połączenie grupowe (${session.kindLabel}).'
-          : 'Dołączono do połączenia grupowego.',
+          ? t('Rozpoczęto połączenie grupowe ({kind}).', {
+              'kind': _callKindWord(session.kind),
+            })
+          : t('Dołączono do połączenia grupowego.'),
     );
   }
 
@@ -817,8 +824,8 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
     await _leaveJoinedGroupCall(
       session,
       note: othersRemain
-          ? 'Opuszczono połączenie grupowe.'
-          : 'Zakończono połączenie grupowe.',
+          ? t('Opuszczono połączenie grupowe.')
+          : t('Zakończono połączenie grupowe.'),
     );
   }
 
@@ -1054,7 +1061,7 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
       if (!_groupCallEverConnected && call.isEmpty) {
         await _leaveJoinedGroupCall(
           joined,
-          note: 'Nikt nie dołączył do połączenia grupowego.',
+          note: t('Nikt nie dołączył do połączenia grupowego.'),
         );
       }
       return;

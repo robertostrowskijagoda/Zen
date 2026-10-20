@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 
 /// Security validator and sanitizer for user profile avatar images.
@@ -99,28 +100,32 @@ final class AvatarSanitizer {
   }) async {
     final File sourceFile = File(sourcePath);
     if (!await sourceFile.exists()) {
-      throw const FormatException('Plik źródłowy awatara nie istnieje.');
+      throw FormatException(t('Plik źródłowy awatara nie istnieje.'));
     }
 
     final Uint8List rawBytes = await sourceFile.readAsBytes();
     if (rawBytes.isEmpty) {
-      throw const FormatException('Plik awatara jest pusty.');
+      throw FormatException(t('Plik awatara jest pusty.'));
     }
     if (rawBytes.length > maxAvatarFileSize) {
       throw FormatException(
-        'Plik awatara jest zbyt duży (${(rawBytes.length / 1024 / 1024).toStringAsFixed(1)} MB). Maksymalny rozmiar to 4 MB.',
+        t(
+          'Plik awatara jest zbyt duży ({size} MB). '
+          'Maksymalny rozmiar to 4 MB.',
+          {'size': (rawBytes.length / 1024 / 1024).toStringAsFixed(1)},
+        ),
       );
     }
 
     if (hasDangerousHeader(rawBytes)) {
-      throw const FormatException(
-        'Wykryto niebezpieczną zawartość lub plik wykonywalny.',
+      throw FormatException(
+        t('Wykryto niebezpieczną zawartość lub plik wykonywalny.'),
       );
     }
 
     if (!isValidImageBytes(rawBytes)) {
-      throw const FormatException(
-        'Nieobsługiwany format pliku. Wybierz obraz JPG, PNG, WEBP lub GIF.',
+      throw FormatException(
+        t('Nieobsługiwany format pliku. Wybierz obraz JPG, PNG, WEBP lub GIF.'),
       );
     }
 

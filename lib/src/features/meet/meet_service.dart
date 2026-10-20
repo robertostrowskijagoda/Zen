@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/nearby_crypto.dart';
@@ -488,9 +489,11 @@ final class MeetService extends ChangeNotifier {
         RuntimeSystemNotification(
           id: 'intent-$from-${status.setAt}',
           title: urgent
-              ? '🆘 ${host.nameOf(from)} pilnie potrzebuje pomocy'
-              : '${host.nameOf(from)} potrzebuje pomocy',
-          body: status.note.isEmpty ? 'Zajrzyj do Zen.' : status.note,
+              ? t('🆘 {name} pilnie potrzebuje pomocy', {
+                  'name': host.nameOf(from),
+                })
+              : t('{name} potrzebuje pomocy', {'name': host.nameOf(from)}),
+          body: status.note.isEmpty ? t('Zajrzyj do Zen.') : status.note,
           createdAtMillis: _now(),
           // Urgent: as loud as a message (heads-up), still not the alarm.
           category: urgent
@@ -546,10 +549,10 @@ final class MeetService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'alarm-${merged.id}',
-          title: '🚨 ALARM: $name potrzebuje pomocy',
+          title: t('🚨 ALARM: {name} potrzebuje pomocy', {'name': name}),
           body: merged.hasLocation
-              ? 'Otwórz, żeby zobaczyć, gdzie jest, i odpowiedzieć.'
-              : 'Otwórz i odpowiedz.',
+              ? t('Otwórz, żeby zobaczyć, gdzie jest, i odpowiedzieć.')
+              : t('Otwórz i odpowiedz.'),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.alarm,
           slotKey: alarmSlot(merged.id),
@@ -562,11 +565,11 @@ final class MeetService extends ChangeNotifier {
         RuntimeSystemNotification(
           id: 'alarm-end-${merged.id}',
           title: merged.duress
-              ? '⚠️ $name odwołał(a) alarm PIN-em panicznym'
-              : '$name jest bezpieczny(-a)',
+              ? t('⚠️ {name} odwołał(a) alarm PIN-em panicznym', {'name': name})
+              : t('{name} jest bezpieczny(-a)', {'name': name}),
           body: merged.duress
-              ? 'Może być do tego zmuszony(-a). Sprawdź, co się dzieje.'
-              : 'Alarm odwołany.',
+              ? t('Może być do tego zmuszony(-a). Sprawdź, co się dzieje.')
+              : t('Alarm odwołany.'),
           createdAtMillis: _now(),
           category: merged.duress
               ? RuntimeSystemNotificationCategory.alarm
@@ -607,7 +610,7 @@ final class MeetService extends ChangeNotifier {
       RuntimeSystemNotification(
         id: 'alarm-resp-$id-$from',
         title: '${host.nameOf(from)}: ${r.label}',
-        body: 'Odpowiedź na Twój alarm.',
+        body: t('Odpowiedź na Twój alarm.'),
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'alarm-resp:$id',
@@ -1070,8 +1073,8 @@ final class MeetService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'alarm-audio-${alarm.id}-$n',
-        title: '🎙 Nagranie z alarmu: ${host.nameOf(from)}',
-        body: 'Otwórz alarm, żeby odsłuchać.',
+        title: t('🎙 Nagranie z alarmu: {name}', {'name': host.nameOf(from)}),
+        body: t('Otwórz alarm, żeby odsłuchać.'),
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'alarm-audio:${alarm.id}',
@@ -1124,16 +1127,16 @@ final class MeetService extends ChangeNotifier {
     String source = '',
   }) async {
     final AlarmWave? wave = AlarmWave.parse(json);
-    final int t = _now();
-    if (wave == null || !wave.isFreshAt(t)) {
+    final int nowMs = _now();
+    if (wave == null || !wave.isFreshAt(nowMs)) {
       return; // damaged, too old or from the future: played back?
     }
     final String who = _signedBy(wave, friend);
-    if (!_rememberWave('$who|${wave.id}|${wave.ended}', t)) {
+    if (!_rememberWave('$who|${wave.id}|${wave.ended}', nowMs)) {
       return; // heard already
     }
     if (who.isEmpty) {
-      await _onUncheckedWave(wave, source, t);
+      await _onUncheckedWave(wave, source, nowMs);
       return;
     }
     if (wave.ended) {
@@ -1151,7 +1154,7 @@ final class MeetService extends ChangeNotifier {
     final AlarmRecord alarm = AlarmRecord(
       id: wave.id,
       from: who,
-      at: t,
+      at: nowMs,
       nearby: true,
     );
     if (!await _putFriendAlarm(alarm)) {
@@ -1163,9 +1166,11 @@ final class MeetService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'alarm-${wave.id}',
-        title: '🚨 ALARM: ${host.nameOf(who)} potrzebuje pomocy',
-        body: 'Jest gdzieś blisko Ciebie (Bluetooth). Otwórz i odpowiedz.',
-        createdAtMillis: t,
+        title: t('🚨 ALARM: {name} potrzebuje pomocy', {
+          'name': host.nameOf(who),
+        }),
+        body: t('Jest gdzieś blisko Ciebie (Bluetooth). Otwórz i odpowiedz.'),
+        createdAtMillis: nowMs,
         category: RuntimeSystemNotificationCategory.alarm,
         slotKey: alarmSlot(wave.id),
         isRingingCall: true,
@@ -1203,7 +1208,11 @@ final class MeetService extends ChangeNotifier {
   /// A wave nobody known signed: a quiet note, clearly unchecked, never
   /// ringing, at most one per [source] in [unverifiedWaveEvery] and
   /// [maxUnverifiedWaves] in all.
-  Future<void> _onUncheckedWave(AlarmWave wave, String source, int t) async {
+  Future<void> _onUncheckedWave(
+    AlarmWave wave,
+    String source,
+    int nowMs,
+  ) async {
     if (wave.ended) {
       if (_unverifiedShown == wave.id) {
         _unverifiedShown = null;
@@ -1218,24 +1227,25 @@ final class MeetService extends ChangeNotifier {
         : '?';
     _unverifiedAt.removeWhere(
       (String _, int at) =>
-          (t - at).abs() >= unverifiedWaveEvery.inMilliseconds,
+          (nowMs - at).abs() >= unverifiedWaveEvery.inMilliseconds,
     );
     if (_unverifiedAt.containsKey(from) ||
         _unverifiedAt.length >= maxUnverifiedWaves) {
       return;
     }
-    _unverifiedAt[from] = t;
+    _unverifiedAt[from] = nowMs;
     _unverifiedShown = wave.id;
     await host.notify(
       RuntimeSystemNotification(
         id: 'alarm-near-${wave.id}',
-        title: 'Niesprawdzone: ktoś obok prosi o pomoc',
-        body:
-            'Telefon w pobliżu wysłał przez Bluetooth prośbę o pomoc. '
-            'Nie wiadomo, kto to, i nie da się tego sprawdzić — może to być '
-            'pomyłka albo żart. Jeśli możesz bezpiecznie, rozejrzyj się. '
-            'W razie zagrożenia: 112.',
-        createdAtMillis: t,
+        title: t('Niesprawdzone: ktoś obok prosi o pomoc'),
+        body: t(
+          'Telefon w pobliżu wysłał przez Bluetooth prośbę o pomoc. '
+          'Nie wiadomo, kto to, i nie da się tego sprawdzić — może to być '
+          'pomyłka albo żart. Jeśli możesz bezpiecznie, rozejrzyj się. '
+          'W razie zagrożenia: 112.',
+        ),
+        createdAtMillis: nowMs,
         category: RuntimeSystemNotificationCategory.social,
         slotKey: unverifiedWaveSlot,
       ),

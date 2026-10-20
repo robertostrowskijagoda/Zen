@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
@@ -150,14 +151,14 @@ class GlobalCallBanner extends StatelessWidget {
                   key: const Key('global-call-open-button'),
                   onPressed: onOpenConversation,
                   icon: const Icon(Icons.chat_bubble_outline_rounded),
-                  label: const Text('Otwórz czat'),
+                  label: Text(t('Otwórz czat')),
                 ),
                 if (onOpenCallSurface != null)
                   FilledButton.tonalIcon(
                     key: const Key('global-call-surface-button'),
                     onPressed: onOpenCallSurface,
                     icon: const Icon(Icons.fullscreen_rounded),
-                    label: const Text('Pełny ekran'),
+                    label: Text(t('Pełny ekran')),
                   ),
               ],
               onAccept: onAccept,
@@ -173,21 +174,35 @@ class GlobalCallBanner extends StatelessWidget {
     );
   }
 
-  String get _title => switch (session.status) {
-    CallSessionStatus.ringing when session.isIncoming =>
-      'Połączenie przychodzące ${session.kindLabel}',
-    CallSessionStatus.ringing => 'Dzwonienie (${session.kindLabel})...',
-    CallSessionStatus.connecting => 'Łączenie...',
-    CallSessionStatus.active => 'Rozmowa ${session.kindLabel} trwa',
-  };
+  String get _title {
+    final bool video = session.kind == CallInviteKind.video;
+    return switch (session.status) {
+      CallSessionStatus.ringing when session.isIncoming =>
+        video
+            ? t('Połączenie przychodzące wideo')
+            : t('Połączenie przychodzące audio'),
+      CallSessionStatus.ringing =>
+        video ? t('Dzwonienie (wideo)...') : t('Dzwonienie (audio)...'),
+      CallSessionStatus.connecting => t('Łączenie...'),
+      CallSessionStatus.active =>
+        video ? t('Rozmowa wideo trwa') : t('Rozmowa audio trwa'),
+    };
+  }
 
   String get _subtitle => switch (session.status) {
-    CallSessionStatus.ringing when session.isIncoming =>
-      '${session.displayName} czeka na odebranie w dowolnej zakładce.',
-    CallSessionStatus.ringing =>
-      'Czekasz, aż ${session.displayName} odbierze połączenie.',
-    CallSessionStatus.connecting => 'Nawiązywanie bezpiecznego połączenia...',
-    CallSessionStatus.active =>
-      'Aktywna sesja z ${session.displayName} jest pod ręką w całej aplikacji.',
+    CallSessionStatus.ringing when session.isIncoming => t(
+      '{name} czeka na odebranie w dowolnej zakładce.',
+      {'name': session.displayName},
+    ),
+    CallSessionStatus.ringing => t('Czekasz, aż {name} odbierze połączenie.', {
+      'name': session.displayName,
+    }),
+    CallSessionStatus.connecting => t(
+      'Nawiązywanie bezpiecznego połączenia...',
+    ),
+    CallSessionStatus.active => t(
+      'Aktywna sesja z {name} jest pod ręką w całej aplikacji.',
+      {'name': session.displayName},
+    ),
   };
 }

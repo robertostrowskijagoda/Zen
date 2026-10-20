@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 
 /// How close a friend is (§8). Private: the other side never learns it.
@@ -31,17 +32,17 @@ enum Audience {
   close,
 }
 
-const Map<Audience, String> kAudienceLabels = <Audience, String>{
-  Audience.public: 'Publiczny',
-  Audience.all: 'Wszyscy znajomi',
-  Audience.mid: 'Znajomi i przyjaciele',
-  Audience.close: 'Tylko przyjaciele',
+Map<Audience, String> get kAudienceLabels => <Audience, String>{
+  Audience.public: t('Publiczny'),
+  Audience.all: t('Wszyscy znajomi'),
+  Audience.mid: t('Znajomi i przyjaciele'),
+  Audience.close: t('Tylko przyjaciele'),
 };
 
-const Map<FriendLevel, String> kFriendLevelLabels = <FriendLevel, String>{
-  FriendLevel.weak: 'Słaby znajomy',
-  FriendLevel.friend: 'Znajomy',
-  FriendLevel.close: 'Przyjaciel',
+Map<FriendLevel, String> get kFriendLevelLabels => <FriendLevel, String>{
+  FriendLevel.weak: t('Słaby znajomy'),
+  FriendLevel.friend: t('Znajomy'),
+  FriendLevel.close: t('Przyjaciel'),
 };
 
 /// Encrypted audiences a friend of [level] may read.

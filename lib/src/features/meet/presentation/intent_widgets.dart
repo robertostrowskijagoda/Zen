@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
@@ -17,13 +18,15 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 
 /// When a status set now goes out: in an hour, at midnight, or never.
 enum IntentDuration {
-  hour('1 godzina'),
-  today('Do końca dnia'),
-  open('Do odwołania');
+  hour,
+  today,
+  open;
 
-  const IntentDuration(this.label);
-
-  final String label;
+  String get label => switch (this) {
+    IntentDuration.hour => t('1 godzina'),
+    IntentDuration.today => t('Do końca dnia'),
+    IntentDuration.open => t('Do odwołania'),
+  };
 
   int untilFrom(int now) {
     switch (this) {
@@ -41,15 +44,15 @@ enum IntentDuration {
 /// "jeszcze 40 min", "do 18:00", "do odwołania".
 String intentTimeLeft(IntentStatus s, int now) {
   if (s.until == 0) {
-    return 'do odwołania';
+    return t('do odwołania');
   }
   final int minutes = ((s.until - now) / 60000).ceil();
   if (minutes < 60) {
-    return 'jeszcze ${minutes < 1 ? 1 : minutes} min';
+    return t('jeszcze {minutes} min', {'minutes': minutes < 1 ? 1 : minutes});
   }
   final DateTime d = DateTime.fromMillisecondsSinceEpoch(s.until);
   String two(int v) => v.toString().padLeft(2, '0');
-  return 'do ${two(d.hour)}:${two(d.minute)}';
+  return t('do {time}', {'time': '${two(d.hour)}:${two(d.minute)}'});
 }
 
 /// How much of a status's time is left (1 = just set), or `null` for one
@@ -258,10 +261,10 @@ class IntentPicker extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Text('TWÓJ STATUS', style: zen.label(color: zen.textMuted)),
+          Text(t('TWÓJ STATUS'), style: zen.label(color: zen.textMuted)),
           const SizedBox(height: 6),
           Text(
-            'Na co masz teraz ochotę?',
+            t('Na co masz teraz ochotę?'),
             style: zen.display(
               color: zen.textPrimary,
               size: 20,
@@ -270,7 +273,7 @@ class IntentPicker extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Daj znać znajomym — zobaczą to od razu.',
+            t('Daj znać znajomym — zobaczą to od razu.'),
             style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
           ),
           const SizedBox(height: 14),
@@ -415,7 +418,7 @@ class _MoreIntents extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 Text(
-                  'Więcej statusów',
+                  t('Więcej statusów'),
                   style: zen.display(
                     color: zen.textPrimary,
                     size: 20,
@@ -470,7 +473,7 @@ class _MoreIntents extends StatelessWidget {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              'Napisz po swojemu i wybierz emoji',
+                              t('Napisz po swojemu i wybierz emoji'),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -526,7 +529,7 @@ class _MoreIntents extends StatelessWidget {
               const SizedBox(width: 6),
               Flexible(
                 child: Text(
-                  'Więcej',
+                  t('Więcej'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -590,11 +593,13 @@ class MyIntentCard extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
               Text(
-                status.isCustom ? 'TWÓJ WŁASNY STATUS' : 'TWÓJ STATUS',
+                status.isCustom ? t('TWÓJ WŁASNY STATUS') : t('TWÓJ STATUS'),
                 style: zen.label(color: tone),
               ),
               ZenPill(
-                text: status.onlyClose ? 'widzą przyjaciele' : 'widzą znajomi',
+                text: status.onlyClose
+                    ? t('widzą przyjaciele')
+                    : t('widzą znajomi'),
                 tone: zen.textSecondary,
                 icon: status.onlyClose
                     ? Icons.favorite_rounded
@@ -602,7 +607,7 @@ class MyIntentCard extends StatelessWidget {
               ),
               if (status.isCustom)
                 ZenPill(
-                  text: 'Własny',
+                  text: t('Własny'),
                   tone: tone,
                   icon: Icons.auto_awesome_rounded,
                 ),
@@ -662,8 +667,10 @@ class MyIntentCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   share == null
-                      ? 'Do odwołania'
-                      : 'Zgaśnie sam: ${intentTimeLeft(status, now)}',
+                      ? t('Do odwołania')
+                      : t('Zgaśnie sam: {left}', {
+                          'left': intentTimeLeft(status, now),
+                        }),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -700,8 +707,8 @@ class MyIntentCard extends StatelessWidget {
                   ),
                   onPressed: onEdit,
                   icon: const Icon(Icons.edit_rounded, size: 18),
-                  label: const Text(
-                    'Zmień',
+                  label: Text(
+                    t('Zmień'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -713,8 +720,8 @@ class MyIntentCard extends StatelessWidget {
                   key: const Key('intent-clear'),
                   onPressed: onClear,
                   icon: const Icon(Icons.close_rounded, size: 18),
-                  label: const Text(
-                    'Wyłącz',
+                  label: Text(
+                    t('Wyłącz'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -786,7 +793,7 @@ class FriendIntents extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(
-                    'Nikt ze znajomych nie ma teraz statusu',
+                    t('Nikt ze znajomych nie ma teraz statusu'),
                     style: TextStyle(
                       color: zen.textPrimary,
                       fontSize: 14.5,
@@ -796,8 +803,8 @@ class FriendIntents extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     ownSet
-                        ? 'Twój już widzą — może ktoś się odezwie.'
-                        : 'Ustaw swój, a może ktoś dołączy.',
+                        ? t('Twój już widzą — może ktoś się odezwie.')
+                        : t('Ustaw swój, a może ktoś dołączy.'),
                     style: TextStyle(
                       color: zen.textSecondary,
                       fontSize: 13,
@@ -814,7 +821,7 @@ class FriendIntents extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        ZenSection('Znajomi teraz · $total', top: 14),
+        ZenSection(t('Znajomi teraz · {count}', {'count': total}), top: 14),
         for (final IntentKind k in kinds)
           _IntentGroup(
             key: Key('intent-friends-${k.name}'),
@@ -893,7 +900,9 @@ class _IntentGroup extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      kind == IntentKind.custom ? 'Własne statusy' : kind.label,
+                      kind == IntentKind.custom
+                          ? t('Własne statusy')
+                          : kind.label,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -1055,7 +1064,7 @@ class _FriendIntentRow extends StatelessWidget {
               ),
             ),
             IconButton(
-              tooltip: 'Napisz',
+              tooltip: t('Napisz'),
               color: tone,
               icon: const Icon(Icons.chat_bubble_outline_rounded),
               onPressed: onOpen,
@@ -1132,7 +1141,7 @@ Future<void> showIntentSheet(
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      initial == null ? current.label : 'Zmień status',
+                      initial == null ? current.label : t('Zmień status'),
                       style: zen.display(
                         color: zen.textPrimary,
                         size: 22,
@@ -1143,7 +1152,7 @@ Future<void> showIntentSheet(
                 ],
               ),
               if (kinds.isNotEmpty) ...<Widget>[
-                const ZenSection('Rodzaj', top: 16),
+                ZenSection(t('Rodzaj'), top: 16),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
@@ -1181,14 +1190,14 @@ Future<void> showIntentSheet(
                   maxLength: IntentStatus.maxCustomChars,
                   textCapitalization: TextCapitalization.sentences,
                   onChanged: (_) => setSheet(() {}),
-                  decoration: const InputDecoration(
-                    labelText: 'Twój status',
-                    hintText: 'np. Na siłowni do 18',
-                    helperText: 'Krótko — znajomi zobaczą to razem z emoji.',
-                    prefixIcon: Icon(Icons.edit_rounded),
+                  decoration: InputDecoration(
+                    labelText: t('Twój status'),
+                    hintText: t('np. Na siłowni do 18'),
+                    helperText: t('Krótko — znajomi zobaczą to razem z emoji.'),
+                    prefixIcon: const Icon(Icons.edit_rounded),
                   ),
                 ),
-                const ZenSection('Emoji', top: 8),
+                ZenSection(t('Emoji'), top: 8),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -1204,7 +1213,7 @@ Future<void> showIntentSheet(
                   ],
                 ),
               ],
-              ZenSection('Na jak długo', top: custom ? 20 : 18),
+              ZenSection(t('Na jak długo'), top: custom ? 20 : 18),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -1213,7 +1222,9 @@ Future<void> showIntentSheet(
                     ChoiceChip(
                       key: const Key('intent-duration-keep'),
                       label: Text(
-                        'Bez zmian (${intentTimeLeft(initial, service.now)})',
+                        t('Bez zmian ({left})', {
+                          'left': intentTimeLeft(initial, service.now),
+                        }),
                       ),
                       selected: duration == null,
                       onSelected: (_) => setSheet(() => duration = null),
@@ -1239,16 +1250,21 @@ Future<void> showIntentSheet(
                   textCapitalization: TextCapitalization.sentences,
                   decoration: InputDecoration(
                     labelText: switch (current) {
-                      IntentKind.urgent =>
-                        'Co się stało? (np. zepsuty samochód, potrzebuję transportu)',
-                      IntentKind.help => 'W czym? (np. przeprowadzka w sobotę)',
-                      IntentKind.canHelp =>
+                      IntentKind.urgent => t(
+                        'Co się stało? (np. zepsuty samochód, potrzebuję '
+                        'transportu)',
+                      ),
+                      IntentKind.help => t(
+                        'W czym? (np. przeprowadzka w sobotę)',
+                      ),
+                      IntentKind.canHelp => t(
                         'W czym? (np. mam auto, znam się na komputerach)',
-                      IntentKind.out => 'Gdzie, kiedy? (nie trzeba)',
-                      IntentKind.walk => 'Gdzie? (np. park, nad rzekę)',
-                      IntentKind.eat => 'Co, gdzie? (np. pizza o 19)',
-                      IntentKind.play => 'W co? (np. planszówki, piłka)',
-                      _ => 'Dopisek (nie trzeba)',
+                      ),
+                      IntentKind.out => t('Gdzie, kiedy? (nie trzeba)'),
+                      IntentKind.walk => t('Gdzie? (np. park, nad rzekę)'),
+                      IntentKind.eat => t('Co, gdzie? (np. pizza o 19)'),
+                      IntentKind.play => t('W co? (np. planszówki, piłka)'),
+                      _ => t('Dopisek (nie trzeba)'),
                     },
                     prefixIcon: const Icon(Icons.edit_note_rounded),
                   ),
@@ -1258,9 +1274,10 @@ Future<void> showIntentSheet(
                 ZenInfo(
                   icon: Icons.priority_high_rounded,
                   tone: tone,
-                  text:
-                      'Znajomi dostaną głośniejsze powiadomienie. Gdy grozi Ci '
-                      'niebezpieczeństwo, użyj Alarmu — wysyła też położenie.',
+                  text: t(
+                    'Znajomi dostaną głośniejsze powiadomienie. Gdy grozi Ci '
+                    'niebezpieczeństwo, użyj Alarmu — wysyła też położenie.',
+                  ),
                 ),
                 const SizedBox(height: 8),
               ],
@@ -1268,9 +1285,10 @@ Future<void> showIntentSheet(
                 ZenInfo(
                   icon: Icons.visibility_off_rounded,
                   tone: tone,
-                  text:
-                      'Osoby, przed którymi ukrywasz profil randkowy, '
-                      'nie zobaczą tego statusu.',
+                  text: t(
+                    'Osoby, przed którymi ukrywasz profil randkowy, '
+                    'nie zobaczą tego statusu.',
+                  ),
                 ),
                 const SizedBox(height: 8),
               ],
@@ -1278,8 +1296,8 @@ Future<void> showIntentSheet(
                 children: <Widget>[
                   SwitchListTile(
                     value: onlyClose,
-                    title: const Text('Tylko przyjaciele'),
-                    subtitle: const Text('Inaczej widzą wszyscy znajomi.'),
+                    title: Text(t('Tylko przyjaciele')),
+                    subtitle: Text(t('Inaczej widzą wszyscy znajomi.')),
                     onChanged: (bool v) => setSheet(() => onlyClose = v),
                   ),
                 ],
@@ -1321,7 +1339,7 @@ Future<void> showIntentSheet(
                         Navigator.of(context).pop();
                       },
                 icon: const Icon(Icons.check_rounded),
-                label: Text(initial == null ? 'Ustaw' : 'Zapisz'),
+                label: Text(initial == null ? t('Ustaw') : t('Zapisz')),
               ),
             ],
           ),

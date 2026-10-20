@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/copy_with_cast.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -55,7 +56,7 @@ final class FriendProfile {
   /// code or the "Zen <code>" placeholder a nameless app sends) is "Kontakt
   /// Zen".
   String get displayLabel =>
-      hasProfileName ? displayName.trim() : 'Kontakt Zen';
+      hasProfileName ? displayName.trim() : t('Kontakt Zen');
 
   /// True when the peer has told its real name (not a generated label).
   bool get hasProfileName {

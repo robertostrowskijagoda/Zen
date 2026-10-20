@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
@@ -59,7 +60,7 @@ class _AskScreenState extends ConsumerState<AskScreen> {
     final String? text = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('Odpowiedz'),
+        title: Text(t('Odpowiedz')),
         content: TextField(
           key: const Key('ask-answer-text'),
           controller: c,
@@ -70,11 +71,11 @@ class _AskScreenState extends ConsumerState<AskScreen> {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(c.text),
-            child: const Text('Wyślij'),
+            child: Text(t('Wyślij')),
           ),
         ],
       ),
@@ -112,9 +113,12 @@ class _AskScreenState extends ConsumerState<AskScreen> {
     final String name = pyr.state?.members[key]?.name ?? answerSource(a.path);
     final (int, String)? amount = await askAmount(
       context,
-      title: 'Napiwek dla: $name',
-      info:
-          'Przelew w walucie piramidy z tytułem „Napiwek za odpowiedź”. Masz: ${formatMoney(balance)}.',
+      title: t('Napiwek dla: {name}', {'name': name}),
+      info: t(
+        'Przelew w walucie piramidy z tytułem „Napiwek za odpowiedź”. '
+        'Masz: {amount}.',
+        {'amount': formatMoney(balance)},
+      ),
       fieldKey: const Key('ask-tip-amount'),
     );
     if (amount == null || !mounted) {
@@ -123,7 +127,7 @@ class _AskScreenState extends ConsumerState<AskScreen> {
     if (amount.$1 > balance) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Za mało środków.')));
+      ).showSnackBar(SnackBar(content: Text(t('Za mało środków.'))));
       return;
     }
     final PyramidRecord? order = await pyr.tip(
@@ -139,8 +143,11 @@ class _AskScreenState extends ConsumerState<AskScreen> {
         SnackBar(
           content: Text(
             order == null
-                ? 'Nie udało się wysłać (może czeka jeszcze poprzedni przelew).'
-                : 'Napiwek wysłany — przelew zatwierdzą skarbnicy.',
+                ? t(
+                    'Nie udało się wysłać (może czeka jeszcze poprzedni '
+                    'przelew).',
+                  )
+                : t('Napiwek wysłany — przelew zatwierdzą skarbnicy.'),
           ),
         ),
       );
@@ -154,7 +161,7 @@ class _AskScreenState extends ConsumerState<AskScreen> {
       context: context,
       builder: (BuildContext context) => StatefulBuilder(
         builder: (BuildContext context, StateSetter set) => AlertDialog(
-          title: const Text('Przekaż dalej — komu?'),
+          title: Text(t('Przekaż dalej — komu?')),
           content: SizedBox(
             width: 360,
             child: ListView(
@@ -179,11 +186,11 @@ class _AskScreenState extends ConsumerState<AskScreen> {
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Anuluj'),
+              child: Text(t('Anuluj')),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Przekaż'),
+              child: Text(t('Przekaż')),
             ),
           ],
         ),
@@ -201,7 +208,7 @@ class _AskScreenState extends ConsumerState<AskScreen> {
     final ZenColors zen = ZenColors.of(context);
     return Scaffold(
       key: const Key('ask-screen'),
-      appBar: AppBar(title: const Text('Zapytaj sieć')),
+      appBar: AppBar(title: Text(t('Zapytaj sieć'))),
       body: ListenableBuilder(
         listenable: Listenable.merge(<Listenable>[ask, pyr]),
         builder: (BuildContext context, Widget? _) {
@@ -211,13 +218,14 @@ class _AskScreenState extends ConsumerState<AskScreen> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
             children: <Widget>[
               ZenHero(
-                title: 'Pytaj ludzi, nie bazę',
+                title: t('Pytaj ludzi, nie bazę'),
                 icon: Icons.help_center_rounded,
                 tone: zenTone(zen, 6),
-                text:
-                    '„Znacie dobrego dentystę w Gdańsku?”, „Kto pożyczy '
-                    'przyczepkę?”. Odpowiedzi wracają tą samą drogą, z '
-                    'informacją, przez kogo — wiesz, komu ufasz.',
+                text: t(
+                  '„Znacie dobrego dentystę w Gdańsku?”, „Kto pożyczy '
+                  'przyczepkę?”. Odpowiedzi wracają tą samą drogą, z '
+                  'informacją, przez kogo — wiesz, komu ufasz.',
+                ),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -227,18 +235,18 @@ class _AskScreenState extends ConsumerState<AskScreen> {
                 maxLines: 4,
                 maxLength: 500,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Twoje pytanie',
-                  hintText: 'np. Kto zna dobrego hydraulika?',
+                decoration: InputDecoration(
+                  labelText: t('Twoje pytanie'),
+                  hintText: t('np. Kto zna dobrego hydraulika?'),
                 ),
               ),
               ZenGroup(
                 children: <Widget>[
                   SwitchListTile(
                     value: _twoSteps,
-                    title: const Text('Znajomi mogą przekazać dalej'),
-                    subtitle: const Text(
-                      'Pytanie dotrze też do znajomych Twoich znajomych.',
+                    title: Text(t('Znajomi mogą przekazać dalej')),
+                    subtitle: Text(
+                      t('Pytanie dotrze też do znajomych Twoich znajomych.'),
                     ),
                     onChanged: (bool v) => setState(() => _twoSteps = v),
                   ),
@@ -249,10 +257,10 @@ class _AskScreenState extends ConsumerState<AskScreen> {
                 key: const Key('ask-send'),
                 onPressed: () => unawaited(_ask(ask)),
                 icon: const Icon(Icons.send_rounded),
-                label: const Text('Zapytaj'),
+                label: Text(t('Zapytaj')),
               ),
               if (mine.isNotEmpty) ...<Widget>[
-                const ZenSection('Twoje pytania'),
+                ZenSection(t('Twoje pytania')),
                 for (final Question q in mine)
                   ZenCard(
                     child: Column(
@@ -269,13 +277,15 @@ class _AskScreenState extends ConsumerState<AskScreen> {
                         const SizedBox(height: 6),
                         if (q.answers.isEmpty)
                           ZenPill(
-                            text: 'Czeka na odpowiedzi',
+                            text: t('Czeka na odpowiedzi'),
                             tone: zen.textMuted,
                             icon: Icons.hourglass_empty_rounded,
                           )
                         else
                           ZenPill(
-                            text: 'Odpowiedzi: ${q.answers.length}',
+                            text: t('Odpowiedzi: {count}', {
+                              'count': q.answers.length,
+                            }),
                             tone: zen.success,
                             icon: Icons.forum_rounded,
                           ),
@@ -321,8 +331,9 @@ class _AskScreenState extends ConsumerState<AskScreen> {
                                     children: <Widget>[
                                       if (a.tipped > 0)
                                         ZenPill(
-                                          text:
-                                              'Napiwek: ${formatMoney(a.tipped)}',
+                                          text: t('Napiwek: {amount}', {
+                                            'amount': formatMoney(a.tipped),
+                                          }),
                                           tone: zen.success,
                                           icon:
                                               Icons.volunteer_activism_rounded,
@@ -339,7 +350,7 @@ class _AskScreenState extends ConsumerState<AskScreen> {
                                             Icons.volunteer_activism_rounded,
                                             size: 18,
                                           ),
-                                          label: const Text('Daj napiwek'),
+                                          label: Text(t('Daj napiwek')),
                                         ),
                                     ],
                                   ),
@@ -352,7 +363,7 @@ class _AskScreenState extends ConsumerState<AskScreen> {
                   ),
               ],
               if (others.isNotEmpty) ...<Widget>[
-                const ZenSection('Pytają Cię'),
+                ZenSection(t('Pytają Cię')),
                 for (final Question q in others)
                   ZenCard(
                     child: Column(
@@ -361,7 +372,10 @@ class _AskScreenState extends ConsumerState<AskScreen> {
                         Text(
                           q.via.isEmpty
                               ? q.askerName
-                              : '${q.askerName} · przez ${q.via.join(', ')}',
+                              : t('{name} · przez {via}', {
+                                  'name': q.askerName,
+                                  'via': q.via.join(', '),
+                                }),
                           style: TextStyle(
                             color: zen.accent,
                             fontSize: 12.5,
@@ -387,8 +401,8 @@ class _AskScreenState extends ConsumerState<AskScreen> {
                               icon: const Icon(Icons.reply_rounded, size: 18),
                               label: Text(
                                 q.answeredByMe
-                                    ? 'Odpowiedz jeszcze raz'
-                                    : 'Odpowiedz',
+                                    ? t('Odpowiedz jeszcze raz')
+                                    : t('Odpowiedz'),
                               ),
                             ),
                             if (q.hops > 0 && !q.forwarded)
@@ -398,7 +412,7 @@ class _AskScreenState extends ConsumerState<AskScreen> {
                                   Icons.forward_rounded,
                                   size: 18,
                                 ),
-                                label: const Text('Przekaż dalej'),
+                                label: Text(t('Przekaż dalej')),
                               ),
                           ],
                         ),

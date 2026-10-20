@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 
@@ -35,10 +36,17 @@ final class ThanksCard {
 Map<String, dynamic> thanksBody(String toAccount, String text) {
   final String trimmed = text.trim();
   if (trimmed.isEmpty) {
-    throw ArgumentError('Napisz, za co dziękujesz.');
+    throw ArgumentError(t('Napisz, za co dziękujesz.'));
   }
   if (trimmed.length > kMaxThanksChars) {
-    throw ArgumentError('Za długie (maks. $kMaxThanksChars znaków).');
+    throw ArgumentError(
+      tn(
+        kMaxThanksChars,
+        one: 'Za długie (maks. {n} znak).',
+        few: 'Za długie (maks. {n} znaki).',
+        many: 'Za długie (maks. {n} znaków).',
+      ),
+    );
   }
   return <String, dynamic>{'to': toAccount, 'text': trimmed};
 }
@@ -93,7 +101,7 @@ List<ThanksCard> thanksFor(
   required String Function(String address) nameOf,
 }) {
   final List<ThanksCard> cards = <ThanksCard>[
-    ..._cardsOf(node.entriesOf(spaceKind: 'acts'), 'Ty'),
+    ..._cardsOf(node.entriesOf(spaceKind: 'acts'), t('Ty')),
   ];
   final Set<String> seen = <String>{node.account};
   node.friendAccounts.forEach((String address, String account) {

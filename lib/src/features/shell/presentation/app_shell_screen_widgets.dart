@@ -284,7 +284,7 @@ class _RuntimeErrorNotice extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     return ZenInfo(
       text: message,
-      title: 'Coś poszło nie tak',
+      title: t('Coś poszło nie tak'),
       icon: Icons.error_outline_rounded,
       tone: zen.danger,
     );
@@ -307,7 +307,7 @@ class _ServiceActions extends ConsumerWidget {
         _ServiceButton(
           key: const Key('service-reset-button'),
           icon: Icons.restart_alt_rounded,
-          title: 'Resetuj sieć',
+          title: t('Resetuj sieć'),
           onPressed: controller.resetService,
         ),
         const SizedBox(height: 8),
@@ -577,14 +577,14 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
               name: conversation.name,
               nickname: conversation.nickname,
               nameBadge: pending
-                  ? _StatusPill(label: 'Oczekuje', tone: zen.warning)
+                  ? _StatusPill(label: t('Oczekuje'), tone: zen.warning)
                   : null,
               meta: conversation.timeLabel,
               preview: conversation.isTyping
                   ? Row(
                       children: <Widget>[
                         Text(
-                          'Pisze...',
+                          t('Pisze...'),
                           style: TextStyle(
                             color: zen.accent,
                             fontSize: 13.5,
@@ -736,10 +736,10 @@ void _showConversationActionSheet(
                         const SizedBox(height: 6),
                         ZenPill(
                           text: pending
-                              ? 'Zaproszenie wysłane'
+                              ? t('Zaproszenie wysłane')
                               : (conversation.isOnline
-                                    ? 'Dostępny'
-                                    : 'Offline'),
+                                    ? t('Dostępny')
+                                    : t('Offline')),
                           tone: pending
                               ? zen.warning
                               : (conversation.isOnline
@@ -758,7 +758,7 @@ void _showConversationActionSheet(
               if (pending) ...<Widget>[
                 _SheetAction(
                   icon: Icons.cancel_outlined,
-                  label: 'Anuluj zaproszenie',
+                  label: t('Anuluj zaproszenie'),
                   tone: zen.danger,
                   danger: true,
                   onTap: () async {
@@ -772,7 +772,7 @@ void _showConversationActionSheet(
                 ),
                 _SheetAction(
                   icon: Icons.block_rounded,
-                  label: 'Zablokuj użytkownika',
+                  label: t('Zablokuj użytkownika'),
                   tone: zen.danger,
                   danger: true,
                   onTap: () {
@@ -783,7 +783,7 @@ void _showConversationActionSheet(
               ] else ...<Widget>[
                 _SheetAction(
                   icon: Icons.chat_bubble_outline_rounded,
-                  label: 'Otwórz rozmowę',
+                  label: t('Otwórz rozmowę'),
                   tone: zen.accent,
                   onTap: () {
                     Navigator.of(sheetContext).pop();
@@ -796,7 +796,7 @@ void _showConversationActionSheet(
                 ),
                 _SheetAction(
                   icon: Icons.edit_outlined,
-                  label: 'Pseudonim',
+                  label: t('Pseudonim'),
                   tone: zenTone(zen, 2),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
@@ -805,7 +805,7 @@ void _showConversationActionSheet(
                 ),
                 _SheetAction(
                   icon: Icons.cleaning_services_outlined,
-                  label: 'Wyczyść historię',
+                  label: t('Wyczyść historię'),
                   tone: zen.warning,
                   danger: true,
                   onTap: () {
@@ -815,7 +815,7 @@ void _showConversationActionSheet(
                 ),
                 _SheetAction(
                   icon: Icons.person_remove_outlined,
-                  label: 'Usuń znajomego',
+                  label: t('Usuń znajomego'),
                   tone: zen.danger,
                   danger: true,
                   onTap: () {
@@ -825,7 +825,7 @@ void _showConversationActionSheet(
                 ),
                 _SheetAction(
                   icon: Icons.block_rounded,
-                  label: 'Zablokuj użytkownika',
+                  label: t('Zablokuj użytkownika'),
                   tone: zen.danger,
                   danger: true,
                   onTap: () {
@@ -853,14 +853,16 @@ Future<void> _confirmAndRemoveFriend(
       final ZenColors zen = ZenColors.of(dialogContext);
       return AlertDialog(
         icon: Icon(Icons.person_remove_outlined, color: zen.danger, size: 30),
-        title: const Text('Usunąć znajomego?'),
+        title: Text(t('Usunąć znajomego?')),
         content: Text(
-          'Czy na pewno chcesz usunąć ${conversation.name} z listy kontaktów?',
+          t('Czy na pewno chcesz usunąć {name} z listy kontaktów?', {
+            'name': conversation.name,
+          }),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -868,7 +870,7 @@ Future<void> _confirmAndRemoveFriend(
               foregroundColor: ZenColors.foregroundFor(zen.danger),
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Usuń'),
+            child: Text(t('Usuń')),
           ),
         ],
       );
@@ -893,14 +895,18 @@ Future<void> _confirmAndBlockFriend(
       final ZenColors zen = ZenColors.of(dialogContext);
       return AlertDialog(
         icon: Icon(Icons.block_rounded, color: zen.danger, size: 30),
-        title: const Text('Zablokować użytkownika?'),
+        title: Text(t('Zablokować użytkownika?')),
         content: Text(
-          'Czy na pewno chcesz zablokować ${conversation.name}? Nie będziesz otrzymywać wiadomości ani połączeń od tego kontaktu.',
+          t(
+            'Czy na pewno chcesz zablokować {name}? Nie będziesz otrzymywać '
+            'wiadomości ani połączeń od tego kontaktu.',
+            {'name': conversation.name},
+          ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -908,7 +914,7 @@ Future<void> _confirmAndBlockFriend(
               foregroundColor: ZenColors.foregroundFor(zen.danger),
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Zablokuj'),
+            child: Text(t('Zablokuj')),
           ),
         ],
       );
@@ -937,14 +943,18 @@ Future<void> _confirmAndClearHistory(
           color: zen.warning,
           size: 30,
         ),
-        title: const Text('Wyczyścić historię?'),
+        title: Text(t('Wyczyścić historię?')),
         content: Text(
-          'Czy na pewno chcesz usunąć całą historię rozmowy z ${conversation.name}? Tej operacji nie można cofnąć.',
+          t(
+            'Czy na pewno chcesz usunąć całą historię rozmowy z {name}? '
+            'Tej operacji nie można cofnąć.',
+            {'name': conversation.name},
+          ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -952,7 +962,7 @@ Future<void> _confirmAndClearHistory(
               foregroundColor: ZenColors.foregroundFor(zen.warning),
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Wyczyść'),
+            child: Text(t('Wyczyść')),
           ),
         ],
       );
@@ -995,7 +1005,9 @@ Future<void> _promptFriendNickname(
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            nickname.isEmpty ? 'Usunięto pseudonim' : 'Zapisano pseudonim',
+            nickname.isEmpty
+                ? t('Usunięto pseudonim')
+                : t('Zapisano pseudonim'),
           ),
         ),
       );
@@ -1003,7 +1015,11 @@ Future<void> _promptFriendNickname(
   } catch (error) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Nie udało się zapisać pseudonimu: $error')),
+        SnackBar(
+          content: Text(
+            t('Nie udało się zapisać pseudonimu: {error}', {'error': error}),
+          ),
+        ),
       );
     }
   }
@@ -1023,7 +1039,7 @@ Future<void> _promptFriendNickname(
       final String name =
           uri.queryParameters['title']?.trim().isNotEmpty == true
           ? uri.queryParameters['title']!.trim()
-          : (groups[id]?.name ?? 'Grupa');
+          : (groups[id]?.name ?? t('Grupa'));
       return (id, name);
     }
   }
@@ -1042,7 +1058,7 @@ Future<void> _promptFriendNickname(
     }
   }
   final String fallbackId = 'grp-${item.peerAddress ?? item.id}';
-  final String fallbackName = name.isNotEmpty ? name : 'Grupa';
+  final String fallbackName = name.isNotEmpty ? name : t('Grupa');
   return (fallbackId, fallbackName);
 }
 
@@ -1072,11 +1088,17 @@ class _InboxCard extends ConsumerWidget {
             inboxEntryId: item.id,
           );
       messenger?.showSnackBar(
-        SnackBar(content: Text('Dołączono do grupy „$groupName”.')),
+        SnackBar(
+          content: Text(
+            t('Dołączono do grupy „{group}”.', {'group': groupName}),
+          ),
+        ),
       );
     } catch (error) {
       messenger?.showSnackBar(
-        SnackBar(content: Text('Nie udało się dołączyć: $error')),
+        SnackBar(
+          content: Text(t('Nie udało się dołączyć: {error}', {'error': error})),
+        ),
       );
     }
   }
@@ -1154,7 +1176,7 @@ class _InboxCard extends ConsumerWidget {
                 height: 32,
                 child: IconButton(
                   key: Key('inbox-dismiss-${item.id}'),
-                  tooltip: 'Usuń powiadomienie',
+                  tooltip: t('Usuń powiadomienie'),
                   padding: EdgeInsets.zero,
                   visualDensity: VisualDensity.compact,
                   iconSize: 18,
@@ -1187,13 +1209,17 @@ class _InboxCard extends ConsumerWidget {
                         }
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text('Nie udało się odrzucić: $error'),
+                            content: Text(
+                              t('Nie udało się odrzucić: {error}', {
+                                'error': error,
+                              }),
+                            ),
                           ),
                         );
                       }
                     },
-                    child: const Text(
-                      'Odrzuć',
+                    child: Text(
+                      t('Odrzuć'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1218,13 +1244,17 @@ class _InboxCard extends ConsumerWidget {
                         }
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text('Nie udało się zaakceptować: $error'),
+                            content: Text(
+                              t('Nie udało się zaakceptować: {error}', {
+                                'error': error,
+                              }),
+                            ),
                           ),
                         );
                       }
                     },
-                    child: const Text(
-                      'Akceptuj',
+                    child: Text(
+                      t('Akceptuj'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1252,8 +1282,8 @@ class _InboxCard extends ConsumerWidget {
                             senderAddress: item.peerAddress,
                           );
                     },
-                    child: const Text(
-                      'Odrzuć',
+                    child: Text(
+                      t('Odrzuć'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1273,8 +1303,8 @@ class _InboxCard extends ConsumerWidget {
                       );
                       unawaited(_joinGroup(context, ref, groupId, groupName));
                     },
-                    child: const Text(
-                      'Dołącz',
+                    child: Text(
+                      t('Dołącz'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1321,17 +1351,17 @@ ConversationPreview _conversationFromFriend(
     FriendRelationshipStatus.pendingOutgoing =>
       friend.requestMessage?.trim().isNotEmpty == true
           ? friend.requestMessage!.trim()
-          : 'Zaproszenie oczekuje na akceptacje.',
+          : t('Zaproszenie oczekuje na akceptacje.'),
     FriendRelationshipStatus.pendingIncoming =>
       friend.requestMessage?.trim().isNotEmpty == true
           ? friend.requestMessage!.trim()
-          : 'Oczekujące zaproszenie.',
+          : t('Oczekujące zaproszenie.'),
     FriendRelationshipStatus.accepted =>
       friend.lastMessagePreview.isEmpty
-          ? 'Brak wiadomości.'
+          ? t('Brak wiadomości.')
           : friend.lastMessagePreview,
-    FriendRelationshipStatus.blocked => 'Kontakt zablokowany.',
-    FriendRelationshipStatus.none => 'Brak relacji.',
+    FriendRelationshipStatus.blocked => t('Kontakt zablokowany.'),
+    FriendRelationshipStatus.none => t('Brak relacji.'),
   };
   return ConversationPreview(
     address: friend.address,
@@ -1342,7 +1372,7 @@ ConversationPreview _conversationFromFriend(
     status: friend.status,
     lastMessage: preview,
     timeLabel: friend.lastActivityLabel.isEmpty
-        ? 'Teraz'
+        ? t('Teraz')
         : friend.lastActivityLabel,
     unreadCount: friend.unreadCount,
     isOnline: friend.isOnline,

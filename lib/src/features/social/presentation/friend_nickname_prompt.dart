@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
@@ -59,7 +60,7 @@ class _FriendNicknameDialogState extends State<_FriendNicknameDialog> {
     final bool hadNickname = widget.friend.hasNickname;
     return AlertDialog(
       icon: ZenIconBadge(icon: Icons.badge_rounded, tone: zenTone(zen, 1)),
-      title: const Text('Pseudonim', textAlign: TextAlign.center),
+      title: Text(t('Pseudonim'), textAlign: TextAlign.center),
       content: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 360),
         child: SingleChildScrollView(
@@ -90,7 +91,7 @@ class _FriendNicknameDialogState extends State<_FriendNicknameDialog> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Text(
-                            'Nazwa z profilu',
+                            t('Nazwa z profilu'),
                             style: TextStyle(
                               color: zen.textMuted,
                               fontSize: 12,
@@ -120,13 +121,14 @@ class _FriendNicknameDialogState extends State<_FriendNicknameDialog> {
                 maxLength: kMaxFriendNickname,
                 textInputAction: TextInputAction.done,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Pseudonim (opcjonalnie)',
-                  hintText: 'np. Kasia z pracy',
-                  prefixIcon: Icon(Icons.edit_note_rounded),
-                  helperText:
-                      'Widzisz go tylko Ty, pod nazwą tej osoby. '
-                      'Nazwę zmienia ona sama w swoim profilu.',
+                decoration: InputDecoration(
+                  labelText: t('Pseudonim (opcjonalnie)'),
+                  hintText: t('np. Kasia z pracy'),
+                  prefixIcon: const Icon(Icons.edit_note_rounded),
+                  helperText: t(
+                    'Widzisz go tylko Ty, pod nazwą tej osoby. '
+                    'Nazwę zmienia ona sama w swoim profilu.',
+                  ),
                   helperMaxLines: 3,
                 ),
                 onSubmitted: (_) => _submit(),
@@ -140,16 +142,16 @@ class _FriendNicknameDialogState extends State<_FriendNicknameDialog> {
           TextButton(
             key: const Key('friend-nickname-clear'),
             onPressed: () => Navigator.of(context).pop(''),
-            child: const Text('Usuń'),
+            child: Text(t('Usuń')),
           ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Anuluj'),
+          child: Text(t('Anuluj')),
         ),
         FilledButton(
           key: widget.confirmKey,
           onPressed: _submit,
-          child: const Text('Zapisz'),
+          child: Text(t('Zapisz')),
         ),
       ],
     );

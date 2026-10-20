@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 enum RuntimeRouteTarget {
@@ -118,11 +119,11 @@ final class RuntimeRouteIntent {
       target == RuntimeRouteTarget.groupConversation ? peerAddress : null;
 
   String get actionLabel => switch (target) {
-    RuntimeRouteTarget.inbox => 'Otwórz powiadomienia',
-    RuntimeRouteTarget.conversation => 'Otwórz czat',
-    RuntimeRouteTarget.call => 'Otwórz połączenie',
-    RuntimeRouteTarget.addFriend => 'Dodaj znajomego',
-    RuntimeRouteTarget.groupConversation => 'Otwórz grupę',
+    RuntimeRouteTarget.inbox => t('Otwórz powiadomienia'),
+    RuntimeRouteTarget.conversation => t('Otwórz czat'),
+    RuntimeRouteTarget.call => t('Otwórz połączenie'),
+    RuntimeRouteTarget.addFriend => t('Dodaj znajomego'),
+    RuntimeRouteTarget.groupConversation => t('Otwórz grupę'),
   };
 }
 

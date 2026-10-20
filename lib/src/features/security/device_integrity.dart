@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 
 /// What the phone says about itself (§14.1 point 12). A rooted or modified
@@ -41,12 +42,13 @@ final class DeviceIntegrity {
   List<String> describe() => <String>[
     for (final String reason in reasons)
       switch (reason) {
-        'su' => 'Znaleziono program su (uprawnienia roota).',
-        'test-keys' => 'System jest podpisany kluczami testowymi.',
-        'frida' => 'Znaleziono narzędzie do podglądania aplikacji (Frida).',
-        final String app when app.startsWith('app:') =>
-          'Zainstalowano aplikację do roota lub modyfikacji: '
-              '${app.substring(4)}.',
+        'su' => t('Znaleziono program su (uprawnienia roota).'),
+        'test-keys' => t('System jest podpisany kluczami testowymi.'),
+        'frida' => t('Znaleziono narzędzie do podglądania aplikacji (Frida).'),
+        final String app when app.startsWith('app:') => t(
+          'Zainstalowano aplikację do roota lub modyfikacji: {app}.',
+          {'app': app.substring(4)},
+        ),
         _ => reason,
       },
   ];

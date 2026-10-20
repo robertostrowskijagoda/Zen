@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
@@ -74,7 +75,7 @@ typedef AudioSource = Future<List<DraftMedia>> Function();
 Future<List<DraftMedia>> pickAudioMedia() async {
   final FilePickerResult? result = await FilePicker.platform.pickFiles(
     type: FileType.audio,
-    dialogTitle: 'Wybierz nagranie',
+    dialogTitle: t('Wybierz nagranie'),
   );
   final PlatformFile? f = result?.files.firstOrNull;
   if (f == null || f.path == null) {
@@ -82,7 +83,9 @@ Future<List<DraftMedia>> pickAudioMedia() async {
   }
   if (f.size > kMaxAudioFileBytes) {
     throw ArgumentError(
-      'Nagranie jest za duże (maks. ${sizeLabel(kMaxAudioFileBytes)}).',
+      t('Nagranie jest za duże (maks. {size}).', {
+        'size': sizeLabel(kMaxAudioFileBytes),
+      }),
     );
   }
   return <DraftMedia>[
@@ -96,7 +99,7 @@ DraftMedia audioDraft(Uint8List bytes, {String name = '', int? durationMs}) {
   final MediaKind kind = sniffMediaKind(bytes);
   if ((kind != MediaKind.audio && kind != MediaKind.video) ||
       !looksLikeSafeContainer(bytes)) {
-    throw ArgumentError('Ten plik nie jest nagraniem audio.');
+    throw ArgumentError(t('Ten plik nie jest nagraniem audio.'));
   }
   final String sniffed = sniffMimeType(bytes) ?? 'audio/mp4';
   return DraftMedia(
@@ -121,11 +124,11 @@ const Map<Audience, IconData> kAudienceIcons = <Audience, IconData>{
   Audience.close: Icons.favorite_rounded,
 };
 
-const Map<Audience, String> kAudienceHints = <Audience, String>{
-  Audience.public: 'Każdy, kto Cię obserwuje, także nieznajomi.',
-  Audience.all: 'Wszyscy Twoi znajomi.',
-  Audience.mid: 'Znajomi oznaczeni jako „znajomi” i przyjaciele.',
-  Audience.close: 'Tylko najbliżsi, oznaczeni jako przyjaciele.',
+Map<Audience, String> get kAudienceHints => <Audience, String>{
+  Audience.public: t('Każdy, kto Cię obserwuje, także nieznajomi.'),
+  Audience.all: t('Wszyscy Twoi znajomi.'),
+  Audience.mid: t('Znajomi oznaczeni jako „znajomi” i przyjaciele.'),
+  Audience.close: t('Tylko najbliżsi, oznaczeni jako przyjaciele.'),
 };
 
 bool get _mobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
@@ -140,7 +143,7 @@ Future<List<Uint8List>> pickImageBytes({int? limit}) async {
     type: FileType.image,
     allowMultiple: true,
     withData: true,
-    dialogTitle: 'Wybierz zdjęcia',
+    dialogTitle: t('Wybierz zdjęcia'),
   );
   return <Uint8List>[
     for (final PlatformFile f in result?.files ?? const <PlatformFile>[])
@@ -164,7 +167,9 @@ Future<List<DraftMedia>> pickVideoMedia({bool camera = false}) async {
     }
     if (await f.length() > kMaxVideoBytes) {
       throw ArgumentError(
-        'Film jest za duży (maks. ${sizeLabel(kMaxVideoBytes)}).',
+        t('Film jest za duży (maks. {size}).', {
+          'size': sizeLabel(kMaxVideoBytes),
+        }),
       );
     }
     return <DraftMedia>[
@@ -177,7 +182,7 @@ Future<List<DraftMedia>> pickVideoMedia({bool camera = false}) async {
   }
   final FilePickerResult? result = await FilePicker.platform.pickFiles(
     type: FileType.video,
-    dialogTitle: 'Wybierz film',
+    dialogTitle: t('Wybierz film'),
   );
   final PlatformFile? f = result?.files.firstOrNull;
   if (f == null || f.path == null) {
@@ -185,7 +190,9 @@ Future<List<DraftMedia>> pickVideoMedia({bool camera = false}) async {
   }
   if (f.size > kMaxVideoBytes) {
     throw ArgumentError(
-      'Film jest za duży (maks. ${sizeLabel(kMaxVideoBytes)}).',
+      t('Film jest za duży (maks. {size}).', {
+        'size': sizeLabel(kMaxVideoBytes),
+      }),
     );
   }
   return <DraftMedia>[
@@ -527,7 +534,12 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   Future<void> _addPhotos({bool camera = false}) async {
     if (_room <= 0) {
       setState(
-        () => _error = 'Najwyżej $kMaxPostImages zdjęć, filmów i nagrań.',
+        () => _error = tn(
+          kMaxPostImages,
+          one: 'Najwyżej {n} zdjęcie, film lub nagranie.',
+          few: 'Najwyżej {n} zdjęcia, filmy i nagrania.',
+          many: 'Najwyżej {n} zdjęć, filmów i nagrań.',
+        ),
       );
       return;
     }
@@ -545,14 +557,21 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       }
     } on Object catch (e) {
       if (mounted) {
-        setState(() => _error = 'Nie udało się otworzyć zdjęć: $e');
+        setState(
+          () =>
+              _error = t('Nie udało się otworzyć zdjęć: {error}', {'error': e}),
+        );
       }
       return;
     }
     if (raw.length > _room && mounted) {
       setState(
-        () => _error =
-            'Najwyżej $kMaxPostImages zdjęć, filmów i nagrań — dodałem pierwsze.',
+        () => _error = tn(
+          kMaxPostImages,
+          one: 'Najwyżej {n} zdjęcie, film lub nagranie — dodałem pierwsze.',
+          few: 'Najwyżej {n} zdjęcia, filmy i nagrania — dodałem pierwsze.',
+          many: 'Najwyżej {n} zdjęć, filmów i nagrań — dodałem pierwsze.',
+        ),
       );
       raw = raw.take(_room).toList();
     }
@@ -568,7 +587,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         }
       } on ArgumentError {
         if (mounted) {
-          setState(() => _error = 'Ten plik nie jest zdjęciem.');
+          setState(() => _error = t('Ten plik nie jest zdjęciem.'));
         }
       } finally {
         if (mounted) {
@@ -581,7 +600,12 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   Future<void> _addVideo({bool camera = false}) async {
     if (_room <= 0) {
       setState(
-        () => _error = 'Najwyżej $kMaxPostImages zdjęć, filmów i nagrań.',
+        () => _error = tn(
+          kMaxPostImages,
+          one: 'Najwyżej {n} zdjęcie, film lub nagranie.',
+          few: 'Najwyżej {n} zdjęcia, filmy i nagrania.',
+          many: 'Najwyżej {n} zdjęć, filmów i nagrań.',
+        ),
       );
       return;
     }
@@ -591,7 +615,9 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       for (final DraftMedia m in picked) {
         if (m.bytes.length > kMaxVideoBytes) {
           throw ArgumentError(
-            'Film jest za duży (maks. ${sizeLabel(kMaxVideoBytes)}).',
+            t('Film jest za duży (maks. {size}).', {
+              'size': sizeLabel(kMaxVideoBytes),
+            }),
           );
         }
         if (mounted) {
@@ -604,7 +630,9 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       }
     } on Object catch (e) {
       if (mounted) {
-        setState(() => _error = 'Nie udało się dodać filmu: $e');
+        setState(
+          () => _error = t('Nie udało się dodać filmu: {error}', {'error': e}),
+        );
       }
     }
   }
@@ -612,7 +640,12 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
   Future<void> _addAudioFile() async {
     if (_room <= 0) {
       setState(
-        () => _error = 'Najwyżej $kMaxPostImages zdjęć, filmów i nagrań.',
+        () => _error = tn(
+          kMaxPostImages,
+          one: 'Najwyżej {n} zdjęcie, film lub nagranie.',
+          few: 'Najwyżej {n} zdjęcia, filmy i nagrania.',
+          many: 'Najwyżej {n} zdjęć, filmów i nagrań.',
+        ),
       );
       return;
     }
@@ -630,7 +663,10 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       }
     } on Object catch (e) {
       if (mounted) {
-        setState(() => _error = 'Nie udało się dodać nagrania: $e');
+        setState(
+          () =>
+              _error = t('Nie udało się dodać nagrania: {error}', {'error': e}),
+        );
       }
     }
   }
@@ -646,7 +682,12 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     }
     if (_room <= 0) {
       setState(
-        () => _error = 'Najwyżej $kMaxPostImages zdjęć, filmów i nagrań.',
+        () => _error = tn(
+          kMaxPostImages,
+          one: 'Najwyżej {n} zdjęcie, film lub nagranie.',
+          few: 'Najwyżej {n} zdjęcia, filmy i nagrania.',
+          many: 'Najwyżej {n} zdjęć, filmów i nagrań.',
+        ),
       );
       return;
     }
@@ -655,14 +696,18 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       if (!await recorder.start()) {
         await recorder.cancel();
         if (mounted) {
-          setState(() => _error = 'Brak dostępu do mikrofonu.');
+          setState(() => _error = t('Brak dostępu do mikrofonu.'));
         }
         return;
       }
     } on Object catch (e) {
       await recorder.cancel();
       if (mounted) {
-        setState(() => _error = 'Nie udało się zacząć nagrania: $e');
+        setState(
+          () => _error = t('Nie udało się zacząć nagrania: {error}', {
+            'error': e,
+          }),
+        );
       }
       return;
     }
@@ -701,7 +746,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       final RecordedVoiceClip? clip = await recorder.stop();
       if (clip == null) {
         if (mounted) {
-          setState(() => _error = 'Nagranie nie zawiera dźwięku.');
+          setState(() => _error = t('Nagranie nie zawiera dźwięku.'));
         }
         return;
       }
@@ -714,12 +759,16 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       }
       if (mounted) {
         _insert(
-          audioDraft(bytes, name: 'Głosówka', durationMs: clip.durationMs),
+          audioDraft(bytes, name: t('Głosówka'), durationMs: clip.durationMs),
         );
       }
     } on Object catch (e) {
       if (mounted) {
-        setState(() => _error = 'Nie udało się zapisać nagrania: $e');
+        setState(
+          () => _error = t('Nie udało się zapisać nagrania: {error}', {
+            'error': e,
+          }),
+        );
       }
     }
   }
@@ -744,7 +793,10 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Nagrywam… ${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}',
+              t('Nagrywam… {time}', {
+                'time':
+                    '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}',
+              }),
               style: TextStyle(
                 color: zen.textPrimary,
                 fontWeight: FontWeight.w600,
@@ -754,13 +806,13 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
           TextButton(
             key: const Key('post-recording-cancel'),
             onPressed: () => unawaited(_stopRecording(keep: false)),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton.icon(
             key: const Key('post-recording-stop'),
             onPressed: () => unawaited(_stopRecording()),
             icon: const Icon(Icons.stop_rounded, size: 18),
-            label: const Text('Wstaw'),
+            label: Text(t('Wstaw')),
           ),
         ],
       ),
@@ -794,13 +846,16 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            const Padding(
-              padding: EdgeInsets.fromLTRB(24, 0, 24, 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Kto zobaczy ten post?',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                  t('Kto zobaczy ten post?'),
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ),
@@ -842,17 +897,19 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
     final bool? discard = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text(widget.editing ? 'Porzucić zmiany?' : 'Odrzucić post?'),
-        content: const Text('To, co napisałeś, nie zostanie zapisane.'),
+        title: Text(
+          widget.editing ? t('Porzucić zmiany?') : t('Odrzucić post?'),
+        ),
+        content: Text(t('To, co napisałeś, nie zostanie zapisane.')),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Pisz dalej'),
+            child: Text(t('Pisz dalej')),
           ),
           FilledButton(
             key: const Key('post-discard'),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Odrzuć'),
+            child: Text(t('Odrzuć')),
           ),
         ],
       ),
@@ -899,7 +956,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
         children: <Widget>[
           AudioClipPlayer(
             load: () async => m.bytes,
-            title: m.name.isEmpty ? 'Nagranie' : m.name,
+            title: m.name.isEmpty ? t('Nagranie') : m.name,
             durationMs: m.durationMs,
             sizeBytes: m.bytes.length,
           ),
@@ -909,7 +966,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
               right: 0,
               child: IconButton(
                 key: removeKey,
-                tooltip: 'Usuń nagranie',
+                tooltip: t('Usuń nagranie'),
                 visualDensity: VisualDensity.compact,
                 onPressed: onRemove,
                 icon: Icon(Icons.close_rounded, size: 18, color: zen.textMuted),
@@ -929,7 +986,8 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                 Icon(Icons.movie_outlined, size: 36, color: zen.textSecondary),
                 const SizedBox(height: 6),
                 Text(
-                  '${m.name.isEmpty ? 'Film' : m.name} · ${sizeLabel(m.bytes.length)}',
+                  '${m.name.isEmpty ? t('Film') : m.name} · '
+                  '${sizeLabel(m.bytes.length)}',
                   style: TextStyle(color: zen.textSecondary, fontSize: 12),
                 ),
               ],
@@ -999,7 +1057,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
               decoration: InputDecoration(
                 hintText: widget.editing || !identical(b, _blocks.first)
                     ? null
-                    : 'Co słychać? Podziel się czymś ze znajomymi…',
+                    : t('Co słychać? Podziel się czymś ze znajomymi…'),
                 hintStyle: style.copyWith(color: zen.textMuted),
                 filled: false,
                 isDense: true,
@@ -1064,19 +1122,19 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
             tool(
               'photo',
               Icons.add_photo_alternate_outlined,
-              'Wstaw zdjęcia w miejscu kursora',
+              t('Wstaw zdjęcia w miejscu kursora'),
               _room > 0 ? () => unawaited(_addPhotos()) : null,
             ),
             tool(
               'video',
               Icons.video_library_outlined,
-              'Wstaw film w miejscu kursora',
+              t('Wstaw film w miejscu kursora'),
               _room > 0 ? () => unawaited(_addVideo()) : null,
             ),
             tool(
               'voice',
               Icons.mic_none_rounded,
-              'Nagraj głosówkę',
+              t('Nagraj głosówkę'),
               _room > 0 && _recording == null
                   ? () => unawaited(_startRecording())
                   : null,
@@ -1084,20 +1142,20 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
             tool(
               'audio',
               Icons.audio_file_outlined,
-              'Wstaw nagranie z pliku',
+              t('Wstaw nagranie z pliku'),
               _room > 0 ? () => unawaited(_addAudioFile()) : null,
             ),
             if (_mobile) ...<Widget>[
               tool(
                 'camera',
                 Icons.photo_camera_outlined,
-                'Zrób zdjęcie',
+                t('Zrób zdjęcie'),
                 _room > 0 ? () => unawaited(_addPhotos(camera: true)) : null,
               ),
               tool(
                 'record',
                 Icons.videocam_outlined,
-                'Nagraj film',
+                t('Nagraj film'),
                 _room > 0 ? () => unawaited(_addVideo(camera: true)) : null,
               ),
             ],
@@ -1106,55 +1164,65 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
           tool(
             'bold',
             Icons.format_bold_rounded,
-            'Pogrubienie (Ctrl+B)',
+            t('Pogrubienie (Ctrl+B)'),
             () => _wrap('**'),
           ),
           tool(
             'italic',
             Icons.format_italic_rounded,
-            'Kursywa (Ctrl+I)',
+            t('Kursywa (Ctrl+I)'),
             () => _wrap('*'),
           ),
           tool(
             'underline',
             Icons.format_underlined_rounded,
-            'Podkreślenie (Ctrl+U)',
+            t('Podkreślenie (Ctrl+U)'),
             () => _wrap('__'),
           ),
           tool(
             'strike',
             Icons.format_strikethrough_rounded,
-            'Przekreślenie (Ctrl+Shift+X)',
+            t('Przekreślenie (Ctrl+Shift+X)'),
             () => _wrap('~~'),
           ),
-          tool('code', Icons.code_rounded, 'Kod (Ctrl+E)', () => _wrap('`')),
+          tool('code', Icons.code_rounded, t('Kod (Ctrl+E)'), () => _wrap('`')),
           tool(
             'spoiler',
             Icons.visibility_off_outlined,
-            'Spoiler',
+            t('Spoiler'),
             () => _wrap('||'),
           ),
           gap(),
-          tool('heading', Icons.title_rounded, 'Nagłówek', () => _prefix('# ')),
+          tool(
+            'heading',
+            Icons.title_rounded,
+            t('Nagłówek'),
+            () => _prefix('# '),
+          ),
           tool(
             'quote',
             Icons.format_quote_rounded,
-            'Cytat',
+            t('Cytat'),
             () => _prefix('> '),
           ),
           tool(
             'list',
             Icons.format_list_bulleted_rounded,
-            'Lista',
+            t('Lista'),
             () => _prefix('- '),
           ),
           tool(
             'numbered',
             Icons.format_list_numbered_rounded,
-            'Lista numerowana',
+            t('Lista numerowana'),
             () => _prefix('1. '),
           ),
-          tool('codeblock', Icons.data_object_rounded, 'Blok kodu', _codeBlock),
+          tool(
+            'codeblock',
+            Icons.data_object_rounded,
+            t('Blok kodu'),
+            _codeBlock,
+          ),
         ],
       ),
     );
@@ -1197,15 +1265,15 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
           appBar: AppBar(
             leading: IconButton(
               key: const Key('post-close'),
-              tooltip: 'Zamknij',
+              tooltip: t('Zamknij'),
               icon: const Icon(Icons.close_rounded),
               onPressed: () => unawaited(_close()),
             ),
-            title: Text(widget.editing ? 'Edytuj post' : 'Nowy post'),
+            title: Text(widget.editing ? t('Edytuj post') : t('Nowy post')),
             actions: <Widget>[
               IconButton(
                 key: const Key('post-preview'),
-                tooltip: _preview ? 'Wróć do edycji' : 'Podgląd',
+                tooltip: _preview ? t('Wróć do edycji') : t('Podgląd'),
                 isSelected: _preview,
                 icon: const Icon(Icons.visibility_outlined),
                 selectedIcon: const Icon(Icons.edit_outlined),
@@ -1222,7 +1290,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : Text(widget.editing ? 'Zapisz' : 'Opublikuj'),
+                      : Text(widget.editing ? t('Zapisz') : t('Opublikuj')),
                 ),
               ),
             ],
@@ -1256,7 +1324,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                                   ),
                                 ),
                                 child: Text(
-                                  'T',
+                                  t('Ty').characters.first,
                                   style: TextStyle(
                                     color: zen.onAccent,
                                     fontWeight: FontWeight.w800,
@@ -1269,7 +1337,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: <Widget>[
                                   Text(
-                                    'Ty',
+                                    t('Ty'),
                                     style: TextStyle(
                                       fontWeight: FontWeight.w800,
                                       fontSize: 15,
@@ -1294,7 +1362,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                               padding: const EdgeInsets.only(top: 12),
                               child: source.trim().isEmpty
                                   ? Text(
-                                      'Na razie pusto.',
+                                      t('Na razie pusto.'),
                                       style: TextStyle(color: zen.textMuted),
                                     )
                                   : RichPostBody(
@@ -1308,14 +1376,15 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                           else
                             _editor(zen),
                           if (widget.editing)
-                            const Padding(
-                              padding: EdgeInsets.only(top: 12),
+                            Padding(
+                              padding: const EdgeInsets.only(top: 12),
                               child: ZenInfo(
                                 icon: Icons.info_outline_rounded,
-                                text:
-                                    'Możesz zmienić tekst, zdjęcia, filmy i '
-                                    'nagrania. '
-                                    'Odbiorcy posta zostają bez zmian.',
+                                text: t(
+                                  'Możesz zmienić tekst, zdjęcia, filmy i '
+                                  'nagrania. '
+                                  'Odbiorcy posta zostają bez zmian.',
+                                ),
                               ),
                             ),
                           if (_error != null)

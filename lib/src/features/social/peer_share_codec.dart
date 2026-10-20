@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 
 @immutable
 final class PeerShareProfile {
@@ -269,7 +270,7 @@ final class PeerShareCodec {
   static PeerDialTarget parseTarget(String input) {
     final String trimmed = normalizeManualInput(input);
     if (trimmed.isEmpty) {
-      throw const FormatException('Wklej kod znajomego albo zeskanuj QR.');
+      throw FormatException(t('Wklej kod znajomego albo zeskanuj QR.'));
     }
     if (trimmed.toLowerCase().startsWith('zen://c/')) {
       return _parseQrDeepLink(trimmed);
@@ -286,15 +287,15 @@ final class PeerShareCodec {
       );
     }
     if (_looksLikeShareId(trimmed)) {
-      throw const FormatException(
-        'Sam kod nie wystarczy. Wklej zaproszenie albo zeskanuj QR.',
+      throw FormatException(
+        t('Sam kod nie wystarczy. Wklej zaproszenie albo zeskanuj QR.'),
       );
     }
     final String canonical = normalizeAddress(trimmed);
     if (trimmed.contains('://') || _tryIpv6ToBytes(canonical) == null) {
       // Other links are not taken: a link must never suggest a name for a
       // stranger.
-      throw const FormatException('Nieprawidłowe zaproszenie.');
+      throw FormatException(t('Nieprawidłowe zaproszenie.'));
     }
     return PeerDialTarget(
       shareId: shareIdForAddress(canonical),
@@ -310,7 +311,7 @@ final class PeerShareCodec {
       rawInput.substring('zen://c/'.length),
     );
     if (invited == null) {
-      throw const FormatException('Nieprawidłowy kod QR.');
+      throw FormatException(t('Nieprawidłowy kod QR.'));
     }
     return PeerDialTarget(
       shareId: shareIdForAddress(invited),

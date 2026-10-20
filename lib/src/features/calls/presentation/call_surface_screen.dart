@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
@@ -288,7 +290,7 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
     final String? path = await callMedia.stopRecording();
     if (path != null && context.mounted) {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(content: Text('Nagranie zapisane (zaszyfrowane).')),
+        SnackBar(content: Text(t('Nagranie zapisane (zaszyfrowane).'))),
       );
     }
   }
@@ -397,7 +399,7 @@ class _SurfaceTopBar extends StatelessWidget {
               size: 28,
               color: zen.textPrimary,
             ),
-            tooltip: 'Zwiń',
+            tooltip: t('Zwiń'),
           ),
           const SizedBox(width: 4),
           Expanded(
@@ -406,7 +408,7 @@ class _SurfaceTopBar extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Text(
-                  returnToConversation ? 'Rozmowa w toku' : 'Rozmowa',
+                  returnToConversation ? t('Rozmowa w toku') : t('Rozmowa'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -446,11 +448,14 @@ class _SurfaceTopBar extends StatelessWidget {
               ),
               onPressed: onChatPressed,
               icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
-              label: const Text(
-                'Czat',
+              label: Text(
+                t('Czat'),
                 maxLines: 1,
                 softWrap: false,
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
@@ -748,7 +753,7 @@ class _CallMediaStageState extends State<_CallMediaStage> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'Oczekiwanie na wideo...',
+                            t('Oczekiwanie na wideo...'),
                             style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 13,
@@ -810,21 +815,31 @@ class _CallMediaStageState extends State<_CallMediaStage> {
   }
 }
 
-String _titleFor(CallSession session) => switch (session.status) {
-  CallSessionStatus.ringing when session.isIncoming =>
-    'Połączenie przychodzące ${session.kindLabel}',
-  CallSessionStatus.ringing => 'Dzwonienie (${session.kindLabel})...',
-  CallSessionStatus.connecting => 'Łączenie...',
-  CallSessionStatus.active => 'Rozmowa ${session.kindLabel} trwa',
-};
+String _titleFor(CallSession session) {
+  final bool video = session.kind == CallInviteKind.video;
+  return switch (session.status) {
+    CallSessionStatus.ringing when session.isIncoming =>
+      video
+          ? t('Połączenie przychodzące wideo')
+          : t('Połączenie przychodzące audio'),
+    CallSessionStatus.ringing =>
+      video ? t('Dzwonienie (wideo)...') : t('Dzwonienie (audio)...'),
+    CallSessionStatus.connecting => t('Łączenie...'),
+    CallSessionStatus.active =>
+      video ? t('Rozmowa wideo trwa') : t('Rozmowa audio trwa'),
+  };
+}
 
 String _subtitleFor(CallSession session) => switch (session.status) {
-  CallSessionStatus.ringing when session.isIncoming =>
-    '${session.displayName} dzwoni do Ciebie',
-  CallSessionStatus.ringing =>
-    'Oczekiwanie na odebranie przez ${session.displayName}',
-  CallSessionStatus.connecting => 'Nawiązywanie bezpiecznego połączenia...',
-  CallSessionStatus.active => 'Połączenie P2P szyfrowane end-to-end',
+  CallSessionStatus.ringing when session.isIncoming => t(
+    '{name} dzwoni do Ciebie',
+    {'name': session.displayName},
+  ),
+  CallSessionStatus.ringing => t('Oczekiwanie na odebranie przez {name}', {
+    'name': session.displayName,
+  }),
+  CallSessionStatus.connecting => t('Nawiązywanie bezpiecznego połączenia...'),
+  CallSessionStatus.active => t('Połączenie P2P szyfrowane end-to-end'),
 };
 
 /// "Udostępnij ekran" and who is sharing (§13.1): everyone sees it.
@@ -874,8 +889,9 @@ class _ScreenShareStrip extends StatelessWidget {
                   Expanded(
                     child: Text(
                       <String>[
-                        if (recording) 'Nagrywasz tę rozmowę',
-                        if (remoteRecording) '$peerName nagrywa',
+                        if (recording) t('Nagrywasz tę rozmowę'),
+                        if (remoteRecording)
+                          t('{name} nagrywa', {'name': peerName}),
                       ].join(' · '),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -915,8 +931,10 @@ class _ScreenShareStrip extends StatelessWidget {
                         Expanded(
                           child: Text(
                             sharing
-                                ? 'Udostępniasz ekran'
-                                : '$peerName udostępnia ekran',
+                                ? t('Udostępniasz ekran')
+                                : t('{name} udostępnia ekran', {
+                                    'name': peerName,
+                                  }),
                             key: const Key('call-screen-share-label'),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
@@ -945,12 +963,14 @@ class _ScreenShareStrip extends StatelessWidget {
                       ? Icons.stop_screen_share_rounded
                       : Icons.screen_share_outlined,
                 ),
-                label: Text(sharing ? 'Zatrzymaj' : 'Udostępnij ekran'),
+                label: Text(sharing ? t('Zatrzymaj') : t('Udostępnij ekran')),
               ),
               if (onToggleRecording != null)
                 IconButton.filledTonal(
                   key: const Key('call-record-button'),
-                  tooltip: recording ? 'Zatrzymaj nagrywanie' : 'Nagrywaj',
+                  tooltip: recording
+                      ? t('Zatrzymaj nagrywanie')
+                      : t('Nagrywaj'),
                   onPressed: onToggleRecording,
                   icon: Icon(
                     recording ? Icons.stop_rounded : Icons.fiber_manual_record,

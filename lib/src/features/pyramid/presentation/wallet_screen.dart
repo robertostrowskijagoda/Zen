@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
@@ -26,7 +27,7 @@ class WalletScreen extends ConsumerWidget {
         final bool member = s != null && me != null && s.isMember(me);
         return Scaffold(
           key: const Key('wallet-screen'),
-          appBar: const ZenSectionBar(title: 'Portfel'),
+          appBar: ZenSectionBar(title: t('Portfel')),
           // The wallet is a scrolling list of its own.
           body: member
               ? PyramidWallet(pyr: pyr, s: s, me: me)
@@ -56,7 +57,7 @@ class _EmptyWallet extends StatelessWidget {
         ),
         const SizedBox(height: 18),
         Text(
-          'Twój portfel jest pusty',
+          t('Twój portfel jest pusty'),
           textAlign: TextAlign.center,
           style: zen.display(
             color: zen.textPrimary,
@@ -66,9 +67,11 @@ class _EmptyWallet extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          'Punkty to waluta piramidy, do której należysz — każda piramida ma '
-          'własne. Gdy dołączysz do piramidy (zakładka „Piramida”), zobaczysz '
-          'tu saldo, historię i przelewy.',
+          t(
+            'Punkty to waluta piramidy, do której należysz — każda piramida '
+            'ma własne. Gdy dołączysz do piramidy (zakładka „Piramida”), '
+            'zobaczysz tu saldo, historię i przelewy.',
+          ),
           textAlign: TextAlign.center,
           style: TextStyle(
             color: zen.textSecondary,
@@ -77,22 +80,24 @@ class _EmptyWallet extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 20),
-        const ZenInfo(
+        ZenInfo(
           icon: Icons.bolt_rounded,
-          title: 'Po co punkty',
-          text:
-              'Płacisz nimi innym osobom z piramidy: przelew, napiwek za '
-              'odpowiedź w „Zapytaj sieć” albo po wydarzeniu, podziękowanie '
-              'w randkach. W rynku dostępu: płatna wiadomość, prośba '
-              'o przedstawienie, udostępnienie i ogłoszenie — płatność '
-              'warunkowa wraca, jeśli odbiorca jej nie przyjmie.',
+          title: t('Po co punkty'),
+          text: t(
+            'Płacisz nimi innym osobom z piramidy: przelew, napiwek za '
+            'odpowiedź w „Zapytaj sieć” albo po wydarzeniu, podziękowanie '
+            'w randkach. W rynku dostępu: płatna wiadomość, prośba '
+            'o przedstawienie, udostępnienie i ogłoszenie — płatność '
+            'warunkowa wraca, jeśli odbiorca jej nie przyjmie.',
+          ),
         ),
-        const ZenInfo(
+        ZenInfo(
           icon: Icons.info_outline_rounded,
-          title: 'Skąd się biorą',
-          text:
-              'Nowe punkty jawnie wydaje szczyt piramidy (z limitem i prawem '
-              'weta). W aplikacji nie da się ich kupić ani wypłacić.',
+          title: t('Skąd się biorą'),
+          text: t(
+            'Nowe punkty jawnie wydaje szczyt piramidy (z limitem i prawem '
+            'weta). W aplikacji nie da się ich kupić ani wypłacić.',
+          ),
         ),
       ],
     );

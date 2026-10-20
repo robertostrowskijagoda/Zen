@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -37,14 +38,12 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
     final String name = _nameController.text.trim();
     final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
     if (name.isEmpty) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Nadaj grupie nazwę.')),
-      );
+      messenger.showSnackBar(SnackBar(content: Text(t('Nadaj grupie nazwę.'))));
       return;
     }
     if (_selectedMembers.isEmpty) {
       messenger.showSnackBar(
-        const SnackBar(content: Text('Wybierz co najmniej jedną osobę.')),
+        SnackBar(content: Text(t('Wybierz co najmniej jedną osobę.'))),
       );
       return;
     }
@@ -62,13 +61,19 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
       if (mounted) {
         Navigator.of(context).pop(created);
         messenger.showSnackBar(
-          SnackBar(content: Text('Utworzono grupę "${created.name}".')),
+          SnackBar(
+            content: Text(
+              t('Utworzono grupę "{name}".', {'name': created.name}),
+            ),
+          ),
         );
       }
     } catch (error) {
       if (mounted) {
         messenger.showSnackBar(
-          SnackBar(content: Text('Błąd tworzenia grupy: $error')),
+          SnackBar(
+            content: Text(t('Błąd tworzenia grupy: {error}', {'error': error})),
+          ),
         );
       }
     }
@@ -128,7 +133,7 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
                         mainAxisSize: MainAxisSize.min,
                         children: <Widget>[
                           Text(
-                            'Nowa grupa',
+                            t('Nowa grupa'),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: zen.display(
@@ -139,7 +144,7 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Nazwij grupę i wybierz, kogo zaprosić.',
+                            t('Nazwij grupę i wybierz, kogo zaprosić.'),
                             style: TextStyle(
                               color: zen.textSecondary,
                               fontSize: 13,
@@ -150,7 +155,7 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
                       ),
                     ),
                     IconButton(
-                      tooltip: 'Zamknij',
+                      tooltip: t('Zamknij'),
                       icon: const Icon(Icons.close_rounded),
                       onPressed: () => Navigator.of(context).pop(),
                     ),
@@ -162,21 +167,24 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
                   controller: _nameController,
                   autofocus: true,
                   textCapitalization: TextCapitalization.sentences,
-                  decoration: const InputDecoration(
-                    labelText: 'Nazwa grupy',
-                    hintText: 'np. Ekipa z pracy',
-                    prefixIcon: Icon(Icons.groups_rounded),
+                  decoration: InputDecoration(
+                    labelText: t('Nazwa grupy'),
+                    hintText: t('np. Ekipa z pracy'),
+                    prefixIcon: const Icon(Icons.groups_rounded),
                   ),
                 ),
                 ZenSection(
-                  'Dodaj znajomych (${_selectedMembers.length})',
+                  t('Dodaj znajomych ({count})', {
+                    'count': _selectedMembers.length,
+                  }),
                   top: 18,
                 ),
                 if (acceptedFriends.isEmpty)
-                  const ZenInfo(
+                  ZenInfo(
                     icon: Icons.person_search_rounded,
-                    text:
-                        'Nie masz jeszcze dodanych znajomych. Możesz utworzyć grupę i dodać ich później.',
+                    text: t(
+                      'Nie masz jeszcze dodanych znajomych. Możesz utworzyć grupę i dodać ich później.',
+                    ),
                   )
                 else
                   ConstrainedBox(
@@ -251,7 +259,7 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
                   ),
                   onPressed: _createGroup,
                   icon: const Icon(Icons.check_rounded),
-                  label: const Text('Utwórz grupę'),
+                  label: Text(t('Utwórz grupę')),
                 ),
               ],
             ),

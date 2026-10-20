@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/features/feed/post_media.dart';
@@ -57,10 +58,10 @@ const String kReshareKind = 'reshare';
 /// resharer also learn the author's name and address, to follow them.
 Map<String, dynamic> reshareBody(LogEntry original, {LogEntry? authorProfile}) {
   if (original.kind != kPostKind) {
-    throw ArgumentError('Udostępnić można tylko post.');
+    throw ArgumentError(t('Udostępnić można tylko post.'));
   }
   if (isSealed(original.body) || original.body['aud'] != Audience.public.name) {
-    throw ArgumentError('Udostępnić można tylko post publiczny.');
+    throw ArgumentError(t('Udostępnić można tylko post publiczny.'));
   }
   return <String, dynamic>{
     'entry': original.toJson(),
@@ -174,11 +175,16 @@ final class FeedComment {
 Map<String, dynamic> commentBody(String postId, String text) {
   final String trimmed = text.trim();
   if (trimmed.isEmpty) {
-    throw ArgumentError('Pusty komentarz.');
+    throw ArgumentError(t('Pusty komentarz.'));
   }
   if (trimmed.length > kMaxCommentChars) {
     throw ArgumentError(
-      'Komentarz jest za długi (maks. $kMaxCommentChars znaków).',
+      tn(
+        kMaxCommentChars,
+        one: 'Komentarz jest za długi (maks. {n} znak).',
+        few: 'Komentarz jest za długi (maks. {n} znaki).',
+        many: 'Komentarz jest za długi (maks. {n} znaków).',
+      ),
     );
   }
   return <String, dynamic>{'post': postId, 'text': trimmed};
@@ -304,13 +310,27 @@ Map<String, dynamic> newPostBody(
 }) {
   final String trimmed = text.trim();
   if (trimmed.isEmpty && images.isEmpty) {
-    throw ArgumentError('Pusty post.');
+    throw ArgumentError(t('Pusty post.'));
   }
   if (trimmed.length > kMaxPostChars) {
-    throw ArgumentError('Post jest za długi (maks. $kMaxPostChars znaków).');
+    throw ArgumentError(
+      tn(
+        kMaxPostChars,
+        one: 'Post jest za długi (maks. {n} znak).',
+        few: 'Post jest za długi (maks. {n} znaki).',
+        many: 'Post jest za długi (maks. {n} znaków).',
+      ),
+    );
   }
   if (images.length > kMaxPostImages) {
-    throw ArgumentError('Najwyżej $kMaxPostImages zdjęć i filmów w poście.');
+    throw ArgumentError(
+      tn(
+        kMaxPostImages,
+        one: 'Najwyżej {n} zdjęcie lub film w poście.',
+        few: 'Najwyżej {n} zdjęcia i filmy w poście.',
+        many: 'Najwyżej {n} zdjęć i filmów w poście.',
+      ),
+    );
   }
   return <String, dynamic>{
     'text': trimmed,
@@ -447,7 +467,7 @@ List<FeedPost> buildFeed(
   final List<FeedPost> posts = _postsOf(
     node.entriesOf(),
     isOwn: true,
-    authorLabel: 'Ty',
+    authorLabel: t('Ty'),
     deleted: deleted,
     bodyOf: node.bodyOf,
   );
@@ -503,7 +523,7 @@ List<FeedPost> buildFeed(
       }
     }
 
-    addReshares(node.entriesOf(), 'Ty');
+    addReshares(node.entriesOf(), t('Ty'));
     node.friendAccounts.forEach((String address, String account) {
       addReshares(node.entriesOf(ofAccount: account), nameOf(address));
     });
@@ -514,8 +534,8 @@ List<FeedPost> buildFeed(
       final String author =
           accountNames[b.$1.account] ??
           (b.$1.account == node.account
-              ? 'Ty'
-              : (carried.isNotEmpty ? carried : 'Znajomy znajomego'));
+              ? t('Ty')
+              : (carried.isNotEmpty ? carried : t('Znajomy znajomego')));
       final FeedPost? post = _postFrom(
         b.$1,
         isOwn: b.$1.account == node.account,
@@ -581,8 +601,9 @@ List<FeedPost> buildFeed(
     }
   }
 
-  final Map<String, String> friendNames = <String, String>{node.account: 'Ty'};
-  collect(myActs, 'Ty', node.account);
+  final String you = t('Ty');
+  final Map<String, String> friendNames = <String, String>{node.account: you};
+  collect(myActs, you, node.account);
   node.friendAccounts.forEach((String address, String account) {
     final String name = nameOf(address);
     friendNames[account] = name;
@@ -602,11 +623,11 @@ List<FeedPost> buildFeed(
   void mergeBundles(Iterable<LogEntry> acts, {String? relayedBy}) {
     String relayedLabel(String name) {
       final String shown = name.trim().isEmpty
-          ? 'Znajomy znajomego'
+          ? t('Znajomy znajomego')
           : name.trim();
       return relayedBy == null
-          ? '$shown (znajomy znajomego)'
-          : '$shown (przez $relayedBy)';
+          ? t('{name} (znajomy znajomego)', {'name': shown})
+          : t('{name} (przez {via})', {'name': shown, 'via': relayedBy});
     }
 
     for (final LogEntry e in latestBundles(acts).values) {

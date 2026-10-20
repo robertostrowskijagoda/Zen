@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/profile/avatar_sanitizer.dart';
 
 /// The cover photo behind the profile header (§9): a 3:1 JPEG, at most
@@ -67,8 +68,10 @@ Future<String> storeCoverImage({
 }) async {
   final File source = File(sourcePath);
   if (!source.existsSync() || source.lengthSync() > kMaxCoverSourceBytes) {
-    throw const FormatException(
-      'To zdjęcie jest za duże albo nie da się go otworzyć (najwyżej 20 MB).',
+    throw FormatException(
+      t(
+        'To zdjęcie jest za duże albo nie da się go otworzyć (najwyżej 20 MB).',
+      ),
     );
   }
   final Uint8List? cover = await compute(
@@ -76,8 +79,8 @@ Future<String> storeCoverImage({
     await source.readAsBytes(),
   );
   if (cover == null) {
-    throw const FormatException(
-      'To nie wygląda na zdjęcie (obsługiwane: JPEG, PNG, WebP, GIF).',
+    throw FormatException(
+      t('To nie wygląda na zdjęcie (obsługiwane: JPEG, PNG, WebP, GIF).'),
     );
   }
   final Directory dir = Directory(

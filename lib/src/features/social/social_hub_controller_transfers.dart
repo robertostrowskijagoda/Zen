@@ -62,7 +62,7 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
             ChatMessage(
               id: messageId,
               sender: signal.sender,
-              text: signal.content ?? '📎 Załącznik',
+              text: signal.content ?? t('📎 Załącznik'),
               sentAtMillis: timestamp,
               direction: ChatMessageDirection.incoming,
               type: signal.messageType ?? ChatMessageType.file,
@@ -139,7 +139,7 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
     final IncomingAttachmentTransfer transfer = IncomingAttachmentTransfer(
       peerAddress: signal.sender,
       messageId: messageId,
-      text: signal.content ?? '📎 Załącznik',
+      text: signal.content ?? t('📎 Załącznik'),
       sentAtMillis: timestamp,
       type: signal.messageType ?? ChatMessageType.file,
       transferBytes: transferBytes,
@@ -246,7 +246,7 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
             ChatMessage(
               id: messageId,
               sender: signal.sender,
-              text: signal.content ?? '📎 Załącznik',
+              text: signal.content ?? t('📎 Załącznik'),
               sentAtMillis: timestamp,
               direction: ChatMessageDirection.incoming,
               type: signal.messageType ?? ChatMessageType.file,
@@ -413,7 +413,7 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
             ChatMessage(
               id: messageId,
               sender: signal.sender,
-              text: signal.content ?? '📎 Załącznik',
+              text: signal.content ?? t('📎 Załącznik'),
               sentAtMillis: timestamp,
               direction: ChatMessageDirection.incoming,
               type: signal.messageType ?? ChatMessageType.file,
@@ -526,7 +526,7 @@ mixin _SocialHubTransfersMixin on _SocialHubControllerBase {
             ChatMessage(
               id: messageId,
               sender: signal.sender,
-              text: signal.content ?? '📎 Załącznik',
+              text: signal.content ?? t('📎 Załącznik'),
               sentAtMillis: timestamp,
               direction: ChatMessageDirection.incoming,
               type: signal.messageType ?? ChatMessageType.file,

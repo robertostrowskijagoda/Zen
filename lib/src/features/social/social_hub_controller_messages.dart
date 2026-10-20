@@ -325,8 +325,10 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           } on FormatException catch (error) {
             await _appendSystemMessage(
               peerAddress: signal.sender,
-              text:
-                  'Nie udało się odebrać załącznika od ${_labelFor(signal, friends: state.friends)}: ${error.message}',
+              text: t('Nie udało się odebrać załącznika od {name}: {error}', {
+                'name': _labelFor(signal, friends: state.friends),
+                'error': error.message,
+              }),
               timestamp: timestamp,
             );
             return;
@@ -455,24 +457,27 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       case ZenSignalType.friendAccept:
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text:
-              'Połączenie z ${_labelFor(signal, friends: state.friends)} jest gotowe.',
+          text: t('Połączenie z {name} jest gotowe.', {
+            'name': _labelFor(signal, friends: state.friends),
+          }),
           timestamp: timestamp,
         );
         return;
       case ZenSignalType.friendReject:
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text:
-              '${_labelFor(signal, friends: state.friends)} odrzucił(a) zaproszenie.',
+          text: t('{name} odrzucił(a) zaproszenie.', {
+            'name': _labelFor(signal, friends: state.friends),
+          }),
           timestamp: timestamp,
         );
         return;
       case ZenSignalType.friendCancel:
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text:
-              '${_labelFor(signal, friends: state.friends)} anulował(a) oczekujące zaproszenie.',
+          text: t('{name} anulował(a) oczekujące zaproszenie.', {
+            'name': _labelFor(signal, friends: state.friends),
+          }),
           timestamp: timestamp,
         );
         return;
@@ -503,7 +508,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         } else {
           await _appendSystemMessage(
             peerAddress: signal.sender,
-            text: 'Transfer został anulowany i stan obu stron jest zgodny.',
+            text: t('Transfer został anulowany i stan obu stron jest zgodny.'),
             timestamp: timestamp,
           );
         }
@@ -575,8 +580,9 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         }
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text:
-              'Przyszło zaproszenie do rozmowy ${_callKindLabel(signal.content)}.',
+          text: t('Przyszło zaproszenie do rozmowy {kind}.', {
+            'kind': _callKindLabel(signal.content),
+          }),
           timestamp: timestamp,
         );
         return;
@@ -595,8 +601,10 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         if (wasRingingAnswer) {
           await _appendSystemMessage(
             peerAddress: signal.sender,
-            text:
-                '${_labelFor(signal, friends: state.friends)} odebrał(a) rozmowę ${_callKindLabel(signal.content)}.',
+            text: t('{name} odebrał(a) rozmowę {kind}.', {
+              'name': _labelFor(signal, friends: state.friends),
+              'kind': _callKindLabel(signal.content),
+            }),
             timestamp: timestamp,
           );
         }
@@ -619,8 +627,10 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         if (wasRingingAccept) {
           await _appendSystemMessage(
             peerAddress: signal.sender,
-            text:
-                '${_labelFor(signal, friends: state.friends)} odebrał(a) rozmowę ${_callKindLabel(signal.content)}.',
+            text: t('{name} odebrał(a) rozmowę {kind}.', {
+              'name': _labelFor(signal, friends: state.friends),
+              'kind': _callKindLabel(signal.content),
+            }),
             timestamp: timestamp,
           );
         }
@@ -640,8 +650,14 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         );
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text:
-              '${_labelFor(signal, friends: state.friends)} jest aktualnie zajęty(a) i nie może odebrać rozmowy ${_callKindLabel(signal.content)}.',
+          text: t(
+            '{name} jest aktualnie zajęty(a) i nie może odebrać rozmowy '
+            '{kind}.',
+            {
+              'name': _labelFor(signal, friends: state.friends),
+              'kind': _callKindLabel(signal.content),
+            },
+          ),
           timestamp: timestamp,
         );
         return;
@@ -660,8 +676,10 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         );
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text:
-              '${_labelFor(signal, friends: state.friends)} odrzucił(a) rozmowę ${_callKindLabel(signal.content)}.',
+          text: t('{name} odrzucił(a) rozmowę {kind}.', {
+            'name': _labelFor(signal, friends: state.friends),
+            'kind': _callKindLabel(signal.content),
+          }),
           timestamp: timestamp,
         );
         return;
@@ -698,8 +716,10 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         }
         await _appendSystemMessage(
           peerAddress: signal.sender,
-          text:
-              '${_labelFor(signal, friends: state.friends)} zakończył(a) rozmowę ${_callKindLabel(signal.content)}.',
+          text: t('{name} zakończył(a) rozmowę {kind}.', {
+            'name': _labelFor(signal, friends: state.friends),
+            'kind': _callKindLabel(signal.content),
+          }),
           timestamp: timestamp,
         );
         return;
@@ -739,8 +759,9 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
             ChatMessage(
               id: 'system-leave-$timestamp-${signal.sender}',
               sender: 'system',
-              text:
-                  '${_labelFor(signal, friends: state.friends)} opuścił(a) grupę.',
+              text: t('{name} opuścił(a) grupę.', {
+                'name': _labelFor(signal, friends: state.friends),
+              }),
               sentAtMillis: timestamp,
               direction: ChatMessageDirection.system,
             ),

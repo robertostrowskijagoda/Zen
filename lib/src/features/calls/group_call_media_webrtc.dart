@@ -66,7 +66,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
   Future<void> startRecording(String path, {String label = ''}) async {
     if (!canRecord) {
       throw UnsupportedError(
-        'Nagrywanie rozmów nie jest jeszcze dostępne na tym urządzeniu.',
+        t('Nagrywanie rozmów nie jest jeszcze dostępne na tym urządzeniu.'),
       );
     }
     if (_callId == null || _recordingPath != null) {
@@ -231,7 +231,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
   Future<void> startScreenShare({String? sourceId}) async {
     final MediaStream? local = _localStream;
     if (local == null) {
-      throw StateError('Brak aktywnego połączenia grupowego.');
+      throw StateError(t('Brak aktywnego połączenia grupowego.'));
     }
     if (_screenTrack != null) {
       return;
@@ -240,7 +240,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
         Platform.isWindows || Platform.isLinux || Platform.isMacOS;
     if (Platform.isAndroid) {
       if (!await Helper.requestCapturePermission()) {
-        throw StateError('Nie zezwolono na udostępnienie ekranu.');
+        throw StateError(t('Nie zezwolono na udostępnienie ekranu.'));
       }
       androidScreenCaptureActive.value = true;
       await androidPrepareScreenCapture?.call();
@@ -267,7 +267,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     if (tracks.isEmpty) {
       await _stopStream(screen);
       androidScreenCaptureActive.value = false;
-      throw StateError('Nie udało się przechwycić ekranu.');
+      throw StateError(t('Nie udało się przechwycić ekranu.'));
     }
     final MediaStreamTrack track = tracks.first;
     _screenStream = screen;
@@ -388,7 +388,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
   }) async {
     await close();
     if (_disposed) {
-      throw StateError('Połączenie zostało już zamknięte.');
+      throw StateError(t('Połączenie zostało już zamknięte.'));
     }
     _generation += 1;
     _callId = callId;
@@ -399,7 +399,9 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     final MediaStream stream = await _openLocalStream(cameraOn: cameraOn);
     if (_disposed || _callId != callId) {
       await _stopStream(stream);
-      throw StateError('Połączenie zostało zamknięte w trakcie zestawiania.');
+      throw StateError(
+        t('Połączenie zostało zamknięte w trakcie zestawiania.'),
+      );
     }
     _localStream = stream;
     final List<MediaStreamTrack> video = stream.getVideoTracks();
@@ -453,7 +455,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     final String? callId = _callId;
     final MediaStream? local = _localStream;
     if (callId == null || local == null) {
-      throw StateError('Brak aktywnego połączenia grupowego.');
+      throw StateError(t('Brak aktywnego połączenia grupowego.'));
     }
     final _GroupLeg leg = _GroupLeg(
       peer: peer,
@@ -467,7 +469,9 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
       remoteAddress: peer,
     );
     if (leg.relayPort <= 0) {
-      throw StateError('Nie udało się uruchomić relay dla $peer.');
+      throw StateError(
+        t('Nie udało się uruchomić relay dla {peer}.', {'peer': peer}),
+      );
     }
     final RTCPeerConnection connection = await createPeerConnection(
       _configuration,
@@ -476,7 +480,11 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     if (leg.closed || _callId != callId) {
       await connection.close();
       await connection.dispose();
-      throw StateError('Połączenie z $peer zamknięte w trakcie zestawiania.');
+      throw StateError(
+        t('Połączenie z {peer} zamknięte w trakcie zestawiania.', {
+          'peer': peer,
+        }),
+      );
     }
     leg.connection = connection;
     connection.onIceCandidate = (RTCIceCandidate candidate) {
@@ -722,16 +730,17 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     final String sdp = description['sdp'] as String? ?? '';
     final String type = description['type'] as String? ?? 'offer';
     _captureMids(leg, sdp);
-    final RTCSessionDescription pinned = RTCSessionDescription(
-      pinWebRtcSdpToLocalRelay(sdp, leg.relayPort),
-      type,
+    // Never the peer's original SDP (see applyRemoteSdpViaLocalRelay): when
+    // even the stripped form is refused this throws, and `_serial` marks the
+    // leg failed.
+    await applyRemoteSdpViaLocalRelay(
+      sdp: sdp,
+      type: type,
+      relayPort: leg.relayPort,
+      apply: (String value, String kind) =>
+          connection.setRemoteDescription(RTCSessionDescription(value, kind)),
+      label: 'group call',
     );
-    try {
-      await connection.setRemoteDescription(pinned);
-    } catch (error) {
-      logZenWarning('Pinned group SDP rejected ($error), using the original');
-      await connection.setRemoteDescription(RTCSessionDescription(sdp, type));
-    }
     leg.remoteDescriptionSet = true;
   }
 
@@ -957,7 +966,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
   Future<void> setCameraEnabled(bool enabled) async {
     final MediaStream? local = _localStream;
     if (local == null) {
-      throw StateError('Brak aktywnego połączenia grupowego.');
+      throw StateError(t('Brak aktywnego połączenia grupowego.'));
     }
     if (enabled) {
       if (_cameraTrack != null) {
@@ -978,7 +987,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
       final List<MediaStreamTrack> tracks = camera.getVideoTracks();
       if (tracks.isEmpty) {
         await _stopStream(camera);
-        throw StateError('Kamera jest niedostępna.');
+        throw StateError(t('Kamera jest niedostępna.'));
       }
       final MediaStreamTrack track = tracks.first;
       await local.addTrack(track);

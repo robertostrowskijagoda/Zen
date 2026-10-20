@@ -1,17 +1,23 @@
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// How far an event reaches (§17.1): only the people the organizer
 /// picked, or as far as friends / friends of friends pass it on.
 enum EventReach {
-  selected('Wybrane osoby', 0),
-  friends('Znajomi', 0),
-  friendsOfFriends('Znajomi znajomych', 1),
-  twoSteps('Znajomi znajomych znajomych', 2);
+  selected(0),
+  friends(0),
+  friendsOfFriends(1),
+  twoSteps(2);
 
-  const EventReach(this.label, this.hops);
+  const EventReach(this.hops);
 
-  final String label;
+  String get label => switch (this) {
+    EventReach.selected => t('Wybrane osoby'),
+    EventReach.friends => t('Znajomi'),
+    EventReach.friendsOfFriends => t('Znajomi znajomych'),
+    EventReach.twoSteps => t('Znajomi znajomych znajomych'),
+  };
 
   /// How many times the invitation is passed on beyond the organizer's
   /// friends.
@@ -23,17 +29,21 @@ enum EventReach {
 }
 
 enum GuestStatus {
-  invited('Zaproszony(-a)'),
-  going('Będzie'),
-  maybe('Może'),
-  declined('Nie będzie'),
+  invited,
+  going,
+  maybe,
+  declined,
 
   /// Asked to come as someone's +1; the organizer decides.
-  requested('Prosi o zaproszenie');
+  requested;
 
-  const GuestStatus(this.label);
-
-  final String label;
+  String get label => switch (this) {
+    GuestStatus.invited => t('Zaproszony(-a)'),
+    GuestStatus.going => t('Będzie'),
+    GuestStatus.maybe => t('Może'),
+    GuestStatus.declined => t('Nie będzie'),
+    GuestStatus.requested => t('Prosi o zaproszenie'),
+  };
 
   static GuestStatus byName(Object? n) =>
       GuestStatus.values.where((GuestStatus s) => s.name == n).firstOrNull ??
@@ -104,15 +114,19 @@ final class EventGuest {
 
 /// What kind of gathering.
 enum EventKind {
-  party('Impreza'),
-  dinner('Posiłek'),
-  table('Stół na sześć'),
-  meeting('Spotkanie'),
-  other('Inne');
+  party,
+  dinner,
+  table,
+  meeting,
+  other;
 
-  const EventKind(this.label);
-
-  final String label;
+  String get label => switch (this) {
+    EventKind.party => t('Impreza'),
+    EventKind.dinner => t('Posiłek'),
+    EventKind.table => t('Stół na sześć'),
+    EventKind.meeting => t('Spotkanie'),
+    EventKind.other => t('Inne'),
+  };
 
   static EventKind byName(Object? n) =>
       EventKind.values.where((EventKind k) => k.name == n).firstOrNull ??

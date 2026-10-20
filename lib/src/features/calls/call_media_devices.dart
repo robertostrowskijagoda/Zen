@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
 
 /// Platform-agnostic device row, so cataloguing can be unit-tested without
@@ -75,14 +76,14 @@ List<CallMediaDevice> catalogCallMediaDevices({
 
   final List<CallMediaDevice> processedCameras = filterMobileCameras
       ? _filterAndLabelMobileCameras(cameras)
-      : _withDistinctLabels(cameras, 'Kamera');
+      : _withDistinctLabels(cameras, t('Kamera'));
   final List<CallMediaDevice> numberedMics = _withDistinctLabels(
     microphones,
-    'Mikrofon',
+    t('Mikrofon'),
   );
   List<CallMediaDevice> numberedSpeakers = _withDistinctLabels(
     speakers,
-    'Głośnik',
+    t('Głośnik'),
   );
 
   if (includeMobileAudioOutputs) {
@@ -99,14 +100,14 @@ List<CallMediaDevice> catalogCallMediaDevices({
 List<CallMediaDevice> _ensureMobileAudioOutputs(
   List<CallMediaDevice> speakers,
 ) {
-  const CallMediaDevice speakerphone = CallMediaDevice(
+  final CallMediaDevice speakerphone = CallMediaDevice(
     id: 'speakerphone',
-    label: 'Głośnik',
+    label: t('Głośnik'),
     kind: CallMediaDeviceKind.speaker,
   );
-  const CallMediaDevice earpiece = CallMediaDevice(
+  final CallMediaDevice earpiece = CallMediaDevice(
     id: 'earpiece',
-    label: 'Słuchawka',
+    label: t('Słuchawka'),
     kind: CallMediaDeviceKind.speaker,
   );
   final bool hasSpeakerphone = speakers.any(
@@ -179,7 +180,9 @@ List<CallMediaDevice> _filterAndLabelMobileCameras(
     return <CallMediaDevice>[
       CallMediaDevice(
         id: cameras.first.id,
-        label: cameras.first.label.isNotEmpty ? cameras.first.label : 'Kamera',
+        label: cameras.first.label.isNotEmpty
+            ? cameras.first.label
+            : t('Kamera'),
         kind: CallMediaDeviceKind.camera,
       ),
     ];
@@ -240,7 +243,7 @@ List<CallMediaDevice> _filterAndLabelMobileCameras(
   final List<CallMediaDevice> result = <CallMediaDevice>[
     CallMediaDevice(
       id: frontCamera.id,
-      label: 'Kamera przednia',
+      label: t('Kamera przednia'),
       kind: CallMediaDeviceKind.camera,
     ),
   ];
@@ -248,7 +251,7 @@ List<CallMediaDevice> _filterAndLabelMobileCameras(
     result.add(
       CallMediaDevice(
         id: backCamera.id,
-        label: 'Kamera tylna',
+        label: t('Kamera tylna'),
         kind: CallMediaDeviceKind.camera,
       ),
     );

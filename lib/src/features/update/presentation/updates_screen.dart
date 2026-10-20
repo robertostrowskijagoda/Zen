@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/app_version.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/update/presentation/share_app_screen.dart';
@@ -42,7 +43,9 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
       }
     } on Object catch (error) {
       if (mounted) {
-        setState(() => _message = 'Nie udało się: $error');
+        setState(
+          () => _message = t('Nie udało się: {error}', {'error': error}),
+        );
       }
     } finally {
       if (mounted) {
@@ -72,12 +75,12 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
     final ZenColors zen = ZenColors.of(context);
     return Scaffold(
       key: const Key('updates-screen'),
-      appBar: AppBar(title: const Text('Aktualizacje i Podaj dalej')),
+      appBar: AppBar(title: Text(t('Aktualizacje i Podaj dalej'))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: <Widget>[
           _versionCard(zen),
-          const ZenSection('Aktualizacje', top: 16),
+          ZenSection(t('Aktualizacje'), top: 16),
           if (service == null)
             ZenCard(
               child: Row(
@@ -92,7 +95,7 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
                   const SizedBox(width: 14),
                   Expanded(
                     child: Text(
-                      'Konto się uruchamia…',
+                      t('Konto się uruchamia…'),
                       style: TextStyle(
                         color: zen.textSecondary,
                         fontSize: 14.5,
@@ -145,32 +148,34 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
               ),
               onPressed: _busy ? null : () => unawaited(_importFile(service)),
               icon: const Icon(Icons.file_open_rounded),
-              label: const Text('Wczytaj aktualizację z pliku'),
+              label: Text(t('Wczytaj aktualizację z pliku')),
             ),
           ],
           const SizedBox(height: 8),
-          const ZenInfo(
+          ZenInfo(
             icon: Icons.verified_user_outlined,
-            title: 'Bez sklepu i bez serwera',
-            text:
-                'Nowe wersje przychodzą od znajomych, bez sklepu i bez serwera. '
-                'Zen czeka 7 dni od pierwszego zobaczenia wersji i nigdy nie '
-                'instaluje niczego sam.',
+            title: t('Bez sklepu i bez serwera'),
+            text: t(
+              'Nowe wersje przychodzą od znajomych, bez sklepu i bez serwera. '
+              'Zen czeka 7 dni od pierwszego zobaczenia wersji i nigdy nie '
+              'instaluje niczego sam.',
+            ),
           ),
-          const ZenSection('Podaj dalej', top: 24),
+          ZenSection(t('Podaj dalej'), top: 24),
           ZenHero(
-            title: 'Daj Zen komuś obok',
+            title: t('Daj Zen komuś obok'),
             icon: Icons.volunteer_activism_rounded,
             tone: zenTone(zen, 2),
-            text:
-                'Bez internetu i bez sklepu: z telefonu przez Wi-Fi albo '
-                'hotspot, z komputera także kablem USB.',
+            text: t(
+              'Bez internetu i bez sklepu: z telefonu przez Wi-Fi albo '
+              'hotspot, z komputera także kablem USB.',
+            ),
             actions: <Widget>[
               FilledButton.icon(
                 key: const Key('updates-share-app'),
                 onPressed: () => unawaited(ShareAppScreen.open(context)),
                 icon: const Icon(Icons.share_rounded),
-                label: const Text('Podaj dalej'),
+                label: Text(t('Podaj dalej')),
               ),
             ],
           ),
@@ -203,7 +208,7 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text('TWOJA WERSJA', style: zen.label(color: zen.textMuted)),
+                Text(t('TWOJA WERSJA'), style: zen.label(color: zen.textMuted)),
                 const SizedBox(height: 6),
                 FittedBox(
                   fit: BoxFit.scaleDown,
@@ -220,7 +225,7 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
                 ),
                 const SizedBox(height: 8),
                 ZenPill(
-                  text: 'kompilacja $kAppBuild',
+                  text: t('kompilacja {build}', {'build': kAppBuild}),
                   icon: Icons.tag_rounded,
                   tone: zen.accent,
                 ),
@@ -242,37 +247,44 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
     final (IconData icon, String title, String subtitle) = switch (s.phase) {
       UpdatePhase.disabled => (
         Icons.block_rounded,
-        'Aktualizacje przez sieć jeszcze nie działają',
-        'Ustalamy, jak zatwierdzać nowe wersje bez osób z kluczami. Nową '
-            'wersję zainstalujesz od znajomego przez „Podaj dalej”.',
+        t('Aktualizacje przez sieć jeszcze nie działają'),
+        t(
+          'Ustalamy, jak zatwierdzać nowe wersje bez osób z kluczami. Nową '
+          'wersję zainstalujesz od znajomego przez „Podaj dalej”.',
+        ),
       ),
       UpdatePhase.upToDate => (
         Icons.check_circle_outline_rounded,
-        'Masz najnowszą znaną wersję',
-        'Gdy znajomy będzie miał nowszą, przyjdzie sama.',
+        t('Masz najnowszą znaną wersję'),
+        t('Gdy znajomy będzie miał nowszą, przyjdzie sama.'),
       ),
       UpdatePhase.downloading => (
         Icons.downloading_rounded,
-        'Pobieram wersję $version',
-        '${(s.progress * 100).round()}% — od znajomych, którzy ją mają.',
+        t('Pobieram wersję {version}', {'version': version}),
+        t('{percent}% — od znajomych, którzy ją mają.', {
+          'percent': (s.progress * 100).round(),
+        }),
       ),
       UpdatePhase.waiting => (
         Icons.schedule_rounded,
-        'Wersja $version pobrana',
-        'Będzie gotowa ${_date(s.readyAt!)} — 7 dni ochrony, w których '
-            'opiekun może wstrzymać wydanie.',
+        t('Wersja {version} pobrana', {'version': version}),
+        t(
+          'Będzie gotowa {date} — 7 dni ochrony, w których '
+          'opiekun może wstrzymać wydanie.',
+          {'date': _date(s.readyAt!)},
+        ),
       ),
       UpdatePhase.ready => (
         Icons.system_update_rounded,
-        'Wersja $version gotowa do instalacji',
+        t('Wersja {version} gotowa do instalacji', {'version': version}),
         s.release!.manifest.notes.isEmpty
-            ? 'Podpisana przez opiekunów projektu.'
+            ? t('Podpisana przez opiekunów projektu.')
             : s.release!.manifest.notes,
       ),
       UpdatePhase.otherPlatform => (
         Icons.devices_other_rounded,
-        'Jest wersja $version',
-        'Na razie bez pliku dla tego urządzenia.',
+        t('Jest wersja {version}', {'version': version}),
+        t('Na razie bez pliku dla tego urządzenia.'),
       ),
     };
     final Color tone = switch (s.phase) {
@@ -337,9 +349,10 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
             ZenInfo(
               icon: Icons.pan_tool_rounded,
               tone: zen.danger,
-              text:
-                  'Opiekun wstrzymał wersję o numerze ${vetoed.build}: '
-                  '${vetoed.reason}',
+              text: t('Opiekun wstrzymał wersję o numerze {build}: {reason}', {
+                'build': vetoed.build,
+                'reason': vetoed.reason,
+              }),
             ),
           if (s.phase == UpdatePhase.ready) ...<Widget>[
             const SizedBox(height: 14),
@@ -352,8 +365,8 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
               icon: const Icon(Icons.install_mobile_rounded),
               label: Text(
                 !kIsWeb && Platform.isAndroid
-                    ? 'Zainstaluj'
-                    : 'Zapisz instalator',
+                    ? t('Zainstaluj')
+                    : t('Zapisz instalator'),
               ),
             ),
           ],
@@ -364,6 +377,9 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
 
   static String _date(DateTime d) {
     String two(int v) => v.toString().padLeft(2, '0');
-    return '${two(d.day)}.${two(d.month)}.${d.year} o ${two(d.hour)}:${two(d.minute)}';
+    return t('{date} o {time}', {
+      'date': '${two(d.day)}.${two(d.month)}.${d.year}',
+      'time': '${two(d.hour)}:${two(d.minute)}',
+    });
   }
 }

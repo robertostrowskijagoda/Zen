@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/meet/events/event_model.dart';
@@ -9,14 +10,14 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/presentation/events_screen.dart';
 import 'package:zen/src/features/meet/table/table_service.dart';
 
-const List<String> _dayNames = <String>[
-  'pn',
-  'wt',
-  'śr',
-  'cz',
-  'pt',
-  'sb',
-  'nd',
+List<String> get _dayNames => <String>[
+  t('pn'),
+  t('wt'),
+  t('śr'),
+  t('cz'),
+  t('pt'),
+  t('sb'),
+  t('nd'),
 ];
 
 /// Stół na sześć (§17.4).
@@ -51,7 +52,7 @@ class _TableScreenState extends ConsumerState<TableScreen> {
     if (city.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Najpierw wpisz miasto.')));
+      ).showSnackBar(SnackBar(content: Text(t('Najpierw wpisz miasto.'))));
       return;
     }
     final DateTime? day = await showDatePicker(
@@ -63,7 +64,7 @@ class _TableScreenState extends ConsumerState<TableScreen> {
     if (day == null || !mounted) {
       return;
     }
-    final TimeOfDay? t = await showTimePicker(
+    final TimeOfDay? picked = await showTimePicker(
       context: context,
       initialTime: const TimeOfDay(hour: 19, minute: 0),
     );
@@ -74,15 +75,18 @@ class _TableScreenState extends ConsumerState<TableScreen> {
       day.year,
       day.month,
       day.day,
-      t?.hour ?? 19,
-      t?.minute ?? 0,
+      picked?.hour ?? 19,
+      picked?.minute ?? 0,
     );
     final List<TableWish> guests = _table.pickGuests(city, when);
     if (guests.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Na razie nikt w Twoim zasięgu nie chce na Stół w tym mieście i dniu.',
+            t(
+              'Na razie nikt w Twoim zasięgu nie chce na Stół w tym mieście '
+              'i dniu.',
+            ),
           ),
         ),
       );
@@ -91,7 +95,14 @@ class _TableScreenState extends ConsumerState<TableScreen> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text('Zaprosić ${guests.length} osób?'),
+        title: Text(
+          tn(
+            guests.length,
+            one: 'Zaprosić {n} osobę?',
+            few: 'Zaprosić {n} osoby?',
+            many: 'Zaprosić {n} osób?',
+          ),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -99,8 +110,14 @@ class _TableScreenState extends ConsumerState<TableScreen> {
             for (final TableWish g in guests)
               Text(
                 g.via == null
-                    ? '• ${g.name} (Twój znajomy)'
-                    : '• ${g.name}, przez ${ref.read(meetServiceProvider).host.nameOf(g.via!)}',
+                    ? t('• {name} (Twój znajomy)', {'name': g.name})
+                    : t('• {name}, przez {via}', {
+                        'name': g.name,
+                        'via': ref
+                            .read(meetServiceProvider)
+                            .host
+                            .nameOf(g.via!),
+                      }),
               ),
             const SizedBox(height: 8),
             Text(eventDate(when.millisecondsSinceEpoch)),
@@ -109,11 +126,11 @@ class _TableScreenState extends ConsumerState<TableScreen> {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Zaproś'),
+            child: Text(t('Zaproś')),
           ),
         ],
       ),
@@ -136,7 +153,7 @@ class _TableScreenState extends ConsumerState<TableScreen> {
     final ZenColors zen = ZenColors.of(context);
     return Scaffold(
       key: const Key('table-screen'),
-      appBar: AppBar(title: const Text('Stół na sześć')),
+      appBar: AppBar(title: Text(t('Stół na sześć'))),
       body: ListenableBuilder(
         listenable: _table,
         builder: (BuildContext context, Widget? _) {
@@ -146,28 +163,29 @@ class _TableScreenState extends ConsumerState<TableScreen> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
             children: <Widget>[
               ZenHero(
-                title: 'Kolacja dla sześciu',
+                title: t('Kolacja dla sześciu'),
                 icon: Icons.dinner_dining_rounded,
                 tone: zenTone(zen, 2),
-                text:
-                    'Ty i pięcioro gości, których aplikacja dobiera sama: '
-                    'znajomi Twoich znajomych, którzy też chcą tak poznawać '
-                    'ludzi. Każdy zna kogoś, kto zna Ciebie — nikt nie jest '
-                    'zupełnie obcy, a prawie wszyscy są nowi.',
+                text: t(
+                  'Ty i pięcioro gości, których aplikacja dobiera sama: '
+                  'znajomi Twoich znajomych, którzy też chcą tak poznawać '
+                  'ludzi. Każdy zna kogoś, kto zna Ciebie — nikt nie jest '
+                  'zupełnie obcy, a prawie wszyscy są nowi.',
+                ),
               ),
-              const ZenSection('1. Daj znać, że chcesz'),
+              ZenSection(t('1. Daj znać, że chcesz')),
               TextField(
                 key: const Key('table-city'),
                 controller: _city,
                 textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: 'Miasto',
-                  prefixIcon: Icon(Icons.location_city_rounded),
+                decoration: InputDecoration(
+                  labelText: t('Miasto'),
+                  prefixIcon: const Icon(Icons.location_city_rounded),
                 ),
               ),
               const SizedBox(height: 14),
               Text(
-                'Kiedy możesz? Nic nie zaznaczysz — każdy dzień.',
+                t('Kiedy możesz? Nic nie zaznaczysz — każdy dzień.'),
                 style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
               ),
               const SizedBox(height: 8),
@@ -199,9 +217,9 @@ class _TableScreenState extends ConsumerState<TableScreen> {
                   SwitchListTile(
                     key: const Key('table-wish'),
                     value: on,
-                    title: const Text('Chcę na Stół na sześć'),
-                    subtitle: const Text(
-                      'Widzą to tylko znajomi i znajomi znajomych.',
+                    title: Text(t('Chcę na Stół na sześć')),
+                    subtitle: Text(
+                      t('Widzą to tylko znajomi i znajomi znajomych.'),
                     ),
                     onChanged: (bool v) => unawaited(
                       _table.setWish(city: v ? _city.text : null, days: _days),
@@ -209,7 +227,7 @@ class _TableScreenState extends ConsumerState<TableScreen> {
                   ),
                 ],
               ),
-              const ZenSection('2. Albo zorganizuj kolację'),
+              ZenSection(t('2. Albo zorganizuj kolację')),
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -229,9 +247,12 @@ class _TableScreenState extends ConsumerState<TableScreen> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            nearbyCount == 1
-                                ? 'osoba w Twoim zasięgu chce na Stół'
-                                : 'chętnych w Twoim zasięgu',
+                            tn(
+                              nearbyCount,
+                              one: 'osoba w Twoim zasięgu chce na Stół',
+                              few: 'chętnych w Twoim zasięgu',
+                              many: 'chętnych w Twoim zasięgu',
+                            ),
                             style: TextStyle(
                               color: zen.textSecondary,
                               fontSize: 14,
@@ -245,12 +266,14 @@ class _TableScreenState extends ConsumerState<TableScreen> {
                       key: const Key('table-set'),
                       onPressed: () => unawaited(_setTable()),
                       icon: const Icon(Icons.dinner_dining_rounded),
-                      label: const Text('Zorganizuj stół'),
+                      label: Text(t('Zorganizuj stół')),
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby jak '
-                      'najmniej się znali.',
+                      t(
+                        'Wybierzesz dzień, a Zen zaprosi 5 gości tak, żeby '
+                        'jak najmniej się znali.',
+                      ),
                       style: TextStyle(color: zen.textMuted, fontSize: 12.5),
                     ),
                   ],

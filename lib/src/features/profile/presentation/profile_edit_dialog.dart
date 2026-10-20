@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -112,7 +113,9 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
     } catch (error, stackTrace) {
       logZenError('Opening the avatar picker failed', error, stackTrace);
       _showAvatarMessage(
-        'Nie udało się otworzyć okna wyboru zdjęcia: $error',
+        t('Nie udało się otworzyć okna wyboru zdjęcia: {error}', {
+          'error': error,
+        }),
         isError: true,
       );
       return;
@@ -148,18 +151,18 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
             children: <Widget>[
               ListTile(
                 leading: Icon(Icons.photo_library_outlined, color: zen.accent),
-                title: const Text('Wybierz z galerii'),
+                title: Text(t('Wybierz z galerii')),
                 onTap: () =>
                     Navigator.of(sheetContext).pop(ImageSource.gallery),
               ),
               ListTile(
                 leading: Icon(Icons.photo_camera_outlined, color: zen.accent),
-                title: const Text('Zrób zdjęcie (Aparat)'),
+                title: Text(t('Zrób zdjęcie (Aparat)')),
                 onTap: () => Navigator.of(sheetContext).pop(ImageSource.camera),
               ),
               ListTile(
                 leading: Icon(Icons.folder_open_outlined, color: zen.accent),
-                title: const Text('Wybierz plik z urządzenia'),
+                title: Text(t('Wybierz plik z urządzenia')),
                 onTap: () => Navigator.of(sheetContext).pop(null),
               ),
             ],
@@ -241,7 +244,9 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
       _showAvatarMessage(
         error is FormatException
             ? error.message
-            : 'Nie udało się wczytać zdjęcia awatara: $error',
+            : t('Nie udało się wczytać zdjęcia awatara: {error}', {
+                'error': error,
+              }),
         isError: true,
       );
     }
@@ -270,7 +275,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
     } catch (error, stackTrace) {
       logZenError('Opening the cover picker failed', error, stackTrace);
       _showAvatarMessage(
-        'Nie udało się otworzyć wyboru zdjęcia.',
+        t('Nie udało się otworzyć wyboru zdjęcia.'),
         isError: true,
       );
       return;
@@ -303,7 +308,9 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
       }
       setState(() => _isProcessingCover = false);
       _showAvatarMessage(
-        error is FormatException ? error.message : 'Nie udało się: $error',
+        error is FormatException
+            ? error.message
+            : t('Nie udało się: {error}', {'error': error}),
         isError: true,
       );
     }
@@ -322,7 +329,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
     final String name = _nameController.text.trim();
     final String bio = _bioController.text.trim();
     if (name.isEmpty) {
-      _showAvatarMessage('Podaj nazwę wyświetlaną.', isError: true);
+      _showAvatarMessage(t('Podaj nazwę wyświetlaną.'), isError: true);
       return;
     }
 
@@ -359,7 +366,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
       final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
       Navigator.of(context).pop();
       messenger.showSnackBar(
-        const SnackBar(content: Text('Profil zaktualizowany.')),
+        SnackBar(content: Text(t('Profil zaktualizowany.'))),
       );
     } catch (error, stackTrace) {
       logZenError('Saving the profile failed', error, stackTrace);
@@ -368,7 +375,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
       }
       setState(() => _isSaving = false);
       _showAvatarMessage(
-        'Nie udało się zapisać profilu: $error',
+        t('Nie udało się zapisać profilu: {error}', {'error': error}),
         isError: true,
       );
     }
@@ -426,7 +433,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Edytuj profil',
+                          t('Edytuj profil'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: zen.display(
@@ -437,16 +444,16 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                         ),
                       ),
                       IconButton(
-                        tooltip: 'Zamknij',
+                        tooltip: t('Zamknij'),
                         icon: const Icon(Icons.close_rounded),
                         onPressed: () => Navigator.of(context).pop(),
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  const _EditSection(
+                  _EditSection(
                     icon: Icons.account_circle_outlined,
-                    title: 'Zdjęcie profilowe',
+                    title: t('Zdjęcie profilowe'),
                   ),
                   Container(
                     padding: const EdgeInsets.all(14),
@@ -507,7 +514,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                                   Icons.add_photo_alternate_rounded,
                                   size: 18,
                                 ),
-                                label: const Text('Wybierz zdjęcie'),
+                                label: Text(t('Wybierz zdjęcie')),
                               ),
                               if (hasCustomPhoto)
                                 TextButton.icon(
@@ -519,7 +526,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                                     Icons.delete_outline_rounded,
                                     size: 18,
                                   ),
-                                  label: const Text('Usuń zdjęcie'),
+                                  label: Text(t('Usuń zdjęcie')),
                                 ),
                             ],
                           ),
@@ -532,16 +539,16 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                     key: const Key('profile-name-field'),
                     controller: _nameController,
                     textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(
-                      labelText: 'Nazwa wyświetlana',
-                      hintText: 'Twoje imię lub pseudonim',
-                      helperText: 'Tak zobaczą Cię znajomi.',
-                      prefixIcon: Icon(Icons.badge_outlined),
+                    decoration: InputDecoration(
+                      labelText: t('Nazwa wyświetlana'),
+                      hintText: t('Twoje imię lub pseudonim'),
+                      helperText: t('Tak zobaczą Cię znajomi.'),
+                      prefixIcon: const Icon(Icons.badge_outlined),
                     ),
                   ),
-                  const _EditSection(
+                  _EditSection(
                     icon: Icons.wallpaper_rounded,
-                    title: 'Zdjęcie w tle',
+                    title: t('Zdjęcie w tle'),
                   ),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(18),
@@ -603,7 +610,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                                 context: 'Picking a cover failed',
                               ),
                         icon: const Icon(Icons.wallpaper_rounded, size: 18),
-                        label: const Text('Wybierz zdjęcie w tle'),
+                        label: Text(t('Wybierz zdjęcie w tle')),
                       ),
                       if (_coverPath != null)
                         TextButton.icon(
@@ -615,14 +622,11 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                             Icons.delete_outline_rounded,
                             size: 18,
                           ),
-                          label: const Text('Usuń'),
+                          label: Text(t('Usuń')),
                         ),
                     ],
                   ),
-                  const _EditSection(
-                    icon: Icons.notes_rounded,
-                    title: 'O mnie',
-                  ),
+                  _EditSection(icon: Icons.notes_rounded, title: t('O mnie')),
                   Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     decoration: BoxDecoration(
@@ -642,9 +646,10 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                     // A tall box: gently rounded corners (the theme's pill
                     // shape suits one-line fields only).
                     decoration: InputDecoration(
-                      hintText:
-                          'Kim jesteś, czym się zajmujesz, co lubisz… '
-                          'Możesz pogrubiać, wypunktować, dodać link.',
+                      hintText: t(
+                        'Kim jesteś, czym się zajmujesz, co lubisz… '
+                        'Możesz pogrubiać, wypunktować, dodać link.',
+                      ),
                       alignLabelWithHint: true,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(16),
@@ -676,7 +681,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                             )
                           : const Icon(Icons.check_rounded),
                       label: Text(
-                        _isSaving ? 'Zapisywanie...' : 'Zapisz profil',
+                        _isSaving ? t('Zapisywanie...') : t('Zapisz profil'),
                       ),
                     ),
                   ),
@@ -745,49 +750,49 @@ class _BioToolbar extends StatelessWidget {
         tool(
           'bold',
           Icons.format_bold_rounded,
-          'Pogrubienie',
+          t('Pogrubienie'),
           () => controller.toggleWrap('**'),
         ),
         tool(
           'italic',
           Icons.format_italic_rounded,
-          'Kursywa',
+          t('Kursywa'),
           () => controller.toggleWrap('*'),
         ),
         tool(
           'underline',
           Icons.format_underlined_rounded,
-          'Podkreślenie',
+          t('Podkreślenie'),
           () => controller.toggleWrap('__'),
         ),
         tool(
           'strike',
           Icons.format_strikethrough_rounded,
-          'Przekreślenie',
+          t('Przekreślenie'),
           () => controller.toggleWrap('~~'),
         ),
         tool(
           'heading',
           Icons.title_rounded,
-          'Nagłówek',
+          t('Nagłówek'),
           () => controller.toggleLinePrefix('### '),
         ),
         tool(
           'quote',
           Icons.format_quote_rounded,
-          'Cytat',
+          t('Cytat'),
           () => controller.toggleLinePrefix('> '),
         ),
         tool(
           'list',
           Icons.format_list_bulleted_rounded,
-          'Lista',
+          t('Lista'),
           () => controller.toggleLinePrefix('- '),
         ),
         tool(
           'numbered',
           Icons.format_list_numbered_rounded,
-          'Lista numerowana',
+          t('Lista numerowana'),
           () => controller.toggleLinePrefix('1. '),
         ),
       ],

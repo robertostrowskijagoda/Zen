@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/feed/rich_text.dart';
 
@@ -101,7 +102,9 @@ class _RichPostBodyState extends State<RichPostBody> {
           // decides where to open it.
           Clipboard.setData(ClipboardData(text: r.text));
           ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-            SnackBar(content: Text('Skopiowano link: ${r.text}')),
+            SnackBar(
+              content: Text(t('Skopiowano link: {link}', {'link': r.text})),
+            ),
           );
         };
     }

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_code_dart_scan/qr_code_dart_scan.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 
 final Provider<PeerQrScanner> peerQrScannerProvider = Provider<PeerQrScanner>((
   Ref ref,
@@ -58,7 +59,7 @@ class _PeerQrScannerPageState extends State<_PeerQrScannerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Skanuj kod QR')),
+      appBar: AppBar(title: Text(t('Skanuj kod QR'))),
       body: QRCodeDartScanView(
         typeScan: TypeScan.live,
         formats: const <BarcodeFormat>[BarcodeFormat.qrCode],
@@ -106,15 +107,18 @@ class _PeerQrScannerPageState extends State<_PeerQrScannerPage> {
                       color: Colors.black.withAlpha(180),
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
                         horizontal: 16,
                         vertical: 14,
                       ),
                       child: Text(
-                        'Skieruj aparat na kod QR znajomego.',
+                        t('Skieruj aparat na kod QR znajomego.'),
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.white, height: 1.4),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          height: 1.4,
+                        ),
                       ),
                     ),
                   ),

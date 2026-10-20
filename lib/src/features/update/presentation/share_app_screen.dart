@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/app_version.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -109,7 +110,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     if (own != null && await File(own).exists()) {
       found.add(
         _ShareSource(
-          'Zen $kAppVersion (ta aplikacja)',
+          t('Zen {version} (ta aplikacja)', {'version': kAppVersion}),
           File(own),
           'zen-$kAppVersion.apk',
           own: true,
@@ -128,7 +129,9 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
         found.insert(
           0,
           _ShareSource(
-            'Zen ${release.manifest.version} (nowsza, podpisana)',
+            t('Zen {version} (nowsza, podpisana)', {
+              'version': release.manifest.version,
+            }),
             f,
             apk.name,
           ),
@@ -192,31 +195,43 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
         key: const Key('share-app-signature-warning'),
         icon: Icon(Icons.gpp_bad_rounded, color: zen.danger),
         title: Text(
-          differs ? 'Podpis się nie zgadza' : 'Nie da się sprawdzić podpisu',
+          differs
+              ? t('Podpis się nie zgadza')
+              : t('Nie da się sprawdzić podpisu'),
         ),
         content: Text(
           differs
-              ? 'Ten plik podpisano innym kluczem niż $_referenceLabel. To '
-                    'może nie być prawdziwy Zen: podróbka może szpiegować '
-                    'albo podmienić link do zbiórki.\n\n'
-                    'Odcisk klucza tego pliku:\n'
-                    '${check.certificates.map(formatCertificateFingerprint).join('\n')}'
-                    '\n\nPorównaj go z odciskiem w README: '
-                    'github.com/robertostrowskijagoda/Zen.'
-              : 'Nie udało się odczytać podpisu tego pliku. To może nie być '
-                    'prawdziwy Zen. Przekaż go dalej tylko, jeśli wiesz, skąd '
-                    'pochodzi.',
+              ? t(
+                  'Ten plik podpisano innym kluczem niż {reference}. To '
+                  'może nie być prawdziwy Zen: podróbka może szpiegować '
+                  'albo podmienić link do zbiórki.\n\n'
+                  'Odcisk klucza tego pliku:\n'
+                  '{fingerprints}'
+                  '\n\nPorównaj go z odciskiem w README: '
+                  'github.com/robertostrowskijagoda/Zen.',
+                  {
+                    'reference': _referenceLabel,
+                    'fingerprints': check.certificates
+                        .map(formatCertificateFingerprint)
+                        .join('\n'),
+                  },
+                )
+              : t(
+                  'Nie udało się odczytać podpisu tego pliku. To może nie być '
+                  'prawdziwy Zen. Przekaż go dalej tylko, jeśli wiesz, skąd '
+                  'pochodzi.',
+                ),
         ),
         actions: <Widget>[
           TextButton(
             key: const Key('share-app-signature-anyway'),
             style: TextButton.styleFrom(foregroundColor: zen.danger),
             onPressed: () => Navigator.of(dialog).pop(true),
-            child: const Text('Mimo to'),
+            child: Text(t('Mimo to')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialog).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
         ],
       ),
@@ -225,7 +240,8 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
   }
 
   /// What the file is compared with.
-  String get _referenceLabel => _isAndroid ? 'ta aplikacja' : 'oficjalny Zen';
+  String get _referenceLabel =>
+      _isAndroid ? t('ta aplikacja') : t('oficjalny Zen');
 
   Future<void> _pickApk() async {
     final FilePickerResult? picked = await FilePicker.platform.pickFiles(
@@ -237,11 +253,11 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
       return;
     }
     if (!path.toLowerCase().endsWith('.apk')) {
-      setState(() => _message = 'Wybierz plik .apk z aplikacją Zen.');
+      setState(() => _message = t('Wybierz plik .apk z aplikacją Zen.'));
       return;
     }
     final _ShareSource source = _ShareSource(
-      'Plik: ${path.split(Platform.pathSeparator).last}',
+      t('Plik: {name}', {'name': path.split(Platform.pathSeparator).last}),
       File(path),
       'zen.apk',
     );
@@ -265,9 +281,10 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     if (addresses.isEmpty) {
       if (mounted) {
         setState(
-          () => _message =
-              'To urządzenie nie jest w żadnej sieci Wi-Fi. Włącz hotspot albo '
-              'połącz się z tą samą siecią co znajomy.',
+          () => _message = t(
+            'To urządzenie nie jest w żadnej sieci Wi-Fi. Włącz hotspot albo '
+            'połącz się z tą samą siecią co znajomy.',
+          ),
         );
       }
       return;
@@ -280,7 +297,11 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
       await server.start(addresses: addresses);
     } on Object catch (error) {
       if (mounted) {
-        setState(() => _message = 'Nie udało się udostępnić pliku: $error');
+        setState(
+          () => _message = t('Nie udało się udostępnić pliku: {error}', {
+            'error': error,
+          }),
+        );
       }
       return;
     }
@@ -343,14 +364,18 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
       if (error != null || ssid is! String || password is! String) {
         setState(
           () => _message = switch (error) {
-            'permission' =>
-              'Zezwól Zen na dostęp do urządzeń w pobliżu i naciśnij jeszcze raz.',
-            'location_off' =>
+            'permission' => t(
+              'Zezwól Zen na dostęp do urządzeń w pobliżu i naciśnij jeszcze '
+              'raz.',
+            ),
+            'location_off' => t(
               'Włącz lokalizację (Android wymaga jej do hotspotu) i spróbuj '
-                  'jeszcze raz.',
-            _ =>
+              'jeszcze raz.',
+            ),
+            _ => t(
               'Nie udało się włączyć hotspotu. Włącz go w ustawieniach '
-                  'telefonu i naciśnij „Udostępnij”.',
+              'telefonu i naciśnij „Udostępnij”.',
+            ),
           },
         );
         return;
@@ -362,8 +387,9 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     } on Object {
       if (mounted) {
         setState(
-          () => _message =
-              'Hotspot nie działa na tym urządzeniu. Włącz go w ustawieniach.',
+          () => _message = t(
+            'Hotspot nie działa na tym urządzeniu. Włącz go w ustawieniach.',
+          ),
         );
       }
     } finally {
@@ -399,17 +425,22 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
       _sendNote = switch (result.status) {
         ApkShareStatus.opened =>
           result.baseOnly
-              ? 'Ta instalacja Zen składa się z kilku plików, a wysłać da się '
-                    'tylko główny. U znajomego może się nie zainstalować.'
+              ? t(
+                  'Ta instalacja Zen składa się z kilku plików, a wysłać da '
+                  'się tylko główny. U znajomego może się nie zainstalować.',
+                )
               : null,
-        ApkShareStatus.noFile =>
+        ApkShareStatus.noFile => t(
           'Nie znalazłem pliku instalacyjnego do wysłania.',
-        ApkShareStatus.unsupported =>
+        ),
+        ApkShareStatus.unsupported => t(
           'Ten telefon nie pozwala wysłać aplikacji w ten sposób. Użyj kodu '
-              'QR poniżej.',
-        ApkShareStatus.failed =>
+          'QR poniżej.',
+        ),
+        ApkShareStatus.failed => t(
           'Nie udało się otworzyć udostępniania. Spróbuj jeszcze raz albo '
-              'użyj kodu QR poniżej.',
+          'użyj kodu QR poniżej.',
+        ),
       };
     });
   }
@@ -445,7 +476,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     }
     setState(() {
       _busy = true;
-      _message = 'Instaluję na ${device.label}…';
+      _message = t('Instaluję na {device}…', {'device': device.label});
     });
     final String result = await adb.install(device, source.file.path);
     if (mounted) {
@@ -493,7 +524,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'SUMA KONTROLNA (SHA-256)',
+                  t('SUMA KONTROLNA (SHA-256)'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: zen.label(color: zen.textSecondary),
@@ -503,7 +534,10 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
           ),
           const SizedBox(height: 8),
           if (hex == null)
-            Text('Liczę…', style: TextStyle(color: zen.textMuted, fontSize: 13))
+            Text(
+              t('Liczę…'),
+              style: TextStyle(color: zen.textMuted, fontSize: 13),
+            )
           else
             SelectableText(
               groupedHex(hex),
@@ -516,8 +550,10 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
             ),
           const SizedBox(height: 8),
           Text(
-            'Ostrożny znajomy może sprawdzić sumę pobranego pliku. Musi być '
-            'dokładnie taka sama, inaczej ktoś po drodze podmienił plik.',
+            t(
+              'Ostrożny znajomy może sprawdzić sumę pobranego pliku. Musi być '
+              'dokładnie taka sama, inaczej ktoś po drodze podmienił plik.',
+            ),
             style: TextStyle(
               color: zen.textMuted,
               fontSize: 12.5,
@@ -542,39 +578,46 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
         key: const Key('share-app-signature'),
         icon: Icons.hourglass_top_rounded,
         tone: zen.textMuted,
-        text: 'Sprawdzam podpis pliku…',
+        text: t('Sprawdzam podpis pliku…'),
       ),
       ApkSignatureVerdict.matches => ZenInfo(
         key: const Key('share-app-signature'),
         icon: Icons.verified_rounded,
         tone: zen.success,
-        text: 'Podpis zgodny: ten sam klucz co $_referenceLabel.',
+        text: t('Podpis zgodny: ten sam klucz co {reference}.', {
+          'reference': _referenceLabel,
+        }),
       ),
       ApkSignatureVerdict.differs => ZenInfo(
         key: const Key('share-app-signature'),
         icon: Icons.gpp_bad_rounded,
         tone: zen.danger,
-        title: 'Podpis się nie zgadza',
-        text:
-            'Inny klucz niż $_referenceLabel — to może być podróbka.\n'
-            '$fingerprints',
+        title: t('Podpis się nie zgadza'),
+        text: t(
+          'Inny klucz niż {reference} — to może być podróbka.\n'
+          '{fingerprints}',
+          {'reference': _referenceLabel, 'fingerprints': fingerprints},
+        ),
       ),
       ApkSignatureVerdict.unknown => ZenInfo(
         key: const Key('share-app-signature'),
         icon: Icons.fingerprint_rounded,
         tone: zen.warning,
-        title: 'Odcisk klucza tego pliku',
-        text:
-            '$fingerprints\nPorównaj go z odciskiem w README: '
-            'github.com/robertostrowskijagoda/Zen.',
+        title: t('Odcisk klucza tego pliku'),
+        text: t(
+          '{fingerprints}\nPorównaj go z odciskiem w README: '
+          'github.com/robertostrowskijagoda/Zen.',
+          {'fingerprints': fingerprints},
+        ),
       ),
       ApkSignatureVerdict.unreadable => ZenInfo(
         key: const Key('share-app-signature'),
         icon: Icons.gpp_maybe_rounded,
         tone: zen.warning,
-        text:
-            'Nie udało się odczytać podpisu tego pliku. To może nie być '
-            'prawdziwy Zen.',
+        text: t(
+          'Nie udało się odczytać podpisu tego pliku. To może nie być '
+          'prawdziwy Zen.',
+        ),
       ),
     };
   }
@@ -596,9 +639,11 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  'Quick Share, Bluetooth albo inna aplikacja z menu '
-                  'udostępniania. Bez internetu, wystarczy, że telefony są '
-                  'blisko siebie.',
+                  t(
+                    'Quick Share, Bluetooth albo inna aplikacja z menu '
+                    'udostępniania. Bez internetu, wystarczy, że telefony są '
+                    'blisko siebie.',
+                  ),
                   style: TextStyle(
                     color: zen.textSecondary,
                     fontSize: 13.5,
@@ -624,8 +669,8 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                     ),
                   )
                 : const Icon(Icons.share_rounded),
-            label: const Text(
-              'Wyślij przez Quick Share / Bluetooth',
+            label: Text(
+              t('Wyślij przez Quick Share / Bluetooth'),
               textAlign: TextAlign.center,
             ),
           ),
@@ -644,9 +689,11 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'Odbiorca musi zezwolić na instalowanie aplikacji z '
-                  'nieznanych źródeł (telefon sam o to zapyta przy otwieraniu '
-                  'pliku).',
+                  t(
+                    'Odbiorca musi zezwolić na instalowanie aplikacji z '
+                    'nieznanych źródeł (telefon sam o to zapyta przy '
+                    'otwieraniu pliku).',
+                  ),
                   style: TextStyle(
                     color: zen.textMuted,
                     fontSize: 12.5,
@@ -693,18 +740,19 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     final Color tone = zenTone(zen, 2);
     return Scaffold(
       key: const Key('share-app-screen'),
-      appBar: AppBar(title: const Text('Podaj dalej')),
+      appBar: AppBar(title: Text(t('Podaj dalej'))),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: <Widget>[
           ZenHero(
-            title: 'Podaj Zen dalej',
+            title: t('Podaj Zen dalej'),
             icon: Icons.volunteer_activism_rounded,
             tone: tone,
-            text:
-                'Znajomy nie potrzebuje sklepu ani internetu. Wystarczy, że jest '
-                'obok: w tej samej sieci Wi-Fi albo podłączony do Twojego '
-                'hotspotu.',
+            text: t(
+              'Znajomy nie potrzebuje sklepu ani internetu. Wystarczy, że jest '
+              'obok: w tej samej sieci Wi-Fi albo podłączony do Twojego '
+              'hotspotu.',
+            ),
           ),
           if (!kIsWeb && Platform.isIOS)
             Padding(
@@ -712,22 +760,25 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
               child: ZenInfo(
                 icon: Icons.phone_iphone_rounded,
                 tone: zen.warning,
-                text:
-                    'iPhone nie pozwala przekazać aplikacji z ręki do ręki. '
-                    'Znajomy z iPhonem instaluje Zen z GitHuba (opis w README, '
-                    'sekcja „iPhone”). Stąd możesz podać plik .apk znajomemu '
-                    'z Androidem.',
+                text: t(
+                  'iPhone nie pozwala przekazać aplikacji z ręki do ręki. '
+                  'Znajomy z iPhonem instaluje Zen z GitHuba (opis w README, '
+                  'sekcja „iPhone”). Stąd możesz podać plik .apk znajomemu '
+                  'z Androidem.',
+                ),
               ),
             ),
-          const ZenSection('Co udostępnić', top: 12),
+          ZenSection(t('Co udostępnić'), top: 12),
           if (_sources.isEmpty)
             ZenInfo(
               icon: Icons.inventory_2_outlined,
               tone: zen.warning,
               text: _isAndroid
-                  ? 'Nie znalazłem pliku instalacyjnego tej aplikacji.'
-                  : 'Wybierz plik .apk z Zen (np. z aktualizacji albo ze '
-                        'strony projektu).',
+                  ? t('Nie znalazłem pliku instalacyjnego tej aplikacji.')
+                  : t(
+                      'Wybierz plik .apk z Zen (np. z aktualizacji albo ze '
+                      'strony projektu).',
+                    ),
             )
           else
             for (final _ShareSource s in _sources)
@@ -755,14 +806,14 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
               key: const Key('share-app-pick'),
               onPressed: () => unawaited(_pickApk()),
               icon: const Icon(Icons.folder_open_rounded),
-              label: const Text('Wybierz inny plik .apk'),
+              label: Text(t('Wybierz inny plik .apk')),
             ),
           ),
           if (_isAndroid) ...<Widget>[
-            const ZenSection('Prosto na telefon obok', top: 16),
+            ZenSection(t('Prosto na telefon obok'), top: 16),
             _shareSheetCard(zen),
           ],
-          const ZenSection('Przez Wi-Fi albo hotspot', top: 16),
+          ZenSection(t('Przez Wi-Fi albo hotspot'), top: 16),
           ZenCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -777,14 +828,14 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                         ? null
                         : () => unawaited(_startHotspot()),
                     icon: const Icon(Icons.wifi_tethering_rounded),
-                    label: const Text('Włącz hotspot (bez internetu)'),
+                    label: Text(t('Włącz hotspot (bez internetu)')),
                   ),
                   const SizedBox(height: 10),
                 ],
                 if (_hotspot != null) ...<Widget>[
                   _step(
                     zen,
-                    '1. Znajomy skanuje ten kod, żeby połączyć się z Wi-Fi:',
+                    t('1. Znajomy skanuje ten kod, żeby połączyć się z Wi-Fi:'),
                   ),
                   _qr(
                     wifiQrText(
@@ -795,7 +846,10 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                   ),
                   const SizedBox(height: 10),
                   SelectableText(
-                    'Sieć: ${_hotspot!.ssid}\nHasło: ${_hotspot!.password}',
+                    t('Sieć: {ssid}\nHasło: {password}', {
+                      'ssid': _hotspot!.ssid,
+                      'password': _hotspot!.password,
+                    }),
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: zen.textSecondary,
@@ -815,14 +869,14 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                         ? null
                         : () => unawaited(_startServer()),
                     icon: const Icon(Icons.qr_code_2_rounded),
-                    label: const Text('Udostępnij'),
+                    label: Text(t('Udostępnij')),
                   )
                 else if (first != null) ...<Widget>[
                   _step(
                     zen,
                     _hotspot != null
-                        ? '2. Potem skanuje ten kod i pobiera Zen:'
-                        : 'Znajomy skanuje ten kod aparatem i pobiera Zen:',
+                        ? t('2. Potem skanuje ten kod i pobiera Zen:')
+                        : t('Znajomy skanuje ten kod aparatem i pobiera Zen:'),
                   ),
                   _qr(
                     server.pageUri(first).toString(),
@@ -846,12 +900,12 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                   Center(
                     child: _downloads == 0
                         ? ZenPill(
-                            text: 'Czekam na pobranie…',
+                            text: t('Czekam na pobranie…'),
                             icon: Icons.hourglass_top_rounded,
                             tone: zen.warning,
                           )
                         : ZenPill(
-                            text: 'Pobrano: $_downloads',
+                            text: t('Pobrano: {count}', {'count': _downloads}),
                             icon: Icons.download_done_rounded,
                             tone: zen.success,
                           ),
@@ -859,8 +913,10 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                   if (_downloads == 0) ...<Widget>[
                     const SizedBox(height: 6),
                     Text(
-                      'Udostępnianie wyłączy się po 20 minutach albo po '
-                      'zamknięciu tego ekranu.',
+                      t(
+                        'Udostępnianie wyłączy się po 20 minutach albo po '
+                        'zamknięciu tego ekranu.',
+                      ),
                       textAlign: TextAlign.center,
                       style: TextStyle(color: zen.textMuted, fontSize: 12.5),
                     ),
@@ -869,7 +925,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                   TextButton(
                     style: TextButton.styleFrom(foregroundColor: zen.danger),
                     onPressed: () => unawaited(_stopServer()),
-                    child: const Text('Zakończ udostępnianie'),
+                    child: Text(t('Zakończ udostępnianie')),
                   ),
                 ],
               ],
@@ -904,15 +960,16 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
               ),
             ),
           if (_isDesktop) ...<Widget>[
-            const ZenSection('Kablem USB na telefon z Androidem', top: 24),
-            const ZenInfo(
+            ZenSection(t('Kablem USB na telefon z Androidem'), top: 24),
+            ZenInfo(
               icon: Icons.usb_rounded,
-              title: 'Działa nawet tam, gdzie sklep i strony są zablokowane',
-              text:
-                  'Na telefonie włącz „Debugowanie USB” (Ustawienia → '
-                  'Informacje o telefonie → 7 razy dotknij „Numer '
-                  'kompilacji”, potem Opcje programisty), podłącz kabel i '
-                  'zezwól na debugowanie.',
+              title: t('Działa nawet tam, gdzie sklep i strony są zablokowane'),
+              text: t(
+                'Na telefonie włącz „Debugowanie USB” (Ustawienia → '
+                'Informacje o telefonie → 7 razy dotknij „Numer '
+                'kompilacji”, potem Opcje programisty), podłącz kabel i '
+                'zezwól na debugowanie.',
+              ),
             ),
             const SizedBox(height: 4),
             if (_adb == null)
@@ -929,7 +986,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Szukam narzędzia adb…',
+                        t('Szukam narzędzia adb…'),
                         style: TextStyle(color: zen.textSecondary),
                       ),
                     ),
@@ -940,16 +997,17 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
               ZenInfo(
                 icon: Icons.build_circle_outlined,
                 tone: zen.warning,
-                text:
-                    'Nie znalazłem narzędzia adb. Zainstaluj „Android SDK '
-                    'Platform-Tools” od Google (albo Android Studio) i otwórz ten '
-                    'ekran ponownie.',
+                text: t(
+                  'Nie znalazłem narzędzia adb. Zainstaluj „Android SDK '
+                  'Platform-Tools” od Google (albo Android Studio) i otwórz '
+                  'ten ekran ponownie.',
+                ),
               )
             else ...<Widget>[
               if (_devices.isEmpty)
-                const ZenEmpty(
+                ZenEmpty(
                   icon: Icons.phonelink_off_rounded,
-                  title: 'Nie widzę podłączonego telefonu.',
+                  title: t('Nie widzę podłączonego telefonu.'),
                 ),
               for (final AdbDevice d in _devices)
                 ZenTile(
@@ -957,9 +1015,9 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                   tone: d.ready ? zen.success : zen.warning,
                   title: d.label,
                   subtitle: d.ready
-                      ? 'Gotowy'
+                      ? t('Gotowy')
                       : d.state == 'unauthorized'
-                      ? 'Zezwól na debugowanie USB na telefonie'
+                      ? t('Zezwól na debugowanie USB na telefonie')
                       : d.state,
                   trailing: FilledButton(
                     style: FilledButton.styleFrom(
@@ -969,7 +1027,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                     onPressed: _busy || _source == null
                         ? null
                         : () => unawaited(_installUsb(d)),
-                    child: const Text('Zainstaluj'),
+                    child: Text(t('Zainstaluj')),
                   ),
                 ),
               Align(
@@ -977,7 +1035,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                 child: TextButton.icon(
                   onPressed: () => unawaited(_refreshDevices()),
                   icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('Odśwież'),
+                  label: Text(t('Odśwież')),
                 ),
               ),
             ],

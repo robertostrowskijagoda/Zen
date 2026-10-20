@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 
 /// A phone connected to this computer over USB.
 @immutable
@@ -101,13 +102,15 @@ final class AdbInstaller {
   Future<String> install(AdbDevice device, String apkPath) async {
     final String? adb = executable;
     if (adb == null) {
-      return 'Nie znaleziono narzędzia adb.';
+      return t('Nie znaleziono narzędzia adb.');
     }
     if (!device.ready) {
       return device.state == 'unauthorized'
-          ? 'Na telefonie pojawiło się pytanie o debugowanie USB — zezwól i '
-                'spróbuj jeszcze raz.'
-          : 'Telefon nie jest gotowy (${device.state}).';
+          ? t(
+              'Na telefonie pojawiło się pytanie o debugowanie USB — zezwól i '
+              'spróbuj jeszcze raz.',
+            )
+          : t('Telefon nie jest gotowy ({state}).', {'state': device.state});
     }
     final ProcessResult r = await Process.run(adb, <String>[
       '-s',
@@ -136,7 +139,7 @@ String describeAdbInstallResult({
   required String deviceLabel,
 }) {
   if (exitCode == 0 && output.contains('Success')) {
-    return 'Zainstalowano Zen na $deviceLabel.';
+    return t('Zainstalowano Zen na {device}.', {'device': deviceLabel});
   }
   final RegExpMatch? failure = RegExp(
     r'Failure \[([^\]]+)\]',
@@ -146,14 +149,15 @@ String describeAdbInstallResult({
     return kAdbSignatureMismatchMessage;
   }
   if (reason.contains('INSTALL_FAILED_VERSION_DOWNGRADE')) {
-    return 'Na telefonie jest nowsza wersja Zen.';
+    return t('Na telefonie jest nowsza wersja Zen.');
   }
-  return 'Instalacja nie udała się: $reason';
+  return t('Instalacja nie udała się: {reason}', {'reason': reason});
 }
 
 /// The phone refused the file because its Zen is signed with another key.
-const String kAdbSignatureMismatchMessage =
-    'Uwaga: Zen na telefonie jest podpisany innym kluczem niż ten plik. '
-    'Jedna z tych kopii może być podróbką. Nie odinstalowuj Zen, żeby to '
-    'obejść. Porównaj odcisk klucza i sumę SHA-256 z README: '
-    'github.com/robertostrowskijagoda/Zen.';
+String get kAdbSignatureMismatchMessage => t(
+  'Uwaga: Zen na telefonie jest podpisany innym kluczem niż ten plik. '
+  'Jedna z tych kopii może być podróbką. Nie odinstalowuj Zen, żeby to '
+  'obejść. Porównaj odcisk klucza i sumę SHA-256 z README: '
+  'github.com/robertostrowskijagoda/Zen.',
+);

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show ThemeMode;
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 
 enum AppLockMode {
   never,
@@ -8,10 +9,10 @@ enum AppLockMode {
   systemRestart;
 
   String get label => switch (this) {
-    AppLockMode.never => 'Nigdy',
-    AppLockMode.background => 'Po wyjściu z aplikacji',
-    AppLockMode.appClose => 'Przy zamknięciu aplikacji',
-    AppLockMode.systemRestart => 'Przy restarcie telefonu',
+    AppLockMode.never => t('Nigdy'),
+    AppLockMode.background => t('Po wyjściu z aplikacji'),
+    AppLockMode.appClose => t('Przy zamknięciu aplikacji'),
+    AppLockMode.systemRestart => t('Przy restarcie telefonu'),
   };
 }
 
@@ -21,9 +22,9 @@ enum AppThemeMode {
   dark;
 
   String get label => switch (this) {
-    AppThemeMode.system => 'Systemowy',
-    AppThemeMode.light => 'Jasny',
-    AppThemeMode.dark => 'Ciemny',
+    AppThemeMode.system => t('Systemowy'),
+    AppThemeMode.light => t('Jasny'),
+    AppThemeMode.dark => t('Ciemny'),
   };
 
   ThemeMode get materialThemeMode => switch (this) {
@@ -35,19 +36,27 @@ enum AppThemeMode {
 
 /// Groups the accent themes into the sections the picker lists them under.
 enum AppThemeFamily {
-  neutral('Neutralne'),
-  green('Zielenie'),
-  teal('Turkusy'),
-  blue('Blekity'),
-  violet('Fiolety'),
-  pink('Roze'),
-  warm('Cieple'),
-  gold('Zlota'),
-  night('Nocne');
+  neutral,
+  green,
+  teal,
+  blue,
+  violet,
+  pink,
+  warm,
+  gold,
+  night;
 
-  const AppThemeFamily(this.label);
-
-  final String label;
+  String get label => switch (this) {
+    AppThemeFamily.neutral => t('Neutralne'),
+    AppThemeFamily.green => t('Zielenie'),
+    AppThemeFamily.teal => t('Turkusy'),
+    AppThemeFamily.blue => t('Błękity'),
+    AppThemeFamily.violet => t('Fiolety'),
+    AppThemeFamily.pink => t('Róże'),
+    AppThemeFamily.warm => t('Ciepłe'),
+    AppThemeFamily.gold => t('Złota'),
+    AppThemeFamily.night => t('Nocne'),
+  };
 }
 
 /// Selectable accent themes. Each one is a full palette (dark and light tone
@@ -107,63 +116,63 @@ enum AppAccentTheme {
 
   String get label => switch (this) {
     AppAccentTheme.graphite => 'Zen',
-    AppAccentTheme.paper => 'Papier',
-    AppAccentTheme.carbon => 'Karbon',
-    AppAccentTheme.terminal => 'Terminal',
-    AppAccentTheme.jade => 'Jadeit',
-    AppAccentTheme.moss => 'Mech',
-    AppAccentTheme.aurora => 'Zorza',
-    AppAccentTheme.arctic => 'Arktyka',
-    AppAccentTheme.lagoon => 'Laguna',
-    AppAccentTheme.cobalt => 'Kobalt',
-    AppAccentTheme.abyss => 'Otchłań',
-    AppAccentTheme.denim => 'Denim',
-    AppAccentTheme.amethyst => 'Ametyst',
-    AppAccentTheme.nebula => 'Mgławica',
-    AppAccentTheme.plum => 'Śliwka',
-    AppAccentTheme.synthwave => 'Synthwave',
-    AppAccentTheme.sakura => 'Sakura',
-    AppAccentTheme.ruby => 'Rubin',
-    AppAccentTheme.magma => 'Magma',
-    AppAccentTheme.rust => 'Rdza',
-    AppAccentTheme.coral => 'Koral',
-    AppAccentTheme.solaris => 'Solaris',
-    AppAccentTheme.honey => 'Miód',
-    AppAccentTheme.voltage => 'Napięcie',
-    AppAccentTheme.amberCrt => 'Bursztyn',
-    AppAccentTheme.nocturne => 'Nokturn',
-    AppAccentTheme.fjord => 'Fiord',
+    AppAccentTheme.paper => t('Papier'),
+    AppAccentTheme.carbon => t('Karbon'),
+    AppAccentTheme.terminal => t('Terminal'),
+    AppAccentTheme.jade => t('Jadeit'),
+    AppAccentTheme.moss => t('Mech'),
+    AppAccentTheme.aurora => t('Zorza'),
+    AppAccentTheme.arctic => t('Arktyka'),
+    AppAccentTheme.lagoon => t('Laguna'),
+    AppAccentTheme.cobalt => t('Kobalt'),
+    AppAccentTheme.abyss => t('Otchłań'),
+    AppAccentTheme.denim => t('Denim'),
+    AppAccentTheme.amethyst => t('Ametyst'),
+    AppAccentTheme.nebula => t('Mgławica'),
+    AppAccentTheme.plum => t('Śliwka'),
+    AppAccentTheme.synthwave => t('Synthwave'),
+    AppAccentTheme.sakura => t('Sakura'),
+    AppAccentTheme.ruby => t('Rubin'),
+    AppAccentTheme.magma => t('Magma'),
+    AppAccentTheme.rust => t('Rdza'),
+    AppAccentTheme.coral => t('Koral'),
+    AppAccentTheme.solaris => t('Solaris'),
+    AppAccentTheme.honey => t('Miód'),
+    AppAccentTheme.voltage => t('Napięcie'),
+    AppAccentTheme.amberCrt => t('Bursztyn'),
+    AppAccentTheme.nocturne => t('Nokturn'),
+    AppAccentTheme.fjord => t('Fiord'),
   };
 
   /// One-line character sketch shown under the name in the picker.
   String get tagline => switch (this) {
-    AppAccentTheme.graphite => 'stal / tusz',
-    AppAccentTheme.paper => 'sepia / atrament',
-    AppAccentTheme.carbon => 'czern / biel',
-    AppAccentTheme.terminal => 'fosfor / bursztyn',
-    AppAccentTheme.jade => 'jadeit / mieta',
-    AppAccentTheme.moss => 'oliwka / mech',
-    AppAccentTheme.aurora => 'turkus / fiolet',
-    AppAccentTheme.arctic => 'lod / blekit',
-    AppAccentTheme.lagoon => 'laguna / piasek',
-    AppAccentTheme.cobalt => 'blekit / indygo',
-    AppAccentTheme.abyss => 'glebia / stal',
-    AppAccentTheme.denim => 'denim / tan',
-    AppAccentTheme.amethyst => 'ametyst / fuksja',
-    AppAccentTheme.nebula => 'fiolet / roz / cyjan',
-    AppAccentTheme.plum => 'sliwka / mauve',
-    AppAccentTheme.synthwave => 'magenta / cyjan',
-    AppAccentTheme.sakura => 'kwiat wisni',
-    AppAccentTheme.ruby => 'rubin / zloto',
-    AppAccentTheme.magma => 'lawa / rubin',
-    AppAccentTheme.rust => 'rdza / miedz',
-    AppAccentTheme.coral => 'koral / brzoskwinia',
-    AppAccentTheme.solaris => 'zloto / niebo',
-    AppAccentTheme.honey => 'miod / krem',
-    AppAccentTheme.voltage => 'kwas / limonka',
-    AppAccentTheme.amberCrt => 'bursztynowy CRT',
-    AppAccentTheme.nocturne => 'noc / neon',
-    AppAccentTheme.fjord => 'fiord / szron',
+    AppAccentTheme.graphite => t('stal / tusz'),
+    AppAccentTheme.paper => t('sepia / atrament'),
+    AppAccentTheme.carbon => t('czerń / biel'),
+    AppAccentTheme.terminal => t('fosfor / bursztyn'),
+    AppAccentTheme.jade => t('jadeit / mięta'),
+    AppAccentTheme.moss => t('oliwka / mech'),
+    AppAccentTheme.aurora => t('turkus / fiolet'),
+    AppAccentTheme.arctic => t('lód / błękit'),
+    AppAccentTheme.lagoon => t('laguna / piasek'),
+    AppAccentTheme.cobalt => t('błękit / indygo'),
+    AppAccentTheme.abyss => t('głębia / stal'),
+    AppAccentTheme.denim => t('denim / tan'),
+    AppAccentTheme.amethyst => t('ametyst / fuksja'),
+    AppAccentTheme.nebula => t('fiolet / róż / cyjan'),
+    AppAccentTheme.plum => t('śliwka / mauve'),
+    AppAccentTheme.synthwave => t('magenta / cyjan'),
+    AppAccentTheme.sakura => t('kwiat wiśni'),
+    AppAccentTheme.ruby => t('rubin / złoto'),
+    AppAccentTheme.magma => t('lawa / rubin'),
+    AppAccentTheme.rust => t('rdza / miedź'),
+    AppAccentTheme.coral => t('koral / brzoskwinia'),
+    AppAccentTheme.solaris => t('złoto / niebo'),
+    AppAccentTheme.honey => t('miód / krem'),
+    AppAccentTheme.voltage => t('kwas / limonka'),
+    AppAccentTheme.amberCrt => t('bursztynowy CRT'),
+    AppAccentTheme.nocturne => t('noc / neon'),
+    AppAccentTheme.fjord => t('fiord / szron'),
   };
 
   static AppAccentTheme fromStorageId(int value) {
@@ -276,8 +285,9 @@ final class AppSettings {
     seconds: normalizeNotificationDelaySeconds(notificationDelaySeconds),
   );
 
-  String get inboxLimitLabel =>
-      inboxUnlimited ? 'Bez limitu' : '$inboxLimitMb MB';
+  String get inboxLimitLabel => inboxUnlimited
+      ? t('Bez limitu')
+      : t('{size} MB', <String, Object?>{'size': inboxLimitMb});
 
   AppSettings copyWith({
     int? inboxLimitMb,

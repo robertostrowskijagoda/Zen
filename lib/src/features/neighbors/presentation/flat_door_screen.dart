@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -37,7 +38,7 @@ class FlatDoorScreen extends ConsumerStatefulWidget {
 class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
   final GlobalKey _sticker = GlobalKey();
   final TextEditingController _line = TextEditingController(
-    text: 'Zeskanuj — zapraszamy na kawę!',
+    text: t('Zeskanuj — zapraszamy na kawę!'),
   );
 
   @override
@@ -67,7 +68,7 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
       String? target;
       if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
         target = await FilePicker.platform.saveFile(
-          dialogTitle: 'Zapisz naklejkę',
+          dialogTitle: t('Zapisz naklejkę'),
           fileName: name,
         );
       } else {
@@ -89,7 +90,9 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Zapisano: $target — wydrukuj w formacie A6.'),
+            content: Text(
+              t('Zapisano: {path} — wydrukuj w formacie A6.', {'path': target}),
+            ),
           ),
         );
       }
@@ -102,20 +105,22 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('Nowy kod?'),
-        content: const Text(
-          'Stary kod przestanie działać (np. po przeprowadzce albo gdy '
-          'trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, '
-          'zostają. Trzeba będzie wydrukować nową naklejkę.',
+        title: Text(t('Nowy kod?')),
+        content: Text(
+          t(
+            'Stary kod przestanie działać (np. po przeprowadzce albo gdy '
+            'trafił w niepowołane ręce). Sąsiedzi, którzy już Was mają, '
+            'zostają. Trzeba będzie wydrukować nową naklejkę.',
+          ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Nowy kod'),
+            child: Text(t('Nowy kod')),
           ),
         ],
       ),
@@ -130,19 +135,21 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
     final NeighborsService service = ref.watch(neighborsServiceProvider);
     return Scaffold(
       key: const Key('flat-door-screen'),
-      appBar: AppBar(title: const Text('Kod na drzwi')),
+      appBar: AppBar(title: Text(t('Kod na drzwi'))),
       body: ListenableBuilder(
         listenable: service,
         builder: (BuildContext context, Widget? _) {
           final FlatDoorCode? code = service.doorCode;
           if (code == null) {
-            return const Center(
+            return Center(
               child: SingleChildScrollView(
                 child: ZenEmpty(
                   icon: Icons.home_work_rounded,
-                  title: 'Najpierw profil mieszkania',
-                  text:
-                      'Załóżcie profil w zakładce Sąsiedzi — wtedy pojawi się tu kod na drzwi i domownicy.',
+                  title: t('Najpierw profil mieszkania'),
+                  text: t(
+                    'Załóżcie profil w zakładce Sąsiedzi — wtedy pojawi się '
+                    'tu kod na drzwi i domownicy.',
+                  ),
                 ),
               ),
             );
@@ -200,7 +207,7 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
               const SizedBox(height: 8),
               Center(
                 child: Text(
-                  'Podgląd naklejki (A6)',
+                  t('Podgląd naklejki (A6)'),
                   style: TextStyle(color: zen.textMuted, fontSize: 12.5),
                 ),
               ),
@@ -209,10 +216,10 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
                 controller: _line,
                 maxLength: 60,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Hasło na naklejce',
-                  hintText: 'Zeskanuj — zapraszamy na kawę!',
-                  prefixIcon: Icon(Icons.edit_rounded),
+                decoration: InputDecoration(
+                  labelText: t('Hasło na naklejce'),
+                  hintText: t('Zeskanuj — zapraszamy na kawę!'),
+                  prefixIcon: const Icon(Icons.edit_rounded),
                 ),
                 onChanged: (_) => setState(() {}),
               ),
@@ -224,7 +231,7 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
                 ),
                 onPressed: () => unawaited(_save()),
                 icon: const Icon(Icons.print_rounded),
-                label: const Text('Zapisz naklejkę'),
+                label: Text(t('Zapisz naklejkę')),
               ),
               const SizedBox(height: 10),
               Wrap(
@@ -236,13 +243,13 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
                     // Cleared from the clipboard after a minute (§14.1).
                     onPressed: () => unawaited(copyWithExpiry(qr)),
                     icon: const Icon(Icons.copy_rounded),
-                    label: const Text('Kopiuj kod'),
+                    label: Text(t('Kopiuj kod')),
                   ),
                   OutlinedButton.icon(
                     key: const Key('flat-door-new'),
                     onPressed: () => unawaited(_newDoor(service)),
                     icon: const Icon(Icons.autorenew_rounded),
-                    label: const Text('Nowy kod'),
+                    label: Text(t('Nowy kod')),
                   ),
                 ],
               ),
@@ -250,12 +257,13 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
               ZenInfo(
                 icon: Icons.shield_outlined,
                 tone: tone,
-                title: 'Co jest w kodzie?',
-                text:
-                    'Klucz mieszkania i adres, pod który pukać — nie Wasze '
-                    'konta. Kto go zeskanuje, wysyła Wam swój profil '
-                    'mieszkania i dostaje Wasz. Sąsiad bez aplikacji dostanie '
-                    'ją od kogoś, kto ją ma („Podaj dalej”).',
+                title: t('Co jest w kodzie?'),
+                text: t(
+                  'Klucz mieszkania i adres, pod który pukać — nie Wasze '
+                  'konta. Kto go zeskanuje, wysyła Wam swój profil '
+                  'mieszkania i dostaje Wasz. Sąsiad bez aplikacji dostanie '
+                  'ją od kogoś, kto ją ma („Podaj dalej”).',
+                ),
               ),
             ],
           );
@@ -295,18 +303,18 @@ class _Sticker extends StatelessWidget {
                 color: const Color(0xFFF1F1F1),
                 borderRadius: BorderRadius.circular(999),
               ),
-              child: const Row(
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Icon(
+                  const Icon(
                     Icons.door_front_door_rounded,
                     size: 13,
                     color: Color(0xFF555555),
                   ),
-                  SizedBox(width: 5),
+                  const SizedBox(width: 5),
                   Text(
-                    'SĄSIEDZI',
-                    style: TextStyle(
+                    t('SĄSIEDZI'),
+                    style: const TextStyle(
                       color: Color(0xFF555555),
                       fontSize: 11,
                       fontWeight: FontWeight.w800,
@@ -346,9 +354,9 @@ class _Sticker extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 6),
-            const Text(
-              'Zen · sąsiedzi',
-              style: TextStyle(color: Color(0xFF8A8A8A), fontSize: 12),
+            Text(
+              t('Zen · sąsiedzi'),
+              style: const TextStyle(color: Color(0xFF8A8A8A), fontSize: 12),
             ),
           ],
         ),
@@ -380,25 +388,27 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('Przeprowadzka'),
+        title: Text(t('Przeprowadzka')),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              const Text(
-                'Kod na drzwiach przestanie działać, a sąsiedzi dostaną '
-                'informację, że się wyprowadziliście, i znikną z Waszej listy. '
-                'Zaproszenia i oferty też znikną. Zostajecie Wy: nazwa, '
-                'domownicy i „O nas”. Nowi lokatorzy założą własny profil od '
-                'zera.',
+              Text(
+                t(
+                  'Kod na drzwiach przestanie działać, a sąsiedzi dostaną '
+                  'informację, że się wyprowadziliście, i znikną z Waszej '
+                  'listy. Zaproszenia i oferty też znikną. Zostajecie Wy: '
+                  'nazwa, domownicy i „O nas”. Nowi lokatorzy założą własny '
+                  'profil od zera.',
+                ),
               ),
               TextField(
                 key: const Key('flat-new-place'),
                 controller: place,
                 maxLength: 80,
-                decoration: const InputDecoration(
-                  labelText: 'Nowe miejsce (można później)',
-                  prefixIcon: Icon(Icons.apartment_rounded),
+                decoration: InputDecoration(
+                  labelText: t('Nowe miejsce (można później)'),
+                  prefixIcon: const Icon(Icons.apartment_rounded),
                 ),
               ),
             ],
@@ -407,12 +417,12 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             key: const Key('flat-move-out-ok'),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Przeprowadzamy się'),
+            child: Text(t('Przeprowadzamy się')),
           ),
         ],
       ),
@@ -423,10 +433,12 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
       await service.moveOut(newPlace: newPlace);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'Gotowe. Zdejmijcie starą naklejkę; nową wydrukujecie '
-              'w „Kod na drzwi”.',
+              t(
+                'Gotowe. Zdejmijcie starą naklejkę; nową wydrukujecie '
+                'w „Kod na drzwi”.',
+              ),
             ),
           ),
         );
@@ -448,18 +460,31 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
           Icons.person_remove_rounded,
           color: ZenColors.of(context).danger,
         ),
-        title: Text('Odłączyć „$name”?'),
+        title: Text(t('Odłączyć „{name}”?', {'name': name})),
         content: Text(
-          'Gdy zgodzi się większość pozostałych domowników '
-          '(${needed == 1 ? 'wystarczy Twój głos' : 'potrzeba $needed głosów'}), '
-          'mieszkanie dostanie nowy klucz i nowy kod na drzwi, a ten telefon '
-          'zostanie bez dostępu. Sąsiedzi dostaną informację. Starą naklejkę '
-          'trzeba będzie wymienić.',
+          tn(
+            needed,
+            one:
+                'Gdy zgodzi się większość pozostałych domowników '
+                '(wystarczy Twój głos), mieszkanie dostanie nowy klucz i nowy '
+                'kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi '
+                'dostaną informację. Starą naklejkę trzeba będzie wymienić.',
+            few:
+                'Gdy zgodzi się większość pozostałych domowników '
+                '(potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy '
+                'kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi '
+                'dostaną informację. Starą naklejkę trzeba będzie wymienić.',
+            many:
+                'Gdy zgodzi się większość pozostałych domowników '
+                '(potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy '
+                'kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi '
+                'dostaną informację. Starą naklejkę trzeba będzie wymienić.',
+          ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             key: const Key('flat-remove-ok'),
@@ -470,7 +495,7 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
               ),
             ),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Głosuję za'),
+            child: Text(t('Głosuję za')),
           ),
         ],
       ),
@@ -484,20 +509,22 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: const Text('Odłączyć ten telefon?'),
-        content: const Text(
-          'Ten telefon przestanie być domownikiem (np. ktoś się wyprowadza '
-          'sam). Pozostali zachowają profil, sąsiadów i wiadomości. Jeśli '
-          'to ostatni telefon, profil zniknie.',
+        title: Text(t('Odłączyć ten telefon?')),
+        content: Text(
+          t(
+            'Ten telefon przestanie być domownikiem (np. ktoś się wyprowadza '
+            'sam). Pozostali zachowają profil, sąsiadów i wiadomości. Jeśli '
+            'to ostatni telefon, profil zniknie.',
+          ),
         ),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Anuluj'),
+            child: Text(t('Anuluj')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Opuść'),
+            child: Text(t('Opuść')),
           ),
         ],
       ),
@@ -515,20 +542,22 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
     final NeighborsService service = ref.watch(neighborsServiceProvider);
     return Scaffold(
       key: const Key('flat-home-screen'),
-      appBar: AppBar(title: const Text('Domownicy')),
+      appBar: AppBar(title: Text(t('Domownicy'))),
       body: ListenableBuilder(
         listenable: service,
         builder: (BuildContext context, Widget? _) {
           final FlatHomeCode? code = service.homeCode;
           final FlatProfile? p = service.profile;
           if (code == null || p == null) {
-            return const Center(
+            return Center(
               child: SingleChildScrollView(
                 child: ZenEmpty(
                   icon: Icons.home_work_rounded,
-                  title: 'Najpierw profil mieszkania',
-                  text:
-                      'Załóżcie profil w zakładce Sąsiedzi — wtedy pojawi się tu kod na drzwi i domownicy.',
+                  title: t('Najpierw profil mieszkania'),
+                  text: t(
+                    'Załóżcie profil w zakładce Sąsiedzi — wtedy pojawi się '
+                    'tu kod na drzwi i domownicy.',
+                  ),
                 ),
               ),
             );
@@ -539,16 +568,19 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
             children: <Widget>[
               ZenHero(
-                title: 'Wasz dom w telefonach',
+                title: t('Wasz dom w telefonach'),
                 icon: Icons.family_restroom_rounded,
                 tone: tone,
-                text:
-                    'Każdy domownik może zmieniać profil, zapraszać i odpisywać '
-                    'sąsiadom. Żeby dodać kolejnego, niech zeskanuje ten kod '
-                    'w „Sąsiedzi → Dołącz”.',
+                text: t(
+                  'Każdy domownik może zmieniać profil, zapraszać i odpisywać '
+                  'sąsiadom. Żeby dodać kolejnego, niech zeskanuje ten kod '
+                  'w „Sąsiedzi → Dołącz”.',
+                ),
                 actions: <Widget>[
                   ZenPill(
-                    text: 'Telefony domowników: ${p.members.length}',
+                    text: t('Telefony domowników: {count}', {
+                      'count': p.members.length,
+                    }),
                     tone: tone,
                     icon: Icons.phone_android_rounded,
                   ),
@@ -557,9 +589,10 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
               ZenInfo(
                 icon: Icons.warning_amber_rounded,
                 tone: zen.danger,
-                text:
-                    'Pokazuj go tylko w mieszkaniu: kto go zeskanuje, staje się '
-                    'domownikiem.',
+                text: t(
+                  'Pokazuj go tylko w mieszkaniu: kto go zeskanuje, staje się '
+                  'domownikiem.',
+                ),
               ),
               const SizedBox(height: 12),
               if (_show)
@@ -590,7 +623,7 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                   ),
                   onPressed: () => setState(() => _show = true),
                   icon: const Icon(Icons.qr_code_rounded),
-                  label: const Text('Pokaż kod domownika'),
+                  label: Text(t('Pokaż kod domownika')),
                 ),
               if (_show && !Platform.isAndroid && !Platform.isIOS) ...<Widget>[
                 const SizedBox(height: 8),
@@ -600,11 +633,11 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                     // minute (§14.1).
                     onPressed: () => unawaited(copyWithExpiry(code.toQr())),
                     icon: const Icon(Icons.copy_rounded),
-                    label: const Text('Kopiuj kod (dla komputera domownika)'),
+                    label: Text(t('Kopiuj kod (dla komputera domownika)')),
                   ),
                 ),
               ],
-              const ZenSection('Telefony domowników', top: 28),
+              ZenSection(t('Telefony domowników'), top: 28),
               ZenGroup(
                 children: <Widget>[
                   for (final String m in p.members)
@@ -615,10 +648,14 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                         );
                         final String known = service.residentName(m);
                         final String name = m == own
-                            ? 'Ten telefon'
+                            ? t('Ten telefon')
                             : known.isNotEmpty
                             ? known
-                            : 'Telefon …${m.length > 4 ? m.substring(m.length - 4) : m}';
+                            : t('Telefon …{suffix}', {
+                                'suffix': m.length > 4
+                                    ? m.substring(m.length - 4)
+                                    : m,
+                              });
                         final Set<String> votes = service.votesFor(m);
                         final bool voted = votes.contains(own);
                         return ListTile(
@@ -637,8 +674,13 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                           subtitle: votes.isEmpty
                               ? null
                               : Text(
-                                  'Głosy za odłączeniem: ${votes.length} '
-                                  'z ${service.votesNeeded(m)}',
+                                  t(
+                                    'Głosy za odłączeniem: {votes} z {needed}',
+                                    {
+                                      'votes': votes.length,
+                                      'needed': service.votesNeeded(m),
+                                    },
+                                  ),
                                 ),
                           trailing: m == own
                               ? null
@@ -646,11 +688,11 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                               ? TextButton(
                                   onPressed: () =>
                                       unawaited(service.withdrawVote(m)),
-                                  child: const Text('Cofnij'),
+                                  child: Text(t('Cofnij')),
                                 )
                               : IconButton(
                                   key: Key('flat-remove-$m'),
-                                  tooltip: 'Odłącz ten telefon',
+                                  tooltip: t('Odłącz ten telefon'),
                                   icon: Icon(
                                     Icons.person_remove_rounded,
                                     color: zen.danger,
@@ -663,22 +705,23 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                     ),
                 ],
               ),
-              const ZenSection('Zmiany', top: 28),
+              ZenSection(t('Zmiany'), top: 28),
               ZenTile(
                 key: const Key('flat-move-out'),
                 icon: Icons.local_shipping_rounded,
                 tone: zen.warning,
-                title: 'Przeprowadzka',
-                subtitle:
-                    'Przeprowadzamy się — nowy kod, lista sąsiadów znika.',
+                title: t('Przeprowadzka'),
+                subtitle: t(
+                  'Przeprowadzamy się — nowy kod, lista sąsiadów znika.',
+                ),
                 onTap: () => unawaited(_moveOut(service)),
               ),
               ZenTile(
                 key: const Key('flat-leave'),
                 icon: Icons.logout_rounded,
                 tone: zen.danger,
-                title: 'Odłącz ten telefon',
-                subtitle: 'Ten telefon już tu nie mieszka.',
+                title: t('Odłącz ten telefon'),
+                subtitle: t('Ten telefon już tu nie mieszka.'),
                 onTap: () => unawaited(_leave(service)),
               ),
             ],

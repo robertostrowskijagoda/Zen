@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/events/event_model.dart';
@@ -296,13 +297,14 @@ final class TableService extends ChangeNotifier {
     String place = '',
   }) async {
     return events.create(
-      title: 'Stół na sześć — $city',
+      title: t('Stół na sześć — {city}', {'city': city}),
       kind: EventKind.table,
       startsAt: when.millisecondsSinceEpoch,
       place: place,
-      description:
-          'Kolacja dla sześciu osób połączonych przez znajomych. Każdy zna '
-          'kogoś, kto zna gospodarza.',
+      description: t(
+        'Kolacja dla sześciu osób połączonych przez znajomych. Każdy zna '
+        'kogoś, kto zna gospodarza.',
+      ),
       capacity: 6,
       askForPlusOne: false,
       invite: <String>[for (final TableWish g in guests) g.address],

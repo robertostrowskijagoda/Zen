@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 
 /// What records calls on this device (§13.2), for 1:1 and group calls:
 /// - Android: flutter_webrtc's recorder — what you hear, plus the other
@@ -61,7 +62,7 @@ final class UnavailableCallRecorder implements CallRecorder {
   @override
   Future<void> start(String path, {MediaStreamTrack? video}) =>
       throw UnsupportedError(
-        'Nagrywanie rozmów nie jest jeszcze dostępne na tym urządzeniu.',
+        t('Nagrywanie rozmów nie jest jeszcze dostępne na tym urządzeniu.'),
       );
 
   @override
@@ -135,10 +136,12 @@ final class WindowsCallRecorder implements CallRecorder {
         'path': path,
       });
     } on PlatformException catch (e) {
-      throw StateError('Nie udało się zacząć nagrywania: ${e.message}');
+      throw StateError(
+        t('Nie udało się zacząć nagrywania: {error}', {'error': e.message}),
+      );
     } on MissingPluginException {
       throw UnsupportedError(
-        'Ta wersja aplikacji nie umie nagrywać — zaktualizuj ją.',
+        t('Ta wersja aplikacji nie umie nagrywać — zaktualizuj ją.'),
       );
     }
     _recording = true;

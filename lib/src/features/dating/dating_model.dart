@@ -1,19 +1,25 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 
 /// Gender on a dating profile (§19.1).
 enum DatingGender {
-  woman('k', 'kobieta'),
-  man('m', 'mężczyzna'),
-  other('i', 'inna osoba');
+  woman('k'),
+  man('m'),
+  other('i');
 
-  const DatingGender(this.code, this.label);
+  const DatingGender(this.code);
 
   final String code;
-  final String label;
+
+  String get label => switch (this) {
+    DatingGender.woman => t('kobieta'),
+    DatingGender.man => t('mężczyzna'),
+    DatingGender.other => t('inna osoba'),
+  };
 
   static DatingGender? byCode(Object? code) {
     for (final DatingGender g in values) {

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/app.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
@@ -27,6 +28,15 @@ String _clock(int millis) {
   final DateTime d = DateTime.fromMillisecondsSinceEpoch(millis);
   String two(int v) => v.toString().padLeft(2, '0');
   return '${two(d.hour)}:${two(d.minute)}';
+}
+
+/// How sure a position is, shown after it: " (±12 m)", or nothing.
+String _accuracy(double? accuracy) {
+  if (accuracy == null) {
+    return '';
+  }
+  final String meters = t('±{meters} m', {'meters': accuracy.round()});
+  return ' ($meters)';
 }
 
 /// Keeps sending the position while this person's alarm runs (every
@@ -98,12 +108,12 @@ Widget _call112Button(BuildContext context, {bool onRed = false}) =>
       onPressed: () async {
         if (!await openDialer('112') && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Zadzwoń na 112 z telefonu.')),
+            SnackBar(content: Text(t('Zadzwoń na 112 z telefonu.'))),
           );
         }
       },
       icon: const Icon(Icons.phone_rounded),
-      label: const Text('Zadzwoń na 112'),
+      label: Text(t('Zadzwoń na 112')),
     );
 
 /// "Alarm" (§16.3): hold the button for 3 seconds and the closest friends
@@ -159,8 +169,8 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
   Future<void> _end(MeetService service) async {
     final String? pin = await _askPin(
       context,
-      title: 'Jestem bezpieczny(-a)',
-      hint: 'Wpisz PIN alarmu',
+      title: t('Jestem bezpieczny(-a)'),
+      hint: t('Wpisz PIN alarmu'),
     );
     if (pin == null) {
       return;
@@ -169,7 +179,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
     if (result == AlarmEndResult.wrongPin) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Zły PIN. Spróbuj jeszcze raz.')),
+          SnackBar(content: Text(t('Zły PIN. Spróbuj jeszcze raz.'))),
         );
       }
       return;
@@ -179,7 +189,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
     if (mounted) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Alarm odwołany.')));
+      ).showSnackBar(SnackBar(content: Text(t('Alarm odwołany.'))));
     }
   }
 
@@ -192,7 +202,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
         final AlarmRecord? own = service.book.ownActiveAlarm;
         return Scaffold(
           key: const Key('alarm-screen'),
-          appBar: const ZenSectionBar(title: 'Alarm'),
+          appBar: ZenSectionBar(title: t('Alarm')),
           body: !service.hasAlarmPin
               ? _PinSetup(service: service)
               : own != null
@@ -213,14 +223,20 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
         ZenInfo(
           icon: to.isEmpty ? Icons.group_off_rounded : Icons.groups_rounded,
           tone: to.isEmpty ? zen.warning : zen.danger,
-          title: to.isEmpty ? 'Nie ma do kogo wysłać' : 'Kto dostanie alarm',
+          title: to.isEmpty
+              ? t('Nie ma do kogo wysłać')
+              : t('Kto dostanie alarm'),
           text: to.isEmpty
-              ? 'Nie masz jeszcze znajomych, do których alarm mógłby pójść.'
+              ? t('Nie masz jeszcze znajomych, do których alarm mógłby pójść.')
               : onlyClose
-              ? 'Alarm dostaną przyjaciele: '
-                    '${to.map(service.host.nameOf).join(', ')}.'
-              : 'Nie masz nikogo oznaczonego jako przyjaciel, więc alarm '
-                    'dostaną wszyscy znajomi (${to.length}).',
+              ? t('Alarm dostaną przyjaciele: {names}.', {
+                  'names': to.map(service.host.nameOf).join(', '),
+                })
+              : t(
+                  'Nie masz nikogo oznaczonego jako przyjaciel, więc alarm '
+                  'dostaną wszyscy znajomi ({count}).',
+                  {'count': to.length},
+                ),
         ),
         const SizedBox(height: 24),
         Center(
@@ -308,8 +324,8 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                               fit: BoxFit.scaleDown,
                               child: Text(
                                 _sending
-                                    ? 'Wysyłam…'
-                                    : 'Przytrzymaj\n3 sekundy',
+                                    ? t('Wysyłam…')
+                                    : t('Przytrzymaj\n3 sekundy'),
                                 textAlign: TextAlign.center,
                                 style: zen.display(
                                   color: Colors.white,
@@ -335,10 +351,10 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
           maxLength: 140,
           textCapitalization: TextCapitalization.sentences,
           enableIMEPersonalizedLearning: false,
-          decoration: const InputDecoration(
-            labelText: 'Co się dzieje? (nie trzeba)',
-            hintText: 'np. Ktoś za mną idzie',
-            prefixIcon: Icon(Icons.edit_note_rounded),
+          decoration: InputDecoration(
+            labelText: t('Co się dzieje? (nie trzeba)'),
+            hintText: t('np. Ktoś za mną idzie'),
+            prefixIcon: const Icon(Icons.edit_note_rounded),
           ),
         ),
         const SizedBox(height: 4),
@@ -348,10 +364,12 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
               key: const Key('alarm-audio-toggle'),
               value: service.book.alarmRecordAudio,
               secondary: const Icon(Icons.mic_rounded),
-              title: const Text('Nagrywaj dźwięk'),
-              subtitle: const Text(
-                'Przy alarmie telefon nagrywa otoczenie (kawałki po 20 s) '
-                'i wysyła je tym samym przyjaciołom.',
+              title: Text(t('Nagrywaj dźwięk')),
+              subtitle: Text(
+                t(
+                  'Przy alarmie telefon nagrywa otoczenie (kawałki po 20 s) '
+                  'i wysyła je tym samym przyjaciołom.',
+                ),
               ),
               onChanged: (bool v) => unawaited(service.setAlarmRecordAudio(v)),
             ),
@@ -359,11 +377,13 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
               key: const Key('alarm-nearby-toggle'),
               value: service.book.alarmNearby,
               secondary: const Icon(Icons.bluetooth_searching_rounded),
-              title: const Text('Powiadom ludzi w pobliżu'),
-              subtitle: const Text(
-                'Przez Bluetooth: znajomi obok zobaczą, że to Ty, inni tylko '
-                '„ktoś w pobliżu potrzebuje pomocy”. Twój telefon odbiera też '
-                'takie alarmy od innych, nawet gdy Zen jest zamknięty.',
+              title: Text(t('Powiadom ludzi w pobliżu')),
+              subtitle: Text(
+                t(
+                  'Przez Bluetooth: znajomi obok zobaczą, że to Ty, inni tylko '
+                  '„ktoś w pobliżu potrzebuje pomocy”. Twój telefon odbiera '
+                  'też takie alarmy od innych, nawet gdy Zen jest zamknięty.',
+                ),
               ),
               onChanged: (bool v) => unawaited(service.setAlarmNearby(v)),
             ),
@@ -372,12 +392,14 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                 key: const Key('alarm-power-toggle'),
                 value: service.book.alarmPowerButton,
                 secondary: const Icon(Icons.power_settings_new_rounded),
-                title: const Text('Skrót: 5× przycisk zasilania'),
-                subtitle: const Text(
-                  'Naciśnij szybko 5 razy przycisk zasilania (w ciągu ok. '
-                  '4 s), także przy wygaszonym ekranie i zamkniętym Zen. '
-                  'Alarm pójdzie jak z przycisku, a telefon zawibruje '
-                  '(długo–krótko–długo). Odwołasz go tylko PIN-em.',
+                title: Text(t('Skrót: 5× przycisk zasilania')),
+                subtitle: Text(
+                  t(
+                    'Naciśnij szybko 5 razy przycisk zasilania (w ciągu ok. '
+                    '4 s), także przy wygaszonym ekranie i zamkniętym Zen. '
+                    'Alarm pójdzie jak z przycisku, a telefon zawibruje '
+                    '(długo–krótko–długo). Odwołasz go tylko PIN-em.',
+                  ),
                 ),
                 onChanged: (bool v) =>
                     unawaited(service.setAlarmPowerButton(v)),
@@ -388,32 +410,34 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
           ZenInfo(
             icon: Icons.warning_amber_rounded,
             tone: zen.warning,
-            title: 'Sprawdź ustawienia telefonu',
-            text:
-                'Na wielu telefonach 5× przycisk zasilania włącza też '
-                'systemowe „Alarmowe SOS”, które może samo zadzwonić na 112. '
-                'Zdecyduj w ustawieniach Androida, czy ma działać razem z '
-                'alarmem Zen. Skrót działa, dopóki Zen działa w tle; po '
-                'restarcie telefonu z hasłem do Zen — dopiero po '
-                'odblokowaniu aplikacji.',
+            title: t('Sprawdź ustawienia telefonu'),
+            text: t(
+              'Na wielu telefonach 5× przycisk zasilania włącza też '
+              'systemowe „Alarmowe SOS”, które może samo zadzwonić na 112. '
+              'Zdecyduj w ustawieniach Androida, czy ma działać razem z '
+              'alarmem Zen. Skrót działa, dopóki Zen działa w tle; po '
+              'restarcie telefonu z hasłem do Zen — dopiero po '
+              'odblokowaniu aplikacji.',
+            ),
           ),
         const SizedBox(height: 4),
         ZenInfo(
           icon: Icons.info_outline_rounded,
           tone: zenTone(zen, 1),
-          title: 'Jak to działa',
-          text:
-              'Alarm przebija tryb „nie przeszkadzać” i dzwoni u przyjaciół jak '
-              'połączenie. Wysyła Twoje położenie (tylko teraz, tylko im) i '
-              'odświeża je co minutę. Odwołasz go swoim PIN-em. PIN paniczny '
-              'też go odwołuje na ekranie, ale przyjaciele dostają wtedy '
-              'ostrzeżenie, że możesz być zmuszony(-a).',
+          title: t('Jak to działa'),
+          text: t(
+            'Alarm przebija tryb „nie przeszkadzać” i dzwoni u przyjaciół jak '
+            'połączenie. Wysyła Twoje położenie (tylko teraz, tylko im) i '
+            'odświeża je co minutę. Odwołasz go swoim PIN-em. PIN paniczny '
+            'też go odwołuje na ekranie, ale przyjaciele dostają wtedy '
+            'ostrzeżenie, że możesz być zmuszony(-a).',
+          ),
         ),
         const SizedBox(height: 16),
         _call112Button(context),
         const SizedBox(height: 8),
         Text(
-          'To nie zastępuje 112.',
+          t('To nie zastępuje 112.'),
           textAlign: TextAlign.center,
           style: TextStyle(color: zen.textMuted, fontSize: 12.5),
         ),
@@ -457,7 +481,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(
-                      'Alarm wysłany o ${_clock(a.at)}',
+                      t('Alarm wysłany o {time}', {'time': _clock(a.at)}),
                       style: zen.display(
                         color: Colors.white,
                         size: 20,
@@ -467,9 +491,11 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                     const SizedBox(height: 4),
                     Text(
                       a.hasLocation
-                          ? 'Położenie wysłane o ${_clock(a.locatedAt ?? a.at)}'
-                                '${a.accuracy == null ? '' : ' (±${a.accuracy!.round()} m)'}'
-                          : 'Szukam położenia…',
+                          ? t('Położenie wysłane o {time}', {
+                                  'time': _clock(a.locatedAt ?? a.at),
+                                }) +
+                                _accuracy(a.accuracy)
+                          : t('Szukam położenia…'),
                       style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 13.5,
@@ -493,13 +519,15 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                     children: <Widget>[
                       if (on)
                         ZenPill(
-                          text: 'Nagrywam dźwięk…',
+                          text: t('Nagrywam dźwięk…'),
                           tone: zen.danger,
                           icon: Icons.mic_rounded,
                         ),
                       if (a.clips.isNotEmpty)
                         ZenPill(
-                          text: 'Wysłane nagrania: ${a.clips.length}',
+                          text: t('Wysłane nagrania: {count}', {
+                            'count': a.clips.length,
+                          }),
                           tone: zen.textSecondary,
                           icon: Icons.graphic_eq_rounded,
                         ),
@@ -511,14 +539,14 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
         // Who got it (§16.3): an alarm raised before confirmations existed
         // (no list of whom it went to) shows only the answers.
         if (a.sentTo.isNotEmpty) ...<Widget>[
-          const ZenSection('Kto dostał alarm'),
+          ZenSection(t('Kto dostał alarm')),
           _AlarmReachView(
             key: const Key('alarm-reach'),
             service: service,
             alarm: a,
           ),
         ] else ...<Widget>[
-          const ZenSection('Odpowiedzi'),
+          ZenSection(t('Odpowiedzi')),
           if (a.responses.isEmpty)
             ZenCard(
               child: Row(
@@ -534,7 +562,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Jeszcze nikt nie odpowiedział.',
+                      t('Jeszcze nikt nie odpowiedział.'),
                       style: TextStyle(color: zen.textSecondary),
                     ),
                   ),
@@ -580,7 +608,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
           ),
           onPressed: () => unawaited(_end(service)),
           icon: const Icon(Icons.verified_user_rounded),
-          label: const Text('Jestem bezpieczny(-a)'),
+          label: Text(t('Jestem bezpieczny(-a)')),
         ),
         const SizedBox(height: 10),
         _call112Button(context),
@@ -640,7 +668,7 @@ class _AlarmReachViewState extends State<_AlarmReachView> {
     setState(() => _resending = false);
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('Wysłano jeszcze raz.')));
+    ).showSnackBar(SnackBar(content: Text(t('Wysłano jeszcze raz.'))));
   }
 
   /// Where [f] is in the list: answers first, no confirmation last.
@@ -703,7 +731,10 @@ class _AlarmReachViewState extends State<_AlarmReachView> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Text(
-                          'Doręczono $delivered z $total',
+                          t('Doręczono {delivered} z {total}', {
+                            'delivered': delivered,
+                            'total': total,
+                          }),
                           key: const Key('alarm-reach-summary'),
                           style: zen.display(
                             color: zen.textPrimary,
@@ -713,7 +744,10 @@ class _AlarmReachViewState extends State<_AlarmReachView> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Zobaczyło: $seen · Odpowiedziało: ${a.responses.length}',
+                          t('Zobaczyło: {seen} · Odpowiedziało: {answered}', {
+                            'seen': seen,
+                            'answered': a.responses.length,
+                          }),
                           style: TextStyle(
                             color: zen.textSecondary,
                             fontSize: 13,
@@ -747,12 +781,14 @@ class _AlarmReachViewState extends State<_AlarmReachView> {
             key: const Key('alarm-not-confirmed'),
             icon: Icons.signal_wifi_off_rounded,
             tone: zen.warning,
-            title:
-                'Nie dotarło do: ${missing.map(service.host.nameOf).join(', ')}',
-            text:
-                'Ich telefony nie potwierdziły alarmu — mogą być wyłączone, '
-                'bez internetu albo mieć starszą wersję Zen. Wyślij jeszcze '
-                'raz, a jeśli możesz, zadzwoń do nich lub napisz SMS.',
+            title: t('Nie dotarło do: {names}', {
+              'names': missing.map(service.host.nameOf).join(', '),
+            }),
+            text: t(
+              'Ich telefony nie potwierdziły alarmu — mogą być wyłączone, '
+              'bez internetu albo mieć starszą wersję Zen. Wyślij jeszcze '
+              'raz, a jeśli możesz, zadzwoń do nich lub napisz SMS.',
+            ),
           ),
           Align(
             alignment: Alignment.centerLeft,
@@ -762,8 +798,8 @@ class _AlarmReachViewState extends State<_AlarmReachView> {
               icon: const Icon(Icons.refresh_rounded),
               label: Text(
                 missing.length == 1
-                    ? 'Wyślij jeszcze raz'
-                    : 'Wyślij do nich jeszcze raz',
+                    ? t('Wyślij jeszcze raz')
+                    : t('Wyślij do nich jeszcze raz'),
               ),
             ),
           ),
@@ -799,16 +835,16 @@ class _AlarmReachViewState extends State<_AlarmReachView> {
             : (Icons.schedule_rounded, zen.textMuted),
     };
     final List<String> steps = <String>[
-      if (gotAt != null) '✓ doręczony ${_clock(gotAt)}',
-      if (seenAt != null) '👁 zobaczył(a) ${_clock(seenAt)}',
+      if (gotAt != null) t('✓ doręczony {time}', {'time': _clock(gotAt)}),
+      if (seenAt != null) t('👁 zobaczył(a) {time}', {'time': _clock(seenAt)}),
     ];
     final String status = steps.isNotEmpty
         ? steps.join(' · ')
         : answer != null
-        ? '✓ doręczony'
+        ? t('✓ doręczony')
         : overdue
-        ? 'brak potwierdzenia'
-        : 'wysłany, czekam na potwierdzenie…';
+        ? t('brak potwierdzenia')
+        : t('wysłany, czekam na potwierdzenie…');
     return ListTile(
       key: Key('alarm-reach-$f'),
       leading: Container(
@@ -840,9 +876,9 @@ class _AlarmReachViewState extends State<_AlarmReachView> {
           ? null
           : ZenPill(
               text: switch (answer) {
-                AlarmResponse.coming => '🚗 jedzie',
-                AlarmResponse.calling => '📞 dzwoni',
-                AlarmResponse.cant => 'nie może',
+                AlarmResponse.coming => t('🚗 jedzie'),
+                AlarmResponse.calling => t('📞 dzwoni'),
+                AlarmResponse.cant => t('nie może'),
               },
               tone: answer == AlarmResponse.cant ? zen.textMuted : zen.success,
             ),
@@ -880,15 +916,15 @@ class _PinSetupState extends State<_PinSetup> {
     final String panic = _p.text.trim();
     final RegExp digits = RegExp(r'^\d{4,8}$');
     if (!digits.hasMatch(pin) || !digits.hasMatch(panic)) {
-      setState(() => _error = 'Każdy PIN to 4–8 cyfr.');
+      setState(() => _error = t('Każdy PIN to 4–8 cyfr.'));
       return;
     }
     if (pin != _b.text.trim() || panic != _q.text.trim()) {
-      setState(() => _error = 'Powtórzony PIN się nie zgadza.');
+      setState(() => _error = t('Powtórzony PIN się nie zgadza.'));
       return;
     }
     if (pin == panic) {
-      setState(() => _error = 'PIN paniczny musi być inny niż zwykły.');
+      setState(() => _error = t('PIN paniczny musi być inny niż zwykły.'));
       return;
     }
     await widget.service.setAlarmPin(pin, panic);
@@ -922,31 +958,33 @@ class _PinSetupState extends State<_PinSetup> {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: <Widget>[
         ZenHero(
-          title: 'Najpierw dwa PIN-y',
+          title: t('Najpierw dwa PIN-y'),
           icon: Icons.pin_rounded,
           tone: zen.danger,
-          text:
-              'Najpierw ustaw dwa PIN-y alarmu. Zwykły odwołuje alarm '
-              '(„Jestem bezpieczny”), więc napastnik nie zgasi go za Ciebie.',
+          text: t(
+            'Najpierw ustaw dwa PIN-y alarmu. Zwykły odwołuje alarm '
+            '(„Jestem bezpieczny”), więc napastnik nie zgasi go za Ciebie.',
+          ),
         ),
-        const ZenSection('Zwykły PIN', top: 12),
-        field('alarm-pin-1', _a, 'Zwykły PIN', Icons.lock_rounded),
-        field('alarm-pin-2', _b, 'Powtórz zwykły PIN', Icons.lock_rounded),
-        const ZenSection('PIN paniczny'),
+        ZenSection(t('Zwykły PIN'), top: 12),
+        field('alarm-pin-1', _a, t('Zwykły PIN'), Icons.lock_rounded),
+        field('alarm-pin-2', _b, t('Powtórz zwykły PIN'), Icons.lock_rounded),
+        ZenSection(t('PIN paniczny')),
         ZenInfo(
           icon: Icons.warning_amber_rounded,
           tone: zen.warning,
-          text:
-              'PIN paniczny wygląda tak samo — alarm znika z ekranu — ale '
-              'przyjaciele dostają ostrzeżenie, że ktoś Cię zmusza. Pomyłka '
-              '(inny PIN) niczego nie odwołuje, możesz wpisać jeszcze raz.',
+          text: t(
+            'PIN paniczny wygląda tak samo — alarm znika z ekranu — ale '
+            'przyjaciele dostają ostrzeżenie, że ktoś Cię zmusza. Pomyłka '
+            '(inny PIN) niczego nie odwołuje, możesz wpisać jeszcze raz.',
+          ),
         ),
         const SizedBox(height: 4),
-        field('alarm-panic-1', _p, 'PIN paniczny', Icons.shield_rounded),
+        field('alarm-panic-1', _p, t('PIN paniczny'), Icons.shield_rounded),
         field(
           'alarm-panic-2',
           _q,
-          'Powtórz PIN paniczny',
+          t('Powtórz PIN paniczny'),
           Icons.shield_rounded,
         ),
         if (_error != null)
@@ -961,7 +999,7 @@ class _PinSetupState extends State<_PinSetup> {
           style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
           onPressed: () => unawaited(_save()),
           icon: const Icon(Icons.check_rounded),
-          label: const Text('Zapisz PIN-y'),
+          label: Text(t('Zapisz PIN-y')),
         ),
       ],
     );
@@ -994,12 +1032,12 @@ Future<String?> _askPin(
       actions: <Widget>[
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Anuluj'),
+          child: Text(t('Anuluj')),
         ),
         FilledButton(
           key: const Key('alarm-pin-ok'),
           onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-          child: const Text('Odwołaj alarm'),
+          child: Text(t('Odwołaj alarm')),
         ),
       ],
     ),
@@ -1082,10 +1120,10 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
         if (a == null) {
           return Scaffold(
             appBar: AppBar(),
-            body: const Center(
+            body: Center(
               child: ZenEmpty(
                 icon: Icons.notifications_off_rounded,
-                title: 'Nie ma tego alarmu.',
+                title: t('Nie ma tego alarmu.'),
               ),
             ),
           );
@@ -1105,10 +1143,10 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
           appBar: AppBar(
             title: Text(
               a.isActive
-                  ? 'ALARM'
+                  ? t('ALARM')
                   : expired
-                  ? 'Alarm wygasł'
-                  : 'Alarm odwołany',
+                  ? t('Alarm wygasł')
+                  : t('Alarm odwołany'),
             ),
             backgroundColor: a.isActive ? _alarmRed : null,
             foregroundColor: a.isActive ? Colors.white : null,
@@ -1139,15 +1177,23 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
                         Expanded(
                           child: Text(
                             a.isActive
-                                ? '$name potrzebuje pomocy'
+                                ? t('{name} potrzebuje pomocy', {'name': name})
                                 : expired
-                                ? 'Alarm od $name przyszedł tylko przez '
-                                      'Bluetooth i wygasł. Nie wiadomo, czy '
-                                      'jest bezpieczny(-a) — zadzwoń.'
+                                ? t(
+                                    'Alarm od {name} przyszedł tylko przez '
+                                    'Bluetooth i wygasł. Nie wiadomo, czy '
+                                    'jest bezpieczny(-a) — zadzwoń.',
+                                    {'name': name},
+                                  )
                                 : a.duress
-                                ? '$name odwołał(a) alarm PIN-em panicznym — może być '
-                                      'do tego zmuszony(-a)'
-                                : '$name jest bezpieczny(-a)',
+                                ? t(
+                                    '{name} odwołał(a) alarm PIN-em panicznym '
+                                    '— może być do tego zmuszony(-a)',
+                                    {'name': name},
+                                  )
+                                : t('{name} jest bezpieczny(-a)', {
+                                    'name': name,
+                                  }),
                             style: zen.display(
                               color: zen.textPrimary,
                               size: 21,
@@ -1159,7 +1205,7 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
                     ),
                     const SizedBox(height: 10),
                     ZenPill(
-                      text: 'Od ${_clock(a.at)}',
+                      text: t('Od {time}', {'time': _clock(a.at)}),
                       tone: headTone,
                       icon: Icons.schedule_rounded,
                     ),
@@ -1190,10 +1236,10 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
                   key: const Key('friend-alarm-map'),
                   icon: Icons.place_rounded,
                   tone: zenTone(zen, 4),
-                  title: 'Pokaż na mapie',
+                  title: t('Pokaż na mapie'),
                   subtitle:
                       '${a.lat!.toStringAsFixed(5)}, ${a.lon!.toStringAsFixed(5)}'
-                      '${a.accuracy == null ? '' : ' (±${a.accuracy!.round()} m)'}'
+                      '${_accuracy(a.accuracy)}'
                       ' · ${_clock(a.locatedAt ?? a.at)}',
                   onTap: () => unawaited(openMap(a.lat!, a.lon!, label: name)),
                 )
@@ -1201,16 +1247,17 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
                 ZenTile(
                   icon: Icons.location_disabled_rounded,
                   tone: zen.textMuted,
-                  title: 'Bez położenia',
+                  title: t('Bez położenia'),
                 ),
               if (a.nearby && a.isActive)
                 ZenTile(
                   icon: Icons.bluetooth_rounded,
                   tone: zenTone(zen, 2),
-                  title: 'Jest blisko Ciebie',
-                  subtitle:
-                      'Alarm przyszedł przez Bluetooth — położenie dojdzie '
-                      'przez sieć.',
+                  title: t('Jest blisko Ciebie'),
+                  subtitle: t(
+                    'Alarm przyszedł przez Bluetooth — położenie dojdzie '
+                    'przez sieć.',
+                  ),
                 ),
               for (final AlarmClip c in a.clips)
                 AlarmClipTile(service: service, alarmId: a.id, clip: c),
@@ -1221,7 +1268,9 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
                         in a.responses.entries)
                       ListTile(
                         title: Text(
-                          r.key == 'self' ? 'Ty' : service.host.nameOf(r.key),
+                          r.key == 'self'
+                              ? t('Ty')
+                              : service.host.nameOf(r.key),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),

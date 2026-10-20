@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
@@ -89,8 +90,8 @@ enum FlatScan { sent, own, noFlat, alreadyNeighbor }
 const Duration kResidentKeyTrust = Duration(days: 1);
 
 /// The warning when a neighbour household announced two different new keys.
-const String kFlatKeyConflict =
-    'Dwa różne nowe klucze mieszkania — zapytaj sąsiadów osobiście';
+String get kFlatKeyConflict =>
+    t('Dwa różne nowe klucze mieszkania — zapytaj sąsiadów osobiście');
 
 /// "Sekcja sąsiedzka" (§18): this phone's flat (shared by its residents,
 /// who all hold the flat's key), the door QR, "Moi sąsiedzi", messages
@@ -1221,7 +1222,7 @@ final class NeighborsService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'flat-near-${code.key.hashCode}-${text.hashCode}',
-        title: 'Zaproszenie w pobliżu',
+        title: t('Zaproszenie w pobliżu'),
         body: text,
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
@@ -1352,10 +1353,12 @@ final class NeighborsService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'flat-moved-${from.hashCode}',
-        title: '${f.profile.name} wyprowadzili się',
+        title: t('{name} wyprowadzili się', {'name': f.profile.name}),
         body: f.profile.place.isEmpty
-            ? 'Znikają z listy sąsiadów.'
-            : 'Z ${f.profile.place}. Nowi lokatorzy założą własny profil.',
+            ? t('Znikają z listy sąsiadów.')
+            : t('Z {place}. Nowi lokatorzy założą własny profil.', {
+                'place': f.profile.place,
+              }),
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'flat-moved',
@@ -1397,8 +1400,8 @@ final class NeighborsService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'flat-hello-${from.hashCode}-${_now()}',
-        title: 'Nowi sąsiedzi',
-        body: '${theirs.name} zeskanowali Wasz kod z drzwi.',
+        title: t('Nowi sąsiedzi'),
+        body: t('{name} zeskanowali Wasz kod z drzwi.', {'name': theirs.name}),
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'flat-hello',
@@ -1462,9 +1465,13 @@ final class NeighborsService extends ChangeNotifier {
           RuntimeSystemNotification(
             id: 'flat-item-${i.id}',
             title: switch (i.kind) {
-              FlatItemKind.invite => '${theirs.name} zapraszają',
-              FlatItemKind.offer => '${theirs.name} oferują',
-              FlatItemKind.need => '${theirs.name} szukają pomocy',
+              FlatItemKind.invite => t('{name} zapraszają', {
+                'name': theirs.name,
+              }),
+              FlatItemKind.offer => t('{name} oferują', {'name': theirs.name}),
+              FlatItemKind.need => t('{name} szukają pomocy', {
+                'name': theirs.name,
+              }),
             },
             body: i.at == null ? i.text : '${i.text} — ${_shortDate(i.at!)}',
             createdAtMillis: _now(),
@@ -1565,8 +1572,14 @@ final class NeighborsService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'flat-signup-${item.id}-${from.hashCode}-$count',
-          title: '${f.profile.name} przyjdą',
-          body: '${item.text}: ${count == 1 ? '1 osoba' : '$count osoby'}',
+          title: t('{name} przyjdą', {'name': f.profile.name}),
+          body: tn(
+            count,
+            one: '{text}: {n} osoba',
+            few: '{text}: {n} osoby',
+            many: '{text}: {n} osób',
+            args: <String, Object?>{'text': item.text},
+          ),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'flat-signup:${item.id}',
@@ -1594,9 +1607,10 @@ final class NeighborsService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'flat-full-$itemId',
-          title: 'Brak miejsc',
+          title: t('Brak miejsc'),
           body:
-              '${f.profile.name}: ${f.profile.item(itemId)?.text ?? 'zaproszenie'}',
+              '${f.profile.name}: '
+              '${f.profile.item(itemId)?.text ?? t('zaproszenie')}',
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'flat-full:$itemId',
@@ -1633,8 +1647,8 @@ final class NeighborsService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'flat-join-${sender.hashCode}',
-        title: 'Nowy domownik',
-        body: 'Kolejny telefon dołączył do „${p.name}”.',
+        title: t('Nowy domownik'),
+        body: t('Kolejny telefon dołączył do „{name}”.', {'name': p.name}),
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'flat-join',
@@ -1781,8 +1795,8 @@ final class NeighborsService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'flat-joined-${p.key.hashCode}',
-          title: 'Jesteś domownikiem',
-          body: 'Dołączyłeś(-aś) do „${p.name}”.',
+          title: t('Jesteś domownikiem'),
+          body: t('Dołączyłeś(-aś) do „{name}”.', {'name': p.name}),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'flat-join',
@@ -1852,16 +1866,16 @@ final class NeighborsService extends ChangeNotifier {
     if (p == null || a is! String) {
       return;
     }
-    final String t = _n(a);
-    if (t == own ||
-        t == sender ||
-        !p.members.contains(t) ||
+    final String target = _n(a);
+    if (target == own ||
+        target == sender ||
+        !p.members.contains(target) ||
         !p.members.contains(sender)) {
       return;
     }
     if (b['no'] == true) {
-      _kickVotes[t]?.remove(sender);
-      _voteSigs[t]?.remove(sender);
+      _kickVotes[target]?.remove(sender);
+      _voteSigs[target]?.remove(sender);
       await _save();
       return;
     }
@@ -1874,37 +1888,41 @@ final class NeighborsService extends ChangeNotifier {
     if (rk != null &&
         !await verifyLedgerSignature(
           publicKey: rk,
-          message: flatKickBytes(p.key, t),
+          message: flatKickBytes(p.key, target),
           signature: vote,
         )) {
       return;
     }
-    (_voteSigs[t] ??= <String, String>{})[sender] = vote;
-    final bool added = (_kickVotes[t] ??= <String>{}).add(sender);
+    (_voteSigs[target] ??= <String, String>{})[sender] = vote;
+    final bool added = (_kickVotes[target] ??= <String>{}).add(sender);
     await _save();
-    if (added && !(_kickVotes[t]?.contains(own) ?? false)) {
-      final String name = residentName(t);
+    if (added && !(_kickVotes[target]?.contains(own) ?? false)) {
+      final String name = residentName(target);
       await host.notify(
         RuntimeSystemNotification(
-          id: 'flat-kick-${t.hashCode}-${sender.hashCode}',
-          title: 'Domownicy chcą odłączyć telefon',
-          body:
-              '${name.isEmpty ? 'Jeden z telefonów' : name}: '
-              'głosów ${votesFor(t).length} z ${votesNeeded(t)}. '
-              'Zajrzyj do „Domownicy”.',
+          id: 'flat-kick-${target.hashCode}-${sender.hashCode}',
+          title: t('Domownicy chcą odłączyć telefon'),
+          body: t(
+            '{name}: głosów {votes} z {needed}. Zajrzyj do „Domownicy”.',
+            <String, Object?>{
+              'name': name.isEmpty ? t('Jeden z telefonów') : name,
+              'votes': votesFor(target).length,
+              'needed': votesNeeded(target),
+            },
+          ),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'flat-kick',
         ),
       );
     }
-    final (String, Map<String, dynamic>)? waiting = _pendingRekeys[t];
-    if (waiting != null && _enoughVotes(t)) {
-      _pendingRekeys.remove(t);
-      await _applyRekey(t, waiting.$2);
+    final (String, Map<String, dynamic>)? waiting = _pendingRekeys[target];
+    if (waiting != null && _enoughVotes(target)) {
+      _pendingRekeys.remove(target);
+      await _applyRekey(target, waiting.$2);
       return;
     }
-    await _maybeRekey(t);
+    await _maybeRekey(target);
   }
 
   /// With a majority, the voter with the lowest address makes the new key
@@ -2006,10 +2024,11 @@ final class NeighborsService extends ChangeNotifier {
   Future<void> _notifyRekeyed(FlatProfile next) => host.notify(
     RuntimeSystemNotification(
       id: 'flat-rekey-${next.key.hashCode}',
-      title: 'Telefon odłączony od „${next.name}”',
-      body:
-          'Macie nowy klucz mieszkania i nowy kod na drzwi — wydrukujcie '
-          'nową naklejkę. Sąsiedzi dostali informację.',
+      title: t('Telefon odłączony od „{name}”', {'name': next.name}),
+      body: t(
+        'Macie nowy klucz mieszkania i nowy kod na drzwi — wydrukujcie '
+        'nową naklejkę. Sąsiedzi dostali informację.',
+      ),
       createdAtMillis: _now(),
       category: RuntimeSystemNotificationCategory.social,
       slotKey: 'flat-kick',
@@ -2156,12 +2175,12 @@ final class NeighborsService extends ChangeNotifier {
         !await next.verify()) {
       return;
     }
-    final int t = _now();
+    final int now = _now();
     final NeighborFlat? f = _neighbors[from];
     if (f != null) {
       final FlatKeySwitch? hop = _switchTo(from);
       if (hop != null &&
-          t - hop.at < const Duration(days: 1).inMilliseconds &&
+          now - hop.at < const Duration(days: 1).inMilliseconds &&
           next.key.compareTo(from) < 0 &&
           setEquals(next.members.toSet(), f.profile.members.toSet()) &&
           f.profile.members.contains(sender)) {
@@ -2193,7 +2212,7 @@ final class NeighborsService extends ChangeNotifier {
         newKey: next.key,
         removed: claim.$1,
         by: claim.$2,
-        at: t,
+        at: now,
       );
       _moveNeighbor(f, next);
       await _save();
@@ -2201,11 +2220,12 @@ final class NeighborsService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'flat-newkey-${next.key.hashCode}',
-          title: '${next.name}: zmiana domowników',
-          body:
-              'Odłączyli jeden telefon i mają nowy klucz. Lista sąsiadów jest '
-              'aktualna.',
-          createdAtMillis: t,
+          title: t('{name}: zmiana domowników', {'name': next.name}),
+          body: t(
+            'Odłączyli jeden telefon i mają nowy klucz. Lista sąsiadów jest '
+            'aktualna.',
+          ),
+          createdAtMillis: now,
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'flat-newkey',
         ),
@@ -2268,10 +2288,12 @@ final class NeighborsService extends ChangeNotifier {
       RuntimeSystemNotification(
         id: 'flat-newkey-conflict-${from.hashCode}',
         title: kFlatKeyConflict,
-        body:
-            '„${s.name}”: nie wiadomo, który telefon naprawdę odłączyli. '
-            'Zeskanujcie ich nowy kod z drzwi.',
-        createdAtMillis: t,
+        body: t(
+          '„{name}”: nie wiadomo, który telefon naprawdę odłączyli. '
+          'Zeskanujcie ich nowy kod z drzwi.',
+          <String, Object?>{'name': s.name},
+        ),
+        createdAtMillis: now,
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'flat-newkey',
       ),
@@ -2489,8 +2511,11 @@ final class NeighborsService extends ChangeNotifier {
     await host.notify(
       RuntimeSystemNotification(
         id: 'flat-reveal-${from.hashCode}-${sender.hashCode}',
-        title: '${f.profile.name}: ${r.name} pokazuje swój profil',
-        body: 'Możesz zaprosić do znajomych.',
+        title: t('{flat}: {name} pokazuje swój profil', {
+          'flat': f.profile.name,
+          'name': r.name,
+        }),
+        body: t('Możesz zaprosić do znajomych.'),
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'flat-reveal:$from',

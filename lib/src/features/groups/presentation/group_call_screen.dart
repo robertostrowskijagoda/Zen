@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -122,7 +123,7 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
         return entry.value.trim();
       }
     }
-    return 'Uczestnik';
+    return t('Uczestnik');
   }
 
   @override
@@ -182,7 +183,7 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
                       children: <Widget>[
                         IconButton(
                           key: const Key('group-call-minimize'),
-                          tooltip: 'Minimalizuj',
+                          tooltip: t('Minimalizuj'),
                           icon: const Icon(
                             Icons.keyboard_arrow_down_rounded,
                             size: 28,
@@ -195,7 +196,7 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: <Widget>[
                               Text(
-                                'Połączenie grupowe',
+                                t('Połączenie grupowe'),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -217,8 +218,10 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
                               ),
                               Text(
                                 participants.isEmpty
-                                    ? 'Czekasz, aż ktoś dołączy'
-                                    : 'W rozmowie: ${participants.length + 1} os.',
+                                    ? t('Czekasz, aż ktoś dołączy')
+                                    : t('W rozmowie: {count} os.', {
+                                        'count': participants.length + 1,
+                                      }),
                                 key: const Key('group-call-headcount'),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -263,9 +266,12 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
                           Expanded(
                             child: Text(
                               <String>[
-                                if (media.isRecording) 'Nagrywasz tę rozmowę',
+                                if (media.isRecording)
+                                  t('Nagrywasz tę rozmowę'),
                                 for (final String a in media.recordingPeers)
-                                  '${_nameFor(a, friends, group)} nagrywa',
+                                  t('{name} nagrywa', {
+                                    'name': _nameFor(a, friends, group),
+                                  }),
                               ].join(' · '),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
@@ -308,8 +314,10 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
                                   _ParticipantTile(
                                     key: const Key('group-call-tile-self'),
                                     name: myName.trim().isEmpty
-                                        ? 'Ty'
-                                        : '${myName.trim()} (Ty)',
+                                        ? t('Ty')
+                                        : t('{name} (Ty)', {
+                                            'name': myName.trim(),
+                                          }),
                                     isSelf: true,
                                     isMuted: activeCall.isMuted,
                                     renderer:
@@ -390,7 +398,7 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
     final String? path = await media.stopRecording();
     if (path != null && mounted) {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(content: Text('Nagranie zapisane (zaszyfrowane).')),
+        SnackBar(content: Text(t('Nagranie zapisane (zaszyfrowane).'))),
       );
     }
   }
@@ -448,7 +456,7 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
       children: <Widget>[
         IconButton.filledTonal(
           key: const Key('group-call-mute'),
-          tooltip: call.isMuted ? 'Włącz mikrofon' : 'Wycisz mikrofon',
+          tooltip: call.isMuted ? t('Włącz mikrofon') : t('Wycisz mikrofon'),
           style: toggleStyle(call.isMuted, onColor: zen.danger),
           icon: Icon(call.isMuted ? Icons.mic_off_rounded : Icons.mic_rounded),
           onPressed: () =>
@@ -456,7 +464,9 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
         ),
         IconButton.filledTonal(
           key: const Key('group-call-camera'),
-          tooltip: call.isCameraEnabled ? 'Wyłącz kamerę' : 'Włącz kamerę',
+          tooltip: call.isCameraEnabled
+              ? t('Wyłącz kamerę')
+              : t('Włącz kamerę'),
           style: toggleStyle(call.isCameraEnabled),
           icon: Icon(
             call.isCameraEnabled
@@ -468,7 +478,7 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
         ),
         if (call.isCameraEnabled)
           IconButton.filledTonal(
-            tooltip: 'Przełącz kamerę',
+            tooltip: t('Przełącz kamerę'),
             style: toggleStyle(false),
             icon: const Icon(Icons.flip_camera_ios_rounded),
             onPressed: () => runCallAction(context, media.switchCamera),
@@ -476,8 +486,8 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
         IconButton.filledTonal(
           key: const Key('group-call-screen-share'),
           tooltip: media.isScreenSharing
-              ? 'Zatrzymaj udostępnianie'
-              : 'Udostępnij ekran',
+              ? t('Zatrzymaj udostępnianie')
+              : t('Udostępnij ekran'),
           style: toggleStyle(media.isScreenSharing),
           icon: Icon(
             media.isScreenSharing
@@ -490,7 +500,9 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
         if (media.canRecord)
           IconButton.filledTonal(
             key: const Key('group-call-record'),
-            tooltip: media.isRecording ? 'Zatrzymaj nagrywanie' : 'Nagrywaj',
+            tooltip: media.isRecording
+                ? t('Zatrzymaj nagrywanie')
+                : t('Nagrywaj'),
             style: toggleStyle(media.isRecording, onColor: zen.danger),
             icon: Icon(
               media.isRecording
@@ -512,7 +524,7 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
           ),
         IconButton.filledTonal(
           key: const Key('group-call-speaker'),
-          tooltip: call.isSpeakerOn ? 'Głośnik' : 'Słuchawka',
+          tooltip: call.isSpeakerOn ? t('Głośnik') : t('Słuchawka'),
           style: toggleStyle(call.isSpeakerOn),
           icon: Icon(
             call.isSpeakerOn ? Icons.volume_up_rounded : Icons.hearing_rounded,
@@ -522,7 +534,7 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
         ),
         IconButton.filled(
           key: const Key('group-call-leave'),
-          tooltip: 'Opuść połączenie',
+          tooltip: t('Opuść połączenie'),
           style: IconButton.styleFrom(
             backgroundColor: zen.danger,
             foregroundColor: ZenColors.foregroundFor(zen.danger),
@@ -617,8 +629,8 @@ class _ParticipantTile extends StatelessWidget {
         video != null && video.textureId != null && video.srcObject != null;
     final String? stateLabel = switch (state) {
       GroupCallLegState.connected => null,
-      GroupCallLegState.connecting => 'Łączenie…',
-      GroupCallLegState.failed => 'Ponowne łączenie…',
+      GroupCallLegState.connecting => t('Łączenie…'),
+      GroupCallLegState.failed => t('Ponowne łączenie…'),
     };
     final Color tone = zenTone(zen, (name.hashCode & 0x7FFFFFFF) % 8);
     return ClipRRect(
@@ -661,7 +673,7 @@ class _ParticipantTile extends StatelessWidget {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    isSelf ? 'Udostępniasz ekran' : 'Udostępnia ekran',
+                    isSelf ? t('Udostępniasz ekran') : t('Udostępnia ekran'),
                     style: TextStyle(
                       color: zen.onAccent,
                       fontSize: 11,

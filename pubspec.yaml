@@ -11,6 +11,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: ^0.20.2
 
   ffi: ^2.1.4
   file_picker: ^10.3.3
@@ -18,6 +21,8 @@ dependencies:
   crypto: ^3.0.6
   mime: ^2.0.0
   video_player: ^2.10.0
+  # Linux has no video_player backend: UnsupportedVideoPlayer stands in.
+  video_player_platform_interface: ^6.9.0
   video_player_win: ^3.2.2
   path_provider: ^2.1.5
   qr_flutter: ^4.1.0
@@ -73,6 +78,8 @@ flutter:
 
   assets:
     - assets/branding/
+    # Translations of the Polish texts in the code (tool/i18n.dart).
+    - assets/i18n/
     # Licenses of the Go bridge's modules (tool/go_licenses.dart) and fonts.
     - assets/licenses/go/
     - assets/licenses/fonts/

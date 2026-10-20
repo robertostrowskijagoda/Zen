@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
@@ -58,46 +59,59 @@ final class BridgeHostStatus {
 
   /// Short line for the settings.
   String get title => switch (state) {
-    BridgeHostState.waiting => 'Most: czekam na sieć',
-    BridgeHostState.checking => 'Most: sprawdzam…',
-    BridgeHostState.active => 'Most działa',
-    BridgeHostState.noRouter => 'Most: router nie otworzył portu',
-    BridgeHostState.routerRefused => 'Most: router nie pozwolił otworzyć portu',
-    BridgeHostState.sharedAddress => 'Most: brak publicznego adresu',
-    BridgeHostState.unreachable => 'Most: nie da się połączyć z zewnątrz',
-    BridgeHostState.noFriendsOnline => 'Most: czekam na znajomego online',
+    BridgeHostState.waiting => t('Most: czekam na sieć'),
+    BridgeHostState.checking => t('Most: sprawdzam…'),
+    BridgeHostState.active => t('Most działa'),
+    BridgeHostState.noRouter => t('Most: router nie otworzył portu'),
+    BridgeHostState.routerRefused => t(
+      'Most: router nie pozwolił otworzyć portu',
+    ),
+    BridgeHostState.sharedAddress => t('Most: brak publicznego adresu'),
+    BridgeHostState.unreachable => t('Most: nie da się połączyć z zewnątrz'),
+    BridgeHostState.noFriendsOnline => t('Most: czekam na znajomego online'),
   };
 
   /// What it means, in plain words.
   String get detail => switch (state) {
-    BridgeHostState.waiting =>
+    BridgeHostState.waiting => t(
       'Za chwilę komputer spróbuje zostać mostem dla innych.',
-    BridgeHostState.checking =>
+    ),
+    BridgeHostState.checking => t(
       'Otwieram port w routerze i proszę znajomych o sprawdzenie z zewnątrz.',
-    BridgeHostState.active =>
-      'Inni łączą się z siecią przez ten komputer ($uri). '
-          'Ogłoszenie nie mówi, czyj to komputer, ale jego adres IP jest '
-          'widoczny w sieci.',
-    BridgeHostState.noRouter =>
+    ),
+    BridgeHostState.active => t(
+      'Inni łączą się z siecią przez ten komputer ({uri}). '
+      'Ogłoszenie nie mówi, czyj to komputer, ale jego adres IP jest '
+      'widoczny w sieci.',
+      {'uri': uri},
+    ),
+    BridgeHostState.noRouter => t(
       'Router nie obsługuje UPnP ani NAT-PMP (albo są wyłączone). Włącz '
-          'UPnP w ustawieniach routera albo przekieruj port TCP '
-          '$kMeshListenPort na ten komputer.',
-    BridgeHostState.routerRefused =>
+      'UPnP w ustawieniach routera albo przekieruj port TCP '
+      '{port} na ten komputer.',
+      {'port': kMeshListenPort},
+    ),
+    BridgeHostState.routerRefused => t(
       'Router odpowiada, ale odmawia otwierania portów. Włącz UPnP '
-          '(czasem nazywane „zezwalaj na zmiany” albo „UPnP IGD”) w '
-          'ustawieniach routera albo przekieruj port TCP $kMeshListenPort '
-          'na ten komputer.',
-    BridgeHostState.sharedAddress =>
+      '(czasem nazywane „zezwalaj na zmiany” albo „UPnP IGD”) w '
+      'ustawieniach routera albo przekieruj port TCP {port} '
+      'na ten komputer.',
+      {'port': kMeshListenPort},
+    ),
+    BridgeHostState.sharedAddress => t(
       'Dostawca internetu dzieli jeden adres między wielu klientów, więc '
-          'nikt z zewnątrz nie połączy się z tym komputerem. Aplikacja '
-          'działa normalnie, tylko nie jest mostem.',
-    BridgeHostState.unreachable =>
+      'nikt z zewnątrz nie połączy się z tym komputerem. Aplikacja '
+      'działa normalnie, tylko nie jest mostem.',
+    ),
+    BridgeHostState.unreachable => t(
       'Port jest otwarty, ale znajomi nie mogli się połączyć. Sprawdź, czy '
-          'Zapora systemu Windows pozwala aplikacji Zen na połączenia '
-          'przychodzące.',
-    BridgeHostState.noFriendsOnline =>
+      'Zapora systemu Windows pozwala aplikacji Zen na połączenia '
+      'przychodzące.',
+    ),
+    BridgeHostState.noFriendsOnline => t(
       'Sprawdzenie z zewnątrz robi znajomy. Spróbuję, gdy ktoś będzie '
-          'online.',
+      'online.',
+    ),
   };
 }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
@@ -89,8 +90,12 @@ class _IncomingCallOverlayState extends ConsumerState<_IncomingCallOverlay> {
     const Color onStage = Colors.white;
     final Color onStageSoft = Colors.white.withValues(alpha: 0.72);
     final String kindLabel = video
-        ? (session.isGroup ? 'Grupowe połączenie wideo' : 'Połączenie wideo')
-        : (session.isGroup ? 'Grupowe połączenie audio' : 'Połączenie audio');
+        ? (session.isGroup
+              ? t('Grupowe połączenie wideo')
+              : t('Połączenie wideo'))
+        : (session.isGroup
+              ? t('Grupowe połączenie audio')
+              : t('Połączenie audio'));
 
     Future<void> decline() => runCallAction(
       context,
@@ -270,11 +275,25 @@ class _IncomingCallOverlayState extends ConsumerState<_IncomingCallOverlay> {
                           Text(
                             session.isGroup
                                 ? (session.participantAddresses.isEmpty
-                                      ? 'Rozmowa grupowa - dołącz, kiedy chcesz'
-                                      : 'W rozmowie: ${session.participantAddresses.length} os. - dołącz, kiedy chcesz')
+                                      ? t(
+                                          'Rozmowa grupowa - dołącz, kiedy '
+                                          'chcesz',
+                                        )
+                                      : tn(
+                                          session.participantAddresses.length,
+                                          one:
+                                              'W rozmowie: {n} os. - dołącz, '
+                                              'kiedy chcesz',
+                                          few:
+                                              'W rozmowie: {n} os. - dołącz, '
+                                              'kiedy chcesz',
+                                          many:
+                                              'W rozmowie: {n} os. - dołącz, '
+                                              'kiedy chcesz',
+                                        ))
                                 : (video
-                                      ? 'Zaproszenie do rozmowy wideo'
-                                      : 'Zaproszenie do rozmowy głosowej'),
+                                      ? t('Zaproszenie do rozmowy wideo')
+                                      : t('Zaproszenie do rozmowy głosowej')),
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: onStageSoft,
@@ -292,7 +311,7 @@ class _IncomingCallOverlayState extends ConsumerState<_IncomingCallOverlay> {
                                   'incoming-call-decline-button',
                                 ),
                                 icon: Icons.call_end_rounded,
-                                label: 'Odrzuć',
+                                label: t('Odrzuć'),
                                 color: zen.danger,
                                 labelColor: onStageSoft,
                                 onPressed: decline,
@@ -304,7 +323,9 @@ class _IncomingCallOverlayState extends ConsumerState<_IncomingCallOverlay> {
                                 icon: video && !session.isGroup
                                     ? Icons.videocam_rounded
                                     : Icons.call_rounded,
-                                label: session.isGroup ? 'Dołącz' : 'Odbierz',
+                                label: session.isGroup
+                                    ? t('Dołącz')
+                                    : t('Odbierz'),
                                 color: zen.success,
                                 labelColor: onStageSoft,
                                 onPressed: accept,

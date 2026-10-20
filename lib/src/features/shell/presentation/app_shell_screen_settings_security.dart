@@ -20,29 +20,30 @@ class _SettingsSecuritySection extends ConsumerWidget {
           children: <Widget>[
             ZenHero(
               title: security.hasPassword
-                  ? 'Twoje dane są pod kluczem'
-                  : 'Dane są szyfrowane',
-              text:
-                  'Dane na dysku są zawsze szyfrowane. Hasło dodatkowo blokuje '
-                  'dostęp do aplikacji.',
+                  ? t('Twoje dane są pod kluczem')
+                  : t('Dane są szyfrowane'),
+              text: t(
+                'Dane na dysku są zawsze szyfrowane. Hasło dodatkowo blokuje '
+                'dostęp do aplikacji.',
+              ),
               icon: Icons.shield_rounded,
               tone: security.hasPassword ? zen.success : zen.warning,
             ),
-            const ZenSection('Hasła', top: 16),
+            ZenSection(t('Hasła'), top: 16),
             ZenGroup(
               children: <Widget>[
                 _SecurityStatusRow(
                   icon: Icons.password_rounded,
                   tone: zenTone(zen, 0),
-                  title: 'Hasło lokalne',
-                  subtitle: 'Odblokowuje aplikację i Twoje dane',
+                  title: t('Hasło lokalne'),
+                  subtitle: t('Odblokowuje aplikację i Twoje dane'),
                   isSet: security.hasPassword,
                 ),
                 _SecurityStatusRow(
                   icon: Icons.emergency_outlined,
                   tone: zen.danger,
-                  title: 'Hasło panic',
-                  subtitle: 'Wpisane na blokadzie kasuje wszystko',
+                  title: t('Hasło panic'),
+                  subtitle: t('Wpisane na blokadzie kasuje wszystko'),
                   isSet: security.hasPanicPassword,
                 ),
                 _BiometricUnlockTile(
@@ -61,7 +62,7 @@ class _SettingsSecuritySection extends ConsumerWidget {
                   onPressed: () => _changePassword(context, security),
                   icon: const Icon(Icons.password_rounded, size: 18),
                   label: Text(
-                    security.hasPassword ? 'Zmień hasło' : 'Ustaw hasło',
+                    security.hasPassword ? t('Zmień hasło') : t('Ustaw hasło'),
                   ),
                 ),
                 OutlinedButton.icon(
@@ -70,8 +71,8 @@ class _SettingsSecuritySection extends ConsumerWidget {
                   icon: const Icon(Icons.emergency_outlined, size: 18),
                   label: Text(
                     security.hasPanicPassword
-                        ? 'Hasło panic'
-                        : 'Ustaw hasło panic',
+                        ? t('Hasło panic')
+                        : t('Ustaw hasło panic'),
                   ),
                 ),
               ],
@@ -80,12 +81,13 @@ class _SettingsSecuritySection extends ConsumerWidget {
             ZenInfo(
               icon: Icons.emergency_outlined,
               tone: zen.danger,
-              title: 'Hasło panic',
-              text:
-                  'Hasło panic wpisane na ekranie blokady bezpowrotnie kasuje '
-                  'wszystkie dane i otwiera świeżą aplikację.',
+              title: t('Hasło panic'),
+              text: t(
+                'Hasło panic wpisane na ekranie blokady bezpowrotnie kasuje '
+                'wszystkie dane i otwiera świeżą aplikację.',
+              ),
             ),
-            const ZenSection('Automatyczna blokada', top: 16),
+            ZenSection(t('Automatyczna blokada'), top: 16),
             ZenCard(
               margin: const EdgeInsets.symmetric(vertical: 4),
               child: Column(
@@ -117,7 +119,7 @@ class _SettingsSecuritySection extends ConsumerWidget {
                   if (settings.lockMode == AppLockMode.background) ...<Widget>[
                     const SizedBox(height: 16),
                     Text(
-                      'Zablokuj, gdy aplikacja jest w tle dłużej niż',
+                      t('Zablokuj, gdy aplikacja jest w tle dłużej niż'),
                       style: TextStyle(
                         color: zen.textPrimary,
                         fontSize: 14.5,
@@ -130,15 +132,14 @@ class _SettingsSecuritySection extends ConsumerWidget {
                       spacing: 8,
                       runSpacing: 8,
                       children: <Widget>[
-                        for (final (int sec, String label)
-                            in const <(int, String)>[
-                              (5, '5 s'),
-                              (30, '30 s'),
-                              (60, '1 min'),
-                              (300, '5 min'),
-                              (900, '15 min'),
-                              (3600, '1 h'),
-                            ])
+                        for (final (int sec, String label) in <(int, String)>[
+                          (5, t('{seconds} s', {'seconds': 5})),
+                          (30, t('{seconds} s', {'seconds': 30})),
+                          (60, t('{minutes} min', {'minutes': 1})),
+                          (300, t('{minutes} min', {'minutes': 5})),
+                          (900, t('{minutes} min', {'minutes': 15})),
+                          (3600, t('{hours} h', {'hours': 1})),
+                        ])
                           ChoiceChip(
                             key: Key('settings-lock-delay-$sec'),
                             label: Text(label),
@@ -154,7 +155,7 @@ class _SettingsSecuritySection extends ConsumerWidget {
                 ],
               ),
             ),
-            const ZenSection('Prywatność ekranu', top: 16),
+            ZenSection(t('Prywatność ekranu'), top: 16),
             ZenGroup(
               children: <Widget>[
                 SwitchListTile.adaptive(
@@ -165,10 +166,12 @@ class _SettingsSecuritySection extends ConsumerWidget {
                     size: 40,
                   ),
                   value: settings.secureScreens,
-                  title: const Text('Blokuj zrzuty i nagrywanie ekranu'),
+                  title: Text(t('Blokuj zrzuty i nagrywanie ekranu')),
                   subtitle: Text(
-                    'Rozmowy, nagrania, konto i urządzenia nie trafią na zrzut, '
-                    'nagranie ekranu ani podgląd ostatnich aplikacji.',
+                    t(
+                      'Rozmowy, nagrania, konto i urządzenia nie trafią na '
+                      'zrzut, nagranie ekranu ani podgląd ostatnich aplikacji.',
+                    ),
                     style: TextStyle(color: zen.textSecondary, height: 1.35),
                   ),
                   onChanged: controller.setSecureScreens,
@@ -182,10 +185,12 @@ class _SettingsSecuritySection extends ConsumerWidget {
                       size: 40,
                     ),
                     value: settings.allowNoAppPassword,
-                    title: const Text('Pozwól używać aplikacji bez hasła'),
+                    title: Text(t('Pozwól używać aplikacji bez hasła')),
                     subtitle: Text(
-                      'Niezalecane: bez hasła każdy, kto weźmie urządzenie, '
-                      'zobaczy Twoje rozmowy.',
+                      t(
+                        'Niezalecane: bez hasła każdy, kto weźmie urządzenie, '
+                        'zobaczy Twoje rozmowy.',
+                      ),
                       style: TextStyle(color: zen.danger, height: 1.35),
                     ),
                     onChanged: controller.setAllowNoAppPassword,
@@ -193,13 +198,14 @@ class _SettingsSecuritySection extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 8),
-            const ZenInfo(
+            ZenInfo(
               icon: Icons.memory_rounded,
-              title: 'Jak chronimy klucz',
-              text:
-                  'Klucz danych jest tylko w pamięci, gdy aplikacja jest '
-                  'odblokowana. Do odblokowania biometrią jest zamknięty w '
-                  'sprzęcie urządzenia, a hasło chroni go algorytmem Argon2id.',
+              title: t('Jak chronimy klucz'),
+              text: t(
+                'Klucz danych jest tylko w pamięci, gdy aplikacja jest '
+                'odblokowana. Do odblokowania biometrią jest zamknięty w '
+                'sprzęcie urządzenia, a hasło chroni go algorytmem Argon2id.',
+              ),
             ),
             const _DeviceIntegrityWarning(),
           ],
@@ -218,7 +224,7 @@ class _SettingsSecuritySection extends ConsumerWidget {
         !await _confirmPasswordOwner(
           context,
           security,
-          reason: 'Potwierdź obecne hasło, zanim je zmienisz.',
+          reason: t('Potwierdź obecne hasło, zanim je zmienisz.'),
         )) {
       return;
     }
@@ -227,8 +233,10 @@ class _SettingsSecuritySection extends ConsumerWidget {
     }
     final String? password = await _showPasswordDialog(
       context,
-      title: replacing ? 'Zmień hasło szyfrowania' : 'Ustaw hasło szyfrowania',
-      actionLabel: replacing ? 'Zapisz hasło' : 'Ustaw hasło',
+      title: replacing
+          ? t('Zmień hasło szyfrowania')
+          : t('Ustaw hasło szyfrowania'),
+      actionLabel: replacing ? t('Zapisz hasło') : t('Ustaw hasło'),
     );
     if (password == null || !context.mounted) {
       return;
@@ -247,9 +255,13 @@ class _SettingsSecuritySection extends ConsumerWidget {
         return AlertDialog(
           key: const Key('settings-panic-intro-dialog'),
           icon: Icon(Icons.emergency_outlined, color: zen.danger, size: 32),
-          title: const Text('Hasło panic'),
-          content: const Text(
-            'To drugie, tajne hasło. Wpisane na ekranie blokady natychmiast i bezpowrotnie kasuje wszystkie dane aplikacji, a potem otwiera ją jak po świeżej instalacji — bez żadnego komunikatu.',
+          title: Text(t('Hasło panic')),
+          content: Text(
+            t(
+              'To drugie, tajne hasło. Wpisane na ekranie blokady natychmiast '
+              'i bezpowrotnie kasuje wszystkie dane aplikacji, a potem '
+              'otwiera ją jak po świeżej instalacji — bez żadnego komunikatu.',
+            ),
           ),
           actionsOverflowButtonSpacing: 4,
           actions: <Widget>[
@@ -258,18 +270,18 @@ class _SettingsSecuritySection extends ConsumerWidget {
                 key: const Key('settings-panic-clear-button'),
                 onPressed: () => Navigator.of(dialogContext).pop(false),
                 child: Text(
-                  'Usuń hasło panic',
+                  t('Usuń hasło panic'),
                   style: TextStyle(color: zen.danger),
                 ),
               ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Anuluj'),
+              child: Text(t('Anuluj')),
             ),
             FilledButton(
               key: const Key('settings-panic-continue-button'),
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: Text(security.hasPanicPassword ? 'Zmień' : 'Ustaw'),
+              child: Text(security.hasPanicPassword ? t('Zmień') : t('Ustaw')),
             ),
           ],
         );
@@ -284,8 +296,8 @@ class _SettingsSecuritySection extends ConsumerWidget {
       context,
       security,
       reason: replace
-          ? 'Potwierdź hasło aplikacji, zanim ustawisz hasło panic.'
-          : 'Potwierdź hasło aplikacji, zanim usuniesz hasło panic.',
+          ? t('Potwierdź hasło aplikacji, zanim ustawisz hasło panic.')
+          : t('Potwierdź hasło aplikacji, zanim usuniesz hasło panic.'),
     )) {
       return;
     }
@@ -298,8 +310,8 @@ class _SettingsSecuritySection extends ConsumerWidget {
     }
     final String? password = await _showPasswordDialog(
       context,
-      title: 'Ustaw hasło panic',
-      actionLabel: 'Zapisz hasło panic',
+      title: t('Ustaw hasło panic'),
+      actionLabel: t('Zapisz hasło panic'),
       fieldKey: const Key('settings-panic-password-field'),
       confirmKey: const Key('settings-panic-password-confirm-field'),
       submitKey: const Key('settings-panic-password-submit-button'),
@@ -329,7 +341,7 @@ Future<void> _runPasswordChange(
     problem = error.message;
   } on Object catch (error, stackTrace) {
     logZenError('Changing a password failed', error, stackTrace);
-    problem = 'Nie udało się zapisać hasła. Spróbuj ponownie.';
+    problem = t('Nie udało się zapisać hasła. Spróbuj ponownie.');
   }
   if (problem == null || !context.mounted) {
     return;
@@ -405,7 +417,7 @@ class _CurrentPasswordDialogState extends State<_CurrentPasswordDialog> {
     }
     setState(() {
       _busy = false;
-      _error = 'Nieprawidłowe hasło.';
+      _error = t('Nieprawidłowe hasło.');
     });
   }
 
@@ -415,7 +427,7 @@ class _CurrentPasswordDialogState extends State<_CurrentPasswordDialog> {
     return AlertDialog(
       key: const Key('settings-current-password-dialog'),
       icon: Icon(Icons.verified_user_outlined, color: zen.accent, size: 32),
-      title: const Text('Potwierdź, że to Ty'),
+      title: Text(t('Potwierdź, że to Ty')),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -436,11 +448,11 @@ class _CurrentPasswordDialogState extends State<_CurrentPasswordDialog> {
               enableIMEPersonalizedLearning: false,
               onSubmitted: (_) => _submit(),
               decoration: InputDecoration(
-                labelText: 'Obecne hasło aplikacji',
+                labelText: t('Obecne hasło aplikacji'),
                 prefixIcon: const Icon(Icons.key_rounded),
                 errorText: _error,
                 suffixIcon: IconButton(
-                  tooltip: _obscure ? 'Pokaż' : 'Ukryj',
+                  tooltip: _obscure ? t('Pokaż') : t('Ukryj'),
                   onPressed: () => setState(() => _obscure = !_obscure),
                   icon: Icon(
                     _obscure
@@ -456,12 +468,12 @@ class _CurrentPasswordDialogState extends State<_CurrentPasswordDialog> {
       actions: <Widget>[
         TextButton(
           onPressed: _busy ? null : () => Navigator.of(context).pop(false),
-          child: const Text('Anuluj'),
+          child: Text(t('Anuluj')),
         ),
         FilledButton(
           key: const Key('settings-current-password-confirm'),
           onPressed: _busy ? null : _submit,
-          child: Text(_busy ? 'Sprawdzam…' : 'Potwierdź'),
+          child: Text(_busy ? t('Sprawdzam…') : t('Potwierdź')),
         ),
       ],
     );
@@ -532,14 +544,16 @@ class _BiometricUnlockTileState extends State<_BiometricUnlockTile> {
         if (await _confirmPasswordOwner(
           context,
           security,
-          reason:
-              'Potwierdź hasło aplikacji, aby włączyć odblokowanie '
-              'biometrią.',
+          reason: t(
+            'Potwierdź hasło aplikacji, aby włączyć odblokowanie '
+            'biometrią.',
+          ),
         )) {
           if (!await security.setBiometricUnlockEnabled(true)) {
-            problem =
-                'Nie udało się włączyć odblokowania biometrią na tym '
-                'urządzeniu.';
+            problem = t(
+              'Nie udało się włączyć odblokowania biometrią na tym '
+              'urządzeniu.',
+            );
           }
         }
       } else {
@@ -547,7 +561,7 @@ class _BiometricUnlockTileState extends State<_BiometricUnlockTile> {
       }
     } on Object catch (error, stackTrace) {
       logZenError('Changing biometric unlock failed', error, stackTrace);
-      problem = 'Nie udało się zmienić odblokowania biometrią.';
+      problem = t('Nie udało się zmienić odblokowania biometrią.');
     }
     await _load();
     if (!mounted) {
@@ -572,19 +586,23 @@ class _BiometricUnlockTileState extends State<_BiometricUnlockTile> {
     if (status == null) {
       subtitle = '…';
     } else if (!widget.hasPassword) {
-      subtitle = 'Najpierw ustaw hasło aplikacji.';
+      subtitle = t('Najpierw ustaw hasło aplikacji.');
     } else if (!available) {
-      subtitle = 'Niedostępne na tym urządzeniu — tylko hasło.';
+      subtitle = t('Niedostępne na tym urządzeniu — tylko hasło.');
     } else if (!status.hardwareEnforced) {
-      subtitle =
-          'Klucz: $protection. Windows Hello to zwykle PIN tego komputera '
-          'i pyta o niego aplikacja, nie sam TPM: gdy to jest włączone, '
-          'program uruchomiony na Twoim koncie Windows mógłby odczytać '
-          'klucz. Włączaj tylko na zaufanym komputerze.';
+      subtitle = t(
+        'Klucz: {protection}. Windows Hello to zwykle PIN tego komputera '
+        'i pyta o niego aplikacja, nie sam TPM: gdy to jest włączone, '
+        'program uruchomiony na Twoim koncie Windows mógłby odczytać '
+        'klucz. Włączaj tylko na zaufanym komputerze.',
+        {'protection': protection},
+      );
     } else {
-      subtitle =
-          'Klucz: $protection. Sprzęt wydaje go dopiero po '
-          'odcisku palca lub twarzy. $kBiometricRiskText';
+      subtitle = t(
+        'Klucz: {protection}. Sprzęt wydaje go dopiero po '
+        'odcisku palca lub twarzy. {risk}',
+        {'protection': protection, 'risk': kBiometricRiskText},
+      );
     }
     return SwitchListTile.adaptive(
       key: const Key('settings-biometric-unlock-switch'),
@@ -596,8 +614,8 @@ class _BiometricUnlockTileState extends State<_BiometricUnlockTile> {
       value: on,
       title: Text(
         defaultTargetPlatform == TargetPlatform.windows
-            ? 'Odblokowanie Windows Hello'
-            : 'Odblokowanie biometrią',
+            ? t('Odblokowanie Windows Hello')
+            : t('Odblokowanie biometrią'),
       ),
       subtitle: Text(
         subtitle,
@@ -639,7 +657,7 @@ class _SecurityStatusRow extends StatelessWidget {
       title: Text(title),
       subtitle: Text(subtitle, style: TextStyle(color: zen.textSecondary)),
       trailing: ZenPill(
-        text: isSet ? 'Ustawione' : 'Brak',
+        text: isSet ? t('Ustawione') : t('Brak'),
         tone: isSet ? zen.success : zen.textMuted,
         icon: isSet ? Icons.check_rounded : null,
       ),
@@ -680,7 +698,7 @@ class _DeviceIntegrityWarning extends ConsumerWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'To urządzenie wygląda na zmodyfikowane',
+                  t('To urządzenie wygląda na zmodyfikowane'),
                   style: TextStyle(
                     color: zen.danger,
                     fontSize: 15,
@@ -692,9 +710,11 @@ class _DeviceIntegrityWarning extends ConsumerWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Na telefonie z rootem inne aplikacje mogą odczytać pamięć i pliki '
-            'Zen, więc szyfrowanie chroni słabiej. Zen działa dalej — to Twój '
-            'telefon — ale weź to pod uwagę.',
+            t(
+              'Na telefonie z rootem inne aplikacje mogą odczytać pamięć i '
+              'pliki Zen, więc szyfrowanie chroni słabiej. Zen działa dalej — '
+              'to Twój telefon — ale weź to pod uwagę.',
+            ),
             style: TextStyle(
               color: zen.textSecondary,
               fontSize: 13.5,
@@ -755,12 +775,16 @@ Future<String?> _showPasswordDialog(
                         autofocus: true,
                         enableIMEPersonalizedLearning: false,
                         decoration: InputDecoration(
-                          labelText: 'Hasło',
-                          helperText:
-                              'Co najmniej $kMinAppPasswordLength znaków',
+                          labelText: t('Hasło'),
+                          helperText: tn(
+                            kMinAppPasswordLength,
+                            one: 'Co najmniej {n} znak',
+                            few: 'Co najmniej {n} znaki',
+                            many: 'Co najmniej {n} znaków',
+                          ),
                           prefixIcon: const Icon(Icons.key_rounded),
                           suffixIcon: IconButton(
-                            tooltip: obscurePassword ? 'Pokaż' : 'Ukryj',
+                            tooltip: obscurePassword ? t('Pokaż') : t('Ukryj'),
                             onPressed: () {
                               setDialogState(
                                 () => obscurePassword = !obscurePassword,
@@ -775,11 +799,15 @@ Future<String?> _showPasswordDialog(
                         ),
                         validator: (String? value) {
                           if (value == null || value.isEmpty) {
-                            return 'Podaj hasło.';
+                            return t('Podaj hasło.');
                           }
                           if (value.length < kMinAppPasswordLength) {
-                            return 'Hasło musi mieć co najmniej '
-                                '$kMinAppPasswordLength znaków.';
+                            return tn(
+                              kMinAppPasswordLength,
+                              one: 'Hasło musi mieć co najmniej {n} znak.',
+                              few: 'Hasło musi mieć co najmniej {n} znaki.',
+                              many: 'Hasło musi mieć co najmniej {n} znaków.',
+                            );
                           }
                           return null;
                         },
@@ -791,10 +819,10 @@ Future<String?> _showPasswordDialog(
                         obscureText: obscureConfirm,
                         enableIMEPersonalizedLearning: false,
                         decoration: InputDecoration(
-                          labelText: 'Potwierdź hasło',
+                          labelText: t('Potwierdź hasło'),
                           prefixIcon: const Icon(Icons.key_rounded),
                           suffixIcon: IconButton(
-                            tooltip: obscureConfirm ? 'Pokaż' : 'Ukryj',
+                            tooltip: obscureConfirm ? t('Pokaż') : t('Ukryj'),
                             onPressed: () {
                               setDialogState(
                                 () => obscureConfirm = !obscureConfirm,
@@ -809,7 +837,7 @@ Future<String?> _showPasswordDialog(
                         ),
                         validator: (String? value) {
                           if (value != passwordController.text) {
-                            return 'Hasła nie są takie same.';
+                            return t('Hasła nie są takie same.');
                           }
                           return null;
                         },
@@ -821,7 +849,7 @@ Future<String?> _showPasswordDialog(
               actions: <Widget>[
                 TextButton(
                   onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: const Text('Anuluj'),
+                  child: Text(t('Anuluj')),
                 ),
                 FilledButton(
                   key: submitKey,

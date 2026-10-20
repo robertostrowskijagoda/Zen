@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/events/event_model.dart';
@@ -330,9 +331,14 @@ final class PlanService extends ChangeNotifier {
         kind: EventKind.meeting,
         startsAt: p.startsAt,
         place: p.place,
-        description:
-            'Z planu na weekend. Chętnych: ${p.joinCount}'
-            '${p.maybe.isEmpty ? '' : ', może: ${p.maybe.length}'}.',
+        description: p.maybe.isEmpty
+            ? t('Z planu na weekend. Chętnych: {count}.', {
+                'count': p.joinCount,
+              })
+            : t('Z planu na weekend. Chętnych: {count}, może: {maybe}.', {
+                'count': p.joinCount,
+                'maybe': p.maybe.length,
+              }),
         invite: <String>[
           for (final PlanAnswer a in p.answers.values) a.address,
         ],
@@ -354,8 +360,8 @@ final class PlanService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'plan-event-${p.id}',
-          title: 'Jest ekipa: ${p.title}',
-          body: 'Plan zamienił się w wydarzenie. Zaproszenia poszły.',
+          title: t('Jest ekipa: {title}', {'title': p.title}),
+          body: t('Plan zamienił się w wydarzenie. Zaproszenia poszły.'),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'plan:${p.id}',
@@ -451,8 +457,8 @@ final class PlanService extends ChangeNotifier {
     if (org == me || (had != null && had.isMine)) {
       return; // our own plan coming back
     }
-    final int t = _now();
-    if (got.startsAt > t + maxAhead || got.startsAt < t - _keepAfter) {
+    final int nowMs = _now();
+    if (got.startsAt > nowMs + maxAhead || got.startsAt < nowMs - _keepAfter) {
       return;
     }
     final bool direct = from == org;
@@ -487,11 +493,15 @@ final class PlanService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'plan-${got.id}',
-          title: 'Kto chętny? ${got.title}',
-          body:
-              '${planWhen(got.startsAt, t)} · '
-              '${direct ? got.organizerName : '${got.organizerName}, przez ${host.nameOf(from)}'}',
-          createdAtMillis: t,
+          title: t('Kto chętny? {title}', {'title': got.title}),
+          body: direct
+              ? '${planWhen(got.startsAt, nowMs)} · ${got.organizerName}'
+              : t('{when} · {name}, przez {via}', {
+                  'when': planWhen(got.startsAt, nowMs),
+                  'name': got.organizerName,
+                  'via': host.nameOf(from),
+                }),
+          createdAtMillis: nowMs,
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'plan:${got.id}',
         ),
@@ -581,7 +591,7 @@ final class PlanService extends ChangeNotifier {
       who = b;
       name = n is String && n.trim().isNotEmpty
           ? (n.trim().length > 60 ? n.trim().substring(0, 60) : n.trim())
-          : 'Ktoś';
+          : t('Ktoś');
       via = from;
     }
     final Map<String, PlanAnswer> answers = Map<String, PlanAnswer>.of(
@@ -616,8 +626,11 @@ final class PlanService extends ChangeNotifier {
       await host.notify(
         RuntimeSystemNotification(
           id: 'plan-join-${p.id}-$who',
-          title: '$name dołącza: ${p.title}',
-          body: 'Chętnych: ${updated.joinCount} z ${p.threshold}.',
+          title: t('{name} dołącza: {title}', {'name': name, 'title': p.title}),
+          body: t('Chętnych: {count} z {threshold}.', {
+            'count': updated.joinCount,
+            'threshold': p.threshold,
+          }),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'plan:${p.id}',

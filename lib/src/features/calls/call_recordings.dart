@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 
 /// One saved call recording (§13.2).
@@ -146,7 +147,7 @@ Future<CallRecording?> keepCallRecording(
       return null;
     }
     return await CallRecordingStore(disk).add(
-      peer: label.trim().isEmpty ? 'Rozmowa' : label.trim(),
+      peer: label.trim().isEmpty ? t('Rozmowa') : label.trim(),
       data: data,
       millis: millis ?? DateTime.now().millisecondsSinceEpoch,
       mime: mime,

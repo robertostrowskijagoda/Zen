@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -28,28 +29,28 @@ enum FlatItemKind {
 }
 
 /// Ready-made invitations (§18.1), to start with one tap.
-const List<String> kFlatInviteIdeas = <String>[
-  'Zapraszamy na obiad',
-  'Zapraszamy na kawę',
-  'Zapraszamy na imprezę',
-  'Zapraszamy na planszówki',
-  'Zapraszamy na grilla',
-  'Wspólny spacer z psem',
+List<String> get kFlatInviteIdeas => <String>[
+  t('Zapraszamy na obiad'),
+  t('Zapraszamy na kawę'),
+  t('Zapraszamy na imprezę'),
+  t('Zapraszamy na planszówki'),
+  t('Zapraszamy na grilla'),
+  t('Wspólny spacer z psem'),
 ];
 
-const List<String> kFlatOfferIdeas = <String>[
-  'Pożyczę wiertarkę',
-  'Pożyczę drabinę',
-  'Podleję kwiaty',
-  'Wyprowadzę psa',
-  'Pomogę z komputerem',
-  'Odbiorę paczkę',
+List<String> get kFlatOfferIdeas => <String>[
+  t('Pożyczę wiertarkę'),
+  t('Pożyczę drabinę'),
+  t('Podleję kwiaty'),
+  t('Wyprowadzę psa'),
+  t('Pomogę z komputerem'),
+  t('Odbiorę paczkę'),
 ];
 
-const List<String> kFlatNeedIdeas = <String>[
-  'Pomoc przy wnoszeniu',
-  'Opieka nad kotem na weekend',
-  'Podwózka',
+List<String> get kFlatNeedIdeas => <String>[
+  t('Pomoc przy wnoszeniu'),
+  t('Opieka nad kotem na weekend'),
+  t('Podwózka'),
 ];
 
 /// One invitation, offer or need on a flat's profile.

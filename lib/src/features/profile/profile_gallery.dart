@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/features/feed/feed_model.dart' show mediaIds;
 import 'package:zen/src/features/feed/post_media.dart';
@@ -18,19 +19,20 @@ const String kGalleryDeleteKind = 'gallery_del';
 const int kMaxGalleryBatch = 10;
 
 /// Who sees gallery items, in the words of the gallery.
-const Map<Audience, String> kGalleryAudienceLabels = <Audience, String>{
-  Audience.public: 'Wszyscy (także obserwujący)',
-  Audience.all: 'Wszyscy znajomi',
-  Audience.mid: 'Znajomi i przyjaciele',
-  Audience.close: 'Tylko przyjaciele',
+Map<Audience, String> get kGalleryAudienceLabels => <Audience, String>{
+  Audience.public: t('Wszyscy (także obserwujący)'),
+  Audience.all: t('Wszyscy znajomi'),
+  Audience.mid: t('Znajomi i przyjaciele'),
+  Audience.close: t('Tylko przyjaciele'),
 };
 
-const Map<Audience, String> kGalleryAudienceHints = <Audience, String>{
-  Audience.public:
-      'Znajomi i każdy, kto Cię obserwuje — także osoby spoza znajomych.',
-  Audience.all: 'Wszyscy Twoi znajomi.',
-  Audience.mid: 'Znajomi oznaczeni jako „znajomi” i przyjaciele.',
-  Audience.close: 'Tylko najbliżsi, oznaczeni jako przyjaciele.',
+Map<Audience, String> get kGalleryAudienceHints => <Audience, String>{
+  Audience.public: t(
+    'Znajomi i każdy, kto Cię obserwuje — także osoby spoza znajomych.',
+  ),
+  Audience.all: t('Wszyscy Twoi znajomi.'),
+  Audience.mid: t('Znajomi oznaczeni jako „znajomi” i przyjaciele.'),
+  Audience.close: t('Tylko najbliżsi, oznaczeni jako przyjaciele.'),
 };
 
 /// One addition to a gallery: what was added at once, for whom.
@@ -151,7 +153,7 @@ Future<void> changeGalleryAudience(
   for (final MediaRef r in item.media) {
     final Uint8List? plain = await openMedia(node.blobs, r);
     if (plain == null) {
-      throw StateError('plik jeszcze się nie pobrał');
+      throw StateError(t('plik jeszcze się nie pobrał'));
     }
     media.add((bytes: plain, mime: r.mime));
   }

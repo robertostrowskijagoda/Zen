@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/media/media_guard.dart';
@@ -19,7 +20,7 @@ typedef AudioClipLoader = Future<Uint8List?> Function();
 class AudioClipPlayer extends StatefulWidget {
   const AudioClipPlayer({
     required this.load,
-    this.title = 'Nagranie',
+    this.title,
     this.durationMs,
     this.sizeBytes,
     this.onMissing,
@@ -27,7 +28,7 @@ class AudioClipPlayer extends StatefulWidget {
   });
 
   final AudioClipLoader load;
-  final String title;
+  final String? title;
   final int? durationMs;
   final int? sizeBytes;
 
@@ -110,13 +111,15 @@ class _AudioClipPlayerState extends State<AudioClipPlayer> {
       if (bytes == null) {
         widget.onMissing?.call();
         if (mounted) {
-          setState(() => _problem = 'Nagranie jeszcze się pobiera…');
+          setState(() => _problem = t('Nagranie jeszcze się pobiera…'));
         }
         return;
       }
       if (!looksLikeSafeContainer(bytes)) {
         if (mounted) {
-          setState(() => _problem = 'Nieprawidłowy plik — nie odtworzono go.');
+          setState(
+            () => _problem = t('Nieprawidłowy plik — nie odtworzono go.'),
+          );
         }
         return;
       }
@@ -140,7 +143,7 @@ class _AudioClipPlayerState extends State<AudioClipPlayer> {
       logZenWarning('Odtwarzanie nagrania: $error');
       await _release();
       if (mounted) {
-        setState(() => _problem = 'Nie udało się odtworzyć nagrania.');
+        setState(() => _problem = t('Nie udało się odtworzyć nagrania.'));
       }
     } finally {
       if (mounted) {
@@ -199,7 +202,7 @@ class _AudioClipPlayerState extends State<AudioClipPlayer> {
         children: <Widget>[
           IconButton.filledTonal(
             key: const Key('audio-clip-play'),
-            tooltip: _playing ? 'Pauza' : 'Odtwórz',
+            tooltip: _playing ? t('Pauza') : t('Odtwórz'),
             onPressed: _loading ? null : () => unawaited(_toggle()),
             style: IconButton.styleFrom(
               backgroundColor: zen.accent.withValues(alpha: 0.16),
@@ -230,7 +233,7 @@ class _AudioClipPlayerState extends State<AudioClipPlayer> {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        widget.title,
+                        widget.title ?? t('Nagranie'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -255,7 +258,7 @@ class _AudioClipPlayerState extends State<AudioClipPlayer> {
                 const SizedBox(height: 4),
                 Text(
                   _problem ??
-                      (meta.isEmpty ? 'Nagranie audio' : meta.join(' · ')),
+                      (meta.isEmpty ? t('Nagranie audio') : meta.join(' · ')),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
