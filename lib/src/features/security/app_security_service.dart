@@ -80,6 +80,11 @@ const String appSecurityGuardedSettingsStorageKey =
 /// settings file.
 const String appSecurityGifApiKeyStorageKey = 'zen_rewrite_gif_api_key';
 
+/// Failed lock-screen password attempts and when the last one happened
+/// (`<count>:<epoch ms>`), see `UnlockThrottle`.
+const String appSecurityUnlockFailuresStorageKey =
+    'zen_rewrite_unlock_failures';
+
 const int appSecurityMasterKeyLengthBytes = 32;
 
 /// Message when the main password would be the same as the panic password.
@@ -469,6 +474,10 @@ abstract class AppSecurityService extends ChangeNotifier {
   Future<void> reset();
 
   Future<Uint8List?> currentEncryptionKey();
+
+  /// The secure storage this service keeps its credentials in (the lock
+  /// screen keeps its failed-attempt counter there too).
+  AppSecurityCredentialsStore get credentialsStore;
 }
 
 Future<bool> loadStoredAppSecurityHasPassword([
@@ -610,6 +619,9 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
 
   @override
   bool get isReady => _isReady;
+
+  @override
+  AppSecurityCredentialsStore get credentialsStore => _credentialsStore;
 
   @override
   bool get hasPassword => _hasPassword;
@@ -1004,6 +1016,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
     appSecurityBiometricUnlockChoiceStorageKey,
     appSecurityGuardedSettingsStorageKey,
     appSecurityGifApiKeyStorageKey,
+    appSecurityUnlockFailuresStorageKey,
   ];
 
   Future<void> _deleteCredential(String key) async {

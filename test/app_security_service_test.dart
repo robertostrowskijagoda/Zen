@@ -22,7 +22,6 @@ void main() {
       await service.setPassword('sekret12');
       await service.applySettings(
         const AppSettings(
-          encryptionEnabled: true,
           lockMode: AppLockMode.background,
           backgroundLockDelaySeconds: 7,
         ),
@@ -59,10 +58,7 @@ void main() {
       expect(await service.currentEncryptionKey(), deviceKey);
 
       await service.applySettings(
-        const AppSettings(
-          encryptionEnabled: false,
-          lockMode: AppLockMode.never,
-        ),
+        const AppSettings(lockMode: AppLockMode.never),
       );
       // Encryption can no longer be toggled off.
       expect(service.encryptionEnabled, isTrue);

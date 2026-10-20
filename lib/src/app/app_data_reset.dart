@@ -72,7 +72,7 @@ final class ZenScratchPlaces {
   /// Zen named (`zen-…`, `zen_…`) goes.
   final List<Directory> sharedFolders;
 
-  /// Documents and Downloads: only a `Zen` folder in them goes.
+  /// A phone app's Documents: only a `Zen` folder in it goes.
   final List<Directory> namedFolders;
 }
 
@@ -106,16 +106,16 @@ Future<ZenScratchPlaces> findZenScratchPlaces() async {
       logZenWarning('No external cache folders: $error');
     }
   }
-  final Directory? documents = await _tryFolder(
-    getApplicationDocumentsDirectory,
-  );
-  if (documents != null) {
-    named.add(documents);
-  }
-  if (!phone) {
-    final Directory? downloads = await _tryFolder(getDownloadsDirectory);
-    if (downloads != null) {
-      named.add(downloads);
+  if (phone) {
+    // The app's own Documents, where "Zapisz kopię" makes its `Zen` folder
+    // on a phone. A computer's Documents and Downloads belong to the person:
+    // a `Zen` folder there may be theirs, and what Zen saves there (by
+    // choice, through a dialog) is on the export list.
+    final Directory? documents = await _tryFolder(
+      getApplicationDocumentsDirectory,
+    );
+    if (documents != null) {
+      named.add(documents);
     }
   }
   return ZenScratchPlaces(

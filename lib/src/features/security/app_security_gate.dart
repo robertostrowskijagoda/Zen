@@ -8,6 +8,7 @@ import 'package:zen/src/app/app_data_reset.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
 import 'package:zen/src/features/account/presentation/account_secure_stage.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
@@ -15,9 +16,18 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/hold_to_confirm_button.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
+import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+
+/// The wipe behind "Nie pamiętam hasła — zacznij od nowa" and the panic
+/// password. A provider so tests can stand in for it.
+final Provider<Future<void> Function(WidgetRef ref)> zenLocalDataResetProvider =
+    Provider<Future<void> Function(WidgetRef ref)>(
+      (Ref ref) => performZenLocalDataReset,
+    );
 
 class AppSecurityGate extends ConsumerStatefulWidget {
   const AppSecurityGate({required this.child, super.key});
@@ -45,6 +55,11 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
 
   AppSecurityService? _security;
 
+  /// Set while the lock screen erases this device. Erasing makes the app
+  /// unlocked half way through; the lock screen stays (and keeps its `ref`
+  /// alive for the rest of the wipe) until this is false again.
+  final ValueNotifier<bool> _wiping = ValueNotifier<bool>(false);
+
   @override
   void initState() {
     super.initState();
@@ -60,6 +75,7 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
     _security?.removeListener(_onSecurityChanged);
     _backgroundLockTimer?.cancel();
     _idleLockTimer?.cancel();
+    _wiping.dispose();
     super.dispose();
   }
 
@@ -221,12 +237,15 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
     bool accountStep,
   ) {
     return AnimatedBuilder(
-      animation: security,
+      animation: Listenable.merge(<Listenable>[security, _wiping]),
       builder: (BuildContext context, Widget? child) {
         if (!security.isReady) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
           );
+        }
+        if (_wiping.value) {
+          return _unlockOverlay();
         }
         if (!security.hasPassword &&
             ref.watch(appPasswordRequiredProvider) &&
@@ -271,23 +290,30 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
           }
           return child!;
         }
-        // The gate sits above the root Navigator (MaterialApp.builder), so
-        // the lock screen must provide its own Overlay for text fields.
-        return Overlay(
-          initialEntries: <OverlayEntry>[
-            OverlayEntry(
-              builder: (BuildContext context) => const _UnlockScreen(),
-            ),
-          ],
-        );
+        return _unlockOverlay();
       },
       child: widget.child,
+    );
+  }
+
+  /// The gate sits above the root Navigator (MaterialApp.builder), so the
+  /// lock screen must provide its own Overlay for text fields.
+  Widget _unlockOverlay() {
+    return Overlay(
+      initialEntries: <OverlayEntry>[
+        OverlayEntry(
+          builder: (BuildContext context) => _UnlockScreen(wiping: _wiping),
+        ),
+      ],
     );
   }
 }
 
 class _UnlockScreen extends ConsumerStatefulWidget {
-  const _UnlockScreen();
+  const _UnlockScreen({required this.wiping});
+
+  /// Raised by the gate's owner while this screen erases the device.
+  final ValueNotifier<bool> wiping;
 
   @override
   ConsumerState<_UnlockScreen> createState() => _UnlockScreenState();
@@ -301,16 +327,85 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
   bool _canUseBiometrics = false;
   String? _errorText;
 
+  /// "Nie pamiętam hasła": the page that erases the device is open.
+  bool _forgot = false;
+  bool _wipeFailed = false;
+
+  /// How long the password must not be tried (Z2-9), counted down by [_tick].
+  Duration _wait = Duration.zero;
+  Timer? _tick;
+
   @override
   void initState() {
     super.initState();
     unawaited(_loadBiometricAvailability());
+    unawaited(_loadWait());
   }
 
   @override
   void dispose() {
+    _tick?.cancel();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  /// The wait left from earlier failures (it survives a restart).
+  Future<void> _loadWait() async {
+    final Duration left = await ref.read(unlockThrottleProvider).remaining();
+    if (mounted && left > Duration.zero) {
+      _startWait(left);
+    }
+  }
+
+  void _startWait(Duration left) {
+    _tick?.cancel();
+    setState(() {
+      _wait = left;
+      _errorText = null;
+    });
+    _tick = Timer.periodic(const Duration(seconds: 1), (Timer timer) {
+      final Duration next = _wait - const Duration(seconds: 1);
+      if (next <= Duration.zero) {
+        timer.cancel();
+        _tick = null;
+      }
+      setState(() => _wait = next <= Duration.zero ? Duration.zero : next);
+    });
+  }
+
+  static String _formatWait(Duration wait) {
+    final int seconds =
+        wait.inSeconds + (wait.inMilliseconds % 1000 > 0 ? 1 : 0);
+    final String rest = (seconds % 60).toString().padLeft(2, '0');
+    return '${seconds ~/ 60}:$rest';
+  }
+
+  /// Erases this device and lets the gate carry on to a fresh start. The
+  /// lock screen stays up until it is done ([_AppSecurityGateState._wiping]).
+  Future<bool> _wipe() async {
+    widget.wiping.value = true;
+    try {
+      await ref.read(zenLocalDataResetProvider)(ref);
+      return true;
+    } on Object catch (error, stackTrace) {
+      logZenError(
+        'Erasing this device from the lock screen failed',
+        error,
+        stackTrace,
+      );
+      return false;
+    } finally {
+      widget.wiping.value = false;
+    }
+  }
+
+  Future<void> _startOver() async {
+    setState(() => _wipeFailed = false);
+    final bool done = await _wipe();
+    if (!mounted) {
+      return;
+    }
+    setState(() => _wipeFailed = !done);
   }
 
   Future<void> _loadBiometricAvailability() async {
@@ -324,13 +419,27 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
   }
 
   Future<void> _unlock() async {
-    if (!_formKey.currentState!.validate()) {
+    // Enter in the field submits too: one attempt at a time, or attempts
+    // started together would all pass the check before any failure counts.
+    if (_isSubmitting ||
+        _wait > Duration.zero ||
+        !_formKey.currentState!.validate()) {
       return;
     }
     setState(() {
       _isSubmitting = true;
       _errorText = null;
     });
+    final UnlockThrottle throttle = ref.read(unlockThrottleProvider);
+    final Duration left = await throttle.remaining();
+    if (!mounted) {
+      return;
+    }
+    if (left > Duration.zero) {
+      setState(() => _isSubmitting = false);
+      _startWait(left);
+      return;
+    }
     final String password = _passwordController.text;
     final AppSecurityService security = ref.read(appSecurityServiceProvider);
     // The panic password wipes all local data and silently lands on a fresh
@@ -341,7 +450,7 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
         // the real password never wipes. The panic password is void.
         await security.clearPanicPassword();
       } else {
-        await performZenLocalDataReset(ref);
+        await _wipe();
         if (!mounted) {
           return;
         }
@@ -353,13 +462,24 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
       }
     }
     final bool unlocked = await security.unlock(password);
+    Duration wait = Duration.zero;
+    if (unlocked) {
+      await throttle.clear();
+    } else {
+      wait = await throttle.recordFailure();
+    }
     if (!mounted) {
       return;
     }
     setState(() {
       _isSubmitting = false;
-      _errorText = unlocked ? null : t('Nieprawidłowe hasło.');
+      _errorText = unlocked || wait > Duration.zero
+          ? null
+          : t('Nieprawidłowe hasło.');
     });
+    if (wait > Duration.zero) {
+      _startWait(wait);
+    }
   }
 
   Future<void> _unlockWithBiometrics() async {
@@ -372,6 +492,9 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
     final bool unlocked = await ref
         .read(appSecurityServiceProvider)
         .unlockWithBiometrics();
+    if (unlocked) {
+      await ref.read(unlockThrottleProvider).clear();
+    }
     if (!mounted) {
       return;
     }
@@ -386,6 +509,19 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
+    if (_forgot) {
+      return _GateScaffold(
+        child: _ForgotPasswordPanel(
+          wiping: widget.wiping,
+          failed: _wipeFailed,
+          onConfirmed: _startOver,
+          onBack: () => setState(() {
+            _forgot = false;
+            _wipeFailed = false;
+          }),
+        ),
+      );
+    }
     return _GateScaffold(
       child: Form(
         key: _formKey,
@@ -458,7 +594,15 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
               },
               onFieldSubmitted: (_) => _unlock(),
             ),
-            if (_errorText != null) ...<Widget>[
+            if (_wait > Duration.zero) ...<Widget>[
+              const SizedBox(height: 10),
+              _GateError(
+                key: const Key('app-unlock-wait-message'),
+                text: t('Za dużo błędnych prób. Spróbuj ponownie za {time}.', {
+                  'time': _formatWait(_wait),
+                }),
+              ),
+            ] else if (_errorText != null) ...<Widget>[
               const SizedBox(height: 10),
               _GateError(text: _errorText!),
             ],
@@ -468,7 +612,9 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(52),
               ),
-              onPressed: _isSubmitting ? null : _unlock,
+              onPressed: _isSubmitting || _wait > Duration.zero
+                  ? null
+                  : _unlock,
               icon: _isSubmitting
                   ? const SizedBox.square(
                       dimension: 18,
@@ -507,9 +653,144 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
                 ),
               ],
             ),
+            const SizedBox(height: 8),
+            Center(
+              child: TextButton(
+                key: const Key('app-unlock-forgot-button'),
+                style: TextButton.styleFrom(
+                  foregroundColor: zen.textMuted,
+                  textStyle: const TextStyle(fontSize: 12.5),
+                ),
+                onPressed: _isSubmitting
+                    ? null
+                    : () => setState(() => _forgot = true),
+                child: Text(t('Nie pamiętam hasła — zacznij od nowa')),
+              ),
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// "Nie pamiętam hasła": says what erasing this device means, then waits
+/// for the button to be held. Says nothing of the panic password, so that
+/// nobody can tell from here whether there is one.
+class _ForgotPasswordPanel extends StatelessWidget {
+  const _ForgotPasswordPanel({
+    required this.wiping,
+    required this.failed,
+    required this.onConfirmed,
+    required this.onBack,
+  });
+
+  final ValueListenable<bool> wiping;
+  final bool failed;
+  final VoidCallback onConfirmed;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return ValueListenableBuilder<bool>(
+      valueListenable: wiping,
+      builder: (BuildContext context, bool busy, Widget? child) {
+        return Column(
+          key: const Key('app-reset-panel'),
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            const Center(
+              child: _GateLockIcon(icon: Icons.warning_amber_rounded),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              t('Zacząć od nowa?'),
+              textAlign: TextAlign.center,
+              style: zen.display(
+                color: zen.textPrimary,
+                size: 28,
+                weight: FontWeight.w600,
+                height: 1.1,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              t(
+                'Bez hasła nie otworzysz tych danych. Możesz je usunąć i '
+                'zacząć jak na nowym urządzeniu. Z TEGO urządzenia zniknie '
+                'wszystko: klucz konta, rozmowy, pliki i ustawienia.',
+              ),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: zen.textSecondary,
+                height: 1.45,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              t(
+                'Konto wróci tylko z kopii zapasowej klucza albo z kręgu '
+                'odzyskiwania. Tego nie da się cofnąć.',
+              ),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: zen.danger,
+                height: 1.45,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (failed && !busy) ...<Widget>[
+              const SizedBox(height: 12),
+              _GateError(
+                text: t(
+                  'Nie udało się usunąć wszystkich danych. Spróbuj jeszcze '
+                  'raz.',
+                ),
+              ),
+            ],
+            const SizedBox(height: 22),
+            if (busy) ...<Widget>[
+              const Center(child: CircularProgressIndicator()),
+              const SizedBox(height: 12),
+              Text(
+                t('Usuwam dane z tego urządzenia…'),
+                textAlign: TextAlign.center,
+                style: TextStyle(color: zen.textSecondary),
+              ),
+            ] else ...<Widget>[
+              Center(
+                child: HoldToConfirmButton(
+                  key: const Key('app-reset-hold-button'),
+                  autofocus: true,
+                  idleLabel: t('Przytrzymaj 10 sekund, aby usunąć wszystko'),
+                  holdingLabel: (int seconds) =>
+                      t('Trzymaj… jeszcze {n} s', {'n': seconds}),
+                  onConfirmed: onConfirmed,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                t(
+                  'Puść przycisk, żeby przerwać. Na komputerze możesz też '
+                  'przytrzymać Enter lub spację.',
+                ),
+                textAlign: TextAlign.center,
+                style: TextStyle(color: zen.textMuted, fontSize: 12),
+              ),
+              const SizedBox(height: 10),
+              TextButton(
+                key: const Key('app-reset-back-button'),
+                onPressed: onBack,
+                child: Text(t('Wróć')),
+              ),
+            ],
+          ],
+        );
+      },
     );
   }
 }
@@ -625,7 +906,7 @@ class _GateLockIcon extends StatelessWidget {
 
 /// A short error under the password field.
 class _GateError extends StatelessWidget {
-  const _GateError({required this.text});
+  const _GateError({required this.text, super.key});
 
   final String text;
 
