@@ -21,7 +21,6 @@ class ExperimentalFeaturesScreen extends ConsumerWidget {
     ZenFeature.pyramid => t('Piramida'),
     ZenFeature.wallet => t('Portfel i waluta'),
     ZenFeature.dating => t('Randki'),
-    ZenFeature.neighbors => t('Sąsiedzi'),
   };
 
   @override

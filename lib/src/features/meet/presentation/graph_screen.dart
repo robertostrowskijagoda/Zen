@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
@@ -754,6 +755,10 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
     final NearbyService nearby = ref.watch(nearbyServiceProvider);
     final IntroService intro = ref.watch(introServiceProvider);
     final PyramidService pyramid = ref.watch(pyramidServiceProvider);
+    // "Z mojej piramidy" only while the pyramid is switched on (§2.5.1).
+    final bool pyramidOn = ref
+        .watch(featureFlagsProvider)
+        .isEnabled(ZenFeature.pyramid);
     final SocialHubState social = watchSocialPeople(ref);
     final LedgerNode? node = ref.watch(ledgerNodeProvider);
     return Scaffold(
@@ -766,7 +771,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
           meet: meet,
           nearby: nearby,
           intro: intro,
-          pyramid: pyramid,
+          pyramid: pyramidOn ? pyramid : null,
           social: social,
           node: node,
         ),
@@ -779,7 +784,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
     required MeetService meet,
     required NearbyService nearby,
     required IntroService intro,
-    required PyramidService pyramid,
+    required PyramidService? pyramid,
     required SocialHubState social,
     required LedgerNode? node,
   }) {
@@ -790,7 +795,9 @@ class _GraphScreenState extends ConsumerState<GraphScreen> {
       for (final NearbyPerson p in nearby.people)
         if (p.friend != null) PeerShareCodec.normalizeAddress(p.friend!),
     };
-    final Set<String> inPyramid = pyramidFriendAddresses(pyramid);
+    final Set<String> inPyramid = pyramid == null
+        ? const <String>{}
+        : pyramidFriendAddresses(pyramid);
     final String? selected = _selected;
     final List<GraphNode> all = buildGraph(
       social: social,

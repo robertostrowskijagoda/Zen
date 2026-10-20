@@ -92,7 +92,9 @@ void main() {
       log.clear();
 
       core.applyFlags(
-        const FeatureFlags().withFeature(ZenFeature.dating, false),
+        const FeatureFlags()
+            .withFeature(ZenFeature.dating, false)
+            .withFeature(ZenFeature.pyramid, true),
       );
       await _settle();
       expect(log, <String>['stop dating', 'start pyramid']);
@@ -218,6 +220,7 @@ void main() {
     expect(core.modules.map((ZenModule m) => m.id), <String>[
       'signal',
       'ledger',
+      'feed',
       'meet',
       'neighbors',
       'dating',
@@ -231,8 +234,9 @@ void main() {
       <String, ZenFeature?>{
         'signal': null,
         'ledger': null,
+        'feed': null,
         'meet': null,
-        'neighbors': ZenFeature.neighbors,
+        'neighbors': null,
         'dating': ZenFeature.dating,
         'pyramid': ZenFeature.pyramid,
         'plan': null,

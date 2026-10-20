@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
@@ -669,7 +670,9 @@ class _EconomyNote extends StatelessWidget {
 
   final String friend;
   final bool inPyramid;
-  final VoidCallback onOpenMarket;
+
+  /// Null while the wallet is switched off: no link to the market.
+  final VoidCallback? onOpenMarket;
 
   @override
   Widget build(BuildContext context) {
@@ -699,15 +702,16 @@ class _EconomyNote extends StatelessWidget {
             {'name': friend},
           ),
         ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            key: const Key('intro-open-market'),
-            onPressed: onOpenMarket,
-            icon: const Icon(Icons.storefront_rounded, size: 18),
-            label: Text(t('Otwórz rynek')),
+        if (onOpenMarket != null)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const Key('intro-open-market'),
+              onPressed: onOpenMarket,
+              icon: const Icon(Icons.storefront_rounded, size: 18),
+              label: Text(t('Otwórz rynek')),
+            ),
           ),
-        ),
       ],
     );
   }
@@ -726,9 +730,13 @@ Future<void> askIntroduction(
     return;
   }
   final IntroService intro = ref.read(introServiceProvider);
-  final Set<String> pyramid = pyramidFriendAddresses(
-    ref.read(pyramidServiceProvider),
-  );
+  // The pyramid's market and the wallet only while they are switched on
+  // (§2.5.1).
+  final FeatureFlags flags = ref.read(featureFlagsProvider);
+  final Set<String> pyramid = flags.isEnabled(ZenFeature.pyramid)
+      ? pyramidFriendAddresses(ref.read(pyramidServiceProvider))
+      : const <String>{};
+  final bool wallet = flags.isEnabled(ZenFeature.wallet);
   final NavigatorState nav = Navigator.of(context);
   final TextEditingController note = TextEditingController();
   String middle = via.first;
@@ -779,17 +787,19 @@ Future<void> askIntroduction(
                 _EconomyNote(
                   friend: f,
                   inPyramid: pyramid.contains(middle),
-                  onOpenMarket: () {
-                    Navigator.of(context).pop(false);
-                    unawaited(
-                      nav.push(
-                        MaterialPageRoute<void>(
-                          builder: (BuildContext context) =>
-                              const WalletScreen(),
-                        ),
-                      ),
-                    );
-                  },
+                  onOpenMarket: wallet
+                      ? () {
+                          Navigator.of(context).pop(false);
+                          unawaited(
+                            nav.push(
+                              MaterialPageRoute<void>(
+                                builder: (BuildContext context) =>
+                                    const WalletScreen(),
+                              ),
+                            ),
+                          );
+                        }
+                      : null,
                 ),
               ],
             ),
