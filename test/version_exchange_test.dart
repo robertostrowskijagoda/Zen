@@ -214,9 +214,12 @@ void main() {
   testWidgets('the banner shows only while a friend is ahead', (
     WidgetTester tester,
   ) async {
-    Future<void> pump(String? version) => tester.pumpWidget(
+    Future<void> pump(String? version, {String? signed}) => tester.pumpWidget(
       ProviderScope(
-        overrides: [friendsNewerVersionProvider.overrideWithValue(version)],
+        overrides: [
+          friendsNewerVersionProvider.overrideWithValue(version),
+          signedNewerVersionProvider.overrideWithValue(signed),
+        ],
         child: MaterialApp(
           theme: ZenTheme.dark(),
           home: const Scaffold(body: FriendsNewerVersionBanner()),
@@ -233,6 +236,13 @@ void main() {
       findsOneWidget,
     );
     expect(find.textContaining('1.12.0'), findsOneWidget);
+    expect(find.textContaining('podpisana'), findsNothing);
+
+    // A signature that verified here says so; a friend's claim does not.
+    await pump('1.12.0', signed: '1.13.0');
+    expect(find.textContaining('1.13.0'), findsOneWidget);
+    expect(find.textContaining('podpisana'), findsOneWidget);
+    expect(find.textContaining('1.12.0'), findsNothing);
   });
 }
 

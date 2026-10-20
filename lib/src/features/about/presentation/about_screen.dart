@@ -249,8 +249,11 @@ class AboutScreen extends StatelessWidget {
               'Zen nie ma własnych serwerów. Telefony i komputery łączą się '
               'przez Yggdrasil — otwartą, szyfrowaną sieć, w której każde '
               'urządzenie ma swój adres, a ruch idzie wprost albo przez inne '
-              'urządzenia, które nie widzą treści. Zen dokłada do tego własne '
-              'szyfrowanie każdej wiadomości.',
+              'urządzenia, które nie widzą treści. Bezpośrednie wiadomości są '
+              'szyfrowane end-to-end przez samą sieć Yggdrasil. Własne '
+              'szyfrowanie Zen dokłada tam, gdzie treść leży poza tym '
+              'połączeniem: w kopiach u znajomych (skrzynka), we wpisach '
+              'dla wybranych odbiorców, w randkach i podobnych miejscach.',
             ),
           ),
           ZenSection(t('Własny most Yggdrasil')),

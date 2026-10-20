@@ -60,11 +60,15 @@ void main() {
     await pumpAbout(tester, ZenTheme.light());
     final Finder list = find.byType(Scrollable).first;
     await tester.scrollUntilVisible(
-      find.byKey(const Key('about-yggdrasil-site')),
+      find.byKey(const Key('about-public-peers')),
       300,
       scrollable: list,
     );
-    expect(find.byKey(const Key('about-own-bridge')), findsOneWidget);
+    await tester.pump();
+    expect(
+      find.byKey(const Key('about-own-bridge'), skipOffstage: false),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('about-public-peers')), findsOneWidget);
     expect(kYggdrasilUrl, startsWith('https://yggdrasil-network.github.io'));
   });
