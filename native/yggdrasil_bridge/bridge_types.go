@@ -47,6 +47,8 @@ type bridgeNode struct {
 	peerProbe          *peerProbeState
 	nudgeStop          chan struct{}
 	nudgeStopOnce      sync.Once
+	// Limits on the public peering port of a desktop bridge (peer_guard.go).
+	peerGuards []*peerListenGuard
 }
 
 type configSummary struct {
@@ -84,9 +86,11 @@ type relayState struct {
 	localTargets    map[string]*net.UDPAddr
 	pendingPackets  [][]byte
 	outboundPackets int
-	// Source IP -> whether it is this device's own (see acceptLocalSource).
+	// Source IP -> whether it is this device's own (see isLocalSourceLocked).
 	sourceVerdicts map[string]bool
-	mu             sync.Mutex
+	// Which local sockets may use the relay (relay_admission.go).
+	admission relayAdmission
+	mu        sync.Mutex
 }
 
 type leafPeerMonitor struct {

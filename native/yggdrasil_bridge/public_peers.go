@@ -13,7 +13,7 @@ import (
 // v0.5.12 can dial are kept (tls, tcp, quic, ws, wss).
 //
 // This list is only the emergency starting point. The app is meant to
-// learn bridges from other users (see docs/PROJEKT_APLIKACJI.md §5.1).
+// learn bridges from other users (see docs/PLAN.md §5.1).
 
 type publicPeer struct {
 	uri     string

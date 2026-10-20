@@ -54,6 +54,7 @@ func createNode(configJSON string) (*bridgeNode, error) {
 		return nil, err
 	}
 	ensureDefaultRuntimeConfig(cfg)
+	applyLanDiscovery(cfg, parseZenLanDiscovery(configJSON))
 	cfg.IfName = "none"
 	cfg.AdminListen = "none"
 
@@ -87,25 +88,52 @@ func createNode(configJSON string) (*bridgeNode, error) {
 		options = append(options, core.AllowedPublicKey(k[:]))
 	}
 	listenOptions := make([]core.SetupOption, 0, len(cfg.Listen))
+	activeListen := make([]string, 0, len(cfg.Listen))
+	var peerGuards []*peerListenGuard
+	closePeerGuards := func() {
+		for _, guard := range peerGuards {
+			guard.close()
+		}
+		peerGuards = nil
+	}
 	for _, listenAddr := range cfg.Listen {
-		listenOptions = append(listenOptions, core.ListenAddress(listenAddr))
+		nodeListen := listenAddr
+		if _, _, guarded := guardedListenAddress(listenAddr); guarded && !isPhoneOS() {
+			// A bridge's public port goes through the connection and
+			// transfer limits (peer_guard.go); the node listens on loopback.
+			guard, backendURI, guardErr := startPeerListenGuard(listenAddr, defaultPeerGuardLimits, func(ip net.IP) bool {
+				return !iprange.Contains(ip)
+			})
+			if guardErr != nil {
+				// The inbound peering port is fixed, so another process (an
+				// older Zen instance that is still shutting down, or an
+				// unrelated service) can hold it. The node then stays a leaf
+				// for this address and reaches the mesh through outbound peers.
+				logger.Warnf("listen address %s unavailable (%v), starting without it", listenAddr, guardErr)
+				continue
+			}
+			peerGuards = append(peerGuards, guard)
+			nodeListen = backendURI
+		}
+		listenOptions = append(listenOptions, core.ListenAddress(nodeListen))
+		activeListen = append(activeListen, listenAddr)
 	}
 
 	yggCore, err := core.New(cfg.Certificate, logger, append(options, listenOptions...)...)
 	if err != nil && len(listenOptions) > 0 {
-		// The inbound peering port is fixed, so another process (an older Zen
-		// instance that is still shutting down, or an unrelated service) can
-		// hold it. Falling back to a leaf node keeps the mesh reachable through
-		// outbound peers instead of leaving the user with no network at all.
+		// Same as above, for a listener the node binds itself. Falling back
+		// to a leaf node keeps the mesh reachable through outbound peers
+		// instead of leaving the user with no network at all.
 		logger.Warnf("listen address unavailable (%v), starting without an inbound listener", err)
+		closePeerGuards()
 		yggCore, err = core.New(cfg.Certificate, logger, options...)
-		if err == nil {
-			cfg.Listen = []string{}
-		}
+		activeListen = []string{}
 	}
 	if err != nil {
+		closePeerGuards()
 		return nil, err
 	}
+	cfg.Listen = activeListen
 
 	var multicastModule *multicast.Multicast
 	if len(cfg.MulticastInterfaces) > 0 {
@@ -147,6 +175,7 @@ func createNode(configJSON string) (*bridgeNode, error) {
 		relays:         make(map[string]*relayState),
 		peerProbe:      newPeerProbeState(),
 		nudgeStop:      make(chan struct{}),
+		peerGuards:     peerGuards,
 	}
 	if !isPhoneOS() {
 		node.startPeerProbeMonitor()
@@ -251,6 +280,10 @@ func normalizeNodeState(handle int32, node *bridgeNode) map[string]any {
 	// needs peering/routing details for the runtime dashboard. A nil key is
 	// omitted from the JSON entirely (omitempty).
 	cfg.PrivateKey = nil
+	// Nor the LAN discovery password (the snapshot's slice is a copy).
+	for i := range cfg.MulticastInterfaces {
+		cfg.MulticastInterfaces[i].Password = ""
+	}
 	activeLeafPeer := currentLeafPeer(node)
 	selectedPeer, selectedPeerLatency, availablePeerCount, candidatePeerCount := currentSelectedPeer(node, peers)
 	if candidatePeerCount == 0 {

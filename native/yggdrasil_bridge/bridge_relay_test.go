@@ -5,12 +5,12 @@ import (
 	"testing"
 )
 
-func TestOpenRelayBindsToUnspecified(t *testing.T) {
+func TestOpenRelayBindHost(t *testing.T) {
 	node := &bridgeNode{
 		relays: make(map[string]*relayState),
 	}
 
-	const callID = "call-unspecified-bind"
+	const callID = "call-bind-host"
 	port, err := node.openRelay(callID, "200:1111::1")
 	if err != nil {
 		t.Fatalf("openRelay failed: %v", err)
@@ -31,42 +31,80 @@ func TestOpenRelayBindsToUnspecified(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected UDP local addr, got %T", relay.conn.LocalAddr())
 	}
-	if !localAddr.IP.IsUnspecified() {
-		t.Fatalf("expected relay to bind to 0.0.0.0, got %s", localAddr.IP)
+	if isPhoneOS() {
+		if !localAddr.IP.IsUnspecified() {
+			t.Fatalf("expected the phone relay on 0.0.0.0, got %s", localAddr.IP)
+		}
+	} else if !localAddr.IP.IsLoopback() {
+		t.Fatalf("expected the desktop relay on loopback only, got %s", localAddr.IP)
 	}
 }
 
+// admittedRelay is a relay that has learned the peer's check "mine:peer",
+// so local checks must carry "peer:mine".
+func admittedRelay(callID string) *relayState {
+	relay := &relayState{callID: callID, localTargets: make(map[string]*net.UDPAddr)}
+	relay.admission.learnFromPeer(stunBindingRequestFor("mine:peer"))
+	return relay
+}
+
 func TestRelayAcceptsMultipleLocalMediaSources(t *testing.T) {
-	relay := &relayState{callID: "call-pin", localTargets: make(map[string]*net.UDPAddr)}
+	relay := admittedRelay("call-pin")
+	check := stunBindingRequestFor("peer:mine")
 
 	first := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 51000}
 	second := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 52000}
 
-	if !relay.acceptLocalSource(first) {
-		t.Fatal("expected the first local source to be accepted")
+	if relay.admitLocalDatagram(first, check) != relayAdmit {
+		t.Fatal("expected the first local source to be admitted")
 	}
-	if !relay.acceptLocalSource(second) {
-		t.Fatal("expected the second local source (e.g. video) to also be accepted")
+	if relay.admitLocalDatagram(second, check) != relayAdmit {
+		t.Fatal("expected the second local source (e.g. video) to also be admitted")
 	}
 
 	relay.outboundPackets = 10
 
-	// Even when media flows, subsequent packets from both audio (first) and video (second) must be accepted.
-	if !relay.acceptLocalSource(first) {
-		t.Fatal("expected the audio source to remain accepted")
+	// Once admitted, any datagram (DTLS, RTP) from both sockets passes.
+	media := []byte{0x80, 0x6f, 0x00, 0x01}
+	if relay.admitLocalDatagram(first, media) != relayAdmit {
+		t.Fatal("expected the audio source to remain admitted")
 	}
-	if !relay.acceptLocalSource(second) {
-		t.Fatal("expected the video source to remain accepted")
+	if relay.admitLocalDatagram(second, media) != relayAdmit {
+		t.Fatal("expected the video source to remain admitted")
 	}
 	if len(relay.localTargets) != 2 {
 		t.Fatalf("expected 2 local targets, got %d", len(relay.localTargets))
 	}
 }
 
+func TestRelayRefusesALocalAppWithoutTheCallsCredentials(t *testing.T) {
+	relay := admittedRelay("call-hijack")
+	intruder := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 40000}
+
+	// Speaking first no longer takes the relay.
+	if verdict := relay.admitLocalDatagram(intruder, []byte{0x80, 0x00, 0x00, 0x01}); verdict != relayDrop {
+		t.Fatalf("media from an unadmitted socket must be dropped, got %v", verdict)
+	}
+	if verdict := relay.admitLocalDatagram(intruder, stunBindingRequestFor("guess:wrong")); verdict != relayForwardOnly {
+		t.Fatalf("a check with other credentials is only passed on, got %v", verdict)
+	}
+	if len(relay.localTargets) != 0 || relay.activeTarget != nil {
+		t.Fatal("the intruder must not become a target of the call's media")
+	}
+
+	webrtc := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 40001}
+	if relay.admitLocalDatagram(webrtc, stunBindingRequestFor("peer:mine")) != relayAdmit {
+		t.Fatal("the call's own WebRTC socket must be admitted")
+	}
+	if relay.admitLocalDatagram(intruder, []byte{0x80, 0x00, 0x00, 0x02}) != relayDrop {
+		t.Fatal("the intruder must stay refused after the call is up")
+	}
+}
+
 func TestRelayRejectsNonLocalSources(t *testing.T) {
-	relay := &relayState{callID: "call-nonlocal"}
+	relay := admittedRelay("call-nonlocal")
 	remote := &net.UDPAddr{IP: net.ParseIP("8.8.8.8"), Port: 51000}
-	if relay.acceptLocalSource(remote) {
+	if relay.admitLocalDatagram(remote, stunBindingRequestFor("peer:mine")) != relayDrop {
 		t.Fatal("expected a public source address to be rejected")
 	}
 }
@@ -77,17 +115,18 @@ func TestRelayAcceptsOnlyThisDevicesOwnAddresses(t *testing.T) {
 	isOwnHostAddress = func(ip net.IP) bool { return ip.Equal(own) }
 	defer func() { isOwnHostAddress = previous }()
 
-	relay := &relayState{callID: "call-lan"}
-	if !relay.acceptLocalSource(&net.UDPAddr{IP: own, Port: 50000}) {
+	relay := admittedRelay("call-lan")
+	check := stunBindingRequestFor("peer:mine")
+	if relay.admitLocalDatagram(&net.UDPAddr{IP: own, Port: 50000}, check) != relayAdmit {
 		t.Fatal("this device's LAN address (WebRTC host candidate) must be accepted")
 	}
-	if relay.acceptLocalSource(&net.UDPAddr{IP: net.ParseIP("192.168.1.30"), Port: 50000}) {
+	if relay.admitLocalDatagram(&net.UDPAddr{IP: net.ParseIP("192.168.1.30"), Port: 50000}, check) != relayDrop {
 		t.Fatal("another machine on the LAN must be rejected")
 	}
-	if relay.acceptLocalSource(&net.UDPAddr{IP: net.ParseIP("10.0.0.7"), Port: 50000}) {
+	if relay.admitLocalDatagram(&net.UDPAddr{IP: net.ParseIP("10.0.0.7"), Port: 50000}, check) != relayDrop {
 		t.Fatal("another private address must be rejected")
 	}
-	if !relay.acceptLocalSource(&net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 50001}) {
+	if relay.admitLocalDatagram(&net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 50001}, check) != relayAdmit {
 		t.Fatal("loopback must be accepted")
 	}
 }
