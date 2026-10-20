@@ -16,6 +16,8 @@
   &nbsp;·&nbsp;
   <a href="#iphone"><b>📱 iPhone</b></a>
   &nbsp;·&nbsp;
+  <a href="#mac-linux"><b>💻 Mac, Linux</b></a>
+  &nbsp;·&nbsp;
   <a href="https://robertostrowskijagoda.github.io/Zen/"><b>📲 Otwórz w aplikacji</b></a>
   &nbsp;·&nbsp;
   <a href="#wesprzyj-zen"><b>💜 Wesprzyj</b></a>
@@ -43,6 +45,8 @@ Zen to komunikator i sieć dla ludzi, którzy się znają — ale bez firmy poś
 Nie ma serwera, który wszystko widzi, nie ma reklam ani algorytmu, który decyduje,
 co zobaczysz. Wiadomości, zdjęcia i posty idą wprost między telefonami
 i komputerami znajomych, zaszyfrowane, a dane zostają na Twoim urządzeniu.
+(Jeden wyjątek: wyszukiwarka GIF-ów korzysta z zewnętrznej firmy klipy.com —
+szczegóły w „Prywatność i bezpieczeństwo”.)
 
 Zen ma też zmienić to, jak ludzie decydują o wspólnych sprawach: **piramida** buduje
 się z małych komórek ludzi, którzy znają się osobiście — głosy, zaufanie i wspólna
@@ -50,7 +54,7 @@ kasa płyną oddolnie, bez centrali, którą dałoby się przekupić albo wyłą
 
 ## Co potrafi
 
-- **Rozmowy** — czaty, grupy, głosówki, połączenia audio i wideo, szyfrowane od nadawcy do odbiorcy.
+- **Rozmowy** — czaty, grupy, głosówki, połączenia audio i wideo, szyfrowane od nadawcy do odbiorcy; GIF-y z wyszukiwarki klipy.com (zewnętrzna firma).
 - **Tablica** — posty ze zdjęciami, filmami i nagraniami audio, tylko dla tych, których wybierzesz.
 - **Spotkania na żywo** — status „na teraz” (spacer, kawa, *pilnie potrzebuję pomocy*), wydarzenia, kolacje przez znajomych, plan na weekend.
 - **Graf znajomych** — kto kogo zna, także znajomi znajomych; przedstawienie przez wspólnego znajomego.
@@ -58,6 +62,8 @@ kasa płyną oddolnie, bez centrali, którą dałoby się przekupić albo wyłą
 - **Alarm** — jednym ruchem wołasz najbliższych, z położeniem i potwierdzeniem, kto zobaczył.
 - **Osoby w pobliżu** — przez Bluetooth, także bez internetu.
 - **Piramida** — oddolne głosowania, delegowanie zaufania, wspólna kasa i punkty.
+- **21 języków** — Zen sam mówi językiem telefonu albo komputera (gdy go nie zna — po angielsku); zmienisz go w **Ustawienia → Język**.
+- **Telefon i komputer** — Android, iPhone, Windows, Linux i Mac; jedno konto na kilku urządzeniach.
 
 ## Jak zainstalować
 
@@ -121,7 +127,26 @@ Zen działa też na iPhonie. Nie ma go w App Store (to wymaga płatnego konta Ap
 
 ### Mac, Linux
 
-W przygotowaniu — ten sam rdzeń, co na Windows.
+Nowe — wersje na Linuksa i Maca buduje GitHub Actions razem z innymi plikami
+wydania; nie są podpisane i nie były jeszcze sprawdzone na prawdziwych
+komputerach, więc mogą mieć błędy.
+
+**Linux:** pobierz [Zen-Linux-x64.tar.gz](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-x64.tar.gz)
+(albo [Zen-Linux-arm64.tar.gz](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Linux-arm64.tar.gz)
+dla Raspberry Pi 4/5 i innych komputerów ARM z 64-bitowym systemem), rozpakuj
+i uruchom `Zen/zen`. Potrzebne: GNOME Keyring albo KWallet (tam leży klucz
+szyfrowania), a do ikony w zasobniku `libayatana-appindicator3-1`.
+
+**Mac** (macOS 12 lub nowszy, Apple Silicon i Intel): pobierz
+[Zen-macOS.zip](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-macOS.zip),
+rozpakuj i przenieś `Zen.app` do Programów. Przy pierwszym uruchomieniu macOS
+powie, że nie może sprawdzić twórcy: **Ustawienia systemowe → Prywatność
+i ochrona → Otwórz mimo to** (albo w Terminalu
+`xattr -dr com.apple.quarantine /Applications/Zen.app`). Po aktualizacji macOS
+może zapytać o dostęp do pęku kluczy — wybierz **Zawsze pozwalaj**.
+
+Na komputerze nie ma Bluetooth („Osoby w pobliżu”), nagrywania rozmów ani
+aparatu; na Linuksie Zen nie odtwarza jeszcze głosówek i filmów.
 
 ### Od znajomego
 
@@ -148,8 +173,10 @@ przez Quick Share, Bluetooth albo Wi-Fi, nawet bez internetu.
 
 - **Niezależność.** Sklep może w każdej chwili usunąć aplikację albo zażądać zmian.
   Zen ma być niezależny — także od wielkich firm i od polityki.
-- **Bez firmy i opłat.** Sklepy wymagają firmy, opłat i zgody na swoje zasady,
-  a Zen tworzy jedna osoba, za darmo.
+- **Bez opłat i przeróbek.** Sklepy wymagają opłat (App Store — co roku),
+  zgody na swoje zasady i osobnej wersji aplikacji (bez „Podaj dalej”
+  i aktualizacji od znajomych), a Zen tworzy jedna osoba, za darmo. Wersja
+  do sklepów jest w planach (`docs/WYDANIA.md`, punkt 6).
 - **Prywatność.** Nikt, nawet sklep, nie wie, że masz Zen.
 
 ## Prywatność i bezpieczeństwo
@@ -160,6 +187,11 @@ przez Quick Share, Bluetooth albo Wi-Fi, nawet bez internetu.
   dotrze do telefonu. Film czy nagranie musi być prawdziwym filmem lub
   nagraniem, inaczej zostaje zwykłym plikiem. Zen nigdy sam nie otwiera plików,
   a przed zapisaniem programu (np. `.exe`, `.apk`) ostrzega.
+- **GIF-y idą przez zewnętrzną firmę.** Wyszukiwarka GIF-ów korzysta
+  z klipy.com: ta firma widzi wpisane hasło i Twój adres IP. GIF, który
+  przysłał Ci znajomy, też pobierasz z klipy.com (wtedy klipy.com widzi Twój
+  adres IP), a GIF-y nie przechodzą przez sprawdzanie zdjęć opisane wyżej.
+  Nie chcesz tego — nie używaj GIF-ów.
 - Nazwa znajomego pochodzi z jego profilu — nikt nie podszyje się pod „Mamę”
   nazwą nadaną w zaproszeniu. Własny pseudonim (widoczny tylko u Ciebie)
   pojawia się pod nazwą.
@@ -175,7 +207,13 @@ Zen nie ma własnych serwerów. Urządzenia łączą się przez
 [**Yggdrasil**](https://yggdrasil-network.github.io/) — otwartą, szyfrowaną sieć mesh,
 w której każde urządzenie ma swój adres, a ruch idzie wprost albo przez inne
 urządzenia, które nie widzą treści. Zen dokłada do tego własne szyfrowanie.
-Aplikacja jest napisana we Flutterze (Android, Windows, iPhone), a most sieci w Go.
+Te urządzenia (także publiczne węzły, od których Zen startuje) widzą jednak
+Twój adres IP i Twój adres w sieci, czyli kod zaproszenia — nie widzą, co
+piszesz. Do tego wyszukiwarka GIF-ów korzysta z zewnętrznej firmy klipy.com
+(wyżej).
+Aplikacja jest napisana we Flutterze (Android, iPhone, Windows, Linux, macOS),
+a most sieci w Go. Teksty są w 21 językach; język wybiera się sam albo
+w Ustawienia → Język.
 
 ### Własny most (dla zaawansowanych)
 
@@ -196,6 +234,39 @@ i pomaga wszystkim (nie widzi treści wiadomości):
    (pull request). Zen bierze węzły z tej listy, więc kolejne wersje Zen połączą
    się także przez Twój most.
 
+### Budowanie ze źródeł
+
+Zawsze potrzebne są [Flutter](https://docs.flutter.dev/get-started/install)
+3.47.1 i [Go](https://go.dev/dl/) w wersji z `native/yggdrasil_bridge/go.mod`.
+Most sieci w Go buduje się sam przy `flutter build` i `flutter run` — tylko
+wtedy, gdy zmieniły się jego źródła (szczegóły: `docs/WYDANIA.md`, punkt 3.1).
+
+| System | Do tego | Polecenie |
+|---|---|---|
+| Android | Android Studio (SDK i NDK), JDK 17 | `flutter build apk --release` |
+| Windows | Visual Studio 2022 („Programowanie aplikacji klasycznych w C++”), gcc dla Go (np. Strawberry Perl) | `flutter build windows --release` |
+| Linux | pakiety poniżej | `flutter build linux --release` |
+| macOS | Xcode z narzędziami wiersza poleceń, CocoaPods | `flutter build macos --release` |
+| iPhone (na Macu) | Xcode, CocoaPods | `flutter build ios --release --no-codesign` |
+
+**Linux** (Ubuntu, Debian):
+
+```
+sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
+  libstdc++-12-dev libsecret-1-dev libayatana-appindicator3-dev
+```
+
+Gotowy Zen jest w `build/linux/x64/release/bundle/` (plik `zen` z folderami
+`lib/` i `data/`; na ARM64 `build/linux/arm64/…`). Do działania potrzebuje
+usługi kluczy (GNOME Keyring albo KWallet — w niej leży klucz szyfrowania), a do
+ikony w zasobniku `libayatana-appindicator3-1` (w GNOME także rozszerzenia
+AppIndicator).
+
+**macOS:** aplikacja to `build/macos/Build/Products/Release/Zen.app` (Apple
+Silicon i Intel, macOS 12 lub nowszy). Nie jest w piaskownicy (App Sandbox) —
+uruchamia narzędzia systemu, np. `route` i `adb`; powód jest opisany
+w `macos/Runner/Release.entitlements`.
+
 ## Wesprzyj Zen
 
 Zen jest darmowy i bez reklam — utrzymuje się wyłącznie z dobrowolnych wpłat.
@@ -215,47 +286,14 @@ Jeżeli masz dla mnie pracę, daj znać — znajdziesz mnie między innymi na Li
 ## Licencja
 
 Zen jest na licencji [PolyForm Strict 1.0.0](https://polyformproject.org/licenses/strict/1.0.0)
-z dodatkowymi zezwoleniami autora — szczegóły w [LICENSE](LICENSE). W skrócie:
+z dodatkowymi zezwoleniami autora — pełne warunki w [LICENSE](LICENSE). W skrócie:
 
-- **wolno:** czytać i analizować kod (także pod kątem bezpieczeństwa), zgłaszać
-  błędy i wysyłać pull requesty, budować Zen dla siebie i przekazywać innym
-  niezmienione oficjalne wydania (ta sama suma SHA-256) — za darmo;
-- **nie wolno:** używać Zen komercyjnie, publikować przerobionych wersji ani
-  forków, usuwać autora ani zbiórki, dodawać reklam czy własnych zbiórek,
-  sprzedawać aplikacji;
-- prawa autorskie zostają przy autorze; zgodę na wyjątki daje tylko on.
+| Wolno | Nie wolno |
+|---|---|
+| używać Zen do każdego celu — prywatnie, w firmie, w szkole, w urzędzie — za darmo i bez pytania o zgodę | sprzedawać Zen ani brać pieniędzy za jego udostępnianie |
+| instalować go na dowolnej liczbie urządzeń, także pracownikom | dołączać Zen do płatnych produktów czy usług |
+| czytać kod, badać jego bezpieczeństwo i publikować wyniki | dodawać reklam, płatności ani własnych zbiórek |
+| zgłaszać błędy i wysyłać pull requesty | usuwać autora ani jego zbiórki |
+| budować Zen z niezmienionego kodu i rozdawać oficjalne wydania (ta sama suma SHA-256) | publikować przerobionych wersji ani forków |
 
-Zgłoszenia błędów i propozycje: [Issues](https://github.com/robertostrowskijagoda/Zen/issues).
-
----
-
-# Dla programistów
-
-Flutter (Android, Windows, iPhone) + most sieci w Go (`native/yggdrasil_bridge/`, Yggdrasil).
-
-- **Plan i opis całości:** [`docs/PROJEKT_APLIKACJI.md`](docs/PROJEKT_APLIKACJI.md)
-- **Stan projektu, znane problemy, audyt bezpieczeństwa:** [`docs/STAN.md`](docs/STAN.md)
-- **Wydania, podpisy, publikacja:** [`docs/WYDANIA.md`](docs/WYDANIA.md) · **Testy:** [`docs/TESTOWANIE.md`](docs/TESTOWANIE.md)
-- **Zmiany:** [`CHANGELOG.md`](CHANGELOG.md)
-
-**Potrzebne:** Flutter 3.47, Go 1.26, Android SDK z NDK (Android), kompilator C
-dla cgo (Windows: np. MinGW-w64 albo Strawberry Perl), Xcode (iPhone).
-
-```powershell
-flutter pub get
-flutter analyze
-flutter test                      # testy jednostkowe i widżetów
-flutter build apk --release       # albo: flutter build windows --release
-```
-
-- **Most sieci buduje się sam:** `flutter build apk` i `flutter build windows`
-  kompilują go ze źródeł w `native/yggdrasil_bridge/` (tylko gdy się zmieniły);
-  iPhone: `native/yggdrasil_bridge/build_ios.sh`. Gotowych bibliotek nie ma
-  w repozytorium.
-- **GitHub Actions:** każdy push i pull request — formatowanie, analiza, testy
-  aplikacji i mostu (`ci.yml`); tag `v*` — pliki wydania (`release.yml`,
-  `ios.yml`); strona zaproszeń na GitHub Pages (`pages.yml`).
-- Przegląd całego interfejsu w kilku rozmiarach ekranu:
-  `flutter test tool/ui_tour/ui_audit_test.dart --update-goldens` (wynik w `scratch/audit/`).
-- Układ: `lib/src/core/` — silnik (dziennik, pliki, kryptografia); `lib/src/features/` — funkcje;
-  `android/`, `windows/` — kod natywny; `tool/` — narzędzia (wydania, przegląd UI).
+Prawa autorskie zostają przy autorze; zgodę na wyjątki daje tylko on.

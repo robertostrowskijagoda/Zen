@@ -10,7 +10,8 @@ Od najszybszego do najbardziej „prawdziwego”:
 4. **Przegląd wyglądu** — wszystkie ekrany w kilku rozmiarach.
 
 Do tego testy mostu Go (`go test` w `native/yggdrasil_bridge`,
-`test_native.ps1`). CI jeszcze nie ma (`STAN.md` §8).
+`test_native.ps1`), sprawdzanie tłumaczeń (punkt 5) i GitHub Actions przy
+każdym pushu (punkt 6).
 
 ## 1. Symulator sieci (`lib/src/dev/sim/sim_network.dart`)
 
@@ -37,7 +38,7 @@ Gotowy świat: `test/support/pyramid_world.dart` (`PyramidWorld.six()`,
 | `test/pyramid_security_test.dart`, `test/pyramid_attack_sim_test.dart` | ataki na piramidę |
 | `test/dating_test.dart`, `test/neighbors_test.dart` | randki i sąsiedzi na kilku telefonach |
 
-Testy regresyjne bezpieczeństwa: `STAN.md` §4.3.
+Testy regresyjne bezpieczeństwa: `STAN.md` §4.4.
 
 Nowy scenariusz: zbuduj świat, wykonaj akcje, `await w.net.run()`, sprawdź
 stan u **innej** osoby niż ta, która działała, na końcu
@@ -118,10 +119,64 @@ w `scratch/audit/<konfiguracja>/` (poza repozytorium). `AUDIT_ONLY`
 zawęża konfiguracje. Test kończy się „niezaliczony” z powodu timerów
 aplikacji — liczy się lista problemów.
 
+Języki: przegląd idzie po polsku (testy nie wczytują tłumaczeń). Długość
+tekstów w innych językach (niemiecki, rosyjski) i układ od prawej do lewej
+(arabski) trzeba dziś obejrzeć ręcznie: Ustawienia → Język.
+
+## 5. Tłumaczenia
+
+Teksty w kodzie są po polsku w `t('…')` i `tn(n, one: …, few: …, many: …)`
+(`lib/src/app/i18n/zen_i18n.dart`), tłumaczenia — w
+`assets/i18n/<kod>.json` (20 plików; polski nie ma pliku).
+
+```
+dart run tool/i18n.dart            # sprawdza wszystko; kod wyjścia 1 przy problemie
+dart run tool/i18n.dart --verbose  # pełna lista brakujących i nieaktualnych tekstów
+dart run tool/i18n.dart --keys     # wszystkie teksty kodu jako JSON (do tłumaczenia)
+dart run tool/i18n.dart --prune    # usuwa nieaktualne teksty i sortuje pliki
+```
+
+Sprawdzenie zgłasza: wywołania `t()` / `tn()` z czymś innym niż zwykły
+napis (zmienna, sklejanie, `$x`), a w każdym pliku języka brakujące teksty,
+teksty, których kod już nie ma, i niezgodne wstawki `{name}`. Po zmianie
+albo dodaniu polskiego tekstu: `--keys`, dopisać tłumaczenia we wszystkich
+plikach (pod tym samym polskim kluczem, z tymi samymi wstawkami; formy
+liczby mnogiej według CLDR danego języka), na koniec `--prune` i ponownie
+bez opcji.
+
+`test/i18n_test.dart` (część `flutter test`, więc i CI) sprawdza warstwę
+tłumaczeń (wstawki, brak tłumaczenia = tekst polski, formy liczby mnogiej
+po polsku, angielsku, rosyjsku i arabsku, wybór języka: wybrany, potem
+pierwszy język systemu, potem angielski, wczytywanie plików) i repozytorium
+tak samo jak `tool/i18n.dart`: każdy plik ma dokładnie teksty z `lib/`,
+a `assets/i18n` tylko języki, które Zen zna.
+
+## 6. GitHub Actions
+
+`.github/workflows/ci.yml` — przy każdym pushu na `main`, pull requeście
+i ręcznie (Actions → CI → Run workflow):
+
+| Zadanie | Gdzie | Co robi |
+|---|---|---|
+| Analyze and test | Windows | `dart format` (bez zmian), `flutter analyze`, `flutter test` (w tym tłumaczenia) |
+| Go bridge | Windows | `go vet` i `go test` mostu |
+| Linux build | Ubuntu | `flutter build linux --release` (most buduje się sam), symbol `YggStartNode` w `libyggdrasil_bridge.so`, start pod Xvfb — aplikacja ma działać po 20 s |
+| macOS build | macOS | most (`build_macos.sh`), `flutter build macos --release`, symbol `_YggStartNode` w `Zen.app`, start na 20 s; bez pull requestów (droższe minuty) |
+
+`release.yml` przy tagu `v*` buduje wszystkie pliki wydania, także Linux
+ARM64 i iPhone (`WYDANIA.md` §3). Linux i macOS nie przeszły jeszcze
+pierwszego przebiegu — po wypchnięciu sprawdzić oba zadania; gdyby start
+pod Xvfb był niestabilny, zostaje budowanie i sprawdzenie symbolu.
+
 ## Czego to nie sprawdza
 
 - Symulator nie testuje Bluetooth ani prawdziwych opóźnień Yggdrasil.
 - Usługa w tle Androida ma mało testów, kod Kotlin (BLE, rozmowy) — żadnych.
+- Testy aplikacji idą w CI tylko na Windows; na Linuksie i macOS CI tylko
+  buduje i uruchamia aplikację na 20 s. Nie ma budowania APK przy pushu
+  ani testu na emulatorze.
+- Most Go nie ma testów z losowym wejściem (`go test -fuzz`), a aplikacja
+  — testu „uszkodzone dane nie wysyłają żadnej ramki” (`STAN.md` A13).
 - Pilot działa tylko w wersji debug.
 - Aplikacje na jednym komputerze dzielą jedno łącze: rozcięcie sieci
   testuje się w symulatorze.

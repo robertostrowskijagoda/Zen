@@ -1,6 +1,6 @@
 # Zen — projekt aplikacji
 
-Wersja 12 · 14.10.2026 · rozdziały w kolejności implementacji.
+Wersja 13 · 15.10.2026 · rozdziały w kolejności implementacji.
 
 Numery rozdziałów (§N.M) są stałe, bo odwołuje się do nich kod. Nowe
 podrozdziały dostają kolejne numery na końcu rozdziału. Stan projektu,
@@ -56,8 +56,11 @@ uprawnień, 25.3 Wygląd) · 26. Luki i ryzyka (26.3 iPhone, Mac, Linux) ·
 
 1. **Brak serwera.** Nic nie zależy od maszyny, której nie ma żaden
    użytkownik. Wyjątki: publiczne węzły Yggdrasil jako awaryjny start
-   (§5.1) i strona repozytorium na GitHubie, na którą prowadzą kody QR —
-   kod zaproszenia jest po `#`, więc strona go nie dostaje (§14.2).
+   (§5.1) i strona zaproszeń na GitHub Pages, na którą prowadzą kody QR —
+   kod zaproszenia jest po `#`, więc strona go nie dostaje (§6.1, §14.2).
+   **Stan:** zasadę łamie wyszukiwarka GIF-ów (§13): zapytania i adres IP
+   idą do komercyjnego klipy.com, z kluczem wbudowanym w aplikację
+   (`STAN.md` S29, S37).
 2. **Wszystko jest podpisane.** Sprawdzasz podpis, nie posłańca.
 3. **Najpierw znajomi, potem źródło.** Dane pobierasz od tego, od kogo je
    dostałeś, i od znajomych; autora pytasz na końcu.
@@ -69,13 +72,18 @@ uprawnień, 25.3 Wygląd) · 26. Luki i ryzyka (26.3 iPhone, Mac, Linux) ·
 6. **Zgodność w przód.** Starsza wersja przechowuje i przekazuje dalej to,
    czego nie rozumie. Nieznana (nowsza) wersja zapisu ma być tylko do
    odczytu, nigdy nadpisywana (dziś tak działa stan „Spotkań”; reszta: §2.5).
+   **Stan:** nieznane wpisy w znanej przestrzeni są przechowywane, ale
+   nieznana przestrzeń jest odrzucana (`space_policy.dart`), a wersja
+   aplikacji nie jest wymieniana w sieci (`STAN.md` A17).
 7. **Przejrzysta władza.** Każdy akt władzy to publiczny, podpisany wpis
    z uzasadnieniem; zmiany szefów idą oddolnie aż do szczytu.
-8. **Prywatność domyślnie, poza postami.** Posty są domyślnie publiczne,
-   bo mają się rozchodzić. Reszta (lista znajomych, statusy, randki,
-   sąsiedzi, lokalizacja) jest domyślnie ograniczona. **Stan:** niespełnione
-   dla listy znajomych i widoczności „W pobliżu” — obie są domyślnie
-   włączone (`STAN.md`).
+8. **Prywatność domyślnie.** Posty idą domyślnie do wszystkich znajomych
+   (§10); publiczne są z wyboru autora, bo mają się rozchodzić. Reszta
+   (lista znajomych, statusy, randki, sąsiedzi, lokalizacja) jest domyślnie
+   ograniczona. **Stan:** niespełnione dla listy znajomych (idzie do
+   wszystkich znajomych, także słabych), statusów (widzą je słabi znajomi)
+   i widoczności „W pobliżu” (włączana przy pierwszym starcie) (`STAN.md`
+   §6 pkt 3).
 
 ## 2. Mapa drogowa
 
@@ -110,8 +118,8 @@ uprawnień, 25.3 Wygląd) · 26. Luki i ryzyka (26.3 iPhone, Mac, Linux) ·
 |---|---|---|---|
 | 1 | Silnik | dziennik, pliki, certyfikaty, polityki zapisu, replikacja, archiwum, symulator sieci | Zrobione |
 | 2 | Sieć i konto | Yggdrasil v0.5.14, pula węzłów, mosty na komputerach (§5.1), klucz konta i certyfikaty urządzeń (§6) | Zrobione; tożsamością w sieci jest nadal klucz węzła (§6.1) |
-| 3 | Profil i tablica | poziomy z kluczami (§8), profil w dzienniku (§9), posty, udostępnianie, lajki, komentarze (§10–11), obserwowanie (§12), karty wdzięczności | Częściowo (§9, §11) |
-| 3a | Rozmowy+ | udostępnianie ekranu, jawne nagrywanie, rozmowa w okienku (§13.1–13.3) | Zrobione (nagrywanie: Android, Windows) |
+| 3 | Profil i tablica | poziomy z kluczami (§8), profil w dzienniku (§9), posty, udostępnianie, lajki, komentarze (§10–11), obserwowanie (§12), karty wdzięczności | Częściowo (§8–§12) |
+| 3a | Rozmowy+ | udostępnianie ekranu, jawne nagrywanie, rozmowa w okienku (§13.1–13.3) | Zrobione z brakami (§13.1–13.2; nagrywanie: Android, Windows) |
 | 4 | Konto nie do stracenia | hasło, krąg odzyskiwania, wiele urządzeń (§6.3, §6.5), ochrona danych (§14.1) | Częściowo (§14.1) |
 | 5 | Odporność | Podaj dalej, instalacja przez USB, ruch jak HTTPS, aktualizacje siecią (§14.2) | Częściowo: aktualizacje siecią wyłączone, §14.3 do zrobienia |
 | 6 | Spotkania | Bluetooth (§15), graf, statusy, alarm (§16), wydarzenia i reszta §17 | Zrobione z brakami |
@@ -131,28 +139,30 @@ w przeglądarce.
 ### 2.4 Co już jest
 
 Platformy: **Android i Windows** (gotowe), **iPhone** (SideStore /
-AltStore, bez pracy w tle), macOS i Linux — w planie (§26.3).
+AltStore, bez pracy w tle), **Linux i macOS** — kod i budowanie w CI,
+wydania bez podpisu, niesprawdzone do pierwszego przebiegu CI (§26.3).
+Języki: 21, wybór automatyczny albo w Ustawieniach (§25.1).
 
 | Obszar | § | Stan | Najważniejsze braki |
 |---|---|---|---|
-| Komunikator: czaty, grupy, rozmowy audio/wideo, relaye | 13 | Zrobione | wiadomości do obcych, tablica grupy |
-| Rozmowy+: ekran, nagrywanie, okienko | 13.1–13.3 | Zrobione | nagrywanie na macOS/Linux |
-| Sieć, mosty | 5 | Zrobione | — (Yggdrasil 0.5.14, most Go budowany automatycznie) |
-| Konto, urządzenia, odzyskiwanie | 6 | Częściowo | tożsamość = klucz węzła; klucz piramidy losowy na każdym urządzeniu; ruch piramidy przez relaye |
-| Profil, tablica, lajki, obserwowanie | 9–12 | Częściowo | widoczność pól profilu, narodowość, „N zweryfikowanych”, media „tylko Wi-Fi” |
+| Komunikator: czaty, grupy, rozmowy audio/wideo, relaye | 13 | Częściowo | wiadomości do obcych, tablica grupy; załączniki nie idą przez skrzynki; GIF-y przez klipy.com |
+| Rozmowy+: ekran, nagrywanie, okienko | 13.1–13.3 | Zrobione z brakami | ukrywanie powiadomień przy udostępnianiu ekranu, dźwięk nagrywania; nagrywanie na macOS/Linux |
+| Sieć, mosty | 5 | Zrobione | sieć lokalna (multicast) wyłączona; limit połączeń na most |
+| Konto, urządzenia, odzyskiwanie | 6 | Częściowo | tożsamość = klucz węzła; klucz piramidy losowy na każdym urządzeniu; ruch piramidy przez relaye; „spotkani osobiście” niepodpisane |
+| Profil, tablica, lajki, obserwowanie | 8–12 | Częściowo | uprawnienia poziomów, widoczność pól profilu, narodowość, mini-profil, filmy bez metadanych, „N zweryfikowanych”, lista obserwujących, media „tylko Wi-Fi” |
 | Ochrona danych na urządzeniu | 14.1 | Częściowo | ponowne potwierdzenie i blokada zrzutów dla randek; usługa w tle trzyma klucz główny |
 | Odporność, dystrybucja | 14.2 | Częściowo | aktualizacje siecią wyłączone; kamuflaż, kanarek, Tor, Wi-Fi Direct |
-| Integralność wydań i zbiórki | 14.3 | Częściowo | sprawdzanie certyfikatu APK jest; brak przypiętego odcisku i podpisanego manifestu |
+| Integralność wydań i zbiórki | 14.3 | Częściowo | sprawdzanie certyfikatu APK jest; brak przypiętego odcisku i podpisanego manifestu; klucz APK w sekretach CI |
 | Osoby w pobliżu (Bluetooth) | 15 | Częściowo | tylko Android; wspólny sekret |
 | Graf | 16.1 | Zrobione | przybliżanie i klastry |
-| Statusy | 16.2 | Zrobione | — |
+| Statusy | 16.2 | Zrobione | domyślnie widzą je też słabi znajomi |
 | Alarm | 16.3 | Częściowo | położenie w tle, zapasowy SMS |
 | Wydarzenia, kółka, Stół na sześć, plan na weekend, Zapytaj sieć | 17 | Zrobione | „przyprowadzający ręczy”, wspólna kasa kółka |
-| Sąsiedzi | 18 | Zrobione | strona `/m`, czat zaproszenia |
+| Sąsiedzi | 18 | Zrobione | kod na drzwiach niesie adresy domowników (§18.2); strona `/m`, czat zaproszenia |
 | Randki | 19 | Zrobione | skala (§19.7) |
 | Piramida, władza, polityka | 20–22 | Zrobione w kodzie | flagi funkcji, adres urządzenia widoczny w piramidzie |
 | Waluta, rynek dostępu | 23–24 | Zrobione w kodzie | prywatność przelewów |
-| Nawigacja, wygląd | 25 | Częściowo | tłumaczenia (§25.1) |
+| Nawigacja, wygląd, języki | 25 | Częściowo | grupowanie zakładek, położenie na ekranie uprawnień, dostępność (tłumaczenia zrobione, §25.1) |
 | Prawo | 27 | Do zrobienia | polityka prywatności, regulamin, DPIA, bramka wieku |
 
 ### 2.5 Przed pierwszym publicznym wydaniem
@@ -224,9 +234,12 @@ urządzeń, synchronizacja różnic, archiwum.
 Ogłoszenia mostów (§5.1) to osobna, mała książka z własnymi limitami.
 
 **Stan: Częściowo.** Silnik przyjmuje `feed`, `acts`, `private`, `profile`,
-`own` i (zamkniętą) `power`. `hood`, `date`, `cell`, `treasury` i `event`
-— do zrobienia (L); te funkcje działają dziś na własnych plikach
-i mechanizmach.
+`own` i (zamkniętą) jedną przestrzeń `power` (bez `<id piramidy>`).
+`hood`, `date`, `cell`, `treasury` i `event` — do zrobienia (L); te
+funkcje działają dziś na własnych plikach i mechanizmach. Obserwowania nie
+są wpisami w `acts` (lista `ledger/following` tylko na urządzeniu), więc
+autor nie wie, kto go obserwuje (§12). `profile` to jeden publiczny wpis,
+bez widoczności pól (§9).
 
 ## 5. Sieć: mosty, węzły, aktualizacja Yggdrasil
 
@@ -248,8 +261,11 @@ się sama przez mosty użytkowników.
    połączenie z kilkoma najlepszymi z różnych sieci.
 5. **Nowa osoba** startuje z publicznych węzłów, mosty dostaje od pierwszego
    znajomego. Kod zaproszenia nie niesie mostów (ma być krótki).
-6. **Sieć lokalna**: w tym samym Wi-Fi urządzenia łączą się same
-   (multicast; na komputerach wyłączony, §26.1).
+6. **Sieć lokalna**: w tym samym Wi-Fi urządzenia mają łączyć się same
+   (multicast). **Stan:** wyłączone wszędzie — na telefonach nigdy nie
+   działało (Android: SELinux, iOS: osobne uprawnienie), na komputerach
+   węzeł wymaga hasła multicastu, którego aplikacja nie ustawia (§26.1).
+   Do decyzji (S/M).
 
 | Atak | Obrona |
 |---|---|
@@ -272,23 +288,25 @@ adresy komputera), sprawdzenie przez znajomych (`lg_reach` / `lg_reach_ok`),
 ogłoszenie, odnawianie co 30 min, wycofanie, gdy nikt się nie dostaje. Stan
 widać w ustawieniach. Kraje bez bazy geolokalizacji: rozkład na bloki /16
 i /24. Pula publicznych węzłów odświeżona (233 adresy z 30 krajów; komputer
-łączy się z 20, telefon startuje od 16 stabilnych TLS).
+łączy się z 20, telefon startuje od 16 stabilnych TLS). Brakuje: limitu
+połączeń i transferu na most (obrona „przeciążenie mostu”) (S) i sieci
+lokalnej (pkt 6). Publiczny węzeł widzi IP i stały klucz węzła, czyli kod
+zaproszenia (`STAN.md` §6 pkt 8).
 
 ### 5.2 Aktualizacja Yggdrasil
 
-- **Teraz:** yggdrasil-go v0.5.14 (z v0.5.12, wrzesień 2026): kolejki
-  pakietów do 1 MB, lepsze trasowanie, szybsze ponowne łączenie. Zgodny
-  z v0.5.x.
+- **Teraz:** yggdrasil-go v0.5.14 (z v0.5.12, wrzesień 2026) — najnowsze
+  wydanie stabilne; Go 1.26. Kolejki pakietów do 1 MB, lepsze trasowanie,
+  szybsze ponowne łączenie. Zgodny z v0.5.x.
+- **Budowanie mostu (zrobione):** most Go buduje się sam w ramach
+  `flutter build` / `flutter run` — Android (zadanie Gradle
+  `buildGoBridge`), Windows i Linux (cel CMake), iPhone i macOS (faza
+  Xcode) — tylko gdy zmieniła się suma źródeł (`*.go`, `go.mod`, `go.sum`,
+  skrypt). Gotowych bibliotek nie ma w repozytorium (`WYDANIA.md` §3.1).
+  Brakuje: wersji Go w sumie (S).
 - **Na stałe:** przy każdym wydaniu odświeżona lista publicznych węzłów, co
-  kwartał przegląd wydań Yggdrasil; książka mostów z czasem zastępuje listę.
-- **Do zrobienia:**
-  - przejść na najnowsze wydanie Yggdrasil i Go (S);
-  - **automatyczne budowanie mostu Go** (i innych zależności natywnych)
-    w ramach `flutter build` dla Androida (zadanie Gradle przed pakowaniem
-    `jniLibs`) i Windows (krok CMake), tylko gdy zmieniły się źródła albo
-    wersje: znacznik ze skrótem `native/yggdrasil_bridge/*.go`, `go.mod`,
-    `go.sum` i wersji Go. Dziś ręcznie `build_android.ps1`
-    / `build_windows.ps1`, a gotowe biblioteki leżą w repozytorium (M).
+  kwartał przegląd wydań Yggdrasil i Go; książka mostów z czasem zastępuje
+  listę.
 
 ## 6. Tożsamość, klucze, poświadczenia, odzyskiwanie, anonimowość
 
@@ -296,10 +314,10 @@ i /24. Pula publicznych węzłów odświeżona (233 adresy z 30 krajów; kompute
 
 | Klucz | Gdzie | Do czego |
 |---|---|---|
-| **Klucz konta** (Ed25519) | na urządzeniach, zaszyfrowany hasłem konta | nowe urządzenie, odłączenie, zmiana kręgu, przelewy (§23) |
+| **Klucz konta** (Ed25519) | na urządzeniach, zaszyfrowany hasłem konta | nowe urządzenie, odłączenie, zmiana kręgu |
 | **Klucz urządzenia** (osobny od klucza Yggdrasil) | każde urządzenie swój | codzienne podpisy |
 | **Klucz mieszkania** | telefony domowników | profil mieszkania (§18) |
-| **Klucz tożsamości w piramidzie** | urządzenia konta | pseudonim w piramidzie i konto w skarbie (§6.4) |
+| **Klucz tożsamości w piramidzie** | urządzenia konta | pseudonim w piramidzie, konto w skarbie i podpis przelewów (§6.4, §23.2) |
 | **Klucze jednorazowe** | na chwilę | pobliże (§15) |
 
 - Złodziej telefonu bez hasła nie przejmie konta; skradziony telefon
@@ -332,8 +350,13 @@ Podpisane zdanie jednej osoby o drugiej: `{kto, o kim, co, do kiedy, podpis}`.
 | **Dane podstawowe** (rok urodzenia, narodowość, płeć) | przyjmujący do piramidy | obowiązują, dopóki jesteś w piramidzie (§20.2a) |
 | **Poręczenie** | znajomy | „to prawdziwa osoba”; za fałszywe grozi kara (§21.5) |
 
-**Stan: Częściowo.** Spotkani osobiście, członek piramidy i dane podstawowe
-działają; ogólne poręczenia z karami (§21.5) — do zrobienia (M).
+**Stan: Częściowo.** Członek piramidy i dane podstawowe działają jako
+rekordy piramidy. Wspólnego typu poświadczenia nie ma. „Spotkani
+osobiście” to dziś lokalny, niepodpisany znacznik (`metInPerson`),
+ustawiany przez Bluetooth i na wydarzeniach, ale nie przy dodaniu przez QR,
+i niewymieniany ze znajomymi — więc „zweryfikowani” (§11) i referenda
+z §20.6 nie mają na czym się oprzeć (M). Poręczenia z karami (§21.5) — do
+zrobienia (M).
 
 ### 6.3 Odzyskiwanie konta
 
@@ -344,7 +367,10 @@ urządzenie wita znajomych, którzy oddali kawałki; trzymają oni
 zaszyfrowaną kopię listy znajomych i grup (§6.5), więc konto wraca z nimi.
 
 **Stan: Zrobione.** Brakuje: propozycji kręgu przy powitaniu (dziś schowany
-w ustawieniach) (S).
+w ustawieniach) i ekranu „Co odzyskasz” — historia czatów (`own`), portfel
+i profil randkowy nie wracają (S/M, `STAN.md` §6 pkt 16). Kawałki
+odzyskiwania bez hasła nie są związane z kontem (`STAN.md` S19, naprawiane
+w 1.10.0).
 
 ### 6.4 Anonimowość
 
@@ -370,7 +396,9 @@ opcjonalne, imię może być pseudonimem.
 
 **Stan: Częściowo.** Piramida ujawnia adres urządzenia
 (`pyramid_service.dart` → `pyramid_state.dart`), a ruch piramidy nie idzie
-przez relaye — do zrobienia (M/L).
+przez relaye — do zrobienia (M/L). Dobrowolnego połączenia tożsamości
+(rekord z podpisem obu kluczy) nie ma (S/M). Profil wymaga niepustej nazwy
+(może być pseudonimem).
 
 ### 6.5 Konto na kilku urządzeniach (V1.10)
 
@@ -408,9 +436,15 @@ Ustawienia → Urządzenia).
   cache 1 GB, udostępnione na stałe.
 - **Pobieranie mediów:** Zawsze / Tylko Wi-Fi / Tylko po kliknięciu.
 
-**Stan: Częściowo.** Relaye i krąg działają. Każdy telefon domyślnie pobiera
-i oddaje dalej wszystkie media znajomych; „Tylko Wi-Fi / po kliknięciu”
-i limity — do zrobienia (S–M), docelowo domyślnie „Tylko Wi-Fi”.
+**Stan: Częściowo.** Relaye i krąg działają; krąg i strażników wybiera się
+z ostatnio widzianych znajomych, bez preferencji „Przyjaciel” (S). Media
+trzymają wszyscy znajomi (§13.2a), nie sam krąg; liczniki lajków piszą
+autor i udostępniający (§11). „Tylko po kliknięciu” jest (Ustawienia →
+„Pobieraj zdjęcia i filmy”, `autoDownloadMedia`); domyślnie każdy telefon
+pobiera i oddaje dalej wszystkie media znajomych. „Tylko Wi-Fi” i limity —
+do zrobienia (S–M), docelowo domyślnie „Tylko Wi-Fi”. Skrzynki przyjmują
+tylko wiadomości do 48 KB, a wygasłe po 14 dniach znikają bez śladu
+(`STAN.md` B12, A18).
 
 ---
 
@@ -429,7 +463,12 @@ i limity — do zrobienia (S–M), docelowo domyślnie „Tylko Wi-Fi”.
   proponuje wybór poziomu.
 - Każdy poziom ma własny klucz szyfrowania; obniżenie poziomu rotuje klucz.
 
-**Stan: Zrobione.**
+**Stan: Częściowo.** Poziomy, klucze i rotacja działają (wybór poziomu na
+profilu znajomego). Domyślne uprawnienia z tabeli nie są pilnowane: listę
+znajomych dostaje każdy znajomy, także słaby (§9), status widzą wszyscy
+znajomi albo tylko przyjaciele, bez progu „słaby” (§16.2), zaproszenia do
+grup i przyjęcie do piramidy nie sprawdzają poziomu; przy spotkaniu
+osobiście aplikacja nie proponuje poziomu (S, `STAN.md` §10).
 
 ## 9. Profil główny (i mini-profil, który z niego wynika)
 
@@ -454,8 +493,12 @@ i limity — do zrobienia (S–M), docelowo domyślnie „Tylko Wi-Fi”.
 
 **Stan: Częściowo.** Brakuje widoczności dla każdego pola i narodowości (M).
 Lista znajomych jest domyślnie pokazywana znajomym i idzie do wszystkich,
-także słabych znajomych — wbrew §1.8 (S). Profil w dzienniku jest publiczny
-razem z adresem (`ledger_profile.dart`).
+także słabych znajomych — wbrew §1.8 i §8 (S). Profil w dzienniku jest
+publiczny razem z adresem (`ledger_profile.dart`). Nie ma mini-profilu
+(paczki lajków niosą tylko konto i nazwę), przycisków „Dodaj”
+i „Wiadomość”, liczby znajomych i obserwujących; zakładki to Posty ·
+Galeria · Podziękowania (M). Własny awatar i tło leżą na dysku jawnie
+(§14.1).
 
 ## 10. Tablica, posty, udostępnianie
 
@@ -464,12 +507,16 @@ razem z adresem (`ledger_profile.dart`).
 - Udostępnienie niesie cały podpisany post do znajomych udostępniającego.
 - **Tablica chronologiczna, bez algorytmu, kończy się** („Jesteś na
   bieżąco”). Obcy post widzisz tylko, gdy udostępnił go ktoś, kogo dodałeś.
-- Zdjęcia i filmy bez EXIF/GPS; film do 200 MB w kawałkach, oglądany
-  w trakcie pobierania.
+- Zdjęcia i filmy bez EXIF/GPS; film do 50 MB (decyzja z 1.9) w kawałkach
+  po 256 KB, oglądany w trakcie pobierania; do 10 zdjęć w poście.
 - Usuwanie to podpisany nagrobek (przy postach publicznych tylko prośba);
   edycja tworzy wersje z oznaczeniem „edytowano”.
 
-**Stan: Zrobione.**
+**Stan: Częściowo.** Widoczność (domyślnie „Wszyscy znajomi”),
+udostępnianie, tablica, zdjęcia bez EXIF, edycja i nagrobki działają.
+Brakuje: usuwania metadanych i GPS z filmów (film idzie bajt w bajt) (S),
+oglądania w trakcie pobierania (film to jeden zaszyfrowany blob) (M);
+nagrobek nie dociera do znajomych udostępniającego (S).
 
 ## 11. Polubienia, komentarze, drzewo udostępnień
 
@@ -483,7 +530,13 @@ razem z adresem (`ledger_profile.dart`).
 - Autor ukrywa komentarze i blokuje osoby w swoich wątkach. Powiadomienia
   zbiorcze.
 
-**Stan: Częściowo.** „N zweryfikowanych” — do zrobienia (S/M).
+**Stan: Częściowo.** Lajki i komentarze znajomych to podpisane wpisy
+w `acts`; dalej idą paczkami `rx` (do 200 lajkujących i 30 komentarzy)
+pisanymi przez autora i udostępniających, a lajki spoza kręgu w paczce są
+niepodpisane („przez X”). Do zrobienia: podpisana migawka liczników
+i stronicowanie, zdanie „Lubią to: …” z kolejnością „najpierw znajomi”,
+ukrywanie komentarzy i blokowanie w wątkach, powiadomienia zbiorcze (M),
+„N zweryfikowanych” (S/M, wymaga §6.2).
 
 ## 12. Obserwowanie
 
@@ -492,7 +545,10 @@ razem z adresem (`ledger_profile.dart`).
 - Autor może zablokować osobę (jej reakcje znikają), ale nie zabroni czytania
   treści publicznych.
 
-**Stan: Zrobione.**
+**Stan: Częściowo.** Obserwowanie bez zgody i automatyczne obserwowanie
+znajomych działają. Obserwowanie jest zapisane tylko lokalnie
+(`ledger/following`), nie w `acts`, więc listy i liczby obserwujących nie
+ma; blokady obserwujących też nie (`blockAccount` nieużywane) (M).
 
 ## 13. Czaty, grupy i rozmowy
 
@@ -505,9 +561,17 @@ razem z adresem (`ledger_profile.dart`).
   małą kursywą pod nazwą.
 - Grupa może mieć **tablicę grupy** (przestrzeń z postami) — dla komórek
   piramidy i zwykłych grup.
+- **GIF-y** (dodane poza planem): wyszukiwarka klipy.com. Strona trzecia
+  widzi wpisane hasło i adres IP nadawcy, a przy GIF-ie pobieranym przez
+  odbiorcę także jego IP i czas — wyjątek od §1.1. Kierunek: GIF pobierany
+  dopiero po dotknięciu, docelowo nadawca wysyła bajty jako zwykły
+  załącznik sprawdzany przez `media_guard` (`STAN.md` S29, S37).
 
 **Stan: Częściowo.** Brakuje: tablicy grupy (M) i wiadomości do osób spoza
-znajomych w zwykłych czatach (§24.1) (M).
+znajomych w zwykłych czatach (§24.1) (M). Skrzynki offline przenoszą tylko
+wiadomości do 48 KB: zdjęcia, filmy i dłuższe głosówki dochodzą, gdy oba
+urządzenia są online, a wygasła wiadomość zostaje „wysłana” (`STAN.md`
+B12, A18).
 
 ### 13.1 Udostępnianie ekranu (etap 3a)
 
@@ -519,7 +583,11 @@ znajomych w zwykłych czatach (§24.1) (M).
 - Na czas udostępniania aplikacja ukrywa własne powiadomienia z treścią
   i przypomina, że widać wszystko (także kody SMS).
 
-**Stan: Zrobione.**
+**Stan: Częściowo.** Udostępnianie w rozmowach 1:1 i grupowych, wybór
+ekranu albo okna, pasek „Zatrzymaj” i informacja dla wszystkich działają.
+Ekran zastępuje obraz kamery (`replaceTrack`) zamiast iść drugą ścieżką.
+Brakuje: ukrycia powiadomień i przypomnienia na czas udostępniania oraz
+uprzedzenia na Androidzie starszym niż 14 (S).
 
 ### 13.2 Nagrywanie rozmów (etap 3a)
 
@@ -536,7 +604,9 @@ znajomych w zwykłych czatach (§24.1) (M).
 `windows/runner/call_recorder.cpp` — dźwięk tylko procesu Zen (WASAPI
 process loopback) z mikrofonem, WAV 48 kHz; od Windows 10 2004. W grupie
 sygnał `gc_rec`. Nagranie przerwane końcem rozmowy też jest zapisywane.
-Brakuje macOS/Linux (razem z tymi wersjami).
+Brakuje: dźwięku przy rozpoczęciu nagrywania (S), osobnego „Wyjdź
+z rozmowy” przy pasku (jest zwykłe „Rozłącz”), nagrywania na macOS
+i Linuksie.
 
 ### 13.2a Dostępność treści bez autora (V1.9)
 
@@ -605,7 +675,9 @@ Brakuje macOS/Linux (razem z tymi wersjami).
 Dodatkowo: EXIF i GPS usuwane, obrazy przychodzące dekodowane i kodowane od
 nowa; lokalizacja tylko przy alarmie i „Idę na randkę”, tylko do
 przyjaciół, z czasem ważności; obcy, który zna klucz konta, może pytać tylko
-o treści publiczne.
+o treści publiczne. **Stan:** filmy zachowują metadane (§10), a GIF-y
+z klipy.com omijają przekodowanie (§13); „zweryfikowani” i poręczenia
+przeciw farmom — do zrobienia (§6.2, §21.5).
 
 ### 14.1 Ochrona danych na urządzeniu (Pegasus i spółka)
 
@@ -613,21 +685,23 @@ Oprogramowanie klasy Pegasus przejmuje cały telefon; gdy aplikacja jest
 odblokowana, czyta ekran, pamięć i klawiaturę. Cel: **zablokowana aplikacja
 jest dla szpiega bezużyteczna** (na dysku tylko szyfrogram), a odblokowana
 ujawnia jak najmniej i jak najkrócej. Wszystkie dane na dysku są szyfrowane
-kluczem głównym (szyfrowanie kopertowe, AES-GCM z AAD).
+kluczem głównym (szyfrowanie kopertowe, AES-GCM z AAD). **Wyjątki dziś:**
+własny awatar i tło profilu (`avatar_sanitizer.dart`, `profile_cover.dart`),
+dziennik diagnostyczny (`STAN.md` S34) i plik z wybranym językiem.
 
 | # | Mechanizm | Stan |
 |---|---|---|
-| 1 | **Klucz główny tylko w pamięci, tylko po odblokowaniu**; kasowany przy blokadzie | Zrobione. Domyślnie blokada po 5 min w tle (wcześniej tylko po restarcie telefonu); „Zablokuj teraz” na belce. Wyjątek: usługa w tle na Androidzie trzyma klucz, bo odbiera wiadomości — docelowo usługa bez klucza głównego (M) |
-| 2 | **Klucz zawinięty sprzętowo** (Android Keystore/StrongBox z silną biometrią; Windows TPM + Windows Hello) | Zrobione. Biometria domyślnie wyłączona; jedno pytanie przy ustawianiu pierwszego hasła. Windows Hello bez sprzętowej zgody (STAN.md) |
+| 1 | **Klucz główny tylko w pamięci, tylko po odblokowaniu**; kasowany przy blokadzie | Zrobione. Domyślnie blokada po 5 min w tle (wcześniej tylko po restarcie telefonu); „Zablokuj teraz” na belce. Wyjątek: usługa w tle na Androidzie trzyma klucz, bo odbiera wiadomości — docelowo usługa bez klucza głównego (M). Blokada zakłada się dopiero przy powrocie z tła, a komputer nie blokuje się po bezczynności (`STAN.md` S26) |
+| 2 | **Klucz zawinięty sprzętowo** (Android Keystore/StrongBox z silną biometrią; Windows TPM + Windows Hello; macOS Secure Enclave z Touch ID) | Zrobione. Biometria domyślnie wyłączona; jedno pytanie przy ustawianiu pierwszego hasła. Windows Hello bez sprzętowej zgody (STAN.md). Linux: klucz w GNOME Keyring / KWallet, bez biometrii |
 | 3 | **Hasło domyślnie wymagane** (min. 8 znaków) + Argon2id | Zrobione. Pominięcie tylko świadome („Pozwól używać aplikacji bez hasła”) |
-| 4 | **Ponowne potwierdzenie** wrażliwych miejsc (60 s) | Częściowo: konto i odzyskiwanie, urządzenia, nagrania. Portfel i randki — do zrobienia (S) |
-| 5 | **Media na dysku zaszyfrowane**, bez miniatur w galerii systemu | Częściowo: załączniki, głosówki i zdjęcia znajomych leżą jawnie, a nazwy katalogów zdradzają kontakty — do zrobienia (M) |
-| 6 | **Blokada zrzutów** (Android `FLAG_SECURE`, Windows `WDA_EXCLUDEFROMCAPTURE`) | Zrobione na czatach, grupach, nagraniach, koncie, urządzeniach (domyślnie włączona); portfel i randki — do zrobienia (S) |
-| 7 | **Powiadomienia bez treści** (domyślnie „Nowa wiadomość”) | Zrobione, także randki i piramida |
+| 4 | **Ponowne potwierdzenie** wrażliwych miejsc (60 s) | Częściowo: konto i odzyskiwanie, urządzenia, nagrania, portfel (przed każdą płatnością, 1.10.0). Randki — do zrobienia (S) |
+| 5 | **Media na dysku zaszyfrowane**, bez miniatur w galerii systemu | Zrobione w 1.10.0: załączniki, głosówki i zdjęcia znajomych w sejfie (`media_vault.dart`, losowe nazwy). Jawnie leżą tylko własny awatar i tło (S); nazwy `meet/list/` i `ledger/log-` to skróty adresów znajomych (`STAN.md` A20) |
+| 6 | **Blokada zrzutów** (Android `FLAG_SECURE`, Windows `WDA_EXCLUDEFROMCAPTURE`, macOS `sharingType = .none`) | Zrobione na czatach, grupach, nagraniach, koncie, urządzeniach i w portfelu (domyślnie włączona). Randki i lista czatów — do zrobienia (S, `STAN.md` S27); iPhone i Linux bez ochrony |
+| 7 | **Powiadomienia bez treści** (domyślnie „Nowa wiadomość”) | Zrobione, także randki i piramida; tytuły części powiadomień zdradzają kontekst (`STAN.md` S30) |
 | 8 | **Klawiatura incognito** w polach wiadomości | Zrobione |
-| 9 | **Schowek czyszczony** po 60 s | Zrobione |
+| 9 | **Schowek czyszczony** po 60 s | Częściowo: kilka kopiowań (kod piramidy, link w poście) bez wygasania (S) |
 | 10 | **Znikające wiadomości** (1 h / 1 dzień / 7 dni) | Zrobione; nie trafiają do trwałych kopii konta |
-| 11 | **Hasło paniki** kasuje klucz główny i klucz w układzie bezpieczeństwa | Częściowo: zostają cache/temp, `Android/data/<pakiet>/files/Zen`, pliki w Dokumentach/Pobranych na Windows (S) |
+| 11 | **Hasło paniki** kasuje klucz główny i klucz w układzie bezpieczeństwa | Zrobione w 1.10.0: najpierw zatrzymuje usługę w tle, kasuje też cache, pliki tymczasowe, `Android/data/<pakiet>/files`, foldery Zen w Dokumentach i Pobranych oraz zapisane kopie |
 | 12 | **Wykrywanie roota** (su, Magisk, LSPosed, Frida, klucze testowe) jako ostrzeżenie | Zrobione |
 
 Ustawienia aplikacji są zapisywane jako JSON z nazwanymi polami (koniec
@@ -660,11 +734,11 @@ więc słabe punkty to dystrybucja, sieć i ludzie.
 | # | Zagrożenie | Obrona |
 |---|---|---|
 | 1 | Brak sklepu / usunięcie ze sklepu | Wydania na GitHubie (`WYDANIA.md`) i **„Podaj dalej”**: hotspot + QR, ta sama sieć Wi-Fi, Quick Share / Bluetooth, także bez internetu |
-| 2 | **Weryfikacja twórców Androida** (od 30.09.2026 w Brazylii, Indonezji, Singapurze, Tajlandii; od 2027 wszędzie) | Rejestracja jako zweryfikowany twórca przed 2027. Inaczej zostaje „zaawansowana ścieżka” (opcje programisty, restart, 24 h czekania) i ADB; Zen na PC ma „Zainstaluj na telefonie” przez USB. Telefony bez usług Google tego nie mają |
+| 2 | **Weryfikacja twórców Androida** (od 30.09.2026 przy instalacji ze sklepów w Brazylii, Indonezji, Singapurze, Tajlandii; w 2027 wszędzie, także z pliku) | Rejestracja `com.roj.zen` jako zweryfikowany twórca do końca 2026 (`WYDANIA.md` §4). Inaczej zostaje „zaawansowana ścieżka” (opcje programisty, restart, 24 h czekania) i ADB; Zen na PC ma „Zainstaluj na telefonie” przez USB. Telefony bez usług Google tego nie mają |
 | 3 | iPhone | Najsłabszy punkt (§26.3) |
 | 4 | Aktualizacje bez sklepu | Aktualizacje przez sieć od znajomego do znajomego; zawsze zgoda człowieka (zatwierdzanie: niżej) |
 | 5 | Blokada sieci | połączenia wprost między znajomymi, ruch jak HTTPS (TLS na 443), mosty od znajomych bez centralnej listy; później Tor i siatka Bluetooth/Wi-Fi Direct |
-| 6 | Blokada strony z pobraniem | Strony nie ma — jest README repozytorium. Lustra repozytorium (np. Codeberg) i „Podaj dalej” działają bez niego |
+| 6 | Blokada strony z pobraniem | Własnej strony nie ma — jest README repozytorium i strona zaproszeń na GitHub Pages. Lustra repozytorium (np. Codeberg) i „Podaj dalej” działają bez nich |
 | 7 | Nacisk na autora | Jawny kod; licencja pozwala każdemu budować z niezmienionego kodu i rozpowszechniać kopie z tym samym SHA-256; brak wyłącznika (brak serwera); kanarek (plan). **Słabość:** jeden klucz podpisu jednej osoby i zakaz forków (`STAN.md`) |
 | 8 | Ściganie użytkowników | Kamuflaż (plan: inna ikona i nazwa, wejście przez PIN), hasło paniki, pseudonimy, ruch jak HTTPS. Aplikacja utrudnia wykrycie, nie daje ochrony prawnej |
 | 9 | Nacisk na liderów piramidy | Pseudonimy, zastępowanie nieobecnych (§20.4), 8 z 15 skarbników |
@@ -675,13 +749,16 @@ więc słabe punkty to dystrybucja, sieć i ludzie.
   Wi-Fi + kod QR, plik pobiera zwykła przeglądarka (jeden plik, losowy
   adres, 20 min); systemowe udostępnianie APK (Quick Share, Bluetooth) przez
   `FileProvider`. Wejścia: Zaproś („Znajomy nie ma Zen?”), O aplikacji,
-  Aktualizacje. Brak porównania podpisu instalatora (§14.3).
-- **Jeden kod QR dla wszystkich** (Zrobione): link do README repozytorium
-  z kodem po `#`. Bez Zen trafia się na README („zainstaluj, potem zeskanuj
-  ten sam kod w aplikacji”); skaner Zen dodaje znajomego od razu.
+  Aktualizacje. Certyfikat APK jest sprawdzany przed wysłaniem (1.10.0);
+  brakuje tylko przypiętego odcisku (§14.3).
+- **Jeden kod QR dla wszystkich** (Zrobione): link do strony zaproszeń
+  `robertostrowskijagoda.github.io/Zen/#KOD` (§6.1) z kodem po `#`. Strona
+  otwiera Zen, a bez Zen pokazuje pobieranie; skaner Zen dodaje znajomego
+  od razu.
 - **PC → telefon przez USB** (Zrobione): `adb` z Android SDK (aplikacja go
-  znajduje, nie dołącza). Przy `INSTALL_FAILED_UPDATE_INCOMPATIBLE` radzi
-  dziś odinstalowanie — do zmiany (§14.3).
+  znajduje, nie dołącza), ze sprawdzeniem certyfikatu. Przy
+  `INSTALL_FAILED_UPDATE_INCOMPATIBLE` nie radzi odinstalowania, tylko
+  ostrzega przed podróbką (1.10.0).
 - **Ruch jak HTTPS** (Zrobione): mosty proszą router o port 443.
 - **Aktualizacje przez sieć** (przesyłanie zrobione, wyłączone): pliki jako
   bloby dziennika (podmiana wykrywana), 7 dni od pierwszego zobaczenia,
@@ -689,7 +766,13 @@ więc słabe punkty to dystrybucja, sieć i ludzie.
   opiekunów jest w kodzie, ale lista kluczy jest pusta.
 - **Do zrobienia:** kamuflaż i kanarek (S–M), lustra (S), Tor, Wi-Fi
   Direct, siatka Bluetooth (L), instrukcje instalacji z obrazkami (Android
-  z zaawansowaną ścieżką 2027, Windows SmartScreen) (S).
+  z zaawansowaną ścieżką 2027, Windows SmartScreen, macOS „Otwórz mimo
+  to”) (S), rejestracja zweryfikowanego twórcy (S, organizacyjnie).
+- **Słabość łańcucha dostaw:** klucz APK leży w sekretach GitHub Actions —
+  przejęcie konta, tokenu albo akcji daje podpisaną aktualizację, która przy
+  aktualizacjach przez sieć rozeszłaby się od znajomego do znajomego.
+  Kierunek: CI buduje niepodpisany, powtarzalny APK, autor podpisuje offline
+  (`STAN.md` D11, S24).
 
 #### Otwarta decyzja: kto zatwierdza nowe wersje
 
@@ -718,9 +801,12 @@ Windows nie ma ochrony podpisem jak Android: potrzebny Authenticode
 
 ### 14.3 Integralność oficjalnych wydań i zbiórki
 
-**Stan: Do zrobienia** (S–M). Problem: licencja pozwala rozdawać kopie, a
+**Stan: Częściowo** (S–M). Problem: licencja pozwala rozdawać kopie, a
 przerobiona kopia może podmienić link do zbiórki albo szpiegować. Zen ma
-sam rozpoznawać oficjalne wydanie.
+sam rozpoznawać oficjalne wydanie. Zrobione: sprawdzanie certyfikatu APK
+w „Podaj dalej” i ADB (pkt 3, bez porównania odcisku między telefonami),
+`SHA256SUMS` w każdym wydaniu (pkt 4). Reszta — do zrobienia; lista
+przypiętych odcisków jest pusta.
 
 1. **Przypięty odcisk certyfikatu** (SHA-256) oficjalnego klucza podpisu
    w aplikacji (S).
@@ -781,9 +867,13 @@ Braki i plan:
   jednego wspólnego (dziś znajomy może udawać przed innymi twoją obecność
   i podpisać falę alarmu w twoim imieniu); zmiana tokenu zsynchronizowana
   z rotacją adresu MAC; przywitanie nie powinno ujawniać stałego adresu.
-- Windows i iPhone: brak Bluetooth (M). Android 10–11: skanowanie w tle
-  wymaga zgody na położenie w tle. Przywitania od obcych docierają tylko
-  przy działającej aplikacji. Zakładanie komórek przez Bluetooth (§20).
+- Lista obcych bez odznak; blokady tylko w pamięci (giną po restarcie);
+  limit „1 wiadomość od nieznajomego” pilnuje tylko nadawca, więc
+  przerobiona aplikacja pisze dalej (S).
+- Windows, iPhone, Linux i macOS: brak Bluetooth (M). Android 10–11:
+  skanowanie w tle wymaga zgody na położenie w tle. Przywitania od obcych
+  docierają tylko przy działającej aplikacji. Zakładanie komórek przez
+  Bluetooth (§20).
 
 ## 16. Graf, statusy, alarm
 
@@ -805,7 +895,10 @@ jest pierwszy na belce. Listy znajomych znajomych dochodzą pewnie: ramki od
 jeszcze-nie-znajomych czekają, skrót listy jedzie w ping/pong, a brakująca
 lista jest zamawiana ponownie.
 
-**Do zrobienia:** przybliżanie i klastry przy dużych sieciach (M).
+**Do zrobienia:** przybliżanie i klastry przy dużych sieciach (M);
+dotknięcie osoby otwiera dziś kartę z akcjami, bez przejścia do profilu (S).
+Listy znajomych idą ramkami „Spotkań”, nie wpisami dziennika (świadomie,
+`STAN.md` A4).
 
 ### 16.2 Statusy
 
@@ -830,7 +923,8 @@ Status ma ważność (1 h / do końca dnia / do odwołania), dopisek i opcję
 **Stan: Zrobione** (przebudowa w 1.10.0). „Twój status” to wyróżniona
 karta na górze z paskiem czasu do zgaśnięcia, „Zmień” i „Wyłącz”; statusy
 znajomych pogrupowane według rodzaju, z awatarem, emoji, tekstem i czasem
-do końca.
+do końca. Brakuje: progu „znajomi i przyjaciele” — status idzie do
+wszystkich znajomych (także słabych) albo tylko do przyjaciół (S).
 
 **Propozycja przebudowy (M):** jedno pytanie „Na co masz ochotę?” z trzema
 grupami (Pomoc · Spotkanie · Nie przeszkadzać) zamiast długiej listy; status
@@ -861,20 +955,21 @@ pobliżu”; odbiór też przy zamkniętej aplikacji; każda fala dzwoni raz);
 skrót 5× zasilanie (opcja, wymaga PIN-ów, wibracja długo–krótko–długo);
 **potwierdzenia** `alarm_ack` („got” od razu, „seen” po otwarciu), przyjmowane
 tylko od tych, do których alarm poszedł; po ~60 s „Nie dotarło do: …”
-z „Wyślij jeszcze raz” i radą, by zadzwonić.
+z „Wyślij jeszcze raz” i radą, by zadzwonić. Fala Bluetooth jest
+podpisana (wersja 5, HMAC-SHA256 sekretem „W pobliżu”, ±10 min, bez
+powtórek; 1.10.0): dzwoni tylko sprawdzony alarm znajomego, obcy dają
+cichą notkę „Niesprawdzone…”. Alarm wychodzi przed zapisem stanu
+„Spotkań” (B10, 1.10.0).
 
 Braki:
-- Fala Bluetooth jest podpisana (wersja 5, HMAC-SHA256 sekretem
-  „W pobliżu”, ±10 min, bez powtórek; 1.10.0): dzwoni tylko sprawdzony
-  alarm znajomego, obcy dają cichą notkę „Niesprawdzone…”. Zostaje: wspólny
-  sekret dla wszystkich znajomych (§15).
+- Wspólny sekret „W pobliżu” dla wszystkich znajomych (§15); globalny
+  limit fal da się wyczerpać, zagłuszając prawdziwy alarm (`STAN.md` S31).
 - Położenie w tle (usługa typu `location` i zgoda) — dziś alarm ze skrótu
   przy zamkniętej aplikacji idzie bez nagrania i zwykle bez świeżego
   położenia (M).
 - Zapasowy SMS przez systemowe okno, bez uprawnień SMS (S).
 - Po restarcie telefonu z hasłem skrót i odbiór fal działają po pierwszym
   odblokowaniu Zen. Ten sam gest włącza na wielu telefonach systemowe SOS.
-- Alarm nie powinien zależeć od zapisu dużego stanu „Spotkań” (`STAN.md`).
 
 ## 17. Życie po znajomości
 
@@ -924,6 +1019,9 @@ znajomego 30 zaproszeń na dobę; zdjęcia ponad 4096 px / 16 Mpx odpadają.
 - Obiad u nieznajomego po znajomości (kilka miejsc dla znajomych znajomych).
 - **Wspólna kasa na składniki** — do zrobienia (S).
 
+Stan: rotacja, „Zamień się”, preferencje i przedmioty działają; 4–8 osób
+to tylko podpowiedź, a pojęcia „pary” nie ma (S).
+
 ### 17.4 Stół na sześć (kolacja znajomych znajomych)
 
 Przy stole siedzą ludzie oddaleni o 2 kroki znajomości: każdy zna kogoś,
@@ -949,8 +1047,9 @@ to nowe „spotkani osobiście” i zaczyn przyszłych komórek.
 
 Jeden mechanizm na polecenia, fachowców, pożyczki, pracę, podwózki.
 Bezpiecznik odbiorcy: od jednego znajomego najwyżej 20 pytań na dobę (z
-przekazanymi), 50 odpowiedzi na pytanie. Napiwek walutą za odpowiedź (§24)
-— zrobione.
+przekazanymi) i 50 odpowiedzi na pytanie, łącznie 200 odpowiedzi na
+pytanie. Napiwek walutą za odpowiedź (§24) — zrobione. Brakuje podpisu
+odpowiedzi — dziś uwierzytelnia je tylko adres nadawcy na każdym kroku (S).
 
 ### 17.6 Plan na weekend
 
@@ -967,7 +1066,7 @@ obok wydarzeń, kółek i Stołu na sześć, najlżejsza z nich:
 
 Wariant: **„Wspólna sprawa”** (zbiórka sąsiedzka, sprzątanie podwórka,
 pomoc sąsiadowi): lista tego, co potrzebne (ludzie, terminy, rzeczy), i kto
-co deklaruje; bez pieniędzy.
+co deklaruje; bez pieniędzy — do zrobienia (S/M).
 
 ## 18. Sekcja sąsiedzka
 
@@ -989,11 +1088,18 @@ co deklaruje; bez pieniędzy.
 
 - Naklejka A6 (PNG 300 dpi): QR + nazwa + własne hasło („Zeskanuj —
   zapraszamy na kawę!”). Kod zawiera adres i klucz mieszkania, nie konta.
+  **Stan:** dziś kod niesie adresy do 3 domowników (`flat_model.dart`,
+  `FlatDoorCode.encode`), czyli ich stałe adresy w Zen — każdy, kto
+  przejdzie klatką, łączy dom z osobą, jej publicznym profilem, postami
+  i obecnością online. Do naprawy: klucz mieszkania i osobny adres
+  skrzynki mieszkania; adres osoby dopiero po „Pokaż mój profil” (S/M,
+  `STAN.md` §6 pkt 15).
 - „Nowy kod” unieważnia stary (kto zeskanuje stary, widzi „nieważny”).
 - Kod ma postać `zen-flat:…` i działa bez strony. Aplikacja rozumie też
-  link `https://<domena>/m#<kod>`. Strony nie ma (jedyną stroną jest README
-  repozytorium); do decyzji, czy kod na drzwiach ma prowadzić do README jak
-  zaproszenia (§14.2) (S).
+  link `https://<domena>/m#<kod>`. Własnej strony nie ma; zaproszenia
+  prowadzą na stronę zaproszeń na GitHub Pages (§6.1). Do zrobienia:
+  obsługa `/m#<kod>` na tej stronie, żeby kod z drzwi zeskanowany zwykłym
+  aparatem otwierał Zen albo pobieranie (S).
 
 ### 18.3 Moi sąsiedzi
 
@@ -1015,7 +1121,8 @@ podpisane i sprawdzane kluczami znanymi od co najmniej doby. Dwa różne nowe
 klucze nie rozstrzygają się „kto pierwszy”: sąsiad widzi ostrzeżenie
 „zapytaj sąsiadów osobiście”, a skan nowego kodu z drzwi rozstrzyga.
 
-Braki: strona `/m` i „kod w schowku” po instalacji (S); czat wydarzenia przy
+Braki: kod na drzwiach bez adresów domowników (§18.2); strona `/m` i „kod
+w schowku” po instalacji (S); czat wydarzenia przy
 zaproszeniu (S/M); zaproszenia w pobliżu na komputerze (brak Bluetooth);
 wiadomości, gdy żaden telefon domownika długo nie jest w sieci. Granice: w
 mieszkaniu dwóch osób obie wersje nowego klucza są „poprawne” (zostaje
@@ -1262,8 +1369,12 @@ Szczyt nie może banować każdego, kto się do niego zbliża:
   miesiąc, do kiedy, czy dalej}`, podpisana 2 z 3 szczytu. Limit liczony
   w całym łańcuchu; dalsze delegowanie tylko węższe; ważna, póki delegat jest
   w piramidzie.
-- Każdy klient sprawdza łańcuch delegacji. Cofnięcie unieważnia wszystko,
-  co z niej wynikało. Akty delegatów są publiczne; szczyt może je uchylić.
+- Każdy klient sprawdza łańcuch delegacji. Cofnięcie (szczyt 2 z 3 albo
+  wystawca) unieważnia delegację na przyszłość razem z dalszymi
+  delegacjami. Rekord cofnięcia wymienia akty, które cofający znają: te
+  zostają w mocy, a każdy inny akt datowany przed cofnięciem uznaje się za
+  antydatowany i nieważny. Akty delegatów są publiczne; szczyt może je
+  uchylić (np. zdjąć ban).
 
 ### 21.3 Referenda
 
@@ -1272,9 +1383,11 @@ Szczyt nie może banować każdego, kto się do niego zbliża:
 - **Wyniki liczone drzewem:** każda komórka podpisuje sumę swojej gałęzi
   (suma dzieci + własna komórka) i przekazuje w górę.
 - Głos tajny wobec wszystkich poza własną komórką.
-- **Twarde minimum w kodzie:** referendum co najmniej 1 h, konstytucyjne
-  72 h; sumy dopiero po końcu; szef musi włączyć najnowszą sumę każdej gałęzi
-  (bez niej liczy po 6 h), każdą raz; liczby ograniczone wielkością gałęzi.
+- **Twarde minimum w kodzie:** referendum konstytucyjne 72 h; zwykłe
+  referendum i ankieta niczego nie wiążą, więc wystarczą 2 min (żeby nie
+  zamknęły się, zanim ktokolwiek je zobaczy); sumy dopiero po końcu; szef
+  musi włączyć najnowszą sumę każdej gałęzi (bez niej liczy po 6 h), każdą
+  raz; liczby ograniczone wielkością gałęzi.
 
 ### 21.4 Zgłoszenia
 
@@ -1286,6 +1399,14 @@ Szczyt nie może banować każdego, kto się do niego zbliża:
 - Decyzja (ban, przerwa, ban treści, „bez naruszenia”) jest publiczna,
   zgłaszający anonimowy dla zgłoszonego. Odwołanie raz.
 - Bez piramidy nie ma władzy: zostaje blokada i „Usuń z mojego urządzenia”.
+
+**Stan: Częściowo.** „Zgłoś” jest przy postach, komentarzach, profilach,
+wiadomościach (także grupowych) i profilu randkowym; zgłoszenia przyjmują
+tylko członkowie i ci, którzy je rozpatrują, z limitami (1.10.0). Brakuje:
+„Ukryj u siebie” i przycisku odwołania (`STAN.md` B13, naprawiane
+w 1.10.0), dowodu w postaci podpisanych wpisów (dziś tekst i skrót),
+eskalacji poziom po poziomie (dziś po 48 h od razu do szczytu), wskazania
+autora przy zgłoszeniu komentarza i „Usuń z mojego urządzenia” (§26.1).
 
 ### 21.5 Fałszywe konta i farmy
 
@@ -1477,7 +1598,8 @@ na belce.
   skarbnicy, spóźniona emisja czeka).
 - **Propozycje do podpisania** kończą się, gdy rekord spełnia zasadę
   (próbne złożenie stanu), więc złożone wymagania nie wychodzą w połowie.
-- Zrobione wszystkie mechanizmy §20–24 opisane wyżej, w tym: anonimowe
+- Zrobione główne mechanizmy §20–24 opisane wyżej (braki niżej i w
+  `STAN.md` §10), w tym: anonimowe
   głosowania, migracja z gałęzią, łączenie piramid, delegacje z limitem
   w łańcuchu, immunitet do głębokości 3, zgłoszenia, referenda drzewem,
   konstytucja, sekcja krajowa, waluta z wetem,
@@ -1487,20 +1609,29 @@ na belce.
 - **Tryb kryzysowy** (§28): alarm szczytu, delegata albo sekcji z zasięgiem,
   fala Bluetooth (podpisana, wersja 3) także do telefonów spoza piramidy
   („niesprawdzony”); dalej idzie tylko fala ważna w piramidzie odbiorcy.
-- **Testy:** podpisy pierścieniowe sprawdzone niezależnie (Python), ponad 20
-  scenariuszy w symulatorze (także chaos), skrypt do prawdziwych aplikacji
-  (`TESTOWANIE.md`).
+- **Testy:** podpisy pierścieniowe w `test/ring_signature_test.dart`;
+  wcześniejsze porównanie z osobną implementacją w Pythonie nie zostawiło
+  skryptu w repozytorium, więc nie da się go powtórzyć (do dodania albo
+  zastąpienia wektorami testowymi) (S); ponad 20 scenariuszy w symulatorze
+  (także chaos), skrypt do prawdziwych aplikacji (`TESTOWANIE.md`).
 
 **Braki:** flagi funkcji (S); ruch piramidy przez relaye i ukrycie adresu
-urządzenia (M/L); klucz piramidy z klucza konta (S/M); przyjmowanie
-`report` i `appeal` od każdego bez limitów i podpisu (wysokie, `STAN.md`);
-liczenie od zera co 60 s w wątku interfejsu i wszystkie rekordy u każdego
-członka (M–L: punkty kontrolne, liczenie przyrostowe w tle, telefon trzyma
-swoją gałąź); prywatność przelewów (L); przelewy rozchodzą się do wszystkich
-członków, a §23 mówi o skarbnikach.
+urządzenia (M/L); klucz piramidy z klucza konta (S/M); liczenie od zera co
+60 s w wątku interfejsu i wszystkie rekordy u każdego członka (M–L: punkty
+kontrolne, liczenie przyrostowe w tle, telefon trzyma swoją gałąź);
+prywatność przelewów (L); przelewy rozchodzą się do wszystkich członków,
+a §23 mówi o skarbnikach. Mniejsze (`STAN.md` §10): przerwa tylko 7 dni,
+przyjęcie bez sprawdzenia poziomu „Znajomy”, referenda bez wymogu
+„spotkanych osobiście” (§20.6), brak liczników „Dotarło / przeczytało”,
+przypinania w sekcji krajowej, emisji ponad limit przez referendum,
+cennika w profilu i cofania przelewów udowodnionych jako oszustwo; kworum
+konstytucji liczone od wszystkich miejsc, także martwych (`STAN.md` §6
+pkt 11). Przyjmowanie `report` i `appeal` od każdego naprawione w 1.10.0
+(S1).
 
 **Uczciwie:** to kod przed audytem. Kryptografia pierścieniowa jest własną
-implementacją (BigInt, sprawdzona niezależnie, nieaudytowana, wolna;
+implementacją (BigInt, bez powtarzalnego niezależnego sprawdzenia,
+nieaudytowana, wolna;
 pierścień to 2–3 klucze). Znajomy, który przekazuje głos, widzi, że coś
 wysłałeś. Bez wspólnego zegara nie da się udowodnić antydatowania: zmowa
 wszystkich wymaganych podpisów może cofnąć datę rekordu (widać to
@@ -1516,7 +1647,9 @@ klucz piramidy w odpowiedzi na pytanie to deklaracja odpowiadającego.
 
 ## 25. Nawigacja aplikacji
 
-Pionowa belka po lewej (same ikony na telefonie, szersza na komputerze).
+Pionowa belka po lewej: same ikony, wąska (56 px) na każdym ekranie, także
+na komputerze (tam cała aplikacja ma dziś szerokość telefonu; dwa panele
+od ~900 px — `STAN.md` A24).
 
 **Stan: Częściowo.** Kolejność dziś: **Graf → Profil → Czaty → Tablica →
 Spotkania → Randki → Sąsiedzi → Piramida → Portfel → Osoby w pobliżu →
@@ -1528,7 +1661,8 @@ schować (przycisk albo przesunięcie; aplikacja to pamięta).
 - U góry pasek stanu połączenia; dotknięcie otwiera ustawienia (bez
   osobnej zakładki). Każda sekcja ma ten sam nagłówek (`ZenSectionBar`).
 - Tablica: posty znajomych i obserwowanych (własne na profilu); karta „Co
-  słychać?” otwiera pełnoekranowy edytor (odbiorcy, do 4 zdjęć, Ctrl+Enter).
+  słychać?” otwiera pełnoekranowy edytor (odbiorcy, do 10 zdjęć, film,
+  głosówka, Ctrl+Enter).
 - Domyślny motyw systemowy; w jasnym motywie logo jest czarne. 27 kolorów
   akcentu.
 - „O aplikacji”: najpierw zbiórka, potem czym jest Zen (także piramida
@@ -1543,21 +1677,48 @@ jak kokpit.
 
 ### 25.1 Języki i tłumaczenia
 
-**Do zrobienia (M, potem S na każdy język).** Dziś wszystkie teksty są po
-polsku, wpisane w kod.
-1. Wyciągnąć teksty do plików ARB (`flutter_localizations`, `intl`), także
-   teksty usługi w tle, powiadomień i kanałów Androida.
-2. Pierwszy język: **angielski**.
-3. **Wybór języka w ustawieniach** (Wygląd): „Jak w systemie” (domyślnie)
-   albo konkretny język; zmiana bez restartu.
-4. Formaty dat, liczb i kwot wg języka; teksty bez sklejania słów (liczba
-   mnoga przez ICU).
-5. Test, że każdy klucz ma tłumaczenie w każdym języku.
+**Stan: Zrobione** (1.10.0). Zamiast ARB (`flutter_localizations` +
+`intl`) — własna, prostsza warstwa (`lib/src/app/i18n/zen_i18n.dart`):
+
+1. **Polski jest językiem źródłowym.** Każdy tekst w kodzie to polskie
+   zdanie w `t('…')`, z nazwanymi wstawkami (`t('Wysłano do {name}',
+   {'name': …})`); liczba mnoga przez `tn(n, one: …, few: …, many: …)`.
+   Inne języki szukają tłumaczenia po tym tekście w
+   `assets/i18n/<kod>.json`; liczba mnoga według reguł CLDR danego języka
+   (np. sześć form arabskich). Brak tłumaczenia = tekst polski.
+2. **21 języków:** polski, indonezyjski, czeski, niemiecki, angielski,
+   hiszpański, francuski, włoski, węgierski, niderlandzki, portugalski,
+   rumuński, wietnamski, turecki, rosyjski, ukraiński, arabski (układ od
+   prawej do lewej), hindi, chiński uproszczony, japoński, koreański.
+3. **Wybór:** domyślnie automatycznie — pierwszy język systemu, który Zen
+   zna, a gdy żadnego, angielski. **Ustawienia → Język**: „Automatycznie”
+   albo konkretny język; zmiana od razu, bez restartu (przebudowa
+   wszystkich widżetów). Wybór leży w zwykłym pliku `language.txt` w folderze
+   danych, bo jest potrzebny przed odblokowaniem (ekran blokady) i w usłudze
+   w tle (powiadomienia); teksty Materiala i kierunek układu idą za
+   językiem Zen (`zen_locales.dart`).
+4. **Pilnowanie:** `dart run tool/i18n.dart` sprawdza, że `t()` i `tn()`
+   dostają tylko zwykłe napisy, i dla każdego pliku wypisuje brakujące,
+   nieaktualne teksty i niezgodne wstawki (kod wyjścia 1); `--keys` wypisuje
+   wszystkie teksty jako JSON, `--prune` usuwa nieaktualne. Te same
+   sprawdzenia robi `test/i18n_test.dart` (w CI).
+5. Nie tłumaczymy: dzienników, kluczy i identyfikatorów, danych zapisywanych
+   i wysyłanych do innych, nazw własnych.
+
+Braki i pułapki (`STAN.md` A23): część tekstów jest zapisywana w stanie już
+przetłumaczona (wpisy Skrzynki, „Teraz”, wiadomości systemowe) i po zmianie
+języka zostaje w starym; poprawka polskiego tekstu gubi jego tłumaczenia,
+a jeden polski napis w dwóch znaczeniach ma jedno tłumaczenie (do dodania:
+`context:` w `t()` i oznaczanie „do przejrzenia”); formaty dat, liczb
+i kwot według języka — do sprawdzenia; wyszukiwarka GIF-ów pyta zawsze
+po polsku.
 
 ### 25.2 Ekran uprawnień
 
-**Stan: Zrobione** (1.10.0; brakuje położenia w tle dla alarmu i dokładnych
-alarmów). Jeden ekran przy pierwszym uruchomieniu (po haśle) i w
+**Stan: Częściowo** (1.10.0; na ekranie brakuje położenia — zwykłego
+i w tle — dla alarmu i dokładnych alarmów, a instrukcja dla producentów
+jest tylko w Ustawieniach; na Linuksie i macOS ekranu nie ma, macOS pyta
+sam przy pierwszym użyciu). Jeden ekran przy pierwszym uruchomieniu (po haśle) i w
 ustawieniach, z wyjaśnieniem po co i stanem każdego uprawnienia:
 powiadomienia; Bluetooth / urządzenia w pobliżu; położenie (dla alarmu,
 także w tle); aparat i mikrofon; wyłączenie optymalizacji baterii (z
@@ -1615,13 +1776,26 @@ w tle, Bluetooth i push (§13.4); instrukcja w README. Drogi dystrybucji:
 
 | Droga | Zalety | Wady |
 |---|---|---|
-| App Store / TestFlight | zwykła instalacja dla wszystkich | przegląd Apple (może odrzucić lub usunąć), konto deweloperskie, push przez APNs |
-| Alternatywne sklepy w UE (np. AltStore PAL) | bez przeglądu treści App Store | notaryzacja Apple i konto deweloperskie, tylko UE |
+| App Store / TestFlight | zwykła instalacja dla wszystkich; TestFlight do 10 000 testerów (build ważny 90 dni) | przegląd Apple (UGC, „piramida”, randki — może odrzucić lub usunąć), konto 99 USD/rok, sprzedawca = imię i nazwisko autora, push przez APNs wymaga serwera |
+| AltStore PAL (UE, Japonia, Brazylia) | notaryzacja zamiast przeglądu treści; od 01.10.2026 bez opłat dla darmowej aplikacji; plik źródła na GitHub Pages | konto 99 USD/rok; tylko konta Apple z tych krajów |
+| Web Distribution (UE) | instalacja z własnej strony | tylko organizacje (np. fundacja z fee waiver) |
 | AltStore / SideStore z darmowym Apple ID | bez przeglądu Apple, działa na całym świecie | podpis co 7 dni, najwyżej 3 aplikacje, komputer do pierwszej instalacji |
 
-Wcześniej (taniej): **macOS i Linux** (M) — Flutter i most Go już to
-umożliwiają; brakuje budowania, Bluetooth i nagrywania rozmów. Awaryjnie:
-tryb gościa w przeglądarce przez telefon lub komputer znajomego (L).
+Szczegóły i plan: `WYDANIA.md` §6, `STAN.md` §9.
+
+**Stan Linuksa i macOS: kod i wydania z CI** (1.10.0, niesprawdzone do
+pierwszego przebiegu CI). Linux x64 i ARM64 (`Zen-Linux-*.tar.gz`, klucz
+w GNOME Keyring / KWallet, zasobnik przez AppIndicator); macOS 12+,
+uniwersalny (`Zen-macOS.zip`, most Go statycznie jak na iPhonie, Touch ID
+przez Secure Enclave, bez piaskownicy, podpis ad hoc — od macOS 15 pierwsze
+uruchomienie przez „Otwórz mimo to”). Komputery z Linuksem i macOS są
+mostami jak Windows. Brakuje: Bluetooth, nagrywania rozmów, aparatu
+i skanera QR; na Linuksie odtwarzania audio i wideo (`video_player` bez
+implementacji — rozwiązanie: `fvp` albo `media_kit`), biometrii, linków
+`zen://` i ikony na Waylandzie (potrzebny plik `.desktop`: `.deb`
+i Flatpak, M); na macOS podpisu Developer ID i notaryzacji (to samo konto
+co iPhone). Awaryjnie: tryb gościa w przeglądarce przez telefon lub komputer
+znajomego (L) — wersja przeglądarkowa odpada (serwer mógłby podmienić kod).
 
 ## 27. Prawo (do konsultacji z prawnikiem — nie jestem prawnikiem)
 
@@ -1670,6 +1844,5 @@ tryb gościa w przeglądarce przez telefon lub komputer znajomego (L).
 W V1.8–V1.9 była zakładka „Asystent” (model językowy na urządzeniu,
 llamadart; ocena wiadomości przed wysłaniem, ostrzeżenia, tłumaczenia,
 tamagotchi, Notatnik). Usunięta w V1.9, bo model potrafił zawiesić system.
-Przy starcie aplikacja kasuje pozostałości (`assistant_leftovers.dart`;
-do usunięcia przed wydaniem, §2.5). Powrót tylko z planem, który nie
-obciąża urządzenia.
+Jednorazowe sprzątanie pozostałości usunięto razem z kodem zgodności
+w 1.10.0 (§2.5). Powrót tylko z planem, który nie obciąża urządzenia.
