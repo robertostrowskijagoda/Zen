@@ -1,0 +1,43 @@
+# Dependabot: weekly pull requests with updates (security updates come at
+# once, if "Dependabot security updates" is on in Settings -> Code security).
+# Every pull request goes through CI like any other; read the changelog of
+# what it updates before merging. The cooldown waits 7 days after a new
+# version is published (a hijacked release is usually pulled by then); it
+# does not delay security updates.
+version: 2
+updates:
+  # The actions in .github/workflows. They are pinned to full commit SHAs
+  # with the version in a comment; Dependabot updates both.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns:
+          - '*'
+
+  # The Go bridge. After a change of go.mod refresh LICENSES-GO.txt
+  # (dart run tool/go_licenses.dart); go_licenses_test.dart fails until then.
+  - package-ecosystem: gomod
+    directory: /native/yggdrasil_bridge
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+
+  # Flutter / Dart packages (pubspec.yaml, pubspec.lock). Minor and patch
+  # updates in one pull request, major ones each on its own.
+  - package-ecosystem: pub
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      pub-minor-and-patch:
+        update-types:
+          - minor
+          - patch
