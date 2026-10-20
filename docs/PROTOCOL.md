@@ -125,7 +125,7 @@ Direction is sender -> recipient unless stated. "Reliable" means the type is in
 |---|---|---|
 | `friend_request` | `senderName`, `message` (<=1000 chars) | Reliable, direct only (no relay: recipient unknown). |
 | `friend_accept` | `senderName` | Reliable. |
-| `friend_reject`, `friend_cancel`, `friend_remove` | - | Reliable. A `friend_remove` without a user decision (old peers' automatic reply) is recognised by `isUnconfirmedFriendRemovePayload` and does not end a friendship. |
+| `friend_reject`, `friend_cancel`, `friend_remove` | - | Reliable. |
 | `profile_update` | `v` (profile `updatedAtMillis`), `name`, `status`, `bio`, `avatar` | Reliable. `v` is monotonic. Names limited to 60 characters locally, 64 on receipt. |
 | `friend_list` | `l`: list of `{a: address, n: name}`, `d`: sha256 hex digest of the list | Reliable. Sent per friend according to the audience for the friend list; an empty list with the empty-list digest means "forget it". |
 | `meet_req` | `w`: list of `"l"`, `"k"`, `"s"` | Asks again for the friend list, nearby key or status. |
@@ -187,7 +187,12 @@ accepted (parkable types wait for the friendship to settle).
   (map friend -> answer), `end`, `duress`, optional `cf` (please confirm)};
   `alarm_resp` {`id`, `r`}; `alarm_ack` {`id`, `k`: `got` or `seen`, ...};
   `alarm_audio` {`id`, `n`, `at`, `ms`, `d` (base64 sound piece)}. Limits:
-  sound piece <= 200 KiB, <= 6 pieces per alarm.
+  sound piece <= 200 KiB, <= 6 pieces per alarm. Alarm key (§16.3 of the
+  plan): `alarm_key` {`c`: certificate `{a, k, at, d (device cert), s}`,
+  signed by the device key}; an `alarm` may carry `sg` (Ed25519 over the
+  canonical fields, positions in millionths) and `sk` (the key), and `kit:
+  true` for a copy sealed in advance; `alarm_own` / `alarm_own_audio` exist
+  only in the sealed inbox (from the device's own address).
 - **Events**: `event`, `event_rsvp`, `event_plus1`, `event_pass`, `event_photo`,
   `event_thanks` (ticket QR prefix `zen-ticket:`) [?] fields.
 - **Questions**: `ask`, `ask_answer`. **Table / circles**: `table_wish`,
@@ -201,10 +206,14 @@ accepted (parkable types wait for the friendship to settle).
 
 `flat_hello`, `flat_nope`, `flat_profile`, `flat_get`, `flat_msg`,
 `flat_signup`, `flat_signup_ok`, `flat_house`, `flat_join`, `flat_leave`,
-`flat_moved`, `flat_kick`, `flat_rekey`, `flat_newkey`, `flat_reveal`
-(`neighbors_service.dart`). They are reliable but sent only directly (flats are
-usually not friends): a door QR gives a "door secret" that authorises
-`flat_hello`.
+`flat_moved`, `flat_kick`, `flat_rekey`, `flat_newkey`, `flat_reveal`,
+`flat_ack` (`neighbors_service.dart`). Between flats they go from door node to
+door node (`door_node.go`, `FlatTypes.atDoor`), retried by the sending phone
+until the other door answers `flat_ack {id}` (knocks are never answered);
+`flat_reveal` comes from the resident's own phone. Between housemates
+(`flat_house`, `flat_join`, `flat_leave`, `flat_kick`, `flat_rekey`) they go
+phone to phone, reliable but only directly. A door QR gives a "door secret"
+that authorises `flat_hello`.
 
 ### 2.8 Dating (`date_*`) [P]
 

@@ -7,7 +7,8 @@ limitation-of-liability wording against mandatory consumer law; the DSA
 position of an app with no operator (docs/PLAN.md section 27 says
 a foundation with terms and a law-enforcement channel is safer later); the
 18+ dating rules; whether the name "pyramid" needs another label for stores.
-The LICENSE file is the binding licence text; this document does not change it.
+LICENSE (GPL-3.0) and NOTICE (its section 7 additional terms) are the binding
+licence texts; this document does not change them.
 -->
 
 # Zen - Terms of Use
@@ -15,8 +16,8 @@ The LICENSE file is the binding licence text; this document does not change it.
 *Version for Zen 1.11.0 - last updated 20 October 2026.*
 
 By installing or using Zen you agree to these terms. If you do not agree, do
-not use Zen. Read them together with the [Privacy Policy](PRIVACY.md) and the
-[LICENSE](../LICENSE).
+not use Zen. Read them together with the [Privacy Policy](PRIVACY.md), the
+[LICENSE](../LICENSE) and the [NOTICE](../NOTICE).
 
 ## 1. What Zen is
 
@@ -33,12 +34,17 @@ actions that happened on the network.
 
 ## 2. Licence
 
-Zen is provided under the licence in the [LICENSE](../LICENSE) file
-(PolyForm Strict 1.0.0 plus the author's additional permissions). In short:
-anyone, including companies and public bodies, may use Zen for any purpose and
-read the code; you may **not** sell Zen, add advertising or payments, remove
-the author's notices or publish modified versions or forks. The LICENSE text
-is binding; this paragraph is only a summary.
+Zen is free software under the GNU General Public License version 3
+([LICENSE](../LICENSE), `GPL-3.0-only`) with additional terms under its
+section 7 ([NOTICE](../NOTICE)). In short: anyone may use, study, change and
+share Zen, also commercially, as long as the source code goes along under the
+same licence; copies must keep the author attribution "Zen by Robert
+Ostrowski-Jagoda" and the donation link in the About screen (a modified
+version may replace the link only with a marked note pointing to the original
+author's page); modified versions must be marked as changed, must not be presented as the original and must use
+another name and icon. These terms of use do not restrict the rights the
+licence gives. LICENSE and NOTICE are binding; this paragraph is only a
+summary.
 
 ## 3. Who may use Zen
 
@@ -147,8 +153,8 @@ terms; a new version applies from the Zen release that links to it.
 
 ## 9. No warranty
 
-As the [LICENSE](../LICENSE) says, **Zen is provided "as is", without any
-warranty**, express or implied, including merchantability, fitness for a
+As the [LICENSE](../LICENSE) (GPL sections 15 and 16) says, **Zen is
+provided "as is", without any warranty**, express or implied, including merchantability, fitness for a
 particular purpose and non-infringement. The author does not promise that Zen is
 secure, error-free, uninterrupted or that messages or alarms will always be
 delivered. Backups are your responsibility: lost devices, forgotten passwords
@@ -161,7 +167,7 @@ To the fullest extent the law allows, the author is not liable for any damage
 arising from the use of or inability to use Zen, including loss of data, lost
 messages or alarms, third-party content or behaviour, decisions made in a
 pyramid, financial loss, or consequences of meeting people you met through the
-app. This follows the "No Liability" term of the licence. **Nothing in these
+app. This follows section 16 of the licence. **Nothing in these
 terms excludes or limits liability that cannot be excluded by law**, for
 example for intent or gross negligence, or your statutory rights as a
 consumer.
@@ -189,4 +195,5 @@ Disputes are best raised first through the contact route in the Privacy Policy.
 ## 14. If a term is invalid
 
 If a part of these terms is invalid or unenforceable, the rest stays in force.
-If these terms and the LICENSE conflict about licensing, the LICENSE prevails.
+If these terms and the LICENSE or NOTICE conflict about licensing, the
+LICENSE and NOTICE prevail.

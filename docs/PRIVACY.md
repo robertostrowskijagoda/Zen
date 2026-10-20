@@ -49,7 +49,7 @@ privacy is weaker than people might expect.
 ## 2. Who is responsible
 
 Zen is made by **Robert Ostrowski-Jagoda**, an individual developer
-(see the `LICENSE` file; project page: https://github.com/robertostrowskijagoda/Zen).
+(see the `NOTICE` file; project page: https://github.com/robertostrowskijagoda/Zen).
 
 Because the author never receives your data, in practice the author is **not in
 a position to access, correct or delete it**. To the extent the law treats the
@@ -88,7 +88,12 @@ Almost everything above is stored encrypted (AES-256-GCM, with a master key
 protected by a key derived from your password with Argon2id and, where
 available, by hardware-backed storage). **Exceptions:** media you export or
 save on purpose is saved as an ordinary file, and the language you chose is
-kept in a plain file (it is needed before you unlock).
+kept in a plain file (it is needed before you unlock). On Android, so that
+the phone can keep receiving while Zen is locked, this device's network
+identity and a list of keyed tags of your contacts are sealed with a
+separate key in the system's secure storage that opens without your
+password; what arrives while Zen is locked is stored sealed so that only
+your unlocked app can read it.
 
 ### 3.2 What other people receive
 
@@ -199,8 +204,10 @@ another Zen user.
   GitHub Pages. GitHub sees ordinary web-visit data (IP address, user agent)
   when you download Zen or open that page, under GitHub's own policy. An invite
   code in a link is placed after `#` and is therefore not sent to the server by
-  your browser. Zen itself does not contact GitHub in the background (network
-  self-update is not active in 1.11.0).
+  your browser. Zen itself (except the store build) asks GitHub's API for the
+  latest release at start and every 12 hours, and downloads a release file
+  when you press "Aktualizuj"; GitHub then sees your IP address and the user
+  agent "Zen", nothing else.
 - **Links you tap** (the Yggdrasil site, the public-peers list, maps) open in
   your browser and are governed by those sites.
 - **Operating system and stores.** Your phone vendor, the Android / iOS / Windows

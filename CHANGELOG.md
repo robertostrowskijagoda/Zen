@@ -66,6 +66,7 @@
 - **Store build:** the Android store flavor is **`appStoreOnly`** (label "Zen (store)", no icon camouflage); its files are `Zen-APP-STORE-ONLY-do-not-install-manually.aab` / `.apk` and must never be installed by hand. Tor `.onion` mirror links are no longer accepted.
 - **Owner's decisions kept:** LAN discovery (off by default), own GIF API key, DNS-over-TLS fallback, test profiles, Windows ARM64 and the extra Android ABIs, "Why isn't it working?", clock-skew bar, friends-newer-version bar, key file backup, referendum minimum 2 minutes, Neighbours as a core feature, revoking a delegation voids everything derived from it, constitution quorum above half of all members. Not planned: Tor, Wi-Fi Direct, Bluetooth mesh, iPhone push.
 - **Docs:** the Polish section of `SECURITY.md` was removed (the English text covers it); `docs/PLAN.md` and `docs/STATUS.md` were brought in line with the code (store flavor name, no migrations, idle lock, status of alarm).
+- **License: GPL-3.0-only** (`LICENSE`, the unmodified GNU text) with additional terms under GPL section 7 (`NOTICE`): copies keep "Zen by Robert Ostrowski-Jagoda" and the donation link in the About screen, modified versions are marked as changed and use another name and icon; LICENSE and NOTICE ship with the release files, the `.deb` and the Flatpak. Zen can now go to F-Droid and IzzyOnDroid.
 
 ## 1.10.0 — 14.10.2026 (first public release)
 
@@ -103,7 +104,7 @@
 - **First-launch password fix:** the screen did not close after setting a password (the permissions step took over its navigation). Fixed, with a test.
 - **Honest biometrics:** the first-password question says any fingerprint stored on the phone will unlock Zen; the default is "Password only". Windows: "Windows Hello unlock" with a warning in Settings.
 - **Icons:** Feed as a newspaper, Wallet as a dollar sign; one pyramid drawing everywhere.
-- **License:** PolyForm Strict 1.0.0 with additional permissions — anyone, including companies, may use Zen for any purpose; it may not be sold or bundled into paid products; the author and donation link must stay; pull requests welcome, forks and modified versions forbidden.
+- **License:** a source-available license with the author's permissions (replaced by GPL-3.0-only in 1.11.0) — anyone, including companies, may use Zen for any purpose; it may not be sold or bundled into paid products; the author and donation link must stay; pull requests welcome, forks and modified versions forbidden.
 - Dart package `zen`, version **1.10.0 (10)**.
 
 ### Names from profiles, safe media, recordings in posts

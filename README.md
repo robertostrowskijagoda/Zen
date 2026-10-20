@@ -23,6 +23,10 @@
   <a href="#support-zen"><b>💜 Support</b></a>
 </p>
 
+<p align="center">
+  <a href="#license"><img src="https://img.shields.io/badge/license-GPL--3.0--only-blue" alt="License: GPL-3.0-only"></a>
+</p>
+
 > The download buttons work once the first release is published (they point to
 > the latest release on GitHub).
 
@@ -282,7 +286,7 @@ when its sources changed (details: `docs/RELEASES.md`, point 3.1).
 | System | You need | Command |
 |---|---|---|
 | Android (one APK: arm64-v8a, armeabi-v7a, x86_64) | Android Studio (SDK and NDK), JDK 17 | `flutter build apk --release` |
-| Android for a store only (Google Play, Galaxy Store; no self-update; app name "Zen (store)", "Zen (sklep)" in Polish; the build writes `Zen-APP-STORE-ONLY-do-not-install-manually.aab` and `.apk` to `build/app/outputs/app-store-only/`; never install this build by hand) | as above | `flutter build appbundle --release --flavor appStoreOnly` |
+| Android for a store only (Google Play, Galaxy Store; no self-update; app name "Zen", only About says "Wersja ze sklepu"; the build writes `Zen-APP-STORE-ONLY-do-not-install-manually.aab` and `.apk` to `build/app/outputs/app-store-only/`; never install this build by hand) | as above | `flutter build appbundle --release --flavor appStoreOnly` |
 | Windows | Visual Studio 2022 ("Desktop development with C++"), gcc for Go (e.g. Strawberry Perl) | `flutter build windows --release` |
 | Windows on ARM (on an ARM64 computer) | as above, with ARM64 tools; for Go [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) instead of gcc | `flutter build windows --release` |
 | Linux | packages below | `flutter build linux --release` |
@@ -323,6 +327,8 @@ It is made by one person, with no company and no investors.
 
 **[☕ Buy me a coffee at buycoffee.to/zen](https://buycoffee.to/zen)** — this is the only
 official Zen fundraiser; the same link is in the app (About → Support Zen).
+Donations are voluntary gifts and buy no rights or features. Copies of Zen
+must keep this link with the author's name ([NOTICE](NOTICE), section 1).
 
 ### About the author
 
@@ -334,15 +340,21 @@ If you have a job for me, let me know — you can find me on LinkedIn, among oth
 
 ## License
 
-Zen is under the [PolyForm Strict 1.0.0](https://polyformproject.org/licenses/strict/1.0.0) license
-with additional permissions from the author — the full terms are in [LICENSE](LICENSE). In short:
+Zen is free software under the [GNU General Public License v3.0](LICENSE)
+(`SPDX-License-Identifier: GPL-3.0-only`) with additional terms under GPL
+section 7 in [NOTICE](NOTICE). Copyright © 2026 Robert Ostrowski-Jagoda; the
+copyright stays with the author. In short:
 
-| You may | You may not |
+| You may | If you share Zen or a modified version, you must |
 |---|---|
-| use Zen for any purpose — privately, in a company, at school, in a government office — for free and without asking permission | sell Zen or take money for distributing it |
-| install it on any number of devices, including for employees | bundle Zen into paid products or services |
-| read the code, study its security and publish the results | add ads, payments or your own fundraisers |
-| report bugs and send pull requests | remove the author or their fundraiser |
-| build Zen from unmodified code and hand out official releases (the same SHA-256 sum) | publish modified versions or forks |
+| use Zen for any purpose, privately or in a company, on any number of devices | make the source code available, under the same GPL-3.0 terms, to everyone you give a copy or a modified version to |
+| read, study, change and build the code | keep "Zen by Robert Ostrowski-Jagoda" and the donation link [buycoffee.to/zen](https://buycoffee.to/zen) in the About screen (a modified version may replace the link only with a marked note pointing to the original author's page) |
+| share copies, also modified ones, also for a fee | mark a modified version as changed and never present it as the original or an official release |
+| | give a modified version a different name and icon ("Zen" and the logo are not licensed) |
 
-Copyright stays with the author; only the author can grant exceptions.
+Because the license is approved by both the FSF and the OSI, Zen can also be
+distributed through F-Droid and IzzyOnDroid (not set up yet;
+[docs/RELEASES.md](docs/RELEASES.md), section 6.1). Builds that such
+repositories make from the unchanged source of a release may keep the name and
+icon (NOTICE, 3.3). The full license text is in [LICENSE](LICENSE); libraries
+keep their own licenses (in the app: About → Licenses).
