@@ -40,6 +40,7 @@ import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
 import 'package:zen/src/features/profile/presentation/profile_screen.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_screen.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
+import 'package:zen/src/features/runtime/runtime_deep_link_bridge.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -157,6 +158,7 @@ void main() {
       final ProviderContainer container = ProviderContainer(
         overrides: [
           socialHubAutoHydrateProvider.overrideWithValue(false),
+          deepLinkSourceProvider.overrideWithValue(_NoDeepLinks()),
           signalTransportProvider.overrideWithValue(MemorySignalTransport()),
           ledgerNodeEnabledProvider.overrideWithValue(true),
           ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
@@ -248,7 +250,7 @@ void main() {
             .read(circleServiceProvider)
             .create(
               name: 'Czwartkowe kolacje sąsiedzkie',
-              friends: <String>['ada.ygg', 'maks.ygg'],
+              friends: <String>['ada.ygg', 'maks.ygg', 'nina.ygg'],
               weekday: 4,
               hour: 19,
               firstDinner: DateTime.now().add(const Duration(days: 3)),
@@ -473,4 +475,13 @@ void main() {
       print(out);
     });
   }
+}
+
+/// No platform plugin in widget tests: the deep-link source never emits.
+final class _NoDeepLinks implements DeepLinkSource {
+  @override
+  Future<Uri?> getInitialLink() async => null;
+
+  @override
+  Stream<Uri> get linkStream => const Stream<Uri>.empty();
 }
