@@ -49,9 +49,16 @@ type bridgeNode struct {
 	nudgeStopOnce      sync.Once
 	// Limits on the public peering port of a desktop bridge (peer_guard.go).
 	peerGuards []*peerListenGuard
-	// The flat's door, when the app runs one (door_node.go).
-	door   *doorNode
-	doorMu sync.Mutex
+	// The flat's door, when the app runs one, the mailbox doors it runs
+	// for friends, by key, and the node carrying them (door_node.go).
+	door         *doorNode
+	mailboxDoors map[string]*doorNode
+	doorHost     *doorHost
+	doorMu       sync.Mutex
+	// Direct links with friends' and own devices nearby
+	// (local_link.go), made on first use.
+	localLinks   *localLinkManager
+	localLinksMu sync.Mutex
 }
 
 type configSummary struct {
@@ -132,13 +139,7 @@ const (
 	// Desktops help the wider mesh by accepting inbound peering (they are
 	// the bridges of §5.1). "[::]" listens on IPv6 and IPv4 together; Go
 	// falls back to IPv4 alone where the computer has no IPv6.
-	defaultDesktopPeerListen = "tls://[::]:32913"
-	// LAN discovery, when the app turns it on with a password (it is off by
-	// default, see ensureDefaultRuntimeConfig), runs on every interface.
-	defaultMulticastInterfaceRegex = ".*"
-	// Android interface names for Wi-Fi / ethernet / hotspot. Matching every
-	// interface (rmnet, dummy, lo) makes multicast noisy and can stall startup.
-	androidMulticastInterfaceRegex = "^(wlan|ap|swlan|eth|en|wl).*"
+	defaultDesktopPeerListen       = "tls://[::]:32913"
 	androidBootstrapPeerLimit      = 8
 	androidBootstrapPeerCount      = 16
 	desktopPublicPeerCount         = 20

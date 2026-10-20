@@ -143,6 +143,8 @@ void main() {
   test('the flat door runs with the node and comes back after a restart '
       '(§18.2)', () async {
     final List<String> doorCalls = <String>[];
+    final List<List<String>> mailboxCalls = <List<String>>[];
+    final List<String> doorSent = <String>[];
     final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.live(
       bootstrap: () async => RuntimeNodeSession(
         transport: MemorySignalTransport(),
@@ -155,35 +157,64 @@ void main() {
           return '200:dddd::${seed.substring(0, 2)}';
         },
         stopDoor: () => doorCalls.add('stop'),
+        setMailboxDoors: mailboxCalls.add,
+        sendFromDoor: (String to, Map<String, dynamic> payload) async =>
+            doorSent.add('$to ${payload['type']}'),
       ),
     );
     addTearDown(runtime.dispose);
 
     // Asked for before the node is up: it starts with the node.
     runtime.setDoorKey('aa');
+    // So do the mailbox doors run for friends (flat_door_mail.dart).
+    runtime.setMailboxDoorKeys(<String>['cc']);
+    expect(mailboxCalls, isEmpty);
     expect(runtime.doorAddress, isNull);
     await runtime.start();
     expect(runtime.doorAddress, '200:dddd::aa');
     expect(doorCalls, <String>['start aa']);
+    // Traffic to neighbour flats goes out from the door.
+    expect(
+      await runtime.sendFromDoor('200::9', <String, dynamic>{
+        'type': 'flat_msg',
+      }),
+      isTrue,
+    );
+    expect(doorSent, <String>['200::9 flat_msg']);
 
     runtime.setDoorKey('aa');
     expect(doorCalls, hasLength(1), reason: 'the same key keeps the door');
     runtime.setDoorKey('bb');
     expect(runtime.doorAddress, '200:dddd::bb');
 
+    expect(mailboxCalls, <List<String>>[
+      <String>['cc'],
+    ]);
+
     await runtime.stop();
     expect(runtime.doorAddress, isNull);
     await runtime.start();
     expect(runtime.doorAddress, '200:dddd::bb');
+    expect(mailboxCalls.last, <String>['cc']);
+    runtime.setMailboxDoorKeys(const <String>[]);
+    expect(mailboxCalls.last, isEmpty);
 
     runtime.setDoorKey(null);
     expect(runtime.doorAddress, isNull);
     expect(doorCalls.last, 'stop');
+    // No door, nothing goes out from it.
+    expect(
+      await runtime.sendFromDoor('200::9', <String, dynamic>{
+        'type': 'flat_msg',
+      }),
+      isFalse,
+    );
+    expect(doorSent, hasLength(1));
     await runtime.stop();
   });
 
-  test('knocks on the door reach only the door stream; nothing else comes '
-      'through the door (§18.2)', () async {
+  test('what comes to the doors reaches only the door stream; only flat '
+      'frames come through a door (§18.2)', () async {
     final MemorySignalTransport node = MemorySignalTransport();
     final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.live(
       bootstrap: () async => RuntimeNodeSession(
@@ -211,6 +242,24 @@ void main() {
       payload: <String, dynamic>{'type': kFlatKnockType},
       door: true,
     );
+    // A sealed knock that came to a mailbox door run for a friend.
+    await node.injectIncoming(
+      from: '200::1',
+      payload: <String, dynamic>{'type': kFlatSealType},
+      door: true,
+    );
+    // A neighbour flat's message, from its door to ours.
+    await node.injectIncoming(
+      from: '200::1',
+      payload: <String, dynamic>{'type': 'flat_msg'},
+      door: true,
+    );
+    // Housemates talk phone to phone, never through a door.
+    await node.injectIncoming(
+      from: '200::1',
+      payload: <String, dynamic>{'type': 'flat_house'},
+      door: true,
+    );
     await node.injectIncoming(
       from: '200::1',
       payload: <String, dynamic>{'type': 'lg_hello'},
@@ -224,8 +273,10 @@ void main() {
 
     expect(knocks.map((SignalTransportFrame f) => f.payload['type']), <String>[
       kFlatKnockType,
+      kFlatSealType,
+      'flat_msg',
     ]);
-    expect(knocks.single.door, isTrue);
+    expect(knocks.every((SignalTransportFrame f) => f.door), isTrue);
     expect(frames.map((SignalTransportFrame f) => f.payload['type']), <String>[
       'lg_hello',
     ]);

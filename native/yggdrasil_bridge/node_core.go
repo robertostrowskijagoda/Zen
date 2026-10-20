@@ -54,7 +54,6 @@ func createNode(configJSON string) (*bridgeNode, error) {
 		return nil, err
 	}
 	ensureDefaultRuntimeConfig(cfg)
-	applyLanDiscovery(cfg, parseZenLanDiscovery(configJSON))
 	cfg.IfName = "none"
 	cfg.AdminListen = "none"
 
@@ -219,7 +218,7 @@ func (node *bridgeNode) stopPeerNudge() {
 }
 
 func (node *bridgeNode) hasUpPeer() bool {
-	for _, peer := range node.meshPeers() {
+	for _, peer := range node.core.GetPeers() {
 		if peer.Up {
 			return true
 		}
@@ -273,7 +272,7 @@ func currentSelectedPeer(node *bridgeNode, peers []peerJSON) (string, string, in
 
 func normalizeNodeState(handle int32, node *bridgeNode) map[string]any {
 	self := node.core.GetSelf()
-	peers := buildPeerJSON(node.meshPeers())
+	peers := buildPeerJSON(node.core.GetPeers())
 	subnet := node.core.Subnet()
 	cfg := node.configSnapshot()
 	// Never leak the node identity key across the FFI boundary; Dart only

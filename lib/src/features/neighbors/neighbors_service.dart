@@ -10,8 +10,10 @@ import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
+import 'package:zen/src/features/neighbors/flat_door_mail.dart';
 import 'package:zen/src/features/neighbors/flat_model.dart';
-import 'package:zen/src/features/relay/relay_engine.dart' show kReliableIdKey;
+import 'package:zen/src/features/relay/relay_engine.dart'
+    show kReliableIdKey, kReliableTtlKey;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -58,7 +60,26 @@ abstract final class FlatTypes {
   /// profil").
   static const String reveal = 'flat_reveal';
 
-  static const Set<String> all = <String>{
+  /// To a mailbox door: a knock (or the answer to one) sealed for the flat
+  /// (flat_door_mail.dart).
+  static const String seal = 'flat_seal';
+
+  /// To a friend who keeps this phone's mailbox: "run this mailbox door"
+  /// (its key), or "stop" (an empty key).
+  static const String slot = 'flat_slot';
+
+  /// From that friend: a sealed knock its mailbox door took for us.
+  static const String held = 'flat_held';
+
+  /// Door to door: "your frame (its id) came", so the sender stops
+  /// retrying it.
+  static const String ack = 'flat_ack';
+
+  /// What comes in through a door (the bridge lets only these through,
+  /// `kFlatDoorTypes`): knocks and everything between neighbour flats, sent
+  /// from the sender's door; [reveal] comes from the resident's own phone;
+  /// [seal] only to mailbox doors.
+  static const Set<String> atDoor = <String>{
     hello,
     nope,
     profile,
@@ -66,15 +87,93 @@ abstract final class FlatTypes {
     message,
     signup,
     signupAck,
+    moved,
+    newKey,
+    reveal,
+    ack,
+    seal,
+  };
+
+  /// What goes phone to phone, through the relay layer: between housemates,
+  /// and between friends for the mailbox doors.
+  static const Set<String> atPhone = <String>{
     house,
     join,
     leave,
-    moved,
     kick,
     rekey,
-    newKey,
-    reveal,
+    slot,
+    held,
   };
+
+  static const Set<String> all = <String>{...atDoor, ...atPhone};
+}
+
+/// How long a frame for a neighbour flat's doors is retried until a door
+/// says it came ([FlatTypes.ack]).
+const Duration kFlatSendLife = Duration(days: 3);
+
+/// Frames waiting to be retried from the door at most; the oldest go first.
+const int kMaxDoorOutbox = 300;
+
+/// Knock notifications per hour, all knockers together; one knocker rings
+/// once an hour at most. More knocks still wait in the list, silently.
+const int kKnockRingsPerHour = 4;
+
+/// Waits between the retries of a frame sent from the door.
+const List<Duration> _doorRetries = <Duration>[
+  Duration(seconds: 30),
+  Duration(minutes: 2),
+  Duration(minutes: 10),
+  Duration(minutes: 30),
+  Duration(hours: 1),
+  Duration(hours: 3),
+  Duration(hours: 6),
+];
+
+/// One frame sent from this phone's door, kept until a door says it came
+/// (or, with [acked] off, until its time is up: doors never answer a knock).
+final class _DoorSend {
+  _DoorSend({
+    required this.id,
+    required this.to,
+    required this.payload,
+    required this.until,
+    required this.acked,
+  });
+
+  final String id;
+  final String to;
+  final Map<String, dynamic> payload;
+  final int until;
+  final bool acked;
+  int next = 0;
+  int tries = 0;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'id': id,
+    'to': to,
+    'p': payload,
+    'u': until,
+    if (acked) 'ack': true,
+  };
+
+  static _DoorSend? fromJson(Object? json) {
+    if (json is! Map ||
+        json['id'] is! String ||
+        json['to'] is! String ||
+        json['p'] is! Map ||
+        json['u'] is! int) {
+      return null;
+    }
+    return _DoorSend(
+      id: json['id'] as String,
+      to: json['to'] as String,
+      payload: Map<String, dynamic>.from(json['p'] as Map),
+      until: json['u'] as int,
+      acked: json['ack'] == true,
+    );
+  }
 }
 
 /// Wave payload version of a flat's invitation passed over Bluetooth.
@@ -87,8 +186,9 @@ const Duration kNearbyInviteLife = Duration(days: 3);
 enum FlatScan { sent, own, noFlat, alreadyNeighbor }
 
 /// How long a knock on the door waits for a resident to let them in or
-/// not (§18.2); after that it is gone, as if refused.
-const Duration kKnockLife = Duration(minutes: 10);
+/// not (§18.2), also while the phones are offline (friends hold it); after
+/// that it is gone, as if refused.
+const Duration kKnockLife = kHeldKnockLife;
 
 /// How long a knock already answered (let in, refused, expired) is
 /// remembered, so the knocker's retries of the same knock do not ask again:
@@ -110,7 +210,10 @@ String get kFlatKeyConflict =>
 /// "Sekcja sąsiedzka" (§18): this phone's flat (shared by its residents,
 /// who all hold the flat's key), the door QR, "Moi sąsiedzi", messages
 /// between flats and sign-ups for invitations. Everything is signed with
-/// the flats' keys; the residents' accounts never show.
+/// the flats' keys. Between flats everything goes from door to door (each
+/// resident's phone runs one, [doorInbox]), so the residents' accounts never
+/// show; a resident's own address only with "Pokaż mój profil". Housemates
+/// reach each other phone to phone.
 final class NeighborsService extends ChangeNotifier {
   NeighborsService({
     required this.host,
@@ -118,6 +221,8 @@ final class NeighborsService extends ChangeNotifier {
     int Function()? now,
     Random? random,
     this.doorInbox,
+    this.doorSend,
+    this.mailboxes,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch),
        _random = random ?? Random.secure();
 
@@ -127,8 +232,18 @@ final class NeighborsService extends ChangeNotifier {
   /// The address of the flat's door while it runs: a node of its own that
   /// this phone runs with [doorKey] (door_node.go in the bridge). The door
   /// QR carries it and never a resident's address (§18.2); without it there
-  /// is no door QR.
+  /// is no door QR. The flat's profile lists it as this resident's door.
   final String? Function()? doorInbox;
+
+  /// Sends a frame from that door (false while it does not run): all
+  /// traffic to neighbour flats goes this way, never from this phone's own
+  /// address.
+  final Future<bool> Function(String to, Map<String, dynamic> payload)?
+  doorSend;
+
+  /// The friends who keep this phone's offline mailboxes (§7), `null` while
+  /// not known yet: they run this door's mailbox doors.
+  final List<String>? Function()? mailboxes;
   final int Function() _now;
   final Random _random;
   static const String _key = 'neighbors/state';
@@ -145,6 +260,30 @@ final class NeighborsService extends ChangeNotifier {
   /// phone only: two phones never run one key on the mesh.
   String? _doorKey;
   String _doorKeyFor = '';
+
+  /// What [_doorKey] gives (mailbox doors, the sealing key); worked out
+  /// again after a restart, never stored.
+  FlatDoorKeys? _doorKeys;
+
+  /// Who runs which of this door's mailbox doors (slot → friend), and for
+  /// which door key they got the keys.
+  final Map<int, String> _slotHolders = <int, String>{};
+  String _slotsFor = '';
+
+  /// The stamp of the last hand-over; a friend keeps only a newer one.
+  int _slotAt = 0;
+  bool _syncingSlots = false;
+
+  /// Mailbox doors this phone runs for friends (friend → door).
+  final Map<String, HostedDoor> _hosted = <String, HostedDoor>{};
+
+  /// Sealed knocks already taken at those doors (hash of knocker and retry
+  /// id → until when): the knocker retries until [kSealRetryLife] is over.
+  final Map<String, int> _heldSeen = <String, int>{};
+
+  /// When each [pending] door was knocked at: the answer may come days
+  /// later, through the mailboxes.
+  final Map<String, int> _pendingAt = <String, int>{};
   bool shareWithScanners = false;
   int _shareAt = 0;
 
@@ -181,11 +320,17 @@ final class NeighborsService extends ChangeNotifier {
   final Map<String, String> staleDoors = <String, String>{};
   final List<NearbyFlatInvite> _nearby = <NearbyFlatInvite>[];
 
-  /// Residents' first names (phone address → name), shared between
+  /// Residents' first names (resident key → name), shared between
   /// housemates only.
   final Map<String, String> _names = <String, String>{};
 
-  /// Votes to remove a phone: target → the phones that voted.
+  /// Housemates' phones (resident key → phone address, this phone's too):
+  /// housemates reach each other phone to phone. Shared between housemates
+  /// only, never in the profile.
+  final Map<String, String> _phones = <String, String>{};
+
+  /// Votes to remove a resident: target → the residents who voted (all
+  /// resident keys).
   final Map<String, Set<String>> _kickVotes = <String, Set<String>>{};
 
   /// A new key that came before enough votes did (target → sender, body).
@@ -197,17 +342,13 @@ final class NeighborsService extends ChangeNotifier {
   String? _oldKey;
 
   /// This phone's own key as a resident (Ed25519; not the flat's key, which
-  /// every resident holds): votes to remove a phone and the "new key"
-  /// notice for neighbours are signed with it, so a removed phone cannot
-  /// speak for the others (§18.1).
+  /// every resident holds): it names this resident in the profile, and votes
+  /// to remove a resident and the "new key" notice for neighbours are
+  /// signed with it, so a removed phone cannot speak for the others (§18.1).
   String? _residentSeed;
   LedgerKeyPair? _resident;
 
-  /// The residents' own public keys (phone address → key), known to all
-  /// housemates and sent to neighbours with the profile.
-  final Map<String, String> _residentKeys = <String, String>{};
-
-  /// Signed votes to remove a phone: target → voter → signature.
+  /// Signed votes to remove a resident: target → voter → signature.
   final Map<String, Map<String, String>> _voteSigs =
       <String, Map<String, String>>{};
 
@@ -220,6 +361,12 @@ final class NeighborsService extends ChangeNotifier {
 
   /// Neighbour flats this phone showed its own account to.
   final Set<String> _revealedTo = <String>{};
+
+  /// Frames sent from the door, waiting to be retried (id → frame).
+  final Map<String, _DoorSend> _doorOut = <String, _DoorSend>{};
+
+  /// Knock notifications of the last hour (when, which flat).
+  final List<(int, String)> _knockRings = <(int, String)>[];
   Future<void> _queue = Future<void>.value();
 
   String _n(String a) => PeerShareCodec.normalizeAddress(a);
@@ -235,12 +382,124 @@ final class NeighborsService extends ChangeNotifier {
     if (p == null || inbox == null || !isRoutablePeerAddress(inbox)) {
       return null;
     }
+    final FlatDoorKeys? keys = _doorKeys;
     return FlatDoorCode(
       key: p.key,
       door: _door,
       inbox: _n(inbox),
       name: p.label,
+      mail: keys != null && keys.doorKey == doorKey
+          ? keys.mailDoor(_slotHolders.keys)
+          : null,
     );
+  }
+
+  /// Keys of the mailbox doors this phone runs for friends (door_node.go).
+  /// What comes to a door of someone who is no friend any more is dropped
+  /// ([_onSealed]); such a door goes when a friend needs the room.
+  List<String> get hostedDoorKeys => <String>[
+    for (final HostedDoor d in _hosted.values) d.seed,
+  ];
+
+  /// The friends holding this phone's mailboxes changed ([mailboxes]): they
+  /// get (or give back) this door's mailbox doors.
+  Future<void> mailboxesChanged() {
+    final Completer<void> done = Completer<void>();
+    _queue = _queue.then((_) async {
+      try {
+        await _syncSlots();
+      } on Object catch (error, stack) {
+        logZenError('Sąsiedzi: skrzynki', error, stack);
+      }
+      done.complete();
+    });
+    return done.future;
+  }
+
+  /// [_doorKeys] for the current door key; `null` without one.
+  Future<FlatDoorKeys?> _currentKeys() async {
+    final String? key = doorKey;
+    if (key == null) {
+      return null;
+    }
+    if (_doorKeys?.doorKey != key) {
+      _doorKeys = await FlatDoorKeys.derive(key);
+      notifyListeners();
+    }
+    return _doorKeys;
+  }
+
+  /// Hands this door's mailbox doors to the friends holding this phone's
+  /// mailboxes, one slot each, and takes them back from friends who no
+  /// longer do (or all of them, without a flat). A new door key ("Nowy
+  /// kod") gives every holder the new key of its slot.
+  Future<void> _syncSlots() async {
+    final List<String>? boxes = mailboxes?.call();
+    if (_syncingSlots || _diskUnreadable || boxes == null) {
+      return;
+    }
+    _syncingSlots = true;
+    try {
+      final FlatDoorKeys? keys = await _currentKeys();
+      final List<String> wanted = keys == null
+          ? const <String>[]
+          : boxes.map(_n).toSet().take(kDoorSlots).toList();
+      final int now = max(_now(), _slotAt + 1);
+      bool changed = false;
+      for (final MapEntry<int, String> e in _slotHolders.entries.toList()) {
+        if (!wanted.contains(e.value)) {
+          _slotHolders.remove(e.key);
+          changed = true;
+          await _send(e.value, <String, dynamic>{
+            'type': FlatTypes.slot,
+            's': '',
+            'at': now,
+          });
+        }
+      }
+      if (keys != null) {
+        final bool rotated = _slotsFor != keys.doorKey;
+        for (final String friend in wanted) {
+          int? slot;
+          for (final MapEntry<int, String> e in _slotHolders.entries) {
+            if (e.value == friend) {
+              slot = e.key;
+            }
+          }
+          if (slot != null && !rotated) {
+            continue;
+          }
+          if (slot == null) {
+            int free = 0;
+            while (_slotHolders.containsKey(free)) {
+              free++;
+            }
+            if (free >= kDoorSlots) {
+              continue;
+            }
+            _slotHolders[free] = friend;
+            slot = free;
+          }
+          changed = true;
+          await _send(friend, <String, dynamic>{
+            'type': FlatTypes.slot,
+            's': keys.slotSeeds[slot],
+            'at': now,
+          });
+        }
+        changed = changed || rotated;
+        _slotsFor = keys.doorKey;
+      } else if (_slotsFor.isNotEmpty) {
+        _slotsFor = '';
+        changed = true;
+      }
+      if (changed) {
+        _slotAt = now;
+        await _write();
+      }
+    } finally {
+      _syncingSlots = false;
+    }
   }
 
   /// The key this phone runs the flat's door with ([doorInbox]); `null`
@@ -249,8 +508,71 @@ final class NeighborsService extends ChangeNotifier {
       hasFlat && _door.isNotEmpty && _doorKeyFor == _door ? _doorKey : null;
 
   /// The door came up, went down or moved ([doorInbox]): the door QR
-  /// changes with it.
-  void doorInboxChanged() => notifyListeners();
+  /// changes with it, the profile names the new door, and what waits to go
+  /// out from the door is tried now.
+  void doorInboxChanged() {
+    notifyListeners();
+    _later(() async {
+      await _syncOwnDoor();
+      await _retryDoorSends();
+    });
+  }
+
+  /// Runs [work] once what is queued now (handling frames) is done, but
+  /// outside the queue, as the public calls run: what it sends may be
+  /// answered with frames this phone then has to handle.
+  void _later(Future<void> Function() work) {
+    unawaited(
+      _queue.then((_) async {
+        try {
+          await work();
+        } on Object catch (error, stack) {
+          logZenError('Sąsiedzi', error, stack);
+        }
+      }),
+    );
+  }
+
+  /// This phone's door address ([doorInbox]), or `null` while none runs.
+  String? get _ownDoor {
+    final String? d = doorInbox?.call();
+    return d != null && isRoutablePeerAddress(d) ? _n(d) : null;
+  }
+
+  /// Whether the profile still names an old door (or none) for this
+  /// resident while the door runs at [_ownDoor].
+  bool get _ownDoorStale {
+    final FlatProfile? p = _profile;
+    final String? me = _resident?.id;
+    final String? door = _ownDoor;
+    return p != null &&
+        _pair != null &&
+        !joining &&
+        me != null &&
+        door != null &&
+        p.members.containsKey(me) &&
+        p.members[me] != door;
+  }
+
+  /// Puts this phone's current door into the profile (a new door code
+  /// gives every resident's door a new key, so a new address).
+  Future<void> _syncOwnDoor() async {
+    if (!_ownDoorStale) {
+      return;
+    }
+    final String me = _resident!.id;
+    final String door = _ownDoor!;
+    final List<NeighborFlat> others = <NeighborFlat>[
+      for (final NeighborFlat f in _neighbors.values)
+        if (!audience.contains(f)) f,
+    ];
+    await _changeProfile(
+      (FlatProfile p) =>
+          p.copyWith(members: <String, String>{...p.members, me: door}),
+    );
+    // Everyone else must reach the new door too (the audience got it).
+    await _pushProfile(to: others, quiet: true);
+  }
 
   /// Makes [_doorKey] match the door token; true when it changed.
   bool _syncDoorKey() {
@@ -276,8 +598,11 @@ final class NeighborsService extends ChangeNotifier {
     final String? seed = _seed;
     return seed == null || !hasFlat
         ? null
-        : FlatHomeCode(seed: seed, address: _n(host.ownAddress()));
+        : FlatHomeCode(seed: seed, address: _own);
   }
+
+  /// This phone's own address (housemates only ever see it).
+  String get _own => _n(host.ownAddress());
 
   List<NeighborFlat> get neighbors => _neighbors.values.toList()
     ..sort(
@@ -318,15 +643,17 @@ final class NeighborsService extends ChangeNotifier {
   int mySignup(String flat, String itemId) =>
       _mine['$flat|$itemId']?.count ?? 0;
 
-  /// A resident's name, as housemates told it ('' when unknown).
-  String residentName(String address) => _names[_n(address)] ?? '';
+  /// A resident's name (by resident key), as housemates told it ('' when
+  /// unknown).
+  String residentName(String resident) => _names[resident] ?? '';
 
-  /// Phones that voted to remove [target].
+  /// Residents (resident keys) who voted to remove the resident [target].
   Set<String> votesFor(String target) {
-    final Set<String> members = (_profile?.members ?? const <String>[]).toSet();
+    final Map<String, String> members =
+        _profile?.members ?? const <String, String>{};
     return <String>{
-      for (final String v in _kickVotes[_n(target)] ?? const <String>{})
-        if (members.contains(v) && v != _n(target)) v,
+      for (final String v in _kickVotes[target] ?? const <String>{})
+        if (members.containsKey(v) && v != target) v,
     };
   }
 
@@ -435,6 +762,9 @@ final class NeighborsService extends ChangeNotifier {
       if (_syncDoorKey()) {
         await _save();
       }
+      await _currentKeys();
+      await _syncSlots();
+      await _syncOwnDoor();
       notifyListeners();
     } on Object catch (error, stack) {
       logZenError('Odczyt sąsiadów', error, stack);
@@ -467,6 +797,50 @@ final class NeighborsService extends ChangeNotifier {
     _knocksSeen
       ..clear()
       ..addAll(_intMap(json['knockSeen']));
+    _slotHolders.clear();
+    final Object? slots = json['slots'];
+    if (slots is Map) {
+      for (final MapEntry<dynamic, dynamic> e in slots.entries) {
+        final int? slot = e.key is String
+            ? int.tryParse(e.key as String)
+            : null;
+        if (slot != null &&
+            slot >= 0 &&
+            slot < kDoorSlots &&
+            e.value is String) {
+          _slotHolders[slot] = _n(e.value as String);
+        }
+      }
+    }
+    _slotsFor = json['slotsFor'] is String ? json['slotsFor'] as String : '';
+    _slotAt = json['slotAt'] is int ? json['slotAt'] as int : 0;
+    _hosted.clear();
+    final Object? hosted = json['hosted'];
+    if (hosted is List) {
+      for (final Object? item in hosted.take(kMaxHostedDoors)) {
+        final HostedDoor? d = HostedDoor.fromJson(item);
+        if (d != null) {
+          _hosted[d.owner] = d;
+        }
+      }
+    }
+    _heldSeen
+      ..clear()
+      ..addAll(_intMap(json['heldSeen']));
+    pending.clear();
+    _pendingAt.clear();
+    final Object? pend = json['pend'];
+    if (pend is List) {
+      for (final Object? item in pend) {
+        if (item is Map && item['q'] is String && item['at'] is int) {
+          final FlatDoorCode? code = FlatDoorCode.parse(item['q'] as String);
+          if (code != null) {
+            pending[code.key] = code;
+            _pendingAt[code.key] = item['at'] as int;
+          }
+        }
+      }
+    }
     shareWithScanners = json['share'] == true;
     _shareAt = json['shareAt'] is int ? json['shareAt'] as int : 0;
     joining = json['joining'] == true;
@@ -515,6 +889,19 @@ final class NeighborsService extends ChangeNotifier {
     _names
       ..clear()
       ..addAll(_stringMap(json['names']));
+    _phones
+      ..clear()
+      ..addAll(_phoneMap(json['phones']));
+    _doorOut.clear();
+    final Object? out = json['out'];
+    if (out is List) {
+      for (final Object? item in out.take(kMaxDoorOutbox)) {
+        final _DoorSend? d = _DoorSend.fromJson(item);
+        if (d != null) {
+          _doorOut[d.id] = d;
+        }
+      }
+    }
     _kickVotes.clear();
     final Object? kick = json['kick'];
     if (kick is Map) {
@@ -549,9 +936,6 @@ final class NeighborsService extends ChangeNotifier {
     _resident = residentSeed == null
         ? null
         : await LedgerKeyPair.fromSeed(residentSeed);
-    _residentKeys
-      ..clear()
-      ..addAll(_keyMap(json['rks']));
     _voteSigs.clear();
     final Object? kickSig = json['kickSig'];
     if (kickSig is Map) {
@@ -577,12 +961,14 @@ final class NeighborsService extends ChangeNotifier {
     }
   }
 
-  /// Public keys by phone address, from JSON (anything else dropped).
-  Map<String, String> _keyMap(Object? json) => <String, String>{
+  /// Phone addresses by resident key, from JSON (anything else dropped).
+  Map<String, String> _phoneMap(Object? json) => <String, String>{
     if (json is Map)
       for (final MapEntry<dynamic, dynamic> e in json.entries)
-        if (e.key is String && unb64(e.value, length: 32) != null)
-          _n(e.key as String): e.value as String,
+        if (unb64(e.key, length: 32) != null &&
+            e.value is String &&
+            isRoutablePeerAddress(e.value as String))
+          e.key as String: _n(e.value as String),
   };
 
   static Map<String, String> _stringMap(Object? json) => <String, String>{
@@ -632,8 +1018,27 @@ final class NeighborsService extends ChangeNotifier {
     if (_diskUnreadable) {
       return;
     }
+    await _write();
+    // A new door key, or no flat any more: the mailbox doors follow.
+    await _currentKeys();
+    await _syncSlots();
+  }
+
+  Future<void> _write() async {
+    if (_diskUnreadable) {
+      return;
+    }
     final int t = _now();
     _syncDoorKey();
+    final int held = kHeldKnockLife.inMilliseconds;
+    _heldSeen.removeWhere((String _, int until) => until <= t);
+    for (final HostedDoor d in _hosted.values) {
+      d.knocks.removeWhere((HeldKnock k) => t - k.at >= held);
+    }
+    pending.removeWhere(
+      (String key, FlatDoorCode _) => t - (_pendingAt[key] ?? t) >= held,
+    );
+    _pendingAt.removeWhere((String key, int _) => !pending.containsKey(key));
     _nearby.removeWhere(
       (NearbyFlatInvite i) => t - i.at >= kNearbyInviteLife.inMilliseconds,
     );
@@ -641,6 +1046,7 @@ final class NeighborsService extends ChangeNotifier {
       (String _, FlatKnock k) => t - k.at >= kKnockLife.inMilliseconds,
     );
     _knocksSeen.removeWhere((String _, int until) => until <= t);
+    _doorOut.removeWhere((String _, _DoorSend d) => d.until <= t);
     // Keep the newest 300 messages per neighbour.
     final Map<String, List<FlatMessage>> byFlat = <String, List<FlatMessage>>{};
     for (final FlatMessage m in _messages.values) {
@@ -691,7 +1097,28 @@ final class NeighborsService extends ChangeNotifier {
             for (final FlatKnock k in _knocks.values) k.toJson(),
           ],
           'knockSeen': _knocksSeen,
+          'slots': <String, String>{
+            for (final MapEntry<int, String> e in _slotHolders.entries)
+              '${e.key}': e.value,
+          },
+          'slotsFor': _slotsFor,
+          'slotAt': _slotAt,
+          'hosted': <Map<String, dynamic>>[
+            for (final HostedDoor d in _hosted.values) d.toJson(),
+          ],
+          'heldSeen': _heldSeen,
+          'pend': <Map<String, dynamic>>[
+            for (final MapEntry<String, FlatDoorCode> e in pending.entries)
+              <String, dynamic>{
+                'q': e.value.toQr(),
+                'at': _pendingAt[e.key] ?? t,
+              },
+          ],
           'names': _names,
+          'phones': _phones,
+          'out': <Map<String, dynamic>>[
+            for (final _DoorSend d in _doorOut.values) d.toJson(),
+          ],
           'kick': <String, dynamic>{
             for (final MapEntry<String, Set<String>> e in _kickVotes.entries)
               e.key: e.value.toList(),
@@ -709,7 +1136,6 @@ final class NeighborsService extends ChangeNotifier {
               if (_neighbors.containsKey(k)) k,
           ],
           'rseed': ?_residentSeed,
-          'rks': _residentKeys,
           'kickSig': _voteSigs,
           'sw': <Map<String, dynamic>>[
             for (final FlatKeySwitch s in _switches.values) s.toJson(),
@@ -745,22 +1171,173 @@ final class NeighborsService extends ChangeNotifier {
     return <String, dynamic>{...signed, 's': b64(sig)};
   }
 
-  Future<void> _sendToFlat(
-    List<String> members,
+  /// Sends a frame signed by our flat to housemates' phones.
+  Future<void> _sendToHouse(
+    List<String> phones,
     String type,
-    String to,
     Map<String, dynamic> body,
   ) async {
-    if (_pair == null) {
+    final LedgerKeyPair? pair = _pair;
+    if (pair == null) {
       return;
     }
-    final Map<String, dynamic> payload = await _envelope(type, to, body);
-    final String own = _n(host.ownAddress());
-    for (final String m in members.toSet()) {
+    final Map<String, dynamic> payload = await _envelope(type, pair.id, body);
+    final String own = _own;
+    for (final String m in phones.toSet()) {
       if (_n(m) != own) {
         await _send(m, payload);
       }
     }
+  }
+
+  /// Sends a frame signed by our flat to the flat [to] at its [doors], from
+  /// this phone's door.
+  Future<void> _sendToDoors(
+    Iterable<String> doors,
+    String type,
+    String to,
+    Map<String, dynamic> body, {
+    LedgerKeyPair? pair,
+  }) async {
+    final LedgerKeyPair? signer = pair ?? _pair;
+    if (signer == null) {
+      return;
+    }
+    final Map<String, dynamic> payload = await _envelopeWith(
+      signer,
+      type,
+      to,
+      body,
+    );
+    bool waits = false;
+    for (final String d in doors.toSet()) {
+      waits = await _sendFromDoor(d, payload, save: false) || waits;
+    }
+    if (waits) {
+      await _write();
+    }
+  }
+
+  /// Sends [payload] from this phone's door to [to] and keeps it for
+  /// retries (on disk too, unless [save] is off): until a door says it came
+  /// ([FlatTypes.ack]) when [acked], otherwise (knocks: a door never answers
+  /// one) until [life] is over. True while it waits.
+  Future<bool> _sendFromDoor(
+    String to,
+    Map<String, dynamic> payload, {
+    Duration life = kFlatSendLife,
+    bool acked = true,
+    bool save = true,
+  }) async {
+    final String target = _n(to);
+    if (target.isEmpty || target == _ownDoor) {
+      return false;
+    }
+    final int now = _now();
+    final Object? type = payload['type'];
+    final Object? flat = payload['to'];
+    if (type == FlatTypes.profile || type == FlatTypes.get) {
+      // Only the newest profile (or request) for a door waits.
+      _doorOut.removeWhere(
+        (String _, _DoorSend d) =>
+            d.to == target &&
+            d.payload['type'] == type &&
+            d.payload['to'] == flat,
+      );
+    }
+    final String id = _newId(20);
+    final _DoorSend out = _DoorSend(
+      id: id,
+      to: target,
+      payload: <String, dynamic>{...payload, kReliableIdKey: id},
+      until: now + life.inMilliseconds,
+      acked: acked,
+    );
+    // Kept before it goes: the answer may come back while it is sent.
+    _doorOut[id] = out;
+    while (_doorOut.length > kMaxDoorOutbox) {
+      _doorOut.remove(_doorOut.keys.first);
+    }
+    await _tryDoorSend(out);
+    final bool waits = _doorOut.containsKey(id);
+    if (waits && save) {
+      await _write();
+    }
+    return waits;
+  }
+
+  Future<void> _tryDoorSend(_DoorSend out) async {
+    bool sent = false;
+    try {
+      sent = await doorSend?.call(out.to, out.payload) ?? false;
+    } on Object catch (error) {
+      logZenWarning('Sąsiedzi: ${out.payload['type']} do ${out.to}: $error');
+    }
+    if (sent) {
+      out.tries++;
+    }
+    out.next =
+        _now() +
+        _doorRetries[min(max(out.tries - 1, 0), _doorRetries.length - 1)]
+            .inMilliseconds;
+  }
+
+  /// Retries what waits to go out from the door; the app calls it now and
+  /// then, and when the door comes up.
+  Future<void> retryDoorSends() {
+    final Completer<void> done = Completer<void>();
+    _later(() async {
+      await _retryDoorSends();
+      done.complete();
+    });
+    return done.future;
+  }
+
+  Future<void> _retryDoorSends() async {
+    final int now = _now();
+    final int before = _doorOut.length;
+    _doorOut.removeWhere((String _, _DoorSend d) => d.until <= now);
+    for (final _DoorSend d in _doorOut.values.toList()) {
+      if (d.next <= now && _doorOut.containsKey(d.id)) {
+        await _tryDoorSend(d);
+      }
+    }
+    if (_doorOut.length != before) {
+      await _write();
+    }
+  }
+
+  /// Frames still waiting to go out from the door (tests).
+  @visibleForTesting
+  int get doorOutbox => _doorOut.length;
+
+  /// A door says our frame [id] came: it is not retried any more.
+  void _onAck(String from, Map<String, dynamic> p) {
+    final Object? id = p['id'];
+    final _DoorSend? out = id is String ? _doorOut[id] : null;
+    if (out != null && out.to == from && out.acked) {
+      _doorOut.remove(id);
+    }
+  }
+
+  /// Tells the door [to] that its frame [rid] came (from our door: the
+  /// answer must not name this phone either).
+  void _ack(String to, Object? rid) {
+    if (rid is! String || rid.isEmpty || rid.length > 64) {
+      return;
+    }
+    unawaited(
+      Future<void>(() async {
+        try {
+          await doorSend?.call(to, <String, dynamic>{
+            'type': FlatTypes.ack,
+            'id': rid,
+          });
+        } on Object catch (error) {
+          logZenWarning('Sąsiedzi: potwierdzenie do $to: $error');
+        }
+      }),
+    );
   }
 
   Future<void> _send(String to, Map<String, dynamic> payload) async {
@@ -773,10 +1350,10 @@ final class NeighborsService extends ChangeNotifier {
 
   /// Housemates' phones (all residents but this phone).
   List<String> get _housemates {
-    final String own = _n(host.ownAddress());
+    final String own = _own;
     return <String>[
-      for (final String m in _profile?.members ?? const <String>[])
-        if (m != own) m,
+      for (final String r in _profile?.members.keys ?? const <String>[])
+        if (_phones[r] != null && _phones[r] != own) _phones[r]!,
     ];
   }
 
@@ -786,29 +1363,29 @@ final class NeighborsService extends ChangeNotifier {
       if (f.weScanned || (f.scannedUs && shareWithScanners)) f,
   ];
 
-  Future<void> _pushProfile({Iterable<NeighborFlat>? to}) async {
+  /// Sends our profile to [to] (the [audience] by default). [quiet]: only
+  /// so they reach our doors (a door moved); they do not hear of our news
+  /// from it.
+  Future<void> _pushProfile({
+    Iterable<NeighborFlat>? to,
+    bool quiet = false,
+  }) async {
     final FlatProfile? p = _profile;
     if (p == null) {
       return;
     }
-    for (final NeighborFlat f in to ?? audience) {
-      await _sendToFlat(
-        f.profile.members,
+    for (final NeighborFlat f in (to ?? audience).toList()) {
+      await _sendToDoors(
+        f.profile.doors,
         FlatTypes.profile,
         f.key,
-        <String, dynamic>{'p': p.toJson(), 'rk': _roster(p.members)},
+        <String, dynamic>{'p': p.toJson(), if (quiet) 'q': true},
       );
     }
   }
 
-  /// The residents' own keys of [members], sent beside the signed profile.
-  Map<String, String> _roster(List<String> members) => <String, String>{
-    for (final String m in members)
-      if (_residentKeys[m] != null) m: _residentKeys[m]!,
-  };
-
-  /// Makes sure this phone has its resident key, and that it is on the
-  /// housemates' list.
+  /// Makes sure this phone has its resident key, and that its phone is on
+  /// the housemates' list.
   Future<LedgerKeyPair> _ensureResident() async {
     LedgerKeyPair? pair = _resident;
     if (pair == null) {
@@ -816,23 +1393,23 @@ final class NeighborsService extends ChangeNotifier {
       _resident = pair;
       _residentSeed = b64(pair.seed);
     }
-    final String own = _n(host.ownAddress());
+    final String own = _own;
     if (own.isNotEmpty) {
-      _residentKeys[own] = pair.id;
+      _phones[pair.id] = own;
     }
     return pair;
   }
 
-  /// Pins the residents' keys a neighbour flat sent along with its own
-  /// profile: the first key for an address stays for good.
-  bool _pinResidents(NeighborFlat f, List<String> members, Object? json) {
+  /// Pins the residents' keys of a neighbour flat's profile [p]: the first
+  /// time each was seen stays for good.
+  bool _pinResidents(NeighborFlat f, FlatProfile p) {
     bool changed = false;
-    _keyMap(json).forEach((String a, String k) {
-      if (members.contains(a) && !f.residents.containsKey(a)) {
-        f.residents[a] = FlatPin(key: k, since: _now());
+    for (final String r in p.members.keys) {
+      if (!f.residents.containsKey(r)) {
+        f.residents[r] = _now();
         changed = true;
       }
-    });
+    }
     return changed;
   }
 
@@ -844,36 +1421,34 @@ final class NeighborsService extends ChangeNotifier {
     }
     final List<FlatMessage> recent = _messages.values.toList()
       ..sort((FlatMessage a, FlatMessage b) => b.at.compareTo(a.at));
-    await _sendToFlat(
-      to ?? _housemates,
-      FlatTypes.house,
-      p.key,
-      <String, dynamic>{
-        'p': p.toJson(),
-        'door': _door,
-        'doorAt': _doorAt,
-        'share': shareWithScanners,
-        'shareAt': _shareAt,
-        'nb': <Map<String, dynamic>>[
-          for (final NeighborFlat f in _neighbors.values)
-            <String, dynamic>{
-              'p': f.profile.toJson(),
-              'at': f.addedAt,
-              if (f.weScanned) 'ws': true,
-              if (f.scannedUs) 'su': true,
-              if (f.residents.isNotEmpty) 'rk': flatPinsToJson(f.residents),
-            },
-        ],
-        'rm': _removed,
-        'msgs': <Map<String, dynamic>>[
-          for (final FlatMessage m in recent.take(200)) m.toJson(),
-        ],
-        'sign': _signupsJson(),
-        'my': _mineJson(),
-        'names': _names,
-        'rks': _roster(p.members),
+    await _sendToHouse(to ?? _housemates, FlatTypes.house, <String, dynamic>{
+      'p': p.toJson(),
+      'door': _door,
+      'doorAt': _doorAt,
+      'share': shareWithScanners,
+      'shareAt': _shareAt,
+      'nb': <Map<String, dynamic>>[
+        for (final NeighborFlat f in _neighbors.values)
+          <String, dynamic>{
+            'p': f.profile.toJson(),
+            'at': f.addedAt,
+            if (f.weScanned) 'ws': true,
+            if (f.scannedUs) 'su': true,
+            if (f.residents.isNotEmpty) 'rk': f.residents,
+          },
+      ],
+      'rm': _removed,
+      'msgs': <Map<String, dynamic>>[
+        for (final FlatMessage m in recent.take(200)) m.toJson(),
+      ],
+      'sign': _signupsJson(),
+      'my': _mineJson(),
+      'names': _names,
+      'ph': <String, String>{
+        for (final MapEntry<String, String> e in _phones.entries)
+          if (p.members.containsKey(e.key)) e.key: e.value,
       },
-    );
+    });
   }
 
   // ---- this flat ----
@@ -884,15 +1459,15 @@ final class NeighborsService extends ChangeNotifier {
     String place = '',
     String about = '',
   }) async {
-    final String own = _n(host.ownAddress());
+    final String own = _own;
     if (name.trim().isEmpty || own.isEmpty || hasFlat) {
       return null;
     }
     final LedgerKeyPair pair = await LedgerKeyPair.generate();
     _seed = b64(pair.seed);
     _pair = pair;
-    _residentKeys.clear();
-    await _ensureResident();
+    _phones.clear();
+    final LedgerKeyPair me = await _ensureResident();
     _door = _newDoor();
     _doorAt = _now();
     _profile = await FlatProfile(
@@ -900,12 +1475,14 @@ final class NeighborsService extends ChangeNotifier {
       name: _clip(name, 60),
       place: _clip(place, 80),
       about: _clip(about, 1000),
-      members: <String>[own],
+      // The door comes up with the door key ([_save]); then it is named.
+      members: <String, String>{me.id: ''},
       rev: 1,
     ).signedWith(pair);
-    _names[own] = _clip(host.ownName(), 40);
+    _names[me.id] = _clip(host.ownName(), 40);
     joining = false;
     await _save();
+    await _syncOwnDoor();
     return _profile;
   }
 
@@ -916,7 +1493,7 @@ final class NeighborsService extends ChangeNotifier {
 
   /// Joins a housemate's flat from their "home" QR (§18.1).
   Future<bool> joinFlat(FlatHomeCode code) async {
-    final String own = _n(host.ownAddress());
+    final String own = _own;
     final Uint8List? seed = unb64(code.seed, length: 32);
     if (seed == null || own.isEmpty || hasFlat) {
       return false;
@@ -924,7 +1501,7 @@ final class NeighborsService extends ChangeNotifier {
     _pair = await LedgerKeyPair.fromSeed(seed);
     _seed = code.seed;
     joining = true;
-    _residentKeys.clear();
+    _phones.clear();
     final LedgerKeyPair me = await _ensureResident();
     await _save();
     await _send(
@@ -932,7 +1509,7 @@ final class NeighborsService extends ChangeNotifier {
       await _envelope(FlatTypes.join, _pair!.id, <String, dynamic>{
         'a': own,
         'n': _clip(host.ownName(), 40),
-        // This phone's own key, for votes and neighbours (§18.1).
+        // This resident's own key: it names them in the profile (§18.1).
         'rk': me.id,
       }),
     );
@@ -1019,9 +1596,12 @@ final class NeighborsService extends ChangeNotifier {
       return;
     }
     _door = _newDoor();
-    _doorAt = _now();
+    // Always newer than the door it replaces, or housemates (same
+    // millisecond, a clock behind theirs) keep the old one.
+    _doorAt = max(_now(), _doorAt + 1);
     await _save();
     await _syncHouse();
+    await _syncOwnDoor();
   }
 
   /// A flat that scanned our door code becomes a full neighbour: it gets
@@ -1056,13 +1636,11 @@ final class NeighborsService extends ChangeNotifier {
   /// reaching the remaining residents.
   Future<void> leaveFlat() async {
     final FlatProfile? p = _profile;
-    final String own = _n(host.ownAddress());
-    if (p != null && _pair != null) {
+    final String? me = _resident?.id;
+    if (p != null && _pair != null && me != null) {
       final List<String> others = _housemates;
       if (others.isNotEmpty) {
-        await _sendToFlat(others, FlatTypes.leave, p.key, <String, dynamic>{
-          'a': own,
-        });
+        await _sendToHouse(others, FlatTypes.leave, <String, dynamic>{'a': me});
       }
     }
     _seed = null;
@@ -1079,14 +1657,18 @@ final class NeighborsService extends ChangeNotifier {
     _mine.clear();
     pending.clear();
     _names.clear();
+    _phones.clear();
     _kickVotes.clear();
     _pendingRekeys.clear();
     _oldKey = null;
     _reveals.clear();
     _revealedTo.clear();
-    _residentKeys.clear();
     _voteSigs.clear();
     _switches.clear();
+    _doorOut.clear();
+    // The next household gets a resident key of its own.
+    _resident = null;
+    _residentSeed = null;
     await _save();
   }
 
@@ -1100,8 +1682,8 @@ final class NeighborsService extends ChangeNotifier {
       return;
     }
     for (final NeighborFlat f in _neighbors.values.toList()) {
-      await _sendToFlat(
-        f.profile.members,
+      await _sendToDoors(
+        f.profile.doors,
         FlatTypes.moved,
         f.key,
         <String, dynamic>{'pl': p.place},
@@ -1128,6 +1710,7 @@ final class NeighborsService extends ChangeNotifier {
       (FlatProfile p) =>
           p.copyWith(place: _clip(newPlace, 80), items: const <FlatItem>[]),
     );
+    await _syncOwnDoor();
   }
 
   // ---- neighbours ----
@@ -1146,8 +1729,9 @@ final class NeighborsService extends ChangeNotifier {
     await _settleByDoor(code.key);
     final NeighborFlat? had = _neighbors[code.key];
     if (had != null && had.weScanned) {
-      await _sendToFlat(
-        had.profile.members,
+      // Also at the door on the sticker: their doors may have moved since.
+      await _sendToDoors(
+        <String>[...had.profile.doors, code.inbox],
         FlatTypes.get,
         code.key,
         const <String, dynamic>{},
@@ -1155,18 +1739,73 @@ final class NeighborsService extends ChangeNotifier {
       return FlatScan.alreadyNeighbor;
     }
     pending[code.key] = code;
-    notifyListeners();
-    await _sendToFlat(
-      <String>[code.inbox],
-      FlatTypes.hello,
-      code.key,
-      <String, dynamic>{
-        'door': code.door,
-        'p': p.toJson(),
-        'rk': _roster(p.members),
-      },
+    _pendingAt[code.key] = _now();
+    await _save();
+    // One knock, whichever way it reaches them: they are asked once. With
+    // our own mailbox doors, so the answer can wait for us there too.
+    final FlatMailDoor? reply = (await _currentKeys())?.mailDoor(
+      _slotHolders.keys,
     );
+    final Map<String, dynamic> body = <String, dynamic>{
+      'door': code.door,
+      'kid': _newId(16),
+      'ra': ?reply?.toJson(),
+    };
+    // From our door: the knock names no one of us either.
+    await _sendFromDoor(
+      code.inbox,
+      await _envelope(FlatTypes.hello, code.key, <String, dynamic>{
+        ...body,
+        'p': p.toJson(),
+      }),
+      life: kDoorRetryLife,
+      acked: false,
+    );
+    final FlatMailDoor? mail = code.mail;
+    if (mail != null) {
+      // For when nobody is home: the friends at their mailbox doors keep it
+      // sealed (our card, without the photo).
+      await _sendSealed(
+        mail,
+        await _envelope(FlatTypes.hello, code.key, <String, dynamic>{
+          ...body,
+          'p': (await _card()).toJson(),
+        }),
+      );
+    }
     return FlatScan.sent;
+  }
+
+  /// Our profile as it travels through friends' phones: without the photo,
+  /// and at revision 0, so the full profile replaces it once it arrives.
+  Future<FlatProfile> _card() =>
+      _profile!.copyWith(photo: '', rev: 0).signedWith(_pair!);
+
+  /// Leaves [envelope] sealed at the mailbox doors of [to] (a flat whose
+  /// phones may be offline), from our door, naming our door for the answer.
+  Future<void> _sendSealed(
+    FlatMailDoor to,
+    Map<String, dynamic> envelope,
+  ) async {
+    final String? door = _ownDoor;
+    if (door == null) {
+      return;
+    }
+    final Map<String, dynamic>? box = await FlatSeal.seal(<String, dynamic>{
+      'e': envelope,
+      'a': door,
+    }, to.seal);
+    if (box == null || (box['c'] as String).length > kMaxSealedChars) {
+      return;
+    }
+    for (final String slot in to.slots) {
+      await _sendFromDoor(
+        slot,
+        <String, dynamic>{'type': FlatTypes.seal, 'd': slot, ...box},
+        life: kSealRetryLife,
+        acked: false,
+      );
+    }
   }
 
   /// A neighbour household with two different new keys ([keyRival]): the
@@ -1220,8 +1859,8 @@ final class NeighborsService extends ChangeNotifier {
   Future<void> refresh(String key) async {
     final NeighborFlat? f = _neighbors[key];
     if (f != null) {
-      await _sendToFlat(
-        f.profile.members,
+      await _sendToDoors(
+        f.profile.doors,
         FlatTypes.get,
         key,
         const <String, dynamic>{},
@@ -1253,8 +1892,8 @@ final class NeighborsService extends ChangeNotifier {
     _messages[m.id] = m;
     _lastRead[key] = m.at;
     await _save();
-    await _sendToFlat(
-      f.profile.members,
+    await _sendToDoors(
+      f.profile.doors,
       FlatTypes.message,
       key,
       <String, dynamic>{
@@ -1286,8 +1925,8 @@ final class NeighborsService extends ChangeNotifier {
       at: _now(),
     );
     await _save();
-    await _sendToFlat(
-      f.profile.members,
+    await _sendToDoors(
+      f.profile.doors,
       FlatTypes.signup,
       key,
       <String, dynamic>{'i': itemId, 'c': count.clamp(0, 20)},
@@ -1360,9 +1999,10 @@ final class NeighborsService extends ChangeNotifier {
     if (type is! String || !FlatTypes.all.contains(type)) {
       return Future<bool>.value(false);
     }
-    if (frame.door && type != FlatTypes.hello) {
-      // The door takes knocks only (the bridge and the runtime let nothing
-      // else in).
+    if (frame.door != FlatTypes.atDoor.contains(type)) {
+      // Between flats only through the doors (the bridge and the runtime
+      // let nothing else in there), between housemates and friends only
+      // phone to phone.
       return Future<bool>.value(false);
     }
     final Completer<bool> done = Completer<bool>();
@@ -1373,12 +2013,35 @@ final class NeighborsService extends ChangeNotifier {
         logZenError('Sąsiedzi', error, stack);
       }
       done.complete(true);
+      if (_ownDoorStale) {
+        // A new door code from a housemate gave this phone's door a new
+        // address: the profile names it (after this frame, not inside it).
+        _later(_syncOwnDoor);
+      }
     });
     return done.future;
   }
 
-  Future<void> _handle(String type, SignalTransportFrame frame) async {
+  Future<void> _handle(
+    String type,
+    SignalTransportFrame frame, {
+    int? heldAt,
+  }) async {
     final Map<String, dynamic> p = frame.payload;
+    switch (type) {
+      case FlatTypes.ack:
+        _onAck(_n(frame.from), p);
+        return;
+      case FlatTypes.seal:
+        await _onSealed(frame);
+        return;
+      case FlatTypes.slot:
+        await _onSlot(_n(frame.from), p);
+        return;
+      case FlatTypes.held:
+        await _onHeld(_n(frame.from), p);
+        return;
+    }
     final Object? from = p['f'];
     final Object? to = p['to'];
     final Object? body = p['b'];
@@ -1432,14 +2095,25 @@ final class NeighborsService extends ChangeNotifier {
     if (_profile == null) {
       return;
     }
+    if (frame.door &&
+        type != FlatTypes.hello &&
+        type != FlatTypes.reveal &&
+        (_neighbors.containsKey(from) ||
+            pending.containsKey(from) ||
+            _switches.containsKey(from))) {
+      // Door to door: their phone stops retrying it. Only flats we know
+      // hear back, so nobody learns from the sticker alone whether the
+      // phone behind the door is online.
+      _ack(sender, p[kReliableIdKey]);
+    }
     switch (type) {
       case FlatTypes.hello:
         await _onHello(
           from,
           sender,
           b,
-          atDoor: frame.door,
           retryId: p[kReliableIdKey],
+          heldAt: heldAt,
         );
       case FlatTypes.nope:
         final FlatDoorCode? code = pending.remove(from);
@@ -1506,38 +2180,32 @@ final class NeighborsService extends ChangeNotifier {
     String from,
     String sender,
     Map<String, dynamic> b, {
-    bool atDoor = false,
     Object? retryId,
+    int? heldAt,
   }) async {
     final FlatProfile? theirs = await _verifiedProfile(from, b['p']);
-    if (theirs == null) {
+    if (theirs == null || b['door'] != _door) {
+      // Anyone can knock at the door address; an answer would only tell
+      // them the door's phone is online. (An old sticker's door has a key
+      // that no longer runs, so its knocks reach nobody anyway.)
       return;
     }
-    if (b['door'] != _door) {
-      if (atDoor) {
-        // Anyone can knock at the door address; an answer from this phone
-        // would tell them whose door it is. (An old sticker's door has a
-        // key that no longer runs, so its knocks reach nobody anyway.)
-        return;
-      }
-      await _sendToFlat(
-        <String>{sender, ...theirs.members}.toList(),
-        FlatTypes.nope,
-        from,
-        const <String, dynamic>{},
-      );
-      return;
-    }
-    // The knocker's phone retries the same knock until it hears back; one
-    // already let in, refused or expired does not ask again.
+    // The knocker's phone retries the same knock, and sends it to the door
+    // and to the mailbox doors at once; one already let in, refused or
+    // expired does not ask again.
     final int now = _now();
-    if (retryId is String && retryId.isNotEmpty) {
-      final String seen = '$sender|$retryId';
-      if ((_knocksSeen[seen] ?? 0) > now) {
+    final Object? kid = b['kid'];
+    final String? once = kid is String && kid.isNotEmpty && kid.length <= 40
+        ? '$from|$kid'
+        : retryId is String && retryId.isNotEmpty
+        ? '$sender|$retryId'
+        : null;
+    if (once != null) {
+      if ((_knocksSeen[once] ?? 0) > now) {
         return;
       }
-      _knocksSeen.remove(seen);
-      _knocksSeen[seen] = now + kKnockMemory.inMilliseconds;
+      _knocksSeen.remove(once);
+      _knocksSeen[once] = now + kKnockMemory.inMilliseconds;
       while (_knocksSeen.length > 500) {
         _knocksSeen.remove(_knocksSeen.keys.first);
       }
@@ -1546,20 +2214,29 @@ final class NeighborsService extends ChangeNotifier {
       // Neighbours already: they have our profile, so answering tells them
       // nothing new.
       final NeighborFlat f = _addNeighbor(theirs)..scannedUs = true;
-      _pinResidents(f, theirs.members, b['rk']);
+      _pinResidents(f, theirs);
       await _save();
       await _pushProfile(to: <NeighborFlat>[f]);
       await _syncHouse();
       return;
     }
-    final FlatKnock? waiting = _knocks[from];
-    final bool fresh =
-        waiting == null || now - waiting.at >= kKnockLife.inMilliseconds;
+    // A knock friends held waits from when they took it.
+    final int at = min(heldAt ?? now, now);
+    if (now - at >= kKnockLife.inMilliseconds) {
+      await _save();
+      return;
+    }
+    final FlatKnock? had = _knocks[from];
+    final FlatKnock? waiting =
+        had != null && now - had.at < kKnockLife.inMilliseconds ? had : null;
+    final bool fresh = waiting == null;
     _knocks[from] = FlatKnock(
-      profile: theirs,
+      profile: waiting == null || theirs.newerThan(waiting.profile)
+          ? theirs
+          : waiting.profile,
       sender: sender,
-      roster: _keyMap(b['rk']),
-      at: waiting == null || fresh ? now : waiting.at,
+      at: waiting?.at ?? at,
+      reply: FlatMailDoor.fromJson(b['ra']) ?? waiting?.reply,
     );
     while (_knocks.length > kMaxKnocks) {
       final FlatKnock oldest = _knocks.values.reduce(
@@ -1568,19 +2245,34 @@ final class NeighborsService extends ChangeNotifier {
       _knocks.remove(oldest.key);
     }
     await _save();
-    if (!fresh) {
+    if (!fresh || !_mayRingKnock(from, now)) {
       return;
     }
     await host.notify(
       RuntimeSystemNotification(
-        id: 'flat-knock-${from.hashCode}-$now',
+        // One per knocker: a knock again replaces it instead of piling up.
+        id: 'flat-knock-${from.hashCode}',
         title: t('{name} puka do drzwi', {'name': theirs.name}),
         body: t('Otwórz Sąsiadów, żeby ich wpuścić albo odmówić.'),
         createdAtMillis: now,
         category: RuntimeSystemNotificationCategory.social,
-        slotKey: 'flat-knock',
+        slotKey: 'flat-knock:$from',
       ),
     );
+  }
+
+  /// Whether a knock from [flat] may ring now: once an hour per knocker and
+  /// [kKnockRingsPerHour] an hour in all, so a flood of knocks (new flat
+  /// keys cost nothing) cannot keep the phone ringing.
+  bool _mayRingKnock(String flat, int now) {
+    const int hour = 3600 * 1000;
+    _knockRings.removeWhere(((int, String) r) => now - r.$1 >= hour);
+    if (_knockRings.length >= kKnockRingsPerHour ||
+        _knockRings.any(((int, String) r) => r.$2 == flat)) {
+      return false;
+    }
+    _knockRings.add((now, flat));
+    return true;
   }
 
   /// Lets in the flat that knocked ([knocks]): only now do both flats
@@ -1593,9 +2285,20 @@ final class NeighborsService extends ChangeNotifier {
       return false;
     }
     final NeighborFlat f = _addNeighbor(k.profile)..scannedUs = true;
-    _pinResidents(f, k.profile.members, k.roster);
+    _pinResidents(f, k.profile);
     await _save();
     await _pushProfile(to: <NeighborFlat>[f]);
+    final FlatMailDoor? reply = k.reply;
+    if (reply != null && _profile != null) {
+      // Their phone may be offline by now: the answer waits at their
+      // mailbox doors too.
+      await _sendSealed(
+        reply,
+        await _envelope(FlatTypes.profile, f.key, <String, dynamic>{
+          'p': (await _card()).toJson(),
+        }),
+      );
+    }
     await _syncHouse();
     return true;
   }
@@ -1606,6 +2309,160 @@ final class NeighborsService extends ChangeNotifier {
     if (_knocks.remove(key) != null) {
       await _save();
     }
+  }
+
+  // ---- mailbox doors (flat_door_mail.dart) ----
+
+  /// A sealed knock came to a mailbox door this phone runs for a friend:
+  /// passed on to the friend unread, within the door's caps.
+  Future<void> _onSealed(SignalTransportFrame frame) async {
+    final Map<String, dynamic> p = frame.payload;
+    final Object? d = p['d'];
+    if (d is! String || !FlatSeal.looksSealed(p)) {
+      return;
+    }
+    final String address = _n(d);
+    HostedDoor? door;
+    for (final HostedDoor h in _hosted.values) {
+      if (h.address == address) {
+        door = h;
+      }
+    }
+    if (door == null || !host.isFriend(door.owner)) {
+      return;
+    }
+    final int now = _now();
+    final String sender = _n(frame.from);
+    // The knocker's phone retries until it gives up ([kSealRetryLife]):
+    // the door never answers, or it would say who runs it.
+    final Object? rid = p[kReliableIdKey];
+    if (rid is String && rid.isNotEmpty && rid.length <= 128) {
+      final String seen = flatMailHash('$address|$sender|$rid');
+      if ((_heldSeen[seen] ?? 0) > now) {
+        return;
+      }
+      _heldSeen[seen] = now + kSealRetryLife.inMilliseconds;
+      while (_heldSeen.length > 500) {
+        _heldSeen.remove(_heldSeen.keys.first);
+      }
+    }
+    final int life = kHeldKnockLife.inMilliseconds;
+    door.knocks.removeWhere((HeldKnock k) => now - k.at >= life);
+    final String who = HeldKnock.hashOf(
+      address,
+      PeerShareCodec.identityKeyForAddress(sender),
+    );
+    const int day = Duration.millisecondsPerDay;
+    if (door.knocks.length >= kHeldPerDoor ||
+        door.knocks.where((HeldKnock k) => now - k.at < day).length >=
+            kHeldPerDoorPerDay ||
+        door.knocks.where((HeldKnock k) => k.who == who).length >=
+            kHeldPerKnocker) {
+      await _save();
+      return;
+    }
+    door.knocks.add(HeldKnock(at: now, who: who));
+    await _save();
+    // Through the relay layer: straight to the friend, again as soon as
+    // they show up, for as long as a knock waits.
+    await _send(door.owner, <String, dynamic>{
+      'type': FlatTypes.held,
+      'd': address,
+      'x': p['x'],
+      'n': p['n'],
+      'c': p['c'],
+      'k': p['k'],
+      'at': now,
+      kReliableTtlKey: life,
+    });
+  }
+
+  /// A friend whose mailbox this phone keeps hands over one of its mailbox
+  /// doors (or takes it back).
+  Future<void> _onSlot(String sender, Map<String, dynamic> p) async {
+    final Object? seed = p['s'];
+    final Object? at = p['at'];
+    if (seed is! String || at is! int) {
+      return;
+    }
+    final HostedDoor? had = _hosted[sender];
+    if (had != null && at <= had.at) {
+      return;
+    }
+    // Taking a door back is fine from a former friend too; running one
+    // only for a friend.
+    if (seed.isNotEmpty && !host.isFriend(sender)) {
+      return;
+    }
+    if (seed.isEmpty) {
+      if (had != null) {
+        _hosted.remove(sender);
+        await _save();
+      }
+      return;
+    }
+    final String? address = await doorAddressForSeed(seed);
+    if (address == null || seed == _doorKey) {
+      return;
+    }
+    if (had == null && _hosted.length >= kMaxHostedDoors) {
+      // Room only by dropping doors of people who are friends no more.
+      _hosted.removeWhere(
+        (String owner, HostedDoor _) => !host.isFriend(owner),
+      );
+      if (_hosted.length >= kMaxHostedDoors) {
+        return;
+      }
+    }
+    _hosted[sender] = HostedDoor(
+      owner: sender,
+      seed: seed,
+      address: address,
+      at: at,
+    );
+    await _save();
+  }
+
+  /// A friend passes on a sealed knock (or the answer to ours) one of our
+  /// mailbox doors took while this phone was offline.
+  Future<void> _onHeld(String sender, Map<String, dynamic> p) async {
+    final Object? at = p['at'];
+    final int now = _now();
+    if (at is! int ||
+        !host.isFriend(sender) ||
+        !hasFlat ||
+        now - at >= kHeldKnockLife.inMilliseconds) {
+      return;
+    }
+    // Sealed for the current door key: an old sticker's knocks stay shut.
+    final FlatDoorKeys? keys = await _currentKeys();
+    final Map<String, dynamic>? box = keys == null
+        ? null
+        : await FlatSeal.open(p, keys.seal);
+    final Object? e = box?['e'];
+    if (box == null || e is! Map) {
+      return;
+    }
+    final Map<String, dynamic> inner = Map<String, dynamic>.from(e);
+    final Object? type = inner['type'];
+    if (type != FlatTypes.hello && type != FlatTypes.profile) {
+      return;
+    }
+    // The knocker's (or the answering flat's) door, as it named it.
+    final Object? a = box['a'];
+    if (a is! String || !isRoutablePeerAddress(a)) {
+      return;
+    }
+    await _handle(
+      type as String,
+      SignalTransportFrame(
+        from: a,
+        payload: inner,
+        receivedAtMillis: now,
+        door: true,
+      ),
+      heldAt: min(at, now),
+    );
   }
 
   NeighborFlat _addNeighbor(FlatProfile p) {
@@ -1630,21 +2487,31 @@ final class NeighborsService extends ChangeNotifier {
       return;
     }
     final bool wasPending = pending.remove(from) != null;
+    if (wasPending) {
+      // Let in: the knock is not retried any more.
+      _doorOut.removeWhere(
+        (String _, _DoorSend d) =>
+            d.payload['type'] == FlatTypes.hello && d.payload['to'] == from,
+      );
+    }
     NeighborFlat? f = _neighbors[from];
     if (f == null && !wasPending) {
       return;
     }
     if (f == null) {
       f = _addNeighbor(theirs)..weScanned = true;
-      _pinResidents(f, theirs.members, b['rk']);
+      _pinResidents(f, theirs);
       await _save();
       await _syncHouse();
+      // They may have only our card (through their friends): the full
+      // profile follows (not waited for: their answer may come back here).
+      unawaited(_pushProfile(to: <NeighborFlat>[f]));
       return;
     }
     if (wasPending && !f.weScanned) {
       f.weScanned = true;
     }
-    final bool pinned = _pinResidents(f, theirs.members, b['rk']);
+    final bool pinned = _pinResidents(f, theirs);
     if (!theirs.newerThan(f.profile)) {
       if (wasPending || pinned) {
         await _save();
@@ -1658,7 +2525,8 @@ final class NeighborsService extends ChangeNotifier {
     ];
     f.seenItems.addAll(theirs.items.map((FlatItem i) => i.id));
     await _save();
-    if (f.following) {
+    // Sent only because one of their doors moved: no news from it.
+    if (f.following && b['q'] != true) {
       for (final FlatItem i in news) {
         await host.notify(
           RuntimeSystemNotification(
@@ -1745,8 +2613,8 @@ final class NeighborsService extends ChangeNotifier {
         at: _now(),
       );
     }
-    await _sendToFlat(
-      f.profile.members,
+    await _sendToDoors(
+      f.profile.doors,
       FlatTypes.signupAck,
       from,
       <String, dynamic>{
@@ -1825,26 +2693,32 @@ final class NeighborsService extends ChangeNotifier {
 
   Future<void> _onJoin(String sender, Map<String, dynamic> b) async {
     final Object? a = b['a'];
+    final Object? rk = b['rk'];
     final FlatProfile? p = _profile;
     if (p == null ||
         a is! String ||
         _n(a) != sender ||
-        (!p.members.contains(sender) &&
-            p.members.length >= FlatProfile.maxMembers)) {
+        unb64(rk, length: 32) == null) {
       return;
     }
+    final String resident = rk as String;
+    final String? phone = _phones[resident];
+    if ((phone != null && phone != sender) ||
+        (!p.members.containsKey(resident) &&
+            p.members.length >= FlatProfile.maxMembers)) {
+      // A resident key already someone else's, or no room.
+      return;
+    }
+    _phones[resident] = sender;
     final Object? name = b['n'];
     if (name is String && name.trim().isNotEmpty) {
-      _names[sender] = _clip(name, 40);
+      _names[resident] = _clip(name, 40);
     }
-    // The new resident's own key (its first one stays).
-    final Object? rk = b['rk'];
-    if (unb64(rk, length: 32) != null && _residentKeys[sender] == null) {
-      _residentKeys[sender] = rk as String;
-    }
-    if (!p.members.contains(sender)) {
+    if (!p.members.containsKey(resident)) {
+      // Their door is named once it runs (they put it in themselves).
       await _changeProfile(
-        (FlatProfile p) => p.copyWith(members: <String>[...p.members, sender]),
+        (FlatProfile p) =>
+            p.copyWith(members: <String, String>{...p.members, resident: ''}),
       );
     } else {
       await _save();
@@ -1862,22 +2736,35 @@ final class NeighborsService extends ChangeNotifier {
     );
   }
 
+  /// The resident whose phone is [phone] (resident key), or `null`.
+  String? _residentOf(String phone) {
+    for (final MapEntry<String, String> e in _phones.entries) {
+      if (e.value == phone && (_profile?.members.containsKey(e.key) ?? false)) {
+        return e.key;
+      }
+    }
+    return null;
+  }
+
   Future<void> _onLeave(String sender, Map<String, dynamic> b) async {
     final Object? a = b['a'];
     final FlatProfile? p = _profile;
     if (p == null ||
         a is! String ||
-        _n(a) != sender ||
-        !p.members.contains(sender)) {
+        _phones[a] != sender ||
+        !p.members.containsKey(a)) {
       return;
     }
-    _names.remove(sender);
-    _kickVotes.remove(sender);
-    _voteSigs.remove(sender);
-    _residentKeys.remove(sender);
+    _names.remove(a);
+    _phones.remove(a);
+    _kickVotes.remove(a);
+    _voteSigs.remove(a);
     await _changeProfile(
       (FlatProfile p) => p.copyWith(
-        members: p.members.where((String m) => m != sender).toList(),
+        members: <String, String>{
+          for (final MapEntry<String, String> e in p.members.entries)
+            if (e.key != a) e.key: e.value,
+        },
       ),
     );
   }
@@ -1888,6 +2775,8 @@ final class NeighborsService extends ChangeNotifier {
       return;
     }
     final bool wasJoining = joining;
+    final Map<String, String> before =
+        _profile?.members ?? const <String, String>{};
     if (p.newerThan(_profile)) {
       _profile = p;
     }
@@ -1924,7 +2813,7 @@ final class NeighborsService extends ChangeNotifier {
         }
         final NeighborFlat? had = _neighbors[fp.key];
         // Residents' keys a housemate pinned (ours stay where we have one).
-        final Map<String, FlatPin> pins = flatPinsFromJson(item['rk']);
+        final Map<String, int> pins = flatPinsFromJson(item['rk']);
         if (had == null) {
           _neighbors[fp.key] = NeighborFlat(
             profile: fp,
@@ -1941,8 +2830,8 @@ final class NeighborsService extends ChangeNotifier {
           had
             ..weScanned = had.weScanned || item['ws'] == true
             ..scannedUs = had.scannedUs || item['su'] == true;
-          pins.forEach((String a, FlatPin pin) {
-            had.residents.putIfAbsent(a, () => pin);
+          pins.forEach((String r, int since) {
+            had.residents.putIfAbsent(r, () => since);
           });
         }
       }
@@ -1981,21 +2870,32 @@ final class NeighborsService extends ChangeNotifier {
         _mine[key] = s;
       }
     });
-    final Set<String> residents = (_profile?.members ?? const <String>[])
-        .toSet();
-    _stringMap(b['names']).forEach((String a, String n) {
-      if (residents.contains(a) && n.trim().isNotEmpty) {
-        _names[a] = n;
+    final Set<String> residents =
+        (_profile?.members ?? const <String, String>{}).keys.toSet();
+    _stringMap(b['names']).forEach((String r, String n) {
+      if (residents.contains(r) && n.trim().isNotEmpty) {
+        _names[r] = n;
       }
     });
-    // Housemates' own keys: the first one known for a phone stays, and
+    // Housemates' phones: the first one known for a resident stays, and
     // this phone's own is never taken from elsewhere.
-    final String own = _n(host.ownAddress());
-    _keyMap(b['rks']).forEach((String a, String k) {
-      if (residents.contains(a) && a != own) {
-        _residentKeys.putIfAbsent(a, () => k);
+    final String? me = _resident?.id;
+    _phoneMap(b['ph']).forEach((String r, String phone) {
+      if (residents.contains(r) && r != me) {
+        _phones.putIfAbsent(r, () => phone);
       }
     });
+    // Two housemates changed the profile at once and theirs won: a resident
+    // only ours had (one who just joined) comes back. One who left or was
+    // removed is no housemate here any more.
+    final Map<String, String> lost = <String, String>{
+      for (final MapEntry<String, String> e in before.entries)
+        if (!residents.contains(e.key) && _phones.containsKey(e.key))
+          e.key: e.value,
+    };
+    if (lost.isNotEmpty) {
+      _later(() => _restoreResidents(lost));
+    }
     await _save();
     if (wasJoining && hasFlat) {
       await host.notify(
@@ -2011,102 +2911,125 @@ final class NeighborsService extends ChangeNotifier {
     }
   }
 
+  /// Puts back the residents [lost] (resident key → door) that are still
+  /// housemates here but missing from the profile.
+  Future<void> _restoreResidents(Map<String, String> lost) async {
+    final FlatProfile? p = _profile;
+    if (p == null) {
+      return;
+    }
+    final Map<String, String> back = <String, String>{
+      for (final MapEntry<String, String> e in lost.entries)
+        if (!p.members.containsKey(e.key) && _phones.containsKey(e.key))
+          e.key: e.value,
+    };
+    if (back.isEmpty ||
+        p.members.length + back.length > FlatProfile.maxMembers) {
+      return;
+    }
+    await _changeProfile(
+      (FlatProfile p) =>
+          p.copyWith(members: <String, String>{...back, ...p.members}),
+    );
+  }
+
   // ---- removing a housemate who will not leave (§18.1) ----
 
-  /// Votes to remove the phone [target] from the household. Once a
-  /// majority of the other residents agree, the household gets a new key
-  /// and a new door code without it, and neighbours are told. Returns
-  /// whether the vote counted.
+  /// Votes to remove the resident [target] (their resident key) from the
+  /// household. Once a majority of the other residents agree, the
+  /// household gets a new key and a new door code without them, and
+  /// neighbours are told. Returns whether the vote counted.
   Future<bool> voteRemove(String target) async {
     final FlatProfile? p = _profile;
-    final String own = _n(host.ownAddress());
-    final String t = _n(target);
-    if (p == null || _pair == null || t == own || !p.members.contains(t)) {
+    final String? me = _resident?.id;
+    if (p == null ||
+        _pair == null ||
+        me == null ||
+        target == me ||
+        !p.members.containsKey(target)) {
       return false;
     }
     // Signed with this phone's own key: neighbours check the votes when
     // the household announces its new key.
-    final LedgerKeyPair me = await _ensureResident();
-    final String vote = b64(await me.sign(flatKickBytes(p.key, t)));
-    (_kickVotes[t] ??= <String>{}).add(own);
-    (_voteSigs[t] ??= <String, String>{})[own] = vote;
+    final LedgerKeyPair pair = await _ensureResident();
+    final String vote = b64(await pair.sign(flatKickBytes(p.key, target)));
+    (_kickVotes[target] ??= <String>{}).add(me);
+    (_voteSigs[target] ??= <String, String>{})[me] = vote;
     await _save();
-    await _sendToFlat(
+    await _sendToHouse(
       <String>[
         for (final String m in _housemates)
-          if (m != t) m,
+          if (m != _phones[target]) m,
       ],
       FlatTypes.kick,
-      p.key,
-      <String, dynamic>{'a': t, 'v': vote},
+      <String, dynamic>{'a': target, 'by': me, 'v': vote},
     );
-    await _maybeRekey(t);
+    await _maybeRekey(target);
+    await _syncOwnDoor();
     return true;
   }
 
   /// Takes back this phone's vote.
   Future<void> withdrawVote(String target) async {
     final FlatProfile? p = _profile;
-    final String own = _n(host.ownAddress());
-    final String t = _n(target);
-    if (p == null || !(_kickVotes[t]?.remove(own) ?? false)) {
+    final String? me = _resident?.id;
+    if (p == null || me == null || !(_kickVotes[target]?.remove(me) ?? false)) {
       return;
     }
-    _voteSigs[t]?.remove(own);
+    _voteSigs[target]?.remove(me);
     await _save();
-    await _sendToFlat(
+    await _sendToHouse(
       <String>[
         for (final String m in _housemates)
-          if (m != t) m,
+          if (m != _phones[target]) m,
       ],
       FlatTypes.kick,
-      p.key,
-      <String, dynamic>{'a': t, 'no': true},
+      <String, dynamic>{'a': target, 'by': me, 'no': true},
     );
   }
 
   Future<void> _onKick(String sender, Map<String, dynamic> b) async {
     final FlatProfile? p = _profile;
     final Object? a = b['a'];
-    final String own = _n(host.ownAddress());
-    if (p == null || a is! String) {
+    final Object? by = b['by'];
+    final String? me = _resident?.id;
+    if (p == null || a is! String || by is! String) {
       return;
     }
-    final String target = _n(a);
-    if (target == own ||
-        target == sender ||
-        !p.members.contains(target) ||
-        !p.members.contains(sender)) {
+    final String target = a;
+    if (target == me ||
+        target == by ||
+        !p.members.containsKey(target) ||
+        !p.members.containsKey(by)) {
       return;
     }
     if (b['no'] == true) {
-      _kickVotes[target]?.remove(sender);
-      _voteSigs[target]?.remove(sender);
-      await _save();
+      // Only the voter's own phone takes a vote back.
+      if (_phones[by] == sender) {
+        _kickVotes[target]?.remove(by);
+        _voteSigs[target]?.remove(by);
+        await _save();
+      }
       return;
     }
     // The vote signed with the voter's own key.
     final Object? vote = b['v'];
-    if (vote is! String) {
-      return;
-    }
-    final String? rk = _residentKeys[sender];
-    if (rk != null &&
+    if (vote is! String ||
         !await verifyLedgerSignature(
-          publicKey: rk,
+          publicKey: by,
           message: flatKickBytes(p.key, target),
           signature: vote,
         )) {
       return;
     }
-    (_voteSigs[target] ??= <String, String>{})[sender] = vote;
-    final bool added = (_kickVotes[target] ??= <String>{}).add(sender);
+    (_voteSigs[target] ??= <String, String>{})[by] = vote;
+    final bool added = (_kickVotes[target] ??= <String>{}).add(by);
     await _save();
-    if (added && !(_kickVotes[target]?.contains(own) ?? false)) {
+    if (added && me != null && !(_kickVotes[target]?.contains(me) ?? false)) {
       final String name = residentName(target);
       await host.notify(
         RuntimeSystemNotification(
-          id: 'flat-kick-${target.hashCode}-${sender.hashCode}',
+          id: 'flat-kick-${target.hashCode}-${by.hashCode}',
           title: t('Domownicy chcą odłączyć telefon'),
           body: t(
             '{name}: głosów {votes} z {needed}. Zajrzyj do „Domownicy”.',
@@ -2131,16 +3054,16 @@ final class NeighborsService extends ChangeNotifier {
     await _maybeRekey(target);
   }
 
-  /// With a majority, the voter with the lowest address makes the new key
-  /// (so two phones do not do it at once).
+  /// With a majority, the voter with the lowest resident key makes the new
+  /// key (so two phones do not do it at once).
   Future<void> _maybeRekey(String target) async {
-    final String own = _n(host.ownAddress());
+    final String? me = _resident?.id;
     final Set<String> votes = votesFor(target);
-    if (!_enoughVotes(target) || !votes.contains(own)) {
+    if (me == null || !_enoughVotes(target) || !votes.contains(me)) {
       return;
     }
     final List<String> sorted = votes.toList()..sort();
-    if (sorted.first == own) {
+    if (sorted.first == me) {
       await _rekey(target);
     }
   }
@@ -2148,8 +3071,8 @@ final class NeighborsService extends ChangeNotifier {
   Future<void> _rekey(String target) async {
     final FlatProfile? p = _profile;
     final LedgerKeyPair? old = _pair;
-    final String own = _n(host.ownAddress());
-    if (p == null || old == null) {
+    final String? me = _resident?.id;
+    if (p == null || old == null || me == null) {
       return;
     }
     final LedgerKeyPair pair = await LedgerKeyPair.generate();
@@ -2158,7 +3081,10 @@ final class NeighborsService extends ChangeNotifier {
     final FlatProfile next = await p
         .copyWith(
           key: pair.id,
-          members: p.members.where((String m) => m != target).toList(),
+          members: <String, String>{
+            for (final MapEntry<String, String> e in p.members.entries)
+              if (e.key != target) e.key: e.value,
+          },
           rev: 1,
         )
         .signedWith(pair);
@@ -2173,12 +3099,12 @@ final class NeighborsService extends ChangeNotifier {
           'doorAt': t,
         });
     // For neighbours the old key is not enough (the removed phone has it
-    // too): the notice carries this phone's own signature and the
+    // too): the notice carries this resident's own signature and the
     // others' signed votes, checked with the residents' keys the neighbours
     // pinned while everyone was still in.
-    final LedgerKeyPair me = await _ensureResident();
+    final LedgerKeyPair mine = await _ensureResident();
     final String bySig = b64(
-      await me.sign(flatNewKeyBytes(old.id, pair.id, target)),
+      await mine.sign(flatNewKeyBytes(old.id, pair.id, target)),
     );
     final Map<String, String> votes = <String, String>{
       for (final String v in votesFor(target))
@@ -2187,18 +3113,25 @@ final class NeighborsService extends ChangeNotifier {
     final Map<String, dynamic> notice = <String, dynamic>{
       'p': next.toJson(),
       'a': target,
-      'by': own,
+      'by': me,
       'bs': bySig,
       'v': votes,
     };
-    final List<(Set<String>, Map<String, dynamic>)> toNeighbors =
-        <(Set<String>, Map<String, dynamic>)>[
-          for (final NeighborFlat f in _neighbors.values)
-            (
-              f.profile.members.toSet(),
-              await _envelopeWith(old, FlatTypes.newKey, f.key, notice),
-            ),
-        ];
+    final List<String> stay = <String>[
+      for (final String r in next.members.keys)
+        if (r != me && _phones[r] != null) _phones[r]!,
+    ];
+    // To neighbours first, from the door they know: the new door code gives
+    // this phone's door a new key, and so a new address.
+    for (final NeighborFlat f in _neighbors.values.toList()) {
+      await _sendToDoors(
+        f.profile.doors,
+        FlatTypes.newKey,
+        f.key,
+        notice,
+        pair: old,
+      );
+    }
     _oldKey = old.id;
     _seed = b64(pair.seed);
     _pair = pair;
@@ -2209,20 +3142,10 @@ final class NeighborsService extends ChangeNotifier {
     _voteSigs.clear();
     _pendingRekeys.clear();
     _names.remove(target);
-    _residentKeys.remove(target);
+    _phones.remove(target);
     await _save();
-    for (final String m in next.members) {
-      if (m != own) {
-        await _send(m, toHouse);
-      }
-    }
-    for (final (Set<String> members, Map<String, dynamic> payload)
-        in toNeighbors) {
-      for (final String m in members) {
-        if (m != own) {
-          await _send(m, payload);
-        }
-      }
+    for (final String m in stay) {
+      await _send(m, toHouse);
     }
     await _notifyRekeyed(next);
   }
@@ -2244,15 +3167,14 @@ final class NeighborsService extends ChangeNotifier {
   Future<void> _onRekey(String sender, Map<String, dynamic> b) async {
     final FlatProfile? p = _profile;
     final Object? a = b['a'];
-    final String own = _n(host.ownAddress());
-    if (p == null || a is! String) {
+    final String? by = _residentOf(sender);
+    if (p == null || a is! String || by == null) {
       return;
     }
-    final String target = _n(a);
-    if (target == own ||
-        sender == target ||
-        !p.members.contains(sender) ||
-        !p.members.contains(target)) {
+    final String target = a;
+    if (target == _resident?.id ||
+        by == target ||
+        !p.members.containsKey(target)) {
       return; // the removed phone gets nothing; nobody removes us by mail
     }
     if (!_enoughVotes(target)) {
@@ -2265,17 +3187,17 @@ final class NeighborsService extends ChangeNotifier {
 
   /// Checks a new key from a housemate and switches to it.
   Future<bool> _applyRekey(String target, Map<String, dynamic> b) async {
-    final String own = _n(host.ownAddress());
+    final String? me = _resident?.id;
     final Object? seed = b['seed'];
     final Uint8List? seedBytes = unb64(seed, length: 32);
-    if (seed is! String || seedBytes == null) {
+    if (seed is! String || seedBytes == null || me == null) {
       return false;
     }
     final LedgerKeyPair pair = await LedgerKeyPair.fromSeed(seedBytes);
     final FlatProfile? next = await _verifiedProfile(pair.id, b['p']);
     if (next == null ||
-        !next.members.contains(own) ||
-        next.members.contains(target)) {
+        !next.members.containsKey(me) ||
+        next.members.containsKey(target)) {
       return false;
     }
     final Object? door = b['door'];
@@ -2295,7 +3217,7 @@ final class NeighborsService extends ChangeNotifier {
     _voteSigs.clear();
     _pendingRekeys.clear();
     _names.remove(target);
-    _residentKeys.remove(target);
+    _phones.remove(target);
     await _save();
     await _notifyRekeyed(next);
     return true;
@@ -2313,8 +3235,8 @@ final class NeighborsService extends ChangeNotifier {
         mine == null ||
         a is! String ||
         seedBytes == null ||
-        p.members.contains(_n(a)) ||
-        !p.members.contains(sender)) {
+        p.members.containsKey(a) ||
+        _residentOf(sender) == null) {
       return;
     }
     final LedgerKeyPair theirs = await LedgerKeyPair.fromSeed(seedBytes);
@@ -2325,19 +3247,14 @@ final class NeighborsService extends ChangeNotifier {
     if (next == null) {
       return;
     }
-    final String own = _n(host.ownAddress());
-    for (final NeighborFlat f in _neighbors.values) {
-      final Map<String, dynamic> payload = await _envelopeWith(
-        mine,
+    for (final NeighborFlat f in _neighbors.values.toList()) {
+      await _sendToDoors(
+        f.profile.doors,
         FlatTypes.newKey,
         f.key,
         <String, dynamic>{'p': next.toJson()},
+        pair: mine,
       );
-      for (final String m in f.profile.members.toSet()) {
-        if (m != own) {
-          await _send(m, payload);
-        }
-      }
     }
     _seed = b64(seedBytes);
     _pair = theirs;
@@ -2388,8 +3305,11 @@ final class NeighborsService extends ChangeNotifier {
       if (hop != null &&
           now - hop.at < const Duration(days: 1).inMilliseconds &&
           next.key.compareTo(from) < 0 &&
-          setEquals(next.members.toSet(), f.profile.members.toSet()) &&
-          f.profile.members.contains(sender)) {
+          setEquals(
+            next.members.keys.toSet(),
+            f.profile.members.keys.toSet(),
+          ) &&
+          f.profile.residentAt(sender) != null) {
         // Two housemates made a new key at once: the household keeps the
         // lower one, and the key it leaves is one the removed phone never
         // had.
@@ -2413,8 +3333,8 @@ final class NeighborsService extends ChangeNotifier {
       _switches[from] = FlatKeySwitch(
         oldKey: from,
         name: f.profile.name,
-        members: List<String>.of(f.profile.members),
-        pins: Map<String, FlatPin>.of(f.residents),
+        members: Map<String, String>.of(f.profile.members),
+        pins: Map<String, int>.of(f.residents),
         newKey: next.key,
         removed: claim.$1,
         by: claim.$2,
@@ -2517,29 +3437,31 @@ final class NeighborsService extends ChangeNotifier {
   }
 
   /// Checks a "new key" notice of the household that had the key [oldKey]
-  /// with [members] and the residents' keys [pins]. Returns who it removes
-  /// and who made it, or `null` when it does not hold up.
+  /// with the residents [members] (resident key → door) and the residents'
+  /// keys [pins] (→ when first seen), sent from the door [sender]. Returns
+  /// who it removes and who made it (resident keys), or `null` when it does
+  /// not hold up.
   Future<(Set<String>, String)?> _checkNewKey(
     String oldKey,
-    List<String> members,
-    Map<String, FlatPin> pins,
+    Map<String, String> members,
+    Map<String, int> pins,
     FlatProfile next,
     String sender,
     Map<String, dynamic> b,
   ) async {
     final Set<String> removed = <String>{
-      for (final String m in members)
-        if (!next.members.contains(m)) m,
+      for (final String m in members.keys)
+        if (!next.members.containsKey(m)) m,
     };
     final int t = _now();
     final Set<String> trusted = <String>{
-      for (final MapEntry<String, FlatPin> e in pins.entries)
-        if (members.contains(e.key) &&
-            t - e.value.since >= kResidentKeyTrust.inMilliseconds)
+      for (final MapEntry<String, int> e in pins.entries)
+        if (members.containsKey(e.key) &&
+            t - e.value >= kResidentKeyTrust.inMilliseconds)
           e.key,
     };
     final Object? a = b['a'];
-    final String? target = a is String ? _n(a) : null;
+    final String? target = a is String ? a : null;
     // The residents whose votes can be checked: keys known long enough,
     // but not the one being removed.
     final List<String> voters = <String>[
@@ -2548,9 +3470,15 @@ final class NeighborsService extends ChangeNotifier {
     ];
     if (voters.isEmpty) {
       // Nothing to check the votes with (a household met just now): a
-      // resident who stays.
-      return members.contains(sender) && next.members.contains(sender)
-          ? (removed, sender)
+      // resident who stays, from their own door.
+      String? maker;
+      for (final MapEntry<String, String> e in members.entries) {
+        if (e.value.isNotEmpty && e.value == sender) {
+          maker = e.key;
+        }
+      }
+      return maker != null && next.members.containsKey(maker)
+          ? (removed, maker)
           : null;
     }
     final Object? by = b['by'];
@@ -2559,14 +3487,12 @@ final class NeighborsService extends ChangeNotifier {
     if (target == null || by is! String || bySig is! String || votes is! Map) {
       return null;
     }
-    final String maker = _n(by);
-    final FlatPin? makerPin = pins[maker];
     if (!removed.contains(target) ||
-        maker == target ||
-        !next.members.contains(maker) ||
-        makerPin == null ||
+        by == target ||
+        !next.members.containsKey(by) ||
+        !pins.containsKey(by) ||
         !await verifyLedgerSignature(
-          publicKey: makerPin.key,
+          publicKey: by,
           message: flatNewKeyBytes(oldKey, next.key, target),
           signature: bySig,
         )) {
@@ -2578,7 +3504,7 @@ final class NeighborsService extends ChangeNotifier {
       final Object? sig = votes[v];
       if (sig is String &&
           await verifyLedgerSignature(
-            publicKey: pins[v]!.key,
+            publicKey: v,
             message: flatKickBytes(oldKey, target),
             signature: sig,
           )) {
@@ -2588,7 +3514,7 @@ final class NeighborsService extends ChangeNotifier {
     if (yes < voters.length ~/ 2 + 1) {
       return null;
     }
-    return (removed, maker);
+    return (removed, by);
   }
 
   /// Moves the neighbour household [f] to its new key [next], with its
@@ -2609,7 +3535,7 @@ final class NeighborsService extends ChangeNotifier {
         ...f.seenItems,
         ...next.items.map((FlatItem i) => i.id),
       },
-      residents: Map<String, FlatPin>.of(f.residents),
+      residents: Map<String, int>.of(f.residents),
     );
     for (final FlatMessage m in _messages.values.toList()) {
       if (m.flat == from) {
@@ -2648,11 +3574,12 @@ final class NeighborsService extends ChangeNotifier {
     if (reveals != null) {
       _reveals[next.key] = <FlatReveal>[
         for (final FlatReveal r in reveals)
-          if (next.members.contains(r.address))
+          if (next.members.containsKey(r.resident))
             FlatReveal(
               flat: next.key,
               name: r.name,
               address: r.address,
+              resident: r.resident,
               at: r.at,
             ),
       ];
@@ -2667,21 +3594,32 @@ final class NeighborsService extends ChangeNotifier {
 
   /// Shows this resident's own account to the neighbour flat [key]: they
   /// see the name and can send a friend invitation. Only this phone's
-  /// person is revealed, never the housemates.
+  /// person is revealed, never the housemates, and this is the only time a
+  /// neighbour learns a resident's own address: the reveal goes from this
+  /// phone itself (to their doors), not from our door.
   Future<bool> revealMyProfile(String key) async {
     final NeighborFlat? f = _neighbors[key];
-    final String own = _n(host.ownAddress());
-    if (f == null || !hasFlat || own.isEmpty) {
+    final FlatProfile? p = _profile;
+    final String own = _own;
+    if (f == null || p == null || !hasFlat || own.isEmpty) {
       return false;
     }
+    final LedgerKeyPair me = await _ensureResident();
+    final String name = _clip(host.ownName(), 60);
     _revealedTo.add(key);
     await _save();
-    await _sendToFlat(
-      f.profile.members,
-      FlatTypes.reveal,
-      key,
-      <String, dynamic>{'n': _clip(host.ownName(), 60), 'a': own},
-    );
+    final Map<String, dynamic> payload = <String, dynamic>{
+      ...await _envelope(FlatTypes.reveal, key, <String, dynamic>{
+        'n': name,
+        'a': own,
+        'rk': me.id,
+        'rs': b64(await me.sign(flatRevealBytes(p.key, key, own, name))),
+      }),
+      kReliableTtlKey: kDoorRetryLife.inMilliseconds,
+    };
+    for (final String d in f.profile.doors.toSet()) {
+      await _send(d, payload);
+    }
     return true;
   }
 
@@ -2691,33 +3629,46 @@ final class NeighborsService extends ChangeNotifier {
     Map<String, dynamic> b,
   ) async {
     final NeighborFlat? f = _neighbors[from];
+    final String? ownKey = _pair?.id;
     final Object? a = b['a'];
     final Object? n = b['n'];
-    // Only the phone itself reveals its own account.
+    final Object? rk = b['rk'];
+    final Object? rs = b['rs'];
+    // Only the phone itself reveals its own account, and only a resident
+    // of that flat, signed with their own key.
     if (f == null ||
+        ownKey == null ||
         a is! String ||
         _n(a) != sender ||
         n is! String ||
         n.trim().isEmpty ||
-        !f.profile.members.contains(sender)) {
+        rk is! String ||
+        rs is! String ||
+        !f.profile.members.containsKey(rk) ||
+        !await verifyLedgerSignature(
+          publicKey: rk,
+          message: flatRevealBytes(from, ownKey, a, n),
+          signature: rs,
+        )) {
       return;
     }
     final FlatReveal r = FlatReveal(
       flat: from,
       name: _clip(n, 60),
       address: sender,
+      resident: rk,
       at: _now(),
     );
     _reveals[from] = <FlatReveal>[
       ...(_reveals[from] ?? const <FlatReveal>[]).where(
-        (FlatReveal x) => x.address != sender,
+        (FlatReveal x) => x.resident != rk && x.address != sender,
       ),
       r,
     ];
     await _save();
     await host.notify(
       RuntimeSystemNotification(
-        id: 'flat-reveal-${from.hashCode}-${sender.hashCode}',
+        id: 'flat-reveal-${from.hashCode}-${rk.hashCode}',
         title: t('{flat}: {name} pokazuje swój profil', {
           'flat': f.profile.name,
           'name': r.name,

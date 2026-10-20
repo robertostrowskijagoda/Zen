@@ -4,9 +4,11 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, visibleForTesting;
+import 'package:zen/src/features/runtime/local_link.dart';
 import 'package:zen/src/features/runtime/yggdrasil_signal_transport.dart';
 
-abstract interface class NodeSignalBridge implements NativeSignalBridge {
+abstract interface class NodeSignalBridge
+    implements NativeSignalBridge, LocalLinkBridgeCalls {
   String generateConfigJson();
 
   Map<String, dynamic> startNode(String configJson);
@@ -19,8 +21,8 @@ abstract interface class NodeSignalBridge implements NativeSignalBridge {
   Map<String, dynamic> addPeer(int handle, String uri);
 
   /// Runs the flat's door next to the node [handle]: a second node with its
-  /// own key ([seedHex], a 32-byte ed25519 seed as hex), peered to this one
-  /// over loopback, that only takes knocks (they come in through
+  /// own key ([seedHex], a 32-byte ed25519 seed as hex), never peered to
+  /// this one, that takes only flat frames (they come in through
   /// [waitSignal] / [pollSignal] marked `door: true`). Another key replaces the door; the
   /// same key keeps it. Returns `{running, address, publicKey, linked}`.
   Map<String, dynamic> startDoorNode(int handle, String seedHex);
@@ -29,6 +31,20 @@ abstract interface class NodeSignalBridge implements NativeSignalBridge {
 
   /// `{running: false}`, or the running door as [startDoorNode] tells it.
   Map<String, dynamic> getDoorNode(int handle);
+
+  /// Runs exactly the mailbox doors whose keys [seedsJson] lists (a JSON
+  /// array of hex seeds): doors this phone runs for friends, taking only
+  /// sealed knocks (door_node.go). Returns `{addresses: {seed: address}}`.
+  Map<String, dynamic> setMailboxDoors(int handle, String seedsJson);
+
+  /// Sends one flat frame ([payload], encoded as for [sendSignal]) from the
+  /// flat's door to [remoteAddress]: traffic between neighbour flats goes
+  /// from door to door (door_node.go). Throws without a running door.
+  Map<String, dynamic> doorSendSignal(
+    int handle,
+    String remoteAddress,
+    String payload,
+  );
 
   /// Which Yggdrasil and Go the library was built with:
   /// `{yggdrasil, go, os, arch}`.
@@ -159,9 +175,41 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
       _getDoorNode = library.lookupFunction<_NativeIntArgCall, _DartIntArgCall>(
         'YggGetDoorNodeJson',
       ),
+      _setMailboxDoors = library
+          .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
+            'YggSetMailboxDoorsJson',
+          ),
+      _doorSendSignal = library
+          .lookupFunction<_NativeIntTwoStringArgCall, _DartIntTwoStringArgCall>(
+            'YggDoorSendSignal',
+          ),
       _getBuildInfo = library.lookupFunction<_NativeNoArgCall, _DartNoArgCall>(
         'YggGetBuildInfoJson',
-      );
+      ),
+      _setLocalLinks = library
+          .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
+            'YggSetLocalLinksJson',
+          ),
+      _getLocalLinks = library
+          .lookupFunction<_NativeIntArgCall, _DartIntArgCall>(
+            'YggGetLocalLinksJson',
+          ),
+      _openLocalLink = library
+          .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
+            'YggOpenLocalLinkJson',
+          ),
+      _closeLocalLink = library
+          .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
+            'YggCloseLocalLink',
+          ),
+      _localLinkAdvert = library
+          .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
+            'YggLocalLinkAdvertJson',
+          ),
+      _matchLocalLinkAdvert = library
+          .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
+            'YggLocalLinkMatchJson',
+          );
 
   final void Function(Pointer<Utf8>) _freeString;
   final Pointer<Utf8> Function() _generateConfig;
@@ -178,7 +226,16 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
   final Pointer<Utf8> Function(int, Pointer<Utf8>) _startDoorNode;
   final Pointer<Utf8> Function(int) _stopDoorNode;
   final Pointer<Utf8> Function(int) _getDoorNode;
+  final Pointer<Utf8> Function(int, Pointer<Utf8>) _setMailboxDoors;
+  final Pointer<Utf8> Function(int, Pointer<Utf8>, Pointer<Utf8>)
+  _doorSendSignal;
   final Pointer<Utf8> Function() _getBuildInfo;
+  final Pointer<Utf8> Function(int, Pointer<Utf8>) _setLocalLinks;
+  final Pointer<Utf8> Function(int) _getLocalLinks;
+  final Pointer<Utf8> Function(int, Pointer<Utf8>) _openLocalLink;
+  final Pointer<Utf8> Function(int, Pointer<Utf8>) _closeLocalLink;
+  final Pointer<Utf8> Function(int, Pointer<Utf8>) _localLinkAdvert;
+  final Pointer<Utf8> Function(int, Pointer<Utf8>) _matchLocalLinkAdvert;
 
   static YggdrasilBridgeFfi load() {
     final DynamicLibrary library = _openLibrary();
@@ -188,6 +245,10 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
         );
     return YggdrasilBridgeFfi._(library, freeString);
   }
+
+  /// The bridge library itself, for calls outside a node (the Bluetooth
+  /// streams of bluetooth_local_links.dart).
+  static DynamicLibrary openLibrary() => _openLibrary();
 
   static DynamicLibrary _openLibrary() {
     if (Platform.isAndroid) {
@@ -349,8 +410,75 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
       _extractMap(_readEnvelope(_getDoorNode(handle)));
 
   @override
+  Map<String, dynamic> setMailboxDoors(int handle, String seedsJson) {
+    final Pointer<Utf8> nativeSeeds = seedsJson.toNativeUtf8();
+    try {
+      return _extractMap(_readEnvelope(_setMailboxDoors(handle, nativeSeeds)));
+    } finally {
+      malloc.free(nativeSeeds);
+    }
+  }
+
+  @override
+  Map<String, dynamic> doorSendSignal(
+    int handle,
+    String remoteAddress,
+    String payload,
+  ) {
+    final Pointer<Utf8> nativeRemoteAddress = remoteAddress.toNativeUtf8();
+    final Pointer<Utf8> nativePayload = payload.toNativeUtf8();
+    try {
+      return _extractMap(
+        _readEnvelope(
+          _doorSendSignal(handle, nativeRemoteAddress, nativePayload),
+        ),
+      );
+    } finally {
+      malloc.free(nativeRemoteAddress);
+      malloc.free(nativePayload);
+    }
+  }
+
+  @override
   Map<String, dynamic> getBuildInfo() =>
       _extractMap(_readEnvelope(_getBuildInfo()));
+
+  @override
+  Map<String, dynamic> setLocalLinks(int handle, String settingsJson) =>
+      _callWithString(_setLocalLinks, handle, settingsJson);
+
+  @override
+  Map<String, dynamic> getLocalLinks(int handle) =>
+      _extractMap(_readEnvelope(_getLocalLinks(handle)));
+
+  @override
+  Map<String, dynamic> openLocalLink(int handle, String requestJson) =>
+      _callWithString(_openLocalLink, handle, requestJson);
+
+  @override
+  Map<String, dynamic> closeLocalLink(int handle, String id) =>
+      _callWithString(_closeLocalLink, handle, id);
+
+  @override
+  Map<String, dynamic> localLinkAdvert(int handle, String requestJson) =>
+      _callWithString(_localLinkAdvert, handle, requestJson);
+
+  @override
+  Map<String, dynamic> matchLocalLinkAdvert(int handle, String requestJson) =>
+      _callWithString(_matchLocalLinkAdvert, handle, requestJson);
+
+  Map<String, dynamic> _callWithString(
+    Pointer<Utf8> Function(int, Pointer<Utf8>) call,
+    int handle,
+    String argument,
+  ) {
+    final Pointer<Utf8> native = argument.toNativeUtf8();
+    try {
+      return _extractMap(_readEnvelope(call(handle, native)));
+    } finally {
+      malloc.free(native);
+    }
+  }
 
   Map<String, dynamic> _readEnvelope(Pointer<Utf8> pointer) {
     final String response = _readString(pointer);

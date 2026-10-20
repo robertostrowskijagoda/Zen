@@ -19,7 +19,7 @@ String addr(String n) => PeerShareCodec.normalizeAddress('200::$n');
 const int _day = 24 * 3600 * 1000;
 
 /// A removed phone that cheats: it still holds the household's old key and
-/// sends neighbours a "new key" notice of its own making.
+/// sends neighbours a "new key" notice of its own making, from its door.
 Future<void> _raceNewKey({
   required _Phone from,
   required String oldKey,
@@ -36,29 +36,45 @@ Future<void> _raceNewKey({
     'b': body,
   };
   final Uint8List sig = await old.sign(canonicalJsonBytes(signed));
-  await from.send(to.address, <String, dynamic>{...signed, 's': b64(sig)});
+  await from.doorSend(to.inbox!, <String, dynamic>{
+    ...signed,
+    's': b64(sig),
+    '_rid': 'race-${from.doorSent.length}',
+  });
 }
 
-/// The household's profile under a key [key] the cheat made, with [members].
+/// The household's profile under a key [key] the cheat made, with the
+/// residents [members] (resident keys; their doors as they are now).
 Future<FlatProfile> _fakeProfile(
   _Phone cheat,
   LedgerKeyPair key,
   List<String> members,
-) => cheat.service.profile!
-    .copyWith(key: key.id, members: members, rev: 1)
-    .signedWith(key);
+) {
+  final FlatProfile p = cheat.service.profile!;
+  return p
+      .copyWith(
+        key: key.id,
+        members: <String, String>{
+          for (final String r in members) r: p.members[r] ?? '',
+        },
+        rev: 1,
+      )
+      .signedWith(key);
+}
+
+/// Gives work the services queued without waiting for it time to finish.
+Future<void> _settle() async {
+  for (int i = 0; i < 20; i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 2));
+  }
+}
 
 final class _Phone implements EventHost {
   // Hex, so the addresses are routable when they travel in a QR code.
   _Phone(this.net, this.name)
     : address = addr((0xa0 + net.length).toRadixString(16)) {
     net[address] = this;
-    service = NeighborsService(
-      host: this,
-      disk: disk,
-      now: () => clock,
-      doorInbox: () => inbox,
-    );
+    service = restarted();
   }
 
   final Map<String, _Phone> net;
@@ -83,11 +99,30 @@ final class _Phone implements EventHost {
   /// for [NeighborsService.acceptKnock].
   bool autoOpen = true;
   final List<RuntimeSystemNotification> shown = <RuntimeSystemNotification>[];
-  final List<Map<String, dynamic>> sent = <Map<String, dynamic>>[];
 
-  @override
-  Future<void> send(String to, Map<String, dynamic> payload) async {
-    sent.add(payload);
+  /// What it sent from its own address, and from its door.
+  final List<Map<String, dynamic>> sent = <Map<String, dynamic>>[];
+  final List<Map<String, dynamic>> doorSent = <Map<String, dynamic>>[];
+
+  /// Every address something reached this phone (or its door) from.
+  final Set<String> heardFrom = <String>{};
+
+  /// The service again, as after a restart (same disk, same door).
+  NeighborsService restarted() => NeighborsService(
+    host: this,
+    disk: disk,
+    now: () => clock,
+    doorInbox: () => inbox,
+    doorSend: doorSend,
+  );
+
+  /// Delivers [payload] from [from] to the phone or the door at [to], as
+  /// the mesh and the bridge's doors do.
+  Future<void> _deliver(
+    String from,
+    String to,
+    Map<String, dynamic> payload,
+  ) async {
     _Phone? other = net[to];
     bool door = false;
     for (final _Phone p in net.values) {
@@ -99,22 +134,47 @@ final class _Phone implements EventHost {
     if (other == null || !other.online) {
       return;
     }
-    if (door && payload['type'] != FlatTypes.hello) {
-      // Like the bridge's door: knocks only.
+    final Object? type = payload['type'];
+    if (door && (!kFlatDoorTypes.contains(type) || type == FlatTypes.seal)) {
+      // Like the bridge's door: flat frames only (sealed knocks go to
+      // mailbox doors).
       return;
     }
+    other.heardFrom.add(from);
     await other.service.handle(
       SignalTransportFrame(
-        from: address,
+        from: from,
         payload: jsonDecode(jsonEncode(payload)) as Map<String, dynamic>,
         receivedAtMillis: 0,
         door: door,
       ),
     );
     final Object? knocker = payload['f'];
-    if (door && other.autoOpen && knocker is String) {
+    if (door &&
+        type == FlatTypes.hello &&
+        other.autoOpen &&
+        knocker is String) {
       await other.service.acceptKnock(knocker);
     }
+  }
+
+  @override
+  Future<void> send(String to, Map<String, dynamic> payload) async {
+    sent.add(payload);
+    if (online) {
+      await _deliver(address, to, payload);
+    }
+  }
+
+  /// [NeighborsService.doorSend]: from this phone's door.
+  Future<bool> doorSend(String to, Map<String, dynamic> payload) async {
+    final String? from = inbox;
+    if (!online || from == null) {
+      return false;
+    }
+    doorSent.add(payload);
+    await _deliver(from, to, payload);
+    return true;
   }
 
   @override
@@ -135,6 +195,9 @@ final class _Phone implements EventHost {
   @override
   Future<void> notify(RuntimeSystemNotification n) async => shown.add(n);
 }
+
+/// [p]'s resident key.
+String _rk(_Phone p) => p.service.residentKey!;
 
 void main() {
   test(
@@ -174,6 +237,7 @@ void main() {
     final _Phone bartek = _Phone(net, 'bartek');
     await ania.service.createFlat('Nowakowie', place: 'm. 12');
     await ola.service.joinFlat(ania.service.homeCode!);
+    await _settle();
     expect(ania.service.profile!.members, hasLength(2));
 
     String payload(String qr) => utf8.decode(
@@ -216,6 +280,138 @@ void main() {
     expect(bartek.service.neighbors.single.profile.name, 'Nowakowie');
   });
 
+  test('neighbours see doors and resident keys only: a resident\'s own '
+      'address only after "Pokaż mój profil" (§18.2)', () async {
+    final Map<String, _Phone> net = <String, _Phone>{};
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone ola = _Phone(net, 'ola');
+    final _Phone bartek = _Phone(net, 'bartek');
+    await ania.service.createFlat('Nowakowie', place: 'm. 12');
+    await ola.service.joinFlat(ania.service.homeCode!);
+    await _settle();
+    await bartek.service.createFlat('Bartkowie');
+    await bartek.service.scanDoor(ania.service.doorCode!);
+    await ania.service.setShareWithScanners(true);
+    final String aniaKey = ania.service.profile!.key;
+    final String bartekKey = bartek.service.profile!.key;
+    await ania.service.addItem(FlatItemKind.invite, 'Grill');
+    await bartek.service.sendMessage(aniaKey, 'hej');
+    await ola.service.sendMessage(bartekKey, 'cześć');
+    await bartek.service.signUp(
+      aniaKey,
+      ania.service.profile!.of(FlatItemKind.invite).single.id,
+      2,
+    );
+    await _settle();
+
+    // The profile names each resident by a key of its own and the door its
+    // phone runs.
+    final FlatProfile seen = bartek.service.neighbors.single.profile;
+    expect(seen.members, <String, String>{
+      _rk(ania): ania.inbox!,
+      _rk(ola): ola.inbox!,
+    });
+    final String everything =
+        '${jsonEncode(seen.toJson())} '
+        '${utf8.decode(bartek.disk.files['neighbors/state']!)}';
+    for (final _Phone resident in <_Phone>[ania, ola]) {
+      expect(everything.contains(resident.address), isFalse);
+      // Nothing came to Bartek from their own addresses, nor went to them.
+      expect(bartek.heardFrom, isNot(contains(resident.address)));
+    }
+    expect(ania.heardFrom, isNot(contains(bartek.address)));
+    expect(bartek.sent, isEmpty, reason: 'all of it went from the door');
+    expect(
+      ola.service.messagesWith(bartekKey).map((FlatMessage m) => m.text),
+      containsAll(<String>['hej', 'cześć']),
+    );
+    // Neighbour frames never come phone to phone, housemates' never
+    // through a door.
+    expect(
+      await ania.service.handle(
+        SignalTransportFrame(
+          from: bartek.address,
+          payload: bartek.doorSent.first,
+          receivedAtMillis: 0,
+        ),
+      ),
+      isFalse,
+    );
+    expect(
+      await ania.service.handle(
+        SignalTransportFrame(
+          from: ola.inbox!,
+          payload: ola.sent.first,
+          receivedAtMillis: 0,
+          door: true,
+        ),
+      ),
+      isFalse,
+    );
+
+    // "Pokaż mój profil": now (and only now) Bartek learns Ania's address.
+    await ania.service.revealMyProfile(bartekKey);
+    expect(bartek.service.revealsFrom(aniaKey).single.address, ania.address);
+    expect(bartek.heardFrom, contains(ania.address));
+    expect(bartek.heardFrom, isNot(contains(ola.address)));
+
+    // What the doors took was confirmed; what reached Ola before she knew
+    // Bartek is confirmed on the next try. Nothing waits to be retried.
+    bartek.clock += 60 * 1000;
+    await bartek.service.retryDoorSends();
+    await _settle();
+    expect(bartek.service.doorOutbox, 0);
+    expect(ola.service.doorOutbox, 0);
+  });
+
+  test('frames that did not arrive are retried from the door until a door '
+      'confirms them', () async {
+    final Map<String, _Phone> net = <String, _Phone>{};
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone bartek = _Phone(net, 'bartek');
+    await ania.service.createFlat('Nowakowie');
+    await bartek.service.createFlat('Bartkowie');
+    await bartek.service.scanDoor(ania.service.doorCode!);
+    final String aniaKey = ania.service.profile!.key;
+    final String bartekKey = bartek.service.profile!.key;
+    await _settle();
+    expect(bartek.service.doorOutbox, 0);
+
+    ania.online = false;
+    await bartek.service.sendMessage(aniaKey, 'jesteście?');
+    expect(bartek.service.doorOutbox, 1);
+    // Not yet due, then due: the same frame, the same id.
+    await bartek.service.retryDoorSends();
+    expect(
+      bartek.doorSent.where(
+        (Map<String, dynamic> m) => m['type'] == FlatTypes.message,
+      ),
+      hasLength(1),
+    );
+    ania.online = true;
+    bartek.clock += 60 * 1000;
+    await bartek.service.retryDoorSends();
+    await _settle();
+    expect(ania.service.messagesWith(bartekKey).single.text, 'jesteście?');
+    expect(bartek.service.doorOutbox, 0);
+    final List<Map<String, dynamic>> tries = <Map<String, dynamic>>[
+      for (final Map<String, dynamic> m in bartek.doorSent)
+        if (m['type'] == FlatTypes.message) m,
+    ];
+    expect(tries, hasLength(2));
+    expect(tries.first['_rid'], tries.last['_rid']);
+
+    // A frame waits on disk, and gives up after a while.
+    ania.online = false;
+    await bartek.service.sendMessage(aniaKey, 'halo');
+    bartek.service = bartek.restarted();
+    await bartek.service.load();
+    expect(bartek.service.doorOutbox, 1);
+    bartek.clock += kFlatSendLife.inMilliseconds;
+    await bartek.service.retryDoorSends();
+    expect(bartek.service.doorOutbox, 0);
+  });
+
   test('a knock waits for a resident: nothing goes back before "Wpuść", '
       'refused and expired knocks stay unanswered (§18.2)', () async {
     final Map<String, _Phone> net = <String, _Phone>{};
@@ -227,24 +423,23 @@ void main() {
     await cyryl.service.createFlat('Cyryl');
     final String bartekKey = bartek.service.profile!.key;
 
-    final int before = ania.sent.length;
+    final int before = ania.sent.length + ania.doorSent.length;
     expect(
       await bartek.service.scanDoor(ania.service.doorCode!),
       FlatScan.sent,
     );
-    // Not a word from Ania's phone yet: an answer would say whose door it is.
-    expect(ania.sent.length, before);
+    // Not a word from Ania's phone or door yet: an answer would say whose
+    // door it is, or that its phone is online.
+    await _settle();
+    expect(ania.sent.length + ania.doorSent.length, before);
     expect(ania.service.neighbors, isEmpty);
     expect(bartek.service.neighbors, isEmpty);
     expect(bartek.service.pending.keys, <String>[ania.service.profile!.key]);
     expect(ania.service.knocks.single.key, bartekKey);
+    expect(ania.service.knocks.single.sender, bartek.inbox);
     expect(ania.shown.last.title, 'Bartkowie puka do drzwi');
     // The knock waits on disk too (the background service took it).
-    final NeighborsService again = NeighborsService(
-      host: ania,
-      disk: ania.disk,
-      now: () => ania.clock,
-    );
+    final NeighborsService again = ania.restarted();
     await again.load();
     expect(again.knocks.single.profile.name, 'Bartkowie');
 
@@ -254,40 +449,52 @@ void main() {
     expect(ania.service.neighbors.single.scannedUs, isTrue);
     expect(bartek.service.neighbors.single.profile.name, 'Nowakowie');
     expect(bartek.service.pending, isEmpty);
+    // Let in: the knock is not retried any more.
+    await _settle();
+    expect(
+      bartek.service.doorOutbox,
+      0,
+      reason: 'the knock went, the rest was confirmed',
+    );
 
     // "Odmów": nothing goes back, and the knocker's retries of the same
-    // knock (same retry id) do not ask again.
+    // knock do not ask again.
     await cyryl.service.scanDoor(ania.service.doorCode!);
-    final Map<String, dynamic> knock = <String, dynamic>{
-      ...cyryl.sent.last,
-      '_rid': 'r1',
-    };
+    final Map<String, dynamic> knock = cyryl.doorSent.last;
+    expect(knock['type'], FlatTypes.hello);
     final String cyrylKey = cyryl.service.profile!.key;
     final SignalTransportFrame retried = SignalTransportFrame(
-      from: cyryl.address,
+      from: cyryl.inbox!,
       payload: knock,
       receivedAtMillis: 0,
       door: true,
     );
     await ania.service.handle(retried);
     expect(ania.service.knocks.single.key, cyrylKey);
-    final int sentBefore = ania.sent.length;
+    final int sentBefore = ania.sent.length + ania.doorSent.length;
     await ania.service.rejectKnock(cyrylKey);
     expect(ania.service.knocks, isEmpty);
     await ania.service.handle(retried);
+    cyryl.clock += 60 * 1000;
+    await cyryl.service.retryDoorSends();
+    await _settle();
     expect(ania.service.knocks, isEmpty);
-    expect(ania.sent.length, sentBefore);
+    expect(ania.sent.length + ania.doorSent.length, sentBefore);
     expect(cyryl.service.neighbors, isEmpty);
 
-    // A new scan (a new retry id) asks again; after ten minutes it is gone.
+    // The same knock again (another retry id, as it comes through the
+    // mailbox doors) does not ask again either; a new scan does, and after
+    // a week it is gone.
     await ania.service.handle(
       SignalTransportFrame(
-        from: cyryl.address,
+        from: cyryl.inbox!,
         payload: <String, dynamic>{...knock, '_rid': 'r2'},
         receivedAtMillis: 0,
         door: true,
       ),
     );
+    expect(ania.service.knocks, isEmpty);
+    await cyryl.service.scanDoor(ania.service.doorCode!);
     expect(ania.service.knocks.single.key, cyrylKey);
     ania.clock += kKnockLife.inMilliseconds;
     expect(ania.service.knocks, isEmpty);
@@ -295,18 +502,61 @@ void main() {
     expect(ania.service.neighbors, hasLength(1));
     expect(cyryl.service.neighbors, isEmpty);
 
-    // A knock that is not one is never taken at the door.
+    // Housemates' frames are never taken at the door.
     expect(
       await ania.service.handle(
         SignalTransportFrame(
-          from: cyryl.address,
-          payload: <String, dynamic>{...knock, 'type': FlatTypes.message},
+          from: cyryl.inbox!,
+          payload: <String, dynamic>{...knock, 'type': FlatTypes.house},
           receivedAtMillis: 0,
           door: true,
         ),
       ),
       isFalse,
     );
+  });
+
+  test('knock notifications: one per knocker, a few an hour', () async {
+    final Map<String, _Phone> net = <String, _Phone>{};
+    final _Phone ania = _Phone(net, 'ania')..autoOpen = false;
+    await ania.service.createFlat('Nowakowie');
+    final List<_Phone> knockers = <_Phone>[
+      for (int i = 0; i < kKnockRingsPerHour + 3; i++) _Phone(net, 'k$i'),
+    ];
+    for (final _Phone k in knockers) {
+      await k.service.createFlat('Flat ${k.name}');
+    }
+    List<RuntimeSystemNotification> rings() => <RuntimeSystemNotification>[
+      for (final RuntimeSystemNotification n in ania.shown)
+        if (n.id.startsWith('flat-knock')) n,
+    ];
+
+    // The same flat knocking again and again (new scans): one notification,
+    // in its own slot, replaced rather than piled up.
+    final _Phone first = knockers.first;
+    for (int i = 0; i < 3; i++) {
+      await first.service.scanDoor(ania.service.doorCode!);
+      await ania.service.rejectKnock(first.service.profile!.key);
+    }
+    expect(rings(), hasLength(1));
+    expect(rings().single.slotKey, 'flat-knock:${first.service.profile!.key}');
+
+    // Many flats: no more than kKnockRingsPerHour an hour; the knocks still
+    // wait in the list.
+    for (final _Phone k in knockers.skip(1)) {
+      await k.service.scanDoor(ania.service.doorCode!);
+    }
+    expect(rings(), hasLength(kKnockRingsPerHour));
+    expect(ania.service.knocks, hasLength(knockers.length - 1));
+    expect(
+      rings().map((RuntimeSystemNotification n) => n.id).toSet(),
+      hasLength(kKnockRingsPerHour),
+    );
+
+    // An hour later, a knock rings again.
+    ania.clock += 3600 * 1000;
+    await first.service.scanDoor(ania.service.doorCode!);
+    expect(rings(), hasLength(kKnockRingsPerHour + 1));
   });
 
   test('the small chat about an invitation stays on its thread', () async {
@@ -354,7 +604,9 @@ void main() {
     await bartek.service.createFlat('Bartkowie, m. 14');
     await cyryl.service.createFlat('Cyryl, m. 3');
     expect(ania.service.hasFlat, isTrue);
-    expect(ania.service.profile!.members, <String>[ania.address]);
+    expect(ania.service.profile!.members, <String, String>{
+      _rk(ania): ania.inbox!,
+    });
 
     final FlatDoorCode door = ania.service.doorCode!;
     expect(await ania.service.scanDoor(door), FlatScan.own);
@@ -437,13 +689,15 @@ void main() {
 
       // Ola scans Ania's home code.
       expect(await ola.service.joinFlat(ania.service.homeCode!), isTrue);
+      await _settle();
       expect(ola.service.hasFlat, isTrue);
       expect(ola.service.joining, isFalse);
       expect(ola.service.profile!.key, ania.service.profile!.key);
-      expect(ania.service.profile!.members, <String>[
-        ania.address,
-        ola.address,
-      ]);
+      // Each resident with the door of its phone, never the phone.
+      expect(ania.service.profile!.members, <String, String>{
+        _rk(ania): ania.inbox!,
+        _rk(ola): ola.inbox!,
+      });
       expect(
         ola.service.profile!.of(FlatItemKind.offer).single.text,
         'Pożyczę drabinę',
@@ -498,7 +752,7 @@ void main() {
       // Ola leaves; Ania keeps the flat.
       await ola.service.leaveFlat();
       expect(ola.service.hasFlat, isFalse);
-      expect(ania.service.profile!.members, <String>[ania.address]);
+      expect(ania.service.profile!.members.keys, <String>[_rk(ania)]);
     },
   );
 
@@ -506,27 +760,38 @@ void main() {
       'ignored', () async {
     final Map<String, _Phone> net = <String, _Phone>{};
     final _Phone ania = _Phone(net, 'ania');
+    final _Phone ola = _Phone(net, 'ola');
     final _Phone dorota = _Phone(net, 'dorota');
     final _Phone eve = _Phone(net, 'eve');
     await ania.service.createFlat('Nowakowie, m. 12');
+    await ola.service.joinFlat(ania.service.homeCode!);
     await dorota.service.createFlat('Dorota, m. 7');
     await eve.service.createFlat('Eve, m. 1');
+    await _settle();
 
     final FlatDoorCode old = ania.service.doorCode!;
     final String? oldKey = ania.service.doorKey;
+    final String olaDoor = ola.inbox!;
     await ania.service.newDoor();
-    // A new code is a new door: new key, new address.
+    await _settle();
+    // A new code is a new door: new key, new address, for every resident;
+    // the profile names the new doors.
     expect(ania.service.doorKey, isNot(oldKey));
     expect(ania.service.doorCode!.inbox, isNot(old.inbox));
+    expect(ola.inbox, isNot(olaDoor));
+    expect(ania.service.profile!.members, <String, String>{
+      _rk(ania): ania.inbox!,
+      _rk(ola): ola.inbox!,
+    });
+    expect(ola.service.profile!.members, ania.service.profile!.members);
     await dorota.service.scanDoor(old);
     // The old door's address answers no more: nothing reaches Ania.
     expect(dorota.service.neighbors, isEmpty);
     expect(dorota.service.pending.keys, <String>[old.key]);
     expect(ania.service.neighbors, isEmpty);
 
-    // A knock at the live door with a wrong token gets no answer: one from
-    // Ania's phone would tell whose door it is.
-    final int before = ania.sent.length;
+    // A knock at the live door with a wrong token gets no answer.
+    final int before = ania.sent.length + ania.doorSent.length;
     await dorota.service.scanDoor(
       FlatDoorCode(
         key: old.key,
@@ -535,34 +800,16 @@ void main() {
         name: old.name,
       ),
     );
-    expect(ania.sent.length, before);
+    await _settle();
+    expect(ania.sent.length + ania.doorSent.length, before);
     expect(ania.service.neighbors, isEmpty);
     expect(dorota.service.staleDoors, isEmpty);
-
-    // The door takes knocks only.
-    expect(
-      await ania.service.handle(
-        SignalTransportFrame(
-          from: eve.address,
-          payload: <String, dynamic>{
-            'type': FlatTypes.get,
-            'f': eve.service.profile!.key,
-            'to': ania.service.profile!.key,
-            'b': <String, dynamic>{},
-            's': 'AAAA',
-          },
-          receivedAtMillis: 0,
-          door: true,
-        ),
-      ),
-      isFalse,
-    );
 
     // Eve was never let in: her messages, sign-ups and profiles are dropped.
     final String ownKey = ania.service.profile!.key;
     await ania.service.handle(
       SignalTransportFrame(
-        from: eve.address,
+        from: eve.inbox!,
         payload: <String, dynamic>{
           'type': FlatTypes.message,
           'f': eve.service.profile!.key,
@@ -571,6 +818,7 @@ void main() {
           's': 'AAAA',
         },
         receivedAtMillis: 0,
+        door: true,
       ),
     );
     expect(ania.service.messagesWith(eve.service.profile!.key), isEmpty);
@@ -583,13 +831,13 @@ void main() {
           'type': FlatTypes.join,
           'f': ownKey,
           'to': ownKey,
-          'b': <String, dynamic>{'a': eve.address},
+          'b': <String, dynamic>{'a': eve.address, 'rk': _rk(eve)},
           's': base64Url.encode(List<int>.filled(64, 1)),
         },
         receivedAtMillis: 0,
       ),
     );
-    expect(ania.service.profile!.members, <String>[ania.address]);
+    expect(ania.service.profile!.members, hasLength(2));
   });
 
   test('an invitation goes over Bluetooth to people nearby and turns into '
@@ -650,6 +898,7 @@ void main() {
     expect(ania.service.doorCode!.name, 'Nowakowie · m. 12');
     await ola.service.joinFlat(ania.service.homeCode!);
     await bartek.service.createFlat('Bartkowie', place: 'm. 14');
+    await _settle();
     final FlatDoorCode oldDoor = ania.service.doorCode!;
     await bartek.service.scanDoor(oldDoor);
     await ania.service.addItem(FlatItemKind.offer, 'Pożyczę drabinę');
@@ -658,6 +907,7 @@ void main() {
 
     ania.clock += 100;
     await ania.service.moveOut(newPlace: 'Lipowa 3/7');
+    await _settle();
     final FlatProfile moved = ania.service.profile!;
     expect(moved.name, 'Nowakowie');
     expect(moved.place, 'Lipowa 3/7');
@@ -696,9 +946,14 @@ void main() {
     for (final _Phone p in others) {
       expect(await p.service.joinFlat(first.service.homeCode!), isTrue);
     }
+    await _settle();
     expect(first.service.profile!.members, hasLength(13));
     expect(others.last.service.profile!.members, hasLength(13));
     expect(others.last.service.hasFlat, isTrue);
+    // Every resident's door made it into the profile everyone holds.
+    expect(first.service.profile!.members.values.toSet(), <String>{
+      for (final _Phone p in <_Phone>[first, ...others]) p.inbox!,
+    });
   });
 
   test('the state survives a restart', () async {
@@ -710,15 +965,12 @@ void main() {
     await bartek.service.scanDoor(ania.service.doorCode!);
     await bartek.service.sendMessage(ania.service.profile!.key, 'hej');
 
-    final NeighborsService again = NeighborsService(
-      host: ania,
-      disk: ania.disk,
-      now: () => ania.clock,
-    );
+    final NeighborsService again = ania.restarted();
     await again.load();
     expect(again.hasFlat, isTrue);
     expect(again.profile!.name, 'Nowakowie');
     expect(again.door, ania.service.door);
+    expect(again.residentKey, ania.service.residentKey);
     expect(again.neighbors.single.profile.name, 'Bartkowie');
     expect(again.messagesWith(bartek.service.profile!.key).single.text, 'hej');
     // Still signs as the same flat.
@@ -765,14 +1017,25 @@ void main() {
     final Map<String, dynamic> huge = seen.toJson()
       ..['ph'] = 'A' * (FlatProfile.maxPhotoChars + 4);
     expect(FlatProfile.fromJson(huge), isNull);
-    // So is a list of residents' phones long enough to make other phones
-    // send to addresses its maker picked.
+    // So is a list of residents long enough to make other phones send to
+    // doors its maker picked.
     final Map<String, dynamic> crowded = seen.toJson()
-      ..['m'] = <String>[
+      ..['m'] = <String, String>{
         for (int i = 0; i <= FlatProfile.maxMembers; i++)
-          addr(i.toRadixString(16)),
-      ];
+          b64(List<int>.filled(32, i)): addr(i.toRadixString(16)),
+      };
     expect(FlatProfile.fromJson(crowded), isNull);
+    // A resident that is not a key, or a door that is not an address, is
+    // left out.
+    final Map<String, dynamic> odd = seen.toJson()
+      ..['m'] = <String, String>{
+        'nope': addr('1'),
+        b64(List<int>.filled(32, 1)): 'not an address',
+        b64(List<int>.filled(32, 2)): addr('2'),
+      };
+    expect(FlatProfile.fromJson(odd)!.members, <String, String>{
+      b64(List<int>.filled(32, 2)): addr('2'),
+    });
 
     expect(await ania.service.setPhoto(null), isTrue);
     expect(ania.service.profile!.photo, isEmpty);
@@ -789,11 +1052,12 @@ void main() {
     await ania.service.createFlat('Nowakowie', place: 'm. 12');
     await ola.service.joinFlat(ania.service.homeCode!);
     await tomek.service.joinFlat(ania.service.homeCode!);
+    await _settle();
     expect(ania.service.profile!.members, hasLength(3));
     // Housemates know each other's names (neighbours do not).
-    expect(ola.service.residentName(ania.address), 'ania');
-    expect(ania.service.residentName(tomek.address), 'tomek');
-    expect(tomek.service.residentName(ola.address), 'ola');
+    expect(ola.service.residentName(_rk(ania)), 'ania');
+    expect(ania.service.residentName(_rk(tomek)), 'tomek');
+    expect(tomek.service.residentName(_rk(ola)), 'ola');
 
     await bartek.service.createFlat('Bartkowie');
     await bartek.service.scanDoor(ania.service.doorCode!);
@@ -803,44 +1067,45 @@ void main() {
     expect(ola.service.messagesWith(bartek.service.profile!.key), hasLength(1));
 
     // Nobody removes themselves this way, or a stranger.
-    expect(await tomek.service.voteRemove(tomek.address), isFalse);
-    expect(await ania.service.voteRemove(bartek.address), isFalse);
+    expect(await tomek.service.voteRemove(_rk(tomek)), isFalse);
+    expect(await ania.service.voteRemove(_rk(bartek)), isFalse);
 
     // One vote of two needed.
-    expect(ania.service.votesNeeded(tomek.address), 2);
-    expect(await ania.service.voteRemove(tomek.address), isTrue);
+    expect(ania.service.votesNeeded(_rk(tomek)), 2);
+    expect(await ania.service.voteRemove(_rk(tomek)), isTrue);
     expect(ania.service.profile!.key, oldKey);
-    expect(ola.service.votesFor(tomek.address), <String>{ania.address});
+    expect(ola.service.votesFor(_rk(tomek)), <String>{_rk(ania)});
     expect(ola.shown.last.title, 'Domownicy chcą odłączyć telefon');
     expect(
-      tomek.service.votesFor(tomek.address),
+      tomek.service.votesFor(_rk(tomek)),
       isEmpty,
       reason: 'the phone being removed is not asked',
     );
     // Taking the vote back, and voting again.
-    await ania.service.withdrawVote(tomek.address);
-    expect(ola.service.votesFor(tomek.address), isEmpty);
-    await ania.service.voteRemove(tomek.address);
+    await ania.service.withdrawVote(_rk(tomek));
+    expect(ola.service.votesFor(_rk(tomek)), isEmpty);
+    await ania.service.voteRemove(_rk(tomek));
 
     // The second vote decides.
-    await ola.service.voteRemove(tomek.address);
+    await ola.service.voteRemove(_rk(tomek));
+    await _settle();
     final FlatProfile now = ania.service.profile!;
     expect(now.key, isNot(oldKey));
-    expect(now.members, unorderedEquals(<String>[ania.address, ola.address]));
+    expect(now.members.keys, unorderedEquals(<String>[_rk(ania), _rk(ola)]));
     expect(await now.verify(), isTrue);
     expect(ola.service.profile!.key, now.key);
     expect(ola.service.homeCode!.seed, ania.service.homeCode!.seed);
     expect(ania.service.door, isNot(oldDoor));
     expect(ola.service.door, ania.service.door);
-    expect(ania.service.votesFor(tomek.address), isEmpty);
-    expect(ania.service.residentName(tomek.address), isEmpty);
+    expect(ania.service.votesFor(_rk(tomek)), isEmpty);
+    expect(ania.service.residentName(_rk(tomek)), isEmpty);
     // Tomek is left with the old key only.
     expect(tomek.service.profile!.key, oldKey);
 
-    // The neighbour follows, messages and all.
+    // The neighbour follows, messages and all, and learns the new doors.
     final NeighborFlat atBartek = bartek.service.neighbors.single;
     expect(atBartek.key, now.key);
-    expect(atBartek.profile.members, hasLength(2));
+    expect(atBartek.profile.members.keys, hasLength(2));
     expect(bartek.service.messagesWith(now.key), hasLength(1));
     expect(bartek.shown.last.title, 'Nowakowie: zmiana domowników');
 
@@ -850,6 +1115,7 @@ void main() {
     expect(bartek.service.neighbors, hasLength(1));
 
     // The remaining two carry on with the new key.
+    await bartek.service.refresh(now.key);
     await bartek.service.sendMessage(now.key, 'cześć');
     expect(
       ania.service.messagesWith(bartek.service.profile!.key),
@@ -863,11 +1129,7 @@ void main() {
       isNot(contains('cześć')),
     );
     // A restart keeps the new key.
-    final NeighborsService again = NeighborsService(
-      host: ola,
-      disk: ola.disk,
-      now: () => ola.clock,
-    );
+    final NeighborsService again = ola.restarted();
     await again.load();
     expect(again.profile!.key, now.key);
   });
@@ -878,11 +1140,12 @@ void main() {
     final _Phone tomek = _Phone(net, 'tomek');
     await ania.service.createFlat('Mieszkanie');
     await tomek.service.joinFlat(ania.service.homeCode!);
+    await _settle();
     final String oldKey = ania.service.profile!.key;
-    expect(ania.service.votesNeeded(tomek.address), 1);
-    await ania.service.voteRemove(tomek.address);
+    expect(ania.service.votesNeeded(_rk(tomek)), 1);
+    await ania.service.voteRemove(_rk(tomek));
     expect(ania.service.profile!.key, isNot(oldKey));
-    expect(ania.service.profile!.members, <String>[ania.address]);
+    expect(ania.service.profile!.members.keys, <String>[_rk(ania)]);
     expect(tomek.service.profile!.key, oldKey);
   });
 
@@ -894,6 +1157,7 @@ void main() {
     final _Phone bartek = _Phone(net, 'bartek');
     await ania.service.createFlat('Nowakowie');
     await ola.service.joinFlat(ania.service.homeCode!);
+    await _settle();
     await bartek.service.createFlat('Bartkowie');
     await bartek.service.scanDoor(ania.service.doorCode!);
     final String aniaKey = ania.service.profile!.key;
@@ -910,6 +1174,7 @@ void main() {
     final FlatReveal r = bartek.service.revealsFrom(aniaKey).single;
     expect(r.name, 'ania');
     expect(r.address, ania.address);
+    expect(r.resident, _rk(ania));
     expect(bartek.shown.last.title, 'Nowakowie: ania pokazuje swój profil');
 
     // Again: no duplicate; Ola too.
@@ -921,12 +1186,25 @@ void main() {
     );
     // Not to strangers.
     expect(await ania.service.revealMyProfile('nieznany'), isFalse);
-
-    final NeighborsService again = NeighborsService(
-      host: bartek,
-      disk: bartek.disk,
-      now: () => bartek.clock,
+    // Only the phone itself shows its own account: Ola cannot pass Ania's
+    // address off as hers.
+    final Map<String, dynamic> forged = Map<String, dynamic>.from(
+      ola.sent.last,
     );
+    await bartek.service.handle(
+      SignalTransportFrame(
+        from: ania.address,
+        payload: forged,
+        receivedAtMillis: 0,
+        door: true,
+      ),
+    );
+    expect(
+      bartek.service.revealsFrom(aniaKey).map((FlatReveal x) => x.address),
+      unorderedEquals(<String>[ania.address, ola.address]),
+    );
+
+    final NeighborsService again = bartek.restarted();
     await again.load();
     expect(again.revealsFrom(aniaKey), hasLength(2));
   });
@@ -941,17 +1219,14 @@ void main() {
     await ania.service.createFlat('Nowakowie', place: 'm. 12');
     await ola.service.joinFlat(ania.service.homeCode!);
     await tomek.service.joinFlat(ania.service.homeCode!);
+    await _settle();
     await bartek.service.createFlat('Bartkowie');
     await bartek.service.scanDoor(ania.service.doorCode!);
     final String oldKey = ania.service.profile!.key;
     // Bartek learnt each resident's own key with their profile.
     expect(
       bartek.service.neighbors.single.residents.keys,
-      unorderedEquals(<String>[ania.address, ola.address, tomek.address]),
-    );
-    expect(
-      bartek.service.neighbors.single.residents[tomek.address]!.key,
-      tomek.service.residentKey,
+      unorderedEquals(<String>[_rk(ania), _rk(ola), _rk(tomek)]),
     );
     for (final _Phone p in <_Phone>[ania, ola, tomek, bartek]) {
       p.clock += 2 * _day;
@@ -961,19 +1236,19 @@ void main() {
     // Ania", signed with the old flat key and his own resident key.
     final LedgerKeyPair fakeKey = await LedgerKeyPair.generate();
     final FlatProfile fake = await _fakeProfile(tomek, fakeKey, <String>[
-      ola.address,
-      tomek.address,
+      _rk(ola),
+      _rk(tomek),
     ]);
     final Map<String, dynamic> asHimself = <String, dynamic>{
       'p': fake.toJson(),
-      'a': ania.address,
-      'by': tomek.address,
+      'a': _rk(ania),
+      'by': _rk(tomek),
       'bs': (await tomek.service.residentSign(
-        flatNewKeyBytes(oldKey, fakeKey.id, ania.address),
+        flatNewKeyBytes(oldKey, fakeKey.id, _rk(ania)),
       ))!,
       'v': <String, String>{
-        tomek.address: (await tomek.service.residentSign(
-          flatKickBytes(oldKey, ania.address),
+        _rk(tomek): (await tomek.service.residentSign(
+          flatKickBytes(oldKey, _rk(ania)),
         ))!,
       },
     };
@@ -992,11 +1267,11 @@ void main() {
       to: bartek,
       body: <String, dynamic>{
         ...asHimself,
-        'by': ola.address,
+        'by': _rk(ola),
         'v': <String, String>{
           ...asHimself['v'] as Map<String, String>,
-          ola.address: (await tomek.service.residentSign(
-            flatKickBytes(oldKey, ania.address),
+          _rk(ola): (await tomek.service.residentSign(
+            flatKickBytes(oldKey, _rk(ania)),
           ))!,
         },
       },
@@ -1005,15 +1280,16 @@ void main() {
     expect(bartek.service.keyRival(oldKey), isNull);
 
     // The real vote: Ania and Ola remove Tomek.
-    await ania.service.voteRemove(tomek.address);
-    await ola.service.voteRemove(tomek.address);
+    await ania.service.voteRemove(_rk(tomek));
+    await ola.service.voteRemove(_rk(tomek));
+    await _settle();
     final FlatProfile now = ania.service.profile!;
     expect(now.key, isNot(oldKey));
     final NeighborFlat atBartek = bartek.service.neighbors.single;
     expect(atBartek.key, now.key);
     expect(
-      atBartek.profile.members,
-      unorderedEquals(<String>[ania.address, ola.address]),
+      atBartek.profile.members.keys,
+      unorderedEquals(<String>[_rk(ania), _rk(ola)]),
     );
     expect(bartek.service.keyRival(now.key), isNull);
     expect(bartek.shown.last.title, 'Nowakowie: zmiana domowników');
@@ -1022,6 +1298,7 @@ void main() {
     await _raceNewKey(from: tomek, oldKey: oldKey, to: bartek, body: asHimself);
     expect(bartek.service.neighbors.single.key, now.key);
     expect(bartek.service.keyRival(now.key), isNull);
+    await bartek.service.refresh(now.key);
     await bartek.service.sendMessage(now.key, 'cześć');
     expect(ola.service.messagesWith(bartek.service.profile!.key), hasLength(1));
     expect(tomek.service.messagesWith(bartek.service.profile!.key), isEmpty);
@@ -1037,6 +1314,7 @@ void main() {
       final _Phone bartek = _Phone(net, 'bartek');
       await ania.service.createFlat('Mieszkanie', place: 'm. 3');
       await tomek.service.joinFlat(ania.service.homeCode!);
+      await _settle();
       await bartek.service.createFlat('Bartkowie');
       await bartek.service.scanDoor(ania.service.doorCode!);
       final String oldKey = ania.service.profile!.key;
@@ -1049,7 +1327,7 @@ void main() {
       // on its own it checks out.
       final LedgerKeyPair fakeKey = await LedgerKeyPair.generate();
       final FlatProfile fake = await _fakeProfile(tomek, fakeKey, <String>[
-        tomek.address,
+        _rk(tomek),
       ]);
       await _raceNewKey(
         from: tomek,
@@ -1057,14 +1335,14 @@ void main() {
         to: bartek,
         body: <String, dynamic>{
           'p': fake.toJson(),
-          'a': ania.address,
-          'by': tomek.address,
+          'a': _rk(ania),
+          'by': _rk(tomek),
           'bs': (await tomek.service.residentSign(
-            flatNewKeyBytes(oldKey, fakeKey.id, ania.address),
+            flatNewKeyBytes(oldKey, fakeKey.id, _rk(ania)),
           ))!,
           'v': <String, String>{
-            tomek.address: (await tomek.service.residentSign(
-              flatKickBytes(oldKey, ania.address),
+            _rk(tomek): (await tomek.service.residentSign(
+              flatKickBytes(oldKey, _rk(ania)),
             ))!,
           },
         },
@@ -1072,7 +1350,8 @@ void main() {
       expect(bartek.service.neighbors.single.key, fakeKey.id);
 
       // Then Ania's real one comes: the first is not taken silently.
-      await ania.service.voteRemove(tomek.address);
+      await ania.service.voteRemove(_rk(tomek));
+      await _settle();
       final String real = ania.service.profile!.key;
       expect(real, isNot(oldKey));
       expect(bartek.service.neighbors, hasLength(1));
@@ -1089,11 +1368,7 @@ void main() {
       await bartek.service.sendMessage(real, 'dzień dobry');
       expect(ania.service.messagesWith(bartekKey), hasLength(1));
       // It stays settled after a restart.
-      final NeighborsService again = NeighborsService(
-        host: bartek,
-        disk: bartek.disk,
-        now: () => bartek.clock,
-      );
+      final NeighborsService again = bartek.restarted();
       await again.load();
       expect(again.neighbors.single.key, real);
       expect(again.keyRival(real), isNull);

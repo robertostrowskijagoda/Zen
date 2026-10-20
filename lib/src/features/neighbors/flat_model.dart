@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/features/neighbors/flat_door_mail.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -123,7 +124,9 @@ final class FlatItem {
 /// family or any group living together — in the flat where it lives now,
 /// not to the flat itself. When they move out, the new tenants start their
 /// own from scratch. Signed with the household's own key, which every
-/// resident holds. Residents' main profiles are not in it.
+/// resident holds. Residents' main profiles are not in it, nor their
+/// addresses: each resident is a key of its own and the door its phone
+/// runs (§18.2).
 @immutable
 final class FlatProfile {
   const FlatProfile({
@@ -141,9 +144,9 @@ final class FlatProfile {
   /// Longest photo accepted in a profile (base64 characters).
   static const int maxPhotoChars = 100 * 1024;
 
-  /// Most residents' phones a profile may name: everything for a flat
-  /// goes to each of them, so a longer list would make other phones send
-  /// to addresses the profile's maker picked.
+  /// Most residents a profile may name: everything for a flat goes to each
+  /// one's door, so a longer list would make other phones send to
+  /// addresses the profile's maker picked.
   static const int maxMembers = 32;
 
   /// The household's public key (its identity).
@@ -162,9 +165,26 @@ final class FlatProfile {
   /// One photo of the household (a small JPEG, base64; '' = none).
   final String photo;
 
-  /// Where the residents' phones can be reached (only to deliver messages
-  /// for the flat; nothing ties them to the residents' accounts).
-  final List<String> members;
+  /// The residents: each one's own resident key (Ed25519, base64url; votes
+  /// and the "new key" notice are signed with it, §18.1) → the address of
+  /// the door that resident's phone runs ('' until it runs). Everything for
+  /// the flat goes to these doors, from door to door; a resident's own
+  /// address is not here (only "Pokaż mój profil" shows it).
+  final Map<String, String> members;
+
+  /// The doors to send to.
+  Iterable<String> get doors =>
+      members.values.where((String d) => d.isNotEmpty);
+
+  /// The resident whose door is [door], or `null`.
+  String? residentAt(String door) {
+    for (final MapEntry<String, String> e in members.entries) {
+      if (e.value.isNotEmpty && e.value == door) {
+        return e.key;
+      }
+    }
+    return null;
+  }
 
   /// Grows with every change; the higher one wins.
   final int rev;
@@ -210,7 +230,7 @@ final class FlatProfile {
     String? place,
     String? about,
     List<FlatItem>? items,
-    List<String>? members,
+    Map<String, String>? members,
     int? rev,
     String? photo,
     String? key,
@@ -268,7 +288,7 @@ final class FlatProfile {
     final Object? place = json['pl'];
     final Object? photo = json['ph'];
     if ((photo is String && photo.length > maxPhotoChars) ||
-        (members is List && members.length > maxMembers)) {
+        (members is Map && members.length > maxMembers)) {
       return null;
     }
     return FlatProfile(
@@ -285,11 +305,17 @@ final class FlatProfile {
           for (final Object? i in items.take(60))
             if (FlatItem.fromJson(i) != null) FlatItem.fromJson(i)!,
       ],
-      members: <String>[
-        if (members is List)
-          for (final String m in members.whereType<String>())
-            PeerShareCodec.normalizeAddress(m),
-      ],
+      members: <String, String>{
+        if (members is Map)
+          for (final MapEntry<dynamic, dynamic> m in members.entries)
+            if (unb64(m.key, length: 32) != null &&
+                m.value is String &&
+                ((m.value as String).isEmpty ||
+                    isRoutablePeerAddress(m.value as String)))
+              m.key as String: (m.value as String).isEmpty
+                  ? ''
+                  : PeerShareCodec.normalizeAddress(m.value as String),
+      },
       rev: json['r'] as int,
       photo: photo is String ? photo : '',
       signature: json['s'] is String ? json['s'] as String : '',
@@ -301,10 +327,15 @@ final class FlatProfile {
 /// (a new QR makes the old one useless), the name and where to knock.
 ///
 /// Where to knock is the flat's door: a node of its own with a random key
-/// that one resident's phone runs next to its own node (door_node.go in
-/// the bridge). It is nobody's identity, so a stranger who walks past the
-/// sticker does not learn who lives there; "Nowy kod" gives the door a new
-/// key and so a new address.
+/// that one resident's phone runs beside its own node, never peered with it
+/// (door_node.go in the bridge). It is nobody's identity, so a stranger who
+/// walks past the sticker does not learn who lives there; "Nowy kod" gives
+/// the door a new key and so a new address.
+///
+/// While that phone is offline, knocks go sealed to the flat's mailbox doors
+/// ([mail], flat_door_mail.dart): run by the friends who keep the phone's
+/// offline mailboxes, named by addresses that say nothing about who they
+/// are.
 @immutable
 final class FlatDoorCode {
   const FlatDoorCode({
@@ -312,6 +343,7 @@ final class FlatDoorCode {
     required this.door,
     required this.inbox,
     required this.name,
+    this.mail,
   });
 
   final String key;
@@ -322,6 +354,10 @@ final class FlatDoorCode {
   /// Where to knock: the address of the flat's door.
   final String inbox;
   final String name;
+
+  /// The mailbox doors and the key knocks for them are sealed to; `null`
+  /// before the phone has worked them out.
+  final FlatMailDoor? mail;
 
   static const int currentVersion = 3;
 
@@ -342,6 +378,7 @@ final class FlatDoorCode {
             'd': door,
             'a': inbox,
             'n': name,
+            ...?mail?.toJson(),
           }),
         ),
       )
@@ -397,6 +434,7 @@ final class FlatDoorCode {
       door: json['d'] as String,
       inbox: PeerShareCodec.normalizeAddress(inbox),
       name: name.length > 150 ? name.substring(0, 150) : name,
+      mail: FlatMailDoor.read(json['s'], json['x']),
     );
   }
 }
@@ -444,14 +482,15 @@ final class FlatHomeCode {
   }
 }
 
-/// What a resident signs (with their own resident key) to vote the phone
-/// [target] out of the household [flatKey] (§18.1).
+/// What a resident signs (with their own resident key) to vote the
+/// resident [target] (their resident key) out of the household [flatKey]
+/// (§18.1).
 Uint8List flatKickBytes(String flatKey, String target) => canonicalJsonBytes(
   <String, dynamic>{'t': 'zen_flat_kick', 'f': flatKey, 'a': target},
 );
 
 /// What the resident who made a household's new key signs for neighbours:
-/// "[oldKey] is now [newKey], without [target]".
+/// "[oldKey] is now [newKey], without the resident [target]".
 Uint8List flatNewKeyBytes(String oldKey, String newKey, String target) =>
     canonicalJsonBytes(<String, dynamic>{
       't': 'zen_flat_newkey',
@@ -460,45 +499,31 @@ Uint8List flatNewKeyBytes(String oldKey, String newKey, String target) =>
       'a': target,
     });
 
-/// A resident's own key as a neighbour learned it (§18.3): from the flat's
-/// own profile message, pinned the first time and never replaced.
-@immutable
-final class FlatPin {
-  const FlatPin({required this.key, required this.since});
+/// What a resident signs (with their own resident key) to show a
+/// neighbour flat [to] their own account at [address] under [name] ("Pokaż
+/// mój profil", §18.1).
+Uint8List flatRevealBytes(
+  String flatKey,
+  String to,
+  String address,
+  String name,
+) => canonicalJsonBytes(<String, dynamic>{
+  't': 'zen_flat_reveal',
+  'f': flatKey,
+  'to': to,
+  'a': address,
+  'n': name,
+});
 
-  /// The resident's public key (Ed25519, base64url).
-  final String key;
-
-  /// When this phone learned it.
-  final int since;
-
-  Map<String, dynamic> toJson() => <String, dynamic>{'k': key, 't': since};
-
-  static FlatPin? fromJson(Object? json) {
-    if (json is! Map ||
-        unb64(json['k'], length: 32) == null ||
-        json['t'] is! int) {
-      return null;
-    }
-    return FlatPin(key: json['k'] as String, since: json['t'] as int);
-  }
-}
-
-/// Pinned resident keys from JSON (phone address → pin).
-Map<String, FlatPin> flatPinsFromJson(Object? json) => <String, FlatPin>{
+/// Residents' own keys as a neighbour learned them (§18.3), from the flat's
+/// profile: resident key → when this phone first saw it (kept, never
+/// replaced).
+Map<String, int> flatPinsFromJson(Object? json) => <String, int>{
   if (json is Map)
     for (final MapEntry<dynamic, dynamic> e in json.entries)
-      if (e.key is String && FlatPin.fromJson(e.value) != null)
-        PeerShareCodec.normalizeAddress(e.key as String): FlatPin.fromJson(
-          e.value,
-        )!,
+      if (unb64(e.key, length: 32) != null && e.value is int)
+        e.key as String: e.value as int,
 };
-
-Map<String, dynamic> flatPinsToJson(Map<String, FlatPin> pins) =>
-    <String, dynamic>{
-      for (final MapEntry<String, FlatPin> e in pins.entries)
-        e.key: e.value.toJson(),
-    };
 
 /// A neighbour's flat on "Moi sąsiedzi" (§18.3).
 final class NeighborFlat {
@@ -509,9 +534,9 @@ final class NeighborFlat {
     this.scannedUs = false,
     this.following = true,
     Set<String>? seenItems,
-    Map<String, FlatPin>? residents,
+    Map<String, int>? residents,
   }) : seenItems = seenItems ?? <String>{},
-       residents = residents ?? <String, FlatPin>{};
+       residents = residents ?? <String, int>{};
 
   FlatProfile profile;
   final int addedAt;
@@ -528,9 +553,9 @@ final class NeighborFlat {
   /// Item ids already announced (so a profile update rings only for news).
   final Set<String> seenItems;
 
-  /// The residents' own keys (phone address → pin), used to check a new
-  /// household key (§18.1).
-  final Map<String, FlatPin> residents;
+  /// The residents' own keys and when this phone first saw each, used to
+  /// check a new household key (§18.1).
+  final Map<String, int> residents;
 
   String get key => profile.key;
 
@@ -541,7 +566,7 @@ final class NeighborFlat {
     if (scannedUs) 'su': true,
     if (!following) 'mute': true,
     'seen': seenItems.toList(),
-    if (residents.isNotEmpty) 'rk': flatPinsToJson(residents),
+    if (residents.isNotEmpty) 'rk': residents,
   };
 
   static NeighborFlat? fromJson(Object? json) {
@@ -586,11 +611,13 @@ final class FlatKeySwitch {
   final String oldKey;
   final String name;
 
-  /// The residents' phones and pinned keys before the change.
-  final List<String> members;
-  final Map<String, FlatPin> pins;
+  /// The residents (resident key → door) and the keys pinned before the
+  /// change.
+  final Map<String, String> members;
+  final Map<String, int> pins;
 
-  /// The key followed now, which phones it removed, and who made it.
+  /// The key followed now, which residents it removed, and who made it
+  /// (resident keys).
   String newKey;
   Set<String> removed;
   String by;
@@ -606,7 +633,7 @@ final class FlatKeySwitch {
     'o': oldKey,
     'n': name,
     'm': members,
-    'rk': flatPinsToJson(pins),
+    'rk': pins,
     'k': newKey,
     'rm': removed.toList(),
     'by': by,
@@ -622,27 +649,29 @@ final class FlatKeySwitch {
         json['k'] is! String ||
         json['by'] is! String ||
         json['at'] is! int ||
-        json['m'] is! List ||
+        json['m'] is! Map ||
         json['rm'] is! List) {
       return null;
     }
-    Set<String> addresses(Object? list) => <String>{
-      if (list is List)
-        for (final String a in list.whereType<String>())
-          PeerShareCodec.normalizeAddress(a),
+    Set<String> keys(Object? list) => <String>{
+      if (list is List) ...list.whereType<String>(),
     };
     final Object? name = json['n'];
     return FlatKeySwitch(
       oldKey: json['o'] as String,
       name: name is String ? name : '',
-      members: addresses(json['m']).toList(),
+      members: <String, String>{
+        for (final MapEntry<dynamic, dynamic> e in (json['m'] as Map).entries)
+          if (e.key is String && e.value is String)
+            e.key as String: e.value as String,
+      },
       pins: flatPinsFromJson(json['rk']),
       newKey: json['k'] as String,
-      removed: addresses(json['rm']),
+      removed: keys(json['rm']),
       by: json['by'] as String,
       at: json['at'] as int,
       rival: FlatProfile.fromJson(json['rv']),
-      rivalRemoved: addresses(json['rvRm']),
+      rivalRemoved: keys(json['rvRm']),
       rivalBy: json['rvBy'] is String ? json['rvBy'] as String : '',
     );
   }
@@ -788,33 +817,39 @@ final class NearbyFlatInvite {
 
 /// Someone scanned our door and knocked (§18.2): nothing goes back to them
 /// until a resident lets them in, so the knock alone tells them nothing
-/// about who lives here.
+/// about who lives here. It came to the door, or while this phone was
+/// offline, sealed through the friends who run its mailbox doors.
 @immutable
 final class FlatKnock {
   const FlatKnock({
     required this.profile,
     required this.sender,
-    required this.roster,
     required this.at,
+    this.reply,
   });
 
-  /// The knocking flat's profile (signed, checked when it came).
+  /// The knocking flat's profile (signed, checked when it came); its
+  /// residents' keys are pinned when they are let in.
   final FlatProfile profile;
 
-  /// The phone that knocked.
+  /// The door that knocked (the knocker's phone's door, never its own
+  /// address).
   final String sender;
 
-  /// Their residents' own keys, pinned when they are let in.
-  final Map<String, String> roster;
+  /// When they knocked (a knock held by friends: when a friend took it).
   final int at;
+
+  /// The knocker's own mailbox doors: the answer after "Wpuść" waits there
+  /// too, if their phone is offline by then.
+  final FlatMailDoor? reply;
 
   String get key => profile.key;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'p': profile.toJson(),
     'a': sender,
-    'rk': roster,
     'at': at,
+    'ra': ?reply?.toJson(),
   };
 
   static FlatKnock? fromJson(Object? json) {
@@ -822,19 +857,13 @@ final class FlatKnock {
       return null;
     }
     final FlatProfile? profile = FlatProfile.fromJson(json['p']);
-    final Object? roster = json['rk'];
     return profile == null
         ? null
         : FlatKnock(
             profile: profile,
             sender: json['a'] as String,
-            roster: <String, String>{
-              if (roster is Map)
-                for (final MapEntry<dynamic, dynamic> e in roster.entries)
-                  if (e.key is String && e.value is String)
-                    e.key as String: e.value as String,
-            },
             at: json['at'] as int,
+            reply: FlatMailDoor.fromJson(json['ra']),
           );
   }
 }
@@ -847,6 +876,7 @@ final class FlatReveal {
     required this.flat,
     required this.name,
     required this.address,
+    required this.resident,
     required this.at,
   });
 
@@ -854,14 +884,19 @@ final class FlatReveal {
   final String flat;
   final String name;
 
-  /// Their own phone (the account's address).
+  /// Their own phone (the account's address): the only place a neighbour
+  /// learns it.
   final String address;
+
+  /// Their resident key in the flat's profile.
+  final String resident;
   final int at;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'f': flat,
     'n': name,
     'a': address,
+    'r': resident,
     'at': at,
   };
 
@@ -870,6 +905,7 @@ final class FlatReveal {
         json['f'] is! String ||
         json['n'] is! String ||
         json['a'] is! String ||
+        json['r'] is! String ||
         json['at'] is! int ||
         !isRoutablePeerAddress(json['a'] as String)) {
       return null;
@@ -879,6 +915,7 @@ final class FlatReveal {
       flat: json['f'] as String,
       name: n.length > 60 ? n.substring(0, 60) : n,
       address: PeerShareCodec.normalizeAddress(json['a'] as String),
+      resident: json['r'] as String,
       at: json['at'] as int,
     );
   }

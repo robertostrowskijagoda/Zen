@@ -44,15 +44,37 @@ final class SignalTransportFrame {
   final Map<String, dynamic> payload;
   final int receivedAtMillis;
 
-  /// It came to the flat's door address (a knock on the door sticker,
-  /// §18.2), not to this phone's own address. Such frames go only to the
-  /// neighbours section (`RuntimeNodeRuntime.doorFrames`), never to
-  /// [SignalTransport.frames].
+  /// It came to the flat's door address (a knock on the door sticker, or
+  /// a neighbour flat's frame, §18.2), not to this phone's own address. Such
+  /// frames go only to the neighbours section
+  /// (`RuntimeNodeRuntime.doorFrames`), never to [SignalTransport.frames].
   final bool door;
 }
 
-/// The only frame the flat's door takes: a knock (`flat_hello`, §18.2).
+/// A knock on the flat's door (`flat_hello`, §18.2).
 const String kFlatKnockType = 'flat_hello';
+
+/// The only frame a mailbox door (run for a friend) takes: a sealed knock
+/// (`flat_seal`, flat_door_mail.dart).
+const String kFlatSealType = 'flat_seal';
+
+/// The frames the doors take (door_node.go): at the flat's own door, knocks
+/// and everything between neighbour flats (`FlatTypes.viaDoor`); at a
+/// mailbox door, [kFlatSealType].
+const Set<String> kFlatDoorTypes = <String>{
+  kFlatKnockType,
+  'flat_nope',
+  'flat_profile',
+  'flat_get',
+  'flat_msg',
+  'flat_signup',
+  'flat_signup_ok',
+  'flat_moved',
+  'flat_newkey',
+  'flat_reveal',
+  'flat_ack',
+  kFlatSealType,
+};
 
 abstract interface class SignalTransport {
   Stream<SignalTransportFrame> get frames;

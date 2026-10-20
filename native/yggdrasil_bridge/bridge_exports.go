@@ -95,6 +95,8 @@ func YggStartNode(configJSON *C.char) *C.char {
 func YggStopNode(handle C.int) *C.char {
 	return withNode(handle, func(node *bridgeNode) *C.char {
 		node.stopDoor()
+		_, _ = node.setMailboxDoors(nil)
+		node.stopLocalLinks()
 		node.closeAllRelays()
 		node.stopLeafMonitor()
 		node.stopPeerProbeMonitor()
@@ -125,7 +127,7 @@ func YggGetNodeInfo(handle C.int) *C.char {
 //export YggGetPeersJson
 func YggGetPeersJson(handle C.int) *C.char {
 	return withNode(handle, func(node *bridgeNode) *C.char {
-		return responseOK(buildPeerJSON(node.meshPeers()))
+		return responseOK(buildPeerJSON(node.core.GetPeers()))
 	})
 }
 
@@ -330,8 +332,8 @@ func YggCloseRelay(handle C.int, callID *C.char) *C.char {
 
 // YggStartDoorNode runs the flat's door next to the node (door_node.go):
 // a second node with its own key (seedHex: a 32-byte ed25519 seed as hex,
-// kept by the app), peered to this one over loopback, that only takes
-// knocks. A door with another key is replaced; the same key keeps it.
+// kept by the app), never peered to this one, that takes and sends only
+// flat frames. A door with another key is replaced; the same key keeps it.
 //
 //export YggStartDoorNode
 func YggStartDoorNode(handle C.int, seedHex *C.char) *C.char {
@@ -350,6 +352,27 @@ func YggStopDoorNode(handle C.int) *C.char {
 	return withNode(handle, func(node *bridgeNode) *C.char {
 		node.stopDoor()
 		return responseOK(map[string]any{"stopped": true})
+	})
+}
+
+// YggSetMailboxDoorsJson runs exactly the mailbox doors (door_node.go) whose
+// keys seedsJson lists (a JSON array of 32-byte ed25519 seeds as hex): doors
+// this phone runs for friends whose own phone may be offline. Returns
+// {"addresses": {seed: address}}.
+//
+//export YggSetMailboxDoorsJson
+func YggSetMailboxDoorsJson(handle C.int, seedsJSON *C.char) *C.char {
+	return withNode(handle, func(node *bridgeNode) *C.char {
+		var seeds []string
+		if err := json.Unmarshal([]byte(C.GoString(seedsJSON)), &seeds); err != nil {
+			return responseError(err)
+		}
+		startPacketLoop(node)
+		addresses, err := node.setMailboxDoors(seeds)
+		if err != nil {
+			return responseError(err)
+		}
+		return responseOK(map[string]any{"addresses": addresses})
 	})
 }
 

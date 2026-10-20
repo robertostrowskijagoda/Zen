@@ -19,7 +19,6 @@ import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
 import 'package:zen/src/features/security/exported_files.dart';
-import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// The door sticker (§18.2): QR, the flat's name and a line of invitation.
 class FlatDoorScreen extends ConsumerStatefulWidget {
@@ -666,12 +665,10 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
               ZenSection(t('Telefony domowników'), top: 28),
               ZenGroup(
                 children: <Widget>[
-                  for (final String m in p.members)
+                  for (final String m in p.members.keys)
                     Builder(
                       builder: (BuildContext context) {
-                        final String own = PeerShareCodec.normalizeAddress(
-                          service.host.ownAddress(),
-                        );
+                        final String own = service.residentKey ?? '';
                         final String known = service.residentName(m);
                         final String name = m == own
                             ? t('Ten telefon')

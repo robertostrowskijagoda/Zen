@@ -12,7 +12,7 @@ import 'package:zen/src/core/utils/copy_with_cast.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
-import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
+import 'package:zen/src/features/runtime/local_link.dart';
 import 'package:zen/src/features/runtime/runtime_signal_codec.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/yggdrasil_bridge_ffi.dart';
@@ -260,6 +260,9 @@ final class RuntimeNodeSession {
     this.addPeer,
     this.startDoor,
     this.stopDoor,
+    this.setMailboxDoors,
+    this.sendFromDoor,
+    this.localLinks,
   });
 
   final SignalTransport transport;
@@ -273,6 +276,21 @@ final class RuntimeNodeSession {
   /// (§18.2, door_node.go in the bridge).
   final String? Function(String seedHex)? startDoor;
   final void Function()? stopDoor;
+
+  /// Runs exactly the mailbox doors with these keys (hex seeds) for friends
+  /// (flat_door_mail.dart, door_node.go).
+  final void Function(List<String> seedsHex)? setMailboxDoors;
+
+  /// Sends a flat frame from the flat's door, not from this node (§18.2,
+  /// door_node.go); throws without a running door.
+  final Future<void> Function(
+    String remoteAddress,
+    Map<String, dynamic> payload,
+  )?
+  sendFromDoor;
+
+  /// Direct links with devices nearby (local_link.dart).
+  final LocalLinkNodeApi? localLinks;
 }
 
 /// Platforms that ship the Go bridge (a DLL, a .so, or linked into the iOS
@@ -488,19 +506,50 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   final StreamController<SignalTransportFrame> _doorFrames =
       StreamController<SignalTransportFrame>.broadcast();
 
-  /// Knocks on the flat's door (§18.2), for the neighbours section only.
-  /// They never reach [frames]: nothing else in the app (the ledger, the
-  /// relay layer, friends, calls) may answer what came to the door, or the
-  /// answer would tell the knocker whose door it is.
+  /// What came to the flat's door and the mailbox doors (§18.2), for the
+  /// neighbours section only. It never reaches [frames]: nothing else in the
+  /// app (the ledger, the relay layer, friends, calls) may answer what came
+  /// to a door, or the answer would tell the sender whose door it is.
   Stream<SignalTransportFrame> get doorFrames => _doorFrames.stream;
 
   void _forward(SignalTransportFrame frame) {
+    final Object? type = frame.payload['type'];
     if (!frame.door) {
       _frames.add(frame);
-    } else if (frame.payload['type'] == kFlatKnockType) {
-      // The bridge lets only knocks through the door; anything else that
-      // claims to come from it is dropped here too.
+    } else if (kFlatDoorTypes.contains(type)) {
+      // The bridge lets only flat frames through the doors; anything else
+      // that claims to come from one is dropped here too.
       _doorFrames.add(frame);
+    }
+  }
+
+  /// Sends a flat frame from the flat's door (§18.2): what goes to
+  /// neighbour flats never carries this phone's own address. False while
+  /// no door runs.
+  Future<bool> sendFromDoor(
+    String remoteAddress,
+    Map<String, dynamic> payload,
+  ) async {
+    final Future<void> Function(String, Map<String, dynamic>)? send =
+        _session?.sendFromDoor;
+    if (send == null || _doorAddress == null) {
+      return false;
+    }
+    try {
+      await send(remoteAddress, payload);
+      return true;
+    } on Object catch (error) {
+      logZenWarning('Drzwi mieszkania nie wysłały: $error');
+      return false;
+    }
+  }
+
+  /// Hands [frame] to [frames] as if this node had just received it: what
+  /// the Android background service kept sealed while the app was locked
+  /// (§14.1), opened after unlock.
+  void replayReceived(SignalTransportFrame frame) {
+    if (!_frames.isClosed) {
+      _forward(frame);
     }
   }
 
@@ -567,6 +616,62 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       }
     }
     _setDoorAddress(address);
+  }
+
+  /// Keys (hex seeds) of the mailbox doors this phone runs for friends;
+  /// kept so they come back after the node restarts.
+  List<String> _mailboxSeeds = const <String>[];
+
+  /// Runs exactly the mailbox doors with the keys [seedsHex] (an empty list
+  /// stops them). Safe to call before the node is up.
+  void setMailboxDoorKeys(List<String> seedsHex) {
+    if (listEquals(seedsHex, _mailboxSeeds)) {
+      return;
+    }
+    _mailboxSeeds = List<String>.unmodifiable(seedsHex);
+    _applyMailboxDoorsNow();
+  }
+
+  void _applyMailboxDoorsNow() {
+    final RuntimeNodeSession? session = _session;
+    if (session == null) {
+      return;
+    }
+    try {
+      session.setMailboxDoors?.call(_mailboxSeeds);
+    } on Object catch (error) {
+      logZenWarning('Drzwi znajomych nie ruszyły: $error');
+    }
+  }
+
+  /// The local link settings (localLinksSettingsJson) the app wants;
+  /// kept so they come back after the node restarts.
+  String? _localLinksJson;
+
+  /// The running node's local link calls, `null` while it is not running.
+  LocalLinkNodeApi? get localLinks => _session?.localLinks;
+
+  /// Sets the devices to link with nearby and the LAN (§5.1 item 6); `null`
+  /// turns local links off. Safe to call before the node is up.
+  void setLocalLinks(String? settingsJson) {
+    if (settingsJson == _localLinksJson) {
+      return;
+    }
+    _localLinksJson = settingsJson;
+    _applyLocalLinksNow();
+  }
+
+  void _applyLocalLinksNow() {
+    final LocalLinkNodeApi? api = _session?.localLinks;
+    final String? json = _localLinksJson;
+    if (api == null || json == null) {
+      return;
+    }
+    try {
+      api.configure(json);
+    } on Object catch (error) {
+      logZenWarning('Local links not set: $error');
+    }
   }
 
   void _setDoorAddress(String? address) {
@@ -641,15 +746,6 @@ final class RuntimeNodeRuntime extends ChangeNotifier
         _starting = null;
       }
     });
-  }
-
-  /// Restarts a running live node, so settings read at start (LAN
-  /// discovery) apply; does nothing in a preview or while stopped.
-  Future<void> restartIfRunning() async {
-    if (_previewMode || (_session == null && _starting == null)) {
-      return;
-    }
-    await restart();
   }
 
   Future<void> restart() async {
@@ -800,6 +896,8 @@ final class RuntimeNodeRuntime extends ChangeNotifier
           _addPeerNow(uri);
         }
         _applyDoorNow();
+        _applyMailboxDoorsNow();
+        _applyLocalLinksNow();
         _setSnapshot(session.snapshot);
         _startSnapshotRefreshLoop(session, token);
         return;
@@ -977,16 +1075,12 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
     bridge,
     config.nodeConfigProtector,
   );
-  final String? lanSecret = await _resolveLanDiscovery(config);
-  // Android hands Wi-Fi multicast only to holders of the lock.
-  await AndroidMulticastLock.setHeld(lanSecret != null);
-  final Map<String, dynamic> startResult = bridge.startNode(
-    applyLanDiscoveryToNodeConfig(configJson, lanSecret),
-  );
+  final Map<String, dynamic> startResult = bridge.startNode(configJson);
   final int handle = _readNodeHandle(startResult);
   final RuntimeTransportSnapshot initialSnapshot = _snapshotFromNodeInfo(
     startResult,
   );
+  final SignalPayloadCompressor doorCompressor = ZstdSignalPayloadCompressor();
   return RuntimeNodeSession(
     transport: ManagedSignalTransport(
       delegate: YggdrasilSignalTransport(
@@ -1011,22 +1105,16 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
     startDoor: (String seedHex) =>
         bridge.startDoorNode(handle, seedHex)['address'] as String?,
     stopDoor: () => bridge.stopDoorNode(handle),
+    setMailboxDoors: (List<String> seedsHex) =>
+        bridge.setMailboxDoors(handle, jsonEncode(seedsHex)),
+    sendFromDoor: (String remoteAddress, Map<String, dynamic> payload) async =>
+        bridge.doorSendSignal(
+          handle,
+          remoteAddress,
+          await encodeRuntimeSignalPayload(payload, doorCompressor),
+        ),
+    localLinks: BridgeLocalLinkApi(bridge, handle),
   );
-}
-
-Future<String?> _resolveLanDiscovery(
-  RuntimeSignalBootstrapConfig config,
-) async {
-  final RuntimeLanDiscoveryResolver? resolve = config.lanDiscovery;
-  if (resolve == null) {
-    return null;
-  }
-  try {
-    return await resolve();
-  } on Object catch (error, stackTrace) {
-    logZenError('LAN discovery setting unreadable', error, stackTrace);
-    return null;
-  }
 }
 
 /// Which Yggdrasil and Go the bridge was built with (§5.2), for the
@@ -1332,7 +1420,6 @@ final class RuntimeSignalBootstrapConfig {
     this.waitTimeout = const Duration(seconds: 5),
     this.nodeConfigProtector,
     this.fallbackPollInterval = const Duration(seconds: 1),
-    this.lanDiscovery,
   });
 
   /// How long one blocking signal wait lasts before it is renewed (signals
@@ -1342,11 +1429,9 @@ final class RuntimeSignalBootstrapConfig {
   /// Polling interval used only when the blocking signal wait fails.
   Duration fallbackPollInterval;
 
-  /// LAN discovery for the next node start (§5.1 item 6); `null` keeps it
-  /// off.
-  RuntimeLanDiscoveryResolver? lanDiscovery;
-
   /// Seals the persisted Yggdrasil node config (which contains the node
-  /// identity key) with the app master key, bound to its storage key.
+  /// identity key), bound to its storage key: with the master key, or on
+  /// Android with the background key, since the background service runs
+  /// the node while the app is locked (§14.1).
   KeyedBinaryPayloadProtector? nodeConfigProtector;
 }
