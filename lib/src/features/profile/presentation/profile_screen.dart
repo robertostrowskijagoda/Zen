@@ -288,8 +288,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final String? coverPath = me.coverPath;
     final MediaRef? theirCover = view?.cover ?? card?.cover;
     if (_isOwn && coverPath != null && File(coverPath).existsSync()) {
-      // Kept encrypted in the vault (§14.1); an older plain file still
-      // shows until it is moved.
+      // Kept encrypted in the vault (§14.1).
       cover = Image(
         image: mediaFileImage(coverPath),
         key: const Key('profile-cover'),
@@ -346,8 +345,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 clipBehavior: Clip.none,
                 children: <Widget>[
                   Positioned(
-                    left: 12,
-                    right: 12,
+                    left: 20,
+                    right: 20,
                     top: 4,
                     height: 134,
                     child: ClipRRect(
@@ -846,7 +845,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           ))
                             HiddenContentPlaceholder(
                               key: Key('profile-hidden-${p.id}'),
-                              byMe: !isContentBanned(banned, p.text, id: p.id),
+                              byMe: !isContentBanned(banned, id: p.id),
                               onShow: () {
                                 showHiddenAnyway(ref, id: p.id);
                                 setState(() => _revealed.add(p.id));
@@ -1262,12 +1261,14 @@ class _ProfileStats extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: zen.textSecondary, fontSize: 12.5),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: zen.textSecondary, fontSize: 12.5),
+              ),
             ),
           ],
         ),
