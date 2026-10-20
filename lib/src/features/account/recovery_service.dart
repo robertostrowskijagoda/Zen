@@ -17,13 +17,13 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 ///   helper agreed to release the piece to a new device;
 /// * `rc_cancel {}`: owner's old device → helper ("to nie ja");
 /// * `rc_piece {kind, half, account}`: helper → new device, after the
-///   delay. `account` (the account the piece is for) is missing from older
-///   helpers; such halves are still taken, but the account they open must
-///   be confirmed by its fingerprint.
+///   delay. `account` is the account the piece is for; the account the
+///   pieces open must still be confirmed by its fingerprint.
 ///
 /// The new device takes pieces only while a recovery is started on it
-/// ([RecoveryService.beginRecovery]), at most one of each kind per sender,
-/// and only with the Argon2 costs this app writes.
+/// ([RecoveryService.beginRecovery]), only from its friends and the helpers
+/// the person listed there ([RecoveryService.allowHelper]), at most one of
+/// each kind per sender, and only with the Argon2 costs this app writes.
 abstract final class RecoveryMessages {
   static const String store = 'rc_store';
   static const String ack = 'rc_ack';
@@ -112,8 +112,11 @@ final class RecoveryService {
   static const String _receivedKey = 'recovery/received';
   static const String _collectingKey = 'recovery/collecting';
 
-  /// Pieces kept from strangers for one recovery, at most.
+  /// Pieces kept for one recovery, at most.
   static const int maxReceived = 24;
+
+  /// Helpers the person may list for one recovery, at most.
+  static const int maxHelpers = 24;
 
   /// How long a started recovery takes pieces (the emergency delay with
   /// room for helpers who agree late).
@@ -130,6 +133,10 @@ final class RecoveryService {
 
   /// When the recovery on this device was started (millis), if it was.
   int? _collectingSince;
+
+  /// Addresses of the helpers the person listed for this recovery: with
+  /// friends, the only senders whose pieces are taken.
+  final Set<String> _helpers = <String>{};
 
   /// Owner address → piece.
   final Map<String, Map<String, dynamic>> _held =
@@ -164,6 +171,9 @@ final class RecoveryService {
   int receivedCount(RecoveryKind kind) => _received[kind]!.length;
   List<Map<String, dynamic>> received(RecoveryKind kind) =>
       List<Map<String, dynamic>>.unmodifiable(_received[kind]!);
+
+  /// The helpers the person listed for the recovery on this device.
+  Set<String> get allowedHelpers => Set<String>.unmodifiable(_helpers);
 
   /// The friends who sent pieces (to greet after recovery).
   List<String> get helperAddresses => <String>{
@@ -306,7 +316,7 @@ final class RecoveryService {
             'kind': p.kind.name,
             'half': half,
             // Whose key it is: the new device checks the seed against it.
-            if (account is String) 'account': account,
+            'account': account,
           },
         );
       }
@@ -334,12 +344,47 @@ final class RecoveryService {
       for (final List<Map<String, dynamic>> l in _received.values) {
         l.clear();
       }
+      _helpers.clear();
       await _saveReceived();
     }
-    final int since = _clock();
-    _collectingSince = since;
-    await _write(_collectingKey, <String, dynamic>{'since': since});
+    _collectingSince = _clock();
+    await _saveCollecting();
     _changed();
+  }
+
+  /// Lists [address] (a helper's address or invitation code, as given by
+  /// the person) as a helper of the recovery on this device: their pieces
+  /// are taken. False when no recovery is started, the address is not
+  /// valid or the list is full.
+  Future<bool> allowHelper(String address) async {
+    await start();
+    final String a;
+    try {
+      a = PeerShareCodec.normalizeAddress(
+        PeerShareCodec.parseTarget(address).address,
+      );
+    } on FormatException {
+      return false;
+    }
+    if (!collecting ||
+        a.isEmpty ||
+        (_helpers.length >= maxHelpers && !_helpers.contains(a))) {
+      return false;
+    }
+    if (_helpers.add(a)) {
+      await _saveCollecting();
+      _changed();
+    }
+    return true;
+  }
+
+  /// Takes [address] off the helpers of this recovery.
+  Future<void> removeHelper(String address) async {
+    await start();
+    if (_helpers.remove(PeerShareCodec.normalizeAddress(address))) {
+      await _saveCollecting();
+      _changed();
+    }
   }
 
   /// Ends the recovery (done or given up): pieces are no longer taken and
@@ -347,6 +392,7 @@ final class RecoveryService {
   Future<void> endRecovery() async {
     await start();
     _collectingSince = null;
+    _helpers.clear();
     await disk.delete(_collectingKey);
     await clearReceived();
   }
@@ -419,6 +465,11 @@ final class RecoveryService {
     if (!collecting) {
       return; // nobody started a recovery here: nothing is taken
     }
+    if (!_helpers.contains(from) && !isFriend(from)) {
+      // Not someone the person named: fresh addresses cost nothing, so they
+      // must not take the places of the real helpers.
+      return;
+    }
     final RecoveryKind? kind = RecoveryKind.values
         .where((RecoveryKind k) => k.name == payload['kind'])
         .firstOrNull;
@@ -435,8 +486,8 @@ final class RecoveryService {
       return;
     }
     final List<Map<String, dynamic>> list = _received[kind]!;
-    // One half of each kind per sender, so one stranger cannot crowd out
-    // the helpers.
+    // One half of each kind per sender, so one helper cannot crowd out
+    // the others.
     if (list.length >= maxReceived ||
         list.any(
           (Map<String, dynamic> h) =>
@@ -449,8 +500,8 @@ final class RecoveryService {
     _changed();
   }
 
-  /// [half] as kept: the fields recovery uses, the account it names (if
-  /// any) and who sent it — after recovery they are greeted first, and they
+  /// [half] as kept: the fields recovery uses, the account it names and
+  /// who sent it — after recovery they are greeted first, and they
   /// hold the sealed backup of friends and groups (§6). `null` for a
   /// malformed half, a bad account or an Argon2 cost not accepted.
   Map<String, dynamic>? _receivedHalf(
@@ -467,10 +518,11 @@ final class RecoveryService {
     if (fields == null ||
         from is! String ||
         from.isEmpty ||
-        (account != null && !isRecoveryAccountId(account))) {
+        account is! String ||
+        !isRecoveryAccountId(account)) {
       return null;
     }
-    return <String, dynamic>{...fields, 'account': ?account, 'from': from};
+    return <String, dynamic>{...fields, 'account': account, 'from': from};
   }
 
   void _changed() {
@@ -523,7 +575,6 @@ final class RecoveryService {
       for (final RecoveryKind kind in RecoveryKind.values) {
         final Object? list = received[kind.name];
         if (list is List) {
-          // Kept by older versions too: only what would be taken today.
           _received[kind]!.addAll(<Map<String, dynamic>>[
             for (final Map<String, dynamic> h
                 in list.whereType<Map<String, dynamic>>())
@@ -535,16 +586,17 @@ final class RecoveryService {
     final Object? collecting = await _read(_collectingKey);
     if (collecting is Map && collecting['since'] is int) {
       _collectingSince = collecting['since'] as int;
-    } else if (_received.values.any(
-      (List<Map<String, dynamic>> l) => l.isNotEmpty,
-    )) {
-      // A recovery begun before this version kept no start: it goes on.
-      _collectingSince = _clock();
-      await _write(_collectingKey, <String, dynamic>{
-        'since': _collectingSince,
-      });
+      final Object? helpers = collecting['helpers'];
+      if (helpers is List) {
+        _helpers.addAll(helpers.whereType<String>().take(maxHelpers));
+      }
     }
   }
+
+  Future<void> _saveCollecting() => _write(_collectingKey, <String, dynamic>{
+    'since': _collectingSince,
+    'helpers': _helpers.toList(),
+  });
 
   Future<void> _saveHeld() => _write(_heldKey, _held);
 

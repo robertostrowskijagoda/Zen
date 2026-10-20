@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -278,41 +277,34 @@ void main() {
     expect(accountFingerprint(a), isNot(accountFingerprint(b)));
   });
 
-  test('a recovery begun before the update goes on', () async {
+  test('a started recovery and its listed helpers survive a restart', () async {
     final MemoryLedgerDisk disk = MemoryLedgerDisk();
-    final List<RecoveryPiece> pieces = await createRecoveryPieces(
-      account: (await LedgerKeyPair.generate()).id,
-      seed: randomBytes(32),
-      password: _password,
-      helpers: 4,
-      now: 1,
-      cost: _light,
-    );
-    await disk.write(
-      'recovery/received',
-      Uint8List.fromList(
-        utf8.encode(
-          jsonEncode(<String, dynamic>{
-            'normal': <Object?>[],
-            'emergency': <Object?>[
-              <String, dynamic>{...pieces[0].emergency, 'from': '200::b1'},
-              <String, dynamic>{'box': 'zle', 'share': 'xx', 'from': '200::b2'},
-            ],
-          }),
-        ),
-      ),
-    );
-    final RecoveryService s = RecoveryService(
+    final RecoveryService first = RecoveryService(
       transport: MemorySignalTransport(),
       disk: disk,
       isFriend: (_) => false,
       clock: () => 5,
       tickInterval: const Duration(hours: 1),
     );
-    addTearDown(s.stop);
-    await s.start();
-    expect(s.collecting, isTrue);
-    expect(s.receivedCount(RecoveryKind.emergency), 1);
+    addTearDown(first.stop);
+    expect(await first.allowHelper('200::b1'), isFalse, reason: 'not started');
+    await first.beginRecovery();
+    expect(await first.allowHelper('200::b1'), isTrue);
+    expect(await first.allowHelper('nie adres'), isFalse);
+
+    final RecoveryService again = RecoveryService(
+      transport: MemorySignalTransport(),
+      disk: disk,
+      isFriend: (_) => false,
+      clock: () => 6,
+      tickInterval: const Duration(hours: 1),
+    );
+    addTearDown(again.stop);
+    await again.start();
+    expect(again.collecting, isTrue);
+    expect(again.allowedHelpers, <String>{
+      PeerShareCodec.normalizeAddress('200::b1'),
+    });
   });
 
   test('with a password the account key is stored only wrapped', () async {
@@ -399,7 +391,9 @@ void main() {
 
       final RecoveryService f = services[fresh]!;
       await f.beginRecovery();
+      // The person names who helps; only their pieces are taken.
       for (final String h in helpers.take(2)) {
+        expect(await f.allowHelper(h), isTrue);
         await services[h]!.startHelping(owner, fresh);
       }
       await _settle();
@@ -439,8 +433,8 @@ void main() {
       expect(f.receivedCount(RecoveryKind.normal), 0);
     });
 
-    test('a new device takes pieces only while recovering, one per sender, '
-        'at the costs the app writes', () async {
+    test('a new device takes pieces only while recovering, from listed '
+        'helpers, one per sender, at the costs the app writes', () async {
       final String stranger = PeerShareCodec.normalizeAddress('200::66');
       await make(stranger, const <String>{});
       final LedgerKeyPair key = await LedgerKeyPair.generate();
@@ -476,6 +470,11 @@ void main() {
 
       await f.beginRecovery();
       expect(f.collecting, isTrue);
+      // A fresh address nobody named cannot take the helpers' places (Z2-10).
+      await send(pieces[0].emergency, account: key.id);
+      expect(f.receivedCount(RecoveryKind.emergency), 0, reason: 'not named');
+
+      expect(await f.allowHelper(stranger), isTrue);
       await send(pieces[0].emergency, account: key.id);
       await send(pieces[1].emergency, account: key.id);
       expect(f.receivedCount(RecoveryKind.emergency), 1, reason: 'one each');
@@ -488,13 +487,11 @@ void main() {
       }, kind: RecoveryKind.normal);
       await send(pieces[0].normal, kind: RecoveryKind.normal, account: 'konto');
       expect(f.receivedCount(RecoveryKind.normal), 0);
-      // Older helpers send no account: still taken.
+      // A half that does not name its account is not taken.
       await send(pieces[0].normal, kind: RecoveryKind.normal);
+      expect(f.receivedCount(RecoveryKind.normal), 0);
+      await send(pieces[0].normal, kind: RecoveryKind.normal, account: key.id);
       expect(f.receivedCount(RecoveryKind.normal), 1);
-      expect(
-        f.received(RecoveryKind.normal).single.containsKey('account'),
-        isFalse,
-      );
 
       await f.endRecovery();
       expect(f.receivedCount(RecoveryKind.emergency), 0);
@@ -502,6 +499,8 @@ void main() {
       expect(f.receivedCount(RecoveryKind.emergency), 0, reason: 'ended');
 
       await f.beginRecovery();
+      expect(f.allowedHelpers, isEmpty, reason: 'a fresh start');
+      await f.allowHelper(stranger);
       now += RecoveryService.collectWindow.inMilliseconds;
       expect(f.collecting, isFalse);
       await send(pieces[2].emergency, account: key.id);
@@ -634,10 +633,29 @@ void main() {
     final Finder start = find.byKey(const Key('recovery-start'));
     await waitFor(() => start.evaluate().isNotEmpty);
     expect(find.byKey(const Key('recovery-recover-emergency')), findsNothing);
+    expect(find.byKey(const Key('recovery-scope-before')), findsOneWidget);
+    expect(find.textContaining('Nie wraca: historia czatów'), findsOneWidget);
+    expect(find.textContaining('Nie wraca: portfel'), findsOneWidget);
+    expect(find.textContaining('Nie wraca: profil randkowy'), findsOneWidget);
+    expect(find.textContaining('Wraca: znajomi i grupy'), findsOneWidget);
     await tapKey('recovery-start');
     final Finder collecting = find.byKey(const Key('recovery-collecting'));
     await waitFor(() => collecting.evaluate().isNotEmpty);
     expect(collecting, findsOneWidget);
+    // Only the helpers named here can send pieces (Z2-10).
+    for (int i = 0; i < 4; i++) {
+      final Finder code = find.byKey(const Key('recovery-helper-code'));
+      await tester.ensureVisible(code);
+      await tester.enterText(code, '200::b${i + 1}');
+      await tapKey('recovery-helper-add');
+      final Finder listed = find.byKey(
+        Key(
+          'recovery-helper-${PeerShareCodec.normalizeAddress('200::b${i + 1}')}',
+        ),
+      );
+      await waitFor(() => listed.evaluate().isNotEmpty);
+      expect(listed, findsOneWidget);
+    }
 
     late LedgerKeyPair key;
     await tester.runAsync(() async {
@@ -679,6 +697,7 @@ void main() {
     expect(find.text('Klucze od 4 różnych osób'), findsOneWidget);
     expect(find.byKey(const Key('recovery-adopt-0')), findsOneWidget);
     expect(find.byKey(const Key('recovery-mixed-accounts')), findsNothing);
+    expect(find.byKey(const Key('recovery-scope-after')), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(() => _settle());

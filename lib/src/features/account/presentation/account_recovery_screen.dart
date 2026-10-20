@@ -58,6 +58,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
   final TextEditingController _password = TextEditingController();
   final TextEditingController _repeat = TextEditingController();
   final TextEditingController _recoverPassword = TextEditingController();
+  final TextEditingController _helperCode = TextEditingController();
   StreamSubscription<void>? _changes;
   RecoveryService? _service;
   LedgerNode? _node;
@@ -96,6 +97,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     _password.dispose();
     _repeat.dispose();
     _recoverPassword.dispose();
+    _helperCode.dispose();
     super.dispose();
   }
 
@@ -196,8 +198,22 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     await service.beginRecovery();
     return t(
       'Odzyskiwanie rozpoczęte. Podaj adres tego urządzenia osobom '
-      'z kręgu, które Ci pomogą.',
+      'z kręgu, które Ci pomogą, i wpisz tu ich kody.',
     );
+  }
+
+  /// Names a helper of this recovery by their code: only named helpers
+  /// (and friends) can send pieces here.
+  Future<String> _addHelper() async {
+    final RecoveryService? service = _service;
+    if (service == null) {
+      return t('Konto nie jest jeszcze gotowe.');
+    }
+    if (!await service.allowHelper(_helperCode.text)) {
+      return t('Nieprawidłowy kod.');
+    }
+    _helperCode.clear();
+    return t('Dodano. Klucze od tej osoby będą przyjmowane.');
   }
 
   /// Gives up the recovery: no more pieces, the received ones are dropped.
@@ -494,6 +510,81 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     );
   }
 
+  /// "Co odzyskasz" (§6.3): what comes back with the recovery circle and what
+  /// never does, so nobody expects the chat history on a new phone.
+  Widget _recoverScope(ZenColors zen, Key key) => Container(
+    key: key,
+    margin: const EdgeInsets.only(top: 12),
+    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+    decoration: BoxDecoration(
+      color: zen.surfaceSunk,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: zen.outlineSoft),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(t('CO ODZYSKASZ'), style: zen.label(color: zen.textMuted)),
+        const SizedBox(height: 6),
+        _scopeLine(
+          zen,
+          Icons.check_circle_outline_rounded,
+          zen.success,
+          t('Wraca: konto (tożsamość i hasło)'),
+        ),
+        _scopeLine(
+          zen,
+          Icons.check_circle_outline_rounded,
+          zen.success,
+          t(
+            'Wraca: znajomi i grupy, z kopii u osób z kręgu, które oddały '
+            'klucze',
+          ),
+        ),
+        _scopeLine(
+          zen,
+          Icons.cancel_outlined,
+          zen.danger,
+          t('Nie wraca: historia czatów'),
+        ),
+        _scopeLine(
+          zen,
+          Icons.cancel_outlined,
+          zen.danger,
+          t('Nie wraca: portfel'),
+        ),
+        _scopeLine(
+          zen,
+          Icons.cancel_outlined,
+          zen.danger,
+          t('Nie wraca: profil randkowy'),
+        ),
+      ],
+    ),
+  );
+
+  Widget _scopeLine(ZenColors zen, IconData icon, Color tone, String text) =>
+      Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(icon, size: 18, color: tone),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: zen.textSecondary,
+                  fontSize: 13.5,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+
   Widget _mixedAccountsWarning(ZenColors zen) => Padding(
     padding: const EdgeInsets.only(top: 12),
     child: ZenInfo(
@@ -535,6 +626,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
             'jeśli się zgadza.',
           ),
         ),
+        _recoverScope(zen, const Key('recovery-scope-after')),
         if (mixed) _mixedAccountsWarning(zen),
         for (int i = 0; i < candidates.length; i++)
           _candidate(zen, i, candidates[i]),
@@ -924,6 +1016,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                           'osób i 7 dni.',
                         ),
                       ),
+                      _recoverScope(zen, const Key('recovery-scope-before')),
                       if (collectingUntil == null) ...<Widget>[
                         const SizedBox(height: 8),
                         _paragraph(
@@ -997,6 +1090,52 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                             color: zen.textMuted,
                             fontSize: 12.5,
                           ),
+                        ),
+                        const SizedBox(height: 12),
+                        _paragraph(
+                          zen,
+                          t(
+                            'Kto Ci pomaga? Wpisz kody tych osób: klucze od '
+                            'innych nie są przyjmowane.',
+                          ),
+                        ),
+                        for (final String helper in service.allowedHelpers)
+                          ZenTile(
+                            key: Key('recovery-helper-$helper'),
+                            icon: Icons.person_rounded,
+                            tone: zen.accent,
+                            title: helper,
+                            trailing: IconButton(
+                              tooltip: t('Usuń'),
+                              icon: const Icon(Icons.close_rounded),
+                              onPressed: () =>
+                                  unawaited(service.removeHelper(helper)),
+                            ),
+                          ),
+                        Row(
+                          children: <Widget>[
+                            Expanded(
+                              child: TextField(
+                                key: const Key('recovery-helper-code'),
+                                controller: _helperCode,
+                                decoration: InputDecoration(
+                                  labelText: t('Kod osoby z kręgu'),
+                                  prefixIcon: const Icon(
+                                    Icons.person_add_alt_1_rounded,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton.filledTonal(
+                              key: const Key('recovery-helper-add'),
+                              tooltip: t('Dodaj'),
+                              onPressed: _busy
+                                  ? null
+                                  : () => unawaited(_run(_addHelper)),
+                              icon: const Icon(Icons.add_rounded),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 4),
                         _progress(
