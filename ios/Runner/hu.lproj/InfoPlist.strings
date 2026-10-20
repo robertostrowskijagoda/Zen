@@ -1,0 +1,8 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSAppleMusicUsageDescription" = "A Zennek csak akkor van szüksége a zenéidhez való hozzáférésre, amikor te magad választasz ki egy felvételt, hogy üzenetben vagy bejegyzésben elküldd.";
+"NSCameraUsageDescription" = "A Zen a kamerát videohívásokhoz, a barátok QR-kódjainak beolvasásához, valamint az általad küldött fotók és videók készítéséhez használja.";
+"NSFaceIDUsageDescription" = "A Zen a jelszó helyett Face ID-val is feloldhatja az alkalmazást.";
+"NSLocalNetworkUsageDescription" = "A Zen közvetlenül kapcsolódik a barátaid eszközeihez, akár ugyanazon a Wi-Fi-hálózaton is, szerver nélkül.";
+"NSLocationWhenInUseUsageDescription" = "A Zen csak akkor kéri a tartózkodási helyedet, ha te magad szeretnéd elküldeni valakinek, például riasztásban vagy találkozókor.";
+"NSMicrophoneUsageDescription" = "A Zen a mikrofont hang- és videohívásokhoz, valamint hangüzenetek felvételéhez használja.";
+"NSPhotoLibraryUsageDescription" = "A Zennek hozzáférésre van szüksége a fotóidhoz, amikor fotót vagy videót választasz küldéshez, bejegyzéshez vagy a profilodhoz.";

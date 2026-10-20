@@ -1,0 +1,8 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSAppleMusicUsageDescription" = "Zen은 메시지나 게시물로 보낼 녹음을 직접 선택할 때에만 음악에 접근해야 합니다.";
+"NSCameraUsageDescription" = "Zen은 영상 통화, 친구의 QR 코드 스캔, 그리고 보내는 사진과 동영상 촬영에 카메라를 사용합니다.";
+"NSFaceIDUsageDescription" = "Zen은 비밀번호 대신 Face ID로 앱 잠금을 해제할 수 있습니다.";
+"NSLocalNetworkUsageDescription" = "Zen은 서버 없이 같은 Wi-Fi 네트워크를 포함해 친구의 기기와 직접 연결됩니다.";
+"NSLocationWhenInUseUsageDescription" = "Zen은 경보나 만남 등에서 직접 누군가에게 위치를 보내려고 할 때에만 위치를 요청합니다.";
+"NSMicrophoneUsageDescription" = "Zen은 음성 및 영상 통화와 음성 메시지 녹음에 마이크를 사용합니다.";
+"NSPhotoLibraryUsageDescription" = "보낼 사진이나 동영상, 게시물이나 프로필용 사진이나 동영상을 고를 때 Zen은 사진에 접근해야 합니다.";

@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "Zen dùng máy ảnh cho cuộc gọi video.";
+"NSDownloadsFolderUsageDescription" = "Zen chỉ lưu vào Tải xuống những gì bạn yêu cầu lưu, ví dụ phiên bản mới của ứng dụng.";
+"NSLocalNetworkUsageDescription" = "Zen kết nối trực tiếp với thiết bị của bạn bè, kể cả trong cùng mạng Wi-Fi, không cần máy chủ nào.";
+"NSLocationUsageDescription" = "Zen chỉ hỏi vị trí của bạn khi chính bạn muốn gửi cho ai đó, ví dụ trong cảnh báo hoặc khi gặp mặt.";
+"NSLocationWhenInUseUsageDescription" = "Zen chỉ hỏi vị trí của bạn khi chính bạn muốn gửi cho ai đó, ví dụ trong cảnh báo hoặc khi gặp mặt.";
+"NSMicrophoneUsageDescription" = "Zen dùng micrô cho cuộc gọi thoại, cuộc gọi video và để ghi tin nhắn thoại.";

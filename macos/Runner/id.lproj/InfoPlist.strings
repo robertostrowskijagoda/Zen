@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "Zen menggunakan kamera untuk panggilan video.";
+"NSDownloadsFolderUsageDescription" = "Zen hanya menyimpan ke Unduhan apa yang Anda minta untuk disimpan, misalnya versi baru aplikasi.";
+"NSLocalNetworkUsageDescription" = "Zen terhubung langsung ke perangkat teman Anda, termasuk di jaringan Wi-Fi yang sama, tanpa server apa pun.";
+"NSLocationUsageDescription" = "Zen meminta lokasi Anda hanya saat Anda sendiri ingin mengirimnya ke seseorang, misalnya dalam peringatan atau saat bertemu.";
+"NSLocationWhenInUseUsageDescription" = "Zen meminta lokasi Anda hanya saat Anda sendiri ingin mengirimnya ke seseorang, misalnya dalam peringatan atau saat bertemu.";
+"NSMicrophoneUsageDescription" = "Zen menggunakan mikrofon untuk panggilan suara dan video serta untuk merekam pesan suara.";

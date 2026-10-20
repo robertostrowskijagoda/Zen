@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "Zen कैमरे का उपयोग वीडियो कॉल के लिए करता है।";
+"NSDownloadsFolderUsageDescription" = "Zen डाउनलोड में सिर्फ़ वही सहेजता है जो आप सहेजने को कहते हैं, जैसे ऐप का नया संस्करण।";
+"NSLocalNetworkUsageDescription" = "Zen बिना किसी सर्वर के, आपके दोस्तों के डिवाइसों से सीधे जुड़ता है, उसी Wi-Fi नेटवर्क पर भी।";
+"NSLocationUsageDescription" = "Zen आपकी लोकेशन तभी पूछता है जब आप खुद उसे किसी को भेजना चाहते हैं, जैसे अलार्म में या मिलने के समय।";
+"NSLocationWhenInUseUsageDescription" = "Zen आपकी लोकेशन तभी पूछता है जब आप खुद उसे किसी को भेजना चाहते हैं, जैसे अलार्म में या मिलने के समय।";
+"NSMicrophoneUsageDescription" = "Zen माइक्रोफ़ोन का उपयोग वॉइस और वीडियो कॉल तथा वॉइस संदेश रिकॉर्ड करने के लिए करता है।";

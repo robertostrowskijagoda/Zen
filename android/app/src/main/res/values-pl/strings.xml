@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_kind_video">Połączenie wideo</string>
+    <string name="call_kind_audio">Połączenie audio</string>
+    <string name="call_subtitle_video">Zaproszenie do rozmowy wideo</string>
+    <string name="call_subtitle_audio">Zaproszenie do rozmowy głosowej</string>
+    <string name="call_notification_video">Połączenie przychodzące wideo</string>
+    <string name="call_notification_audio">Połączenie przychodzące audio</string>
+    <string name="call_decline">Odrzuć</string>
+    <string name="call_accept">Odbierz</string>
+    <string name="call_hang_up">Rozłącz</string>
+    <string name="call_channel_name">Połączenie przychodzące</string>
+    <string name="biometric_use_password">Użyj hasła</string>
+    <string name="biometric_unlock_reason">Odblokuj Zen</string>
+    <string name="share_zen_chooser">Wyślij Zen</string>
+    <string name="update_installer_opened">Otwarto instalator systemu — potwierdź instalację.</string>
+</resources>

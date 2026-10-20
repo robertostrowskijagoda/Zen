@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "Zen folosește camera pentru apeluri video.";
+"NSDownloadsFolderUsageDescription" = "Zen salvează în Descărcări doar ceea ce îi ceri tu să salveze, de exemplu o versiune nouă a aplicației.";
+"NSLocalNetworkUsageDescription" = "Zen se conectează direct la dispozitivele prietenilor tăi, inclusiv în aceeași rețea Wi-Fi, fără niciun server.";
+"NSLocationUsageDescription" = "Zen îți cere locația doar atunci când vrei tu să o trimiți cuiva, de exemplu într-o alertă sau la o întâlnire.";
+"NSLocationWhenInUseUsageDescription" = "Zen îți cere locația doar atunci când vrei tu să o trimiți cuiva, de exemplu într-o alertă sau la o întâlnire.";
+"NSMicrophoneUsageDescription" = "Zen folosește microfonul pentru apeluri vocale și video și pentru înregistrarea mesajelor vocale.";

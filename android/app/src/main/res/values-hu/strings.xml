@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_kind_video">Videohívás</string>
+    <string name="call_kind_audio">Hanghívás</string>
+    <string name="call_subtitle_video">Meghívás videohívásba</string>
+    <string name="call_subtitle_audio">Meghívás hanghívásba</string>
+    <string name="call_notification_video">Bejövő videohívás</string>
+    <string name="call_notification_audio">Bejövő hanghívás</string>
+    <string name="call_decline">Elutasítás</string>
+    <string name="call_accept">Fogadás</string>
+    <string name="call_hang_up">Befejezés</string>
+    <string name="call_channel_name">Bejövő hívás</string>
+    <string name="biometric_use_password">Jelszó használata</string>
+    <string name="biometric_unlock_reason">Zen feloldása</string>
+    <string name="share_zen_chooser">Zen küldése</string>
+    <string name="update_installer_opened">Megnyílt a rendszertelepítő — erősítsd meg a telepítést.</string>
+</resources>

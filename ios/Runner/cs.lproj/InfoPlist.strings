@@ -1,0 +1,8 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSAppleMusicUsageDescription" = "Zen potřebuje přístup k hudbě, jen když sami vyberete nahrávku k odeslání ve zprávě nebo příspěvku.";
+"NSCameraUsageDescription" = "Zen používá fotoaparát pro video hovory, skenování QR kódů přátel a pořizování fotek a videí, které odesíláte.";
+"NSFaceIDUsageDescription" = "Zen může místo hesla použít k odemknutí aplikace Face ID.";
+"NSLocalNetworkUsageDescription" = "Zen se připojuje přímo k zařízením vašich přátel, i v téže síti Wi-Fi, bez jakéhokoli serveru.";
+"NSLocationWhenInUseUsageDescription" = "Zen se ptá na polohu, jen když ji sami chcete někomu poslat, například v poplachu nebo při schůzce.";
+"NSMicrophoneUsageDescription" = "Zen používá mikrofon pro hlasové a video hovory a pro nahrávání hlasových zpráv.";
+"NSPhotoLibraryUsageDescription" = "Zen potřebuje přístup k fotkám, když vybíráte fotku nebo video k odeslání, do příspěvku nebo na profil.";

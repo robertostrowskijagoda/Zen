@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_kind_video">Videogesprek</string>
+    <string name="call_kind_audio">Audiogesprek</string>
+    <string name="call_subtitle_video">Uitnodiging voor een videogesprek</string>
+    <string name="call_subtitle_audio">Uitnodiging voor een spraakgesprek</string>
+    <string name="call_notification_video">Inkomend videogesprek</string>
+    <string name="call_notification_audio">Inkomend audiogesprek</string>
+    <string name="call_decline">Weigeren</string>
+    <string name="call_accept">Aannemen</string>
+    <string name="call_hang_up">Ophangen</string>
+    <string name="call_channel_name">Inkomend gesprek</string>
+    <string name="biometric_use_password">Wachtwoord gebruiken</string>
+    <string name="biometric_unlock_reason">Zen ontgrendelen</string>
+    <string name="share_zen_chooser">Zen versturen</string>
+    <string name="update_installer_opened">Het installatieprogramma van het systeem is geopend — bevestig de installatie.</string>
+</resources>

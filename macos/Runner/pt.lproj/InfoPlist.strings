@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "O Zen usa a câmera para chamadas de vídeo.";
+"NSDownloadsFolderUsageDescription" = "O Zen salva em Downloads apenas o que você mandar salvar, por exemplo uma nova versão do app.";
+"NSLocalNetworkUsageDescription" = "O Zen se conecta diretamente aos dispositivos dos seus amigos, inclusive na mesma rede Wi-Fi, sem nenhum servidor.";
+"NSLocationUsageDescription" = "O Zen só pede sua localização quando você mesmo quer enviá-la a alguém, por exemplo em um alerta ou num encontro.";
+"NSLocationWhenInUseUsageDescription" = "O Zen só pede sua localização quando você mesmo quer enviá-la a alguém, por exemplo em um alerta ou num encontro.";
+"NSMicrophoneUsageDescription" = "O Zen usa o microfone para chamadas de voz e de vídeo e para gravar mensagens de voz.";

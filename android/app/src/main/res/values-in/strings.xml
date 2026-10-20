@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="call_kind_video">Panggilan video</string>
+    <string name="call_kind_audio">Panggilan audio</string>
+    <string name="call_subtitle_video">Undangan panggilan video</string>
+    <string name="call_subtitle_audio">Undangan panggilan suara</string>
+    <string name="call_notification_video">Panggilan video masuk</string>
+    <string name="call_notification_audio">Panggilan audio masuk</string>
+    <string name="call_decline">Tolak</string>
+    <string name="call_accept">Jawab</string>
+    <string name="call_hang_up">Akhiri</string>
+    <string name="call_channel_name">Panggilan masuk</string>
+    <string name="biometric_use_password">Gunakan kata sandi</string>
+    <string name="biometric_unlock_reason">Buka kunci Zen</string>
+    <string name="share_zen_chooser">Kirim Zen</string>
+    <string name="update_installer_opened">Installer sistem dibuka — konfirmasikan pemasangan.</string>
+</resources>

@@ -1,0 +1,7 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSCameraUsageDescription" = "Zen 使用相机进行视频通话。";
+"NSDownloadsFolderUsageDescription" = "Zen 只会把你要求保存的内容存入“下载”，例如应用的新版本。";
+"NSLocalNetworkUsageDescription" = "Zen 直接连接你好友的设备，包括同一 Wi-Fi 网络中的设备，无需任何服务器。";
+"NSLocationUsageDescription" = "只有当你自己想把位置发给别人时，例如在警报中或见面时，Zen 才会请求你的位置。";
+"NSLocationWhenInUseUsageDescription" = "只有当你自己想把位置发给别人时，例如在警报中或见面时，Zen 才会请求你的位置。";
+"NSMicrophoneUsageDescription" = "Zen 使用麦克风进行语音和视频通话，以及录制语音消息。";

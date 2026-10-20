@@ -1,0 +1,8 @@
+/* Permission texts shown by the system (Info.plist keys). */
+"NSAppleMusicUsageDescription" = "Zen solo necesita acceso a tu música cuando eliges tú mismo una grabación para enviarla en un mensaje o una publicación.";
+"NSCameraUsageDescription" = "Zen usa la cámara para las videollamadas, para escanear los códigos QR de tus amigos y para hacer las fotos y los vídeos que envías.";
+"NSFaceIDUsageDescription" = "Zen puede usar Face ID para desbloquear la aplicación en lugar de la contraseña.";
+"NSLocalNetworkUsageDescription" = "Zen se conecta directamente con los dispositivos de tus amigos, también en la misma red Wi-Fi, sin ningún servidor.";
+"NSLocationWhenInUseUsageDescription" = "Zen solo pide tu ubicación cuando tú quieres enviársela a alguien, por ejemplo en una alerta o al quedar.";
+"NSMicrophoneUsageDescription" = "Zen usa el micrófono para las llamadas de voz y de vídeo y para grabar mensajes de voz.";
+"NSPhotoLibraryUsageDescription" = "Zen necesita acceso a tus fotos cuando eliges una foto o un vídeo para enviar, para una publicación o para tu perfil.";
