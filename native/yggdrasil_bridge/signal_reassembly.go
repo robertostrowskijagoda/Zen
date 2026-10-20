@@ -1,19 +1,23 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 const (
 	// Longest base64 text a fragment set may add up to: the encoding of a
-	// signal at the reassembly cap. Anything longer is refused as it grows,
+	// signal of the largest size. Anything longer is refused as it grows,
 	// not after it has been buffered whole.
-	maxSignalEncodedBytes = ((maxReassembledSignalBytes + 2) / 3) * 4
+	maxSignalEncodedBytes = ((maxSignalPayloadBytes + 2) / 3) * 4
 	// Most fragments a signal can have, derived from the byte cap.
 	maxSignalChunks = (maxSignalEncodedBytes + signalChunkSize - 1) / signalChunkSize
 	// Signals half-received at once, from everyone together and from one
@@ -207,7 +211,7 @@ func (node *bridgeNode) dropOldestSignalPartial(source string) {
 }
 
 // decodeSignalWire turns the joined base64 fragments into the signal text,
-// decompressing zstd payloads, within maxReassembledSignalBytes.
+// decompressing zstd payloads, within maxSignalPayloadBytes.
 func decodeSignalWire(source string, encodedPayload string) (string, bool) {
 	if len(encodedPayload) > maxSignalEncodedBytes {
 		return "", false
@@ -218,7 +222,7 @@ func decodeSignalWire(source string, encodedPayload string) (string, bool) {
 	}
 
 	wireStr := string(decodedPayload)
-	if len(wireStr) > maxReassembledSignalBytes {
+	if len(wireStr) > maxSignalPayloadBytes {
 		fmt.Printf("[ZEN-GO] rejecting oversized signal (%d bytes) from %s\n", len(wireStr), source)
 		return "", false
 	}
@@ -231,13 +235,9 @@ func decodeSignalWire(source string, encodedPayload string) (string, bool) {
 			fmt.Printf("[ZEN-GO] zstd base64 decode error: %v\n", err)
 			return "", false
 		}
-		decompressed, err := zstdDecoder.DecodeAll(compressedBytes, nil)
+		decompressed, err := decompressSignal(compressedBytes)
 		if err != nil {
-			fmt.Printf("[ZEN-GO] zstd decompress error: %v\n", err)
-			return "", false
-		}
-		if len(decompressed) > maxReassembledSignalBytes {
-			fmt.Printf("[ZEN-GO] rejecting oversized decompressed signal (%d bytes) from %s\n", len(decompressed), source)
+			fmt.Printf("[ZEN-GO] rejecting compressed signal from %s: %v\n", source, err)
 			return "", false
 		}
 		return string(decompressed), true
@@ -245,4 +245,41 @@ func decodeSignalWire(source string, encodedPayload string) (string, bool) {
 
 	// Uncompressed (backward compat with older clients).
 	return wireStr, true
+}
+
+// signalDecompressionLimit is the most a zstd signal of compressedBytes may
+// inflate to (see maxSignalCompressionRatio).
+func signalDecompressionLimit(compressedBytes int) int {
+	limit := max(compressedBytes*maxSignalCompressionRatio, minSignalDecompressionLimit)
+	return min(limit, maxSignalPayloadBytes)
+}
+
+// decompressSignal inflates a zstd signal, refusing one that would come out
+// past signalDecompressionLimit. It decodes as a stream and stops as soon as
+// the limit is crossed, so a bomb costs at most the limit (plus one zstd
+// block) in memory and work, never its full declared size. Frames whose
+// window exceeds maxSignalPayloadBytes are refused before decoding.
+func decompressSignal(compressed []byte) ([]byte, error) {
+	limit := signalDecompressionLimit(len(compressed))
+	// A bytes.Reader (unlike a bytes.Buffer) keeps the decoder on its
+	// streaming path; concurrency 1 decodes synchronously, without
+	// goroutines.
+	decoder, err := zstd.NewReader(
+		bytes.NewReader(compressed),
+		zstd.WithDecoderConcurrency(1),
+		zstd.WithDecoderLowmem(true),
+		zstd.WithDecoderMaxMemory(maxSignalPayloadBytes),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer decoder.Close()
+	decompressed, err := io.ReadAll(io.LimitReader(decoder, int64(limit)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(decompressed) > limit {
+		return nil, fmt.Errorf("inflates past %d bytes from %d", limit, len(compressed))
+	}
+	return decompressed, nil
 }

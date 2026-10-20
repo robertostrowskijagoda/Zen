@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"strings"
 	"testing"
@@ -49,13 +50,12 @@ func TestSplitSignalPayloadRawRoundTripsAndFitsDatagramBudget(t *testing.T) {
 func newTestBridgeNode() *bridgeNode {
 	return &bridgeNode{
 		signalPartials: make(map[string]*signalReassembly),
-		signalInbox:    make(chan signalMessage, signalInboxCapacity),
 	}
 }
 
 func TestReassembleSignalRejectsOversizedPayload(t *testing.T) {
 	node := newTestBridgeNode()
-	oversized := strings.Repeat("A", maxReassembledSignalBytes+1)
+	oversized := strings.Repeat("A", maxSignalPayloadBytes+1)
 
 	_, ok := node.reassembleSignal("200:1111::1", singleChunkEnvelope(t, oversized))
 	if ok {
@@ -63,16 +63,81 @@ func TestReassembleSignalRejectsOversizedPayload(t *testing.T) {
 	}
 }
 
+func TestReassembleSignalAcceptsPayloadAtTheLimit(t *testing.T) {
+	node := newTestBridgeNode()
+	largest := strings.Repeat("A", maxSignalPayloadBytes)
+
+	message, ok := node.reassembleSignal("200:1111::1", singleChunkEnvelope(t, largest))
+	if !ok || message != largest {
+		t.Fatal("a signal of exactly the largest size must be accepted")
+	}
+}
+
 func TestReassembleSignalRejectsDecompressionBomb(t *testing.T) {
 	node := newTestBridgeNode()
-	// Highly compressible payload that expands past the reassembly cap.
-	bomb := make([]byte, maxReassembledSignalBytes+1)
+	// Highly compressible payload that expands past the signal limit.
+	bomb := make([]byte, maxSignalPayloadBytes+1)
 	compressed := zstdEncoder.EncodeAll(bomb, nil)
 	wire := zstdMagicPrefix + base64.StdEncoding.EncodeToString(compressed)
 
 	_, ok := node.reassembleSignal("200:1111::1", singleChunkEnvelope(t, wire))
 	if ok {
 		t.Fatal("expected a decompression bomb to be rejected")
+	}
+}
+
+func TestReassembleSignalRejectsCompressionPastTheRatio(t *testing.T) {
+	node := newTestBridgeNode()
+	// Well under the size limit, but a few dozen bytes inflating to 256 KiB.
+	payload := `{"type":"message","text":"` + strings.Repeat("a", 256*1024) + `"}`
+	compressed := zstdEncoder.EncodeAll([]byte(payload), nil)
+	if limit := signalDecompressionLimit(len(compressed)); len(payload) <= limit {
+		t.Fatalf("test payload inflates to %d bytes, within the %d byte limit", len(payload), limit)
+	}
+	wire := zstdMagicPrefix + base64.StdEncoding.EncodeToString(compressed)
+
+	if _, ok := node.reassembleSignal("200:1111::1", singleChunkEnvelope(t, wire)); ok {
+		t.Fatal("expected a signal past the compression ratio limit to be rejected")
+	}
+}
+
+func TestSignalDecompressionLimit(t *testing.T) {
+	cases := map[int]int{
+		0:         minSignalDecompressionLimit,
+		100:       minSignalDecompressionLimit,
+		2000:      2000 * maxSignalCompressionRatio,
+		1 << 20:   maxSignalPayloadBytes,
+		1<<20 + 1: maxSignalPayloadBytes,
+	}
+	for compressed, want := range cases {
+		if got := signalDecompressionLimit(compressed); got != want {
+			t.Fatalf("signalDecompressionLimit(%d) = %d, want %d", compressed, got, want)
+		}
+	}
+}
+
+func TestLargeCompressedSignalRoundTripsThroughFragments(t *testing.T) {
+	node := newTestBridgeNode()
+	// JSON that compresses a few times over, like real signals.
+	random := rand.New(rand.NewPCG(1, 2))
+	var text strings.Builder
+	for text.Len() < 512*1024 {
+		fmt.Fprintf(&text, "word%d ", random.IntN(500))
+	}
+	payload := `{"type":"message","text":"` + text.String() + `"}`
+	wire := buildSignalWirePayload(payload)
+	if !strings.HasPrefix(wire, zstdMagicPrefix) {
+		t.Fatal("expected the bridge to compress the test payload")
+	}
+
+	fragments := fragmentEnvelopes(t, "compressed", wire)
+	var message string
+	var ok bool
+	for _, fragment := range fragments {
+		message, ok = node.reassembleSignal("200:1111::1", fragment)
+	}
+	if !ok || message != payload {
+		t.Fatal("a compressed multi-fragment signal must round-trip")
 	}
 }
 

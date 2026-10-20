@@ -143,7 +143,6 @@ func createNode(configJSON string) (*bridgeNode, error) {
 		config:         cfg,
 		multicast:      multicastModule,
 		logger:         logger,
-		signalInbox:    make(chan signalMessage, signalInboxCapacity),
 		signalPartials: make(map[string]*signalReassembly),
 		relays:         make(map[string]*relayState),
 		peerProbe:      newPeerProbeState(),
