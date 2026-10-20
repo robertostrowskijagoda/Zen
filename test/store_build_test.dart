@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,6 +18,25 @@ void main() {
 
   test('tests run as the direct build', () {
     expect(isStoreBuild, isFalse);
+  });
+
+  test('the store build is called "Zen" on the home screen too', () {
+    // Only the About screen names it; no flavor overrides the label.
+    final Directory res = Directory('android/app/src/appStoreOnly/res');
+    final List<String> overriding = res.existsSync()
+        ? <String>[
+            for (final FileSystemEntity f in res.listSync(recursive: true))
+              if (f is File && f.readAsStringSync().contains('launcher_label'))
+                f.path,
+          ]
+        : const <String>[];
+    expect(overriding, isEmpty);
+    expect(
+      File('android/app/src/main/res/values/strings.xml').readAsStringSync(),
+      contains(
+        '<string name="launcher_label" translatable="false">Zen</string>',
+      ),
+    );
   });
 
   test('the shared link is the project page by default', () {

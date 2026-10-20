@@ -6,7 +6,11 @@ import 'package:zen/src/features/about/presentation/about_screen.dart';
 import 'package:zen/src/features/update/own_copy.dart';
 
 void main() {
-  Future<void> pumpAbout(WidgetTester tester, ThemeData theme) async {
+  Future<void> pumpAbout(
+    WidgetTester tester,
+    ThemeData theme, {
+    bool storeBuild = false,
+  }) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.75;
     addTearDown(tester.view.reset);
@@ -17,11 +21,29 @@ void main() {
             (Ref ref) async => const OwnCopyCheck(OwnCopyState.unknown),
           ),
         ],
-        child: MaterialApp(theme: theme, home: const AboutScreen()),
+        child: MaterialApp(
+          theme: theme,
+          home: AboutScreen(storeBuild: storeBuild),
+        ),
       ),
     );
     await tester.pump();
   }
+
+  testWidgets('the direct build does not call itself anything else', (
+    WidgetTester tester,
+  ) async {
+    await pumpAbout(tester, ZenTheme.dark());
+    expect(find.byKey(const Key('about-store-build')), findsNothing);
+  });
+
+  testWidgets('only the info screen says it is the store build', (
+    WidgetTester tester,
+  ) async {
+    await pumpAbout(tester, ZenTheme.dark(), storeBuild: true);
+    expect(find.byKey(const Key('about-store-build')), findsOneWidget);
+    expect(find.text('Wersja ze sklepu'), findsOneWidget);
+  });
 
   testWidgets('the logo is black on light in the light theme', (
     WidgetTester tester,

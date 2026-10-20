@@ -7,8 +7,9 @@ import 'package:flutter/services.dart' show appFlavor;
 ///
 /// Stores update the app themselves and forbid installing or handing out
 /// APKs, so such a build has no self-update and passes Zen on as a link
-/// instead of a file. The Android "appStoreOnly" flavor (label "Zen (sklep)",
-/// files named `Zen-APP-STORE-ONLY-do-not-install-manually`) also drops the
+/// instead of a file. It is called "Zen" everywhere; only the About screen
+/// says "Wersja ze sklepu". The Android "appStoreOnly" flavor (files named
+/// `Zen-APP-STORE-ONLY-do-not-install-manually`) also drops the
 /// REQUEST_INSTALL_PACKAGES permission (android/app/src/appStoreOnly).
 bool get isStoreBuild => isStoreBuildFor(
   flavor: appFlavor,

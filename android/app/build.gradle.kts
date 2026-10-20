@@ -50,7 +50,8 @@ val zenSplitPerAbi = project.hasProperty("split-per-abi")
 //   full         - the full app (self-update, "Podaj dalej" with the APK);
 //   appStoreOnly - Google Play / Galaxy Store ONLY, never to be sideloaded:
 //                  no REQUEST_INSTALL_PACKAGES (src/appStoreOnly/
-//                  AndroidManifest.xml), the label "Zen (store)" (pl: "Zen (sklep)"), no icon camouflage, and Dart
+//                  AndroidManifest.xml), no icon camouflage, the label "Zen" as
+//                  everywhere (only the About screen names the store build), and Dart
 //                  hides self-update and APK sharing (appFlavor ==
 //                  "appStoreOnly", lib/src/features/update/store_build.dart).
 //   flutter build appbundle --release --flavor appStoreOnly   (Play)

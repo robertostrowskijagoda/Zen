@@ -12,6 +12,7 @@ import 'package:zen/src/core/utils/system_actions.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/update/presentation/own_copy_card.dart';
 import 'package:zen/src/features/update/presentation/share_app_screen.dart';
+import 'package:zen/src/features/update/store_build.dart';
 
 /// Where donations for Zen go (the only official collection).
 const String kDonationUrl = 'https://buycoffee.to/zen';
@@ -32,7 +33,12 @@ const String kYggdrasilPublicPeersUrl =
 
 /// "O aplikacji": what Zen is, who makes it, and how to support it.
 class AboutScreen extends StatelessWidget {
-  const AboutScreen({super.key});
+  const AboutScreen({super.key, this.storeBuild});
+
+  /// Whether to say this is the store build (default: [isStoreBuild]).
+  /// This screen is the only place that says it (the launcher and the rest
+  /// of the app just say "Zen").
+  final bool? storeBuild;
 
   /// Opens [url] in the browser; where that is not possible (or it fails),
   /// copies it instead.
@@ -68,7 +74,7 @@ class AboutScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: <Widget>[
-          const _LogoCard(),
+          _LogoCard(storeBuild: storeBuild ?? isStoreBuild),
 
           // §21: the collection comes first.
           ZenSection(t('Wesprzyj Zen')),
@@ -516,11 +522,29 @@ class AboutScreen extends StatelessWidget {
             icon: Icons.description_outlined,
             tone: zenTone(zen, 6),
             title: t('Licencje'),
-            subtitle: t('Biblioteki, z których korzysta Zen'),
+            subtitle: t(
+              'Licencja GPL-3.0 i biblioteki, z których korzysta Zen',
+            ),
             onTap: () => showLicensePage(
               context: context,
               applicationName: 'Zen',
               applicationVersion: '$kAppVersion ($kAppBuild)',
+              // Appropriate Legal Notices (GPL-3.0 section 0) with the
+              // author attribution notice required by NOTICE (section 7(b)).
+              applicationLegalese: <String>[
+                'Zen by Robert Ostrowski-Jagoda',
+                'Support the author: $kDonationUrl',
+                'Copyright (C) 2026 Robert Ostrowski-Jagoda',
+                '',
+                t(
+                  'Zen jest wolnym oprogramowaniem na licencji GNU GPL w '
+                  'wersji 3 (GPL-3.0-only) z dodatkowymi warunkami z jej '
+                  'sekcji 7 (plik NOTICE). Zen jest dostarczany BEZ ŻADNEJ '
+                  'GWARANCJI. Pełny tekst licencji: plik LICENSE w kodzie '
+                  'źródłowym i https://www.gnu.org/licenses/gpl-3.0.html',
+                ),
+                PeerShareCodec.repositoryUrl,
+              ].join('\n'),
             ),
           ),
         ],
@@ -655,7 +679,9 @@ class _Platform extends StatelessWidget {
 /// The logo (white letters on graphite as on the icon; black on light in the
 /// light theme) with the version.
 class _LogoCard extends StatelessWidget {
-  const _LogoCard();
+  const _LogoCard({required this.storeBuild});
+
+  final bool storeBuild;
 
   @override
   Widget build(BuildContext context) {
@@ -729,6 +755,12 @@ class _LogoCard extends StatelessWidget {
                   }),
                   style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
                 ),
+                if (storeBuild)
+                  Text(
+                    t('Wersja ze sklepu'),
+                    key: const Key('about-store-build'),
+                    style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
+                  ),
                 const SizedBox(height: 6),
                 Text(
                   t('Sieć ludzi, którzy się znają.'),
