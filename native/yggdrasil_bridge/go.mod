@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/gologme/log v1.3.0
-	github.com/klauspost/compress v1.18.5
+	github.com/klauspost/compress v1.20.3
 	github.com/yggdrasil-network/yggdrasil-go v0.5.14
 )
 
