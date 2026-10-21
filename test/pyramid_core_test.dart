@@ -196,17 +196,29 @@ void main() {
       );
       st = PyramidState.fold(py, all, now: 100);
       expect(st.pathOf(a1.id), '0');
-      // A1 and B replace S at the top: a new term.
+      // A1 and B replace S at the top: a new term — a week after A1's
+      // last move up, never sooner.
+      final PyramidRecord tooSoon = await rec(
+        PyrT.swap,
+        py,
+        12,
+        <LedgerKeyPair>[a1, b],
+        <String, dynamic>{'cell': '', 'head': s.id, 'up': a1.id},
+      );
+      all.add(tooSoon);
+      st = PyramidState.fold(py, all, now: 100);
+      expect(st.rejected[tooSoon.id], contains('7 dni'));
+      expect(st.head, s.id);
       all.add(
         await rec(
           PyrT.swap,
           py,
-          12,
+          10 + kPyrRiseCooldownMs,
           <LedgerKeyPair>[a1, b],
           <String, dynamic>{'cell': '', 'head': s.id, 'up': a1.id},
         ),
       );
-      st = PyramidState.fold(py, all, now: 100);
+      st = PyramidState.fold(py, all, now: 100 + kPyrRiseCooldownMs);
       expect(st.head, a1.id);
       expect(st.pathOf(s.id), '0');
       expect(st.term, 2);

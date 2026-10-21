@@ -9,11 +9,19 @@ import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
-/// The points wallet as its own rail destination. The money lives in
-/// the pyramid a person belongs to, so this shows that wallet when they
-/// are in one, and otherwise says plainly what points are for today.
+/// The points wallet: its own place on the rail, next to Piramida. The
+/// money lives in the pyramid a person belongs to, so this shows that
+/// wallet when they are in one, and otherwise says plainly what points are
+/// for today.
 class WalletScreen extends ConsumerWidget {
   const WalletScreen({super.key});
+
+  /// The wallet as a page of its own.
+  static Future<void> open(BuildContext context) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (BuildContext context) => const WalletScreen(),
+    ),
+  );
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

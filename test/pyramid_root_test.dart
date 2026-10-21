@@ -383,10 +383,11 @@ void main() {
           <LedgerKeyPair>[w.a1, w.a2],
           <String, dynamic>{'cell': '0', 'head': w.a.id, 'up': w.a1.id},
         );
+        // The next step up a week after the last one.
         final PyramidRecord upTop = await rec(
           PyrT.swap,
           w.py,
-          t0 + 3 * h,
+          t0 + 2 * h + kPyrRiseCooldownMs,
           <LedgerKeyPair>[w.a1, w.b],
           <String, dynamic>{'cell': '', 'head': w.s.id, 'up': w.a1.id},
         );
@@ -399,7 +400,7 @@ void main() {
         expect(st.pathOf(w.s.id), '0', reason: 'one level down');
         expect(st.pathOf(w.a.id), '00');
         expect(st.handoverDue, isTrue);
-        expect(st.headSince, t0 + 3 * h);
+        expect(st.headSince, t0 + 2 * h + kPyrRiseCooldownMs);
       },
     );
   });

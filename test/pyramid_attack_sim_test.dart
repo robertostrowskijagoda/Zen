@@ -263,7 +263,7 @@ void main() {
               'py': s.current,
               'at': t0 - 25 * hour,
               'by': <String>[s.myKey!, w['B'].myKey!]..sort(),
-              'params': <String, dynamic>{'emitDelayHours': 1},
+              'params': <String, dynamic>{'absenceDays': 90},
             },
           ),
         ),
@@ -278,10 +278,10 @@ void main() {
           greaterThanOrEqualTo(t0 + 24 * hour),
           reason: who,
         );
-        expect(st.params.emitDelayHours, 24, reason: 'not yet: $who');
+        expect(st.params.absenceDays, 60, reason: 'not yet: $who');
       }
       await w.net.advance(const Duration(hours: 25));
-      expect(w['A'].state!.params.emitDelayHours, 1);
+      expect(w['A'].state!.params.absenceDays, 90);
       expect(w.views().values.toSet(), hasLength(1));
     },
   );

@@ -2,11 +2,13 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart' show immutable, visibleForTesting;
 import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/core/crypto/hybrid_signature_core.dart';
 import 'package:zen/src/core/crypto/ring_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
+import 'package:zen/src/features/pyramid/pyramid_court.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 
 /// A referendum only advises the top (which decides), so it may be
@@ -74,6 +76,22 @@ int pyrAge(int birthYear, int atMs) =>
 /// each other ([PyrT.known]).
 const int kPyrVoteAfterMs = 14 * 24 * 3600 * 1000;
 
+/// Somebody who moved up a level moves up again at the earliest this long
+/// after: a swap, a vote, taking a free place above or moving into a cell
+/// one level higher — never more than one level at a time.
+const int kPyrRiseCooldownMs = 7 * 24 * 3600 * 1000;
+
+/// A change of the emission limit that lets more money out (a higher
+/// limit, a shorter wait before an emission counts) is announced to
+/// everybody and applies this long after ([PyrT.emitRule]); a lower one
+/// applies at once.
+const int kPyrEmitChangeWaitMs = 30 * 24 * 3600 * 1000;
+
+/// The wait before an emission counts, during which the rest of the top
+/// may veto it: never shorter than a day.
+const int kPyrMinEmitDelayHours = 24;
+const int kPyrMaxEmitDelayHours = 24 * 30;
+
 /// After a new head takes the top, the old power key has this long to
 /// sign the handover; from then on most of the top cell may sign it
 /// instead ([PyrT.handover]).
@@ -81,7 +99,8 @@ const int kPyrHandoverWaitMs = 72 * 3600 * 1000;
 
 /// The rules in numbers. Changed by the top, 2 of 3, with a signed
 /// record ([PyrT.constitution]) that applies [kPyrParamsDelayMs] later —
-/// never past the hard limits in [apply].
+/// never past the hard limits in [apply]. The emission limit and its
+/// wait are not among them: they change only by [PyrT.emitRule].
 final class PyrParams {
   PyrParams({
     this.version = 1,
@@ -90,7 +109,6 @@ final class PyrParams {
     this.treasurerDepth = 3,
     this.emitLimit = 100000000,
     this.emitDelayHours = 24,
-    this.nationalMin = 100,
     this.electionHours = 72,
     this.reportEscalateHours = 48,
   });
@@ -106,13 +124,10 @@ final class PyrParams {
   int treasurerDepth;
 
   /// Emission allowed per 30 days ([kPyrEmitWindowMs]), in hundredths.
-  /// Once per term before: a swap at the top started a new term
-  /// and with it a fresh limit.
+  /// Only [PyrT.emitRule] changes it (and [emitDelayHours]): lower at
+  /// once, higher 30 days after it is announced.
   int emitLimit;
   int emitDelayHours;
-
-  /// People of a nationality needed in a branch to lead its section.
-  int nationalMin;
   int electionHours;
   int reportEscalateHours;
 
@@ -123,30 +138,43 @@ final class PyrParams {
     'treasurerDepth': treasurerDepth,
     'emitLimit': emitLimit,
     'emitDelayHours': emitDelayHours,
-    'nationalMin': nationalMin,
     'electionHours': electionHours,
     'reportEscalateHours': reportEscalateHours,
   };
 
+  /// The fields only [PyrT.emitRule] changes (and the genesis sets).
+  static const Set<String> emissionFields = <String>{
+    'emitLimit',
+    'emitDelayHours',
+  };
+
   /// Takes the fields of [json] it knows, each clamped to its hard
   /// limits, whatever the top signs ([version] only counts the changes).
-  void apply(Object? json) {
+  /// The emission fields only with [emission] (the genesis; the top
+  /// changes them by [PyrT.emitRule]).
+  void apply(Object? json, {bool emission = false}) {
     if (json is! Map) {
       return;
     }
     int v(String k, int old, int lo, int hi) =>
         json[k] is int ? (json[k] as int).clamp(lo, hi) : old;
-    absenceDays = v('absenceDays', absenceDays, 7, 3650);
-    immunityDepth = v('immunityDepth', immunityDepth, 0, 30);
-    treasurerDepth = v('treasurerDepth', treasurerDepth, 1, 6);
-    emitLimit = v('emitLimit', emitLimit, 0, kPyrMaxAmount);
-    emitDelayHours = v('emitDelayHours', emitDelayHours, 1, 24 * 30);
-    nationalMin = v('nationalMin', nationalMin, 1, 1 << 30);
-    electionHours = v('electionHours', electionHours, 1, 24 * 30);
+    absenceDays = v('absenceDays', absenceDays, 30, 3650);
+    immunityDepth = v('immunityDepth', immunityDepth, 1, 30);
+    treasurerDepth = v('treasurerDepth', treasurerDepth, 3, 6);
+    if (emission) {
+      emitLimit = v('emitLimit', emitLimit, 0, kPyrMaxAmount);
+      emitDelayHours = v(
+        'emitDelayHours',
+        emitDelayHours,
+        kPyrMinEmitDelayHours,
+        kPyrMaxEmitDelayHours,
+      );
+    }
+    electionHours = v('electionHours', electionHours, 24, 24 * 30);
     reportEscalateHours = v(
       'reportEscalateHours',
       reportEscalateHours,
-      1,
+      24,
       24 * 30,
     );
   }
@@ -195,6 +223,10 @@ final class PyrMember {
 
   /// Device address for pyramid traffic (votes, payments, reports).
   String addr;
+
+  /// Every device address the member ever had (what they signed): a
+  /// verdict shows on the profile at each, so a new address hides nothing.
+  final Set<String> addrs = <String>{};
   bool active = true;
 }
 
@@ -219,6 +251,15 @@ final class PyrElection {
 
   /// When the vote was asked for: no vote may be dated before.
   final int start;
+
+  /// The voting cards ([PyrT.ballot]): one-time key (Ed25519 id) → the
+  /// fingerprint of its ML-DSA key; null until the cell signed them.
+  Map<String, String>? tokens;
+
+  /// The ballot record that counted.
+  String? ballot;
+
+  /// One-time key → the member it voted for (nobody's identity).
   final Map<String, String> votes = <String, String>{};
   bool closed = false;
   String? winner;
@@ -280,10 +321,15 @@ final class PyrBan {
     this.datingKey,
     this.reason = '',
     this.entryId,
+    this.rep,
   });
 
   final String id;
   final String target;
+
+  /// The report whose decision gave it: appealing it appeals that
+  /// decision (every ban it gave is lifted with it).
+  final String? rep;
 
   /// perm, pause, content, noadmit, dating.
   final String kind;
@@ -598,6 +644,20 @@ final class PyrAlarm {
   final String by;
 }
 
+/// One change of somebody's place, as the fold made it: [key] is at
+/// [path] from [at] on (null: out of the pyramid), because of record (or
+/// vote) [cause]. What every member can work out from the records; the
+/// animated history replays them ([PyrTimeline]).
+@immutable
+final class PyrMove {
+  const PyrMove(this.at, this.cause, this.key, this.path);
+
+  final int at;
+  final String cause;
+  final String key;
+  final String? path;
+}
+
 /// One structural change, for the public history.
 final class PyrHistory {
   PyrHistory(this.at, this.text, this.recordId);
@@ -662,6 +722,27 @@ final class PyramidState {
   /// ([PyrT.known]) → when.
   final Map<String, Map<String, int>> knownBy = <String, Map<String, int>>{};
 
+  /// Changes of the emission limit, applied, waiting or cancelled
+  /// ([PyrT.emitRule]).
+  final Map<String, PyrEmitChange> emitChanges = <String, PyrEmitChange>{};
+
+  /// What can be appealed, by the id of the decision ([PyrMatter]).
+  final Map<String, PyrMatter> matters = <String, PyrMatter>{};
+  final Map<String, PyrAppeal> appeals = <String, PyrAppeal>{};
+
+  /// Complaints and verdicts of the court.
+  final Map<String, PyrCase> cases = <String, PyrCase>{};
+  final Map<String, PyrVerdict> verdicts = <String, PyrVerdict>{};
+
+  /// Reports whose decision was overturned on appeal.
+  final Set<String> overturnedReports = <String>{};
+
+  /// When each member last moved up a level ([kPyrRiseCooldownMs]).
+  final Map<String, int> lastRise = <String, int>{};
+
+  /// The level each former member left from: they come back no higher.
+  final Map<String, int> leftLevel = <String, int>{};
+
   /// The power key now (public), from the genesis on: it certifies that
   /// this is the original pyramid and who its heads were — nothing more.
   String? powerKey;
@@ -706,6 +787,14 @@ final class PyramidState {
       <String, Map<String, Map<String, int>>>{};
 
   final List<PyrHistory> history = <PyrHistory>[];
+
+  /// Every change of a place, in the order of the fold ([PyrMove]).
+  final List<PyrMove> moves = <PyrMove>[];
+
+  /// The record (or vote) whose rule runs now, and its time: what a move
+  /// is noted with.
+  String _cause = '';
+  int _causeAt = 0;
 
   /// Records that did not count, with the reason (for the curious and the
   /// simulator).
@@ -851,9 +940,9 @@ final class PyramidState {
   int get treasurerMajority => treasurers.length ~/ 2 + 1;
 
   /// Who leads the national section of [nat], if anybody: the
-  /// highest member of [nat] whose branch has at least
-  /// [PyrParams.nationalMin] of them, then the bigger branch, then the
-  /// earlier place. One pass over the tree (not one per member).
+  /// highest member of [nat] (no minimum number of people anywhere), then
+  /// the one with more of [nat] in their branch, then the earlier place.
+  /// One pass over the tree (not one per member).
   String? nationalLead(String nat) {
     if (_natLead.containsKey(nat)) {
       return _natLead[nat];
@@ -878,9 +967,6 @@ final class PyramidState {
         continue;
       }
       final int count = counts[e.value] ?? 0;
-      if (count < params.nationalMin) {
-        continue;
-      }
       final int level = e.value.length;
       if (level < bestLevel ||
           (level == bestLevel && count > bestCount) ||
@@ -1257,6 +1343,9 @@ final class PyramidState {
       final int at = times[r.id] ?? r.at;
       s._clock = at;
       s._timedUpTo(at);
+      s
+        .._cause = r.id
+        .._causeAt = at;
       final String? proposal = r.body['pn'] is String ? r.contentKey : null;
       if (proposal != null && proposalsDone.contains(proposal)) {
         s.rejected[r.id] = 'ta propozycja już weszła (inna kopia)';
@@ -1383,7 +1472,44 @@ final class PyramidState {
         ),
       );
     }
+    final List<PyrEmitChange> raises =
+        emitChanges.values
+            .where((PyrEmitChange c) => c.pending && c.effectiveAt <= upTo)
+            .toList()
+          ..sort(
+            (PyrEmitChange a, PyrEmitChange b) =>
+                a.effectiveAt.compareTo(b.effectiveAt),
+          );
+    for (final PyrEmitChange c in raises) {
+      c.done = true;
+      _setEmission(c.limit, c.delayHours);
+      history.add(
+        PyrHistory(
+          c.effectiveAt,
+          t('Limit emisji po 30 dniach: {limit}, czekanie {hours} h', {
+            'limit': pyrMoney(params.emitLimit),
+            'hours': params.emitDelayHours,
+          }),
+          c.id,
+        ),
+      );
+    }
   }
+
+  /// The emission limit and wait from now on (null: unchanged).
+  void _setEmission(int? limit, int? delayHours) {
+    params
+      ..emitLimit = limit ?? params.emitLimit
+      ..emitDelayHours = delayHours ?? params.emitDelayHours
+      ..version += 1;
+  }
+
+  /// Changes of the emission limit announced and still waiting.
+  List<PyrEmitChange> get pendingEmitChanges =>
+      emitChanges.values.where((PyrEmitChange c) => c.pending).toList()..sort(
+        (PyrEmitChange a, PyrEmitChange b) =>
+            a.effectiveAt.compareTo(b.effectiveAt),
+      );
 
   String _name(String key) =>
       members[key]?.name ?? key.substring(0, min(6, key.length));
@@ -1424,6 +1550,7 @@ final class PyramidState {
   void _noteLevel(String key) {
     final String? p = position[key];
     (_levels[key] ??= <List<int>>[]).add(<int>[_clock, p?.length ?? -1]);
+    moves.add(PyrMove(_causeAt, _cause, key, p));
     // The tree changed: national sections are worked out again.
     _natLead.clear();
   }
@@ -1556,7 +1683,7 @@ final class PyramidState {
           return 'zły odcisk klucza władzy';
         }
         name = r.str('name');
-        params.apply(b['params']);
+        params.apply(b['params'], emission: true);
         powerKey = pk;
         powerKeyPq = pq as String?;
         usedPowerKeys.add(pk);
@@ -1646,6 +1773,11 @@ final class PyramidState {
         if (occupant[PyrPath.parent(slot)] != headKey) {
           return 'szef komórki już inny';
         }
+        // A former member comes back no higher than they left from: leaving
+        // and coming back is no way up.
+        if (slot.length < (leftLevel[m.key] ?? 0)) {
+          return 'powrót najwyżej na poziom, z którego wyszedł(-ła)';
+        }
         members[m.key] = m;
         knownBy.remove(m.key);
         _place(m.key, slot, r.id);
@@ -1687,10 +1819,16 @@ final class PyramidState {
         if (_countOf(by, cellVoters(cell, r.at)) < 2) {
           return 'potrzeba 2 z 3 w komórce (z prawem głosu)';
         }
+        if (!_canRise(up, r.at)) {
+          return _riseTooSoon;
+        }
         _swap(cell, upPath, r);
+        lastRise[up] = r.at;
         return null;
       case PyrT.voteRequest:
         return _voteRequest(r);
+      case PyrT.ballot:
+        return _ballot(r);
       case PyrT.vote:
         return _vote(r);
       case PyrT.leave:
@@ -1699,6 +1837,7 @@ final class PyramidState {
         if (p == null || !(by.length == 1 && by.first == k)) {
           return 'nie ma kogo';
         }
+        leftLevel[k] = p.length;
         _vacate(p);
         members[k]?.active = false;
         if (p.isEmpty) {
@@ -1738,8 +1877,12 @@ final class PyramidState {
         if (!need.every(by.contains)) {
           return 'brak wymaganych podpisów';
         }
+        if (!_canRise(up, r.at)) {
+          return _riseTooSoon;
+        }
         _vacate(upPath);
         _place(up, cell, r.id);
+        lastRise[up] = r.at;
         if (cell.isEmpty) {
           _termChange(r.at);
         }
@@ -1774,6 +1917,7 @@ final class PyramidState {
         if (r.at - seen < params.absenceDays * 24 * 3600 * 1000) {
           return 'jeszcze nie minęło ${params.absenceDays} dni';
         }
+        leftLevel[k] = p.length;
         _vacate(p);
         members[k]?.active = false;
         if (p.isEmpty) {
@@ -1799,6 +1943,18 @@ final class PyramidState {
         if (cell.length < 2 || _countOf(by, cell) < 2) {
           return 'usunąć może tylko własna komórka (2 z 3)';
         }
+        leftLevel[k] = p.length;
+        // Appealed above the head who removed them.
+        matters[r.id] = PyrMatter(
+          id: r.id,
+          kind: PyrMatterKind.remove,
+          party: k,
+          parties: <String>{k},
+          decider: p.isEmpty ? '' : PyrPath.parent(p),
+          step: -1,
+          at: r.at,
+          oldPath: p,
+        );
         _vacate(p);
         members[k]?.active = false;
         if (p.isEmpty) {
@@ -1834,7 +1990,21 @@ final class PyramidState {
           for (final String c in PyrPath.children(p))
             if (occupant[c] != null) occupant[c]!,
         ];
-        if (b['branch'] == true && below.isNotEmpty) {
+        // Promotion is step by step: a move goes sideways or down, or
+        // one level up into the cell of a head who agrees (with the mover,
+        // 2 of that cell) — and not again before [kPyrRiseCooldownMs]. A
+        // whole branch never moves up: it climbs only by its head's swaps.
+        final bool withBranch = b['branch'] == true && below.isNotEmpty;
+        if (slot.length < p.length - (withBranch ? 0 : 1)) {
+          return withBranch
+              ? 'gałąź przechodzi tylko na ten sam poziom albo niżej'
+              : 'awans tylko o jeden poziom';
+        }
+        final bool rises = slot.length < p.length;
+        if (rises && !_canRise(k, r.at)) {
+          return _riseTooSoon;
+        }
+        if (withBranch) {
           // With the whole branch: the whole own cell agrees.
           if (!below.every(by.contains)) {
             return 'przejście z gałęzią: zgoda całej komórki';
@@ -1854,6 +2024,9 @@ final class PyramidState {
         }
         _vacate(p);
         _place(k, slot, r.id);
+        if (rises) {
+          lastRise[k] = r.at;
+        }
         if (p.isEmpty) {
           _termChange(r.at);
         }
@@ -1878,7 +2051,18 @@ final class PyramidState {
         if (m == null || by.firstOrNull != m.key) {
           return 'nie członek';
         }
-        m.addr = _clip(r.str('addr'), 300);
+        final String addr = _clip(r.str('addr'), 300);
+        // Every address stays known (a verdict shows at each): never
+        // so many that keeping them costs anything.
+        if (addr.isEmpty) {
+          return 'brak adresu';
+        }
+        if (!m.addrs.contains(addr) && m.addrs.length >= kPyrMaxAddrs) {
+          return 'za dużo adresów';
+        }
+        m
+          ..addr = addr
+          ..addrs.add(addr);
         return null;
       case PyrT.delegate:
         return _delegate(r);
@@ -2037,6 +2221,11 @@ final class PyramidState {
         };
         if (changed.isEmpty) {
           return 'złe zasady';
+        }
+        // The emission limit has its own rule: lower at once, higher only
+        // 30 days after everybody was told ([PyrT.emitRule]).
+        if (changed.keys.any(PyrParams.emissionFields.contains)) {
+          return 'limit emisji zmienia się osobno (30 dni zapowiedzi)';
         }
         // A day from when it came, when it came late (back-dated past
         // the day's wait, or held back).
@@ -2227,8 +2416,550 @@ final class PyramidState {
         return _badge(r);
       case PyrT.known:
         return _known(r);
+      case PyrT.emitRule:
+        return _emitRule(r);
+      case PyrT.emitCancel:
+        return _emitCancel(r);
+      case PyrT.suit:
+        return _suit(r);
+      case PyrT.verdict:
+        return _verdict(r);
+      case PyrT.appeal:
+        return _appeal(r);
+      case PyrT.appealAnswer:
+        return _appealAnswer(r);
     }
     return 'nieznany rodzaj';
+  }
+
+  // ---- the emission limit ----
+
+  /// A new emission limit and/or wait, signed by the top (2 of 3). Only
+  /// lower (a smaller limit, a longer wait): at once. Anything that lets
+  /// more money out: announced to everybody and in force
+  /// [kPyrEmitChangeWaitMs] after (from when this phone saw it, when it
+  /// came late), unless the top cancels it before; one waits at a time.
+  String? _emitRule(PyramidRecord r) {
+    if (!_twoOfTop(r)) {
+      return 'limit emisji zmienia szczyt (2 z 3)';
+    }
+    final Object? l = r.body['limit'];
+    final Object? d = r.body['delayH'];
+    if ((l != null && l is! int) ||
+        (d != null && d is! int) ||
+        (l == null && d == null)) {
+      return 'zła zmiana limitu emisji';
+    }
+    final int? limit = l is int ? l.clamp(0, kPyrMaxAmount) : null;
+    final int? delay = d is int
+        ? d.clamp(kPyrMinEmitDelayHours, kPyrMaxEmitDelayHours)
+        : null;
+    final int newLimit = limit ?? params.emitLimit;
+    final int newDelay = delay ?? params.emitDelayHours;
+    if (newLimit == params.emitLimit && newDelay == params.emitDelayHours) {
+      return 'nic się nie zmienia';
+    }
+    final bool raises =
+        newLimit > params.emitLimit || newDelay < params.emitDelayHours;
+    if (!raises) {
+      _setEmission(limit, delay);
+      history.add(
+        PyrHistory(
+          r.at,
+          t('Obniżono limit emisji: {limit}, czekanie {hours} h', {
+            'limit': pyrMoney(params.emitLimit),
+            'hours': params.emitDelayHours,
+          }),
+          r.id,
+        ),
+      );
+      return null;
+    }
+    if (emitChanges.values.any((PyrEmitChange c) => c.pending)) {
+      return 'już czeka zapowiedziana zmiana limitu emisji';
+    }
+    final int since = _timeOf(r);
+    emitChanges[r.id] = PyrEmitChange(
+      id: r.id,
+      at: since,
+      effectiveAt: since + kPyrEmitChangeWaitMs,
+      oldLimit: params.emitLimit,
+      oldDelayHours: params.emitDelayHours,
+      limit: limit,
+      delayHours: delay,
+    );
+    history.add(
+      PyrHistory(
+        r.at,
+        t('Zapowiedziano zmianę limitu emisji: {limit}, czekanie {hours} h', {
+          'limit': pyrMoney(newLimit),
+          'hours': newDelay,
+        }),
+        r.id,
+      ),
+    );
+    return null;
+  }
+
+  /// The top (2 of 3) cancels a change of the emission limit still
+  /// waiting.
+  String? _emitCancel(PyramidRecord r) {
+    final PyrEmitChange? c = emitChanges[r.str('change')];
+    if (c == null || c.cancelled) {
+      return 'nie ma czego anulować';
+    }
+    if (!_twoOfTop(r)) {
+      return 'anuluje szczyt (2 z 3)';
+    }
+    if (c.done || r.at >= c.effectiveAt) {
+      return 'za późno: zmiana już obowiązuje';
+    }
+    c.cancelled = true;
+    history.add(
+      PyrHistory(r.at, t('Anulowano zapowiedzianą zmianę limitu emisji'), r.id),
+    );
+    return null;
+  }
+
+  // ---- the court and appeals ----
+
+  /// The top cell without [parties]: who judges at the top.
+  List<String> topJudges(Set<String> parties) => <String>[
+    for (final String k in topCell)
+      if (!parties.contains(k)) k,
+  ];
+
+  /// The first place from [start] up whose head may judge (not one of
+  /// [parties], not empty); '' — the top cell — when nobody below; null
+  /// when nobody at all.
+  String? _judgeFrom(String start, Set<String> parties) {
+    String q = start;
+    while (q.isNotEmpty) {
+      final String? k = occupant[q];
+      if (k != null && !parties.contains(k)) {
+        return q;
+      }
+      q = PyrPath.parent(q);
+    }
+    return topJudges(parties).isEmpty ? null : '';
+  }
+
+  /// Who signs for the judge at [judge] now: the head there, or at the
+  /// top 2 of the top cell (all of it when fewer are left), never one of
+  /// [parties].
+  List<String> judgesAt(String judge, Set<String> parties) {
+    if (judge.isEmpty) {
+      return topJudges(parties);
+    }
+    final String? k = occupant[judge];
+    return k == null || parties.contains(k) ? const <String>[] : <String>[k];
+  }
+
+  /// How many of [judgesAt] must sign.
+  static int judgesNeeded(String judge, int judges) =>
+      judge.isEmpty ? min(2, judges) : 1;
+
+  bool _judgeSigned(String judge, Set<String> parties, List<String> by) {
+    final List<String> j = judgesAt(judge, parties);
+    return j.isNotEmpty && _countOf(by, j) >= judgesNeeded(judge, j.length);
+  }
+
+  /// The last appeal of [m], if any.
+  PyrAppeal? lastAppeal(PyrMatter m) =>
+      m.appeals.isEmpty ? null : appeals[m.appeals.last];
+
+  /// Where the next appeal of [m] goes: one level above whoever decided
+  /// last (the top reconsiders its own decision once); null when there is
+  /// no level left — the top has refused.
+  String? nextJudge(PyrMatter m) {
+    final PyrAppeal? last = lastAppeal(m);
+    final String from = last?.judge ?? m.decider;
+    if (from.isEmpty) {
+      return last != null || topJudges(m.parties).isEmpty ? null : '';
+    }
+    return _judgeFrom(PyrPath.parent(from), m.parties);
+  }
+
+  /// Why [key] cannot appeal [m] at [at], or null when they can.
+  String? appealProblem(PyrMatter m, String key, int at) {
+    if (key != m.party) {
+      return 'odwołuje się tylko osoba, której to dotyczy';
+    }
+    if (m.overturned) {
+      return 'decyzja już uchylona';
+    }
+    if (m.kind == PyrMatterKind.ban && (bans[m.id]?.lifted ?? true)) {
+      return 'ban już uchylony';
+    }
+    if (m.kind == PyrMatterKind.verdict && verdicts[m.id] == null) {
+      return 'nie ma takiego wyroku';
+    }
+    if (m.kind == PyrMatterKind.complaint) {
+      final PyrCase? c = cases[m.id];
+      if (c == null || c.status == PyrCaseStatus.guilty) {
+        return 'wyrok zapadł: odwołuje się pozwany';
+      }
+      if (c.status == PyrCaseStatus.open && at < c.deadline) {
+        return 'sprawa czeka jeszcze na pierwszą decyzję';
+      }
+    }
+    final PyrAppeal? last = lastAppeal(m);
+    if (last != null && last.openAt(at)) {
+      return 'poprzednie odwołanie jeszcze czeka';
+    }
+    if (nextJudge(m) == null) {
+      return 'decyzja jest ostateczna';
+    }
+    return null;
+  }
+
+  /// An appeal by the person a decision is about ([PyrMatter.party]):
+  /// once the level before refused or did not answer in time, it goes one
+  /// level higher, with twice the time ([pyrStepTimeMs]).
+  String? _appeal(PyramidRecord r) {
+    final PyrMatter? m = matters[r.str('of')];
+    final String k = r.signers.length == 1 ? r.signers.first : '';
+    if (m == null) {
+      return 'nie ma takiej decyzji';
+    }
+    final String? problem = appealProblem(m, k, r.at);
+    if (problem != null) {
+      return problem;
+    }
+    final String judge = nextJudge(m)!;
+    final int step = (lastAppeal(m)?.step ?? m.step) + 1;
+    final int since = _timeOf(r);
+    appeals[r.id] = PyrAppeal(
+      id: r.id,
+      matter: m.id,
+      by: k,
+      why: _clip(r.str('why'), kPyrCourtTextChars),
+      at: since,
+      signedAt: r.at,
+      judge: judge,
+      step: step,
+      deadline: since + pyrStepTimeMs(step),
+    );
+    m.appeals.add(r.id);
+    history.add(
+      PyrHistory(
+        r.at,
+        judge.isEmpty
+            ? t('{name} odwołuje się do szczytu', {'name': _name(k)})
+            : t('{name} odwołuje się do {judge}', {
+                'name': _name(k),
+                'judge': _name(occupant[judge] ?? ''),
+              }),
+        r.id,
+      ),
+    );
+    return null;
+  }
+
+  /// The answer of the level an appeal went to, in its time: accepted, the
+  /// decision is overturned; refused, the person may go one level higher.
+  /// A dismissed complaint accepted on appeal gets its verdict here.
+  String? _appealAnswer(PyramidRecord r) {
+    final PyrAppeal? a = appeals[r.str('appeal')];
+    if (a == null || a.ok != null) {
+      return 'nie ma czego rozpatrzyć';
+    }
+    final PyrMatter m = matters[a.matter]!;
+    if (m.overturned) {
+      return 'decyzja już uchylona';
+    }
+    if (r.at < a.signedAt || r.at >= a.deadline) {
+      return 'odpowiedź poza czasem na nią';
+    }
+    if (!_judgeSigned(a.judge, m.parties, r.signers)) {
+      return 'odpowiada szef poziom wyżej (szczyt: 2 z 3)';
+    }
+    final bool ok = r.body['ok'] == true;
+    if (ok && m.kind == PyrMatterKind.complaint) {
+      final PyrCase c = cases[m.id]!;
+      final String? bad = _addVerdict(r, c, judge: a.judge, step: a.step);
+      if (bad != null) {
+        return bad;
+      }
+      c.status = PyrCaseStatus.guilty;
+    }
+    a
+      ..ok = ok
+      ..answer = r.id
+      ..answerWhy = _clip(r.str('why'), kPyrCourtTextChars);
+    if (ok) {
+      _overturn(m, r);
+    }
+    history.add(
+      PyrHistory(
+        r.at,
+        ok
+            ? t('Odwołanie {name} przyjęte', {'name': _name(a.by)})
+            : t('Odwołanie {name} odrzucone', {'name': _name(a.by)}),
+        r.id,
+      ),
+    );
+    return null;
+  }
+
+  /// [m] overturned on appeal.
+  void _overturn(PyrMatter m, PyramidRecord r) {
+    m.overturned = true;
+    switch (m.kind) {
+      case PyrMatterKind.ban:
+        final PyrBan? ban = bans[m.id];
+        ban?.lifted = true;
+        // A ban a report decision gave: the decision falls with it.
+        final String? rep = ban?.rep;
+        if (rep != null) {
+          overturnedReports.add(rep);
+          for (final PyrBan b in bans.values) {
+            if (b.rep == rep) {
+              b.lifted = true;
+            }
+          }
+        }
+      case PyrMatterKind.remove:
+        _restore(m.party, m.oldPath ?? '', r);
+      case PyrMatterKind.verdict:
+        verdicts[m.id]?.overturned = true;
+      case PyrMatterKind.complaint:
+        // Its verdict was given by the answer itself.
+        break;
+    }
+  }
+
+  /// Brings back a member whose removal was overturned: to their old
+  /// place when it is free, else to the first free place under their old
+  /// head's branch — never higher than they were.
+  void _restore(String key, String oldPath, PyramidRecord r) {
+    if (position.containsKey(key) || members[key] == null) {
+      return;
+    }
+    String? spot;
+    if (vacant.contains(oldPath) ||
+        (!_exists(oldPath) &&
+            (oldPath.isEmpty || occupant[PyrPath.parent(oldPath)] != null))) {
+      spot = oldPath;
+    } else {
+      String q = PyrPath.parent(oldPath);
+      while (q.isNotEmpty && occupant[q] == null) {
+        q = PyrPath.parent(q);
+      }
+      spot = freePlaces(
+        q,
+        limit: 64,
+      ).where((String x) => x.length >= oldPath.length).firstOrNull;
+    }
+    if (spot == null) {
+      history.add(
+        PyrHistory(
+          r.at,
+          t('{name}: usunięcie uchylone, brak wolnego miejsca', {
+            'name': _name(key),
+          }),
+          r.id,
+        ),
+      );
+      return;
+    }
+    members[key]?.active = true;
+    leftLevel.remove(key);
+    _place(key, spot, r.id);
+    if (spot.isEmpty) {
+      _termChange(r.at);
+    }
+    history.add(
+      PyrHistory(
+        r.at,
+        t('{name} wraca do piramidy (usunięcie uchylone)', {
+          'name': _name(key),
+        }),
+        r.id,
+      ),
+    );
+  }
+
+  /// A complaint of one member against another ("Sąd"): first to the head
+  /// of the accused's cell (or the first one above who is not a party; at
+  /// the top, 2 of the top cell), who has [pyrStepTimeMs] (0) to answer.
+  String? _suit(PyramidRecord r) {
+    final String k = r.signers.length == 1 ? r.signers.first : '';
+    final String accused = r.str('k');
+    if (!position.containsKey(k)) {
+      return 'skargę składa członek piramidy';
+    }
+    final String? p = position[accused];
+    if (p == null || accused == k) {
+      return 'pozwać można innego członka piramidy';
+    }
+    if (!kPyrVerdictKinds.contains(r.str('type'))) {
+      return 'zły rodzaj sprawy';
+    }
+    if (r.str('text').trim().isEmpty) {
+      return 'skarga bez opisu';
+    }
+    final int open = cases.values
+        .where(
+          (PyrCase c) =>
+              c.plaintiff == k &&
+              c.status == PyrCaseStatus.open &&
+              r.at < c.deadline,
+        )
+        .length;
+    if (open >= kPyrOpenSuits) {
+      return 'za dużo otwartych skarg';
+    }
+    final Set<String> parties = <String>{k, accused};
+    final String? judge = _judgeFrom(
+      p.isEmpty ? '' : PyrPath.parent(p),
+      parties,
+    );
+    if (judge == null) {
+      return 'nie ma kto rozpatrzyć';
+    }
+    final int since = _timeOf(r);
+    cases[r.id] = PyrCase(
+      id: r.id,
+      plaintiff: k,
+      accused: accused,
+      kind: r.str('type'),
+      text: _clip(r.str('text'), kPyrCourtTextChars),
+      at: since,
+      signedAt: r.at,
+      judge: judge,
+      deadline: since + pyrStepTimeMs(0),
+    );
+    matters[r.id] = PyrMatter(
+      id: r.id,
+      kind: PyrMatterKind.complaint,
+      party: k,
+      parties: parties,
+      decider: judge,
+      step: 0,
+      at: since,
+    );
+    history.add(
+      PyrHistory(
+        r.at,
+        t('Skarga {name} przeciw {other}', {
+          'name': _name(k),
+          'other': _name(accused),
+        }),
+        r.id,
+      ),
+    );
+    return null;
+  }
+
+  /// The first instance decides a complaint in its time: a verdict
+  /// (guilty) or not.
+  String? _verdict(PyramidRecord r) {
+    final PyrCase? c = cases[r.str('case')];
+    if (c == null || c.status != PyrCaseStatus.open) {
+      return 'nie ma takiej sprawy';
+    }
+    if (r.at < c.signedAt || r.at >= c.deadline) {
+      return 'decyzja poza czasem na nią';
+    }
+    if (!_judgeSigned(c.judge, <String>{c.plaintiff, c.accused}, r.signers)) {
+      return 'rozstrzyga szef komórki pozwanego';
+    }
+    if (r.body['guilty'] != true) {
+      c
+        ..status = PyrCaseStatus.dismissed
+        ..why = _clip(r.str('why'), kPyrCourtTextChars);
+      history.add(
+        PyrHistory(
+          r.at,
+          t('Skarga przeciw {name} oddalona', {'name': _name(c.accused)}),
+          r.id,
+        ),
+      );
+      return null;
+    }
+    final String? bad = _addVerdict(r, c, judge: c.judge, step: 0);
+    if (bad != null) {
+      return bad;
+    }
+    c.status = PyrCaseStatus.guilty;
+    return null;
+  }
+
+  /// The verdict [r] gives in [c] (its kind, text, end, the accused's
+  /// addresses — each of them one the accused had); null when it counts.
+  String? _addVerdict(
+    PyramidRecord r,
+    PyrCase c, {
+    required String judge,
+    required int step,
+  }) {
+    final String kind = r.str('type');
+    if (!kPyrVerdictKinds.contains(kind) || r.str('k') != c.accused) {
+      return 'zły wyrok';
+    }
+    final Object? until = r.body['until'];
+    if (until != null && (until is! int || until <= r.at)) {
+      return 'zły termin wyroku';
+    }
+    final Object? raw = r.body['addrs'];
+    final List<String> addrs = raw is List
+        ? raw.whereType<String>().toList()
+        : const <String>[];
+    final Set<String> known = addressesOf(c.accused);
+    if ((raw != null && raw is! List) ||
+        addrs.length > kPyrVerdictAddrs ||
+        !addrs.every(known.contains)) {
+      return 'adresy nie należą do tej osoby';
+    }
+    verdicts[r.id] = PyrVerdict(
+      id: r.id,
+      caseId: c.id,
+      accused: c.accused,
+      plaintiff: c.plaintiff,
+      kind: kind,
+      text: _clip(r.str('text'), kPyrCourtTextChars),
+      at: r.at,
+      judge: judge,
+      addrs: addrs,
+      until: until as int?,
+    );
+    c.verdict = r.id;
+    matters[r.id] = PyrMatter(
+      id: r.id,
+      kind: PyrMatterKind.verdict,
+      party: c.accused,
+      parties: <String>{c.accused, c.plaintiff},
+      decider: judge,
+      step: step,
+      at: r.at,
+    );
+    history.add(
+      PyrHistory(
+        r.at,
+        t('Wyrok wobec {name}: {kind}', {
+          'name': _name(c.accused),
+          'kind': pyrVerdictLabel(kind),
+        }),
+        r.id,
+      ),
+    );
+    return null;
+  }
+
+  /// The verdicts in force against [key] at [now], the newest first.
+  List<PyrVerdict> verdictsAgainst(String key, int now) => <PyrVerdict>[
+    for (final PyrVerdict v in verdicts.values)
+      if (v.accused == key && v.activeAt(now)) v,
+  ]..sort((PyrVerdict a, PyrVerdict b) => b.at.compareTo(a.at));
+
+  /// The members who had [address] (normalized by [normalize]).
+  List<String> membersAt(String address, String Function(String) normalize) {
+    final String a = normalize(address);
+    return <String>[
+      for (final PyrMember m in members.values)
+        if (m.addrs.any((String x) => normalize(x) == a)) m.key,
+    ];
   }
 
   /// The most posts one national section keeps pinned.
@@ -2384,6 +3115,26 @@ final class PyramidState {
 
   static String _clip(String s, int n) => s.length > n ? s.substring(0, n) : s;
 
+  /// The most device addresses one member keeps.
+  static const int kPyrMaxAddrs = 64;
+
+  static const String _riseTooSoon =
+      'kolejny awans najwcześniej 7 dni po poprzednim';
+
+  /// Whether [key] may move up a level at [at]: not within
+  /// [kPyrRiseCooldownMs] of their last move up.
+  bool _canRise(String key, int at) {
+    final int? last = lastRise[key];
+    return last == null || at - last >= kPyrRiseCooldownMs;
+  }
+
+  /// When [key] may move up again (now, when nothing holds them back).
+  int nextRiseAt(String key) => (lastRise[key] ?? 0) + kPyrRiseCooldownMs;
+
+  /// Every device address [key] had in the pyramid.
+  Set<String> addressesOf(String key) =>
+      members[key]?.addrs ?? const <String>{};
+
   /// One intermediary of an announcement accepted: it keeps its
   /// share; the rest waits for the next person it names (who accepts or
   /// returns it), or goes back to the payer when there is nobody next.
@@ -2468,7 +3219,7 @@ final class PyramidState {
     if (year is! int || !pyrBirthYearValid(year, at)) {
       return null;
     }
-    return PyrMember(
+    final PyrMember m = PyrMember(
       key: json['k'] as String,
       pq: json['pq'] as String,
       name: _clip(json['n'] as String, 40),
@@ -2482,6 +3233,12 @@ final class PyramidState {
       addr: json['addr'] is String ? _clip(json['addr'] as String, 300) : '',
       founder: founder,
     );
+    if (m.addr.isNotEmpty) {
+      m.addrs.add(m.addr);
+    }
+    // Coming back: the addresses known from before stay known.
+    m.addrs.addAll(members[m.key]?.addrs ?? const <String>{});
+    return m;
   }
 
   void _swap(String cell, String upPath, PyramidRecord r) {
@@ -2511,7 +3268,35 @@ final class PyramidState {
   static String voteRequestContext(String pyramid, String cell, String head) =>
       'vreq|$pyramid|$cell|$head';
 
-  static String voteContext(String election) => 'vote|$election';
+  /// What the ring signature of a voting card's registration is bound to
+  /// (PyramidService: cards go to the cell only, never into the records).
+  static String tokenContext(String election) => 'vtok|$election';
+
+  /// The voting cards of a ballot ([PyrT.ballot]): one-time hybrid ids
+  /// (`<ed>.<fingerprint>`, [parseHybridKeyId]) in strictly ascending
+  /// order, as Ed25519 id → fingerprint; null for anything else (a second
+  /// spelling, a repeat, an unsorted list could make two ballots of one).
+  static Map<String, String>? ballotTokens(Object? value) {
+    if (value is! List ||
+        value.isEmpty ||
+        value.length > RingSignature.maxRing) {
+      return null;
+    }
+    final Map<String, String> out = <String, String>{};
+    String? last;
+    for (final Object? item in value) {
+      final ({String ed, String pq})? id = parseHybridKeyId(item);
+      if (id == null ||
+          !PyramidRecord.isCanonicalKey(id.ed) ||
+          (last != null && (item as String).compareTo(last) <= 0) ||
+          out.containsKey(id.ed)) {
+        return null;
+      }
+      last = item as String;
+      out[id.ed] = id.pq;
+    }
+    return out;
+  }
 
   static Uint8List _key(String b64key) =>
       unb64(b64key, length: 32) ?? Uint8List(32);
@@ -2562,35 +3347,85 @@ final class PyramidState {
     return null;
   }
 
+  /// The cell's voting cards: every member of the vote's ring is listed
+  /// as a signer, and at least as many of them signed as there are cards.
+  /// A member signs only cards that hold its own one, and only all the
+  /// cards it heard of (PyramidService), so whoever did not sign cannot
+  /// have a card among them unless an honest signer gave up its place:
+  /// nobody gets two. The hybrid signatures carry this, so it holds
+  /// against a quantum computer too. The first ballot that is complete
+  /// counts.
+  String? _ballot(PyramidRecord r) {
+    final PyrElection? e = elections[r.str('elect')];
+    if (e == null || e.closed || r.at < e.start) {
+      return 'głosowanie zamknięte';
+    }
+    if (e.tokens != null) {
+      return 'karty do głosowania już są';
+    }
+    final List<String> listed = r.candidates;
+    if (!(listed.length == e.ring.length &&
+        listed.toSet().containsAll(e.ring))) {
+      return 'karty podpisuje komórka';
+    }
+    final Map<String, String>? cards = ballotTokens(r.body['toks']);
+    if (cards == null || cards.length < 2 || cards.length > e.ring.length) {
+      return 'złe karty do głosowania';
+    }
+    final List<String> by = r.signers;
+    if (!by.every(e.ring.contains)) {
+      return 'karty podpisuje komórka';
+    }
+    if (by.length < cards.length) {
+      return 'za mało podpisów pod kartami';
+    }
+    e
+      ..tokens = cards
+      ..ballot = r.id;
+    return null;
+  }
+
+  /// A vote: signed by one card of the ballot (a one-time hybrid key that
+  /// names nobody), once per card.
   String? _vote(PyramidRecord r) {
     final PyrElection? e = elections[r.str('elect')];
-    final RingSignature? ring = r.ring;
     final String choice = r.str('choice');
-    if (e == null || e.closed || ring == null || r.at < e.start) {
+    if (e == null || e.closed || r.at < e.start) {
       return 'głosowanie zamknięte';
+    }
+    final Map<String, String>? cards = e.tokens;
+    if (cards == null) {
+      return 'nie ma jeszcze kart do głosowania';
+    }
+    final List<String> by = r.signers;
+    final List<String> listed = r.candidates;
+    if (by.length != 1 || listed.length != 1 || listed.first != by.first) {
+      return 'głos podpisuje jedna karta';
+    }
+    final String card = by.first;
+    final String? pq = cards[card];
+    if (pq == null) {
+      return 'karta spoza głosowania';
+    }
+    if (r.pqIdOf(card) != pq) {
+      return 'karta z innym kluczem ML-DSA';
     }
     if (!e.ring.contains(choice)) {
       return 'można głosować tylko na kogoś z komórki';
     }
-    // One vote per key image (canonical, so no second spelling of it).
-    if (e.votes.containsKey(ring.keyImage)) {
+    if (e.votes.containsKey(card)) {
       return 'już głosował(a)';
     }
-    if (!ring.verify(
-      ring: e.ring.map(_key).toList(),
-      context: voteContext(e.id),
-      message: r.signedBytes,
-    )) {
-      return 'zły podpis pierścieniowy';
-    }
-    e.votes[ring.keyImage] = choice;
-    if (e.votes.length >= e.ring.length) {
+    e.votes[card] = choice;
+    if (e.votes.length >= cards.length) {
       _closeElection(e, r.at);
     }
     return null;
   }
 
   void _closeElection(PyrElection e, int at) {
+    _cause = e.id;
+    _causeAt = at;
     e.closed = true;
     final Map<String, int> counts = <String, int>{};
     for (final String c in e.votes.values) {
@@ -2603,7 +3438,10 @@ final class PyramidState {
       }
     }
     e.winner = winner ?? e.head;
-    if (winner == null || winner == e.head || occupant[e.cell] != e.head) {
+    if (winner == null ||
+        winner == e.head ||
+        occupant[e.cell] != e.head ||
+        !_canRise(winner, at)) {
       history.add(
         PyrHistory(at, t('Głosowanie w komórce: szef zostaje'), e.id),
       );
@@ -2618,6 +3456,7 @@ final class PyramidState {
     occupant[up] = head;
     position[winner] = e.cell;
     position[head] = up;
+    lastRise[winner] = at;
     _noteLevel(winner);
     _noteLevel(head);
     if (e.cell.isEmpty) {
@@ -2830,7 +3669,27 @@ final class PyramidState {
       // Counted only once the ban counts (a refused one uses nothing up).
       _use(via!, r);
     }
+    final String? rep = r.body['rep'] is String && r.str('rep').length <= 64
+        ? r.str('rep')
+        : null;
+    if (target.isNotEmpty && members.containsKey(target)) {
+      // Appealed above whoever decided: the top reconsiders its own, a
+      // delegate's goes to the head above the delegate.
+      final String decider = delegated
+          ? position[delegations[via]?.to] ?? ''
+          : '';
+      matters[r.id] = PyrMatter(
+        id: r.id,
+        kind: PyrMatterKind.ban,
+        party: target,
+        parties: <String>{target},
+        decider: decider,
+        step: -1,
+        at: r.at,
+      );
+    }
     bans[r.id] = PyrBan(
+      rep: rep,
       id: r.id,
       target: target,
       kind: kind,

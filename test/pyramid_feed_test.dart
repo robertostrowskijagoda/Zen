@@ -142,9 +142,13 @@ void main() {
     await w.net.run();
     expect(ids(w['O'].feed.pyramid), <String>[top.id]);
 
-    // No member friend: nothing, no chips.
+    // No member friend: nothing, no pyramid chips.
     expect(w['P'].feed.posts, isEmpty);
-    expect(feedFiltersFor(w['P'].feed), isEmpty);
+    expect(feedFiltersFor(w['P'].feed), <FeedFilter>[
+      FeedFilter.all,
+      FeedFilter.friends,
+      FeedFilter.close,
+    ]);
 
     // A friend that comes later, without a nationality in the profile,
     // gets the top's posts with the hello, once.
@@ -160,6 +164,7 @@ void main() {
     expect(feedFiltersFor(w['L'].feed), <FeedFilter>[
       FeedFilter.all,
       FeedFilter.friends,
+      FeedFilter.close,
       FeedFilter.pyramid,
     ]);
     bool passed(Map<String, dynamic> m) => m['type'] == PyramidTypes.national;

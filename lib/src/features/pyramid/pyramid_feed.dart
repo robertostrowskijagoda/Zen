@@ -1,4 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_format.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/features/pyramid/pyramid_court.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
@@ -323,18 +326,49 @@ final class PyrFeedReferendum {
 }
 
 /// An alarm announcement in force for this person: a red bar on top of the
-/// Tablica, in every filter, until it ends.
+/// Tablica, in every filter, until it ends. With [notice], a notice every
+/// member must see instead (a change of the emission limit announced), in
+/// the colour of a warning.
 @immutable
 final class PyrFeedAlarm {
   const PyrFeedAlarm({
     required this.id,
     required this.text,
     required this.until,
+    this.notice = false,
   });
 
   final String id;
   final String text;
   final int until;
+  final bool notice;
+}
+
+/// A change of the emission limit announced, in words for everybody.
+String pyrEmitChangeText(PyrEmitChange c) => t(
+  'Zapowiedziana zmiana limitu emisji: {old} → {limit} na 30 dni, emisja '
+  'czeka {hours} h. Obowiązuje od {date}, chyba że szczyt ją anuluje.',
+  <String, Object?>{
+    'old': ZenFormat.money(c.oldLimit),
+    'limit': ZenFormat.money(c.limit ?? c.oldLimit),
+    'hours': c.delayHours ?? c.oldDelayHours,
+    'date': ZenFormat.dateTime(
+      DateTime.fromMillisecondsSinceEpoch(c.effectiveAt),
+    ),
+  },
+);
+
+/// The order of pyramid posts, the same in "Piramida" and "Kraj": the
+/// higher the author stood when writing, the higher the post; within a
+/// level those with the section's priority, then the newest.
+int pyrPostOrder(PyrFeedPost a, PyrFeedPost b) {
+  if (a.level != b.level) {
+    return a.level.compareTo(b.level);
+  }
+  if (a.priority != b.priority) {
+    return a.priority ? -1 : 1;
+  }
+  return b.at.compareTo(a.at);
 }
 
 /// What the pyramid puts on the Tablica for one person: one rule of who
@@ -370,28 +404,18 @@ final class PyramidFeed {
   /// within a level the newest first. Own posts at their own level.
   List<PyrFeedPost> get pyramid =>
       posts.where((PyrFeedPost p) => p.kind != PyrFeedKind.national).toList()
-        ..sort(
-          (PyrFeedPost a, PyrFeedPost b) => a.level != b.level
-              ? a.level.compareTo(b.level)
-              : b.at.compareTo(a.at),
-        );
+        ..sort(pyrPostOrder);
 
-  /// "Kraj": pinned (newest pin first), the lead's, those with priority,
-  /// then by level, newest first within one.
+  /// "Kraj": the posts the section's lead pinned (newest pin first), then
+  /// like "Piramida": the higher the author, the higher the post
+  /// ([pyrPostOrder]).
   List<PyrFeedPost> get national =>
       posts.where((PyrFeedPost p) => p.kind == PyrFeedKind.national).toList()
         ..sort((PyrFeedPost a, PyrFeedPost b) {
           if (a.pinnedAt != b.pinnedAt) {
             return b.pinnedAt.compareTo(a.pinnedAt);
           }
-          int rank(PyrFeedPost p) => p.lead ? 0 : (p.priority ? 1 : 2);
-          final int c = rank(a).compareTo(rank(b));
-          if (c != 0) {
-            return c;
-          }
-          return a.level != b.level
-              ? a.level.compareTo(b.level)
-              : b.at.compareTo(a.at);
+          return pyrPostOrder(a, b);
         });
 
   /// The posts "Wszystko" shows besides friends' ones.
@@ -522,6 +546,14 @@ PyramidFeed _memberFeed(PyramidState s, String me, int now, Set<String> voted) {
           (PyrFeedReferendum a, PyrFeedReferendum b) => a.end.compareTo(b.end),
         ),
     alarms: <PyrFeedAlarm>[
+      // Pinned for every member while it waits: the money may change.
+      for (final PyrEmitChange c in s.pendingEmitChanges)
+        PyrFeedAlarm(
+          id: 'emit-${c.id}',
+          text: pyrEmitChangeText(c),
+          until: c.effectiveAt,
+          notice: true,
+        ),
       for (final PyrAlarm a in s.alarms)
         if (now < a.until &&
             switch (a.scopeKind) {

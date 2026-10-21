@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/dev/sim/sim_network.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/meet/ask/ask_service.dart';
@@ -86,17 +87,21 @@ final class PyramidWorld {
 
   /// A phone with the pyramid service, its data on [disk] (a fresh one in
   /// memory by default); [friendLevelOf] is its private friend levels.
+  ///
+  /// With [fromAccount] the pyramid key comes, as in the app, from the
+  /// ledger identity (the account key) on [disk].
   SimPhone add(
     String name, {
     LedgerDisk? disk,
     FriendLevel? Function(String address)? friendLevelOf,
+    bool fromAccount = false,
   }) {
     final SimPhone p = net.phone(name);
     final LedgerDisk d = disk ?? MemoryLedgerDisk();
     final PyramidService s = PyramidService(
       host: p,
       disk: d,
-      identitySeed: seedOf(d),
+      identitySeed: fromAccount ? null : seedOf(d),
       now: () => net.now,
       tallyWait: const Duration(minutes: 30),
       recordSegmentEntries: recordSegmentEntries,
@@ -279,3 +284,151 @@ final class PyramidWorld {
   static String _fingerprint(PyramidState s) =>
       '${s.describe()}|${s.applied.length}|${s.term}|${s.transfers.length}';
 }
+
+/// The tree of [FoldWorld.make]: name, who admits them (right under
+/// themself), place. Everybody votes at once (admitted by their head).
+const List<(String, String?, String)> kFoldTree = <(String, String?, String)>[
+  ('S', null, ''),
+  ('A', 'S', '0'),
+  ('B', 'S', '1'),
+  ('A1', 'A', '00'),
+  ('A2', 'A', '01'),
+  ('B1', 'B', '10'),
+  ('X', 'A1', '000'),
+  ('Y', 'A1', '001'),
+];
+
+/// Signed records folded without any network: the rules alone.
+final class FoldWorld {
+  FoldWorld._(this.keys, this.records);
+
+  static const int t0 = 1700000000000;
+  static const int hour = 3600 * 1000;
+  static const int day = 24 * hour;
+
+  final Map<String, LedgerKeyPair> keys;
+  final List<PyramidRecord> records;
+
+  String get py => records.first.id;
+
+  LedgerKeyPair operator [](String name) => keys[name]!;
+
+  /// The key of [name].
+  String id(String name) => keys[name]!.id;
+
+  /// The device address [name] was admitted with.
+  static String addrOf(String name) => 'addr-$name';
+
+  /// [tree] admitted one by one after the founding, a millisecond apart;
+  /// [nats] gives some of them another nationality than PL.
+  static Future<FoldWorld> make({
+    List<(String, String?, String)> tree = kFoldTree,
+    Map<String, String> nats = const <String, String>{},
+  }) async {
+    final Map<String, LedgerKeyPair> keys = <String, LedgerKeyPair>{
+      for (final (String name, String? _, String _) in tree)
+        name: await LedgerKeyPair.generate(),
+    };
+    final LedgerKeyPair power = await LedgerKeyPair.generate();
+    final PyramidRecord g = await signedRecord(
+      PyrT.genesis,
+      '',
+      t0,
+      <LedgerKeyPair>[power],
+      <String, dynamic>{'name': 'Test', 'pk': power.id},
+    );
+    final List<PyramidRecord> records = <PyramidRecord>[g];
+    int at = t0;
+    for (final (String name, String? head, String slot) in tree) {
+      final Map<String, dynamic> m = memberData(
+        keys[name]!,
+        name,
+        nat: nats[name] ?? 'PL',
+      );
+      records.add(
+        head == null
+            ? await signedRecord(
+                PyrT.found,
+                g.id,
+                at,
+                <LedgerKeyPair>[power, keys[name]!],
+                <String, dynamic>{'m': m},
+              )
+            : await signedRecord(
+                PyrT.admit,
+                g.id,
+                at,
+                <LedgerKeyPair>[keys[head]!, keys[name]!],
+                <String, dynamic>{
+                  'sp': keys[head]!.id,
+                  'head': keys[head]!.id,
+                  'slot': slot,
+                  'm': m,
+                },
+              ),
+      );
+      at++;
+    }
+    return FoldWorld._(keys, records);
+  }
+
+  /// A record of [type] at [at] signed by [who] (names).
+  Future<PyramidRecord> rec(
+    String type,
+    int at,
+    List<String> who,
+    Map<String, dynamic> fields,
+  ) => signedRecord(type, py, at, <LedgerKeyPair>[
+    for (final String n in who) keys[n]!,
+  ], fields);
+
+  /// The pyramid with [more] records, at [now] (by default long after).
+  PyramidState fold(
+    Iterable<PyramidRecord> more, {
+    int now = t0 + 400 * day,
+    Map<String, int> late = const <String, int>{},
+  }) => PyramidState.fold(
+    py,
+    <PyramidRecord>[...records, ...more],
+    now: now,
+    late: late,
+  );
+}
+
+/// [fields] of [type] in pyramid [py] at [at], signed by [signers].
+Future<PyramidRecord> signedRecord(
+  String type,
+  String py,
+  int at,
+  List<LedgerKeyPair> signers,
+  Map<String, dynamic> fields,
+) async {
+  PyramidRecord r = PyramidRecord(
+    body: <String, dynamic>{
+      't': type,
+      'py': py,
+      'at': at,
+      'by': <String>[for (final LedgerKeyPair k in signers) k.id],
+      ...fields,
+    },
+  );
+  for (final LedgerKeyPair k in signers) {
+    r = await r.signedBy(k);
+  }
+  return r;
+}
+
+/// A member's data as an admission carries it.
+Map<String, dynamic> memberData(
+  LedgerKeyPair k,
+  String name, {
+  String nat = 'PL',
+}) => <String, dynamic>{
+  'k': k.id,
+  'pq': k.pqId,
+  'n': name,
+  'nat': nat,
+  'yr': 1990,
+  'dc': 'x',
+  'addr': FoldWorld.addrOf(name),
+};

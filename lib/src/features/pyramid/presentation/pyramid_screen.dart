@@ -13,9 +13,12 @@ import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/pyramid/presentation/pyramid_court_view.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_decisions.dart';
+import 'package:zen/src/features/pyramid/presentation/pyramid_emission.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_national.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_power.dart';
+import 'package:zen/src/features/pyramid/presentation/pyramid_timeline_view.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_wallet.dart';
 import 'package:zen/src/features/pyramid/presentation/report_sheet.dart';
 import 'package:zen/src/features/pyramid/pyramid_feed.dart';
@@ -44,7 +47,7 @@ String pyrWho(PyramidState s, String key) {
 }
 
 /// The colour of the pyramid feature.
-Color pyrTone(ZenColors zen) => zenTone(zen, 7);
+Color pyrTone(ZenColors zen) => zen.tone(ZenTone.money);
 
 /// The first letter of a name, for avatars.
 String pyrInitial(String name) {
@@ -115,7 +118,7 @@ class PyrBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     return ClipRRect(
-      borderRadius: BorderRadius.circular(height),
+      borderRadius: BorderRadius.circular(ZenLook.of(context).radius(height)),
       child: LinearProgressIndicator(
         value: value.isNaN ? 0 : value.clamp(0.0, 1.0).toDouble(),
         minHeight: height,
@@ -143,13 +146,16 @@ class PyrOption extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final Color t = pyrTone(zen);
+    final BorderRadius radius = BorderRadius.circular(
+      ZenLook.of(context).radius(14),
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Material(
         color: selected ? t.withValues(alpha: 0.12) : zen.surfaceMuted,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: radius,
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: radius,
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -315,7 +321,7 @@ class PyramidScreen extends ConsumerWidget {
                 _VotesTab(pyr: pyr, s: s, me: me),
                 PyramidWallet(pyr: pyr, s: s, me: me),
                 if (power) PyramidPower(pyr: pyr, s: s, me: me),
-                _HistoryTab(s: s),
+                _HistoryTab(s: s, me: me),
               ],
             ),
           ),
@@ -358,7 +364,9 @@ class _PyramidAppBar extends StatelessWidget implements PreferredSizeWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
               ),
-              borderRadius: BorderRadius.circular(3),
+              borderRadius: BorderRadius.circular(
+                ZenLook.of(context).radius(3),
+              ),
             ),
           ),
           const SizedBox(width: 12),
@@ -813,6 +821,14 @@ class _JoinViewState extends ConsumerState<_JoinView> {
             'Z piramidy wynikają głosowania, sekcja krajowa i waluta.',
           ),
         ),
+        if (browsing != null &&
+            widget.pyr.myKey != null &&
+            widget.pyr.myMatters().isNotEmpty)
+          DecisionsAgainstMe(
+            pyr: widget.pyr,
+            s: browsing,
+            me: widget.pyr.myKey!,
+          ),
         ZenSection(t('Jak to działa'), top: 12),
         ZenCard(
           child: Column(
@@ -1129,9 +1145,12 @@ class _MeTab extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Container(
+                    // A QR code reads black on white, whatever the theme.
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(
+                        ZenLook.of(context).radius(20),
+                      ),
                     ),
                     padding: const EdgeInsets.all(12),
                     child: QrImageView(
@@ -1325,6 +1344,10 @@ class _MeTab extends StatelessWidget {
                               value: 'report',
                               child: Text(t('Zgłoś')),
                             ),
+                            PopupMenuItem<String>(
+                              value: 'sue',
+                              child: Text(t('Złóż skargę do sądu')),
+                            ),
                           ],
                     ),
                 ],
@@ -1366,11 +1389,9 @@ class _MeTab extends StatelessWidget {
             Container(
               margin: const EdgeInsets.fromLTRB(0, 8, 8, 4),
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: tone.withValues(alpha: 0.09),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: tone.withValues(alpha: 0.25)),
-              ),
+              decoration: ZenLook.of(
+                context,
+              ).panel(zen, radius: 16, tone: tone),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -1397,6 +1418,21 @@ class _MeTab extends StatelessWidget {
                     }),
                     style: TextStyle(color: zen.textSecondary, fontSize: 13),
                   ),
+                  if (e.tokens == null || pyr.voteWaiting(e.id))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        pyr.voteWaiting(e.id)
+                            ? t('Twój głos wyjdzie sam, gdy karty będą gotowe.')
+                            : t(
+                                'Telefony komórki wymieniają jednorazowe karty.',
+                              ),
+                        style: TextStyle(
+                          color: zen.textSecondary,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 8,
@@ -1409,9 +1445,11 @@ class _MeTab extends StatelessWidget {
                             if (context.mounted) {
                               snack(
                                 context,
-                                ok
-                                    ? t('Głos oddany.')
-                                    : t('Nie można (już głosowano?).'),
+                                !ok
+                                    ? t('Nie można (już głosowano?).')
+                                    : pyr.voteWaiting(e.id)
+                                    ? t('Głos wyjdzie, gdy karty będą gotowe.')
+                                    : t('Głos oddany.'),
                               );
                             }
                           }()),
@@ -1517,6 +1555,10 @@ class _MeTab extends StatelessWidget {
         if (context.mounted) {
           await showReportSheet(context, pyr, target: key);
         }
+      case 'sue':
+        if (context.mounted) {
+          await showComplaintDialog(context, pyr, s, key);
+        }
     }
   }
 
@@ -1531,11 +1573,13 @@ class _MeTab extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: <Widget>[
+        // Pinned for every member: the money may change.
+        EmitChangeNotices(pyr: pyr, s: s),
         // Hero: where I am in the pyramid.
         Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(26),
+            borderRadius: BorderRadius.circular(ZenLook.of(context).radius(26)),
             gradient: LinearGradient(
               colors: <Color>[
                 Color.alphaBlend(tone.withValues(alpha: 0.34), zen.surface),
@@ -1660,7 +1704,9 @@ class _MeTab extends StatelessWidget {
                           height: 6,
                           margin: const EdgeInsets.symmetric(horizontal: 1.5),
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(3),
+                            borderRadius: BorderRadius.circular(
+                              ZenLook.of(context).radius(3),
+                            ),
                             color: i == myPath.length
                                 ? tone
                                 : i < myPath.length
@@ -1691,6 +1737,7 @@ class _MeTab extends StatelessWidget {
           ),
         ),
         PyramidPostsEntry(pyr: pyr),
+        CourtDuties(pyr: pyr, s: s),
         DecisionsAgainstMe(pyr: pyr, s: s, me: me),
         ZenSection(t('Twoja linia do szczytu')),
         ZenCard(
@@ -1779,13 +1826,24 @@ class _MeTab extends StatelessWidget {
             minimumSize: const Size.fromHeight(48),
           ),
           onPressed: () => unawaited(() async {
+            // Sideways, down, or one level up (not again within 7 days):
+            // promotion goes step by step.
+            final bool canRise = pyr.now >= s.nextRiseAt(me);
             final List<String> heads = <String>[
               for (final MapEntry<String, String> e in s.position.entries)
                 if (e.key != me &&
                     !PyrPath.within(e.value, myPath) &&
-                    s.freeSlot(e.value) != null)
+                    s.freeSlot(e.value) != null &&
+                    e.value.length + 1 >= myPath.length - (canRise ? 1 : 0))
                   e.key,
             ];
+            if (heads.isEmpty) {
+              snack(
+                context,
+                t('Brak wolnego miejsca, do którego wolno przejść.'),
+              );
+              return;
+            }
             final String? to = await showDialog<String>(
               context: context,
               builder: (BuildContext context) => SimpleDialog(
@@ -1812,7 +1870,9 @@ class _MeTab extends StatelessWidget {
               return;
             }
             bool branch = false;
-            if (pyr.myCellBelow.isNotEmpty) {
+            // A branch never moves up: one level up only alone.
+            final bool rises = (s.pathOf(to)?.length ?? 0) + 1 < myPath.length;
+            if (pyr.myCellBelow.isNotEmpty && !rises) {
               // Alone (the cell below picks who moves up), or with
               // the whole branch when the whole cell agrees.
               final bool? withBranch = await showDialog<bool>(
@@ -1860,6 +1920,26 @@ class _MeTab extends StatelessWidget {
           }()),
           icon: const Icon(Icons.swap_horiz_rounded),
           label: Text(t('Przejdź do innej komórki')),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          key: const Key('pyr-sue'),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+          ),
+          onPressed: () => unawaited(() async {
+            final String? who = await pickMember(
+              context,
+              s,
+              except: me,
+              title: t('Skarga przeciw komu?'),
+            );
+            if (who != null && context.mounted) {
+              await showComplaintDialog(context, pyr, s, who);
+            }
+          }()),
+          icon: const Icon(Icons.balance_rounded),
+          label: Text(t('Złóż skargę do sądu')),
         ),
         const SizedBox(height: 12),
         PyrBadgeAndStats(pyr: pyr, s: s, me: me),
@@ -2371,9 +2451,10 @@ class _Result extends StatelessWidget {
 }
 
 class _HistoryTab extends StatelessWidget {
-  const _HistoryTab({required this.s});
+  const _HistoryTab({required this.s, required this.me});
 
   final PyramidState s;
+  final String me;
 
   @override
   Widget build(BuildContext context) {
@@ -2404,14 +2485,21 @@ class _HistoryTab extends StatelessWidget {
                   <String, Object?>{'date': pyrDate(s.termStart[s.term] ?? 0)},
                 ),
               ),
+              // The places through time, animated.
+              ZenSection(t('Miejsca w czasie')),
+              ZenCard(
+                child: PyramidTimelineView(s: s, me: me),
+              ),
               if (h.isEmpty)
                 ZenEmpty(
                   icon: Icons.timeline_rounded,
                   tone: tone,
                   title: t('Historia jest pusta'),
                 )
-              else
-                const SizedBox(height: 12),
+              else ...<Widget>[
+                ZenSection(t('Wszystkie zmiany')),
+                const SizedBox(height: 4),
+              ],
             ],
           );
         }
@@ -2446,11 +2534,7 @@ class _HistoryTab extends StatelessWidget {
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-                decoration: BoxDecoration(
-                  color: zen.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: zen.outlineSoft),
-                ),
+                decoration: ZenLook.of(context).panel(zen, radius: 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[

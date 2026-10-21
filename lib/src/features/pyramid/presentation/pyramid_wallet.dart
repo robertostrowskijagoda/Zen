@@ -6,6 +6,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
+import 'package:zen/src/features/pyramid/presentation/pyramid_emission.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_screen.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
@@ -748,11 +749,15 @@ class PyramidWallet extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: <Widget>[
+          // Pinned: the money may change.
+          EmitChangeNotices(pyr: pyr, s: s),
           // The balance.
           Container(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(28),
+              borderRadius: BorderRadius.circular(
+                ZenLook.of(context).radius(28),
+              ),
               gradient: LinearGradient(
                 colors: <Color>[
                   Color.alphaBlend(tone.withValues(alpha: 0.42), zen.surface),
@@ -1266,7 +1271,28 @@ class PyramidWallet extends StatelessWidget {
                       : emitted / s.params.emitLimit,
                   tone: tone,
                 ),
+                const SizedBox(height: 8),
+                Text(
+                  t(
+                    'Emisja czeka {hours} h. Wyższy limit obowiązuje 30 dni '
+                    'po ogłoszeniu, niższy od razu.',
+                    <String, Object?>{'hours': s.params.emitDelayHours},
+                  ),
+                  style: TextStyle(
+                    color: zen.textSecondary,
+                    fontSize: 12.5,
+                    height: 1.35,
+                  ),
+                ),
                 if (top) ...<Widget>[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    key: const Key('emit-limit-change'),
+                    onPressed: () =>
+                        unawaited(changeEmissionLimit(context, pyr, s)),
+                    icon: const Icon(Icons.tune_rounded),
+                    label: Text(t('Zmień limit emisji')),
+                  ),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
                     onPressed: () => unawaited(() async {
@@ -1292,14 +1318,14 @@ class PyramidWallet extends StatelessWidget {
                       if (!context.mounted || amount == null || amount <= 0) {
                         return;
                       }
-                      // Never above the rolling limit: the top raises the
-                      // limit itself, in the rules (24 h later).
+                      // Never above the rolling limit: a higher limit
+                      // applies only 30 days after it is announced.
                       if (amount > s.params.emitLimit - emitted) {
                         snack(
                           context,
                           t(
-                            'Ponad limit 30 dni. Limit zmienia szczyt w '
-                            'zasadach (Władza → Zmień zasady).',
+                            'Ponad limit 30 dni. Wyższy limit obowiązuje '
+                            'dopiero 30 dni po ogłoszeniu.',
                           ),
                         );
                         return;

@@ -10,8 +10,8 @@ import 'package:zen/src/features/pyramid/pyramid_service.dart';
 
 import 'support/pyramid_world.dart';
 
-/// Money and the inboxes of the pyramid: reports and appeals only from
-/// members and within limits, treasurer signatures never replaced.
+/// Money and the inboxes of the pyramid: reports only from members and
+/// within limits, treasurer signatures never replaced.
 void main() {
   /// Emits [amount] to [who] (S proposes, B signs) and waits the 24 h.
   Future<void> fund(PyramidWorld w, String who, int amount) async {
@@ -31,7 +31,7 @@ void main() {
     expect(formatMoney(123456789), contains(','));
   });
 
-  group('reports and appeals', () {
+  group('reports', () {
     test(
       'only members, only to those who take them, cut to size and counted',
       () async {
@@ -39,7 +39,6 @@ void main() {
         final PyramidService s = w['S'];
         final SimPhone z = w.add('Z');
         await w['Z'].load();
-        final String b1 = w['B1'].myKey!;
         Map<String, dynamic> report(String id, {String evidence = 'x'}) =>
             <String, dynamic>{
               'type': PyramidTypes.report,
@@ -50,17 +49,10 @@ void main() {
               'ev': evidence,
             };
 
-        // A stranger: neither reports nor appeals get in.
+        // A stranger's reports do not get in.
         await z.send(w.net['S'].address, report('obcy'));
-        await z.send(w.net['S'].address, <String, dynamic>{
-          'type': PyramidTypes.appeal,
-          'rep': 'r',
-          't': 'odwołanie',
-          'k': b1,
-        });
         await w.net.run();
         expect(s.inbox, isEmpty);
-        expect(s.appeals, isEmpty);
 
         // A member floods the top with huge reports: a few are kept, cut.
         final String huge = 'x' * 100000;
@@ -82,30 +74,14 @@ void main() {
         );
         expect(w['A1'].inbox, isEmpty);
 
-        // Appeals: the key must be the sender's own; one per report.
-        for (final String k in <String>[w['A2'].myKey!, b1, b1]) {
-          await w.net['B1'].send(w.net['S'].address, <String, dynamic>{
-            'type': PyramidTypes.appeal,
-            'rep': 'r1',
-            't': 'y' * 50000,
-            'k': k,
-          });
-        }
-        await w.net.run();
-        expect(s.appeals, hasLength(1));
-        expect(s.appeals.single['k'], b1);
-        expect((s.appeals.single['t'] as String).length, kPyrAppealChars);
-
         // Kept under their own key, never in the main state.
         expect(stored(s, 'pyramid/me').containsKey('in'), isFalse);
-        expect(stored(s, 'pyramid/me').containsKey('ap'), isFalse);
         expect(
           stored(s, 'pyramid/reports')['in'] as List,
           hasLength(kPyrReportsPerSender),
         );
         await s.load();
         expect(s.inbox, hasLength(kPyrReportsPerSender));
-        expect(s.appeals, hasLength(1));
       },
     );
   });

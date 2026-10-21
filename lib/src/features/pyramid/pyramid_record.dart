@@ -32,6 +32,11 @@ abstract final class PyrT {
   static const String swap = 'swap';
   static const String voteRequest = 'vreq';
   static const String vote = 'vote';
+
+  /// The voting cards of a cell vote: one one-time hybrid key per member
+  /// who registered one, signed by the members themselves
+  /// ([PyramidState.ballotTokens]).
+  static const String ballot = 'ballot';
   static const String leave = 'leave';
   static const String fill = 'fill';
   static const String absent = 'absent';
@@ -85,23 +90,56 @@ abstract final class PyrT {
   /// after joining).
   static const String known = 'known';
 
+  /// The emission limit (and the wait before an emission counts) changes
+  /// only by this record, signed by the top (2 of 3): lower at once, any
+  /// change that lets more money out announced to everybody and in force
+  /// 30 days later, unless the top cancels it ([emitCancel]) before.
+  static const String emitRule = 'emitrule';
+  static const String emitCancel = 'emitcancel';
+
+  /// A member's complaint against another member ("Sąd"), judged first by
+  /// the head of the accused's cell ([verdict]).
+  static const String suit = 'suit';
+  static const String verdict = 'verdict';
+
+  /// An appeal against a decision (a ban, a removal, a verdict, a dismissed
+  /// complaint): it goes one level above whoever decided, each time twice
+  /// as long to answer ([appealAnswer]), up to the top.
+  static const String appeal = 'appeal';
+  static const String appealAnswer = 'appans';
+
   /// Kinds signed anonymously with a ring signature.
-  static const Set<String> anonymous = <String>{voteRequest, vote};
+  static const Set<String> anonymous = <String>{voteRequest};
+
+  /// Kinds published through a friend outside the cell, so the first phone
+  /// to show them is not the author's: the anonymous request and the vote
+  /// (signed by a one-time key on the cell's ballot).
+  static const Set<String> relayed = <String>{voteRequest, vote};
 
   /// Kinds most treasurers sign before they count.
   static const Set<String> treasured = <String>{transfer, settle};
 
   /// Kinds whose time starts a wait or counts against a limit (new rules
-  /// a day later, an emission's veto time and its 30-day limit): a phone
-  /// that sees one late ([kPyrLateMs]) counts them from then.
-  static const Set<String> timed = <String>{constitution, emit};
+  /// a day later, an emission's veto time and its 30-day limit, a raise of
+  /// the limit 30 days later, the time a complaint or an appeal gives to
+  /// answer it): a phone that sees one late ([kPyrLateMs]) counts them
+  /// from then.
+  static const Set<String> timed = <String>{
+    constitution,
+    emit,
+    emitRule,
+    suit,
+    appeal,
+  };
 
   /// Kinds whose signatures carry their ML-DSA keys (the keyed form,
   /// [PyramidRecord.signsWithKeys]): the records that introduce a key —
   /// the genesis, founding, admissions, handovers of the power key — and
   /// those read outside the pyramid by people who hold none of its records
-  /// (national-section posts, crisis alarms). Every other signature names
-  /// its key, which a phone keeping the pyramid has from those records.
+  /// (national-section posts, crisis alarms, verdicts with the appeals and
+  /// answers that overturn them, the addresses a verdict is shown at).
+  /// Every other signature names its key, which a phone keeping the pyramid
+  /// has from those records.
   static const Set<String> keyed = <String>{
     genesis,
     found,
@@ -109,13 +147,20 @@ abstract final class PyrT {
     handover,
     natPost,
     alarm,
+    verdict,
+    appeal,
+    appealAnswer,
+    address,
+    vote,
   };
 }
 
 /// One signed record. [body] is everything but the signatures; [sigs] maps
 /// signer key → hybrid signature of the canonical body (Ed25519 +
 /// ML-DSA-65, see hybrid_signature.dart); [ring] is a ring signature for
-/// the anonymous kinds (classical, see ring_signature.dart); [tsigs] are
+/// the anonymous request of a cell vote (classical, see
+/// ring_signature.dart; the votes themselves are hybrid-signed by one-time
+/// keys, [PyrT.ballot]); [tsigs] are
 /// treasurers' hybrid signatures on a transfer or a settlement.
 ///
 /// A signature names the signer's ML-DSA key by fingerprint; the key is

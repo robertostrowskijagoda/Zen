@@ -66,7 +66,7 @@ class PyramidFeedCard extends ConsumerWidget {
     final ZenColors zen = ZenColors.of(context);
     final bool national = post.kind == PyrFeedKind.national;
     final Color tone = national
-        ? zenTone(zen, 1)
+        ? zen.tone(ZenTone.money)
         : post.kind == PyrFeedKind.top
         ? zen.warning
         : pyrTone(zen);
@@ -108,8 +108,8 @@ class PyramidFeedCard extends ConsumerWidget {
                 width: 5,
                 decoration: BoxDecoration(
                   color: tone,
-                  borderRadius: const BorderRadius.horizontal(
-                    left: Radius.circular(18),
+                  borderRadius: BorderRadius.horizontal(
+                    left: Radius.circular(ZenLook.of(context).radius(18)),
                   ),
                 ),
               ),
@@ -224,7 +224,9 @@ class PyramidFeedCard extends ConsumerWidget {
                           padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                           decoration: BoxDecoration(
                             color: zen.surfaceMuted,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: context.zenRadius(
+                              ZenLook.of(context).radius(14),
+                            ),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -442,7 +444,9 @@ class PyramidReferendumCard extends StatelessWidget {
   );
 }
 
-/// An alarm announcement in force: a red bar on top of the Tablica.
+/// An alarm announcement in force: a red bar on top of the Tablica. A
+/// notice for every member (a change of the emission limit announced) in
+/// the colour of a warning.
 class PyramidAlarmBar extends StatelessWidget {
   const PyramidAlarmBar({required this.alarm, super.key});
 
@@ -451,26 +455,28 @@ class PyramidAlarmBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
+    final Color tone = alarm.notice ? zen.warning : zen.danger;
     return Container(
       key: Key('feed-alarm-${alarm.id}'),
       margin: const EdgeInsets.symmetric(vertical: 5),
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-      decoration: BoxDecoration(
-        color: zen.danger.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: zen.danger.withValues(alpha: 0.45)),
-      ),
+      decoration: ZenLook.of(context).panel(zen, radius: 16, tone: tone),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(Icons.campaign_rounded, color: zen.danger, size: 20),
+          Icon(Icons.campaign_rounded, color: tone, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              t('Ogłoszenie alarmowe · do {date}\n{text}', <String, Object?>{
-                'date': pyrDate(alarm.until),
-                'text': alarm.text,
-              }),
+              alarm.notice
+                  ? alarm.text
+                  : t(
+                      'Ogłoszenie alarmowe · do {date}\n{text}',
+                      <String, Object?>{
+                        'date': pyrDate(alarm.until),
+                        'text': alarm.text,
+                      },
+                    ),
               style: TextStyle(
                 color: zen.textPrimary,
                 fontSize: 13.5,
@@ -549,6 +555,19 @@ class PyramidFeedHeader extends StatelessWidget {
               height: 1.35,
             ),
           ),
+          if (national)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                t('Jak w piramidzie: wyżej postawieni na górze.'),
+                key: const Key('feed-nat-order'),
+                style: TextStyle(
+                  color: zen.textMuted,
+                  fontSize: 12.5,
+                  height: 1.35,
+                ),
+              ),
+            ),
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,

@@ -146,19 +146,6 @@ class PyramidPower extends StatelessWidget {
     }
   }
 
-  /// What an appeal is about: the ban it names, else the decision
-  /// on the report it names.
-  String _appealedDecision(Object? rep) {
-    final PyrBan? ban = rep is String ? s.bans[rep] : null;
-    if (ban != null) {
-      return t('Ban ({kind}): {reason}', <String, Object?>{
-        'kind': ban.kind,
-        'reason': ban.reason,
-      });
-    }
-    return s.decisions[rep] ?? '?';
-  }
-
   Future<void> _decide(BuildContext context, PyrReport r) async {
     final String? choice = await showDialog<String>(
       context: context,
@@ -379,7 +366,13 @@ class PyramidPower extends StatelessWidget {
   /// New rules, signed by the top: only the values that change, each kept
   /// within its limits in the app; they apply 24 h later.
   Future<void> _rules(BuildContext context) async {
-    final Map<String, dynamic> current = s.params.toJson()..remove('version');
+    // The emission limit has its own rule (in the wallet): a higher one
+    // only 30 days after everybody was told.
+    final Map<String, dynamic> current = s.params.toJson()
+      ..remove('version')
+      ..removeWhere(
+        (String k, dynamic _) => PyrParams.emissionFields.contains(k),
+      );
     final TextEditingController json = TextEditingController(
       text: const JsonEncoder.withIndent(' ').convert(current),
     );
@@ -411,9 +404,9 @@ class PyramidPower extends StatelessWidget {
                   decoration: InputDecoration(
                     labelText: t('Nowe zasady'),
                     alignLabelWithHint: true,
-                    // Money in the rules is in hundredths.
                     helperText: t(
-                      'emitLimit w setnych: 100000000 = 1 000 000,00',
+                      'Limit emisji zmienia się w Portfelu: wyższy dopiero '
+                      'po 30 dniach od ogłoszenia.',
                     ),
                     helperMaxLines: 2,
                   ),
@@ -691,39 +684,6 @@ class PyramidPower extends StatelessWidget {
                 ],
               ),
             ),
-        ],
-        if (pyr.appeals.isNotEmpty && _top) ...<Widget>[
-          ZenSection(t('Odwołania')),
-          ZenGroup(
-            children: <Widget>[
-              for (final Map<String, dynamic> a in pyr.appeals)
-                _row(
-                  zen,
-                  leading: ZenIconBadge(
-                    icon: Icons.replay_rounded,
-                    tone: zen.warning,
-                    size: 36,
-                  ),
-                  title: '${s.members[a['k']]?.name ?? '?'}: ${a['t']}',
-                  subtitle: t('Decyzja: {decision}', <String, Object?>{
-                    'decision': _appealedDecision(a['rep']),
-                  }),
-                  // The answer to an appeal against a ban: lift it.
-                  trailing: _top && (s.bans[a['rep']]?.activeAt(now) ?? false)
-                      ? TextButton(
-                          key: Key('appeal-lift-${a['rep']}'),
-                          onPressed: () => unawaited(
-                            pyr.topDecision(<String, dynamic>{
-                              't': 'unban',
-                              'ban': a['rep'],
-                            }),
-                          ),
-                          child: Text(t('Uchyl')),
-                        )
-                      : null,
-                ),
-            ],
-          ),
         ],
         ZenSection(t('Delegacje')),
         if (delegations.isEmpty)

@@ -63,6 +63,54 @@ void main() {
   });
 
   test(
+    'a cell vote counts one-time cards, and a member away does not block it',
+    () async {
+      final PyramidWorld w = await PyramidWorld.six();
+      final PyramidService a = w['A'];
+      final PyramidService a2 = w['A2'];
+      w.net.setOnline(w.net['A1'], false);
+      expect(await a2.requestElection('0'), isTrue);
+      await w.net.run();
+      final PyrElection e = a.state!.elections.values.single;
+      expect(e.tokens, isNull, reason: 'A1 has not sent its card yet');
+      // A votes now: the vote waits for the ballot, and only once.
+      expect(await a.voteInCell(e.id, a2.myKey!), isTrue);
+      expect(a.voteWaiting(e.id), isTrue);
+      expect(await a.voteInCell(e.id, a2.myKey!), isFalse);
+      // A third of the vote's time later the two cards there make the
+      // ballot, and the waiting vote goes out by itself.
+      await w.net.advance(const Duration(hours: 25));
+      await w.duties();
+      final PyrElection seen = w['S'].state!.elections[e.id]!;
+      expect(seen.tokens, hasLength(2));
+      expect(seen.votes, hasLength(1));
+      expect(a.voteWaiting(e.id), isFalse);
+      expect(a.votedIn(e.id), isTrue);
+      // The records of the vote name no member and carry no ring
+      // signature; the ballot is signed by the two who sent cards.
+      int votes = 0;
+      for (final String id in w['S'].recordIds) {
+        final PyramidRecord r = w['S'].recordOf(id)!;
+        if (r.type == PyrT.vote) {
+          votes++;
+          expect(r.ring, isNull);
+          expect(r.signers.toSet().intersection(e.ring.toSet()), isEmpty);
+        }
+        if (r.type == PyrT.ballot && id == seen.ballot) {
+          expect(r.signers.toSet(), <String>{a.myKey!, a2.myKey!});
+        }
+      }
+      expect(votes, 1);
+      expect(await a2.voteInCell(e.id, a2.myKey!), isTrue);
+      await w.net.run();
+      final PyramidState st = w['B'].state!;
+      expect(st.elections[e.id]!.closed, isTrue);
+      expect(st.elections[e.id]!.winner, a2.myKey);
+      expect(st.pathOf(a2.myKey!), '0');
+    },
+  );
+
+  test(
     'a referendum counted up the tree: votes secret, sums checkable',
     () async {
       final PyramidWorld w = await PyramidWorld.six();

@@ -284,9 +284,7 @@ void main() {
     );
 
     test('nobody else asks: no delegation for it, no national lead', () async {
-      final World w = await World.make(
-        params: const <String, dynamic>{'nationalMin': 1},
-      );
+      final World w = await World.make();
       const int at = t0 + day;
       final PyramidRecord deleg = await rec(
         PyrT.delegate,
@@ -401,8 +399,8 @@ void main() {
       final World w = await World.make();
       const int at = t0 + day;
       final PyramidRecord change = await w.rules(at, <String, dynamic>{
-        'absenceDays': 30,
-        'nationalMin': 5,
+        'absenceDays': 90,
+        'electionHours': 48,
         // The version is counted, never signed.
         'version': 9,
       });
@@ -414,8 +412,8 @@ void main() {
       expect(st.params.version, 1);
       st = w.fold(<PyramidRecord>[change], now: at + kPyrParamsDelayMs);
       expect(st.paramsChanges[change.id]!.done, isTrue);
-      expect(st.params.absenceDays, 30);
-      expect(st.params.nationalMin, 5);
+      expect(st.params.absenceDays, 90);
+      expect(st.params.electionHours, 48);
       expect(st.params.immunityDepth, 3, reason: 'the rest stays');
       expect(st.params.version, 2);
       expect(
@@ -455,42 +453,58 @@ void main() {
         'absenceDays': 1,
         'immunityDepth': -5,
         'treasurerDepth': 0,
-        'emitLimit': -1,
-        'emitDelayHours': 0,
-        'nationalMin': 0,
         'electionHours': 0,
         'reportEscalateHours': 0,
       });
       PyramidState st = w.fold(<PyramidRecord>[low]);
-      expect(st.params.absenceDays, 7);
-      expect(st.params.immunityDepth, 0);
-      expect(st.params.treasurerDepth, 1);
-      expect(st.params.emitLimit, 0);
-      expect(st.params.emitDelayHours, 1);
-      expect(st.params.nationalMin, 1);
-      expect(st.params.electionHours, 1);
-      expect(st.params.reportEscalateHours, 1);
+      // Sane floors: a month away, the top immune, the top three levels
+      // treasurers, a day to vote and to escalate.
+      expect(st.params.absenceDays, 30);
+      expect(st.params.immunityDepth, 1);
+      expect(st.params.treasurerDepth, 3);
+      expect(st.params.electionHours, 24);
+      expect(st.params.reportEscalateHours, 24);
       final PyramidRecord high = await w.rules(at, const <String, dynamic>{
         'absenceDays': 99999,
         'treasurerDepth': 99,
-        'emitLimit': kPyrMaxAmount * 10,
-        'emitDelayHours': 99999,
       });
       st = w.fold(<PyramidRecord>[high]);
       expect(st.params.absenceDays, 3650);
       expect(st.params.treasurerDepth, 6);
-      expect(st.params.emitLimit, kPyrMaxAmount);
-      expect(st.params.emitDelayHours, 24 * 30);
     });
 
-    test('no emission above the limit; the top raises the limit itself, '
-        'a day later', () async {
+    test('the emission limit is not among the rules the top changes in a '
+        'day', () async {
+      final World w = await World.make();
+      const int at = t0 + day;
+      final PyramidRecord limit = await w.rules(at, const <String, dynamic>{
+        'emitLimit': kPyrMaxAmount,
+      });
+      final PyramidRecord delay = await w.rules(at + 1, const <String, dynamic>{
+        'emitDelayHours': 1,
+        'absenceDays': 90,
+      });
+      final PyramidState st = w.fold(<PyramidRecord>[limit, delay]);
+      for (final PyramidRecord r in <PyramidRecord>[limit, delay]) {
+        expect(st.rejected[r.id], contains('limit emisji'));
+      }
+      expect(st.params.emitLimit, PyrParams().emitLimit);
+      expect(st.params.emitDelayHours, 24);
+      expect(st.params.absenceDays, 60, reason: 'nothing of it applies');
+    });
+
+    test('no emission above the limit; a raise of the limit applies 30 days '
+        'after it is announced', () async {
       final World w = await World.make();
       final int limit = PyrParams().emitLimit;
       const int at = t0 + day;
-      final PyramidRecord raise = await w.rules(at, <String, dynamic>{
-        'emitLimit': 5 * limit,
-      });
+      final PyramidRecord raise = await rec(
+        PyrT.emitRule,
+        w.py,
+        at,
+        <LedgerKeyPair>[w.s, w.a],
+        <String, dynamic>{'limit': 5 * limit},
+      );
       final PyramidRecord tooSoon = await w.emit(at + h, w.a1, 3 * limit);
       // An old "by referendum" field allows nothing.
       final PyramidRecord byRef = await rec(
@@ -505,15 +519,26 @@ void main() {
           'ref': 'r1',
         },
       );
-      final PyramidRecord later = await w.emit(at + 25 * h, w.a1, 3 * limit);
+      final PyramidRecord stillSoon = await w.emit(
+        at + 29 * day,
+        w.a1,
+        3 * limit,
+      );
+      final PyramidRecord later = await w.emit(
+        at + 30 * day + h,
+        w.a1,
+        3 * limit,
+      );
       final PyramidState st = w.fold(<PyramidRecord>[
         raise,
         tooSoon,
         byRef,
+        stillSoon,
         later,
       ]);
       expect(st.rejected[tooSoon.id], contains('limit'));
       expect(st.rejected[byRef.id], contains('limit'));
+      expect(st.rejected[stillSoon.id], contains('limit'));
       expect(st.applied, contains(later.id));
       expect(st.balanceOf(w.a1.id), 3 * limit);
     });
@@ -558,9 +583,7 @@ void main() {
 
   group('national pins, badges, entry bans', () {
     test('the national lead pins posts; nobody else can', () async {
-      final World w = await World.make(
-        params: const <String, dynamic>{'nationalMin': 1},
-      );
+      final World w = await World.make();
       final PyramidRecord post = await rec(
         PyrT.natPost,
         w.py,

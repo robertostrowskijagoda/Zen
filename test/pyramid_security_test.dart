@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/crypto/ring_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
@@ -286,65 +287,220 @@ void main() {
       },
     );
 
-    test(
-      'one person cannot vote twice under another spelling of the key image',
-      () async {
-        final (Map<String, dynamic> reqBody, RingSignature reqSig) =
-            await request(w.a1, t0 + day);
-        final PyramidRecord req = PyramidRecord(body: reqBody, ring: reqSig);
-        final List<String> ring = reqBody['ring'] as List<String>;
-        Future<PyramidRecord> vote(String n, int at) async {
-          final Map<String, dynamic> body = <String, dynamic>{
-            't': PyrT.vote,
-            'py': w.py,
-            'at': at,
-            'by': const <String>[],
-            'elect': req.id,
-            'choice': w.a1.id,
-            'n': n,
-          };
-          return PyramidRecord(
-            body: body,
-            ring: RingSignature.sign(
-              seed: w.a1.seed,
-              ring: ring.map((String k) => unb64(k, length: 32)!).toList(),
-              context: PyramidState.voteContext(req.id),
-              message: PyramidRecord(body: body).signedBytes,
-            ),
-          );
-        }
+    group('cell votes on one-time cards', () {
+      late PyramidRecord req;
+      late List<LedgerKeyPair> cards;
+      late List<String> ring;
 
-        final PyramidRecord first = await vote('v1', t0 + day + 1000);
-        final PyramidRecord again = await vote('v2', t0 + day + 2000);
-        final String image = again.ring!.keyImage;
-        final String alias = image.contains('-') || image.contains('_')
-            ? image.replaceAll('-', '+').replaceAll('_', '/')
-            : image.replaceAll('=', '');
-        final PyramidRecord aliased = PyramidRecord(
-          body: again.body,
-          ring: RingSignature(
-            c0: again.ring!.c0,
-            s: again.ring!.s,
-            keyImage: alias,
-          ),
+      setUp(() async {
+        final (Map<String, dynamic> body, RingSignature sig) = await request(
+          w.a1,
+          t0 + day,
         );
+        req = PyramidRecord(body: body, ring: sig);
+        ring = <String>[w.a.id, w.a1.id, w.a2.id]..sort();
+        cards = <LedgerKeyPair>[
+          for (int i = 0; i < 3; i++) await LedgerKeyPair.generate(),
+        ];
+      });
+
+      Future<PyramidRecord> ballot(
+        List<LedgerKeyPair> signers, {
+        List<LedgerKeyPair>? of,
+        List<String>? toks,
+        int? at,
+      }) async {
+        PyramidRecord r = PyramidRecord(
+          body: <String, dynamic>{
+            't': PyrT.ballot,
+            'py': w.py,
+            'at': at ?? req.at + 1,
+            'by': ring,
+            'elect': req.id,
+            'toks':
+                toks ??
+                (<String>[for (final LedgerKeyPair c in of ?? cards) c.hybridId]
+                  ..sort()),
+          },
+        );
+        for (final LedgerKeyPair k in signers) {
+          r = await r.signedBy(k);
+        }
+        return r;
+      }
+
+      Future<PyramidRecord> vote(LedgerKeyPair card, String choice, int at) =>
+          PyramidRecord(
+            body: <String, dynamic>{
+              't': PyrT.vote,
+              'py': w.py,
+              'at': at,
+              'by': <String>[card.id],
+              'elect': req.id,
+              'choice': choice,
+            },
+          ).signedBy(card);
+
+      test('a vote is signed by a card of the ballot, once per card', () async {
+        final PyramidRecord b = await ballot(<LedgerKeyPair>[w.a, w.a1, w.a2]);
+        final PyramidRecord v1 = await vote(cards[0], w.a2.id, t0 + day + 10);
+        final PyramidRecord again = await vote(
+          cards[0],
+          w.a1.id,
+          t0 + day + 20,
+        );
+        final PyramidRecord v2 = await vote(cards[1], w.a2.id, t0 + day + 30);
         final PyramidState st = w.fold(<PyramidRecord>[
           req,
-          first,
-          aliased,
-        ], now: t0 + day + 3000);
-        expect(st.elections[req.id]!.votes, hasLength(1));
-        expect(st.rejected[aliased.id], isNotNull);
-        // The same image in its own spelling is a repeat, refused as before.
+          b,
+          v1,
+          again,
+          v2,
+        ], now: t0 + day + 1000);
+        final PyrElection e = st.elections[req.id]!;
+        expect(e.ballot, b.id);
+        expect(e.tokens, hasLength(3));
+        expect(e.votes, hasLength(2));
+        expect(st.rejected[again.id], 'już głosował(a)');
+        // The votes name cards, never members.
+        expect(e.votes.keys.toSet().intersection(ring.toSet()), isEmpty);
+        // The third card closes the vote: A2 wins 2:1.
+        final PyramidRecord v3 = await vote(cards[2], w.a1.id, t0 + day + 40);
+        final PyramidState done = w.fold(<PyramidRecord>[
+          req,
+          b,
+          v1,
+          v2,
+          v3,
+        ], now: t0 + day + 1000);
+        expect(done.elections[req.id]!.closed, isTrue);
+        expect(done.elections[req.id]!.winner, w.a2.id);
+      });
+
+      test(
+        'no vote counts before the ballot, nor with a stranger card',
+        () async {
+          final LedgerKeyPair stranger = await LedgerKeyPair.generate();
+          final PyramidRecord early = await vote(
+            cards[0],
+            w.a2.id,
+            t0 + day + 1,
+          );
+          final PyramidRecord b = await ballot(<LedgerKeyPair>[
+            w.a,
+            w.a1,
+            w.a2,
+          ], at: t0 + day + 5);
+          final PyramidRecord outside = await vote(
+            stranger,
+            w.a2.id,
+            t0 + day + 10,
+          );
+          final PyramidRecord forOutsider = await vote(
+            cards[1],
+            w.b.id,
+            t0 + day + 20,
+          );
+          final PyramidState st = w.fold(<PyramidRecord>[
+            req,
+            early,
+            b,
+            outside,
+            forOutsider,
+          ], now: t0 + day + 1000);
+          expect(st.rejected[early.id], 'nie ma jeszcze kart do głosowania');
+          expect(st.rejected[outside.id], 'karta spoza głosowania');
+          expect(
+            st.rejected[forOutsider.id],
+            'można głosować tylko na kogoś z komórki',
+          );
+          expect(st.elections[req.id]!.votes, isEmpty);
+        },
+      );
+
+      test('a ballot needs as many members signing as it has cards', () async {
+        // Three cards, two signatures: whoever did not sign could have
+        // been left out for a second card of someone else.
+        final PyramidRecord short = await ballot(<LedgerKeyPair>[w.a, w.a1]);
+        final PyramidState st = w.fold(<PyramidRecord>[
+          req,
+          short,
+        ], now: t0 + day + 1000);
+        expect(st.rejected[short.id], 'za mało podpisów pod kartami');
+        expect(st.elections[req.id]!.tokens, isNull);
+        // Two cards signed by two members count (the third was away).
+        final PyramidRecord two = await ballot(<LedgerKeyPair>[
+          w.a,
+          w.a1,
+        ], of: cards.sublist(0, 2));
         final PyramidState st2 = w.fold(<PyramidRecord>[
           req,
-          first,
-          again,
-        ], now: t0 + day + 3000);
-        expect(st2.elections[req.id]!.votes, hasLength(1));
-        expect(st2.rejected[again.id], 'już głosował(a)');
-      },
-    );
+          two,
+        ], now: t0 + day + 1000);
+        expect(st2.elections[req.id]!.tokens, hasLength(2));
+        // Someone outside the cell cannot sign it.
+        final PyramidRecord foreign = await ballot(<LedgerKeyPair>[
+          w.a,
+          w.b,
+        ], of: cards.sublist(0, 2));
+        expect(
+          w.fold(<PyramidRecord>[
+            req,
+            foreign,
+          ], now: t0 + day + 1000).rejected[foreign.id],
+          'karty podpisuje komórka',
+        );
+      });
+
+      test('cards are listed once, sorted, in their one spelling', () async {
+        final List<String> ids = <String>[
+          for (final LedgerKeyPair c in cards) c.hybridId,
+        ]..sort();
+        expect(PyramidState.ballotTokens(ids), hasLength(3));
+        expect(PyramidState.ballotTokens(ids.reversed.toList()), isNull);
+        expect(
+          PyramidState.ballotTokens(<String>[ids[0], ids[0], ids[1]]),
+          isNull,
+        );
+        expect(PyramidState.ballotTokens(<String>[cards[0].id]), isNull);
+        expect(PyramidState.ballotTokens(const <String>[]), isNull);
+        final PyramidRecord unsorted = await ballot(<LedgerKeyPair>[
+          w.a,
+          w.a1,
+          w.a2,
+        ], toks: ids.reversed.toList());
+        expect(
+          w.fold(<PyramidRecord>[
+            req,
+            unsorted,
+          ], now: t0 + day + 1000).rejected[unsorted.id],
+          'złe karty do głosowania',
+        );
+      });
+
+      test('a card signs with the ML-DSA key the ballot names', () async {
+        final LedgerKeyPair other = await LedgerKeyPair.generate();
+        // The ballot pairs card 0's Ed25519 key with another ML-DSA key.
+        final List<String> toks = <String>[
+          hybridKeyId(cards[0].id, other.pqId),
+          cards[1].hybridId,
+          cards[2].hybridId,
+        ]..sort();
+        final PyramidRecord b = await ballot(<LedgerKeyPair>[
+          w.a,
+          w.a1,
+          w.a2,
+        ], toks: toks);
+        final PyramidRecord v = await vote(cards[0], w.a2.id, t0 + day + 10);
+        final PyramidState st = w.fold(<PyramidRecord>[
+          req,
+          b,
+          v,
+        ], now: t0 + day + 1000);
+        expect(st.elections[req.id]!.tokens, hasLength(3));
+        expect(st.rejected[v.id], 'karta z innym kluczem ML-DSA');
+      });
+    });
   });
 
   group('referendum sums (H2)', () {
@@ -1135,28 +1291,35 @@ void main() {
           message: PyramidRecord(body: reqBody).signedBytes,
         ),
       );
-      final Map<String, dynamic> voteBody = <String, dynamic>{
-        't': PyrT.vote,
-        'py': w.py,
-        'at': t0 + day - 1000,
-        'by': const <String>[],
-        'elect': req.id,
-        'choice': w.a2.id,
-        'n': 'v',
-      };
-      final PyramidRecord vote = PyramidRecord(
-        body: voteBody,
-        ring: RingSignature.sign(
-          seed: w.a2.seed,
-          ring: points,
-          context: PyramidState.voteContext(req.id),
-          message: PyramidRecord(body: voteBody).signedBytes,
-        ),
+      final LedgerKeyPair c1 = await LedgerKeyPair.generate();
+      final LedgerKeyPair c2 = await LedgerKeyPair.generate();
+      PyramidRecord ballot = PyramidRecord(
+        body: <String, dynamic>{
+          't': PyrT.ballot,
+          'py': w.py,
+          'at': t0 + day + 1,
+          'by': ring,
+          'elect': req.id,
+          'toks': <String>[c1.hybridId, c2.hybridId]..sort(),
+        },
       );
+      ballot = await (await ballot.signedBy(w.a)).signedBy(w.a2);
+      final PyramidRecord vote = await PyramidRecord(
+        body: <String, dynamic>{
+          't': PyrT.vote,
+          'py': w.py,
+          'at': t0 + day - 1000,
+          'by': <String>[c1.id],
+          'elect': req.id,
+          'choice': w.a2.id,
+        },
+      ).signedBy(c1);
       final PyramidState st = w.fold(<PyramidRecord>[
         req,
+        ballot,
         vote,
       ], now: t0 + day + 1000);
+      expect(st.elections[req.id]!.tokens, hasLength(2));
       expect(st.elections[req.id]!.votes, isEmpty);
     });
   });

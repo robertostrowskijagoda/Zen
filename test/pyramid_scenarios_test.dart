@@ -200,7 +200,7 @@ void main() {
 
     // Any question, asked by the top (2 of 3).
     await s.referendum(
-      question: 'Sekcje narodowe od 1 osoby?',
+      question: 'Głosowania w komórkach przez 2 dni?',
       options: <String>['Tak', 'Nie'],
       end: w.net.now + 3600 * 1000,
     );
@@ -225,17 +225,18 @@ void main() {
 
     // The top decides: new rules, 2 of 3, public at once, in force a day
     // later.
-    await s.changeRules(<String, dynamic>{'nationalMin': 1});
+    await s.changeRules(<String, dynamic>{'electionHours': 48});
     await w.net.run();
     await w.approve('B', PyrT.constitution);
     expect(w['B2'].state!.paramsChanges.values.single.done, isFalse);
-    expect(w['B2'].state!.params.nationalMin, 100);
+    expect(w['B2'].state!.params.electionHours, 72);
     await w.net.advance(const Duration(milliseconds: kPyrParamsDelayMs));
     await w.net.advance(const Duration(minutes: 2));
     final PyramidState st = w['B2'].state!;
     expect(st.params.version, 2);
-    expect(st.params.nationalMin, 1);
+    expect(st.params.electionHours, 48);
 
+    // No minimum number of people: the highest of a nationality leads.
     // DE: B1 and B2 are on the same level; the earlier place leads.
     expect(st.nationalLead('DE'), w['B1'].myKey);
     expect(st.nationalLead('PL'), w['S'].myKey);
