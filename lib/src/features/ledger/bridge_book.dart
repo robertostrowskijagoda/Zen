@@ -94,7 +94,8 @@ final class BridgeAnnouncement {
     final int nonce = await Isolate.run(
       () => _findNonce(uri, key, expires, start, powBits),
     );
-    final Uint8List sig = await bridgeKey.sign(
+    // Keyed: announcements are passed on to anyone.
+    final Uint8List sig = await bridgeKey.signWithKey(
       canonicalJsonBytes(_body(uri, bridgeKey.id, expires, nonce)),
     );
     return BridgeAnnouncement._(

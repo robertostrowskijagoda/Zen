@@ -5,8 +5,8 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:zen/src/core/crypto/ed25519_group.dart';
 
-/// A linkable ring signature (LSAG, Liu–Wei–Wong) over Ed25519 keys
-/// (§20.3a): it proves that one of the [ring] signed, not which one.
+/// A linkable ring signature (LSAG, Liu–Wei–Wong) over Ed25519 keys:
+/// it proves that one of the [ring] signed, not which one.
 /// Two signatures by the same key under the same [context] carry the same
 /// [keyImage] — "the same person asks for the 5th time" — while different
 /// contexts cannot be linked.
@@ -15,6 +15,13 @@ import 'package:zen/src/core/crypto/ed25519_group.dart';
 /// the group order, the key image in its one canonical encoding (so one
 /// image cannot pass for two), and a malformed signature is simply invalid
 /// — it never throws.
+///
+/// Classical only: there is no standard post-quantum linkable ring
+/// signature, so the anonymous cell votes stay on Ed25519 while everything
+/// else is signed hybrid (hybrid_signature.dart). A quantum computer would
+/// break them in two ways: whoever holds one could forge a vote of a ring
+/// at the time of the vote, and could later work out from a recorded vote
+/// who cast it (the key image is the signer's secret times a hashed point).
 final class RingSignature {
   const RingSignature({
     required this.c0,

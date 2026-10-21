@@ -12,7 +12,7 @@ import 'package:zen/src/features/account/account_recovery.dart';
 /// This installation's account and device keys.
 ///
 /// Created on first use (this device becomes the account's first certified
-/// device). Kept in the app's encrypted storage. Once the account password is set (§6.1) the
+/// device). Kept in the app's encrypted storage. Once the account password is set the
 /// account key is stored only wrapped by it: daily work needs just the
 /// device key, and a stolen phone without the password cannot take over
 /// the account.
@@ -67,7 +67,7 @@ final class LedgerIdentity {
     return Uint8List.fromList(await key.extractBytes());
   }
 
-  /// Seed of the pyramid identity key (§6.1, §6.4), derived from the
+  /// Seed of the pyramid identity key, derived from the
   /// account key: every device of the account is the same person in the
   /// pyramid, and a recovered account gets its place and wallet back. Kept
   /// next to the device key, so it is at hand while the account key is
@@ -107,7 +107,7 @@ final class LedgerIdentity {
 
   /// The saved identity, or `null` when there is none yet. Never creates
   /// one (only the ledger node does), e.g. for signing with the device key
-  /// outside the ledger (§24.1 introductions).
+  /// outside the ledger (introductions).
   static Future<LedgerIdentity?> read(LedgerDisk disk) => _load(disk);
 
   static Future<LedgerIdentity> loadOrCreate(
@@ -151,7 +151,7 @@ final class LedgerIdentity {
     final LedgerKeyPair device = await LedgerKeyPair.generate();
     final DeviceCertificate cert = await DeviceCertificate.issue(
       account: account,
-      device: device.id,
+      device: device,
       name: deviceName,
       issued: (now ?? () => DateTime.now().millisecondsSinceEpoch)(),
     );
@@ -253,7 +253,7 @@ final class LedgerIdentity {
     }
     final Uint8List? selfKey = unb64(json['self'], length: 32);
     final LedgerKeyPair device = await LedgerKeyPair.fromSeed(deviceSeed);
-    if (cert.device != device.id) {
+    if (cert.device != device.id || cert.devicePq != device.pqId) {
       return null;
     }
     if (json['v'] == _plainVersion) {

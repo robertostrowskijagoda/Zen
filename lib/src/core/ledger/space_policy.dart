@@ -86,9 +86,9 @@ final RegExp _spaceKindPattern = RegExp(r'^[a-z][a-z0-9_]{0,23}$');
 /// Only devices of [owner] may write, only [maxEntries] per device log, at
 /// most [maxWriters] logs and [maxBytes] in all.
 ///
-/// For `<kind>/<account>` spaces of a kind this build does not know (§1.6:
-/// it keeps what it does not understand for a newer build). The entries are
-/// still signed by the owner's devices and checked like any other.
+/// For `<kind>/<account>` spaces of a kind this build does not know (it keeps
+/// what it does not understand for a newer build). The entries are still
+/// signed by the owner's devices and checked like any other.
 final class UnknownAccountSpacePolicy implements BoundedSpacePolicy {
   const UnknownAccountSpacePolicy(
     this.owner, {

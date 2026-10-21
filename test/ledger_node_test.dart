@@ -106,7 +106,7 @@ void main() {
     await _settle();
 
     expect(a.accountOf(eve), isNull);
-    // A one-sided "friend" is just a follower: public posts only (§12).
+    // A one-sided "friend" is just a follower: public posts only.
     expect(e.entriesOf(ofAccount: a.account), hasLength(1));
     expect(e.entriesOf(spaceKind: 'acts', ofAccount: a.account), isEmpty);
     expect(a.store.spaces.where((String s) => s.contains(e.account)), isEmpty);

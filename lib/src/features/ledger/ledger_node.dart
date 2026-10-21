@@ -54,7 +54,7 @@ enum ReachResult {
   noAnswer,
 }
 
-/// Where a device of an account can be reached (several devices, §6): an
+/// Where a device of an account can be reached (several devices): an
 /// entry of this kind in the account's `acts` space, `{address, name}`.
 /// Only a claim (the account signs it, not whoever is at that address):
 /// the address counts once a hello from there proves the device key.
@@ -251,7 +251,7 @@ final class LedgerNode {
 
   /// People met in person whose account is not known yet (a friend request
   /// not answered): normalised address → when they met. The attestation is
-  /// signed once their hello tells the account (§6.2).
+  /// signed once their hello tells the account.
   final Map<String, int> _metPending = <String, int>{};
 
   /// How long a meeting waits for the other's account, and how many wait.
@@ -295,13 +295,13 @@ final class LedgerNode {
   final Iterable<String> Function()? greetAlso;
 
   /// Extra fields for the hello sent to a (normalised) address: a signed
-  /// follow notice for someone this account follows (§12). Peers that do
+  /// follow notice for someone this account follows. Peers that do
   /// not know a field ignore it.
   Map<String, dynamic>? Function(String address)? helloExtras;
 
   /// Called for every proven hello from someone who is neither a friend
   /// nor this account ([account] at [address]), with its payload (follow
-  /// notices, §12).
+  /// notices).
   void Function(String address, String account, Map<String, dynamic> payload)?
   onStrangerHello;
 
@@ -363,13 +363,13 @@ final class LedgerNode {
       StreamController<String>.broadcast();
 
   /// A friend (or own device) proved who it is just now: a good moment to
-  /// tell it news (a new version of the app, §14.2).
+  /// tell it news (a new version of the app).
   Stream<String> get peerGreeted => _peerGreeted.stream;
 
   /// Whether [address] is a friend's device (or one of this account's).
   bool isFriendAddress(String address) => _isFriend(address);
 
-  /// How a friend's address is checked when they ask (§5.1).
+  /// How a friend's address is checked when they ask.
   final BridgeProbe _reachProbe;
   final Map<String, _ReachWait> _reachWaits = <String, _ReachWait>{};
   final List<int> _reachAnsweredAt = <int>[];
@@ -399,7 +399,7 @@ final class LedgerNode {
               // back (a seed while recovering) cannot have forged them.
               (_isSeed(peer) && _ownSpaces.contains(space)),
     // Chat copies never leave this account's own devices. A space of a kind
-    // this build does not know (kept for a newer build, §1.6) goes only to
+    // this build does not know (kept for a newer build) goes only to
     // friends: its rules for who may read it are not known here.
     servesTo: (String peer, String space) =>
         (isKnownSpace(space) && !space.startsWith('own/')) ||
@@ -748,7 +748,7 @@ final class LedgerNode {
   }
 
   /// Follows the public posts and profile of [address] — anyone, no
-  /// consent needed (§12). Friends are followed anyway.
+  /// consent needed. Friends are followed anyway.
   Future<void> follow(String address) async {
     await start();
     final String normalized = PeerShareCodec.normalizeAddress(address);
@@ -861,7 +861,7 @@ final class LedgerNode {
     ..._liveDeviceAddresses(),
   };
 
-  // ---- "met in person" (§6.2) ----
+  // ---- "met in person" ----
 
   /// Accounts [ofAccount] (default: this one) attested as met in person
   /// (none until the ledger is loaded).
@@ -870,7 +870,7 @@ final class LedgerNode {
       : <String>{};
 
   /// Accounts met in person by this account or by a friend (signed
-  /// attestations in their `acts`): who counts as verified (§11).
+  /// attestations in their `acts`): who counts as verified.
   Set<String> metByCircle() => <String>{
     ...metAccounts(),
     for (final String friend in _accounts.values.toSet())
@@ -955,7 +955,7 @@ final class LedgerNode {
     Uint8List.fromList(utf8.encode(jsonEncode(_metPending))),
   );
 
-  // ---- several devices per account (§6) ----
+  // ---- several devices per account ----
 
   _DeviceRef? _liveDevice(String normalized) {
     final _DeviceRef? ref = _devices[normalized];
@@ -1014,7 +1014,7 @@ final class LedgerNode {
   List<String> get siblingAddresses => addressesOfAccount(account);
 
   /// Friends' devices and this account's other devices whose key and mesh
-  /// address a signed hello proved, for direct links nearby (§5.1 item 6).
+  /// address a signed hello proved, for direct links nearby.
   List<AccountDevice> get linkableDevices => <AccountDevice>[
     for (final String a in _liveDeviceAddresses())
       AccountDevice(
@@ -1666,11 +1666,7 @@ final class LedgerNode {
             PeerShareCodec.normalizeAddress(frame.from)) {
       return false;
     }
-    return verifyLedgerSignature(
-      publicKey: cert.device,
-      message: _proofBytes(f),
-      signature: s,
-    );
+    return cert.verifyByDevice(_proofBytes(f), s);
   }
 
   void _subscribePublic(String acc) {
@@ -1838,9 +1834,18 @@ final class LedgerNode {
       }
       return;
     }
-    if (type == LedgerMessages.entries &&
+    if ((type == LedgerMessages.entries || type == LedgerMessages.certs) &&
         (_followedSpaces(from).isNotEmpty || _isSeed(from))) {
       await replicator.handle(from, frame.payload);
+      return;
+    }
+    if (type == LedgerMessages.certWant) {
+      // Certificates of the devices whose entries a stranger may read.
+      replicator.answerCertificates(
+        from,
+        frame.payload['items'],
+        inSpace: readable.contains,
+      );
       return;
     }
     if (type == LedgerMessages.blobWant) {

@@ -117,6 +117,16 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 50));
     await device.archive.flush();
     expect(disk.files.containsKey(LedgerArchive.indexKey), isTrue);
+    // Entries are saved without the device certificate, which is kept once
+    // on its own.
+    final String segment = disk.files.keys.firstWhere(
+      (String k) => k.startsWith('ledger/log-'),
+    );
+    expect(utf8.decode(disk.files[segment]!), isNot(contains('dev_cert')));
+    expect(
+      utf8.decode(disk.files[LedgerArchive.certificatesKey]!),
+      contains(setup.certificate.signature),
+    );
 
     final _Device reopened = await _Device(disk).open();
     expect(

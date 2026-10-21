@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart' as crypto;
 
 /// Arithmetic on the Ed25519 curve (twisted Edwards, RFC 8032), just enough
-/// for the ring signatures of the pyramid (§20.3a). Plain [BigInt]: slow
+/// for the ring signatures of the pyramid. Plain [BigInt]: slow
 /// next to native code, but a ring of three takes milliseconds.
 ///
 /// Not for anything secret-dependent in a hostile timing environment: the

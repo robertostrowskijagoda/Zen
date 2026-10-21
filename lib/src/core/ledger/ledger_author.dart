@@ -74,7 +74,7 @@ final class LedgerAccountSetup {
     final LedgerKeyPair device = deviceKey ?? await LedgerKeyPair.generate();
     final DeviceCertificate cert = await DeviceCertificate.issue(
       account: account,
-      device: device.id,
+      device: device,
       name: deviceName,
       issued: issued,
     );
@@ -91,7 +91,7 @@ final class LedgerAccountSetup {
       device,
       await DeviceCertificate.issue(
         account: accountKey,
-        device: device.id,
+        device: device,
         name: name,
         issued: issued,
       ),

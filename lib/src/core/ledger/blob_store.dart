@@ -242,7 +242,7 @@ final class BlobStore {
   }
 
   /// Piece [index] of blob [id], or `null` while it (or the manifest) has
-  /// not arrived: a film is played piece by piece while it downloads (§10).
+  /// not arrived: a film is played piece by piece while it downloads.
   Future<Uint8List?> chunkAt(String id, int index) async {
     final BlobManifest? manifest = _manifests[id];
     if (manifest == null ||

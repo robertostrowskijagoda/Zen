@@ -16,6 +16,13 @@ abstract final class LedgerMessages {
   static const String want = 'lg_want';
   static const String entries = 'lg_entries';
   static const String revoke = 'lg_revoke';
+
+  /// "Send me these devices' certificates": `items` [{a: account,
+  /// d: device}], for entries that came without one known here.
+  static const String certWant = 'lg_cert_want';
+
+  /// The answer: `items` [DeviceCertificate].
+  static const String certs = 'lg_certs';
   static const String blobWant = 'lg_blob_want';
   static const String blobManifest = 'lg_blob_manifest';
   static const String blobChunk = 'lg_blob_chunk';
@@ -25,6 +32,8 @@ abstract final class LedgerMessages {
     want,
     entries,
     revoke,
+    certWant,
+    certs,
     blobWant,
     blobManifest,
     blobChunk,
@@ -39,6 +48,12 @@ abstract final class LedgerMessages {
 /// 2. The other side answers with the entries the sender lacks
 ///    (`lg_entries`), and asks for what it lacks itself (`lg_want`).
 /// 3. Equal heads → no reply, so gossip always comes to rest.
+///
+/// Entries travel without their device's certificate (the record that
+/// publishes the device's ML-DSA key, about 10 KB): the receiver keeps the
+/// certificates of the devices it holds entries of, and asks the sender
+/// for one it lacks (`lg_cert_want` → `lg_certs`); until it comes, such
+/// entries wait unchecked and are never taken.
 ///
 /// It never trusts the peer: every entry goes through [LedgerStore]'s
 /// checks, every file piece through its hash.
@@ -77,7 +92,7 @@ final class LedgerReplicator {
   final bool Function(String peer, String space)? servesTo;
 
   /// Whether [peer] may hand us entries of [space] only to be passed on
-  /// (a space of a kind this build does not know, §1.6): such a space is
+  /// (a space of a kind this build does not know): such a space is
   /// asked for and taken like a subscribed one, though not followed.
   final bool Function(String peer, String space)? forwardsFrom;
 
@@ -112,6 +127,16 @@ final class LedgerReplicator {
   static const int chunksPerRequest = 4;
   final Map<String, (int, int)> _budget = <String, (int, int)>{};
 
+  /// `peer|account|device` → when its certificate was last asked of the
+  /// peer (asked again after [certificateRetryMs], or in the next sync
+  /// with the peer).
+  final Map<String, int> _certAsked = <String, int>{};
+
+  static const int certificateRetryMs = 30 * 1000;
+
+  /// Most certificates asked for or handed out in one message.
+  static const int certificatesPerMessage = 32;
+
   /// Called whenever a blob became complete here.
   void Function(String blobId)? onBlobComplete;
 
@@ -141,6 +166,8 @@ final class LedgerReplicator {
     if (spaces.isEmpty) {
       return;
     }
+    // A new round: certificates still missing may be asked of it again.
+    _certAsked.removeWhere((String key, int _) => key.startsWith('$peer|'));
     send(peer, _headsMessage(spaces));
     if (only != null) {
       return;
@@ -213,6 +240,10 @@ final class LedgerReplicator {
           await _onEntries(peer, message['entries']);
         case LedgerMessages.revoke:
           await _onRevoke(peer, message['items']);
+        case LedgerMessages.certWant:
+          answerCertificates(peer, message['items']);
+        case LedgerMessages.certs:
+          await _onCertificates(message['items']);
         case LedgerMessages.blobWant:
           await _onBlobWant(peer, message['id'], message['chunks']);
         case LedgerMessages.blobManifest:
@@ -319,6 +350,7 @@ final class LedgerReplicator {
       );
       return byLog != 0 ? byLog : a.seq.compareTo(b.seq);
     });
+    final Set<(String, String)> missing = <(String, String)>{};
     for (final LogEntry entry in entries) {
       final bool allowed =
           (acceptsFrom?.call(peer, entry.space) ??
@@ -327,7 +359,97 @@ final class LedgerReplicator {
       if (!allowed) {
         continue;
       }
-      await store.ingest(entry);
+      final IngestResult result = await store.ingest(entry);
+      if (result.status == IngestStatus.awaitingCertificate) {
+        missing.add((entry.account, entry.device));
+      }
+    }
+    _askCertificates(peer, missing);
+  }
+
+  /// Asks [peer], which sent entries of [devices], for their certificates.
+  void _askCertificates(String peer, Set<(String, String)> devices) {
+    if (devices.isEmpty) {
+      return;
+    }
+    final int now = store.clock.wallMillis();
+    if (_certAsked.length > 4096) {
+      _certAsked.removeWhere(
+        (String _, int at) => now - at >= certificateRetryMs,
+      );
+    }
+    final List<Map<String, String>> items = <Map<String, String>>[];
+    for (final (String account, String device) in devices) {
+      final String key = '$peer|$account|$device';
+      final int? at = _certAsked[key];
+      if (at != null && now - at < certificateRetryMs) {
+        continue;
+      }
+      _certAsked[key] = now;
+      items.add(<String, String>{'a': account, 'd': device});
+      if (items.length >= certificatesPerMessage) {
+        break;
+      }
+    }
+    if (items.isNotEmpty) {
+      send(peer, <String, dynamic>{
+        'type': LedgerMessages.certWant,
+        'items': items,
+      });
+    }
+  }
+
+  /// Answers [peer]'s `lg_cert_want`: the certificates of the devices
+  /// whose entries this store holds in a space [peer] may get ([inSpace]
+  /// narrows that further, e.g. to what a stranger may read).
+  void answerCertificates(
+    String peer,
+    Object? items, {
+    bool Function(String space)? inSpace,
+  }) {
+    if (items is! List) {
+      return;
+    }
+    final List<Map<String, dynamic>> certs = <Map<String, dynamic>>[];
+    for (final Object? item in items.take(certificatesPerMessage)) {
+      if (item is! Map || item['a'] is! String || item['d'] is! String) {
+        continue;
+      }
+      final String account = item['a'] as String;
+      final String device = item['d'] as String;
+      final DeviceCertificate? cert = store.directory.certificateOf(
+        account,
+        device,
+      );
+      if (cert != null &&
+          store.holdsLogOf(
+            account,
+            device,
+            inSpace: (String space) =>
+                _serves(peer, space) && (inSpace?.call(space) ?? true),
+          )) {
+        certs.add(cert.toJson());
+      }
+    }
+    if (certs.isNotEmpty) {
+      send(peer, <String, dynamic>{
+        'type': LedgerMessages.certs,
+        'items': certs,
+      });
+    }
+  }
+
+  /// Certificates a peer sent: only those of devices whose entries wait
+  /// here are taken (and checked), then those entries.
+  Future<void> _onCertificates(Object? items) async {
+    if (items is! List) {
+      return;
+    }
+    for (final Object? json in items.take(certificatesPerMessage)) {
+      final DeviceCertificate? cert = DeviceCertificate.fromJson(json);
+      if (cert != null && store.awaitsCertificate(cert.account, cert.device)) {
+        await store.addCertificate(cert);
+      }
     }
   }
 

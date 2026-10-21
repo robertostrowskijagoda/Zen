@@ -88,14 +88,18 @@ final class DiskBlobChunkBackend implements BlobChunkBackend {
   }
 }
 
-/// Saves and restores logs, revocations, blocks and file manifests.
+/// Saves and restores logs, device certificates, revocations, blocks and
+/// file manifests.
 ///
 /// Logs are saved in segments of [segmentSize] entries, so adding one entry
-/// rewrites one small file, not the whole history.
+/// rewrites one small file, not the whole history. Entries are saved
+/// without their device's certificate; the certificates are one file of
+/// their own ([certificatesKey]), written only when one is added.
 final class LedgerArchive {
   LedgerArchive({required this.disk, this.segmentSize = 200});
 
   static const String indexKey = 'ledger/index';
+  static const String certificatesKey = 'ledger/certs';
   static const int _version = 1;
 
   final LedgerDisk disk;
@@ -107,6 +111,9 @@ final class LedgerArchive {
 
   /// `space|writer` → entries already on disk.
   final Map<String, int> _saved = <String, int>{};
+
+  /// [AccountDirectory.revision] of the certificates on disk.
+  int? _savedCertificates;
   Future<void> _tail = Future<void>.value();
   bool _flushQueued = false;
 
@@ -126,7 +133,30 @@ final class LedgerArchive {
     blobs.onChanged = _scheduleFlush;
   }
 
+  /// Puts back the certificates on disk (checked when they first came):
+  /// the entries are checked with them.
+  Future<void> _loadCertificates(LedgerStore store) async {
+    final Uint8List? raw = await disk.read(certificatesKey);
+    if (raw == null) {
+      return;
+    }
+    try {
+      final Object? list = jsonDecode(utf8.decode(raw));
+      if (list is List) {
+        for (final Object? json in list) {
+          final DeviceCertificate? cert = DeviceCertificate.fromJson(json);
+          if (cert != null) {
+            store.directory.trustCertificate(cert);
+          }
+        }
+      }
+    } on FormatException {
+      logZenWarning('Certyfikaty urządzeń nieczytelne; dotrą od innych.');
+    }
+  }
+
   Future<void> _load(LedgerStore store, BlobStore blobs) async {
+    await _loadCertificates(store);
     final Uint8List? raw = await disk.read(indexKey);
     if (raw == null) {
       return;
@@ -254,6 +284,21 @@ final class LedgerArchive {
     if (store == null || blobs == null) {
       return;
     }
+    if (_savedCertificates != store.directory.revision) {
+      // First: an entry on disk always finds its certificate.
+      _savedCertificates = store.directory.revision;
+      await disk.write(
+        certificatesKey,
+        Uint8List.fromList(
+          utf8.encode(
+            jsonEncode(<Map<String, dynamic>>[
+              for (final DeviceCertificate c in store.directory.certificates)
+                c.toJson(),
+            ]),
+          ),
+        ),
+      );
+    }
     final List<Map<String, dynamic>> logs = <Map<String, dynamic>>[];
     final Set<String> present = <String>{};
     for (final (String space, String writer, int count, bool forked)
@@ -351,6 +396,7 @@ final class LedgerArchive {
       return;
     }
     try {
+      await _loadCertificates(store);
       final Uint8List? raw = await disk.read(indexKey);
       final Object? index = raw == null ? null : jsonDecode(utf8.decode(raw));
       if (index is Map && index['v'] == _version) {

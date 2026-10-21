@@ -8,7 +8,7 @@ import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 
-/// Entry kind of a profile version in a `profile/<account>` space (§9).
+/// Entry kind of a profile version in a `profile/<account>` space.
 /// The newest entry wins. Public: followers and, through reshares, friends
 /// of friends see the name. The mesh address (to follow or write) is in it
 /// only once the account published something that reaches people who are
@@ -77,12 +77,12 @@ Map<String, dynamic> profileBody({
 };
 
 /// Whether this account's [entry] can bring people who are not friends to
-/// its profile (§9): a public post (not sealed for an audience) or a
+/// its profile: a public post (not sealed for an audience) or a
 /// reshare (only public posts are reshared). Kinds as in `feed_model.dart`.
 bool reachesStrangers(LogEntry entry) =>
     (entry.kind == 'post' && !isSealed(entry.body)) || entry.kind == 'reshare';
 
-/// Whether the public profile should carry the device address (§1.8, §9):
+/// Whether the public profile should carry the device address:
 /// only when something public of this account can bring strangers who
 /// want to follow or write. Call after the node started.
 bool profileNeedsAddress(LedgerNode node) {

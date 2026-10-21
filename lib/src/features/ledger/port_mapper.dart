@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/utils/windows_system_paths.dart';
 
-/// A port the home router forwards to this computer (§5.1): what lets
+/// A port the home router forwards to this computer: what lets
 /// other people's apps connect to it, so it can be a bridge.
 @immutable
 final class PortMapping {
@@ -36,7 +36,7 @@ final class PortMapping {
 }
 
 /// External ports asked for first: the mesh speaks TLS, so a bridge on 443
-/// looks like any HTTPS server to whoever watches the traffic (§14.2).
+/// looks like any HTTPS server to whoever watches the traffic.
 const List<int> kDisguisedExternalPorts = <int>[443];
 
 /// Opens a TCP port on the home router.
@@ -284,7 +284,7 @@ final class UpnpPortMapper {
   /// How many external ports to try when the first one is taken.
   static const int portAttempts = 5;
 
-  /// External ports tried first (§14.2: from outside, the bridge looks like
+  /// External ports tried first (from outside, the bridge looks like
   /// an ordinary HTTPS server on 443).
   final List<int> preferredExternalPorts;
 

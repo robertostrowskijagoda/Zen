@@ -1,7 +1,9 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/ledger_author.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/core/ledger/ledger_replicator.dart';
 import 'package:zen/src/core/ledger/ledger_store.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
@@ -115,6 +117,51 @@ void main() {
     },
     timeout: const Timeout(Duration(minutes: 3)),
   );
+
+  test('entries of a device not known yet wait, unchecked, until its '
+      'certificate comes from the sender', () async {
+    final SimNet net = SimNet();
+    final SimNode ada = net.add('ada');
+    final SimNode bob = net.add('bob');
+    net.link('ada', 'bob');
+    await ada.becomeAuthor();
+    bob.replicator.subscribe(_feed(ada));
+    await _post(ada, 3);
+    final List<Map<String, dynamic>> wire = <Map<String, dynamic>>[
+      for (final LogEntry e in ada.store.entries(_feed(ada))) e.toJson(),
+    ];
+    expect(
+      wire.every((Map<String, dynamic> e) => !e.containsKey('cert')),
+      isTrue,
+    );
+    // Ada is gone before Bob can ask her for the certificate.
+    ada.online = false;
+    await bob.replicator.handle('ada', <String, dynamic>{
+      'type': LedgerMessages.entries,
+      'entries': wire,
+    });
+    await net.pump();
+    final String device = ada.author!.deviceKey.id;
+    expect(bob.store.awaitsCertificate(ada.account, device), isTrue);
+    expect(bob.store.holdsSpace(_feed(ada)), isFalse);
+    // Back: the next sync brings the entries again, Bob asks again, and
+    // takes them once the certificate checks out.
+    ada.online = true;
+    await net.syncRounds(1);
+    expect(bob.store.awaitsCertificate(ada.account, device), isFalse);
+    expect(bob.store.entries(_feed(ada)), hasLength(3));
+    expect(
+      bob.store.directory.certificateOf(ada.account, device)?.signature,
+      ada.accountSetup!.certificate.signature,
+    );
+    // A certificate nobody asked for is not taken.
+    final LedgerAccountSetup eve = await LedgerAccountSetup.create();
+    await bob.replicator.handle('ada', <String, dynamic>{
+      'type': LedgerMessages.certs,
+      'items': <Map<String, dynamic>>[eve.certificate.toJson()],
+    });
+    expect(bob.store.directory.devicesOf(eve.accountKey.id), isEmpty);
+  });
 
   test('nobody can push entries of a space we did not ask for', () async {
     final SimNet net = SimNet();

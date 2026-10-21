@@ -75,11 +75,53 @@ void main() {
       );
       expect(await entry.verifySignature(), isTrue);
 
-      final Map<String, dynamic> tampered = entry.toJson()
+      final Map<String, dynamic> tampered = entry.toCertifiedJson()
         ..['body'] = <String, dynamic>{'text': 'Podmienione'};
       final LedgerStore b = _store();
       expect((await b.ingestJson(tampered)).status, IngestStatus.rejected);
-      expect((await b.ingestJson(entry.toJson())).status, IngestStatus.added);
+      expect(
+        (await b.ingestJson(entry.toCertifiedJson())).status,
+        IngestStatus.added,
+      );
+    });
+
+    test('an entry without a known certificate waits for it, unchecked, '
+        'and is checked when it comes', () async {
+      final LedgerStore a = _store();
+      final (LedgerAccountSetup setup, LedgerAuthor author) = await _account(a);
+      final String space = accountSpace('feed', author.account);
+      final LogEntry entry = await author.append(
+        space,
+        'post',
+        <String, dynamic>{'text': 'Cześć'},
+      );
+      // As replicated: no certificate in it.
+      expect(entry.toJson().containsKey('cert'), isFalse);
+      final LedgerStore b = _store();
+      expect(
+        (await b.ingestJson(entry.toJson())).status,
+        IngestStatus.awaitingCertificate,
+      );
+      final Map<String, dynamic> tampered = entry.toJson()
+        ..['body'] = <String, dynamic>{'text': 'Podmienione'};
+      expect(
+        (await b.ingestJson(tampered)).status,
+        IngestStatus.awaitingCertificate,
+      );
+      expect(b.awaitsCertificate(author.account, entry.device), isTrue);
+      expect(b.heads(space), isEmpty, reason: 'never taken unchecked');
+      // The certificate comes: the genuine entry is taken, the forgery not.
+      expect(await b.addCertificate(setup.certificate), 1);
+      expect(b.awaitsCertificate(author.account, entry.device), isFalse);
+      expect(b.entries(space).single.id, entry.id);
+      expect(b.entries(space).single.certificate, isNotNull);
+      // From now on its entries are checked at once.
+      final LogEntry next = await author.append(
+        space,
+        'post',
+        <String, dynamic>{'text': 'Dalej'},
+      );
+      expect((await b.ingestJson(next.toJson())).status, IngestStatus.added);
     });
 
     test('entries arriving out of order wait for the gap', () async {
@@ -169,52 +211,48 @@ void main() {
       },
     );
 
-    test(
-      'a space kind from a newer build is kept for its owner (§1.6)',
-      () async {
-        final LedgerStore a = _store();
-        final (_, LedgerAuthor ada) = await _account(a);
-        final (_, LedgerAuthor bob) = await _account(a);
-        final String space = 'stories/${ada.account}';
-        expect(isKnownSpace(space), isFalse);
-        expect(isKnownSpace(accountSpace('feed', ada.account)), isTrue);
-        final LogEntry entry = await ada.append(
-          space,
-          'story',
-          <String, dynamic>{'text': 'Z nowszej wersji', 'extra': 1},
-        );
-        // Another device takes it as it is, unknown fields included.
-        final LedgerStore b = _store();
-        expect((await b.ingest(entry)).status, IngestStatus.added);
-        expect(b.entries(space).single.body['extra'], 1);
-        // Still only the owner writes there.
-        await expectLater(
-          bob.append(space, 'story', <String, dynamic>{}),
-          throwsStateError,
-        );
-        // And only so much of it.
-        expect(
-          const UnknownAccountSpacePolicy('x').maxEntries,
-          kMaxUnknownSpaceEntries,
-        );
-        final LedgerStore small = LedgerStore(
-          clock: HlcClock(wallClock: () => _now),
-          policies: (String s) => s == space
-              ? UnknownAccountSpacePolicy(ada.account, maxEntries: 1)
-              : defaultSpacePolicy(s),
-        );
-        final LogEntry second = await ada.append(
-          space,
-          'story',
-          <String, dynamic>{},
-        );
-        expect((await small.ingest(entry)).status, IngestStatus.added);
-        expect((await small.ingest(second)).status, IngestStatus.rejected);
-      },
-    );
+    test('a space kind from a newer build is kept for its owner', () async {
+      final LedgerStore a = _store();
+      final (_, LedgerAuthor ada) = await _account(a);
+      final (_, LedgerAuthor bob) = await _account(a);
+      final String space = 'stories/${ada.account}';
+      expect(isKnownSpace(space), isFalse);
+      expect(isKnownSpace(accountSpace('feed', ada.account)), isTrue);
+      final LogEntry entry = await ada.append(space, 'story', <String, dynamic>{
+        'text': 'Z nowszej wersji',
+        'extra': 1,
+      });
+      // Another device takes it as it is, unknown fields included.
+      final LedgerStore b = _store();
+      expect((await b.ingest(entry)).status, IngestStatus.added);
+      expect(b.entries(space).single.body['extra'], 1);
+      // Still only the owner writes there.
+      await expectLater(
+        bob.append(space, 'story', <String, dynamic>{}),
+        throwsStateError,
+      );
+      // And only so much of it.
+      expect(
+        const UnknownAccountSpacePolicy('x').maxEntries,
+        kMaxUnknownSpaceEntries,
+      );
+      final LedgerStore small = LedgerStore(
+        clock: HlcClock(wallClock: () => _now),
+        policies: (String s) => s == space
+            ? UnknownAccountSpacePolicy(ada.account, maxEntries: 1)
+            : defaultSpacePolicy(s),
+      );
+      final LogEntry second = await ada.append(
+        space,
+        'story',
+        <String, dynamic>{},
+      );
+      expect((await small.ingest(entry)).status, IngestStatus.added);
+      expect((await small.ingest(second)).status, IngestStatus.rejected);
+    });
 
     test('a space kind from a newer build is kept within a few device logs '
-        'and bytes (Z2-6)', () async {
+        'and bytes', () async {
       final LedgerStore a = _store();
       final (LedgerAccountSetup setup, LedgerAuthor ada) = await _account(a);
       final String space = 'stories/${ada.account}';
@@ -263,7 +301,7 @@ void main() {
     });
 
     test('spaces of unknown kinds share a byte budget per owner and in all '
-        '(Z2-6)', () async {
+        '', () async {
       final LedgerStore a = _store();
       final (_, LedgerAuthor ada) = await _account(a);
       final (_, LedgerAuthor bob) = await _account(a);
@@ -343,7 +381,7 @@ void main() {
             'x': <int>[1, 2, 3],
           },
         );
-        final Map<String, dynamic> json = newer.toJson();
+        final Map<String, dynamic> json = newer.toCertifiedJson();
         expect(LogEntry.fromJson(json)!.kind, 'hologram');
         final LedgerStore b = _store();
         expect((await b.ingestJson(json)).status, IngestStatus.added);

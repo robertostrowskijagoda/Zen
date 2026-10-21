@@ -56,7 +56,7 @@ List<String> acceptedFriendAddresses(SocialHubState state) => <String>[
     if (f.status == FriendRelationshipStatus.accepted) f.address,
 ];
 
-/// What the account routing (§6, several devices) asks the ledger.
+/// What the account routing (several devices) asks the ledger.
 final class LedgerAccountDirectory implements AccountDeviceDirectory {
   LedgerAccountDirectory(this.node, this.friends, {this.groupMembers});
 
@@ -195,13 +195,13 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     createIdentity: !inService,
   );
   unawaitedLogged(node.start(), context: 'Start dziennika nie udał się');
-  // Follows are signed entries; followers learn of them from hellos (§12).
+  // Follows are signed entries; followers learn of them from hellos.
   final FollowLedger follows = FollowLedger.of(node);
   ref.onDispose(
     () =>
         unawaitedLogged(follows.dispose(), context: 'Zatrzymanie obserwowania'),
   );
-  // §14.1: the unwrapped account key lives only while the app is open.
+  // The unwrapped account key lives only while the app is open.
   final AppSecurityService security = ref.read(appSecurityServiceProvider);
   void lockAccountKey() {
     if (security.isLocked && node.isReady) {
@@ -210,7 +210,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   }
 
   security.addListener(lockAccountKey);
-  // Friends with several devices look like one person to the app (§6).
+  // Friends with several devices look like one person to the app.
   final AccountDirectoryHolder holder = ref.read(accountDirectoryHolderProvider)
     ..directory = LedgerAccountDirectory(
       node,
@@ -233,7 +233,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
       }, spaceKind: 'private'),
       context: 'Zapis wyjścia z grupy nie udał się',
     ));
-  // The social hub asks friends' levels without starting the ledger (§8).
+  // The social hub asks friends' levels without starting the ledger.
   final FriendLevelLookup levels = ref.read(friendLevelLookupProvider)
     ..levelOf = node.levelOf;
   ref.onDispose(() {
@@ -241,7 +241,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
       levels.levelOf = null;
     }
   });
-  // Conversations are the same on every device of the account (§6).
+  // Conversations are the same on every device of the account.
   final DeviceChatSync chatSync = DeviceChatSync(
     node: node,
     target: _HubChatTarget(ref),
@@ -318,7 +318,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
       }
     },
   );
-  // The profile you edit is mirrored into the public profile space (§9),
+  // The profile you edit is mirrored into the public profile space,
   // with your mesh address only once something public of yours can bring
   // followers (friends know it anyway).
   Future<void> publishProfile() async {
@@ -327,9 +327,9 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     final String address = profileNeedsAddress(node)
         ? ref.read(runtimeNodeSnapshotProvider).localAddress
         : '';
-    // Each field goes to whom the user chose (§9): public ones in the
+    // Each field goes to whom the user chose: public ones in the
     // public entry, the others sealed per audience; the photo and cover
-    // are read from the vault (§14.1).
+    // are read from the vault.
     await publishOwnProfile(
       node,
       me: me,
@@ -387,7 +387,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
       );
     },
   );
-  // Likes and comments travel along the reshare tree (§11): after a quiet
+  // Likes and comments travel along the reshare tree: after a quiet
   // moment, bundle what this circle said about posts we wrote or reshared.
   Timer? relayTimer;
   const Set<String> relayKinds = <String>{
@@ -453,11 +453,11 @@ final Provider<bool> bridgeHostEnabledProvider = Provider<bool>(
 );
 
 /// Whether this platform is a desktop (a computer, not a phone): only
-/// those can accept incoming connections and be bridges (§5.1).
+/// those can accept incoming connections and be bridges.
 bool get isDesktopPlatform =>
     !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
-/// Makes this computer a bridge of the mesh (§5.1). `null` on phones and
+/// Makes this computer a bridge of the mesh. `null` on phones and
 /// while disabled. Reading it starts it.
 final Provider<BridgeHost?> bridgeHostProvider = Provider<BridgeHost?>((
   Ref ref,

@@ -132,7 +132,7 @@ Future<List<InternetAddress>> systemAddresses() async {
   return out;
 }
 
-/// Makes this desktop a bridge of the mesh (§5.1), without asking: opens
+/// Makes this desktop a bridge of the mesh, without asking: opens
 /// the port in the home router (UPnP / NAT-PMP), asks friends to check
 /// from outside that it really answers, and only then announces it. Kept
 /// up to date: the port is renewed, the address re-checked, and the

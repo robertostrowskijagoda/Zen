@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
@@ -22,6 +23,11 @@ const int kMaxBlobsPerEntry = 32;
 /// The log is a hash chain: entry `seq` names entry `seq - 1` in [prev], so
 /// nothing can be cut out or slipped in unnoticed, and two different entries
 /// with the same [seq] prove the device misbehaved (a fork).
+///
+/// One hybrid signature by the device covers the whole entry (the chain
+/// included); it names the device's ML-DSA key, which the device's
+/// certificate publishes. The certificate does not travel with the entry
+/// ([toJson]); [certificate] is the one it was checked with, when known.
 @immutable
 final class LogEntry {
   const LogEntry._({
@@ -59,7 +65,11 @@ final class LogEntry {
   final List<String> blobs;
   final String account;
   final String device;
-  final DeviceCertificate certificate;
+
+  /// The certificate of [device] this entry was checked with (or came
+  /// with, [toCertifiedJson]); `null` for an entry just read from the
+  /// wire.
+  final DeviceCertificate? certificate;
   final String signature;
 
   /// Hash of the signed part: the entry's identity everywhere.
@@ -106,11 +116,44 @@ final class LogEntry {
     device: device,
   );
 
+  /// The entry as stored and replicated: the device's certificate is not
+  /// part of it (stores keep certificates apart, once per device).
   Map<String, dynamic> toJson() => <String, dynamic>{
     ...unsigned,
-    'cert': certificate.toJson(),
     'sig': signature,
   };
+
+  /// The entry with its device's certificate, for passing it on outside
+  /// the ledger (a reshare, a report, a follow notice), where whoever
+  /// checks it may hold no record of the device.
+  Map<String, dynamic> toCertifiedJson() => <String, dynamic>{
+    ...toJson(),
+    if (certificate case final DeviceCertificate cert) 'cert': cert.toJson(),
+  };
+
+  /// This entry, checked with (or to be checked with) [cert].
+  LogEntry withCertificate(DeviceCertificate cert) {
+    if (cert.account != account || cert.device != device) {
+      throw ArgumentError('certificate of another device');
+    }
+    return LogEntry._(
+      version: version,
+      space: space,
+      writer: writer,
+      seq: seq,
+      prev: prev,
+      hlc: hlc,
+      kind: kind,
+      body: body,
+      blobs: blobs,
+      account: account,
+      device: device,
+      certificate: cert,
+      signature: signature,
+      id: id,
+      encodedLength: encodedLength,
+    );
+  }
 
   /// Signs a new entry with [deviceKey].
   static Future<LogEntry> create({
@@ -142,17 +185,19 @@ final class LogEntry {
     final Uint8List sig = await deviceKey.sign(bytes);
     final LogEntry? entry = fromJson(<String, dynamic>{
       ...unsigned,
-      'cert': certificate.toJson(),
       'sig': b64(sig),
     });
-    if (entry == null) {
+    if (entry == null ||
+        certificate.account != entry.account ||
+        certificate.device != entry.device) {
       throw ArgumentError(t('Nieprawidłowy wpis (za duży lub błędne pola).'));
     }
-    return entry;
+    return entry.withCertificate(certificate);
   }
 
-  /// Parses and structurally validates an entry. Does not check signatures
-  /// (see [verifySignature]); returns `null` for anything malformed.
+  /// Parses and structurally validates an entry (with its certificate when
+  /// one comes along, [toCertifiedJson]). Does not check signatures (see
+  /// [verifySignature]); returns `null` for anything malformed.
   static LogEntry? fromJson(Object? json) {
     if (json is! Map) {
       return null;
@@ -168,7 +213,10 @@ final class LogEntry {
     final Object? blobs = json['blobs'];
     final Object? account = json['account'];
     final Object? device = json['device'];
-    final DeviceCertificate? cert = DeviceCertificate.fromJson(json['cert']);
+    final Object? rawCert = json['cert'];
+    final DeviceCertificate? cert = rawCert == null
+        ? null
+        : DeviceCertificate.fromJson(rawCert);
     final Object? sig = json['sig'];
     if (v is! int ||
         v < 1 ||
@@ -191,10 +239,11 @@ final class LogEntry {
         !blobs.every((Object? b) => isHex(b, 64)) ||
         unb64(account, length: 32) == null ||
         unb64(device, length: 32) == null ||
-        cert == null ||
-        cert.account != account ||
-        cert.device != device ||
-        unb64(sig, length: 64) == null) {
+        (rawCert != null &&
+            (cert == null ||
+                cert.account != account ||
+                cert.device != device)) ||
+        !isHybridSignatureText(sig)) {
       return null;
     }
     final Map<String, dynamic> typedBody;
@@ -221,12 +270,9 @@ final class LogEntry {
     try {
       final Uint8List unsignedBytes = canonicalJsonBytes(unsigned);
       id = sha256Hex(unsignedBytes);
-      // Whole entry size: signed part + certificate + signature.
-      length =
-          unsignedBytes.length +
-          canonicalJsonBytes(cert.toJson()).length +
-          (sig as String).length +
-          32;
+      // Whole entry size as stored and replicated: signed part and
+      // signature (the certificate is kept once per device).
+      length = unsignedBytes.length + (sig as String).length + 32;
     } on ArgumentError {
       return null;
     }
@@ -252,11 +298,14 @@ final class LogEntry {
     );
   }
 
-  Future<bool> verifySignature() => verifyLedgerSignature(
-    publicKey: device,
-    message: canonicalJsonBytes(unsigned),
-    signature: signature,
-  );
+  /// The device's hybrid signature, checked against the ML-DSA key its
+  /// certificate publishes; false without a [certificate].
+  Future<bool> verifySignature() {
+    final DeviceCertificate? cert = certificate;
+    return cert == null
+        ? Future<bool>.value(false)
+        : cert.verifyByDevice(canonicalJsonBytes(unsigned), signature);
+  }
 
   @override
   bool operator ==(Object other) => other is LogEntry && other.id == id;

@@ -17,6 +17,12 @@ enum IngestStatus {
   /// until the gap is filled.
   pending,
 
+  /// Its device's certificate (which publishes the key the entry is
+  /// checked with) is not known here yet: kept aside **unchecked** until
+  /// the certificate comes ([LedgerStore.addCertificate]; the replicator
+  /// asks the peer that sent the entry). Never part of a log before.
+  awaitingCertificate,
+
   /// Malformed, bad signature, not allowed in this space, from the future,
   /// revoked, blocked, or its log is known to be forked.
   rejected,
@@ -105,6 +111,7 @@ final class LedgerStore {
     HlcClock? clock,
     SpacePolicyResolver? policies,
     this.maxPendingPerLog = 512,
+    this.maxAwaitingCertificate = 1024,
     this.maxBoundedOwnerBytes = kMaxUnknownOwnerBytes,
     this.maxBoundedBytes = kMaxUnknownBytes,
   }) : directory = directory ?? AccountDirectory(),
@@ -115,6 +122,15 @@ final class LedgerStore {
   final HlcClock clock;
   final SpacePolicyResolver _policies;
   final int maxPendingPerLog;
+
+  /// Most entries kept aside, in all, for certificates not known yet.
+  final int maxAwaitingCertificate;
+
+  /// `account|device` → entries (by id) waiting for that device's
+  /// certificate; unchecked.
+  final Map<String, Map<String, LogEntry>> _awaiting =
+      <String, Map<String, LogEntry>>{};
+  int _awaitingCount = 0;
 
   /// Most bytes held in [BoundedSpacePolicy] spaces of one owner.
   final int maxBoundedOwnerBytes;
@@ -215,14 +231,23 @@ final class LedgerStore {
     return ingest(entry);
   }
 
-  Future<IngestResult> ingest(LogEntry entry) async {
-    final IngestResult? early = _precheck(entry);
+  Future<IngestResult> ingest(LogEntry received) async {
+    final IngestResult? early = _precheck(received);
     if (early != null) {
       return early;
     }
-    if (!await directory.addCertificate(entry.certificate)) {
+    final DeviceCertificate? carried = received.certificate;
+    if (carried != null && !await directory.addCertificate(carried)) {
       return const IngestResult(IngestStatus.rejected, 'zły certyfikat');
     }
+    final DeviceCertificate? cert =
+        carried ?? directory.certificateOf(received.account, received.device);
+    if (cert == null) {
+      return _awaitCertificate(received);
+    }
+    final LogEntry entry = carried == null
+        ? received.withCertificate(cert)
+        : received;
     if (!await entry.verifySignature()) {
       return const IngestResult(IngestStatus.rejected, 'zły podpis');
     }
@@ -266,6 +291,90 @@ final class LedgerStore {
     }
     _drain(log);
     return const IngestResult(IngestStatus.added);
+  }
+
+  static String _deviceKey(String account, String device) => '$account|$device';
+
+  IngestResult _awaitCertificate(LogEntry entry) {
+    final String key = _deviceKey(entry.account, entry.device);
+    final Map<String, LogEntry>? had = _awaiting[key];
+    if (had != null && had.containsKey(entry.id)) {
+      return const IngestResult(IngestStatus.awaitingCertificate);
+    }
+    if ((had?.length ?? 0) >= maxPendingPerLog) {
+      return const IngestResult(
+        IngestStatus.rejected,
+        'za dużo wpisów bez certyfikatu',
+      );
+    }
+    // Full: the device that has waited longest goes (its entries come
+    // again with the next sync).
+    while (_awaitingCount >= maxAwaitingCertificate && _awaiting.isNotEmpty) {
+      final String oldest = _awaiting.keys.first;
+      _awaitingCount -= _awaiting.remove(oldest)!.length;
+    }
+    (_awaiting[key] ??= <String, LogEntry>{})[entry.id] = entry;
+    _awaitingCount++;
+    return const IngestResult(
+      IngestStatus.awaitingCertificate,
+      'brak certyfikatu urządzenia',
+    );
+  }
+
+  /// Whether entries of [device] of [account] wait for its certificate.
+  bool awaitsCertificate(String account, String device) =>
+      _awaiting.containsKey(_deviceKey(account, device));
+
+  /// Takes the certificate of a device whose entries wait for it: checks
+  /// it, keeps it, then checks and takes the entries. Returns how many
+  /// became new (added or pending), or -1 for a certificate that does not
+  /// hold.
+  Future<int> addCertificate(DeviceCertificate cert) async {
+    if (!await directory.addCertificate(cert)) {
+      return -1;
+    }
+    final Map<String, LogEntry>? waiting = _awaiting.remove(
+      _deviceKey(cert.account, cert.device),
+    );
+    if (waiting == null) {
+      return 0;
+    }
+    _awaitingCount -= waiting.length;
+    final List<LogEntry> entries = waiting.values.toList()
+      ..sort((LogEntry a, LogEntry b) {
+        final int byLog = '${a.space}|${a.writer}'.compareTo(
+          '${b.space}|${b.writer}',
+        );
+        return byLog != 0 ? byLog : a.seq.compareTo(b.seq);
+      });
+    int taken = 0;
+    for (final LogEntry entry in entries) {
+      if ((await ingest(entry)).isNew) {
+        taken++;
+      }
+    }
+    return taken;
+  }
+
+  /// Whether this store holds a log of [device] of [account] in a space
+  /// [inSpace] admits (whose certificate it may then hand out).
+  bool holdsLogOf(
+    String account,
+    String device, {
+    bool Function(String space)? inSpace,
+  }) {
+    for (final MapEntry<String, Map<String, _WriterLog>> space
+        in _logs.entries) {
+      if (inSpace != null && !inSpace(space.key)) {
+        continue;
+      }
+      for (final _WriterLog log in space.value.values) {
+        if (log.account == account && log.device == device) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   IngestResult? _precheck(LogEntry entry) {
@@ -389,12 +498,18 @@ final class LedgerStore {
 
   /// Puts back an entry read from our own storage: it was fully checked
   /// when it first arrived, so only the chain is checked again (a damaged
-  /// file must not produce a broken log). Returns false when it does not
-  /// fit.
-  bool restore(LogEntry entry) {
-    if (_policies(entry.space) == null) {
+  /// file must not produce a broken log) and its device's certificate must
+  /// be known (restored first). Returns false when it does not fit.
+  bool restore(LogEntry stored) {
+    final DeviceCertificate? cert =
+        stored.certificate ??
+        directory.certificateOf(stored.account, stored.device);
+    if (_policies(stored.space) == null || cert == null) {
       return false;
     }
+    final LogEntry entry = stored.certificate == null
+        ? stored.withCertificate(cert)
+        : stored;
     final _WriterLog log = _space(entry.space)[entry.writer] ??= _WriterLog(
       entry.account,
       entry.device,
@@ -405,7 +520,7 @@ final class LedgerStore {
         entry.prev != log.lastId) {
       return false;
     }
-    directory.trustCertificate(entry.certificate);
+    directory.trustCertificate(cert);
     log.add(entry);
     clock.observe(entry.hlc);
     return true;
@@ -479,6 +594,13 @@ final class LedgerStore {
     for (final Map<String, _WriterLog> space in _logs.values) {
       space.removeWhere((_, _WriterLog log) => log.account == account);
     }
+    _awaiting.removeWhere((String key, Map<String, LogEntry> waiting) {
+      if (!key.startsWith('$account|')) {
+        return false;
+      }
+      _awaitingCount -= waiting.length;
+      return true;
+    });
     _changed.add(null);
   }
 

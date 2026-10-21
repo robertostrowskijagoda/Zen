@@ -1,18 +1,30 @@
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 
-final Ed25519 _ed25519 = Ed25519();
-
-/// An Ed25519 key pair (account or device key).
+/// A signing key (account, device, pyramid, alarm, maintainer… key): a
+/// 32-byte seed with both public halves of Zen's hybrid signature
+/// (Ed25519 + ML-DSA-65, hybrid_signature.dart). [id] is the Ed25519 half,
+/// [pqId] the fingerprint of the ML-DSA half.
 final class LedgerKeyPair {
-  LedgerKeyPair._(this.seed, this.publicKey, this._pair);
+  LedgerKeyPair._(this.seed, this.publicKey, this.pqPublicKey, this.pqId);
 
   final Uint8List seed;
+
+  /// The Ed25519 public key.
   final Uint8List publicKey;
-  final SimpleKeyPair _pair;
+
+  /// The ML-DSA-65 public key.
+  final Uint8List pqPublicKey;
+
+  /// SHA-256 of [pqPublicKey], base64url.
+  final String pqId;
 
   String get id => b64(publicKey);
+
+  /// Both halves in one text ([hybridKeyId]).
+  String get hybridId => hybridKeyId(id, pqId);
 
   static Future<LedgerKeyPair> generate() => fromSeed(randomBytes(32));
 
@@ -20,23 +32,49 @@ final class LedgerKeyPair {
     if (seed.length != 32) {
       throw ArgumentError('Ziarno klucza musi mieć 32 bajty.');
     }
-    final SimpleKeyPair pair = await _ed25519.newKeyPairFromSeed(seed);
-    final SimplePublicKey publicKey = await pair.extractPublicKey();
+    final HybridPublicKey key = await hybridSigner.publicKeyOf(
+      Uint8List.fromList(seed),
+    );
+    // Own keys are always at hand to check what this device signed.
+    HybridKeyBook.add(key.pq);
     return LedgerKeyPair._(
       Uint8List.fromList(seed),
-      Uint8List.fromList(publicKey.bytes),
-      pair,
+      key.ed,
+      key.pq,
+      b64(key.fingerprint),
     );
   }
 
-  Future<Uint8List> sign(List<int> message) async {
-    final Signature signature = await _ed25519.sign(message, keyPair: _pair);
+  /// The hybrid signature of [message] (3405 bytes): it names the ML-DSA
+  /// key by fingerprint, so whoever checks it needs the key from the
+  /// record that published it ([DeviceCertificate], a pyramid admission).
+  Future<Uint8List> sign(List<int> message) =>
+      hybridSigner.signDigest(seed, hybridDigest(message));
+
+  /// The keyed hybrid signature of [message] (5325 bytes): it carries the
+  /// ML-DSA key, for records checked where no record of the key can be at
+  /// hand yet — the record that introduces the key, what strangers check
+  /// (releases, bridge announcements, neighbours' frames, alarms).
+  Future<Uint8List> signWithKey(List<int> message) =>
+      hybridSigner.signDigest(seed, hybridDigest(message), withKey: true);
+
+  /// A classical Ed25519 signature (64 bytes) — only for what must fit a
+  /// QR code and is checked on the spot (an event ticket at the door,
+  /// docs/PROTOCOL.md §4.1). Everything kept or passed on is signed with
+  /// [sign].
+  Future<Uint8List> signClassical(List<int> message) async {
+    final Ed25519 ed = Ed25519();
+    final Signature signature = await ed.sign(
+      message,
+      keyPair: await ed.newKeyPairFromSeed(seed),
+    );
     return Uint8List.fromList(signature.bytes);
   }
 }
 
-/// Checks an Ed25519 signature; false for anything malformed.
-Future<bool> verifyLedgerSignature({
+/// Checks a classical Ed25519 signature ([LedgerKeyPair.signClassical]);
+/// false for anything malformed. Never for what is kept or passed on.
+Future<bool> verifyClassicalSignature({
   required String publicKey,
   required List<int> message,
   required String signature,
@@ -47,28 +85,99 @@ Future<bool> verifyLedgerSignature({
     return false;
   }
   try {
-    return await _ed25519.verify(
+    return await Ed25519().verify(
       message,
       signature: Signature(
         sig,
         publicKey: SimplePublicKey(pk, type: KeyPairType.ed25519),
       ),
     );
-  } catch (_) {
+  } on Object {
     return false;
   }
 }
 
+/// Checks a hybrid signature (hybrid_signature.dart) by the key [publicKey]
+/// (its Ed25519 id): both halves must hold, and the ML-DSA key it names or
+/// carries must be [pqId] when a record anchors the key (device
+/// certificates, maintainers, alarm keys), otherwise the one pinned for
+/// [publicKey] ([HybridKeyPins]) if any.
+///
+/// A signature that names its ML-DSA key is checked with [pqKey] (from the
+/// record that publishes it) or the key [HybridKeyBook] holds. Without the
+/// key it is **not** taken: false, like anything malformed (an
+/// Ed25519-only signature included); callers that can wait fetch the
+/// record ([hybridSignatureLacksKey]) and check again.
+Future<bool> verifyLedgerSignature({
+  required String publicKey,
+  required List<int> message,
+  required String signature,
+  String? pqId,
+  Uint8List? pqKey,
+}) async {
+  final Uint8List? pk = unb64(publicKey, length: 32);
+  final Uint8List? sig = decodeHybridSignature(signature);
+  if (pk == null || sig == null) {
+    return false;
+  }
+  final String ed = b64(pk);
+  final Uint8List? fingerprint = hybridSignatureFingerprint(sig);
+  if (fingerprint == null) {
+    return false;
+  }
+  final String named = b64(fingerprint);
+  if (pqId != null ? named != pqId : !HybridKeyPins.admits(ed, named)) {
+    return false;
+  }
+  final bool keyed = hybridSignaturePqKey(sig) != null;
+  final Uint8List? key = keyed ? pqKey : pqKey ?? HybridKeyBook.lookup(named);
+  if (!keyed && key == null) {
+    return false;
+  }
+  try {
+    if (!await hybridSigner.verifyDigest(
+      pk,
+      hybridDigest(message),
+      sig,
+      pqKey: key,
+    )) {
+      return false;
+    }
+  } on Object {
+    return false;
+  }
+  HybridKeyPins.pin(ed, named);
+  return true;
+}
+
 bool _isKey(Object? value) => unb64(value, length: 32) != null;
 
+/// The ML-DSA public key in [value] (base64url, its one canonical
+/// spelling), or `null`.
+Uint8List? _pqKeyOf(Object? value) {
+  final Uint8List? key = unb64(value, length: kMlDsaPublicKeyBytes);
+  return key != null && b64(key) == value ? key : null;
+}
+
 /// "Device [device] belongs to account [account]", signed by the account
-/// key. Travels inside every entry the device writes, so any entry can be
-/// checked by anyone, even a stranger who got it through a reshare.
+/// key: the **device record**. It publishes the device key's ML-DSA half
+/// ([devicePqKey]) once, so what the device signs (every ledger entry, its
+/// hello) names that key by fingerprint only and is checked against
+/// exactly that key ([verifyByDevice]). The account's signature carries
+/// the account's ML-DSA key (keyed form), so a certificate can be checked
+/// by anyone on its own.
+///
+/// Entries do not carry it: a store keeps the certificates of the devices
+/// whose entries it holds ([AccountDirectory]) and asks the peer that sent
+/// an entry for the certificate it lacks (`lg_cert_want`). An entry passed
+/// on outside the ledger (a reshare, a report) goes with it
+/// ([LogEntry.toCertifiedJson]).
 @immutable
 final class DeviceCertificate {
   const DeviceCertificate({
     required this.account,
     required this.device,
+    required this.devicePqKey,
     required this.name,
     required this.issued,
     required this.signature,
@@ -76,40 +185,61 @@ final class DeviceCertificate {
 
   final String account;
   final String device;
+
+  /// The device key's ML-DSA public key (base64url,
+  /// [LedgerKeyPair.pqPublicKey]).
+  final String devicePqKey;
   final String name;
   final int issued;
   final String signature;
 
   static const int maxNameLength = 60;
 
+  static final Expando<Uint8List> _pqKeys = Expando<Uint8List>('devicePq');
+  static final Expando<String> _pqIds = Expando<String>('devicePqId');
+
+  /// [devicePqKey] decoded (once: every entry of the device is checked
+  /// with it).
+  Uint8List get _pqKey => _pqKeys[this] ??=
+      unb64(devicePqKey, length: kMlDsaPublicKeyBytes) ?? Uint8List(0);
+
+  /// The fingerprint of [devicePqKey] ([LedgerKeyPair.pqId]).
+  String get devicePq => _pqIds[this] ??= pqFingerprintOf(_pqKey);
+
   static Map<String, dynamic> _payload(
     String account,
     String device,
+    String devicePqKey,
     String name,
     int issued,
   ) => <String, dynamic>{
     't': 'dev_cert',
     'account': account,
     'device': device,
+    'dpk': devicePqKey,
     'name': name,
     'issued': issued,
   };
 
   static Future<DeviceCertificate> issue({
     required LedgerKeyPair account,
-    required String device,
+    required LedgerKeyPair device,
     required String name,
     required int issued,
   }) async {
     final String clipped = name.length > maxNameLength
         ? name.substring(0, maxNameLength)
         : name;
-    final Uint8List sig = await account.sign(
-      canonicalJsonBytes(_payload(account.id, device, clipped, issued)),
+    final String devicePqKey = b64(device.pqPublicKey);
+    final Uint8List sig = await account.signWithKey(
+      canonicalJsonBytes(
+        _payload(account.id, device.id, devicePqKey, clipped, issued),
+      ),
     );
     return DeviceCertificate(
       account: account.id,
-      device: device,
+      device: device.id,
+      devicePqKey: devicePqKey,
       name: clipped,
       issued: issued,
       signature: b64(sig),
@@ -118,12 +248,25 @@ final class DeviceCertificate {
 
   Future<bool> verify() => verifyLedgerSignature(
     publicKey: account,
-    message: canonicalJsonBytes(_payload(account, device, name, issued)),
+    message: canonicalJsonBytes(
+      _payload(account, device, devicePqKey, name, issued),
+    ),
     signature: signature,
   );
 
+  /// Whether [signature] over [message] is the device's: its Ed25519 half
+  /// and exactly the ML-DSA key this certificate publishes.
+  Future<bool> verifyByDevice(List<int> message, String signature) =>
+      verifyLedgerSignature(
+        publicKey: device,
+        message: message,
+        signature: signature,
+        pqId: devicePq,
+        pqKey: _pqKey,
+      );
+
   Map<String, dynamic> toJson() => <String, dynamic>{
-    ..._payload(account, device, name, issued),
+    ..._payload(account, device, devicePqKey, name, issued),
     'sig': signature,
   };
 
@@ -132,15 +275,17 @@ final class DeviceCertificate {
         json['t'] != 'dev_cert' ||
         !_isKey(json['account']) ||
         !_isKey(json['device']) ||
+        _pqKeyOf(json['dpk']) == null ||
         json['name'] is! String ||
         (json['name'] as String).length > maxNameLength ||
         json['issued'] is! int ||
-        json['sig'] is! String) {
+        !isKeyedHybridSignatureText(json['sig'])) {
       return null;
     }
     return DeviceCertificate(
       account: json['account'] as String,
       device: json['device'] as String,
+      devicePqKey: json['dpk'] as String,
       name: json['name'] as String,
       issued: json['issued'] as int,
       signature: json['sig'] as String,
@@ -191,7 +336,10 @@ final class DeviceRevocation {
     required Map<String, int> cutoffs,
     required int issued,
   }) async {
-    final Uint8List sig = await account.sign(
+    // Keyed: a revocation travels to everyone, also to phones that never
+    // met the account (a cut-off must reach them before the device's
+    // entries do).
+    final Uint8List sig = await account.signWithKey(
       canonicalJsonBytes(_payload(account.id, device, cutoffs, issued)),
     );
     return DeviceRevocation(
@@ -221,7 +369,7 @@ final class DeviceRevocation {
         !_isKey(json['device']) ||
         json['cutoffs'] is! Map ||
         json['issued'] is! int ||
-        json['sig'] is! String) {
+        !isKeyedHybridSignatureText(json['sig'])) {
       return null;
     }
     final Map<String, int> cutoffs = <String, int>{};
@@ -268,14 +416,38 @@ final class AccountDirectory {
 
   static String _key(String account, String device) => '$account|$device';
 
+  /// Grows whenever a certificate is added (what the archive saves).
+  int get revision => _revision;
+  int _revision = 0;
+
   bool knowsCertificate(DeviceCertificate cert) =>
       _certs[cert.account]?[cert.device]?.signature == cert.signature;
 
-  /// Records a certificate read back from our own storage (checked when it
-  /// first arrived).
-  void trustCertificate(DeviceCertificate cert) {
+  /// The certificate of [device] of [account], if known: what its entries
+  /// are checked with.
+  DeviceCertificate? certificateOf(String account, String device) =>
+      _certs[account]?[device];
+
+  /// Every certificate known.
+  Iterable<DeviceCertificate> get certificates =>
+      _certs.values.expand((Map<String, DeviceCertificate> m) => m.values);
+
+  void _put(DeviceCertificate cert) {
     (_certs[cert.account] ??= <String, DeviceCertificate>{})[cert.device] =
         cert;
+    _revision++;
+  }
+
+  /// Records a certificate read back from our own storage (checked when it
+  /// first arrived); it pins the account's ML-DSA key again
+  /// ([HybridKeyPins]).
+  void trustCertificate(DeviceCertificate cert) {
+    if (HybridKeyPins.pinnedFor(cert.account) == null) {
+      HybridKeyPins.pinSignature(cert.account, cert.signature);
+    }
+    if (!knowsCertificate(cert)) {
+      _put(cert);
+    }
   }
 
   /// Records a certificate after checking its signature.
@@ -286,8 +458,7 @@ final class AccountDirectory {
     if (!await cert.verify()) {
       return false;
     }
-    (_certs[cert.account] ??= <String, DeviceCertificate>{})[cert.device] =
-        cert;
+    _put(cert);
     return true;
   }
 

@@ -6,7 +6,7 @@ import 'package:zen/src/core/crypto/ed25519_group.dart';
 import 'package:zen/src/core/crypto/ring_signature.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 
-/// Ring signatures from outside are checked strictly (§20.3a): one image,
+/// Ring signatures from outside are checked strictly: one image,
 /// one spelling; scalars below the order; never an exception.
 void main() {
   late List<LedgerKeyPair> keys;

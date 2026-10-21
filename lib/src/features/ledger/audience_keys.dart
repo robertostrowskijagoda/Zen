@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 
-/// How close a friend is (§8). Private: the other side never learns it.
+/// How close a friend is. Private: the other side never learns it.
 enum FriendLevel {
   /// "Słaby znajomy": public posts and "Wszyscy znajomi".
   weak,
@@ -52,13 +52,13 @@ Set<Audience> audiencesFor(FriendLevel level) => switch (level) {
   FriendLevel.close => <Audience>{Audience.all, Audience.mid, Audience.close},
 };
 
-/// Whether [level] is at least [min] (§8: "Znajomy" and up may see the
+/// Whether [level] is at least [min] ("Znajomy" and up may see the
 /// friend list and statuses, invite to groups).
 bool levelAtLeast(FriendLevel level, FriendLevel min) =>
     level.index >= min.index;
 
 /// [addresses] with "Przyjaciel" first, then "Znajomy", then "Słaby
-/// znajomy" (§7: the recovery circle and mailbox guardians prefer close
+/// znajomy" (the recovery circle and mailbox guardians prefer close
 /// friends). Stable: the order within a level is kept.
 List<String> closestFirst(
   Iterable<String> addresses,
@@ -206,7 +206,7 @@ final class AudienceKeyring {
     return added;
   }
 
-  /// Takes the own keys another device of this account made (§6, several
+  /// Takes the own keys another device of this account made (several
   /// devices): every device can then read and write for the same
   /// audiences. Returns how many were new.
   int mergeOwn(Object? items) {

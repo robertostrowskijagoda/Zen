@@ -4,7 +4,7 @@ import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
 
-/// Entry kind of a "met in person" attestation (§6.2) in the attester's
+/// Entry kind of a "met in person" attestation in the attester's
 /// `acts/<account>` space: `{a: the other account, d: 'YYYY-MM-DD'}`. The
 /// entry is signed by a device the attester's account certified, so it is
 /// the account's word; friends keep and follow the attester's `acts`, so it

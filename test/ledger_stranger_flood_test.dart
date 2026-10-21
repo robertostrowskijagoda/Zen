@@ -36,7 +36,7 @@ void main() {
     final LedgerKeyPair device = await LedgerKeyPair.generate();
     final DeviceCertificate cert = await DeviceCertificate.issue(
       account: account,
-      device: device.id,
+      device: device,
       name: 'obcy',
       issued: 1,
     );
