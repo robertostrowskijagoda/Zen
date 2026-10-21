@@ -1,14 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 
-// The author's say over the threads under their posts (§11): hiding a
+// The author's say over the threads under their posts: hiding a
 // comment and blocking a person (their likes and comments disappear from
 // all of the author's posts). Signed entries in the author's own `acts`
 // space; the latest entry for a comment or a person wins, so both can be
 // undone. Friends of the author read them directly; everyone further away
 // gets them with the author's reaction bundles (`reaction_relay.dart`).
 //
-// The author cannot stop anyone from reading public posts (§12): a block
+// The author cannot stop anyone from reading public posts: a block
 // only takes the person's reactions out of the author's threads.
 
 /// Entry kind: hide (or show again) one comment under the author's post.

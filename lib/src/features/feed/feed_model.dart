@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
@@ -53,8 +54,9 @@ Map<String, dynamic> editPostBody(
 const String kLikeKind = 'like';
 
 /// Entry kind of a reshare in the resharer's `feed/<account>` space. The
-/// body carries the whole signed original, so friends of the resharer can
-/// check it came from its author without following them.
+/// body carries the whole signed original with its device certificate
+/// ([LogEntry.toCertifiedJson]), so friends of the resharer can check it
+/// came from its author without following them.
 const String kReshareKind = 'reshare';
 
 /// Body of a reshare of [original] (a post, never a reshare). With
@@ -68,23 +70,32 @@ Map<String, dynamic> reshareBody(LogEntry original, {LogEntry? authorProfile}) {
     throw ArgumentError(t('Udostępnić można tylko post publiczny.'));
   }
   return <String, dynamic>{
-    'entry': original.toJson(),
+    'entry': original.toCertifiedJson(),
     if (authorProfile != null &&
         authorProfile.kind == kProfileKind &&
         authorProfile.account == original.account)
-      'profile': authorProfile.toJson(),
+      'profile': authorProfile.toCertifiedJson(),
   };
 }
 
-/// Parses [json] as an entry and checks its certificate and signature.
-Future<LogEntry?> verifiedEntry(Object? json) async {
-  final LogEntry? entry = LogEntry.fromJson(json);
-  if (entry == null ||
-      entry.certificate.account != entry.account ||
-      entry.certificate.device != entry.device) {
+/// Parses [json] as an entry passed on outside the ledger and checks its
+/// certificate and signature. The certificate comes with it
+/// ([LogEntry.toCertifiedJson]) or is [certificate] (one the caller
+/// already checked, e.g. of the hello the entry came in).
+Future<LogEntry?> verifiedEntry(
+  Object? json, {
+  DeviceCertificate? certificate,
+}) async {
+  final LogEntry? parsed = LogEntry.fromJson(json);
+  final DeviceCertificate? cert = parsed?.certificate ?? certificate;
+  if (parsed == null ||
+      cert == null ||
+      cert.account != parsed.account ||
+      cert.device != parsed.device) {
     return null;
   }
-  if (!await entry.certificate.verify() || !await entry.verifySignature()) {
+  final LogEntry entry = parsed.withCertificate(cert);
+  if (!await cert.verify() || !await entry.verifySignature()) {
     return null;
   }
   return entry;
@@ -121,7 +132,7 @@ Future<LedgerProfile?> unpackReshareProfile(
   return profileFromEntry(entry);
 }
 
-/// Entry kind of a passed-on tombstone in a resharer's feed (§10): the
+/// Entry kind of a passed-on tombstone in a resharer's feed: the
 /// author removed a post this account reshared, and friends of this
 /// account (who may not follow the author) should hide it too. The body
 /// carries the author's signed `post_del`; older versions ignore it.
@@ -134,7 +145,7 @@ Map<String, dynamic> reshareDeleteBody(LogEntry tombstone) {
   }
   return <String, dynamic>{
     'post': tombstone.body['post'],
-    'entry': tombstone.toJson(),
+    'entry': tombstone.toCertifiedJson(),
   };
 }
 
@@ -232,17 +243,17 @@ final class FeedComment {
   final int millis;
 
   /// The author's device address when they are a friend ('' otherwise):
-  /// a report of the comment names its author (§21.4).
+  /// a report of the comment names its author.
   final String authorAddress;
 
   /// Who wrote it ('' when unknown).
   final String account;
 
-  /// Hidden by the post's author (§11): only the author still sees it, to
+  /// Hidden by the post's author: only the author still sees it, to
   /// show it again.
   final bool hiddenByAuthor;
 
-  /// The writer's profile photo from their mini-profile (§9), when the
+  /// The writer's profile photo from their mini-profile, when the
   /// comment came with one.
   final MediaRef? avatar;
 
@@ -272,15 +283,14 @@ final class FeedLiker {
   final String account;
   final String name;
 
-  /// The liker's profile photo from their mini-profile (§9), when known.
+  /// The liker's profile photo from their mini-profile, when known.
   final MediaRef? avatar;
 
   /// This account or a friend (shown first: "Lubią to: Bob, Kasia…").
   final bool friend;
 
   /// In the pyramid, or met in person by this account or one of its
-  /// friends (a signed attestation, §6.2): "w tym N zweryfikowanych"
-  /// (§11).
+  /// friends (a signed attestation): "w tym N zweryfikowanych"
   final bool verified;
 
   FeedLiker withVerified(bool on) => on == verified
@@ -294,7 +304,7 @@ final class FeedLiker {
         );
 }
 
-/// "w tym 830 zweryfikowanych" (§11): how many of those who like [post]
+/// "w tym 830 zweryfikowanych": how many of those who like [post]
 /// are in the pyramid or were met in person by this account or its
 /// friends; `null` for none.
 String? verifiedSummary(FeedPost post) {
@@ -310,7 +320,7 @@ String? verifiedSummary(FeedPost post) {
   );
 }
 
-/// "Lubią to: Ty, Bob i 1 284 inne osoby" (§11): up to two names of
+/// "Lubią to: Ty, Bob i 1 284 inne osoby": up to two names of
 /// friends first, then how many others; `null` when nobody likes [post].
 String? likeSummary(FeedPost post) {
   final int total = post.likeTotal;
@@ -344,7 +354,7 @@ String? likeSummary(FeedPost post) {
 }
 
 /// Body of a comment on [postId] (validated, trimmed). With [mini] the
-/// writer's mini-profile goes along, signed with the comment (§9).
+/// writer's mini-profile goes along, signed with the comment.
 Map<String, dynamic> commentBody(
   String postId,
   String text, {
@@ -415,7 +425,7 @@ final class FeedPost {
   final int? _commentTotal;
 
   /// How many like it in all: at least [likers], more when a bundle said
-  /// there are more than it carried (§11).
+  /// there are more than it carried.
   int get likeTotal => _likeTotal ?? likers.length;
 
   /// How many of [likes] are verified ([FeedLiker.verified]).
@@ -480,7 +490,7 @@ final class FeedPost {
 }
 
 /// Body of a like (or, with [on] false, of taking it back). With [mini] the
-/// liker's mini-profile goes along, signed with the like (§9).
+/// liker's mini-profile goes along, signed with the like.
 Map<String, dynamic> likeBody(
   String postId, {
   bool on = true,
@@ -672,7 +682,7 @@ FeedPost _edited(FeedPost post, Map<String, dynamic>? edit) {
 /// keys are known (plus, with [reshares], posts reshared by friends),
 /// newest first. [nameOf] turns a friend's mesh address into a display name.
 /// [pyramidAddresses] are the device addresses of the pyramid's members:
-/// their accounts count as verified (§11).
+/// their accounts count as verified.
 List<FeedPost> buildFeed(
   LedgerNode node, {
   required String Function(String address) nameOf,
@@ -921,11 +931,11 @@ List<FeedPost> buildFeed(
   for (final List<FeedComment> list in comments.values) {
     list.sort((FeedComment a, FeedComment b) => a.millis.compareTo(b.millis));
   }
-  // The author's say over the thread (§11): their signed entries (when
+  // The author's say over the thread: their signed entries (when
   // this device reads their acts) and what their bundles passed on.
   final Map<String, ThreadModeration> signed = <String, ThreadModeration>{};
-  // In the pyramid, or met in person by this account or a friend (§6.2):
-  // "verified" (§11).
+  // In the pyramid, or met in person by this account or a friend:
+  // "verified".
   final Set<String> verified = <String>{
     ...node.metByCircle(),
     for (final String address in pyramidAddresses)

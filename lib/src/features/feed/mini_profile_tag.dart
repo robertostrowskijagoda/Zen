@@ -4,7 +4,7 @@ import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
 
-// The mini-profile (§9, §11) that travels with likes and comments: name and
+// The mini-profile that travels with likes and comments: name and
 // profile photo, so someone who is not your friend is more than a bare name
 // when their reaction reaches you through a friend. The tag is part of the
 // signed like or comment, and the bundles that carry reactions along the

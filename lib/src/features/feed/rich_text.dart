@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 
-/// Formatting in posts, Discord-style (§24): plain text with markers, so a
+/// Formatting in posts, Discord-style: plain text with markers, so a
 /// post stays readable anywhere and nothing executes.
 ///
 /// Inline: `**pogrubienie**`, `*kursywa*` / `_kursywa_`, `__podkreślenie__`,

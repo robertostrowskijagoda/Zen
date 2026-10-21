@@ -14,6 +14,8 @@ import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
+import 'package:zen/src/features/feed/feed_filter.dart';
+import 'package:zen/src/features/feed/feed_items.dart';
 import 'package:zen/src/features/feed/feed_memo.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
@@ -21,6 +23,7 @@ import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/feed/presentation/mutual_friends.dart';
 import 'package:zen/src/features/feed/presentation/post_editor_screen.dart';
 import 'package:zen/src/features/feed/presentation/post_reactions_sheet.dart';
+import 'package:zen/src/features/feed/presentation/pyramid_feed_card.dart';
 import 'package:zen/src/features/feed/presentation/reaction_notices.dart';
 import 'package:zen/src/features/feed/presentation/rich_post_body.dart';
 import 'package:zen/src/features/feed/presentation/video_autoplay.dart';
@@ -40,6 +43,7 @@ import 'package:zen/src/features/profile/ledger_profile.dart';
 import 'package:zen/src/features/profile/presentation/own_avatar.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
 import 'package:zen/src/features/profile/presentation/profile_screen.dart';
+import 'package:zen/src/features/pyramid/pyramid_feed.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart'
     show PyramidService;
 import 'package:zen/src/features/pyramid/pyramid_state.dart'
@@ -50,6 +54,8 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 /// The wall: posts of friends and followed people, newest first, and a
 /// place to write. Your own posts are on your profile, not here.
 /// Chronological, no algorithm, and it ends ("Jesteś na bieżąco").
+/// The pyramid's posts live here too (and only here), made from its
+/// records: chips „Wszystko · Znajomi · Piramida · Kraj” pick what shows.
 class FeedScreen extends ConsumerStatefulWidget {
   const FeedScreen({this.pickPhotos, super.key});
 
@@ -82,12 +88,43 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   /// Posts hidden by a pyramid content ban that the user chose to see.
   final Set<String> _revealed = <String>{};
 
-  /// The pyramid whose bans this screen follows (once it runs).
+  /// The pyramid whose bans and posts this screen follows (once it runs).
   PyramidService? _pyramid;
+
+  /// The chip on: the last one picked, kept on the device.
+  FeedFilter _filter = FeedFilter.all;
+
+  /// A filter was picked (or asked for) before the stored one was read.
+  bool _filterPicked = false;
+
+  static const String _filterKey = 'ui/feed_filter';
 
   @override
   void initState() {
     super.initState();
+    // Asked for before this screen was first built.
+    final FeedFilter? asked = feedFilterRequest.value;
+    if (asked != null) {
+      feedFilterRequest.value = null;
+      _filterPicked = true;
+      _filter = asked;
+    }
+    feedFilterRequest.addListener(_onFilterRequest);
+    unawaited(
+      ref
+          .read(ledgerDiskProvider)
+          .read(_filterKey)
+          .then((Uint8List? raw) {
+            if (mounted &&
+                !_filterPicked &&
+                raw != null &&
+                raw.isNotEmpty &&
+                raw.first < FeedFilter.values.length) {
+              setState(() => _filter = FeedFilter.values[raw.first]);
+            }
+          })
+          .catchError((Object _) {}),
+    );
     _node = ref.read(ledgerNodeProvider);
     _media = _node?.mediaCompleted.listen((_) {
       if (mounted) {
@@ -124,6 +161,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
 
   @override
   void dispose() {
+    feedFilterRequest.removeListener(_onFilterRequest);
     _pyramid?.removeListener(_onPyramid);
     unawaited(_updates?.cancel());
     unawaited(_storeChanges?.cancel());
@@ -136,6 +174,29 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     if (mounted) {
       setState(() {});
     }
+  }
+
+  /// Another part of the app asked for a filter ([openFeed]).
+  void _onFilterRequest() {
+    final FeedFilter? asked = feedFilterRequest.value;
+    if (asked == null) {
+      return;
+    }
+    feedFilterRequest.value = null;
+    _pick(asked);
+  }
+
+  void _pick(FeedFilter filter) {
+    _filterPicked = true;
+    if (mounted && filter != _filter) {
+      setState(() => _filter = filter);
+    }
+    unawaited(
+      ref
+          .read(ledgerDiskProvider)
+          .write(_filterKey, Uint8List.fromList(<int>[filter.index]))
+          .catchError((Object _) {}),
+    );
   }
 
   /// Follows the pyramid's decisions (content bans) once it is running.
@@ -165,7 +226,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     return post.authorAddress;
   }
 
-  /// "Zgłoś" on someone's post (§21.4). Once reported it is hidden here;
+  /// "Zgłoś" on someone's post. Once reported it is hidden here;
   /// "Usuń z mojego urządzenia" takes its photos and films off the phone
   /// (the text is a signed ledger entry that cannot be deleted, only
   /// hidden).
@@ -178,7 +239,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       text: post.text,
       header: t('Post na tablicy — {name}', {'name': post.authorLabel}),
       contentId: post.id,
-      // The signed post itself goes in as evidence (S36).
+      // The signed post itself goes in as evidence.
       entry: post.entry,
       deleteLocal: node == null || post.images.isEmpty
           ? null
@@ -544,7 +605,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                                             reportContent(
                                               context,
                                               ref,
-                                              // §21.4: the comment's author.
+                                              // The comment's author.
                                               authorAddress: c.authorAddress,
                                               text: c.text,
                                               header: t('Komentarz — {name}', {
@@ -640,7 +701,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     );
   }
 
-  /// Who likes it: you and friends first (§11).
+  /// Who likes it: you and friends first.
   void _showLikers(FeedPost post) {
     final LedgerNode? node = _node;
     unawaited(
@@ -658,7 +719,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     return friend == null ? address : state.nameFor(friend);
   }
 
-  /// Device addresses of the pyramid's members: "verified" likes (§11).
+  /// Device addresses of the pyramid's members: "verified" likes.
   Set<String> _pyramidAddresses() {
     final PyramidState? s = _pyramid?.state;
     return <String>{
@@ -689,11 +750,37 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     final List<FeedPost> posts = node != null && node.isReady
         ? _feedFor(node, social)
         : const <FeedPost>[];
+    final PyramidService? pyr = _pyramid;
+    final PyramidFeed pyramid = pyr?.feed ?? PyramidFeed.empty;
+    final List<FeedFilter> filters = feedFiltersFor(pyramid);
+    // A remembered chip that is not there any more: everything.
+    final FeedFilter filter = filters.contains(_filter)
+        ? _filter
+        : FeedFilter.all;
+    final List<FeedItem> items = composeFeed(
+      filter,
+      wall: posts,
+      pyramid: pyramid,
+    );
     final List<Widget> header = <Widget>[
       _ComposerPrompt(
         onWrite: () => unawaited(_compose()),
         onPhoto: () => unawaited(_compose(withPhotos: true)),
       ),
+      if (filters.isNotEmpty) ...<Widget>[
+        const SizedBox(height: 12),
+        _FilterChips(filters: filters, selected: filter, onSelect: _pick),
+      ],
+      if (pyr != null &&
+          (filter == FeedFilter.pyramid || filter == FeedFilter.national))
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: PyramidFeedHeader(
+            pyr: pyr,
+            feed: pyramid,
+            national: filter == FeedFilter.national,
+          ),
+        ),
       if (_error != null)
         Container(
           margin: const EdgeInsets.only(top: 12),
@@ -773,17 +860,44 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       );
     }
 
+    Widget card(LedgerNode node, FeedItem entry) => switch (entry) {
+      FeedFriendItem(:final FeedPost post) => postItem(node, post),
+      FeedPyramidItem(:final PyrFeedPost post) =>
+        pyr == null
+            ? const SizedBox.shrink()
+            : PyramidFeedCard(pyr: pyr, post: post),
+      FeedReferendumItem(:final PyrFeedReferendum referendum) =>
+        PyramidReferendumCard(referendum: referendum),
+      FeedAlarmItem(:final PyrFeedAlarm alarm) => PyramidAlarmBar(alarm: alarm),
+    };
+
     Widget feedEnd() {
-      if (posts.isEmpty) {
-        return ZenEmpty(
-          key: const Key('feed-end'),
-          icon: Icons.newspaper_rounded,
-          title: t('Nic tu jeszcze nie ma od znajomych.'),
-          text: t(
-            'Gdy znajomi coś opublikują, zobaczysz to tutaj — '
-            'po kolei, bez algorytmu.',
+      if (!items.any((FeedItem i) => i is! FeedAlarmItem)) {
+        return switch (filter) {
+          FeedFilter.pyramid => ZenEmpty(
+            key: const Key('feed-end'),
+            icon: Icons.forum_outlined,
+            title: t('Cisza w linii'),
+            text: t(
+              'Nikt z Twojej linii ani ze szczytu jeszcze nic nie napisał.',
+            ),
           ),
-        );
+          FeedFilter.national => ZenEmpty(
+            key: const Key('feed-end'),
+            icon: Icons.flag_outlined,
+            title: t('Jeszcze nic'),
+            text: t('W sekcji krajowej nikt jeszcze nie pisał.'),
+          ),
+          _ => ZenEmpty(
+            key: const Key('feed-end'),
+            icon: Icons.newspaper_rounded,
+            title: t('Nic tu jeszcze nie ma od znajomych.'),
+            text: t(
+              'Gdy znajomi coś opublikują, zobaczysz to tutaj — '
+              'po kolei, bez algorytmu.',
+            ),
+          ),
+        };
       }
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 20),
@@ -845,7 +959,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                 key: const Key('feed-list'),
                 padding: readableInsets(context, top: 12, bottom: 28),
                 // Lazy: only the posts on screen are built.
-                itemCount: header.length + posts.length + 1,
+                itemCount: header.length + items.length + 1,
                 // Keyed items keep their state when posts above them come
                 // and go, as they did in the eager list.
                 findChildIndexCallback: (Key key) {
@@ -853,14 +967,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                     return null;
                   }
                   if (key.value == 'feed-end') {
-                    return header.length + posts.length;
+                    return header.length + items.length;
                   }
                   const String hidden = 'feed-hidden-';
                   if (!key.value.startsWith(hidden)) {
                     return null;
                   }
                   final String id = key.value.substring(hidden.length);
-                  final int at = posts.indexWhere((FeedPost p) => p.id == id);
+                  final int at = items.indexWhere((FeedItem i) => i.id == id);
                   return at < 0 ? null : header.length + at;
                 },
                 itemBuilder: (BuildContext context, int index) {
@@ -868,9 +982,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                     return header[index];
                   }
                   final int at = index - header.length;
-                  return at < posts.length
-                      ? postItem(node, posts[at])
-                      : feedEnd();
+                  return at < items.length ? card(node, items[at]) : feedEnd();
                 },
               ),
       ),
@@ -1075,6 +1187,48 @@ String postTimeLabel(int millis, {bool withYear = false}) {
 }
 
 /// "Co słychać?" at the top of the wall; opens the post editor.
+/// „Wszystko · Znajomi · Piramida · Kraj” over the list.
+class _FilterChips extends StatelessWidget {
+  const _FilterChips({
+    required this.filters,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  final List<FeedFilter> filters;
+  final FeedFilter selected;
+  final ValueChanged<FeedFilter> onSelect;
+
+  String _label(FeedFilter f) => switch (f) {
+    FeedFilter.all => t('Wszystko'),
+    FeedFilter.friends => t('Znajomi'),
+    FeedFilter.pyramid => t('Piramida'),
+    FeedFilter.national => t('Kraj'),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      key: const Key('feed-filters'),
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: <Widget>[
+          for (final FeedFilter f in filters)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                key: Key('feed-filter-${f.name}'),
+                label: Text(_label(f)),
+                selected: f == selected,
+                onSelected: (bool _) => onSelect(f),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ComposerPrompt extends StatelessWidget {
   const _ComposerPrompt({required this.onWrite, required this.onPhoto});
 
@@ -1240,7 +1394,7 @@ class _PostCard extends StatelessWidget {
   final VoidCallback? onAuthor;
   final VoidCallback? onFollow;
 
-  /// Someone else's post: "Zgłoś" (§21.4).
+  /// Someone else's post: "Zgłoś".
   final VoidCallback? onReport;
 
   @override
@@ -1815,7 +1969,7 @@ class PostAudio extends StatelessWidget {
   }
 }
 
-/// A video in a post (§24). It starts by itself, muted, when it is the
+/// A video in a post. It starts by itself, muted, when it is the
 /// topmost video on screen ([VideoAutoplay]); several videos play one after
 /// another. A tap turns the sound on, the next one pauses. Decrypted to a
 /// private temporary file only when needed, removed afterwards.
@@ -1925,7 +2079,7 @@ class _PostVideoState extends State<PostVideo> {
       if (widget.entry != null && !widget.node.autoDownloadMedia()) {
         widget.node.downloadMedia(widget.entry!);
       }
-      // §10: a film plays while it downloads, once its first piece is here.
+      // A film plays while it downloads, once its first piece is here.
       if (!await _stream() && mounted) {
         setState(() {
           _loading = false;
@@ -2259,7 +2413,7 @@ class PostGallery extends StatelessWidget {
 }
 
 /// All photos and videos of someone's posts, as a grid (the profile's
-/// "Galeria", §9). Videos play in place; photos open full screen.
+/// "Galeria"). Videos play in place; photos open full screen.
 class ProfileMediaGrid extends StatelessWidget {
   const ProfileMediaGrid({
     required this.items,

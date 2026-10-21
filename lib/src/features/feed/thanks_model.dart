@@ -3,7 +3,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 
-/// Entry kind of a gratitude card ("karta wdzięczności", §9) in the giver's
+/// Entry kind of a gratitude card ("karta wdzięczności") in the giver's
 /// `acts/<account>` space: a signed "dziękuję" with a short reason.
 const String kThanksKind = 'thanks';
 

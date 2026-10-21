@@ -17,7 +17,7 @@ final class FeedMemo {
   Map<String, String> _inputs = const <String, String>{};
 
   /// Others' posts on the wall (own posts are on the profile), newest first.
-  /// Friends' posts older than the 12 months they are kept (§7) are left
+  /// Friends' posts older than the 12 months they are kept are left
   /// out; [nowMillis] is the clock (tests).
   List<FeedPost> wallOf(
     LedgerNode node, {

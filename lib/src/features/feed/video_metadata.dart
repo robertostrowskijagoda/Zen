@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
-// Removing the metadata of MP4 / MOV films before they leave the phone
-// (§10: films without GPS, like photos without EXIF).
+// Removing the metadata of MP4 / MOV films before they leave the phone.
+// (films without GPS, like photos without EXIF).
 //
 // Phones write where and when a film was recorded into "user data" boxes
 // of the ISO base media file format: Android puts the location into

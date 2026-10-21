@@ -8,6 +8,7 @@ import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
+import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/groups/presentation/group_conversation_screen.dart';
 import 'package:zen/src/features/neighbors/flat_model.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
@@ -103,7 +104,7 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
         if (ringingIncoming &&
             (!intent.autoAcceptCall || !intent.answersCall(session.id))) {
           // Not answered from the card, or answered for another call from
-          // the same person (STAN S17): the overlay asks.
+          // the same person: the overlay asks.
           // `IncomingCallLayer` already covers every route with the
           // accept/decline overlay; pushing under it would only leave a stray
           // surface behind once the user decides.
@@ -164,6 +165,10 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
                 GroupConversationScreen(groupId: groupId, groupName: title),
           ),
         );
+        break;
+      case RuntimeRouteTarget.feed:
+        // The pyramid's posts' notification: the Tablica on that filter.
+        openFeed(FeedFilter.parse(intent.rawInput));
         break;
       case RuntimeRouteTarget.flatDoor:
         // A door sticker's link: the neighbours section, then the knock

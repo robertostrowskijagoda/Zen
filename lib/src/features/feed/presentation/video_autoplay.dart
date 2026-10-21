@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-/// Decides which video in the feed plays (§24): the topmost one that is
+/// Decides which video in the feed plays: the topmost one that is
 /// mostly on screen and has not finished yet. One at a time — when it ends,
 /// the next visible one starts, so videos of a post play one after another.
 final class VideoAutoplay extends ChangeNotifier {

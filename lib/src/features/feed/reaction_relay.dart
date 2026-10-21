@@ -10,8 +10,8 @@ import 'package:zen/src/features/feed/thread_moderation.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
 
-/// Entry kind of a reaction bundle in the writer's `acts/<account>` space
-/// (§11): the likes and comments a post got in the writer's circle, so they
+/// Entry kind of a reaction bundle in the writer's `acts/<account>` space:
+/// the likes and comments a post got in the writer's circle, so they
 /// reach people outside it along the reshare tree.
 ///
 /// Who writes one: the author (for their own posts) and everyone who
@@ -54,7 +54,7 @@ const Set<String> kReactionRelayExtraKinds = <String>{
 };
 
 /// One liker or comment as a bundle carries it, with the writer's profile
-/// photo from their mini-profile (§9) when the bundle had room for it.
+/// photo from their mini-profile when the bundle had room for it.
 typedef BundleLike = ({String account, String name, MediaRef? avatar});
 typedef BundleComment = ({
   String id,
@@ -517,7 +517,7 @@ Future<int> relayReactions(
 }
 
 /// Passes on the author's tombstone of every post this account reshared
-/// and the author removed (§10): a [kReshareDeleteKind] entry in this
+/// and the author removed: a [kReshareDeleteKind] entry in this
 /// account's feed carrying the signed `post_del`, so friends of this
 /// account (who may not follow the author) hide the post too. The
 /// tombstone comes from the author's feed, or from a friend who passed it

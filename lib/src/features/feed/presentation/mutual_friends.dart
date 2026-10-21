@@ -4,7 +4,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 
-/// Account → how many friends you have in common with it (§9), from the
+/// Account → how many friends you have in common with it, from the
 /// friend lists friends share with this phone ("N wspólnych znajomych"
 /// under the name of someone who is not your friend).
 int Function(String account) mutualFriendsLookup(

@@ -13,7 +13,7 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 /// The bell on the wall: new likes and comments under your own posts,
-/// gathered per post ("Bob i 3 inne osoby polubili…", §11) instead of one
+/// gathered per post ("Bob i 3 inne osoby polubili…") instead of one
 /// notification per like. Opening it marks everything as seen.
 class ReactionNoticesButton extends ConsumerStatefulWidget {
   const ReactionNoticesButton({required this.node, super.key});

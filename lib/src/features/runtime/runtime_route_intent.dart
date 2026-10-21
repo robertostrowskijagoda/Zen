@@ -15,6 +15,10 @@ enum RuntimeRouteTarget {
   /// A flat's door code (`zen://m/<code>`, the sticker's `/m#<code>` page):
   /// the neighbours section knocks on that door.
   flatDoor,
+
+  /// The Tablica with a filter (`zen://feed?f=pyramid`); [rawInput] holds
+  /// the filter's name.
+  feed,
 }
 
 @immutable
@@ -103,6 +107,18 @@ final class RuntimeRouteIntent {
     );
   }
 
+  /// The Tablica, filtered by [filter] (a name of the feed's filters).
+  factory RuntimeRouteIntent.feed({
+    required String id,
+    required String filter,
+  }) {
+    return RuntimeRouteIntent(
+      id: id,
+      target: RuntimeRouteTarget.feed,
+      rawInput: filter,
+    );
+  }
+
   final String id;
   final RuntimeRouteTarget target;
   final String? peerAddress;
@@ -125,7 +141,7 @@ final class RuntimeRouteIntent {
 
   /// The call a call route was built for (its `call` parameter), when the
   /// route names one. An answering route only answers that very call, not a
-  /// later one from the same person (STAN S17). Never persisted.
+  /// later one from the same person. Never persisted.
   final String? callId;
 
   /// Whether this route may answer [ringingCallId]: a route that names a
@@ -160,10 +176,18 @@ final class RuntimeRouteIntent {
     RuntimeRouteTarget.addFriend => t('Dodaj znajomego'),
     RuntimeRouteTarget.groupConversation => t('Otwórz grupę'),
     RuntimeRouteTarget.flatDoor => t('Zapukaj do sąsiadów'),
+    RuntimeRouteTarget.feed => t('Otwórz Tablicę'),
   };
 }
 
 String buildInboxRouteKey() => 'zen://inbox';
+
+/// The Tablica on [filter] (`zen://feed?f=pyramid`).
+String buildFeedRouteKey(String filter) => Uri(
+  scheme: 'zen',
+  host: 'feed',
+  queryParameters: <String, String>{'f': filter},
+).toString();
 
 String buildConversationRouteKey({required String peerAddress, String? title}) {
   final String? trimmedTitle = title?.trim();
@@ -260,6 +284,12 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
   }
   if (uri.host == 'inbox') {
     return RuntimeRouteIntent.inbox(id: id);
+  }
+  if (uri.host == 'feed') {
+    return RuntimeRouteIntent.feed(
+      id: id,
+      filter: uri.queryParameters['f'] ?? '',
+    );
   }
   if (uri.host == 'call' && uri.pathSegments.isNotEmpty) {
     final String peerAddress = uri.pathSegments.first;
@@ -363,7 +393,7 @@ String issueCallAcceptToken(String peerAddress, {String? callId}) {
 
 /// Whether [token] was issued here, is still valid, and was issued for a
 /// call with [peerAddress] - and, when it was bound to a call, for the call
-/// [callId] (STAN S17: a token for one call never answers another call
+/// [callId] (a token for one call never answers another call
 /// from the same person).
 bool isIssuedCallAcceptToken(
   String? token,

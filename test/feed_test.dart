@@ -248,7 +248,7 @@ void main() {
     );
 
     // A forged text inside a reshare is refused.
-    final Map<String, dynamic> forged = fromAda.entry!.toJson();
+    final Map<String, dynamic> forged = fromAda.entry!.toCertifiedJson();
     forged['body'] = <String, dynamic>{'text': 'Podróbka', 'aud': 'public'};
     final LogEntry fake = await b.publish(kReshareKind, <String, dynamic>{
       'entry': forged,

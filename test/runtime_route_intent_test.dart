@@ -50,7 +50,7 @@ void main() {
     expect(intent.actionLabel, 'Dodaj znajomego');
   });
 
-  test('an answering route is bound to its call (S17)', () {
+  test('an answering route is bound to its call', () {
     const String peer = '200:1111:2222:3333:4444:5555:6666:7777';
     final String routeKey = buildCallRouteKey(
       peerAddress: peer,
@@ -114,7 +114,7 @@ void main() {
     }
   });
 
-  test('door sticker links open the neighbours knock (§18.2)', () {
+  test('door sticker links open the neighbours knock', () {
     final FlatDoorCode door = FlatDoorCode(
       key: base64Url.encode(List<int>.filled(32, 7)),
       door: 'abc',

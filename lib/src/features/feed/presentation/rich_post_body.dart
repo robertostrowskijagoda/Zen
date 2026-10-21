@@ -48,7 +48,7 @@ TextStyle richRunStyle(
 }
 
 /// A post's text with its formatting, and its photos and videos in the
-/// places the author put them (§24). Media the text does not mention are
+/// places the author put them. Media the text does not mention are
 /// left to the caller (shown after the text).
 class RichPostBody extends StatefulWidget {
   const RichPostBody({

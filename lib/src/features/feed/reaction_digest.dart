@@ -5,14 +5,14 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 
-// Collective notifications about reactions to your posts (§11): not one
+// Collective notifications about reactions to your posts: not one
 // per like, but "Bob i 3 inne osoby polubiły Twój post „…”". What was
 // already seen is remembered per post (who liked, which comments), so the
 // digest only speaks of what is new since the user last looked.
 
 const String _seenKey = 'feed/seen_reactions';
 
-/// What was already announced as a system notification (§11), kept apart
+/// What was already announced as a system notification, kept apart
 /// from what the bell on the wall has shown.
 const String kNotifiedReactionsKey = 'feed/notified_reactions';
 

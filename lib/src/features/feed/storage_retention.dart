@@ -6,7 +6,7 @@ import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/profile_gallery.dart';
 
-// The storage limits of the plan (§7), enforced: what other people's posts
+// The storage limits, enforced: what other people's posts
 // may take on this phone. Oldest first, and never anything of your own.
 //
 //  * Friends' posts are kept 12 months: older ones leave the wall, and their

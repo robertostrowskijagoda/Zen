@@ -18,7 +18,7 @@ import 'package:zen/src/features/media/video_faststart.dart';
 const int kMaxPostImages = 10;
 const int kMaxImageSide = 2048;
 
-/// Re-encodes a photo as JPEG without EXIF/GPS (§10), turned upright and
+/// Re-encodes a photo as JPEG without EXIF/GPS, turned upright and
 /// scaled down. Throws [ArgumentError] for anything that is not an image.
 Future<Uint8List> sanitizePhoto(Uint8List bytes) =>
     Isolate.run(() => _sanitize(bytes));
@@ -44,7 +44,7 @@ final Chacha20 _aead = Chacha20.poly1305Aead();
 /// Plain bytes in one sealed segment of a media file. With its 16-byte tag
 /// a segment fills exactly one piece of the blob (`kBlobChunkSize`), so
 /// every piece opens by itself as soon as it arrives: a film plays while
-/// it downloads (§10).
+/// it downloads.
 const int kMediaSegmentBytes = kBlobChunkSize - 16;
 
 /// Stores [media] encrypted with a fresh key and returns the reference that

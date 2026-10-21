@@ -12,11 +12,10 @@ import 'package:zen/src/features/feed/presentation/reactor_avatar.dart';
 import 'package:zen/src/features/feed/thread_moderation.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 
-/// Who likes [post] (§11): you and your friends first, then the others;
+/// Who likes [post]: you and your friends first, then the others;
 /// "i N innych osób" for those known only by number. With [node] a stranger
 /// shows the photo of their mini-profile, and with [mutualFriends] (account
-/// → how many friends you have in common) the line "N wspólnych znajomych"
-/// (§9).
+/// → how many friends you have in common) the line "N wspólnych znajomych".
 Future<void> showPostLikers(
   BuildContext context,
   FeedPost post, {
@@ -119,7 +118,7 @@ class _LikersSheet extends StatelessWidget {
 }
 
 /// The comments under [post], with a field to write one. Under your own
-/// post you decide about the thread (§11): hide a comment (only you still
+/// post you decide about the thread: hide a comment (only you still
 /// see it) or block its author in all your threads.
 Future<void> showPostComments(
   BuildContext context,
@@ -152,7 +151,7 @@ class PostCommentsSheet extends StatefulWidget {
   final FeedPost post;
   final VoidCallback? onChanged;
 
-  /// Account → how many friends you have in common (§9), for the line under
+  /// Account → how many friends you have in common, for the line under
   /// the name of a commenter who is not your friend.
   final int Function(String account)? mutualFriends;
 

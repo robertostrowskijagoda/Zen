@@ -12,7 +12,7 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 /// What the wall does in the background: system notifications about
-/// reactions to your posts (§11) and the storage limits (§7).
+/// reactions to your posts and the storage limits.
 final class FeedMaintenance {
   FeedMaintenance({required this.node, required this.notifier});
 

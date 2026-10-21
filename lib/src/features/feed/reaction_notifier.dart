@@ -15,7 +15,7 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 /// (`PrivacyRedactingNotificationService.hidesTitle`).
 const String kReactionNoticeIdPrefix = 'react-';
 
-/// The collective notifications about reactions to your posts (§11) as
+/// The collective notifications about reactions to your posts as
 /// system notifications, not only on the bell of the wall: one per post,
 /// "Cela i 3 inne osoby polubiły Twój post „…”", updated in place as more
 /// reactions arrive. It reads the same digest as the bell, but keeps its own

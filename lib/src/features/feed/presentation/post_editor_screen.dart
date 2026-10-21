@@ -243,7 +243,7 @@ final class _MediaBlock extends _Block {
   final DraftMedia media;
 }
 
-/// The post editor (§24), Discord-style: formatting from a toolbar or
+/// The post editor, Discord-style: formatting from a toolbar or
 /// shortcuts (Ctrl+B/I/U, Ctrl+Shift+X, Ctrl+E), shown live, and photos or
 /// videos placed exactly where the cursor is. A preview shows the post as
 /// friends will see it. Also edits an existing post ([editing]): its text,

@@ -4,7 +4,7 @@ import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/presentation/ledger_picture.dart';
 
-/// The round photo of someone who liked or commented (§9, §11): their
+/// The round photo of someone who liked or commented: their
 /// profile photo from the mini-profile that came with the reaction, fetched
 /// from your friends when it is not on the phone yet; the initial until
 /// then, and when the reaction came without a photo.
