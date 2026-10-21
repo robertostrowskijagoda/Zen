@@ -6,6 +6,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
+import 'package:zen/src/features/calls/call_media_e2ee.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
 import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
@@ -106,7 +107,7 @@ abstract class GroupCallMedia extends ChangeNotifier {
   Future<void> setCameraEnabled(bool enabled);
   Future<void> switchCamera();
 
-  /// Screen sharing (§13.1): the shared screen goes out on every leg's
+  /// Screen sharing: the shared screen goes out on every leg's
   /// screen slot, the camera stays on; everyone is told who shares.
   bool get isScreenSharing => false;
 
@@ -119,7 +120,7 @@ abstract class GroupCallMedia extends ChangeNotifier {
 
   Future<void> stopScreenShare() async {}
 
-  /// Recording (§13.2), always announced to everyone in the call.
+  /// Recording, always announced to everyone in the call.
   bool get canRecord => false;
   bool get isRecording => false;
 
@@ -140,6 +141,10 @@ abstract class GroupCallMedia extends ChangeNotifier {
 
   /// Gets every finished recording to be kept (encrypted) in the app.
   CallRecordingFinished? onRecordingFinished;
+
+  /// How the media of the call is protected: the weakest leg counts (see
+  /// call_media_e2ee.dart).
+  CallMediaSecurity get mediaSecurity => CallMediaSecurity.standard;
 
   Future<void> close();
 }

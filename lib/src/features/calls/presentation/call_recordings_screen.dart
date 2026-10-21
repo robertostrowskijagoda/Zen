@@ -18,11 +18,11 @@ import 'package:zen/src/features/security/exported_files.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 
-/// "Nagrania rozmów" (§13.2): play, export or delete what you recorded.
+/// "Nagrania rozmów": play, export or delete what you recorded.
 class CallRecordingsScreen extends ConsumerStatefulWidget {
   const CallRecordingsScreen({super.key});
 
-  /// Opens after the person confirms who they are (§14.1 point 4).
+  /// Opens after the person confirms who they are.
   static Future<void> open(BuildContext context) async {
     if (!await confirmSensitiveAccess(
           context,

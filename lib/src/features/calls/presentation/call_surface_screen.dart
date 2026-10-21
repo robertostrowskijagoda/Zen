@@ -14,6 +14,7 @@ import 'package:zen/src/features/calls/call_screen_share.dart';
 import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/calls/presentation/call_compact_layer.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
+import 'package:zen/src/features/calls/presentation/call_security_badge.dart';
 import 'package:zen/src/features/calls/presentation/call_session_widgets.dart';
 import 'package:zen/src/features/calls/presentation/screen_share_guard.dart';
 import 'package:zen/src/features/calls/presentation/screen_source_picker.dart';
@@ -155,6 +156,15 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
                     returnToConversation: widget.returnToConversation,
                     onChatPressed: () => _openChat(context),
                   ),
+                  if (ownsMedia)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                      child: Center(
+                        child: CallSecurityBadge(
+                          security: callMedia.mediaSecurity,
+                        ),
+                      ),
+                    ),
                   // Center media/audio stage
                   Expanded(
                     child: _CallMediaStage(
@@ -284,7 +294,7 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
   }
 
   /// Records into a temporary file, then moves it into the app's encrypted
-  /// storage (§13.2): the recording never lies around in plain form.
+  /// storage: the recording never lies around in plain form.
   Future<void> _toggleRecording(
     BuildContext context,
     CallMediaSessionController callMedia,
@@ -940,7 +950,7 @@ String _subtitleFor(CallSession session) => switch (session.status) {
   CallSessionStatus.active => t('Połączenie P2P szyfrowane end-to-end'),
 };
 
-/// "Udostępnij ekran" and who is sharing (§13.1): everyone sees it.
+/// "Udostępnij ekran" and who is sharing: everyone sees it.
 class _ScreenShareStrip extends StatelessWidget {
   const _ScreenShareStrip({
     required this.zen,

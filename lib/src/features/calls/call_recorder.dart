@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 
-/// What records calls on this device (§13.2), for 1:1 and group calls:
+/// What records calls on this device, for 1:1 and group calls:
 /// - Android: flutter_webrtc's recorder — what you hear, plus the other
 ///   side's video in a 1:1 video call (`.mp4`);
 /// - Windows: only what this app plays (the other side, through WASAPI

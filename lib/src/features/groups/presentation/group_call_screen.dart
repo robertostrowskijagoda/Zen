@@ -17,6 +17,7 @@ import 'package:zen/src/features/calls/group_call_media.dart';
 import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/calls/presentation/call_compact_layer.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
+import 'package:zen/src/features/calls/presentation/call_security_badge.dart';
 import 'package:zen/src/features/calls/presentation/call_session_widgets.dart';
 import 'package:zen/src/features/calls/presentation/screen_share_guard.dart';
 import 'package:zen/src/features/calls/presentation/screen_source_picker.dart';
@@ -240,6 +241,11 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
                       ],
                     ),
                   ),
+                  if (peers.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: CallSecurityBadge(security: media.mediaSecurity),
+                    ),
                   if (media.isScreenSharing)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 2),
@@ -647,7 +653,7 @@ class _ParticipantTile extends StatelessWidget {
   /// The participant's shared screen: fills the tile, the camera goes small.
   final RTCVideoRenderer? screenRenderer;
 
-  /// Shows "udostępnia ekran" on the tile (§13.1): everyone sees who shares.
+  /// Shows "udostępnia ekran" on the tile: everyone sees who shares.
   final bool sharingScreen;
 
   @override

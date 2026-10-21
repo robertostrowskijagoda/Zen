@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-/// A screen or a single window/app that can be shared in a call (§13.1).
+/// A screen or a single window/app that can be shared in a call.
 @immutable
 final class ScreenShareSource {
   const ScreenShareSource({
@@ -26,7 +26,7 @@ const String kCallScreenSignal = 'call_screen';
 const String kGroupScreenSignal = 'gc_screen';
 
 /// Message telling the other side that recording started or stopped:
-/// `{type, callId, on}`. Recording is never silent (§13.2).
+/// `{type, callId, on}`. Recording is never silent.
 const String kCallRecordingSignal = 'call_rec';
 
 /// Group calls: `{type, callId, on}` to every participant (also to whoever

@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 
-/// One saved call recording (§13.2).
+/// One saved call recording.
 @immutable
 final class CallRecording {
   const CallRecording({

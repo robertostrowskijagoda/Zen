@@ -8,7 +8,7 @@ import 'package:video_player/video_player.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 
-/// True while this device shares its screen in a call (§13.1). Notification
+/// True while this device shares its screen in a call. Notification
 /// posting reads it as "notifications without content" so nothing private
 /// pops up on the shared picture.
 final ValueNotifier<bool> screenShareHidesNotifications = ValueNotifier<bool>(
@@ -20,7 +20,7 @@ final ValueNotifier<bool> screenShareHidesNotifications = ValueNotifier<bool>(
 const int kAndroidSingleAppShareApi = 34;
 
 /// Whether starting a share must first warn that the WHOLE screen goes out:
-/// Android before 14 has no "share one app" choice (§13.1).
+/// Android before 14 has no "share one app" choice.
 bool screenShareNeedsWholeScreenWarning({
   required bool isAndroid,
   required int? androidSdkInt,
@@ -29,7 +29,7 @@ bool screenShareNeedsWholeScreenWarning({
     androidSdkInt != null &&
     androidSdkInt < kAndroidSingleAppShareApi;
 
-/// Plays the tone announcing that a recording started (§13.2). Replaceable
+/// Plays the tone announcing that a recording started. Replaceable
 /// in tests.
 Future<void> Function() callRecordingTonePlayer = _playRecordingTone;
 

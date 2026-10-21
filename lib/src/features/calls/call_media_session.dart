@@ -8,6 +8,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/features/calls/call_media_devices.dart';
+import 'package:zen/src/features/calls/call_media_e2ee.dart';
 import 'package:zen/src/features/calls/call_recorder.dart';
 import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
@@ -122,7 +123,7 @@ abstract class CallMediaSessionController extends ChangeNotifier {
 
   Future<void> stopScreenShare() async {}
 
-  /// Whether this device can record calls (§13.2).
+  /// Whether this device can record calls.
   bool get canRecord => false;
 
   /// This side is recording; the other side always knows (signal + banner).
@@ -149,6 +150,10 @@ abstract class CallMediaSessionController extends ChangeNotifier {
 
   Future<Map<String, dynamic>> dumpDiagnostics() async =>
       const <String, dynamic>{};
+
+  /// How the media of the active call is protected (see
+  /// call_media_e2ee.dart).
+  CallMediaSecurity get mediaSecurity => CallMediaSecurity.standard;
 
   Future<void> close();
 }
@@ -190,8 +195,156 @@ final class WebRtcCallMediaSessionController
   WebRtcCallMediaSessionController({
     required this.transport,
     CallRecorder? recorder,
-  }) : _recorder = recorder ?? platformCallRecorder() {
+    MediaFrameCryptoBackend frameCrypto = const WebRtcFrameCryptoBackend(),
+  }) : _recorder = recorder ?? platformCallRecorder(),
+       _frameCrypto = frameCrypto {
     _callFrames = transport.frames.listen(_onCallFrame);
+  }
+
+  final MediaFrameCryptoBackend _frameCrypto;
+
+  /// Frame encryption of the call; null where this device has none or the
+  /// other side does not offer it (DTLS-SRTP only).
+  MediaE2eeChannel? _e2ee;
+  CallMediaSecurity _mediaSecurity = CallMediaSecurity.negotiating;
+
+  /// The block this side answered the first offer with, repeated in every
+  /// answer (the first one may be lost).
+  Map<String, dynamic>? _e2eeAnswer;
+
+  @override
+  CallMediaSecurity get mediaSecurity => _mediaSecurity;
+
+  /// Opens frame encryption for a new connection, as the offering side
+  /// unless [isIncoming].
+  Future<void> _openE2ee(String callId, {required bool isIncoming}) async {
+    _e2eeAnswer = null;
+    _mediaSecurity = CallMediaSecurity.negotiating;
+    late final MediaE2eeChannel? channel;
+    channel = await MediaE2eeChannel.open(
+      backend: _frameCrypto,
+      callId: callId,
+      localId: isIncoming ? kMediaAnswererId : kMediaOffererId,
+      remoteId: isIncoming ? kMediaOffererId : kMediaAnswererId,
+      onRotated: _sendMediaKeyNotice,
+      onChanged: () {
+        final MediaE2eeChannel? current = _e2ee;
+        if (current != null && identical(current, channel)) {
+          _mediaSecurity = current.security;
+          _notify();
+        }
+      },
+    );
+    if (_disposed || _activeCallId != callId) {
+      await channel?.dispose();
+      return;
+    }
+    _e2ee = channel;
+    if (channel == null) {
+      _mediaSecurity = CallMediaSecurity.standard;
+    }
+  }
+
+  /// Drops frame encryption: DTLS-SRTP only from here on.
+  Future<void> _dropE2ee() async {
+    final MediaE2eeChannel? channel = _e2ee;
+    _e2ee = null;
+    _mediaSecurity = CallMediaSecurity.standard;
+    _notify();
+    if (channel != null) {
+      await channel.fallBack();
+      await channel.dispose();
+    }
+  }
+
+  /// The offering side's key-exchange block, or null without encryption.
+  Future<Map<String, dynamic>?> _offerE2eeBlock() async {
+    final MediaE2eeChannel? channel = _e2ee;
+    if (channel == null) {
+      return null;
+    }
+    try {
+      return await channel.offerBlock();
+    } on Object catch (error, stackTrace) {
+      logZenError('Media key offer failed', error, stackTrace);
+      await _dropE2ee();
+      return null;
+    }
+  }
+
+  /// The answering side: keys from the offer's block, and the block for the
+  /// answer; null (DTLS-SRTP only) when the offer has none.
+  Future<void> _answerE2ee(Object? offerBlock) async {
+    final MediaE2eeChannel? channel = _e2ee;
+    if (channel == null) {
+      return;
+    }
+    try {
+      final Map<String, dynamic>? answer = await channel.answerOffer(
+        offerBlock,
+        offererId: kMediaOffererId,
+        answererId: kMediaAnswererId,
+      );
+      if (answer == null) {
+        await _dropE2ee();
+        return;
+      }
+      _e2eeAnswer = answer;
+      _mediaSecurity = channel.security;
+    } on Object catch (error, stackTrace) {
+      logZenError('Media key answer failed', error, stackTrace);
+      await _dropE2ee();
+    }
+  }
+
+  /// The offering side, before the first answer is applied.
+  Future<void> _acceptE2eeAnswer(Object? answerBlock) async {
+    final MediaE2eeChannel? channel = _e2ee;
+    if (channel == null || _mediaSecurity != CallMediaSecurity.negotiating) {
+      return;
+    }
+    try {
+      await channel.acceptAnswer(
+        answerBlock,
+        offererId: kMediaOffererId,
+        answererId: kMediaAnswererId,
+      );
+      _mediaSecurity = channel.security;
+      if (channel.negotiated == CallMediaSecurity.standard) {
+        await _dropE2ee();
+      }
+    } on Object catch (error, stackTrace) {
+      logZenError('Media key agreement failed', error, stackTrace);
+      await _dropE2ee();
+    }
+    _notify();
+  }
+
+  Map<String, dynamic> _withE2ee(
+    Map<String, dynamic> description,
+    Map<String, dynamic>? block,
+  ) => <String, dynamic>{...description, kMediaE2eeField: ?block};
+
+  void _sendMediaKeyNotice(int epoch) {
+    final String? remote = _remoteAddress;
+    final String? callId = _activeCallId;
+    if (remote == null || callId == null) {
+      return;
+    }
+    unawaited(
+      transport
+          .send(
+            remoteAddress: remote,
+            payload: <String, dynamic>{
+              'type': kCallMediaKeySignal,
+              'callId': callId,
+              'epoch': epoch,
+            },
+          )
+          .catchError((Object error) {
+            logZenWarning('Sending the media key notice failed: $error');
+          }),
+    );
   }
 
   StreamSubscription<SignalTransportFrame>? _callFrames;
@@ -240,7 +393,7 @@ final class WebRtcCallMediaSessionController
     }
     final List<MediaStreamTrack> video =
         _remoteStream?.getVideoTracks() ?? const <MediaStreamTrack>[];
-    // Announced first: nobody is recorded without knowing (§13.2).
+    // Announced first: nobody is recorded without knowing.
     _sendCallSignal(kCallRecordingSignal, true);
     try {
       await _recorder.start(path, video: video.isEmpty ? null : video.first);
@@ -395,7 +548,9 @@ final class WebRtcCallMediaSessionController
 
   void _onCallFrame(SignalTransportFrame frame) {
     final Object? type = frame.payload['type'];
-    if (type != kCallScreenSignal && type != kCallRecordingSignal) {
+    if (type != kCallScreenSignal &&
+        type != kCallRecordingSignal &&
+        type != kCallMediaKeySignal) {
       return;
     }
     final String? remote = _remoteAddress;
@@ -404,12 +559,19 @@ final class WebRtcCallMediaSessionController
         frame.from.trim().toLowerCase() != remote.trim().toLowerCase()) {
       return;
     }
+    if (type == kCallMediaKeySignal) {
+      unawaitedLogged(
+        _e2ee?.remoteAdvanced(frame.payload['epoch']),
+        context: 'Following the media key failed',
+      );
+      return;
+    }
     if (type == kCallScreenSignal) {
       _remoteScreenSharing = frame.payload['on'] == true;
     } else {
       final bool on = frame.payload['on'] == true;
       if (on && !_remoteRecording) {
-        // Everyone hears that a recording began (§13.2).
+        // Everyone hears that a recording began.
         announceRecordingStartedWithTone();
       }
       _remoteRecording = on;
@@ -834,10 +996,11 @@ final class WebRtcCallMediaSessionController
         isIncoming: false,
       );
       await _pinLocalVideoDirection(sending: _localCameraWanted);
+      final Map<String, dynamic>? e2ee = await _offerE2eeBlock();
       final RTCSessionDescription offer = await _requireConnection()
           .createOffer(_offerConstraints());
       final RTCSessionDescription pinned = await _commitLocalDescription(offer);
-      _lastSentOfferDescription = _descriptionToMap(pinned);
+      _lastSentOfferDescription = _withE2ee(_descriptionToMap(pinned), e2ee);
       _awaitingRemoteAnswer = true;
       await _sendPayload(
         type: 'offer',
@@ -869,6 +1032,9 @@ final class WebRtcCallMediaSessionController
         captureVideo: _localCameraWanted,
         isIncoming: true,
       );
+      // Keys first: the transformers attached with the remote description
+      // then have them before anything arrives.
+      await _answerE2ee(remoteDescription[kMediaE2eeField]);
       await _setRemoteDescriptionPinned(remoteDescription);
       await _bindLocalTracksToAnswerTransceivers();
       await _pinLocalVideoDirection(sending: _localCameraWanted);
@@ -877,7 +1043,10 @@ final class WebRtcCallMediaSessionController
       final RTCSessionDescription pinned = await _commitLocalDescription(
         answer,
       );
-      _lastSentAnswerDescription = _descriptionToMap(pinned);
+      _lastSentAnswerDescription = _withE2ee(
+        _descriptionToMap(pinned),
+        _e2eeAnswer,
+      );
       await _sendPayload(
         type: 'answer',
         payload: <String, dynamic>{
@@ -914,7 +1083,10 @@ final class WebRtcCallMediaSessionController
         answer,
       );
       _activeKind = kind;
-      _lastSentAnswerDescription = _descriptionToMap(pinned);
+      _lastSentAnswerDescription = _withE2ee(
+        _descriptionToMap(pinned),
+        _e2eeAnswer,
+      );
       await _sendPayload(
         type: 'answer',
         payload: <String, dynamic>{
@@ -943,6 +1115,8 @@ final class WebRtcCallMediaSessionController
       return;
     }
     try {
+      // Keys before the answer lands, so no frame comes in without them.
+      await _acceptE2eeAnswer(description[kMediaE2eeField]);
       await _setRemoteDescriptionPinned(description);
       _awaitingRemoteAnswer = false;
       _syncRemoteRenderer();
@@ -1509,6 +1683,7 @@ final class WebRtcCallMediaSessionController
     }
     _peerConnection = connection;
     _relayMetadataReady = Completer<void>();
+    await _openE2ee(callId, isIncoming: isIncoming);
     connection.onIceCandidate = (RTCIceCandidate candidate) {
       final String? candidateValue = candidate.candidate;
       if (candidateValue == null || candidateValue.isEmpty) {
@@ -2075,6 +2250,9 @@ final class WebRtcCallMediaSessionController
         desc.type,
       );
     }
+    // Every sender and receiver gets its transformer before the
+    // description that lets media flow on it.
+    await _e2ee?.attachAll(connection);
     await connection.setLocalDescription(desc);
     _captureRelayMetadata(desc.sdp);
     _screenMid ??= screenShareSlotInSdp(desc.sdp ?? '')?.mid;
@@ -2107,6 +2285,7 @@ final class WebRtcCallMediaSessionController
       apply: (String value, String kind) =>
           connection.setRemoteDescription(RTCSessionDescription(value, kind)),
     );
+    await _e2ee?.attachAll(connection);
     _remoteDescriptionSet = true;
     await _waitForRelayMetadata();
     await _ensureRelayCandidate();
@@ -2178,6 +2357,14 @@ final class WebRtcCallMediaSessionController
     await _disposeStream(screen);
     _disconnectGraceTimer?.cancel();
     _disconnectGraceTimer = null;
+    final MediaE2eeChannel? e2ee = _e2ee;
+    _e2ee = null;
+    _e2eeAnswer = null;
+    _mediaSecurity = CallMediaSecurity.negotiating;
+    if (e2ee != null) {
+      // Transformers go before the connection they sit on.
+      await e2ee.dispose();
+    }
     final RTCPeerConnection? connection = _peerConnection;
     final String? callId = _activeCallId;
     _peerConnection = null;
@@ -2339,6 +2526,7 @@ final class WebRtcCallMediaSessionController
             },
           )
           .toList(),
+      'mediaSecurity': _mediaSecurity.name,
       'lastSentOffer': _lastSentOfferDescription?['sdp'],
       'lastSentAnswer': _lastSentAnswerDescription?['sdp'],
     };

@@ -13,7 +13,7 @@ Future<int?> Function() screenShareAndroidSdkReader = loadAndroidSdkInt;
 bool Function() screenShareIsAndroid = () => Platform.isAndroid;
 
 /// Before sharing starts: on Android older than 14 the system cannot share a
-/// single app, so the person is told that the WHOLE screen goes out (§13.1).
+/// single app, so the person is told that the WHOLE screen goes out.
 /// Returns false when they back out.
 Future<bool> confirmScreenShareStart(BuildContext context) async {
   final bool android = screenShareIsAndroid();

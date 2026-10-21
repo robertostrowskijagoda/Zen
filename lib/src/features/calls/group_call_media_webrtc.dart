@@ -39,15 +39,101 @@ final class _GroupLeg {
   String? localCandidateIp;
   Timer? disconnectTimer;
   bool closed = false;
+
+  /// Frame encryption of this leg (its own hybrid KEM exchange); null
+  /// where either end has none.
+  MediaE2eeChannel? e2ee;
+  CallMediaSecurity security = CallMediaSecurity.negotiating;
 }
 
 /// [GroupCallMedia] over flutter_webrtc: one [RTCPeerConnection] per remote
 /// participant, each pinned to its own Yggdrasil UDP relay (see
 /// [pinWebRtcSdpToLocalRelay]), all sharing one local stream.
 final class WebRtcGroupCallMedia extends GroupCallMedia {
-  WebRtcGroupCallMedia({required this.transport, CallRecorder? recorder})
-    : _recorder = recorder ?? platformCallRecorder() {
+  WebRtcGroupCallMedia({
+    required this.transport,
+    CallRecorder? recorder,
+    MediaFrameCryptoBackend frameCrypto = const WebRtcFrameCryptoBackend(),
+  }) : _recorder = recorder ?? platformCallRecorder(),
+       _frameCrypto = frameCrypto {
     _frames = transport.frames.listen(_onFrame);
+  }
+
+  final MediaFrameCryptoBackend _frameCrypto;
+
+  /// The weakest protection among the connected legs.
+  @override
+  CallMediaSecurity get mediaSecurity => combineMediaSecurity(
+    _legs.values
+        .where((_GroupLeg leg) => leg.state == GroupCallLegState.connected)
+        .map((_GroupLeg leg) => leg.security),
+  );
+
+  Future<void> _openLegE2ee(_GroupLeg leg, String callId) async {
+    late final MediaE2eeChannel? channel;
+    channel = await MediaE2eeChannel.open(
+      backend: _frameCrypto,
+      callId: callId,
+      localId: mediaParticipantId(_localAddress),
+      remoteId: mediaParticipantId(leg.peer),
+      onRotated: (int epoch) => unawaited(_sendMediaKey(leg, epoch)),
+      onChanged: () {
+        if (identical(leg.e2ee, channel)) {
+          leg.security = channel?.security ?? CallMediaSecurity.standard;
+          _notify();
+        }
+      },
+    );
+    if (leg.closed || _callId != callId) {
+      await channel?.dispose();
+      return;
+    }
+    leg.e2ee = channel;
+    leg.security = channel == null
+        ? CallMediaSecurity.standard
+        : CallMediaSecurity.negotiating;
+  }
+
+  /// DTLS-SRTP only on [leg] from here on.
+  Future<void> _dropLegE2ee(_GroupLeg leg) async {
+    final MediaE2eeChannel? channel = leg.e2ee;
+    leg.e2ee = null;
+    leg.security = CallMediaSecurity.standard;
+    _notify();
+    if (channel != null) {
+      await channel.fallBack();
+      await channel.dispose();
+    }
+  }
+
+  /// Someone joined or left: every other leg moves its key forward.
+  void _rekeyLegs({required _GroupLeg except}) {
+    unawaitedLogged(
+      rekeyMediaChannels(<MediaE2eeChannel?>[
+        for (final _GroupLeg other in _legs.values)
+          if (!identical(other, except)) other.e2ee,
+      ]),
+      context: 'Rotating the group call media keys failed',
+    );
+  }
+
+  Future<void> _sendMediaKey(_GroupLeg leg, int epoch) async {
+    final String? callId = _callId;
+    if (callId == null || leg.closed) {
+      return;
+    }
+    try {
+      await transport.send(
+        remoteAddress: leg.peer,
+        payload: <String, dynamic>{
+          'type': kGroupMediaKeySignal,
+          'callId': callId,
+          'epoch': epoch,
+        },
+      );
+    } catch (error) {
+      logZenWarning('Telling ${leg.peer} about the media key failed: $error');
+    }
   }
 
   final CallRecorder _recorder;
@@ -77,7 +163,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     if (_callId == null || _recordingPath != null) {
       return;
     }
-    // Everyone is told first: nobody is recorded without knowing (§13.2).
+    // Everyone is told first: nobody is recorded without knowing.
     await _announceRecording(true);
     try {
       // What this device hears: everyone else, mixed.
@@ -167,7 +253,9 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
 
   void _onFrame(SignalTransportFrame frame) {
     final Object? type = frame.payload['type'];
-    if ((type != kGroupScreenSignal && type != kGroupRecordingSignal) ||
+    if ((type != kGroupScreenSignal &&
+            type != kGroupRecordingSignal &&
+            type != kGroupMediaKeySignal) ||
         frame.payload['callId'] != _callId) {
       return;
     }
@@ -177,10 +265,17 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     if (peer == null) {
       return;
     }
+    if (type == kGroupMediaKeySignal) {
+      unawaitedLogged(
+        _legs[peer]?.e2ee?.remoteAdvanced(frame.payload['epoch']),
+        context: 'Following a group call media key failed',
+      );
+      return;
+    }
     if (type == kGroupRecordingSignal) {
       if (frame.payload['on'] == true) {
         if (_recordingPeers.add(peer)) {
-          // Everyone hears that a recording began (§13.2).
+          // Everyone hears that a recording began.
           announceRecordingStartedWithTone();
         }
       } else {
@@ -504,6 +599,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
       );
     }
     leg.connection = connection;
+    await _openLegE2ee(leg, callId);
     connection.onIceCandidate = (RTCIceCandidate candidate) {
       final String value = candidate.candidate ?? '';
       if (leg.localCandidateIp == null) {
@@ -529,6 +625,10 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
           leg.disconnectTimer = null;
           final bool joined = leg.state != GroupCallLegState.connected;
           _setLegState(leg, GroupCallLegState.connected);
+          // Somebody new in the call: everyone else's keys move on.
+          if (joined) {
+            _rekeyLegs(except: leg);
+          }
           // Whoever joins while this side records learns it at once.
           if (joined && _recordingPath != null) {
             unawaited(_announceRecording(true, only: leg.peer));
@@ -687,9 +787,17 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
           init: screenInit,
         );
       }
+      Map<String, dynamic>? e2ee;
+      try {
+        e2ee = await leg.e2ee?.offerBlock();
+      } on Object catch (error, stackTrace) {
+        logZenError('Group media key offer failed', error, stackTrace);
+        await _dropLegE2ee(leg);
+      }
       final RTCSessionDescription offer = _forceVideoSendRecv(
         await connection.createOffer(_offerConstraints()),
       );
+      await leg.e2ee?.attachAll(connection);
       await connection.setLocalDescription(offer);
       _captureMids(leg, offer.sdp);
       leg.exchange = DateTime.now().microsecondsSinceEpoch;
@@ -697,6 +805,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
         'sdp': offer.sdp,
         'type': offer.type,
         'exchange': leg.exchange,
+        kMediaE2eeField: ?e2ee,
       };
       leg.awaitingAnswer = true;
       await _send(peer, 'gc_offer', leg.lastOffer!);
@@ -741,12 +850,17 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
       final _GroupLeg leg = await _createLeg(peer);
       leg.exchange = exchange;
       final RTCPeerConnection connection = leg.connection!;
+      final Map<String, dynamic>? e2ee = await _answerLegE2ee(
+        leg,
+        description[kMediaE2eeField],
+      );
       await _setRemote(leg, description);
       leg.lastRemoteOfferSdp = sdp;
       await _bindLocalTracks(leg);
       final RTCSessionDescription answer = _forceVideoSendRecv(
         await connection.createAnswer(_offerConstraints()),
       );
+      await leg.e2ee?.attachAll(connection);
       await connection.setLocalDescription(answer);
       _captureMids(leg, answer.sdp);
       await _ensureRelayCandidate(leg);
@@ -754,6 +868,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
         'sdp': answer.sdp,
         'type': answer.type,
         'exchange': exchange,
+        kMediaE2eeField: ?e2ee,
       };
       await _send(peer, 'gc_answer', leg.lastAnswer!);
     });
@@ -771,10 +886,59 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
         // The answer to an offer from a leg that has since been rebuilt.
         return;
       }
+      await _acceptLegE2ee(leg, description[kMediaE2eeField]);
       await _setRemote(leg, description);
       leg.awaitingAnswer = false;
       await _ensureRelayCandidate(leg);
     });
+  }
+
+  /// The answering side of [leg]: keys from the offer's block and the
+  /// block for the answer; null (DTLS-SRTP only) when the offer has none.
+  Future<Map<String, dynamic>?> _answerLegE2ee(
+    _GroupLeg leg,
+    Object? block,
+  ) async {
+    final MediaE2eeChannel? channel = leg.e2ee;
+    if (channel == null) {
+      return null;
+    }
+    try {
+      final Map<String, dynamic>? answer = await channel.answerOffer(
+        block,
+        offererId: mediaParticipantId(leg.peer),
+        answererId: mediaParticipantId(_localAddress),
+      );
+      if (answer == null) {
+        await _dropLegE2ee(leg);
+      }
+      return answer;
+    } on Object catch (error, stackTrace) {
+      logZenError('Group media key answer failed', error, stackTrace);
+      await _dropLegE2ee(leg);
+      return null;
+    }
+  }
+
+  /// The offering side of [leg], before the answer is applied.
+  Future<void> _acceptLegE2ee(_GroupLeg leg, Object? block) async {
+    final MediaE2eeChannel? channel = leg.e2ee;
+    if (channel == null || leg.security != CallMediaSecurity.negotiating) {
+      return;
+    }
+    try {
+      await channel.acceptAnswer(
+        block,
+        offererId: mediaParticipantId(_localAddress),
+        answererId: mediaParticipantId(leg.peer),
+      );
+      if (channel.negotiated == CallMediaSecurity.standard) {
+        await _dropLegE2ee(leg);
+      }
+    } on Object catch (error, stackTrace) {
+      logZenError('Group media key agreement failed', error, stackTrace);
+      await _dropLegE2ee(leg);
+    }
   }
 
   Future<void> _setRemote(
@@ -796,6 +960,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
           connection.setRemoteDescription(RTCSessionDescription(value, kind)),
       label: 'group call',
     );
+    await leg.e2ee?.attachAll(connection);
     leg.remoteDescriptionSet = true;
   }
 
@@ -978,6 +1143,14 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     if (identical(_legs[leg.peer], leg)) {
       _legs.remove(leg.peer);
       _recordingPeers.remove(leg.peer);
+      // Somebody left a call that goes on: the others' keys move on.
+      _rekeyLegs(except: leg);
+    }
+    final MediaE2eeChannel? e2ee = leg.e2ee;
+    leg.e2ee = null;
+    if (e2ee != null) {
+      // Transformers go before the connection they sit on.
+      await e2ee.dispose();
     }
     final RTCPeerConnection? connection = leg.connection;
     leg.connection = null;
