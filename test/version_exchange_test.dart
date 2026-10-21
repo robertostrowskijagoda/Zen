@@ -189,8 +189,10 @@ void main() {
       payload: const <String, dynamic>{'type': 'ping'},
     );
     await tester.pumpAndSettle();
-    final Map<String, dynamic> pong = transport.sentSignals.last.payload;
-    expect(pong['type'], 'pong');
+    // The answer is a pong (a `census` frame may go along with it).
+    final Map<String, dynamic> pong = transport.sentSignals
+        .lastWhere((e) => e.payload['type'] == 'pong')
+        .payload;
     expect(pong['ver'], kAppVersion);
 
     await transport.injectIncoming(

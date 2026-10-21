@@ -201,6 +201,9 @@ final class _FakeCamera implements FilmCamera {
   }
 
   @override
+  Future<LumaFrame?> lumaFrame() async => null;
+
+  @override
   Future<void> close() async => calls.add('close');
 }
 

@@ -66,14 +66,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(transport.sentSignals.last.remoteAddress, _adaAddress);
-    // The pong also carries the hello digests (see MeetService.helloFor).
-    expect(transport.sentSignals.last.payload, containsPair('type', 'pong'));
-    expect(
-      transport.sentSignals.last.payload,
-      containsPair('state', 'foreground'),
+    // The answer is a pong (a `census` frame may go along with it).
+    final pong = transport.sentSignals.lastWhere(
+      (entry) => entry.payload['type'] == 'pong',
     );
-    expect(transport.sentSignals.last.payload, contains('ms'));
+    expect(pong.remoteAddress, _adaAddress);
+    // The pong also carries the hello digests (see MeetService.helloFor).
+    expect(pong.payload, containsPair('state', 'foreground'));
+    expect(pong.payload, contains('ms'));
 
     await transport.injectIncoming(
       from: _adaAddress,

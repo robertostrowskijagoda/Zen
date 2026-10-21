@@ -494,6 +494,22 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     expect(find.byKey(const Key('graph-person-sheet')), findsOneWidget);
     expect(find.byKey(const Key('graph-profile')), findsOneWidget);
+    // The gate to this person's friends: free for Ania, from her card.
+    await tester.ensureVisible(find.byKey(const Key('graph-gate-free')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('graph-gate-free')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    final IntroService intro = ProviderScope.containerOf(
+      tester.element(find.byType(GraphScreen)),
+    ).read(introServiceProvider);
+    expect(intro.gates.isFreeFor(_ania), isTrue);
+    expect(
+      tester
+          .widget<SwitchListTile>(find.byKey(const Key('graph-gate-free')))
+          .value,
+      isTrue,
+    );
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 5));

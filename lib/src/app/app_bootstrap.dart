@@ -12,6 +12,8 @@ import 'package:zen/src/features/account/device_chat_sync.dart';
 import 'package:zen/src/features/account/multi/account_registry.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
+import 'package:zen/src/features/account/multi/background_accounts.dart';
+import 'package:zen/src/features/account/multi/desktop_background.dart';
 import 'package:zen/src/features/chat/disappearing_messages.dart';
 import 'package:zen/src/features/groups/group_store.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -215,6 +217,7 @@ final class ZenBootstrapper {
     RuntimeNodeRuntimeBuilder? runtimeBuilder,
     this.opening,
     Future<void> Function()? prepareAccounts,
+    Future<bool> Function()? receivesInBackground,
     this.maxCriticalStepRetries = 1,
   }) : assert(maxCriticalStepRetries >= 0),
        _prepareForegroundLaunch = prepareForegroundLaunch,
@@ -224,6 +227,11 @@ final class ZenBootstrapper {
            // not where a test hands in its own folder.
            (supportDirectoryLoader == null
                ? () => ZenAccountRegistry().prepare()
+               : null),
+       _receivesInBackground =
+           receivesInBackground ??
+           (supportDirectoryLoader == null
+               ? () => ZenBackgroundAccounts().isOn(ZenAccounts.current)
                : null),
        _supportDirectoryLoader =
            supportDirectoryLoader ?? ZenInstance.supportDirectory,
@@ -245,6 +253,10 @@ final class ZenBootstrapper {
 
   final Future<void> Function()? _prepareForegroundLaunch;
   final Future<void> Function()? _prepareAccounts;
+
+  /// Whether the account opening receives in the background ("Odbieraj
+  /// w tle"); `null`: no (tests).
+  final Future<bool> Function()? _receivesInBackground;
 
   /// The account to open (another one than at the last start, switched
   /// to in this process); `null`: the account open now (the default one
@@ -384,12 +396,42 @@ final class ZenBootstrapper {
                   appSecurityService.credentialsStore,
                   createKey: true,
                 )
+              : Platform.isWindows || Platform.isLinux || Platform.isMacOS
+              // A computer: under the background key only while
+              // "Odbieraj w tle" is on (the tray then runs the node without
+              // the password); either seal opens, in case a switch's
+              // reseal was cut short.
+              ? await _desktopNodeConfigProtector(appSecurityService)
               : EncryptedBinaryPayloadProtector(appSecurityService),
         );
     return ZenBootstrapRuntimeState(
       runtime: _runtimeBuilder(config: runtimeConfig),
       runtimeConfig: runtimeConfig,
     );
+  }
+
+  Future<KeyedBinaryPayloadProtector> _desktopNodeConfigProtector(
+    AppSecurityService security,
+  ) async {
+    final KeyedBinaryPayloadProtector master = EncryptedBinaryPayloadProtector(
+      security,
+    );
+    final KeyedBinaryPayloadProtector background = BackgroundKeyProtector(
+      security.credentialsStore,
+      createKey: true,
+    );
+    bool on = false;
+    final Future<bool> Function()? receives = _receivesInBackground;
+    if (receives != null) {
+      try {
+        on = await receives();
+      } on Object catch (error, stackTrace) {
+        logZenError('Reading "Odbieraj w tle" failed', error, stackTrace);
+      }
+    }
+    return on
+        ? FallbackKeyedProtector(background, master)
+        : FallbackKeyedProtector(master, background);
   }
 
   Future<T> _runCriticalStep<T>(

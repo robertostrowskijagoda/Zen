@@ -16,6 +16,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/update/adb_installer.dart';
 import 'package:zen/src/features/update/apk_signature.dart';
 import 'package:zen/src/features/update/own_copy.dart';
+import 'package:zen/src/features/update/presentation/install_guide_screen.dart';
 import 'package:zen/src/features/update/presentation/store_share_dialog.dart';
 import 'package:zen/src/features/update/release.dart';
 import 'package:zen/src/features/update/share_app_channel.dart';
@@ -795,6 +796,18 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
               'hotspotu.',
             ),
           ),
+          const SizedBox(height: 12),
+          ZenTile(
+            key: const Key('share-app-install-guide'),
+            icon: Icons.install_mobile_rounded,
+            tone: tone,
+            title: t('Jak zainstalować Zen na innym telefonie / komputerze'),
+            subtitle: t(
+              'Kod QR do strony instalacji i kroki dla każdego systemu',
+            ),
+            trailing: Icon(Icons.chevron_right_rounded, color: zen.textMuted),
+            onTap: () => unawaited(InstallGuideScreen.open(context)),
+          ),
           if (!kIsWeb && Platform.isIOS)
             Padding(
               padding: const EdgeInsets.only(top: 12),
@@ -803,9 +816,9 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                 tone: zen.warning,
                 text: t(
                   'iPhone nie pozwala przekazać aplikacji z ręki do ręki. '
-                  'Znajomy z iPhonem instaluje Zen z GitHuba (opis w README, '
-                  'sekcja „iPhone”). Stąd możesz podać plik .apk znajomemu '
-                  'z Androidem.',
+                  'Znajomy z iPhonem instaluje Zen przez SideStore (kroki '
+                  'wyżej, w „Jak zainstalować Zen”). Stąd możesz podać plik '
+                  '.apk znajomemu z Androidem.',
                 ),
               ),
             ),

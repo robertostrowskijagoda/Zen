@@ -1367,6 +1367,7 @@ final class _AndroidBackgroundRuntimeBridgeState
             flatKey: neighbors.doorKey == null ? null : neighbors.profile?.key,
             doorToken: neighbors.doorKey == null ? null : neighbors.door,
             sealSeed: neighbors.doorKey == null ? null : neighbors.sealSeed,
+            tempTokens: neighbors.tempDoorTokens,
           );
           final String signature = jsonEncode(door.toJson());
           if (signature != _doorKitWritten) {

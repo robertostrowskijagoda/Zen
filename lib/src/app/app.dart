@@ -10,6 +10,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/account/multi/desktop_background.dart';
 import 'package:zen/src/features/calls/presentation/call_compact_layer.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/calls/presentation/incoming_call_layer.dart';
@@ -148,10 +149,13 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
         child: RuntimeSystemNotificationsBridge(
           child: RuntimeLifecycleBridge(
             child: AndroidBackgroundRuntimeBridge(
-              child: RuntimeSignalBridge(
-                child: TestHarnessBridge(
-                  child: AlarmWatcher(
-                    child: RuntimeRouteBridge(child: AppShellScreen()),
+              // A computer's tray: the background accounts' nodes.
+              child: DesktopBackgroundBridge(
+                child: RuntimeSignalBridge(
+                  child: TestHarnessBridge(
+                    child: AlarmWatcher(
+                      child: RuntimeRouteBridge(child: AppShellScreen()),
+                    ),
                   ),
                 ),
               ),

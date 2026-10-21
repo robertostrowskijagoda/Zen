@@ -5,6 +5,7 @@ import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/recovery_providers.dart';
+import 'package:zen/src/features/census/census_providers.dart';
 import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/feed/feed_maintenance.dart';
 import 'package:zen/src/features/groups/group_board_providers.dart';
@@ -52,6 +53,8 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
       ref.read(bridgeHostProvider);
       // New versions of the app from friends.
       ref.read(updateServiceProvider);
+      // The anonymous estimate of people in the network (O aplikacji).
+      ref.read(networkCensusProvider);
     },
   ),
   // Friends nearby without internet: same Wi-Fi, Wi-Fi Direct.

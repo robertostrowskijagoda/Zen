@@ -66,6 +66,14 @@ abstract final class ZenI18n {
   /// Code of the current language.
   static String get code => _code;
 
+  /// The current language and its texts, for work done in another isolate
+  /// ([adopt] there), so what it writes is in the app's language.
+  static (String, Map<String, Object?>) get snapshot => (_code, _strings);
+
+  /// Speaks the language of a [snapshot] taken in another isolate.
+  static void adopt((String, Map<String, Object?>) snapshot) =>
+      _use(snapshot.$1, snapshot.$2);
+
   /// The current language.
   static ZenLanguage get language => byCode(_code) ?? kZenSourceLanguage;
 

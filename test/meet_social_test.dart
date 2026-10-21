@@ -182,19 +182,21 @@ void main() {
       await h.table.setWish(city: 'Gdańsk', days: <int>{DateTime.thursday});
     }
     await b.table.setWish(city: 'Sopot');
-    expect(host.table.wishes.map((TableWish w) => w.address).toSet(), <String>{
-      a.address,
-      b.address,
-      x1.address,
-      x2.address,
-      y1.address,
-    });
+    // Friends' wishes come with their address; friends of friends' without,
+    // through the friend who passed them on.
+    expect(host.table.wishes, hasLength(5));
     expect(
       host.table.wishes
-          .firstWhere((TableWish w) => w.address == x1.address)
-          .via,
-      a.address,
+          .where((TableWish w) => w.address.isNotEmpty)
+          .map((TableWish w) => w.address)
+          .toSet(),
+      <String>{a.address, b.address},
     );
+    final TableWish x1Wish = host.table.wishes.firstWhere(
+      (TableWish w) => w.id == x1.table.myWish!.id,
+    );
+    expect(x1Wish.via, a.address);
+    expect(x1Wish.address, isEmpty);
 
     host.lists[a.address] = <String, String>{
       x1.address: 'x1',
@@ -217,10 +219,15 @@ void main() {
       guests: host.table.pickGuests('Gdańsk', thursday),
     );
     expect(e.capacity, 6);
+    // Y1 is invited through b2, says "Chcę", the host lets them in.
+    final TableInvite toY1 = y1.table.invitations.single;
+    expect(toY1.via, b.address);
+    expect(await y1.table.answer(toY1.id, true), isTrue);
+    expect(await host.table.accept(toY1.id), isTrue);
     expect(
       y1.events.event(e.id),
       isNotNull,
-      reason: 'vouched by b2, their friend',
+      reason: 'the host is no friend, but y1 said "Chcę"',
     );
 
     await a.table.setWish();
@@ -411,9 +418,11 @@ void main() {
     }
 
     // Bob's (broken) app dates his wish a century ahead.
+    await bob.table.setWish(city: 'Gdańsk');
     await bob.send(ania.address, <String, dynamic>{
       'type': kTableWishType,
       'w': TableWish(
+        id: bob.table.myWish!.id,
         address: bob.address,
         name: 'b2',
         city: 'Gdańsk',
