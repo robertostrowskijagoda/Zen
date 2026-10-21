@@ -26,12 +26,16 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/alarm_kit.dart';
 import 'package:zen/src/features/meet/alarm_shortcut.dart';
+import 'package:zen/src/features/meet/encounters.dart';
 import 'package:zen/src/features/meet/location.dart';
 import 'package:zen/src/features/meet/locked_alarm.dart';
+import 'package:zen/src/features/meet/locked_nearby.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/presentation/alarm_audio.dart';
+import 'package:zen/src/features/neighbors/neighbors_providers.dart';
+import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
@@ -47,6 +51,7 @@ import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -112,7 +117,7 @@ List<ForegroundServiceTypes> foregroundServiceTypesForCallSession(
     session,
     foregroundServiceKeepAliveType(androidSdkInt ?? _androidSdkInt),
   );
-  // Screen sharing (§13.1): Android 14+ captures only under a service of
+  // Screen sharing: Android 14+ captures only under a service of
   // the mediaProjection type.
   if (session != null && androidScreenCaptureActive.value) {
     return <ForegroundServiceTypes>[
@@ -202,7 +207,7 @@ String _backgroundServiceNotificationText(
 }
 
 /// Heads-up for a service parked because the app has not yet published what
-/// it may receive with (not unlocked since it was installed or wiped, §14.1).
+/// it may receive with (not unlocked since it was installed or wiped).
 ///
 /// In that state the background runtime cannot start the node at all, so
 /// incoming calls silently go nowhere. The suppression key keeps repeat park
@@ -268,7 +273,7 @@ Future<bool> showBackgroundRuntimeStoppedNotice(
 /// The payload the service falls back to when no app is around to send one
 /// (a boot, a self-restart): the settings, and "own the node".
 ///
-/// No key of any kind: the service never holds the master key (§14.1). It
+/// No key of any kind: the service never holds the master key. It
 /// receives with the background capability the app published, which it
 /// reads itself.
 Future<AndroidBackgroundBootstrapPayload>
@@ -360,7 +365,7 @@ Future<bool> requestAndroidBackgroundDeliveryExemption() async {
 }
 
 /// What the app tells the service: the settings it needs and the mode to
-/// reach. Never a key (§14.1).
+/// reach. Never a key.
 @immutable
 final class AndroidBackgroundBootstrapPayload {
   const AndroidBackgroundBootstrapPayload({
@@ -548,7 +553,7 @@ final class FlutterForegroundAndroidBackgroundServiceController
       ),
     );
     // Notifications and the rest are asked for on the permissions screen
-    // (§25.2: first start and Ustawienia), never on their own at startup.
+    // (first start and Ustawienia), never on their own at startup.
     // Which service type fits this Android; [start] waits for it.
     unawaited(loadAndroidSdkInt());
     _initialized = true;
@@ -732,7 +737,7 @@ final class FlutterForegroundAndroidBackgroundServiceController
 }
 
 /// Where the app publishes the background capability and finds what the
-/// service kept while the app was locked (§14.1).
+/// service kept while the app was locked.
 final Provider<BackgroundVault> backgroundVaultProvider =
     Provider<BackgroundVault>((Ref ref) {
       return FileBackgroundVault(
@@ -742,7 +747,7 @@ final Provider<BackgroundVault> backgroundVaultProvider =
       );
     });
 
-/// Keeps the node where the master key is (§14.1).
+/// Keeps the node where the master key is.
 ///
 /// * On screen, and in the background while unlocked, this isolate runs the
 ///   node and the app's `ZenCore`; the foreground service stays parked
@@ -754,8 +759,10 @@ final Provider<BackgroundVault> backgroundVaultProvider =
 ///   background capability this widget publishes while the app is unlocked.
 /// * Back on screen and unlocked, this isolate takes the node back and
 ///   drains the sealed inbox into the app.
-/// * While unlocked it keeps the alarm kit up to date (§16.3): what the
-///   locked service raises this person's alarm with.
+/// * While unlocked it keeps the alarm kit up to date: what the
+///   locked service raises this person's alarm with; and the nearby kit
+///   and the door kit: what it shows and recognises nearby with, and the
+///   doors it runs.
 class AndroidBackgroundRuntimeBridge extends ConsumerStatefulWidget {
   const AndroidBackgroundRuntimeBridge({required this.child, super.key});
 
@@ -808,7 +815,7 @@ final class _AndroidBackgroundRuntimeBridgeState
 
   bool _draining = false;
 
-  /// Keeps the alarm kit in step with the alarm setup (§16.3); made once
+  /// Keeps the alarm kit in step with the alarm setup; made once
   /// the app is unlocked and its core runs.
   AlarmKitKeeper? _alarmKitKeeper;
   MeetService? _kitMeet;
@@ -821,6 +828,20 @@ final class _AndroidBackgroundRuntimeBridgeState
   /// This widget emptied the inbox since the service last ran the node.
   bool _inboxDrained = false;
   Timer? _drainRetry;
+
+  /// Keeps the nearby kit in step; made once the app is unlocked and its
+  /// core runs, like the alarm kit's keeper.
+  NearbyKitKeeper? _nearbyKitKeeper;
+
+  /// Whose changes write the door kit again.
+  NeighborsService? _kitNeighbors;
+  String? _doorKitWritten;
+  Future<void> _lockedKitsWriting = Future<void>.value();
+  bool _lockedKitsQueued = false;
+
+  /// Looks at the kits now and then: a new day moves the nearby kit's
+  /// tokens on, also when nothing else changed.
+  Timer? _lockedKitsTimer;
 
   @override
   void initState() {
@@ -876,8 +897,12 @@ final class _AndroidBackgroundRuntimeBridgeState
     _heartbeatTimer = null;
     _drainRetry?.cancel();
     _drainRetry = null;
+    _lockedKitsTimer?.cancel();
+    _lockedKitsTimer = null;
     _kitMeet?.removeListener(_onMeetChanged);
     _kitMeet = null;
+    _kitNeighbors?.removeListener(_onKitSourceChanged);
+    _kitNeighbors = null;
     if (_isObserving) {
       WidgetsBinding.instance.removeObserver(this);
     }
@@ -995,7 +1020,15 @@ final class _AndroidBackgroundRuntimeBridgeState
     }
     _initialized = true;
     _scheduleSync();
-    // Permissions are asked for on the permissions screen (§25.2), not
+    _lockedKitsTimer = Timer.periodic(const Duration(minutes: 15), (_) {
+      if (mounted) {
+        unawaitedLogged(
+          _publishLockedKits(),
+          context: 'Writing the locked kits failed',
+        );
+      }
+    });
+    // Permissions are asked for on the permissions screen, not
     // here: several system dialogs at once at every start got in the way.
   }
 
@@ -1065,7 +1098,7 @@ final class _AndroidBackgroundRuntimeBridgeState
   }
 
   /// The app locked: the node goes to the service, which receives without
-  /// the master key (§14.1).
+  /// the master key.
   ///
   /// Everything is read before the first wait. A lock on screen replaces
   /// the app with the lock screen on the next frame, which removes this
@@ -1095,9 +1128,10 @@ final class _AndroidBackgroundRuntimeBridgeState
     );
     // Who counts as a contact, as of now (the key's public part is kept).
     final Future<void> published = _publishCapability();
-    // The alarm kit was written while the app was unlocked; one still
-    // being written finishes before the service reads it.
+    // The kits were written while the app was unlocked; one still being
+    // written finishes before the service reads it.
     final Future<void> kitWritten = _alarmKitWriting;
+    final Future<void> lockedKitsWritten = _lockedKitsWriting;
     // The service is about to own the node; a heartbeat from here on would
     // only keep it parked.
     _heartbeatTimer?.cancel();
@@ -1108,6 +1142,7 @@ final class _AndroidBackgroundRuntimeBridgeState
     try {
       await published;
       await kitWritten;
+      await lockedKitsWritten;
       // Saved and closed: nothing writes the ledger while the app is locked.
       await ledger?.suspend();
       final bool coreWasRunning = core.isStarted;
@@ -1203,6 +1238,10 @@ final class _AndroidBackgroundRuntimeBridgeState
       _publishAlarmKit(),
       context: 'Writing the alarm kit failed',
     );
+    unawaitedLogged(
+      _publishLockedKits(),
+      context: 'Writing the locked kits failed',
+    );
   }
 
   void _onMeetChanged() {
@@ -1211,10 +1250,94 @@ final class _AndroidBackgroundRuntimeBridgeState
         _publishAlarmKit(),
         context: 'Writing the alarm kit failed',
       );
+      unawaitedLogged(
+        _publishLockedKits(),
+        context: 'Writing the locked kits failed',
+      );
     }
   }
 
-  /// Writes the alarm kit again when the alarm setup changed (§16.3): the
+  void _onKitSourceChanged() {
+    if (_initialized && mounted) {
+      unawaitedLogged(
+        _publishLockedKits(),
+        context: 'Writing the locked kits failed',
+      );
+    }
+  }
+
+  /// Writes the nearby kit and the door kit again when what they hold
+  /// changed: this phone's tokens for the coming days, friends' keys to
+  /// recognise them and the settings; the flat's door key and the mailbox
+  /// doors run for friends. Only while unlocked with the core running (all
+  /// of it is under the master key); everything is read before the first
+  /// wait.
+  Future<void> _publishLockedKits() {
+    if (!mounted ||
+        isSecurityBlockingUi(ref.read(appSecurityServiceProvider)) ||
+        !ref.read(zenCoreProvider).isStarted) {
+      return _lockedKitsWriting;
+    }
+    // Only once the friends were read: a kit without them must not replace
+    // the one stored.
+    if (!ref.read(socialHubControllerProvider.notifier).isHydrated ||
+        ref.read(socialHubControllerProvider).snapshotUnreadable) {
+      return _lockedKitsWriting;
+    }
+    final SupportDirectoryResolver support = ref.read(
+      supportDirectoryResolverProvider,
+    );
+    final AppSecurityCredentialsStore credentials = ref
+        .read(appSecurityServiceProvider)
+        .credentialsStore;
+    final NearbyKitKeeper keeper = _nearbyKitKeeper ??= NearbyKitKeeper(
+      meet: ref.read(meetServiceProvider),
+      write: (NearbyKit kit) => nearbyKitFile(
+        supportDirectory: support,
+        credentials: credentials,
+        createKey: true,
+      ).write(kit.toJson()),
+    );
+    final EncounterLog encounters = ref.read(encounterLogProvider);
+    final NeighborsService neighbors = ref.read(neighborsServiceProvider);
+    if (!identical(_kitNeighbors, neighbors)) {
+      _kitNeighbors?.removeListener(_onKitSourceChanged);
+      _kitNeighbors = neighbors..addListener(_onKitSourceChanged);
+    }
+    if (_lockedKitsQueued) {
+      return _lockedKitsWriting;
+    }
+    _lockedKitsQueued = true;
+    final BackgroundKitFile doorFile = lockedDoorKitFile(
+      supportDirectory: support,
+      credentials: credentials,
+      createKey: true,
+    );
+    _lockedKitsWriting = _lockedKitsWriting
+        .then((_) async {
+          _lockedKitsQueued = false;
+          await keeper.refresh(recording: encounters.recording);
+          if (!neighbors.isLoaded) {
+            return;
+          }
+          final LockedDoorKit door = LockedDoorKit(
+            doorKey: neighbors.doorKey,
+            mailboxDoorKeys: neighbors.hostedDoorKeys,
+          );
+          final String signature = jsonEncode(door.toJson());
+          if (signature != _doorKitWritten) {
+            await doorFile.write(door.toJson());
+            _doorKitWritten = signature;
+          }
+        })
+        .catchError((Object error, StackTrace stackTrace) {
+          _lockedKitsQueued = false;
+          logZenError('Writing the locked kits failed', error, stackTrace);
+        });
+    return _lockedKitsWriting;
+  }
+
+  /// Writes the alarm kit again when the alarm setup changed: the
   /// friends it goes to (and their devices), the settings, the alarm going
   /// on. Only while unlocked with the core running (the setup is under the
   /// master key); everything is read before the first wait.
@@ -1283,7 +1406,7 @@ final class _AndroidBackgroundRuntimeBridgeState
   }
 
   /// Tells the service who counts as a contact while the app is locked, and
-  /// the public part of the inbox key (§14.1). Only once the friends were
+  /// the public part of the inbox key. Only once the friends were
   /// read: an empty list then must not replace the one stored.
   Future<void> _publishCapability() {
     if (!mounted) {
@@ -1363,7 +1486,7 @@ final class _AndroidBackgroundRuntimeBridgeState
   }
 
   /// Opens what the service kept while the app was locked and hands it to
-  /// the app as if it had just arrived (§14.1). Only while the service is
+  /// the app as if it had just arrived. Only while the service is
   /// parked (it is the only writer), the app unlocked, its services
   /// listening and the node up — otherwise the inbox waits.
   Future<void> _drainInbox() async {
@@ -1420,13 +1543,26 @@ final class _AndroidBackgroundRuntimeBridgeState
         });
         return;
       }
+      // "Mijani" seen by the locked service goes to the log, not to the
+      // frame handlers; only this device's own records count.
+      final EncounterLog encounters = ref.read(encounterLogProvider);
+      final String self = runtime.snapshot.localAddress;
       final int delivered = await vault.drain(
         masterKey: masterKey,
         deliver: (Uint8List record) async {
           final SignalTransportFrame? frame = decodeInboxFrame(record);
-          if (frame != null) {
-            runtime.replayReceived(frame);
+          if (frame == null) {
+            return;
           }
+          if (frame.payload['type'] == kKeptEncountersType) {
+            if (!frame.door &&
+                self.isNotEmpty &&
+                PeerShareCodec.addressesEqual(frame.from, self)) {
+              await encounters.takeKept(frame.payload);
+            }
+            return;
+          }
+          runtime.replayReceived(frame);
         },
       );
       _inboxDrained = true;
@@ -1496,14 +1632,17 @@ final class _AndroidBackgroundRuntimeBridgeState
   }
 }
 
-/// The service's node while the app is locked or gone (§14.1): the mesh
+/// The service's node while the app is locked or gone: the mesh
 /// node with its identity under the background key, and the
 /// [LockedReceiver] on it. Nothing here can open the master key's stores.
 final class _LockedReceiverSession {
-  _LockedReceiverSession._(this._runtime, this._receiver);
+  _LockedReceiverSession._(this._runtime, this._receiver, this._nearby);
 
   final RuntimeNodeRuntime _runtime;
   final LockedReceiver _receiver;
+
+  /// People nearby from the nearby kit (`null`: the app never wrote one).
+  final LockedNearby? _nearby;
 
   /// `null` when the app never published a capability (it was never
   /// unlocked since it was installed or wiped): nothing to receive with.
@@ -1522,12 +1661,25 @@ final class _LockedReceiverSession {
     if (capability == null) {
       return null;
     }
-    // What this person's alarm goes out with while the app is locked
-    // (§16.3); `null` when the app never wrote one.
+    // What this person's alarm goes out with while the app is locked;
+    // `null` when the app never wrote one.
     final AlarmKit? kit = await FileAlarmKitStore(
       supportDirectory: () async => support,
       credentials: credentials,
     ).read();
+    // What this phone shows and recognises nearby, and the doors it runs.
+    final NearbyKit? nearbyKit = NearbyKit.fromJson(
+      await nearbyKitFile(
+        supportDirectory: () async => support,
+        credentials: credentials,
+      ).read(),
+    );
+    final LockedDoorKit? doorKit = LockedDoorKit.fromJson(
+      await lockedDoorKitFile(
+        supportDirectory: () async => support,
+        credentials: credentials,
+      ).read(),
+    );
     final RuntimeNodeRuntime runtime = buildDefaultRuntimeNodeRuntime(
       config: RuntimeSignalBootstrapConfig(
         waitTimeout: payload.settings.signalWaitTimeout,
@@ -1537,10 +1689,31 @@ final class _LockedReceiverSession {
         fallbackPollInterval: const Duration(seconds: 2),
       ),
     );
+    if (doorKit != null && !doorKit.isEmpty) {
+      // Safe before the node is up: the doors come up with it. Knocks wait
+      // in the inbox; only the door key is here, never the flat's keys.
+      runtime
+        ..setDoorKey(doorKit.doorKey)
+        ..setMailboxDoorKeys(doorKit.mailboxDoorKeys);
+    }
     final SealedInboxWriter inbox = SealedInboxWriter(
       file: await vault.inboxFile(),
       recipientPublicKey: capability.inboxPublicKey,
     );
+    Future<bool> keep(SignalTransportFrame record) =>
+        inbox.append(encodeInboxFrame(record));
+    final ChannelNearbyRadio radio = ChannelNearbyRadio();
+    final LockedNearby? nearby = nearbyKit == null
+        ? null
+        : LockedNearby(
+            kit: nearbyKit,
+            radio: radio,
+            keep: keep,
+            notices: notices,
+            claimAlarms: radio.setAlarmReceiver,
+            alarmKeys: radio.setAlarmKeys,
+            place: lastKnownEncounterPlace,
+          );
     return _LockedReceiverSession._(
       runtime,
       LockedReceiver(
@@ -1548,30 +1721,31 @@ final class _LockedReceiverSession {
         capability: capability,
         inbox: inbox,
         notices: notices,
+        doorFrames: runtime.doorFrames,
         alarm: kit == null
             ? null
             : LockedAlarm(
                 kit: kit,
                 transport: runtime,
-                keep: (SignalTransportFrame record) =>
-                    inbox.append(encodeInboxFrame(record)),
+                keep: keep,
                 locate: currentFixInBackground,
                 record: AlarmAudioPump.recordClip,
-                wave: (String id, int at, bool ended) => waveLockedAlarm(
-                  ChannelNearbyRadio(),
-                  kit,
-                  id: id,
-                  at: at,
-                  ended: ended,
-                ),
+                wave: (String id, int at, bool ended) {
+                  Future<int> wave() =>
+                      waveLockedAlarm(radio, kit, id: id, at: at, ended: ended);
+                  // A look around going on must not end its scan midway.
+                  return nearby == null ? wave() : nearby.holdingRadio(wave);
+                },
               ),
       ),
+      nearby,
     );
   }
 
   Future<void> start() async {
     await _setShortcutOwner(true);
     await _receiver.start();
+    await _nearby?.start();
   }
 
   /// The power-button shortcut while this service runs the node.
@@ -1579,6 +1753,9 @@ final class _LockedReceiverSession {
 
   Future<void> dispose() async {
     await _setShortcutOwner(false);
+    // First: what it saw goes to the inbox, and alarm waves go back to the
+    // app before it drains the inbox.
+    await _nearby?.stop();
     await _receiver.stop();
     _runtime.dispose();
   }
@@ -1644,7 +1821,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   final Completer<AndroidBackgroundBootstrapPayload> _bootstrapCompleter =
       Completer<AndroidBackgroundBootstrapPayload>();
 
-  /// The receive-only node while the app is locked or gone (§14.1).
+  /// The receive-only node while the app is locked or gone.
   _LockedReceiverSession? _session;
 
   /// Latest state the app asked for. Every queued reconcile converges to this,
@@ -1672,7 +1849,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// [kAndroidBackgroundStopRequestType]).
   bool _stopRequestedByApp = false;
 
-  /// The power-button shortcut (§16.3). It comes here while this service
+  /// The power-button shortcut. It comes here while this service
   /// runs the network, or when the app is not listening at all.
   StreamSubscription<void>? _powerShortcut;
 
@@ -1869,8 +2046,8 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   }
 
   /// 5× the power button while this service runs the node: the app is
-  /// locked or gone, so the alarm goes out from the alarm kit the app left
-  /// (§16.3), without the master key.
+  /// locked or gone, so the alarm goes out from the alarm kit the app left,
+  /// without the master key.
   void _onPowerShortcut() {
     logZenMessage('Power-button alarm shortcut reached the service.');
     _pendingPowerAlarmAt = DateTime.now();

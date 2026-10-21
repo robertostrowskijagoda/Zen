@@ -51,7 +51,7 @@ List buildRuntimeTransportProviderOverrides({
   return [
     runtimeNodeRuntimeProvider.overrideWithValue(runtime),
     if (relayStateStore == null)
-      // Friends with several devices look like one person (§6).
+      // Friends with several devices look like one person.
       signalTransportProvider.overrideWith(
         (Ref ref) => withAccountRouting(ref, runtime),
       )
@@ -272,8 +272,8 @@ final class RuntimeNodeSession {
   /// Adds a mesh peer at runtime (bridges learnt from friends).
   final void Function(String uri)? addPeer;
 
-  /// Runs the flat's door with a key (hex seed) and returns its address
-  /// (§18.2, door_node.go in the bridge).
+  /// Runs the flat's door with a key (hex seed) and returns its address.
+  /// (door_node.go in the bridge).
   final String? Function(String seedHex)? startDoor;
   final void Function()? stopDoor;
 
@@ -281,8 +281,8 @@ final class RuntimeNodeSession {
   /// (flat_door_mail.dart, door_node.go).
   final void Function(List<String> seedsHex)? setMailboxDoors;
 
-  /// Sends a flat frame from the flat's door, not from this node (§18.2,
-  /// door_node.go); throws without a running door.
+  /// Sends a flat frame from the flat's door, not from this node
+  /// (door_node.go); throws without a running door.
   final Future<void> Function(
     String remoteAddress,
     Map<String, dynamic> payload,
@@ -506,7 +506,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   final StreamController<SignalTransportFrame> _doorFrames =
       StreamController<SignalTransportFrame>.broadcast();
 
-  /// What came to the flat's door and the mailbox doors (§18.2), for the
+  /// What came to the flat's door and the mailbox doors, for the
   /// neighbours section only. It never reaches [frames]: nothing else in the
   /// app (the ledger, the relay layer, friends, calls) may answer what came
   /// to a door, or the answer would tell the sender whose door it is.
@@ -523,7 +523,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     }
   }
 
-  /// Sends a flat frame from the flat's door (§18.2): what goes to
+  /// Sends a flat frame from the flat's door: what goes to
   /// neighbour flats never carries this phone's own address. False while
   /// no door runs.
   Future<bool> sendFromDoor(
@@ -545,8 +545,8 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   }
 
   /// Hands [frame] to [frames] as if this node had just received it: what
-  /// the Android background service kept sealed while the app was locked
-  /// (§14.1), opened after unlock.
+  /// the Android background service kept sealed while the app was locked,
+  /// opened after unlock.
   void replayReceived(SignalTransportFrame frame) {
     if (!_frames.isClosed) {
       _forward(frame);
@@ -586,7 +586,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   String? _doorSeed;
   String? _doorAddress;
 
-  /// The address of the flat's door (§18.2) while it runs: a node of its
+  /// The address of the flat's door while it runs: a node of its
   /// own next to this one, so the door sticker carries no one's address.
   String? get doorAddress => _doorAddress;
 
@@ -651,7 +651,7 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   /// The running node's local link calls, `null` while it is not running.
   LocalLinkNodeApi? get localLinks => _session?.localLinks;
 
-  /// Sets the devices to link with nearby and the LAN (§5.1 item 6); `null`
+  /// Sets the devices to link with nearby and the LAN; `null`
   /// turns local links off. Safe to call before the node is up.
   void setLocalLinks(String? settingsJson) {
     if (settingsJson == _localLinksJson) {
@@ -1117,7 +1117,7 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
   );
 }
 
-/// Which Yggdrasil and Go the bridge was built with (§5.2), for the
+/// Which Yggdrasil and Go the bridge was built with, for the
 /// technical info; `null` without a bridge (tests, previews).
 final Provider<RuntimeBridgeBuildInfo?> runtimeBridgeBuildInfoProvider =
     Provider<RuntimeBridgeBuildInfo?>((Ref ref) {
@@ -1432,6 +1432,6 @@ final class RuntimeSignalBootstrapConfig {
   /// Seals the persisted Yggdrasil node config (which contains the node
   /// identity key), bound to its storage key: with the master key, or on
   /// Android with the background key, since the background service runs
-  /// the node while the app is locked (§14.1).
+  /// the node while the app is locked.
   KeyedBinaryPayloadProtector? nodeConfigProtector;
 }

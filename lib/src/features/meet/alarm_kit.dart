@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -13,7 +14,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-// The alarm kit (§16.3): what the locked Android service needs to raise
+// The alarm kit: what the locked Android service needs to raise
 // this person's alarm without the master key — whom to send it to (their
 // devices, mailbox copies sealed in advance), the settings, and the alarm
 // key: a key of its own that signs alarm frames only. Friends learn its
@@ -78,7 +79,7 @@ Uint8List alarmSignedBytes(Map<String, dynamic> payload) {
 }
 
 /// [payload] signed with the alarm [key]: `sg` the signature, `sk` the
-/// key's public part (the receiver looks it up among the sender's keys).
+/// key's hybrid id (the receiver looks it up among the sender's keys).
 Future<Map<String, dynamic>> signAlarmFrame(
   LedgerKeyPair key,
   Map<String, dynamic> payload,
@@ -86,21 +87,26 @@ Future<Map<String, dynamic>> signAlarmFrame(
   final Map<String, dynamic> clean = Map<String, dynamic>.from(payload)
     ..remove('sg')
     ..remove('sk');
-  final Uint8List signature = await key.sign(alarmSignedBytes(clean));
-  return <String, dynamic>{...clean, 'sg': b64(signature), 'sk': key.id};
+  // Keyed: an alarm may come from a mailbox long after, and must check
+  // out on its own wherever the alarm key's certificate is all there is.
+  final Uint8List signature = await key.signWithKey(alarmSignedBytes(clean));
+  return <String, dynamic>{...clean, 'sg': b64(signature), 'sk': key.hybridId};
 }
 
-/// Whether [payload] carries a good signature of the alarm key
-/// [publicKey].
-Future<bool> verifyAlarmFrame(String publicKey, Map<String, dynamic> payload) {
+/// Whether [payload] carries a good signature of the alarm key whose
+/// hybrid id ([LedgerKeyPair.hybridId]) is [keyId]: both halves, the
+/// ML-DSA one exactly the certified key.
+Future<bool> verifyAlarmFrame(String keyId, Map<String, dynamic> payload) {
   final Object? signature = payload['sg'];
-  if (signature is! String) {
+  final ({String ed, String pq})? key = parseHybridKeyId(keyId);
+  if (signature is! String || key == null) {
     return Future<bool>.value(false);
   }
   return verifyLedgerSignature(
-    publicKey: publicKey,
+    publicKey: key.ed,
     message: alarmSignedBytes(payload),
     signature: signature,
+    pqId: key.pq,
   );
 }
 
@@ -121,7 +127,8 @@ final class AlarmKeyCertificate {
   /// The address of the device whose alarms the key signs (normalised).
   final String address;
 
-  /// The alarm key's public part (base64url).
+  /// The alarm key's hybrid id ([LedgerKeyPair.hybridId]): both public
+  /// halves, so the ML-DSA key of the alarms is certified too.
   final String key;
   final int issued;
   final DeviceCertificate device;
@@ -173,10 +180,9 @@ final class AlarmKeyCertificate {
       return false;
     }
     return await device.verify() &&
-        await verifyLedgerSignature(
-          publicKey: device.device,
-          message: canonicalJsonBytes(_payload(address, key, issued, device)),
-          signature: signature,
+        await device.verifyByDevice(
+          canonicalJsonBytes(_payload(address, key, issued, device)),
+          signature,
         );
   }
 
@@ -200,9 +206,9 @@ final class AlarmKeyCertificate {
     if (a is! String ||
         a.isEmpty ||
         a.length > 200 ||
-        unb64(k, length: 32) == null ||
+        parseHybridKeyId(k) == null ||
         at is! int ||
-        unb64(s, length: 64) == null ||
+        !isHybridSignatureText(s) ||
         device == null) {
       return null;
     }
@@ -273,7 +279,7 @@ final class AlarmKitRecipient {
   final List<String> devices;
 
   /// This phone's pair key for the friend (base64url): it signs only the
-  /// Bluetooth alarm waves the friend checks (§15).
+  /// Bluetooth alarm waves the friend checks.
   final String? pairKey;
 
   /// What the friend gave this phone ([FriendNearbyKey]): recognises
@@ -339,8 +345,8 @@ final class AlarmKitRecipient {
   }
 }
 
-/// What the locked Android service raises this person's alarm with
-/// (§16.3). Never holds the master key, the account key or the device key:
+/// What the locked Android service raises this person's alarm with.
+/// Never holds the master key, the account key or the device key:
 /// only the alarm key, which signs alarm frames and nothing else.
 @immutable
 final class AlarmKit {

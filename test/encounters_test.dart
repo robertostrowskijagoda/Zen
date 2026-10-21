@@ -56,6 +56,12 @@ final class _Radio implements NearbyRadio {
   Future<bool> startAdvertising(Uint8List token) async => true;
 
   @override
+  Future<bool> startAdvertisingSchedule(
+    int firstSlot,
+    Uint8List adverts,
+  ) async => true;
+
+  @override
   Future<void> stopAdvertising() async {}
 
   @override

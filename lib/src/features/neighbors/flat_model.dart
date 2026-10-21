@@ -8,7 +8,7 @@ import 'package:zen/src/features/neighbors/flat_door_mail.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-/// What a line on a flat's profile is (§18.1).
+/// What a line on a flat's profile is.
 enum FlatItemKind {
   /// "Zapraszamy na grilla" — with a date, seats and sign-ups.
   invite,
@@ -29,7 +29,7 @@ enum FlatItemKind {
   }
 }
 
-/// Ready-made invitations (§18.1), to start with one tap.
+/// Ready-made invitations, to start with one tap.
 List<String> get kFlatInviteIdeas => <String>[
   t('Zapraszamy na obiad'),
   t('Zapraszamy na kawę'),
@@ -120,13 +120,13 @@ final class FlatItem {
   }
 }
 
-/// The public neighbour profile (§18.1): it belongs to a household — a
+/// The public neighbour profile: it belongs to a household — a
 /// family or any group living together — in the flat where it lives now,
 /// not to the flat itself. When they move out, the new tenants start their
 /// own from scratch. Signed with the household's own key, which every
 /// resident holds. Residents' main profiles are not in it, nor their
 /// addresses: each resident is a key of its own and the door its phone
-/// runs (§18.2).
+/// runs.
 @immutable
 final class FlatProfile {
   const FlatProfile({
@@ -166,7 +166,7 @@ final class FlatProfile {
   final String photo;
 
   /// The residents: each one's own resident key (Ed25519, base64url; votes
-  /// and the "new key" notice are signed with it, §18.1) → the address of
+  /// and the "new key" notice are signed with it) → the address of
   /// the door that resident's phone runs ('' until it runs). Everything for
   /// the flat goes to these doors, from door to door; a resident's own
   /// address is not here (only "Pokaż mój profil" shows it).
@@ -246,7 +246,7 @@ final class FlatProfile {
   );
 
   Future<FlatProfile> signedWith(LedgerKeyPair pair) async {
-    final Uint8List sig = await pair.sign(signedBytes);
+    final Uint8List sig = await pair.signWithKey(signedBytes);
     return FlatProfile(
       key: key,
       name: name,
@@ -323,7 +323,7 @@ final class FlatProfile {
   }
 }
 
-/// What the QR on the door holds (§18.2): the flat's key, a door token
+/// What the QR on the door holds: the flat's key, a door token
 /// (a new QR makes the old one useless), the name and where to knock.
 ///
 /// Where to knock is the flat's door: a node of its own with a random key
@@ -439,7 +439,7 @@ final class FlatDoorCode {
   }
 }
 
-/// What a housemate shows to let a new resident in (§18.1): scanned only
+/// What a housemate shows to let a new resident in: scanned only
 /// inside the flat, because it carries the flat's private key.
 @immutable
 final class FlatHomeCode {
@@ -483,8 +483,7 @@ final class FlatHomeCode {
 }
 
 /// What a resident signs (with their own resident key) to vote the
-/// resident [target] (their resident key) out of the household [flatKey]
-/// (§18.1).
+/// resident [target] (their resident key) out of the household [flatKey].
 Uint8List flatKickBytes(String flatKey, String target) => canonicalJsonBytes(
   <String, dynamic>{'t': 'zen_flat_kick', 'f': flatKey, 'a': target},
 );
@@ -501,7 +500,7 @@ Uint8List flatNewKeyBytes(String oldKey, String newKey, String target) =>
 
 /// What a resident signs (with their own resident key) to show a
 /// neighbour flat [to] their own account at [address] under [name] ("Pokaż
-/// mój profil", §18.1).
+/// mój profil").
 Uint8List flatRevealBytes(
   String flatKey,
   String to,
@@ -515,7 +514,7 @@ Uint8List flatRevealBytes(
   'n': name,
 });
 
-/// Residents' own keys as a neighbour learned them (§18.3), from the flat's
+/// Residents' own keys as a neighbour learned them, from the flat's
 /// profile: resident key → when this phone first saw it (kept, never
 /// replaced).
 Map<String, int> flatPinsFromJson(Object? json) => <String, int>{
@@ -525,7 +524,7 @@ Map<String, int> flatPinsFromJson(Object? json) => <String, int>{
         e.key as String: e.value as int,
 };
 
-/// A neighbour's flat on "Moi sąsiedzi" (§18.3).
+/// A neighbour's flat on "Moi sąsiedzi".
 final class NeighborFlat {
   NeighborFlat({
     required this.profile,
@@ -554,7 +553,7 @@ final class NeighborFlat {
   final Set<String> seenItems;
 
   /// The residents' own keys and when this phone first saw each, used to
-  /// check a new household key (§18.1).
+  /// check a new household key.
   final Map<String, int> residents;
 
   String get key => profile.key;
@@ -591,7 +590,7 @@ final class NeighborFlat {
 }
 
 /// A neighbour household that moved to a new key because it removed a
-/// phone (§18.1), remembered for a while so that a second, different "new
+/// phone, remembered for a while so that a second, different "new
 /// key" for the same old one is recognised instead of silently taken.
 final class FlatKeySwitch {
   FlatKeySwitch({
@@ -677,7 +676,7 @@ final class FlatKeySwitch {
   }
 }
 
-/// A message between two flats (§18.3).
+/// A message between two flats.
 @immutable
 final class FlatMessage {
   const FlatMessage({
@@ -692,7 +691,7 @@ final class FlatMessage {
 
   final String id;
 
-  /// The invitation this message is about ("czat zaproszenia", §18.3); ''
+  /// The invitation this message is about ("czat zaproszenia"); ''
   /// = a plain message between the flats.
   final String item;
 
@@ -778,7 +777,7 @@ final class FlatSignup {
   }
 }
 
-/// An invitation that came over Bluetooth from a flat nearby (§18.3).
+/// An invitation that came over Bluetooth from a flat nearby.
 @immutable
 final class NearbyFlatInvite {
   const NearbyFlatInvite({
@@ -815,7 +814,7 @@ final class NearbyFlatInvite {
   }
 }
 
-/// Someone scanned our door and knocked (§18.2): nothing goes back to them
+/// Someone scanned our door and knocked: nothing goes back to them
 /// until a resident lets them in, so the knock alone tells them nothing
 /// about who lives here. It came to the door, or while this phone was
 /// offline, sealed through the friends who run its mailbox doors.
@@ -869,7 +868,7 @@ final class FlatKnock {
 }
 
 /// A resident of a neighbour flat who showed their own account ("Pokaż mój
-/// profil", §18.1): their name and where to send a friend invitation.
+/// profil"): their name and where to send a friend invitation.
 @immutable
 final class FlatReveal {
   const FlatReveal({

@@ -13,15 +13,15 @@ import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 
-/// "Sekcja sąsiedzka" (§18).
+/// "Sekcja sąsiedzka".
 final Provider<NeighborsService> neighborsServiceProvider =
     Provider<NeighborsService>((Ref ref) {
       final MeetService meet = ref.watch(meetServiceProvider);
-      // The flat's door runs next to the node (§18.2): the door QR and the
+      // The flat's door runs next to the node: the door QR and the
       // flat's profile carry its address, never a resident's, and
       // everything to neighbour flats goes out from it.
       final RuntimeNodeRuntime runtime = ref.watch(runtimeNodeRuntimeProvider);
-      // The friends holding this phone's mailboxes (§7) run the door's
+      // The friends holding this phone's mailboxes run the door's
       // mailbox doors, for knocks while the phone is offline; unknown until
       // the relay layer has its state.
       final RelayEngine? relay = ref.watch(relayEngineProvider);

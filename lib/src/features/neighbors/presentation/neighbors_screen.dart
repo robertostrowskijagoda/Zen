@@ -188,7 +188,7 @@ Future<String?> scanOrPaste(
   return text == null || text.isEmpty ? null : text;
 }
 
-/// Knocks on the door [code] (§18.2) and tells how it went. With [ask] it
+/// Knocks on the door [code] and tells how it went. With [ask] it
 /// asks first: a door link can come from any page or app, and a knock
 /// sends this flat's profile.
 Future<void> knockOnFlatDoor(
@@ -245,7 +245,7 @@ Future<void> knockOnFlatDoor(
   );
 }
 
-/// "Sąsiedzi" (§18): this flat, its door QR, "Moi sąsiedzi" and
+/// "Sąsiedzi": this flat, its door QR, "Moi sąsiedzi" and
 /// invitations heard nearby.
 class NeighborsScreen extends ConsumerWidget {
   const NeighborsScreen({super.key});

@@ -59,6 +59,12 @@ final class _Radio implements NearbyRadio {
   }
 
   @override
+  Future<bool> startAdvertisingSchedule(
+    int firstSlot,
+    Uint8List adverts,
+  ) async => true;
+
+  @override
   Future<void> stopAdvertising() async => advertised = null;
 
   @override
@@ -250,7 +256,7 @@ void main() {
     );
   });
 
-  test('S5: a hello carries no address; the answer comes over Bluetooth, '
+  test('a hello carries no address; the answer comes over Bluetooth, '
       'sealed, and only then do both learn the addresses', () async {
     final _Air air = _Air();
     final Map<String, _Phone> mesh = <String, _Phone>{};
@@ -452,7 +458,7 @@ void main() {
     },
   );
 
-  test('S6 tokens: a new one every 10 minutes, checked along a one-way '
+  test('tokens: a new one every 10 minutes, checked along a one-way '
       'chain that friends cannot run forward', () {
     final NearbyOwnKeys keys = NearbyOwnKeys(
       base64Url.encode(List<int>.filled(32, 3)),
@@ -510,7 +516,7 @@ void main() {
     expect(FriendNearbyKey.parse('${kNearbyKeyPrefix}xyz'), isNull);
   });
 
-  test('S6: a friend can show neither another friend\'s presence nor an '
+  test('a friend can show neither another friend\'s presence nor an '
       'alarm wave in their name', () async {
     final _Air air = _Air();
     final Map<String, _Phone> mesh = <String, _Phone>{};

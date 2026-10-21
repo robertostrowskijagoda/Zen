@@ -7,11 +7,11 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/relay/relay_crypto.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-// Knocks while nobody is home (§18.2). The flat's door runs on a resident's
+// Knocks while nobody is home. The flat's door runs on a resident's
 // phone, so it answers only while that phone is online. Next to it the door
 // sticker lists up to [kDoorSlots] "mailbox doors": addresses of door nodes
 // whose keys are derived from the phone's door key, one per slot, and run by
-// the friends who keep this phone's offline mailboxes (§7). Nothing in the
+// the friends who keep this phone's offline mailboxes. Nothing in the
 // code says who runs them; a slot keeps its address when another friend
 // takes it over, so the sticker stays valid while the mailboxes change (as
 // long as there are not fewer of them).
@@ -24,7 +24,7 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 // path carries the answer after "Wpuść" when the knocker is offline by then:
 // the knock names the knocker's own mailbox doors ([FlatMailDoor]).
 
-/// Mailbox doors on one door sticker: as many as a phone has mailboxes (§7).
+/// Mailbox doors on one door sticker: as many as a phone has mailboxes.
 const int kDoorSlots = 6;
 
 /// Mailbox doors one phone runs for friends at most (door_node.go has the

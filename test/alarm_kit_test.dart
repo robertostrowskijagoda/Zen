@@ -168,8 +168,11 @@ void main() {
     final LedgerKeyPair alarmKey = await LedgerKeyPair.fromSeed(
       unb64(kit.alarmKeySeed, length: 32)!,
     );
-    expect(template['sk'], alarmKey.id);
-    expect(await verifyAlarmFrame(alarmKey.id, template), isTrue);
+    // Named by both halves of the key (Ed25519 and ML-DSA), and signed
+    // with both.
+    expect(template['sk'], alarmKey.hybridId);
+    expect(await verifyAlarmFrame(alarmKey.hybridId, template), isTrue);
+    expect(await verifyAlarmFrame(alarmKey.id, template), isFalse);
 
     // No master key, account key, device key or anything derived from them.
     final LedgerIdentity identity = (await LedgerIdentity.read(ania.disk))!;
@@ -187,8 +190,12 @@ void main() {
 
     // Friends got the alarm key's public part, checked against the
     // certificate.
-    expect(bob.service.book.friendAlarmKeys[_ania], <String>[alarmKey.id]);
-    expect(cyryl.service.book.friendAlarmKeys[_ania], <String>[alarmKey.id]);
+    expect(bob.service.book.friendAlarmKeys[_ania], <String>[
+      alarmKey.hybridId,
+    ]);
+    expect(cyryl.service.book.friendAlarmKeys[_ania], <String>[
+      alarmKey.hybridId,
+    ]);
   });
 
   test('a certificate that does not check out is not taken', () async {
@@ -201,7 +208,7 @@ void main() {
       deviceKey: identity.deviceKey,
       certificate: identity.certificate,
       address: _ania,
-      alarmKey: alarmKey.id,
+      alarmKey: alarmKey.hybridId,
       issued: 5,
     );
     expect(await good.verify(from: _ania), isTrue);
@@ -210,7 +217,7 @@ void main() {
     expect(await good.verify(from: _cyryl), isFalse);
     expect(await good.verify(from: _ania, account: 'someone-else'), isFalse);
     final LedgerKeyPair other = await LedgerKeyPair.generate();
-    final Map<String, dynamic> forged = good.toJson()..['k'] = other.id;
+    final Map<String, dynamic> forged = good.toJson()..['k'] = other.hybridId;
     final _Phone dora = _Phone(net, 'dora.ygg', <String>[_ania]);
     await dora.service.handle(
       SignalTransportFrame(
@@ -230,14 +237,16 @@ void main() {
             deviceKey: identity.deviceKey,
             certificate: identity.certificate,
             address: _cyryl,
-            alarmKey: other.id,
+            alarmKey: other.hybridId,
             issued: 6,
           )).toJson(),
         },
         receivedAtMillis: 0,
       ),
     );
-    expect(bob.service.book.friendAlarmKeys[_ania], <String>[alarmKey.id]);
+    expect(bob.service.book.friendAlarmKeys[_ania], <String>[
+      alarmKey.hybridId,
+    ]);
   });
 
   test('the kit is written again when the alarm setup changes, and only '

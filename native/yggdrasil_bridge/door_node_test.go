@@ -45,7 +45,7 @@ func TestDoorFrameFilter(t *testing.T) {
 		`{"type":"flat_hello","_zenEncoding":"zstd","_zenPayload":"AAAA"}`,
 		`{"_zenEncoding":"gzip","_zenPayload":"AAAA"}`,
 		// The app reads "type" exactly; encoding/json's struct decoding
-		// matched these as a knock (Z2-2).
+		// matched these as a knock.
 		`{"type":"lg_heads","TYPE":"flat_hello"}`,
 		`{"TYPE":"flat_hello"}`,
 		`{"Type":"flat_hello","b":{}}`,
@@ -165,6 +165,9 @@ func newTestMesh(t *testing.T) *testMesh {
 		config:         cfg,
 		logger:         logger,
 		signalPartials: make(map[string]*signalReassembly),
+		// The tests talk to the doors from the main node's own signal
+		// path, as another flat's door would: doors speak no session layer.
+		pqPlain: true,
 	}
 	allowed := doorHostPeerAllowed
 	doorHostPeerAllowed = func(string) bool { return true }
@@ -262,7 +265,7 @@ func TestDoorCarriesFlatTrafficAndIsNeverPeeredWithTheMainNode(t *testing.T) {
 	})
 	warmPaths(t, node.core, door.core)
 
-	// S41: the main node and the door (and its host) never peer, so no
+	// The main node and the door (and its host) never peer, so no
 	// getPeers/getTree answer of either names the other.
 	host := node.doorHost
 	mainKey := hex.EncodeToString(node.core.PublicKey())

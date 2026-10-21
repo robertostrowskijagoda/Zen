@@ -44,7 +44,7 @@ String encounterSpan(int start, int end, {bool withDate = false}) {
   return withDate ? '${_date(start)}, $span' : span;
 }
 
-/// "Mijani" in the "W pobliżu" screen (§15): friends passed and how many
+/// "Mijani" in the "W pobliżu" screen: friends passed and how many
 /// others, kept only on this phone.
 class EncountersSection extends StatelessWidget {
   const EncountersSection({
@@ -246,7 +246,7 @@ class EncountersSection extends StatelessWidget {
             Icon(Icons.verified_rounded, color: zen.success)
           else
             // Being near is only a hint: the meeting is signed when
-            // confirmed (§6.2).
+            // confirmed.
             TextButton(
               key: Key('encounter-met-$friend-${e.start}'),
               onPressed: () => onMet(friend),

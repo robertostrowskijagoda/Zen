@@ -59,6 +59,14 @@ type bridgeNode struct {
 	// (local_link.go), made on first use.
 	localLinks   *localLinkManager
 	localLinksMu sync.Mutex
+	// The post-quantum session layer of the signal port (pq_session.go),
+	// made on first use.
+	pq     *pqEndpoint
+	pqErr  error
+	pqOnce sync.Once
+	// Signals go unsealed: only tests that drive doors (which speak no
+	// session layer) from the main node's signal path set it.
+	pqPlain bool
 }
 
 type configSummary struct {
@@ -137,7 +145,7 @@ const (
 	yggSignalPort = 54321
 	yggRelayPort  = 54322
 	// Desktops help the wider mesh by accepting inbound peering (they are
-	// the bridges of §5.1). "[::]" listens on IPv6 and IPv4 together; Go
+	// the bridges). "[::]" listens on IPv6 and IPv4 together; Go
 	// falls back to IPv4 alone where the computer has no IPv6.
 	defaultDesktopPeerListen       = "tls://[::]:32913"
 	androidBootstrapPeerLimit      = 8
@@ -214,6 +222,9 @@ func debugf(format string, args ...any) {
 // ReadFrom only yields packets whose source key matches the session peer,
 // and the IPv6 source address is bound to that key by ipv6rwc.
 // Peer links additionally use TLS (or link keys) hop by hop.
+// All of this is classical (X25519, Ed25519): the signals the app sends are
+// therefore sealed once more by Zen's hybrid post-quantum session layer
+// (ML-KEM-768 + X25519, pq_session.go) before they enter the mesh.
 // The Dart friend gate authorizes which authenticated peers may drive
 // application features (friendship, messages, calls); see
 // social_hub_controller_lifecycle_signal.dart. It is an authorization layer

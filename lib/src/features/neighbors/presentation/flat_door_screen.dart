@@ -20,7 +20,7 @@ import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 
-/// The door sticker (§18.2): QR, the flat's name and a line of invitation.
+/// The door sticker: QR, the flat's name and a line of invitation.
 class FlatDoorScreen extends ConsumerStatefulWidget {
   const FlatDoorScreen({super.key});
 
@@ -254,7 +254,7 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
                 alignment: WrapAlignment.center,
                 children: <Widget>[
                   OutlinedButton.icon(
-                    // Cleared from the clipboard after a minute (§14.1).
+                    // Cleared from the clipboard after a minute.
                     onPressed: () => unawaited(copyWithExpiry(qr)),
                     icon: const Icon(Icons.copy_rounded),
                     label: Text(t('Kopiuj kod')),
@@ -390,7 +390,7 @@ class _Sticker extends StatelessWidget {
   }
 }
 
-/// Residents of this flat (§18.1): the QR a new housemate scans — only
+/// Residents of this flat: the QR a new housemate scans — only
 /// inside the flat, because it carries the flat's key — and leaving.
 class FlatHomeScreen extends ConsumerStatefulWidget {
   const FlatHomeScreen({super.key});
@@ -655,7 +655,7 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                 Center(
                   child: TextButton.icon(
                     // The household key: gone from the clipboard after a
-                    // minute (§14.1).
+                    // minute.
                     onPressed: () => unawaited(copyWithExpiry(code.toQr())),
                     icon: const Icon(Icons.copy_rounded),
                     label: Text(t('Kopiuj kod (dla komputera domownika)')),

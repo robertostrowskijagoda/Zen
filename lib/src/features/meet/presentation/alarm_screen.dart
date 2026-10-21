@@ -20,6 +20,8 @@ import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/nearby_keeper.dart';
 import 'package:zen/src/features/meet/presentation/alarm_audio.dart';
+import 'package:zen/src/features/runtime/runtime_signal_module.dart';
+import 'package:zen/src/features/security/app_security_service.dart';
 
 const Color _alarmRed = Color(0xFFD32F2F);
 
@@ -113,7 +115,7 @@ Widget _call112Button(BuildContext context, {bool onRed = false}) =>
       label: Text(t('Zadzwoń na 112')),
     );
 
-/// "Alarm" (§16.3): hold the button for 3 seconds and the closest friends
+/// "Alarm": hold the button for 3 seconds and the closest friends
 /// get it at once, with where you are.
 class AlarmScreen extends ConsumerStatefulWidget {
   const AlarmScreen({super.key});
@@ -621,7 +623,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                 )
               : const SizedBox.shrink(),
         ),
-        // Who got it (§16.3): an alarm raised before confirmations existed
+        // Who got it: an alarm raised before confirmations existed
         // (no list of whom it went to) shows only the answers.
         if (a.sentTo.isNotEmpty) ...<Widget>[
           ZenSection(t('Kto dostał alarm')),
@@ -714,7 +716,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
   }
 }
 
-/// Who got this person's alarm (§16.3): every friend it went to, whether
+/// Who got this person's alarm: every friend it went to, whether
 /// their phone confirmed it, whether they opened it and what they answered.
 /// After [confirmWithinMs] the ones without a confirmation are named, with
 /// a button to send it to them again.
@@ -1189,7 +1191,7 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
     }
   }
 
-  /// Tells the friend their alarm is on this screen (§16.3) — only with the
+  /// Tells the friend their alarm is on this screen — only with the
   /// app in front: an alarm opened while the app is away is not "seen".
   void _markSeen() {
     final MeetService? service = _service;
@@ -1433,16 +1435,16 @@ class _AlarmWatcherState extends ConsumerState<AlarmWatcher> {
   NearbyService? _nearby;
   Timer? _minute;
 
-  /// The power-button shortcut (§16.3) when it comes to the app.
+  /// The power-button shortcut when it comes to the app.
   StreamSubscription<void>? _powerShortcut;
 
   /// What the phone was last told about the shortcut (`null`: nothing yet).
   bool? _shortcutOn;
 
-  /// The short look around now and then while the app is on screen (§15).
+  /// The short look around now and then while the app is on screen.
   NearbyKeeper? _keeper;
 
-  /// An alarm wave heard over Bluetooth (§16.3); [device] wrote it. Only a
+  /// An alarm wave heard over Bluetooth; [device] wrote it. Only a
   /// friend's signed wave rings ([MeetService.onAlarmWave] checks).
   void _onWave(Map<dynamic, dynamic> json, String device) {
     final MeetService? service = _service;
@@ -1465,25 +1467,25 @@ class _AlarmWatcherState extends ConsumerState<AlarmWatcher> {
     super.initState();
     final MeetService service = ref.read(meetServiceProvider);
     _service = service..addListener(_check);
-    // Alarms to and from phones nearby go over Bluetooth (§16.3); the
+    // Alarms to and from phones nearby go over Bluetooth; the
     // wave carries this phone's nearby token and a signature only friends
     // can check ([MeetService.alarmWave]).
     final NearbyService nearby = ref.read(nearbyServiceProvider);
     _nearby = nearby;
     nearby.alarmWaveHandlers.add(_onWave);
     service.nearbyBroadcast = nearby.waveAround;
-    // 5× the power button (§16.3): the phone counts and tells the app while
+    // 5× the power button: the phone counts and tells the app while
     // it runs the network itself (otherwise the background service).
     _powerShortcut = const AlarmShortcutChannel().presses.listen((_) {
       unawaitedLogged(_onPowerShortcut(), context: 'Skrót alarmu');
     });
     // Friends nearby marked met in person without the "W pobliżu" screen,
-    // when allowed; the background service does it while the app is away.
+    // when allowed: here while the app is unlocked (on screen or in the
+    // background), in the background service while it is locked or closed.
+    final AppSecurityService security = ref.read(appSecurityServiceProvider);
     final NearbyKeeper keeper = NearbyKeeper(
       nearby: nearby,
-      inService: false,
-      active: () =>
-          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+      active: () => !isSecurityBlockingUi(security),
     );
     _keeper = keeper;
     unawaitedLogged(keeper.start(), context: 'W pobliżu: rozglądanie');

@@ -19,7 +19,7 @@ import 'package:zen/src/features/meet/presentation/met_level_prompt.dart';
 import 'package:zen/src/features/profile/presentation/mini_profile.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
-/// "Osoby w pobliżu" (§15).
+/// "Osoby w pobliżu".
 class NearbyScreen extends ConsumerStatefulWidget {
   const NearbyScreen({super.key});
 
@@ -131,7 +131,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
           children: <Widget>[
             ZenInfo(
               icon: Icons.privacy_tip_outlined,
-              // S5: say what really goes with the hello.
+              // Say what really goes with the hello.
               text: t(
                 'Dostanie Twój pseudonim i tę wiadomość — bez imienia, '
                 'konta i adresu w sieci. Adresy poznacie dopiero, gdy '
@@ -340,7 +340,8 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                         'Znajomi widzą Cię z imieniem, inni jako „{name}” '
                         '(zmienia się co 10 minut, więc nikt Cię nie wyśledzi). '
                         'Telefon nadaje oszczędnie cały czas, także przy '
-                        'zamkniętym Zen.',
+                        'zamkniętym albo zablokowanym Zen — do tygodnia od '
+                        'ostatniego odblokowania.',
                         {'name': _nearby.myPseudonym},
                       ),
                     ),
@@ -448,7 +449,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
     );
   }
 
-  /// "Mijani" (§15): who was passed, kept only on this phone.
+  /// "Mijani": who was passed, kept only on this phone.
   Widget _encountersSection(MeetService meet) => EncountersSection(
     log: _encounters,
     lookingInBackground: meet.book.nearbyBackgroundScan,
@@ -489,8 +490,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                 'distance': nearbyDistance(p.rssi),
               })
             : nearbyDistance(p.rssi),
-        // Being near is only a hint: the meeting is signed when confirmed
-        // (§6.2).
+        // Being near is only a hint: the meeting is signed when confirmed.
         trailing: met
             ? Icon(Icons.verified_rounded, color: zen.success)
             : TextButton(
@@ -510,7 +510,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
               ),
       );
     }
-    // Badges (§15): what this phone knows of the stranger, nothing more.
+    // Badges: what this phone knows of the stranger, nothing more.
     final List<NearbySession> talks = _nearby.sessionsWith(p.token).toList();
     final List<String> badges = <String>[
       nearbyDistance(p.rssi),
@@ -589,7 +589,7 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
           ),
         ),
       );
-      // Met in person: how close are you (§8)?
+      // Met in person: how close are you?
       await showMetLevelPrompt(context, address: address, name: s.pseudonym);
     }
   }

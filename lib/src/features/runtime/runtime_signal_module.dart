@@ -56,7 +56,7 @@ final class RuntimeSignalModule extends ZenModule {
   /// Presence keeps going with nobody looking: in the background service,
   /// and on Android in the app too — its core runs there only while it owns
   /// the node, on screen or unlocked in the background (a locked app hands
-  /// the node to the receive-only service, §14.1).
+  /// the node to the receive-only service).
   bool get _runsUnseen => _inService || Platform.isAndroid;
   StreamSubscription<SignalTransportFrame>? _subscription;
   SignalTransport? _transport;
@@ -216,7 +216,7 @@ final class RuntimeSignalModule extends ZenModule {
     await hub.receiveSignal(signal, receivedAtMillis: frame.receivedAtMillis);
   }
 
-  /// What app version a friend named (A17): only for the "newer Zen" hint.
+  /// What app version a friend named: only for the "newer Zen" hint.
   Future<void> _notePeerVersion(
     SocialHubController hub,
     String from,

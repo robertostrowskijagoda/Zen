@@ -35,7 +35,7 @@ const Duration kLockedAlarmPingResendEvery = Duration(seconds: 30);
 const int kLockedAlarmLocationTicks = 60;
 
 /// This person's alarm raised by the locked Android service from the
-/// [AlarmKit] (§16.3) — the master key, the account key and the device key
+/// [AlarmKit] — the master key, the account key and the device key
 /// are never here, only the alarm key.
 ///
 /// It goes out like the app's: the Bluetooth wave first (when chosen),
@@ -473,7 +473,7 @@ final class LockedAlarm {
   }
 }
 
-/// The Bluetooth alarm wave from the locked service (§16.3): looks around
+/// The Bluetooth alarm wave from the locked service: looks around
 /// for [listen], then sends every phone seen the wave — signed with the
 /// pair key for a friend in [kit] recognised by their token (only they can
 /// check it), unsigned for everyone else ("someone nearby needs help").

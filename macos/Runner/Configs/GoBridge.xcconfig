@@ -14,11 +14,12 @@ ZEN_GO_BRIDGE_SYSTEM = -framework Foundation -framework CoreFoundation -framewor
 ZEN_GO_BRIDGE_KEEP_1 = -Wl,-u,_YggFreeString -Wl,-u,_YggGetVersion -Wl,-u,_YggGenerateConfigJson -Wl,-u,_YggSummarizeConfigJson -Wl,-u,_YggStartNode -Wl,-u,_YggStopNode -Wl,-u,_YggGetNodeInfo
 ZEN_GO_BRIDGE_KEEP_2 = -Wl,-u,_YggGetPeersJson -Wl,-u,_YggGetPathsJson -Wl,-u,_YggGetTreeJson -Wl,-u,_YggGetSessionsJson -Wl,-u,_YggRetryPeersNow -Wl,-u,_YggAddPeer -Wl,-u,_YggRemovePeer
 ZEN_GO_BRIDGE_KEEP_3 = -Wl,-u,_YggCallPeer -Wl,-u,_YggStartSignaling -Wl,-u,_YggSendSignal -Wl,-u,_YggPollSignal -Wl,-u,_YggWaitSignal -Wl,-u,_YggOpenRelayJson -Wl,-u,_YggCloseRelay
-ZEN_GO_BRIDGE_KEEP_4 = -Wl,-u,_YggStartDoorNode -Wl,-u,_YggStopDoorNode -Wl,-u,_YggGetDoorNodeJson -Wl,-u,_YggSetMailboxDoorsJson -Wl,-u,_YggGetBuildInfoJson -Wl,-u,_YggSetDnsServersJson
+ZEN_GO_BRIDGE_KEEP_4 = -Wl,-u,_YggStartDoorNode -Wl,-u,_YggStopDoorNode -Wl,-u,_YggGetDoorNodeJson -Wl,-u,_YggSetMailboxDoorsJson -Wl,-u,_YggDoorSendSignal -Wl,-u,_YggGetBuildInfoJson -Wl,-u,_YggSetDnsServersJson
 ZEN_GO_BRIDGE_KEEP_5 = -Wl,-u,_YggSetLocalLinksJson -Wl,-u,_YggGetLocalLinksJson -Wl,-u,_YggOpenLocalLinkJson -Wl,-u,_YggCloseLocalLink -Wl,-u,_YggLocalLinkAdvertJson -Wl,-u,_YggLocalLinkMatchJson
 ZEN_GO_BRIDGE_KEEP_6 = -Wl,-u,_YggBtLinkStateJson -Wl,-u,_YggBtLinkStartJson -Wl,-u,_YggBtLinkStopJson -Wl,-u,_YggBtLinkPollJson -Wl,-u,_YggBtLinkAcceptJson -Wl,-u,_YggBtLinkRejectJson -Wl,-u,_YggBtLinkDialJson -Wl,-u,_YggBtLinkPairedJson
+ZEN_GO_BRIDGE_KEEP_7 = -Wl,-u,_YggPqPublicKeyJson -Wl,-u,_YggPqEncapsulateJson -Wl,-u,_YggPqDecapsulateJson -Wl,-u,_YggSigPublicKeyJson -Wl,-u,_YggSigSignJson -Wl,-u,_YggSigVerifyJson
 
-ZEN_GO_BRIDGE_LDFLAGS = -force_load "$(ZEN_GO_BRIDGE_LIB)" $(ZEN_GO_BRIDGE_SYSTEM) $(ZEN_GO_BRIDGE_KEEP_1) $(ZEN_GO_BRIDGE_KEEP_2) $(ZEN_GO_BRIDGE_KEEP_3) $(ZEN_GO_BRIDGE_KEEP_4) $(ZEN_GO_BRIDGE_KEEP_5) $(ZEN_GO_BRIDGE_KEEP_6)
+ZEN_GO_BRIDGE_LDFLAGS = -force_load "$(ZEN_GO_BRIDGE_LIB)" $(ZEN_GO_BRIDGE_SYSTEM) $(ZEN_GO_BRIDGE_KEEP_1) $(ZEN_GO_BRIDGE_KEEP_2) $(ZEN_GO_BRIDGE_KEEP_3) $(ZEN_GO_BRIDGE_KEEP_4) $(ZEN_GO_BRIDGE_KEEP_5) $(ZEN_GO_BRIDGE_KEEP_6) $(ZEN_GO_BRIDGE_KEEP_7)
 
 OTHER_LDFLAGS = $(inherited) $(ZEN_GO_BRIDGE_LDFLAGS)
 

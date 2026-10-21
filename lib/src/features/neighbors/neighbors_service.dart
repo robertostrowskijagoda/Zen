@@ -46,7 +46,7 @@ abstract final class FlatTypes {
   static const String moved = 'flat_moved';
 
   /// Between housemates: a vote to remove one phone that will not leave
-  /// by itself (§18.1).
+  /// by itself.
   static const String kick = 'flat_kick';
 
   /// Between housemates: the household's new key, without the removed
@@ -186,7 +186,7 @@ const Duration kNearbyInviteLife = Duration(days: 3);
 enum FlatScan { sent, own, noFlat, alreadyNeighbor }
 
 /// How long a knock on the door waits for a resident to let them in or
-/// not (§18.2), also while the phones are offline (friends hold it); after
+/// not, also while the phones are offline (friends hold it); after
 /// that it is gone, as if refused.
 const Duration kKnockLife = kHeldKnockLife;
 
@@ -199,7 +199,7 @@ const Duration kKnockMemory = Duration(days: 14);
 const int kMaxKnocks = 20;
 
 /// A resident key a neighbour has known at least this long counts when a
-/// household announces a new key (§18.1). A key that showed up just before
+/// household announces a new key. A key that showed up just before
 /// could have been slipped in by the phone being removed.
 const Duration kResidentKeyTrust = Duration(days: 1);
 
@@ -207,7 +207,7 @@ const Duration kResidentKeyTrust = Duration(days: 1);
 String get kFlatKeyConflict =>
     t('Dwa różne nowe klucze mieszkania — zapytaj sąsiadów osobiście');
 
-/// "Sekcja sąsiedzka" (§18): this phone's flat (shared by its residents,
+/// "Sekcja sąsiedzka": this phone's flat (shared by its residents,
 /// who all hold the flat's key), the door QR, "Moi sąsiedzi", messages
 /// between flats and sign-ups for invitations. Everything is signed with
 /// the flats' keys. Between flats everything goes from door to door (each
@@ -231,7 +231,7 @@ final class NeighborsService extends ChangeNotifier {
 
   /// The address of the flat's door while it runs: a node of its own that
   /// this phone runs with [doorKey] (door_node.go in the bridge). The door
-  /// QR carries it and never a resident's address (§18.2); without it there
+  /// QR carries it and never a resident's address; without it there
   /// is no door QR. The flat's profile lists it as this resident's door.
   final String? Function()? doorInbox;
 
@@ -241,7 +241,7 @@ final class NeighborsService extends ChangeNotifier {
   final Future<bool> Function(String to, Map<String, dynamic> payload)?
   doorSend;
 
-  /// The friends who keep this phone's offline mailboxes (§7), `null` while
+  /// The friends who keep this phone's offline mailboxes, `null` while
   /// not known yet: they run this door's mailbox doors.
   final List<String>? Function()? mailboxes;
   final int Function() _now;
@@ -344,7 +344,7 @@ final class NeighborsService extends ChangeNotifier {
   /// This phone's own key as a resident (Ed25519; not the flat's key, which
   /// every resident holds): it names this resident in the profile, and votes
   /// to remove a resident and the "new key" notice for neighbours are
-  /// signed with it, so a removed phone cannot speak for the others (§18.1).
+  /// signed with it, so a removed phone cannot speak for the others.
   String? _residentSeed;
   LedgerKeyPair? _resident;
 
@@ -710,7 +710,7 @@ final class NeighborsService extends ChangeNotifier {
   @visibleForTesting
   Future<String?> residentSign(List<int> message) async {
     final LedgerKeyPair? r = _resident;
-    return r == null ? null : b64(await r.sign(message));
+    return r == null ? null : b64(await r.signWithKey(message));
   }
 
   List<NearbyFlatInvite> get nearbyInvites {
@@ -750,6 +750,11 @@ final class NeighborsService extends ChangeNotifier {
   /// replaces the real data.
   bool _diskUnreadable = false;
 
+  /// The stored state was read at least once ([doorKey] and
+  /// [hostedDoorKeys] are the real ones, not empty memory).
+  bool get isLoaded => _loaded;
+  bool _loaded = false;
+
   Future<void> load() async {
     try {
       _diskUnreadable = true;
@@ -759,6 +764,7 @@ final class NeighborsService extends ChangeNotifier {
       if (json is Map) {
         await _fromJson(json);
       }
+      _loaded = true;
       if (_syncDoorKey()) {
         await _save();
       }
@@ -1167,7 +1173,7 @@ final class NeighborsService extends ChangeNotifier {
       'to': to,
       'b': body,
     };
-    final Uint8List sig = await pair.sign(canonicalJsonBytes(signed));
+    final Uint8List sig = await pair.signWithKey(canonicalJsonBytes(signed));
     return <String, dynamic>{...signed, 's': b64(sig)};
   }
 
@@ -1491,7 +1497,7 @@ final class NeighborsService extends ChangeNotifier {
     return t.length > max ? t.substring(0, max) : t;
   }
 
-  /// Joins a housemate's flat from their "home" QR (§18.1).
+  /// Joins a housemate's flat from their "home" QR.
   Future<bool> joinFlat(FlatHomeCode code) async {
     final String own = _own;
     final Uint8List? seed = unb64(code.seed, length: 32);
@@ -1509,7 +1515,7 @@ final class NeighborsService extends ChangeNotifier {
       await _envelope(FlatTypes.join, _pair!.id, <String, dynamic>{
         'a': own,
         'n': _clip(host.ownName(), 40),
-        // This resident's own key: it names them in the profile (§18.1).
+        // This resident's own key: it names them in the profile.
         'rk': me.id,
       }),
     );
@@ -1672,7 +1678,7 @@ final class NeighborsService extends ChangeNotifier {
     await _save();
   }
 
-  /// The household moves out (§18.1): the door code stops working,
+  /// The household moves out: the door code stops working,
   /// neighbours are told and dropped, invitations and offers go — the
   /// household itself (name, residents, "O nas") stays and starts again at
   /// [newPlace]. The new tenants make their own profile from scratch.
@@ -1869,7 +1875,7 @@ final class NeighborsService extends ChangeNotifier {
   }
 
   /// Writes to the flat [key]. With [itemId] the message belongs to the
-  /// small chat of that invitation (§18.3).
+  /// small chat of that invitation.
   Future<bool> sendMessage(String key, String text, {String? itemId}) async {
     final NeighborFlat? f = _neighbors[key];
     if (f == null || text.trim().isEmpty || !hasFlat) {
@@ -1938,7 +1944,7 @@ final class NeighborsService extends ChangeNotifier {
   // ---- nearby (Bluetooth) ----
 
   /// The Bluetooth "wave" that carries one of our invitations to people
-  /// around (§18.3). `null` when there is nothing to send.
+  /// around. `null` when there is nothing to send.
   Map<String, dynamic>? nearbyWave(String itemId) {
     final FlatDoorCode? code = doorCode;
     final FlatItem? item = _profile?.item(itemId);
@@ -2933,7 +2939,7 @@ final class NeighborsService extends ChangeNotifier {
     );
   }
 
-  // ---- removing a housemate who will not leave (§18.1) ----
+  // ---- removing a housemate who will not leave ----
 
   /// Votes to remove the resident [target] (their resident key) from the
   /// household. Once a majority of the other residents agree, the
@@ -2952,7 +2958,9 @@ final class NeighborsService extends ChangeNotifier {
     // Signed with this phone's own key: neighbours check the votes when
     // the household announces its new key.
     final LedgerKeyPair pair = await _ensureResident();
-    final String vote = b64(await pair.sign(flatKickBytes(p.key, target)));
+    final String vote = b64(
+      await pair.signWithKey(flatKickBytes(p.key, target)),
+    );
     (_kickVotes[target] ??= <String>{}).add(me);
     (_voteSigs[target] ??= <String, String>{})[me] = vote;
     await _save();
@@ -3104,7 +3112,7 @@ final class NeighborsService extends ChangeNotifier {
     // pinned while everyone was still in.
     final LedgerKeyPair mine = await _ensureResident();
     final String bySig = b64(
-      await mine.sign(flatNewKeyBytes(old.id, pair.id, target)),
+      await mine.signWithKey(flatNewKeyBytes(old.id, pair.id, target)),
     );
     final Map<String, String> votes = <String, String>{
       for (final String v in votesFor(target))
@@ -3268,7 +3276,7 @@ final class NeighborsService extends ChangeNotifier {
     await _save();
   }
 
-  /// A neighbour household has a new key: they removed a phone (§18.1).
+  /// A neighbour household has a new key: they removed a phone.
   ///
   /// The notice is signed with the old key, which the removed phone holds
   /// too. So it must also carry the signature of the resident who made the
@@ -3590,7 +3598,7 @@ final class NeighborsService extends ChangeNotifier {
     pending.remove(from);
   }
 
-  // ---- "Pokaż mój profil" (§18.1) ----
+  // ---- "Pokaż mój profil" ----
 
   /// Shows this resident's own account to the neighbour flat [key]: they
   /// see the name and can send a friend invitation. Only this phone's
@@ -3613,7 +3621,7 @@ final class NeighborsService extends ChangeNotifier {
         'n': name,
         'a': own,
         'rk': me.id,
-        'rs': b64(await me.sign(flatRevealBytes(p.key, key, own, name))),
+        'rs': b64(await me.signWithKey(flatRevealBytes(p.key, key, own, name))),
       }),
       kReliableTtlKey: kDoorRetryLife.inMilliseconds,
     };

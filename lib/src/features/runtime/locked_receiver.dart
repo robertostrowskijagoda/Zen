@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
@@ -16,6 +17,7 @@ import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -119,7 +121,13 @@ const int kLockedStrangerFramesTotal = 50;
 /// How often the receiver asks its mailboxes for mail held for it.
 const Duration kLockedMailboxPollInterval = Duration(minutes: 5);
 
-/// One frame as the inbox keeps it (JSON: sender, time, payload).
+/// What came to a door while the app was locked, per run of the receiver
+/// (knocks and neighbour flats' frames, from anyone who has the sticker).
+const int kLockedDoorFramesPerSender = 5;
+const int kLockedDoorFramesTotal = 50;
+
+/// One frame as the inbox keeps it (JSON: sender, time, payload, and `d`
+/// when it came to a door).
 Uint8List encodeInboxFrame(SignalTransportFrame frame) {
   return Uint8List.fromList(
     utf8.encode(
@@ -127,6 +135,7 @@ Uint8List encodeInboxFrame(SignalTransportFrame frame) {
         'f': frame.from,
         't': frame.receivedAtMillis,
         'p': frame.payload,
+        if (frame.door) 'd': true,
       }),
     ),
   );
@@ -149,11 +158,135 @@ SignalTransportFrame? decodeInboxFrame(Uint8List record) {
       from: from,
       payload: payload,
       receivedAtMillis: at,
+      door: json['d'] == true,
     );
   } on FormatException {
     return null;
   }
 }
+
+/// A JSON document in the background folder sealed with the background key
+/// (`BackgroundKeyProtector`): what the locked service needs besides the
+/// capability (the nearby kit, the door kit). The app writes it and makes
+/// the key; the service only reads it.
+final class BackgroundKitFile {
+  BackgroundKitFile({
+    required Future<Directory> Function() supportDirectory,
+    required AppSecurityCredentialsStore credentials,
+    required this.storageKey,
+    required this.fileName,
+    this.createKey = false,
+  }) : _supportDirectory = supportDirectory,
+       _credentials = credentials;
+
+  final String storageKey;
+  final String fileName;
+
+  /// Whether this side makes the background key when there is none (the
+  /// app does; the service never does).
+  final bool createKey;
+  final Future<Directory> Function() _supportDirectory;
+  final AppSecurityCredentialsStore _credentials;
+
+  Future<File> file() async {
+    final Directory support = await _supportDirectory();
+    final String sep = Platform.pathSeparator;
+    return File(
+      '${support.path}$sep${FileBackgroundVault.folderName}$sep$fileName',
+    );
+  }
+
+  Future<void> write(Object? json) async {
+    final Uint8List sealed = await BackgroundKeyProtector(
+      _credentials,
+      createKey: createKey,
+    ).sealFor(storageKey, Uint8List.fromList(utf8.encode(jsonEncode(json))));
+    final File target = await file();
+    await target.parent.create(recursive: true);
+    // Beside the file and moved over it: the service reads the old one or
+    // the new one, never half of one.
+    final File next = File('${target.path}.next');
+    await next.writeAsBytes(sealed, flush: true);
+    await next.rename(target.path);
+  }
+
+  /// The document last written; `null` when there is none or it does not
+  /// open.
+  Future<Object?> read() async {
+    final File source = await file();
+    if (!await source.exists()) {
+      return null;
+    }
+    try {
+      final Uint8List plain = await BackgroundKeyProtector(
+        _credentials,
+      ).unsealFor(storageKey, await source.readAsBytes());
+      return jsonDecode(utf8.decode(plain));
+    } on Object catch (error, stackTrace) {
+      logZenError(
+        'A background kit is unreadable ($fileName)',
+        error,
+        stackTrace,
+      );
+      return null;
+    }
+  }
+}
+
+final RegExp _doorSeedPattern = RegExp(r'^[0-9a-f]{64}$');
+
+/// What the locked service runs the doors with: the flat's door key and
+/// the keys of the mailbox doors this phone runs for friends. Sealed with
+/// the background key, like the alarm kit: a door key only lets one take
+/// frames at that door (the flat's own keys and the sealed knocks' key stay
+/// under the master key), and the doors answer nothing while locked.
+@immutable
+final class LockedDoorKit {
+  const LockedDoorKit({this.doorKey, this.mailboxDoorKeys = const <String>[]});
+
+  /// The flat's door key (hex seed); `null` without a flat.
+  final String? doorKey;
+
+  /// Keys (hex seeds) of the mailbox doors run for friends.
+  final List<String> mailboxDoorKeys;
+
+  bool get isEmpty => doorKey == null && mailboxDoorKeys.isEmpty;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'v': 1,
+    'dk': ?doorKey,
+    'mb': mailboxDoorKeys,
+  };
+
+  static LockedDoorKit? fromJson(Object? json) {
+    if (json is! Map || json['v'] != 1) {
+      return null;
+    }
+    final Object? dk = json['dk'];
+    final Object? mb = json['mb'];
+    return LockedDoorKit(
+      doorKey: dk is String && _doorSeedPattern.hasMatch(dk) ? dk : null,
+      mailboxDoorKeys: <String>[
+        if (mb is List)
+          for (final Object? seed in mb.take(16))
+            if (seed is String && _doorSeedPattern.hasMatch(seed)) seed,
+      ],
+    );
+  }
+}
+
+/// Where the door kit is kept.
+BackgroundKitFile lockedDoorKitFile({
+  required Future<Directory> Function() supportDirectory,
+  required AppSecurityCredentialsStore credentials,
+  bool createKey = false,
+}) => BackgroundKitFile(
+  supportDirectory: supportDirectory,
+  credentials: credentials,
+  storageKey: 'background/door-kit',
+  fileName: 'door-kit.zenbg',
+  createKey: createKey,
+);
 
 /// Who counts as a contact for the background service, from the app's
 /// state (normalized addresses): accepted friends with every device of
@@ -232,8 +365,8 @@ String backgroundContactsSignature(SocialHubState state) {
   return parts.join('|');
 }
 
-/// The Android background service while the app is locked or gone
-/// (§14.1): it holds no master key, only the [BackgroundCapability].
+/// The Android background service while the app is locked or gone:
+/// it holds no master key, only the [BackgroundCapability].
 ///
 /// * Frames from contacts (and, within a small budget, what a stranger
 ///   must be able to leave: a friend request, a neighbour) are sealed into
@@ -248,6 +381,11 @@ String backgroundContactsSignature(SocialHubState state) {
 /// * The power-button alarm goes out from the alarm kit ([LockedAlarm]):
 ///   the frames it needs to see (confirmations, answers, pings) are shown
 ///   to it as well.
+/// * The doors ([doorFrames], run from the [LockedDoorKit]): knocks at the
+///   flat's door, neighbour flats' frames and sealed knocks at the mailbox
+///   doors run for friends are kept like strangers' frames (a budget of
+///   their own) and never answered — a door never says who runs it, and
+///   the app handles them after unlock.
 /// * Paused while locked: mailbox duties for friends, the ledger (posts and
 ///   photos for friends, its sync), outgoing retries, dating and pyramid
 ///   duties — they all need the master key.
@@ -260,6 +398,7 @@ final class LockedReceiver {
     required SealedInboxWriter inbox,
     required RuntimeSystemNotificationService notices,
     LockedAlarm? alarm,
+    Stream<SignalTransportFrame>? doorFrames,
     int Function()? now,
     this.ringTimeout = const Duration(seconds: 6),
     this.noticeThrottle = const Duration(minutes: 1),
@@ -269,12 +408,17 @@ final class LockedReceiver {
        _inbox = inbox,
        _notices = notices,
        _alarm = alarm,
+       _doorFrames = doorFrames,
        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final SignalTransport _transport;
   final BackgroundCapability _capability;
   final SealedInboxWriter _inbox;
   final RuntimeSystemNotificationService _notices;
+
+  /// What came to the doors the node runs (`RuntimeNodeRuntime.doorFrames`);
+  /// `null`: no doors.
+  final Stream<SignalTransportFrame>? _doorFrames;
 
   /// This person's alarm from the alarm kit (`null`: the app never wrote
   /// one).
@@ -290,6 +434,9 @@ final class LockedReceiver {
   final Duration mailboxPollInterval;
 
   StreamSubscription<SignalTransportFrame>? _subscription;
+  StreamSubscription<SignalTransportFrame>? _doorSubscription;
+  final Map<String, int> _doorFramesBy = <String, int>{};
+  int _doorFramesTotal = 0;
   Timer? _pollTimer;
   Timer? _ringTimer;
   String? _ringingFrom;
@@ -317,6 +464,12 @@ final class LockedReceiver {
       (SignalTransportFrame frame) => unawaitedLogged(
         handleFrame(frame),
         context: 'A frame for the locked inbox failed',
+      ),
+    );
+    _doorSubscription = _doorFrames?.listen(
+      (SignalTransportFrame frame) => unawaitedLogged(
+        handleDoorFrame(frame),
+        context: 'A door frame for the locked inbox failed',
       ),
     );
     try {
@@ -353,7 +506,75 @@ final class LockedReceiver {
     _ringingFrom = null;
     await _subscription?.cancel();
     _subscription = null;
+    await _doorSubscription?.cancel();
+    _doorSubscription = null;
     await _transport.stop();
+  }
+
+  /// One frame that came to a door: kept for the app (the neighbours
+  /// section handles it after unlock), within [kLockedDoorFramesPerSender]
+  /// and [kLockedDoorFramesTotal], and never answered.
+  @visibleForTesting
+  Future<void> handleDoorFrame(SignalTransportFrame frame) async {
+    final Object? type = frame.payload['type'];
+    if (type is! String ||
+        !_running ||
+        !frame.door ||
+        !kFlatDoorTypes.contains(type)) {
+      return;
+    }
+    final String from = PeerShareCodec.normalizeAddress(frame.from);
+    if (from.isEmpty ||
+        _capability.kindOf(from) == BackgroundContactKind.blocked) {
+      return;
+    }
+    final Uint8List record;
+    try {
+      record = encodeInboxFrame(frame);
+    } on Object {
+      return;
+    }
+    // A knocker retries the same knock until it gives up: kept once.
+    final Object? rawRid = frame.payload[kReliableIdKey];
+    final String id = rawRid is String && rawRid.isNotEmpty
+        ? 'd|$from|$rawRid'
+        : 'd|$from|${crypto.sha256.convert(record)}';
+    if (_kept.contains(id)) {
+      return;
+    }
+    final int sent = _doorFramesBy[from] ?? 0;
+    if (sent >= kLockedDoorFramesPerSender ||
+        _doorFramesTotal >= kLockedDoorFramesTotal) {
+      return;
+    }
+    _doorFramesBy[from] = sent + 1;
+    _doorFramesTotal += 1;
+    // Taken before the write: a retry arriving meanwhile is the same knock.
+    _kept.add(id);
+    while (_kept.length > _maxKeptIds) {
+      _kept.remove(_kept.first);
+    }
+    if (!await _inbox.append(record, sender: from, stranger: true)) {
+      _kept.remove(id);
+      return;
+    }
+    _keptCount += 1;
+    if (type == kFlatKnockType || type == 'flat_msg') {
+      // Anyone with the sticker can knock, and nothing is checked here:
+      // only that something came, at most once a minute.
+      await _postThrottled(
+        RuntimeSystemNotification(
+          id: '$kLockedSocialSlot-${_now()}',
+          title: PrivacyRedactingNotificationService.genericTitle,
+          body: t('Odblokuj Zen, żeby zobaczyć szczegóły.'),
+          createdAtMillis: _now(),
+          category: RuntimeSystemNotificationCategory.social,
+          routeKey: buildInboxRouteKey(),
+          slotKey: kLockedSocialSlot,
+          contentRedacted: true,
+        ),
+      );
+    }
   }
 
   Future<void> _pollMailboxes() async {

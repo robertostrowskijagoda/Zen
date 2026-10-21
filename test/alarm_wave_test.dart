@@ -112,7 +112,7 @@ void main() {
       final _Host bob = _Host(net, 'bob', <String>['ania']);
       await ania.service.shareNearbySecret('bob');
       const AlarmRecord alarm = AlarmRecord(id: 'abc123', from: 'self', at: 1);
-      // Bob has Ania's keys for him alone (S6): her wave to him is signed
+      // Bob has Ania's keys for him alone: her wave to him is signed
       // for this pair.
       final Map<String, dynamic> wave = ania.service.alarmWave(
         alarm,

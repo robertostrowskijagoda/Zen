@@ -5,18 +5,18 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/meet/location.dart';
 import 'package:zen/src/features/meet/nearby_crypto.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-// "Mijani" (§15): who this person passed in the street or on a tram.
+// "Mijani": who this person passed in the street or on a tram.
 //
 // Built only from what the "W pobliżu" radio already hears while it scans
 // (the screen, the background look around, an alarm's look around): no
-// scanning of its own. A friend is known by the per-friend keys (S6); a
+// scanning of its own. A friend is known by the per-friend keys; a
 // friend of a friend has no key of this person's phone and cannot be told
 // apart from a stranger, so both are only counted. Strangers' tokens stay
 // in memory for one token slot (they change every 10 minutes for
@@ -43,6 +43,12 @@ const Duration kEncounterFlushAfter = Duration(seconds: 30);
 
 /// A last known position older than this is not taken as the place.
 const Duration kEncounterPlaceFresh = Duration(minutes: 30);
+
+/// What the locked Android service saw on its looks around: friends passed
+/// (`e`, [Encounter.toJson]) and the crowd counts (`c`, `[window, count]`).
+/// Left in the sealed inbox from this device's own address; the app merges
+/// it after unlock ([EncounterLog.takeKept]).
+const String kKeptEncountersType = 'encounters_own';
 
 /// An approximate place (rounded to about 100 m).
 @immutable
@@ -241,7 +247,7 @@ final class _Saved {
   }
 }
 
-/// "Mijani" (§15): a log, kept only on this phone, of friends who were
+/// "Mijani": a log, kept only on this phone, of friends who were
 /// near (who, from–to, an approximate place when location is allowed) and
 /// of how many others were, without telling who.
 ///
@@ -433,6 +439,52 @@ final class EncounterLog extends ChangeNotifier {
     _notify();
   });
 
+  /// What the locked service saw while the app was locked
+  /// ([kKeptEncountersType]): merged with the log and written (not when
+  /// recording is off, nor what is older than the last "Wyczyść").
+  Future<void> takeKept(Map<String, dynamic> payload) {
+    if (!_saved.on || _disposed) {
+      return Future<void>.value();
+    }
+    final Object? e = payload['e'];
+    if (e is List) {
+      for (final Object? item in e.take(maxEncounters)) {
+        final Encounter? encounter = Encounter.fromJson(item);
+        if (encounter != null) {
+          _pending = mergeEncounter(
+            _pending,
+            Encounter(
+              friend: PeerShareCodec.normalizeAddress(encounter.friend),
+              start: encounter.start,
+              end: encounter.end,
+              place: encounter.place,
+            ),
+          );
+        }
+      }
+      while (_pending.length > maxEncounters) {
+        _pending.removeLast();
+      }
+    }
+    final Object? c = payload['c'];
+    if (c is List) {
+      for (final Object? x in c.take(maxCrowds)) {
+        if (x is List && x.length == 2 && x[0] is int && x[1] is int) {
+          final int window = encounterWindowOf(x[0] as int);
+          final int count = math.min(x[1] as int, maxStrangersPerSlot);
+          if (count > 0) {
+            _pendingCrowds[window] = math.max(
+              _pendingCrowds[window] ?? 0,
+              count,
+            );
+          }
+        }
+      }
+    }
+    _notify();
+    return flush();
+  }
+
   /// Writes what was heard so far.
   Future<void> flush() {
     _flushTimer?.cancel();
@@ -567,17 +619,14 @@ Future<EncounterPlace?> lastKnownEncounterPlace() async {
     return null;
   }
   try {
-    final LocationPermission permission = await Geolocator.checkPermission();
-    if (permission != LocationPermission.whileInUse &&
-        permission != LocationPermission.always) {
+    final GeoFix? fix = await lastKnownFix();
+    final DateTime? at = fix?.at;
+    if (fix == null ||
+        at == null ||
+        DateTime.now().difference(at) > kEncounterPlaceFresh) {
       return null;
     }
-    final Position? p = await Geolocator.getLastKnownPosition();
-    if (p == null ||
-        DateTime.now().difference(p.timestamp) > kEncounterPlaceFresh) {
-      return null;
-    }
-    return EncounterPlace.approximate(p.latitude, p.longitude);
+    return EncounterPlace.approximate(fix.lat, fix.lon);
   } on Object catch (error) {
     logZenWarning('Mijani: położenie: $error');
     return null;

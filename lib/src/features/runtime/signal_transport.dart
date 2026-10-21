@@ -45,13 +45,13 @@ final class SignalTransportFrame {
   final int receivedAtMillis;
 
   /// It came to the flat's door address (a knock on the door sticker, or
-  /// a neighbour flat's frame, §18.2), not to this phone's own address. Such
+  /// a neighbour flat's frame), not to this phone's own address. Such
   /// frames go only to the neighbours section
   /// (`RuntimeNodeRuntime.doorFrames`), never to [SignalTransport.frames].
   final bool door;
 }
 
-/// A knock on the flat's door (`flat_hello`, §18.2).
+/// A knock on the flat's door (`flat_hello`).
 const String kFlatKnockType = 'flat_hello';
 
 /// The only frame a mailbox door (run for a friend) takes: a sealed knock

@@ -24,7 +24,7 @@ import (
 	"github.com/yggdrasil-network/yggdrasil-go/src/ipv6rwc"
 )
 
-// The flat's door (neighbours, §18.2). The sticker on the door carries the
+// The flat's door (neighbours). The sticker on the door carries the
 // address of a second, minimal Yggdrasil node with its own random key, not
 // the address of anyone who lives there. Each resident's phone runs one, and
 // the flat's profile names the residents' doors, never their phones: all

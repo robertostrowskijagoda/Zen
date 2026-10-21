@@ -2,7 +2,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 
-/// How many phone numbers the backup SMS of the alarm keeps (§16.3).
+/// How many phone numbers the backup SMS of the alarm keeps.
 const int kAlarmSmsMaxNumbers = 5;
 
 /// A phone number as the SMS app takes it: an optional leading "+" and

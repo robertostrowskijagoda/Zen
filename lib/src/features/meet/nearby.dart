@@ -20,7 +20,7 @@ export 'package:zen/src/features/meet/nearby_crypto.dart';
 /// Mesh payload of a conversation started nearby.
 const String kNearbyMessageType = 'nearby_msg';
 
-/// Hello without any address (S5): the pseudonym, the message, the
+/// Hello without any address: the pseudonym, the message, the
 /// sender's token and a one-time X25519 key. Nobody learns an address until
 /// the other person answers.
 const int kNearbyHelloVersion = 7;
@@ -107,6 +107,12 @@ abstract interface class NearbyRadio {
   /// whether it is on already; a change comes later as a `bluetooth` event.
   Future<bool> requestEnable();
   Future<bool> startAdvertising(Uint8List token);
+
+  /// Shows [adverts] ([kNearbyAdvertBytes] per slot, from [firstSlot] on)
+  /// each in its own slot: the radio side changes the token (and with it
+  /// the Bluetooth address) at every slot by itself, without waking Dart,
+  /// and shows nothing once the list is over.
+  Future<bool> startAdvertisingSchedule(int firstSlot, Uint8List adverts);
   Future<void> stopAdvertising();
   Future<bool> startScan({bool lowPower = false});
   Future<void> stopScan();
@@ -165,6 +171,17 @@ final class ChannelNearbyRadio implements NearbyRadio {
       false;
 
   @override
+  Future<bool> startAdvertisingSchedule(
+    int firstSlot,
+    Uint8List adverts,
+  ) async =>
+      await _call<bool>('startAdvertisingSchedule', <String, Object>{
+        'start': firstSlot,
+        'adverts': adverts,
+      }) ??
+      false;
+
+  @override
   Future<void> stopAdvertising() => _call<void>('stopAdvertising');
 
   @override
@@ -190,7 +207,7 @@ final class ChannelNearbyRadio implements NearbyRadio {
   /// Friends' keys for alarm waves ([FriendNearbyKey.radioKey]: a pair key
   /// `p:…`): the radio side checks an
   /// alarm wave's signature with them before counting it, so a flood of
-  /// other waves cannot crowd a friend's alarm out (§16.3).
+  /// other waves cannot crowd a friend's alarm out.
   Future<void> setAlarmKeys(List<String> secrets) =>
       _call<void>('setAlarmKeys', secrets);
 }
@@ -285,10 +302,10 @@ final class NearbySession {
   bool get waitsForThem => !startedByMe && address == null && iAnswered;
 }
 
-/// "Osoby w pobliżu" (§15): shows this phone to people around (friends
+/// "Osoby w pobliżu": shows this phone to people around (friends
 /// recognise it, strangers see a changing pseudonym), lists who is near
 /// and lets strangers say hello. A friend seen here is only a hint: "met
-/// in person" (§6.2) is signed only when the person confirms it.
+/// in person" is signed only when the person confirms it.
 final class NearbyService extends ChangeNotifier {
   NearbyService({
     required this.radio,
@@ -358,12 +375,12 @@ final class NearbyService extends ChangeNotifier {
   /// The scan running now is only a short look around ([scanWindow]).
   bool _windowOpen = false;
 
-  /// Waves of other kinds (a flat's invitation §18.3, a crisis
-  /// announcement §28.1): each handler picks its own version.
+  /// Waves of other kinds (a flat's invitation, a crisis
+  /// announcement): each handler picks its own version.
   final List<void Function(Map<dynamic, dynamic> json)> otherWaveHandlers =
       <void Function(Map<dynamic, dynamic> json)>[];
 
-  /// Alarm waves ([kAlarmWaveVersion], §16.3) with
+  /// Alarm waves ([kAlarmWaveVersion]) with
   /// the Bluetooth address of the phone that wrote them (for limits on what
   /// strangers send).
   final List<void Function(Map<dynamic, dynamic> json, String device)>
@@ -374,7 +391,7 @@ final class NearbyService extends ChangeNotifier {
   final List<void Function(bool on)> bluetoothHandlers =
       <void Function(bool on)>[];
 
-  /// "Mijani" (§15): told about every phone seen while something scans
+  /// "Mijani": told about every phone seen while something scans
   /// anyway (no scanning of its own), written when a scan ends.
   EncounterLog? encounters;
   Timer? _tick;
@@ -385,7 +402,7 @@ final class NearbyService extends ChangeNotifier {
   /// Conversations started by people nearby kept at most, and per address
   /// (or token) they came from (a wave is free to send, so a phone nearby
   /// could otherwise fill the list without end). Of those, one at a time
-  /// may wait for this person's answer (§15: one message from a stranger
+  /// may wait for this person's answer (one message from a stranger
   /// until you answer).
   static const int maxSessions = 50;
   static const int maxSessionsPerAddress = 3;
@@ -528,7 +545,7 @@ final class NearbyService extends ChangeNotifier {
   }
 
   /// Shows the token of the current slot. A new token restarts advertising,
-  /// which gives the phone a new Bluetooth address with it (S6).
+  /// which gives the phone a new Bluetooth address with it.
   Future<bool> _advertise({bool force = false}) async {
     final int slot = nearbySlot(_now());
     if (!force && slot == _advertisedSlot) {
@@ -572,7 +589,7 @@ final class NearbyService extends ChangeNotifier {
     }
   }
 
-  /// One short, low-power look around (§15: without the "W pobliżu" screen
+  /// One short, low-power look around (without the "W pobliżu" screen
   /// the phone only peeks now and then, to save the battery). Who is in
   /// range goes to "Mijani" ([encounters]). Skipped while something else
   /// is scanning; whoever starts scanning meanwhile takes the scan over.
@@ -730,7 +747,7 @@ final class NearbyService extends ChangeNotifier {
       Uint8List.fromList(utf8.encode(jsonEncode(json)));
 
   /// Says hello to [person] over Bluetooth: they get this phone's pseudonym
-  /// and [text] — no account and no address (S5); the address goes only to
+  /// and [text] — no account and no address; the address goes only to
   /// someone who answers ([kNearbyReplyVersion]).
   Future<NearbySession?> wave(NearbyPerson person, String text) async {
     final String message = _clip(text.trim(), kNearbyHelloMaxLength);
@@ -812,7 +829,7 @@ final class NearbyService extends ChangeNotifier {
 
   /// Like [waveAll], but when the radio is not scanning it first looks
   /// around for [listen] (to find the phones to send to) and then stops
-  /// again (an alarm told to phones nearby, §16.3).
+  /// again (an alarm told to phones nearby).
   Future<int> waveAround(
     Map<String, dynamic> json, {
     Duration listen = const Duration(seconds: 6),
@@ -848,7 +865,7 @@ final class NearbyService extends ChangeNotifier {
   /// [device]: the Bluetooth address of the phone that wrote it.
   /// [alarmsElsewhere]: another part of the app (the Android background
   /// service, or the app itself) answers alarm waves right now, so they are
-  /// not handed on here — the alarm rings once (§16.3).
+  /// not handed on here — the alarm rings once.
   void _onWave(
     Uint8List data, {
     String device = '',

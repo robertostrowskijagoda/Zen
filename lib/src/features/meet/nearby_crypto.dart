@@ -8,11 +8,11 @@ import 'package:flutter/foundation.dart';
 String nearbyHex(List<int> bytes) =>
     bytes.map((int x) => x.toRadixString(16).padLeft(2, '0')).join();
 
-/// Bluetooth wave version of an alarm told to phones nearby (§16.3).
+/// Bluetooth wave version of an alarm told to phones nearby.
 ///
 /// Built unsigned for everyone, and signed with the key of one pair of
 /// friends ([FriendNearbyKey.pair]) for a friend: only that friend can
-/// check it, and no other friend can make it (S6). `t` is the pair's id
+/// check it, and no other friend can make it. `t` is the pair's id
 /// for the wave's slot ([nearbyPairId]).
 const int kAlarmWaveVersion = 6;
 
@@ -25,7 +25,7 @@ final RegExp kAlarmIdPattern = RegExp(r'^[0-9A-Za-z_-]{1,40}$');
 
 final RegExp _hex32 = RegExp(r'^[0-9a-f]{32}$');
 
-/// An alarm wave heard over Bluetooth (§16.3).
+/// An alarm wave heard over Bluetooth.
 ///
 /// `{v, id, at, end?, t?, m?}`: `t` is the pair's id — friends look up who
 /// it is — and `m` the MAC over all of it. Without `t` and `m` the wave is
@@ -155,7 +155,7 @@ String _pairMac(
   ).sublist(0, 16),
 );
 
-// ---- per-friend keys (S6) ----
+// ---- per-friend keys ----
 //
 // Each person keeps a private nearby key ([NearbyOwnKeys]) that never
 // leaves the phone. From it come:
@@ -196,6 +196,9 @@ const String kNearbyPairKeyPrefix = 'p:';
 
 /// Bytes of the hint shown after the token (a quick filter for friends).
 const int kNearbyHintLength = 4;
+
+/// Bytes the radio shows in one slot: the token, then the hint.
+const int kNearbyAdvertBytes = 16 + kNearbyHintLength;
 
 List<int> _hmac(List<int> key, String text) =>
     crypto.Hmac(crypto.sha256, key).convert(utf8.encode(text)).bytes;
@@ -302,6 +305,34 @@ final class NearbyOwnKeys {
   /// What the radio shows in [slot]: the token, then the hint.
   Uint8List advert(int slot) =>
       Uint8List.fromList(<int>[...token(slot), ...nearbyHint(maskKey, slot)]);
+
+  /// [advert] of each of [count] slots from [firstSlot] on, one after
+  /// another ([kNearbyAdvertBytes] each). Each chain is hashed once from its
+  /// seed to the last slot needed and then walked back one hash per slot
+  /// (the value of a slot is the hash of the next one's), so a week costs a
+  /// few thousand hashes, not a few million.
+  Uint8List adverts(int firstSlot, int count) {
+    final Uint8List out = Uint8List(max(0, count) * kNearbyAdvertBytes);
+    int slot = firstSlot + count - 1;
+    while (count > 0 && slot >= firstSlot) {
+      final int chain = nearbyChainOf(slot);
+      final int from = max(firstSlot, chain * kNearbyChainSlots);
+      List<int> value = chainValue(slot);
+      for (int s = slot; s >= from; s--) {
+        if (s != slot) {
+          value = _chainStep(value);
+        }
+        final List<int> mask = nearbyMask(maskKey, s);
+        final int at = (s - firstSlot) * kNearbyAdvertBytes;
+        for (int i = 0; i < 16; i++) {
+          out[at + i] = value[i] ^ mask[i];
+        }
+        out.setRange(at + 16, at + kNearbyAdvertBytes, nearbyHint(maskKey, s));
+      }
+      slot = from - 1;
+    }
+    return out;
+  }
 
   /// What [friend] (a normalised address) gets at [now]: the mask key, their
   /// pair key and the anchors of the current and the next chain. Stored as

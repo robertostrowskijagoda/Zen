@@ -35,7 +35,7 @@ Future<void> _raceNewKey({
     'to': to.service.profile!.key,
     'b': body,
   };
-  final Uint8List sig = await old.sign(canonicalJsonBytes(signed));
+  final Uint8List sig = await old.signWithKey(canonicalJsonBytes(signed));
   await from.doorSend(to.inbox!, <String, dynamic>{
     ...signed,
     's': b64(sig),
@@ -95,7 +95,7 @@ final class _Phone implements EventHost {
 
   bool online = true;
 
-  /// A resident lets in whoever knocks right away (§18.2); off, knocks wait
+  /// A resident lets in whoever knocks right away; off, knocks wait
   /// for [NeighborsService.acceptKnock].
   bool autoOpen = true;
   final List<RuntimeSystemNotification> shown = <RuntimeSystemNotification>[];
@@ -230,7 +230,7 @@ void main() {
     },
   );
 
-  test('the door code never carries the residents addresses (§18.2)', () async {
+  test('the door code never carries the residents addresses', () async {
     final Map<String, _Phone> net = <String, _Phone>{};
     final _Phone ania = _Phone(net, 'ania');
     final _Phone ola = _Phone(net, 'ola');
@@ -281,7 +281,7 @@ void main() {
   });
 
   test('neighbours see doors and resident keys only: a resident\'s own '
-      'address only after "Pokaż mój profil" (§18.2)', () async {
+      'address only after "Pokaż mój profil"', () async {
     final Map<String, _Phone> net = <String, _Phone>{};
     final _Phone ania = _Phone(net, 'ania');
     final _Phone ola = _Phone(net, 'ola');
@@ -413,7 +413,7 @@ void main() {
   });
 
   test('a knock waits for a resident: nothing goes back before "Wpuść", '
-      'refused and expired knocks stay unanswered (§18.2)', () async {
+      'refused and expired knocks stay unanswered', () async {
     final Map<String, _Phone> net = <String, _Phone>{};
     final _Phone ania = _Phone(net, 'ania')..autoOpen = false;
     final _Phone bartek = _Phone(net, 'bartek');

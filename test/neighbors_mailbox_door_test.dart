@@ -159,7 +159,7 @@ final class _Phone implements EventHost {
   bool online = true;
   final Set<String> friendSet = <String>{};
 
-  /// This phone's mailboxes (the relay layer's choice, §7).
+  /// This phone's mailboxes (the relay layer's choice).
   List<String>? boxes;
   final List<_Out> outbox = <_Out>[];
   final List<Map<String, dynamic>> sent = <Map<String, dynamic>>[];

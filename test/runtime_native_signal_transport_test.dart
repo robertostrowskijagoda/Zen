@@ -140,81 +140,83 @@ void main() {
     expect(runtime.snapshot.health, RuntimeTransportHealth.stopped);
   });
 
-  test('the flat door runs with the node and comes back after a restart '
-      '(§18.2)', () async {
-    final List<String> doorCalls = <String>[];
-    final List<List<String>> mailboxCalls = <List<String>>[];
-    final List<String> doorSent = <String>[];
-    final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.live(
-      bootstrap: () async => RuntimeNodeSession(
-        transport: MemorySignalTransport(),
-        snapshot: RuntimeTransportSnapshot.started(
-          localAddress: '200:1111:2222:3333:4444:5555:6666:7777',
-          peers: 1,
+  test(
+    'the flat door runs with the node and comes back after a restart',
+    () async {
+      final List<String> doorCalls = <String>[];
+      final List<List<String>> mailboxCalls = <List<String>>[];
+      final List<String> doorSent = <String>[];
+      final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.live(
+        bootstrap: () async => RuntimeNodeSession(
+          transport: MemorySignalTransport(),
+          snapshot: RuntimeTransportSnapshot.started(
+            localAddress: '200:1111:2222:3333:4444:5555:6666:7777',
+            peers: 1,
+          ),
+          startDoor: (String seed) {
+            doorCalls.add('start $seed');
+            return '200:dddd::${seed.substring(0, 2)}';
+          },
+          stopDoor: () => doorCalls.add('stop'),
+          setMailboxDoors: mailboxCalls.add,
+          sendFromDoor: (String to, Map<String, dynamic> payload) async =>
+              doorSent.add('$to ${payload['type']}'),
         ),
-        startDoor: (String seed) {
-          doorCalls.add('start $seed');
-          return '200:dddd::${seed.substring(0, 2)}';
-        },
-        stopDoor: () => doorCalls.add('stop'),
-        setMailboxDoors: mailboxCalls.add,
-        sendFromDoor: (String to, Map<String, dynamic> payload) async =>
-            doorSent.add('$to ${payload['type']}'),
-      ),
-    );
-    addTearDown(runtime.dispose);
+      );
+      addTearDown(runtime.dispose);
 
-    // Asked for before the node is up: it starts with the node.
-    runtime.setDoorKey('aa');
-    // So do the mailbox doors run for friends (flat_door_mail.dart).
-    runtime.setMailboxDoorKeys(<String>['cc']);
-    expect(mailboxCalls, isEmpty);
-    expect(runtime.doorAddress, isNull);
-    await runtime.start();
-    expect(runtime.doorAddress, '200:dddd::aa');
-    expect(doorCalls, <String>['start aa']);
-    // Traffic to neighbour flats goes out from the door.
-    expect(
-      await runtime.sendFromDoor('200::9', <String, dynamic>{
-        'type': 'flat_msg',
-      }),
-      isTrue,
-    );
-    expect(doorSent, <String>['200::9 flat_msg']);
+      // Asked for before the node is up: it starts with the node.
+      runtime.setDoorKey('aa');
+      // So do the mailbox doors run for friends (flat_door_mail.dart).
+      runtime.setMailboxDoorKeys(<String>['cc']);
+      expect(mailboxCalls, isEmpty);
+      expect(runtime.doorAddress, isNull);
+      await runtime.start();
+      expect(runtime.doorAddress, '200:dddd::aa');
+      expect(doorCalls, <String>['start aa']);
+      // Traffic to neighbour flats goes out from the door.
+      expect(
+        await runtime.sendFromDoor('200::9', <String, dynamic>{
+          'type': 'flat_msg',
+        }),
+        isTrue,
+      );
+      expect(doorSent, <String>['200::9 flat_msg']);
 
-    runtime.setDoorKey('aa');
-    expect(doorCalls, hasLength(1), reason: 'the same key keeps the door');
-    runtime.setDoorKey('bb');
-    expect(runtime.doorAddress, '200:dddd::bb');
+      runtime.setDoorKey('aa');
+      expect(doorCalls, hasLength(1), reason: 'the same key keeps the door');
+      runtime.setDoorKey('bb');
+      expect(runtime.doorAddress, '200:dddd::bb');
 
-    expect(mailboxCalls, <List<String>>[
-      <String>['cc'],
-    ]);
+      expect(mailboxCalls, <List<String>>[
+        <String>['cc'],
+      ]);
 
-    await runtime.stop();
-    expect(runtime.doorAddress, isNull);
-    await runtime.start();
-    expect(runtime.doorAddress, '200:dddd::bb');
-    expect(mailboxCalls.last, <String>['cc']);
-    runtime.setMailboxDoorKeys(const <String>[]);
-    expect(mailboxCalls.last, isEmpty);
+      await runtime.stop();
+      expect(runtime.doorAddress, isNull);
+      await runtime.start();
+      expect(runtime.doorAddress, '200:dddd::bb');
+      expect(mailboxCalls.last, <String>['cc']);
+      runtime.setMailboxDoorKeys(const <String>[]);
+      expect(mailboxCalls.last, isEmpty);
 
-    runtime.setDoorKey(null);
-    expect(runtime.doorAddress, isNull);
-    expect(doorCalls.last, 'stop');
-    // No door, nothing goes out from it.
-    expect(
-      await runtime.sendFromDoor('200::9', <String, dynamic>{
-        'type': 'flat_msg',
-      }),
-      isFalse,
-    );
-    expect(doorSent, hasLength(1));
-    await runtime.stop();
-  });
+      runtime.setDoorKey(null);
+      expect(runtime.doorAddress, isNull);
+      expect(doorCalls.last, 'stop');
+      // No door, nothing goes out from it.
+      expect(
+        await runtime.sendFromDoor('200::9', <String, dynamic>{
+          'type': 'flat_msg',
+        }),
+        isFalse,
+      );
+      expect(doorSent, hasLength(1));
+      await runtime.stop();
+    },
+  );
 
   test('what comes to the doors reaches only the door stream; only flat '
-      'frames come through a door (§18.2)', () async {
+      'frames come through a door', () async {
     final MemorySignalTransport node = MemorySignalTransport();
     final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.live(
       bootstrap: () async => RuntimeNodeSession(

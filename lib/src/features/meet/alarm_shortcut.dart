@@ -10,7 +10,7 @@ import 'package:zen/src/features/meet/meet_service.dart';
 /// alarm much later.
 const Duration kAlarmShortcutMaxDelay = Duration(minutes: 2);
 
-/// What the power-button shortcut did (§16.3).
+/// What the power-button shortcut did.
 enum ShortcutAlarmResult {
   /// The alarm went out.
   raised,

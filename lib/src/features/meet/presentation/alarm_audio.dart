@@ -14,7 +14,7 @@ import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 
-/// Records sound while this person's alarm runs (§16.3): pieces of
+/// Records sound while this person's alarm runs: pieces of
 /// [clipLength], each sent to the friends who got the alarm as soon as it
 /// is ready, at most [kAlarmMaxClips] of them.
 final class AlarmAudioPump {
@@ -66,8 +66,8 @@ final class AlarmAudioPump {
   }
 
   /// One piece: the sound and how long it is, or `null` (no microphone or
-  /// no permission). Also what the locked Android service records with
-  /// (the alarm kit, §16.3).
+  /// no permission). Also what the locked Android service records with.
+  /// (the alarm kit).
   static Future<(Uint8List, int)?> recordClip(bool Function() cancelled) async {
     final AudioRecorder recorder = AudioRecorder();
     String? path;

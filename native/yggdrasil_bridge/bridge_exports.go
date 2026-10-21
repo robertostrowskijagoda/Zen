@@ -28,7 +28,7 @@ func YggGetVersion() *C.char {
 }
 
 // YggGetBuildInfoJson tells which Yggdrasil and which Go this library was
-// built with (§5.2: a Go security fix needs a rebuild even when no source
+// built with (a Go security fix needs a rebuild even when no source
 // changed).
 //
 //export YggGetBuildInfoJson

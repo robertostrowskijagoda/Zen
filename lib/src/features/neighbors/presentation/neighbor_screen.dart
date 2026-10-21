@@ -12,7 +12,7 @@ import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
 /// A neighbour's flat: their invitations, offers and needs, and messages
-/// between the two flats (§18.3).
+/// between the two flats.
 class NeighborScreen extends ConsumerStatefulWidget {
   const NeighborScreen({required this.flatKey, super.key});
 
@@ -55,7 +55,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
     await _service.sendMessage(widget.flatKey, t);
   }
 
-  /// The small chat about one invitation (§18.3): a thread with the flat,
+  /// The small chat about one invitation: a thread with the flat,
   /// answered by any of the residents.
   Future<void> _askAbout(FlatItem item) async {
     final TextEditingController input = TextEditingController();
@@ -267,7 +267,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
   }
 
   /// Two different new keys came for this household: the one whose door
-  /// code is scanned stays (§18.1).
+  /// code is scanned stays.
   Future<void> _scanTheirDoor() async {
     final String? text = await scanOrPaste(
       context,

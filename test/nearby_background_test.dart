@@ -1,14 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/meet/alarm_shortcut.dart';
+import 'package:zen/src/features/meet/encounters.dart';
+import 'package:zen/src/features/meet/locked_nearby.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/nearby_keeper.dart';
+import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 
@@ -19,6 +23,10 @@ final class _Radio implements NearbyRadio {
   bool permitted = true;
   bool enabled = true;
   Uint8List? advertised;
+
+  /// The tokens handed over in advance, and the slot of the first.
+  Uint8List? schedule;
+  int? scheduleStart;
   bool scanning = false;
   bool? lowPower;
   int scansStarted = 0;
@@ -46,20 +54,29 @@ final class _Radio implements NearbyRadio {
   @override
   Future<bool> requestEnable() async => enabled;
 
-  /// Bluetooth switched on or off on this phone.
-  void bluetooth(bool on) {
-    enabled = on;
-    _events.add(<Object?, Object?>{'type': 'bluetooth', 'on': on});
-  }
-
   @override
   Future<bool> startAdvertising(Uint8List token) async {
     advertised = token;
+    schedule = null;
     return true;
   }
 
   @override
-  Future<void> stopAdvertising() async => advertised = null;
+  Future<bool> startAdvertisingSchedule(
+    int firstSlot,
+    Uint8List adverts,
+  ) async {
+    advertised = null;
+    schedule = adverts;
+    scheduleStart = firstSlot;
+    return true;
+  }
+
+  @override
+  Future<void> stopAdvertising() async {
+    advertised = null;
+    schedule = null;
+  }
 
   @override
   Future<bool> startScan({bool lowPower = false}) async {
@@ -82,7 +99,7 @@ final class _Radio implements NearbyRadio {
   }
 
   /// A phone nearby ([device]) waved [json] at this one. [elsewhere]: the
-  /// other side of the app answers alarm waves now.
+  /// other engine answers alarm waves now.
   void hear(
     Map<String, dynamic> json, {
     bool elsewhere = false,
@@ -114,7 +131,7 @@ final class _Phone implements MeetHost {
       host: this,
       store: MeetStore(MemoryLedgerDisk()),
       now: () => clock,
-    );
+    )..ownAddress = () => address;
     nearby = NearbyService(
       radio: radio,
       meet: meet,
@@ -185,211 +202,395 @@ Future<void> _settle() async {
   }
 }
 
+/// The nearby kit [phone]'s app would leave the service, as the service
+/// reads it back.
+Future<NearbyKit> _kitOf(_Phone phone, {bool recording = true}) async {
+  NearbyKit? written;
+  final NearbyKitKeeper keeper = NearbyKitKeeper(
+    meet: phone.meet,
+    write: (NearbyKit kit) async => written = kit,
+    now: () => phone.clock,
+  );
+  expect(await keeper.refresh(recording: recording), isTrue);
+  return NearbyKit.fromJson(jsonDecode(jsonEncode(written!.toJson())))!;
+}
+
+/// The service's records, as the inbox keeps them.
+final class _Kept {
+  final List<SignalTransportFrame> records = <SignalTransportFrame>[];
+
+  Future<bool> keep(SignalTransportFrame record) async {
+    records.add(decodeInboxFrame(encodeInboxFrame(record))!);
+    return true;
+  }
+}
+
 void main() {
-  test('with "Alarm do pobliża" on, the background service shows the phone '
-      'and a friend\'s alarm wave rings like one from the network', () async {
-    final _Net net = _Net();
-    // Bob is Ania's friend but not "przyjaciel": her alarm reaches him only
-    // over Bluetooth.
-    final _Phone ania = _Phone(
-      net,
-      'ania',
-      <String>['bob', 'cyryl'],
-      close: <String>['cyryl'],
-    );
-    final _Phone bob = _Phone(net, 'bob', <String>['ania']);
-    await ania.meet.shareNearbySecret('bob');
-    await bob.meet.setAlarmNearby(true);
-    // Hidden by default: Bob chose to be seen.
-    await bob.meet.setNearbyVisible(true);
-
-    final List<bool> announced = <bool>[];
-    final NearbyKeeper keeper = NearbyKeeper(
-      nearby: bob.nearby,
-      inService: true,
-      announceAlarmReceiver: (bool on) async => announced.add(on),
-      now: () => bob.clock,
-    );
-    await keeper.start();
-    expect(keeper.receivesAlarms, isTrue);
-    expect(announced, <bool>[true]);
-    expect(
-      bob.radio.advertised,
-      isNotNull,
-      reason: 'phones around wave only at phones they see',
-    );
-    expect(bob.meet.nearbyBroadcast, isNotNull);
-
-    final AlarmRecord alarm = await ania.meet.raiseAlarm(note: 'pomocy');
-    expect(bob.meet.book.alarm(alarm.id), isNull);
-    // The wave for everyone is unsigned; Bob, who has her keys for him
-    // alone, gets one signed for the pair (S6).
-    expect(ania.meet.alarmWave(alarm), isNot(contains('t')));
-    final Map<String, dynamic> wave = ania.meet.alarmWave(alarm, to: 'bob');
-    expect(wave['v'], kAlarmWaveVersion);
-    expect(wave['m'], isA<String>());
-    final String aniaToken = wave['t'] as String;
-    bob.radio.hear(wave, device: 'mac-ania');
-    await _settle();
-    await keeper.pendingWave;
-    final AlarmRecord heard = bob.meet.book.alarm(alarm.id)!;
-    expect(heard.from, 'ania');
-    expect(heard.nearby, isTrue);
-    expect(heard.isActive, isTrue);
-    expect(bob.shown.single.isRingingCall, isTrue);
-    expect(bob.shown.single.category, RuntimeSystemNotificationCategory.alarm);
-    expect(bob.shown.single.title, contains('ANIA'));
-
-    // Heard again (the same wave from another try): it rings once.
-    bob.radio.hear(wave, device: 'mac-ania');
-    await _settle();
-    await keeper.pendingWave;
-    expect(bob.shown, hasLength(1));
-
-    // Someone who saw her wave knows her token, not her key: a wave
-    // with a made-up signature never rings, it is a quiet unchecked note.
-    bob.radio.hear(<String, dynamic>{
-      'v': kAlarmWaveVersion,
-      'id': 'falszywy1',
-      'at': bob.clock,
-      't': aniaToken,
-      'm': '0' * 32,
-    }, device: 'mac-obcy');
-    await _settle();
-    await keeper.pendingWave;
-    expect(bob.meet.book.alarm('falszywy1'), isNull);
-    expect(bob.shown, hasLength(2));
-    expect(bob.shown.last.title, contains('Niesprawdzone'));
-    expect(bob.shown.last.isRingingCall, isFalse);
-    expect(
-      bob.shown.last.category,
-      isNot(RuntimeSystemNotificationCategory.alarm),
-    );
-
-    // The same phone again within 10 minutes: nothing more.
-    bob.radio.hear(<String, dynamic>{
-      'v': kAlarmWaveVersion,
-      'id': 'falszywy2',
-      'at': bob.clock,
-    }, device: 'mac-obcy');
-    await _settle();
-    await keeper.pendingWave;
-    expect(bob.shown, hasLength(2));
-
-    // While the app answers alarm waves itself, the service leaves them.
-    bob.radio.hear(<String, dynamic>{
-      'v': kAlarmWaveVersion,
-      'id': 'obcy2',
-      'at': bob.clock,
-    }, elsewhere: true);
-    await _settle();
-    expect(bob.shown, hasLength(2));
-
-    await keeper.close();
-    expect(announced, <bool>[true, false]);
-    expect(bob.meet.nearbyBroadcast, isNull);
-    bob.radio.hear(<String, dynamic>{
-      'v': kAlarmWaveVersion,
-      'id': 'obcy3',
-      'at': bob.clock,
-    });
-    await _settle();
-    expect(bob.shown, hasLength(2));
-    await bob.nearby.close();
+  test('the tokens worked out in advance are the very tokens of each slot, '
+      'across a chain\'s end too', () {
+    final NearbyOwnKeys keys = NearbyOwnKeys(newNearbyPrivateKey(Random(3)));
+    final int first = kNearbyChainSlots - 3;
+    final Uint8List all = keys.adverts(first, 6);
+    expect(all.length, 6 * kNearbyAdvertBytes);
+    for (int i = 0; i < 6; i++) {
+      expect(
+        all.sublist(i * kNearbyAdvertBytes, (i + 1) * kNearbyAdvertBytes),
+        keys.advert(first + i),
+      );
+    }
+    expect(keys.adverts(5, 0), isEmpty);
   });
 
-  test('without "Alarm do pobliża", hidden, or without Bluetooth permission '
-      'the background service does not answer alarm waves; while visible '
-      'it shows the phone all the time', () async {
+  test('the nearby kit holds a week of tokens but no key of this person, '
+      'friends\' keys only, and is written again only on a change or a new '
+      'day', () async {
     final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania', <String>['bob']);
     final _Phone bob = _Phone(net, 'bob', <String>['ania']);
-    // Neither the look around nor alarms: visible still means shown (cheap
-    // low-power advertising).
+    await ania.meet.shareNearbySecret('bob');
     await bob.meet.setNearbyVisible(true);
-    await bob.meet.setNearbyBackgroundScan(false);
-    final List<bool> announced = <bool>[];
-    final NearbyKeeper keeper = NearbyKeeper(
-      nearby: bob.nearby,
-      inService: true,
-      announceAlarmReceiver: (bool on) async => announced.add(on),
+    await bob.meet.setAlarmNearby(true);
+
+    int writes = 0;
+    NearbyKit? kit;
+    final NearbyKitKeeper keeper = NearbyKitKeeper(
+      meet: bob.meet,
+      write: (NearbyKit k) async {
+        writes++;
+        kit = k;
+      },
       now: () => bob.clock,
     );
-    await keeper.start();
-    expect(keeper.receivesAlarms, isFalse);
-    expect(bob.radio.advertised, isNotNull);
+    expect(await keeper.refresh(recording: true), isTrue);
+    final NearbyKit written = kit!;
+    final String private = bob.meet.book.nearbyPrivate!;
+    final int slot = nearbySlot(bob.clock);
+    expect(written.visible, isTrue);
+    expect(written.alarms, isTrue);
+    expect(written.covers(slot), isTrue);
+    expect(written.covers(slot + 7 * 144), isTrue, reason: 'a week ahead');
+    expect(written.advertAt(slot), NearbyOwnKeys(private).advert(slot));
+    expect(written.friends.keys.toList(), <String>['ania']);
+    final String json = jsonEncode(written.toJson());
+    expect(json, isNot(contains(private)));
+    expect(
+      NearbyKit.fromJson(jsonDecode(json))!.advertAt(slot + 10),
+      isNotNull,
+    );
+
+    expect(await keeper.refresh(recording: true), isFalse);
+    expect(writes, 1);
+    // A friend's key from someone who is no friend (any more) stays out.
+    await bob.meet.handle(
+      SignalTransportFrame(
+        from: 'cyryl',
+        payload: <String, dynamic>{
+          'type': MeetTypes.nearbyKey,
+          'z': NearbyOwnKeys(
+            newNearbyPrivateKey(Random(5)),
+          ).materialFor('bob', bob.clock),
+        },
+        receivedAtMillis: 0,
+      ),
+    );
+    expect(await keeper.refresh(recording: true), isFalse);
+
+    await bob.meet.setNearbyBackgroundScan(true);
+    expect(await keeper.refresh(recording: true), isTrue);
+    expect(kit!.look, isTrue);
+    bob.clock += Duration.millisecondsPerDay;
+    expect(await keeper.refresh(recording: true), isTrue);
+    expect(kit!.firstSlot, greaterThan(written.firstSlot));
+
+    // Hidden: no tokens at all, and no alarm waves (nobody waves at a phone
+    // they cannot see).
+    await bob.meet.setNearbyVisible(false);
+    expect(await keeper.refresh(recording: true), isTrue);
+    expect(kit!.adverts, isNull);
+    expect(kit!.visible, isFalse);
+    expect(kit!.alarms, isFalse);
+  });
+
+  test(
+    'locked or closed, the service shows the phone from the kit and rings '
+    'a friend\'s checked alarm wave; the app takes it after unlock',
+    () async {
+      final _Net net = _Net();
+      // Bob is Ania's friend but not "przyjaciel": her alarm reaches him only
+      // over Bluetooth.
+      final _Phone ania = _Phone(
+        net,
+        'ania',
+        <String>['bob', 'cyryl'],
+        close: <String>['cyryl'],
+      );
+      final _Phone bob = _Phone(net, 'bob', <String>['ania']);
+      await ania.meet.shareNearbySecret('bob');
+      await bob.meet.setAlarmNearby(true);
+      await bob.meet.setNearbyVisible(true);
+      final NearbyKit kit = await _kitOf(bob);
+
+      final _Kept kept = _Kept();
+      final MemoryRuntimeSystemNotificationService notices =
+          MemoryRuntimeSystemNotificationService();
+      final List<bool> claimed = <bool>[];
+      final List<List<String>> keys = <List<String>>[];
+      final LockedNearby locked = LockedNearby(
+        kit: kit,
+        radio: bob.radio,
+        keep: kept.keep,
+        notices: notices,
+        claimAlarms: (bool on) async => claimed.add(on),
+        alarmKeys: (List<String> k) async => keys.add(k),
+        now: () => bob.clock,
+      );
+      await locked.start();
+      expect(locked.receivesAlarms, isTrue);
+      expect(claimed, <bool>[true]);
+      expect(keys.single, <String>[
+        FriendNearbyKey.parse(
+          bob.meet.book.friendNearbySecrets['ania'],
+        )!.radioKey,
+      ]);
+      // Shown from the tokens worked out in advance: the radio side changes
+      // them by itself.
+      expect(bob.radio.schedule, kit.adverts);
+      expect(bob.radio.scheduleStart, kit.firstSlot);
+
+      final AlarmRecord alarm = await ania.meet.raiseAlarm(note: 'pomocy');
+      expect(bob.meet.book.alarm(alarm.id), isNull);
+      final Map<String, dynamic> wave = ania.meet.alarmWave(alarm, to: 'bob');
+      final String aniaToken = wave['t'] as String;
+      bob.radio.hear(wave, device: 'mac-ania');
+      await _settle();
+      await locked.pendingWave;
+      final RuntimeSystemNotification ring = notices.activeNotifications.single;
+      expect(ring.isRingingCall, isTrue);
+      expect(ring.category, RuntimeSystemNotificationCategory.alarm);
+      expect(ring.slotKey, kLockedAlarmSlot);
+      expect(
+        '${ring.title} ${ring.body}',
+        isNot(anyOf(contains('ANIA'), contains('ania'))),
+        reason: 'no names while locked',
+      );
+      final SignalTransportFrame record = kept.records.single;
+      expect(record.from, 'bob');
+      expect(record.payload['type'], MeetTypes.ownNearbyAlarm);
+      expect(record.payload['f'], 'ania');
+      expect(record.payload['id'], alarm.id);
+
+      // Heard again: it rings once.
+      bob.radio.hear(wave, device: 'mac-ania');
+      await _settle();
+      await locked.pendingWave;
+      expect(kept.records, hasLength(1));
+
+      // Her token with a made-up signature never rings: a quiet unchecked
+      // note, once per phone.
+      bob.radio.hear(<String, dynamic>{
+        'v': kAlarmWaveVersion,
+        'id': 'falszywy1',
+        'at': bob.clock,
+        't': aniaToken,
+        'm': '0' * 32,
+      }, device: 'mac-obcy');
+      await _settle();
+      await locked.pendingWave;
+      expect(kept.records, hasLength(1));
+      final RuntimeSystemNotification note = notices.activeNotifications
+          .firstWhere(
+            (RuntimeSystemNotification n) =>
+                n.slotKey == MeetService.unverifiedWaveSlot,
+          );
+      expect(note.title, contains('Niesprawdzone'));
+      expect(note.isRingingCall, isFalse);
+      bob.radio.hear(<String, dynamic>{
+        'v': kAlarmWaveVersion,
+        'id': 'falszywy2',
+        'at': bob.clock,
+      }, device: 'mac-obcy');
+      await _settle();
+      await locked.pendingWave;
+      expect(notices.activeNotifications, hasLength(2));
+      expect(note.id, 'alarm-near-falszywy1');
+
+      // The app's engine answers them now: left alone.
+      bob.radio.hear(<String, dynamic>{
+        'v': kAlarmWaveVersion,
+        'id': 'obcy2',
+        'at': bob.clock,
+      }, elsewhere: true);
+      await _settle();
+      expect(kept.records, hasLength(1));
+
+      await locked.stop();
+      expect(claimed, <bool>[true, false]);
+      expect(bob.radio.schedule, isNull, reason: 'the app shows it again');
+
+      // After unlock the app takes the alarm as heard nearby, from its own
+      // service only, and confirms it to her; it rang already.
+      await bob.meet.handle(
+        SignalTransportFrame(
+          from: 'ania',
+          payload: <String, dynamic>{
+            'type': MeetTypes.ownNearbyAlarm,
+            'f': 'ania',
+            'id': 'podrobiony',
+            'at': bob.clock,
+          },
+          receivedAtMillis: 0,
+        ),
+      );
+      expect(bob.meet.book.alarm('podrobiony'), isNull);
+      await bob.meet.handle(record);
+      final AlarmRecord heard = bob.meet.book.alarm(alarm.id)!;
+      expect(heard.from, 'ania');
+      expect(heard.nearby, isTrue);
+      expect(heard.isActive, isTrue);
+      expect(bob.shown, isEmpty);
+      expect(bob.sent.last.$1, 'ania');
+      expect(bob.sent.last.$2['type'], MeetTypes.alarmAck);
+    },
+  );
+
+  test('without "Alarm do pobliża" the locked service leaves alarm waves; '
+      'hidden, it shows nothing', () async {
+    final _Net net = _Net();
+    final _Phone bob = _Phone(net, 'bob', <String>['ania']);
+    await bob.meet.setNearbyVisible(true);
+    final _Kept kept = _Kept();
+    final MemoryRuntimeSystemNotificationService notices =
+        MemoryRuntimeSystemNotificationService();
+    final List<bool> claimed = <bool>[];
+    LockedNearby locked = LockedNearby(
+      kit: await _kitOf(bob),
+      radio: bob.radio,
+      keep: kept.keep,
+      notices: notices,
+      claimAlarms: (bool on) async => claimed.add(on),
+      now: () => bob.clock,
+    );
+    await locked.start();
+    expect(locked.receivesAlarms, isFalse);
+    expect(bob.radio.schedule, isNotNull, reason: 'visible means shown');
     bob.radio.hear(<String, dynamic>{
       'v': kAlarmWaveVersion,
       'id': 'x1',
       'at': bob.clock,
     });
     await _settle();
-    expect(bob.shown, isEmpty);
+    expect(notices.activeNotifications, isEmpty);
+    expect(await locked.lookNow(), isFalse, reason: 'no look around chosen');
+    expect(bob.radio.scansStarted, 0);
+    await locked.stop();
 
-    // Hidden stays hidden, even with the option on.
+    // Hidden stays hidden, even with the alarm option on.
     await bob.meet.setNearbyVisible(false);
     await bob.meet.setAlarmNearby(true);
-    await keeper.refresh();
-    expect(keeper.receivesAlarms, isFalse);
-    expect(bob.radio.advertised, isNull);
-
-    // No Activity in the background to ask for Bluetooth: nothing then.
-    await bob.meet.setNearbyVisible(true);
-    bob.radio.permitted = false;
-    await keeper.refresh();
-    expect(keeper.receivesAlarms, isFalse);
-    expect(bob.radio.advertised, isNull);
-
-    bob.radio.permitted = true;
-    await keeper.refresh();
-    expect(keeper.receivesAlarms, isTrue);
-    expect(bob.radio.advertised, isNotNull);
-    expect(announced, <bool>[true]);
-
-    // Turned off in the app: the next look at the settings lets go of the
-    // alarm waves; the phone stays visible.
-    await bob.meet.setAlarmNearby(false);
-    await keeper.refresh();
-    expect(keeper.receivesAlarms, isFalse);
-    expect(bob.radio.advertised, isNotNull);
-    expect(announced, <bool>[true, false]);
-    await keeper.close();
-    await bob.nearby.close();
-  });
-
-  test('Bluetooth switched off and on again: the background service shows '
-      'the phone again by itself', () async {
-    final _Net net = _Net();
-    final _Phone bob = _Phone(net, 'bob', <String>['ania']);
-    await bob.meet.setAlarmNearby(true);
-    await bob.meet.setNearbyVisible(true);
-    bob.radio.enabled = false;
-    final List<bool> announced = <bool>[];
-    final NearbyKeeper keeper = NearbyKeeper(
-      nearby: bob.nearby,
-      inService: true,
-      announceAlarmReceiver: (bool on) async => announced.add(on),
+    locked = LockedNearby(
+      kit: await _kitOf(bob),
+      radio: bob.radio,
+      keep: kept.keep,
+      notices: notices,
+      claimAlarms: (bool on) async => claimed.add(on),
       now: () => bob.clock,
     );
-    await keeper.start();
+    await locked.start();
+    expect(locked.receivesAlarms, isFalse);
+    expect(bob.radio.schedule, isNull);
     expect(bob.radio.advertised, isNull);
-    expect(keeper.receivesAlarms, isFalse);
+    await locked.stop();
+    expect(claimed, isEmpty);
+    expect(kept.records, isEmpty);
+  });
 
-    bob.radio.bluetooth(true);
-    await _settle();
-    expect(bob.radio.advertised, isNotNull);
-    expect(keeper.receivesAlarms, isTrue);
+  test('locked, the look around runs only with "Mijani" on, keeps friends '
+      'passed and the crowd count for the app, which merges them', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania', <String>['bob']);
+    final _Phone bob = _Phone(net, 'bob', <String>['ania']);
+    await ania.meet.shareNearbySecret('bob');
+    await bob.meet.setNearbyBackgroundScan(true);
+    bob.radio.around
+      ..add(<Object?, Object?>{
+        'type': 'seen',
+        'token': NearbyOwnKeys(
+          ania.meet.book.nearbyPrivate!,
+        ).advert(nearbySlot(bob.clock)),
+        'rssi': -65,
+        'device': 'mac-ania',
+      })
+      ..add(<Object?, Object?>{
+        'type': 'seen',
+        'token': Uint8List.fromList(List<int>.generate(20, (int i) => i + 1)),
+        'rssi': -80,
+        'device': 'mac-obcy',
+      });
 
-    bob.radio.bluetooth(false);
-    await _settle();
-    expect(bob.radio.advertised, isNull);
-    expect(keeper.receivesAlarms, isFalse);
-    expect(announced, <bool>[true, false]);
+    final _Kept kept = _Kept();
+    final MemoryRuntimeSystemNotificationService notices =
+        MemoryRuntimeSystemNotificationService();
+    final LockedNearby off = LockedNearby(
+      kit: await _kitOf(bob, recording: false),
+      radio: bob.radio,
+      keep: kept.keep,
+      notices: notices,
+      lookFor: const Duration(milliseconds: 5),
+      now: () => bob.clock,
+    );
+    await off.start();
+    expect(await off.lookNow(), isFalse, reason: '"Mijani" is off');
+    await off.stop();
+    expect(bob.radio.scansStarted, 0);
 
-    await keeper.close();
-    bob.radio.bluetooth(true);
-    await _settle();
-    expect(bob.radio.advertised, isNull, reason: 'closed: nothing applied');
-    await bob.nearby.close();
+    final LockedNearby locked = LockedNearby(
+      kit: await _kitOf(bob),
+      radio: bob.radio,
+      keep: kept.keep,
+      notices: notices,
+      place: () async => EncounterPlace.approximate(52.22971, 21.01224),
+      lookFor: const Duration(milliseconds: 5),
+      keepEvery: Duration.zero,
+      now: () => bob.clock,
+    );
+    await locked.start();
+    expect(await locked.lookNow(), isTrue);
+    expect(bob.radio.lowPower, isTrue);
+    expect(bob.radio.scanning, isFalse, reason: 'only a short look');
+    final SignalTransportFrame record = kept.records.single;
+    expect(record.from, 'bob');
+    expect(record.payload['type'], kKeptEncountersType);
+    expect(jsonEncode(record.payload), isNot(contains('mac-')));
+
+    // This person's own alarm wave looks around too: no look meanwhile.
+    final Completer<void> waving = Completer<void>();
+    final Future<int> held = locked.holdingRadio<int>(() async {
+      await waving.future;
+      return 1;
+    });
+    expect(await locked.lookNow(), isFalse);
+    waving.complete();
+    expect(await held, 1);
+    await locked.stop();
+
+    // After unlock the app merges it into "Mijani".
+    final EncounterLog log = EncounterLog(
+      disk: MemoryLedgerDisk(),
+      now: () => bob.clock,
+    );
+    await log.load();
+    await log.takeKept(record.payload);
+    final Encounter met = log.encounters.single;
+    expect(met.friend, 'ania');
+    expect(met.place, EncounterPlace.approximate(52.22971, 21.01224));
+    expect(log.crowds.single.count, 1);
+
+    // Off in the app: nothing is taken.
+    await log.setRecording(false);
+    await log.clear();
+    await log.takeKept(record.payload);
+    expect(log.encounters, isEmpty);
+    log.dispose();
   });
 
   test('the power-button shortcut raises the very alarm of the button: off '
@@ -443,8 +644,8 @@ void main() {
     );
   });
 
-  test('an alarm raised in the background service goes to phones nearby '
-      'too, when chosen', () async {
+  test('an alarm raised in the app goes to phones nearby too, when '
+      'chosen', () async {
     final _Net net = _Net();
     final _Phone ania = _Phone(
       net,
@@ -461,13 +662,9 @@ void main() {
       'rssi': -60,
       'device': 'mac-obcy',
     });
-    final NearbyKeeper keeper = NearbyKeeper(
-      nearby: ania.nearby,
-      inService: true,
-      waveListen: Duration.zero,
-      now: () => ania.clock,
-    );
-    await keeper.start();
+    // As `AlarmWatcher` wires it.
+    ania.meet.nearbyBroadcast = (Map<String, dynamic> wave) =>
+        ania.nearby.waveAround(wave, listen: Duration.zero);
 
     expect(await raiseAlarmFromShortcut(ania.meet), ShortcutAlarmResult.raised);
     expect(await ania.meet.pendingNearbyWave, 1);
@@ -484,31 +681,29 @@ void main() {
       isFalse,
       reason: 'it looked around only to send',
     );
-    await keeper.close();
     await ania.nearby.close();
   });
 
-  test('the look around runs every few minutes only when allowed, sees '
-      'friends without signing anything and leaves other scans '
-      'alone', () async {
+  test('in the app, the look around runs every few minutes only when allowed '
+      'and unlocked, sees friends without signing anything and leaves other '
+      'scans alone', () async {
     final _Net net = _Net();
     final _Phone ania = _Phone(net, 'ania', <String>['bob']);
     final _Phone bob = _Phone(net, 'bob', <String>['ania']);
     await ania.meet.shareNearbySecret('bob');
     bob.radio.around.add(<Object?, Object?>{
       'type': 'seen',
-      // Her token and hint now (S6), as her phone shows them.
+      // Her token and hint now, as her phone shows them.
       'token': NearbyOwnKeys(
         ania.meet.book.nearbyPrivate!,
       ).advert(nearbySlot(bob.clock)),
       'rssi': -65,
       'device': 'mac-ania',
     });
-    bool onScreen = true;
+    bool unlocked = true;
     final NearbyKeeper keeper = NearbyKeeper(
       nearby: bob.nearby,
-      inService: false,
-      active: () => onScreen,
+      active: () => unlocked,
       lookFor: const Duration(milliseconds: 5),
       now: () => bob.clock,
     );
@@ -523,20 +718,19 @@ void main() {
     await bob.meet.setNearbyBackgroundScan(true);
     expect(await keeper.lookIfDue(), isFalse, reason: 'not due yet');
     bob.clock += kNearbyLookEvery.inMilliseconds;
-    onScreen = false;
+    unlocked = false;
     expect(
       await keeper.lookIfDue(),
       isFalse,
-      reason: 'the background service looks while the app is away',
+      reason: 'the background service looks while the app is locked',
     );
-    onScreen = true;
+    unlocked = true;
     expect(await keeper.lookIfDue(), isTrue);
     expect(bob.radio.scansStarted, 1);
     expect(bob.radio.lowPower, isTrue);
     expect(bob.radio.scanning, isFalse, reason: 'only a short look');
     expect(bob.nearby.scanning, isFalse);
-    // Seen nearby is only a hint (§6.2): nothing is signed in the
-    // background.
+    // Seen nearby is only a hint: nothing is signed in the background.
     expect(
       bob.nearby.people.map((NearbyPerson p) => p.friend),
       contains('ania'),
@@ -571,13 +765,6 @@ void main() {
     );
     expect(
       MeetBook.fromJson(<String, dynamic>{'v': 1}).nearbyBackgroundScan,
-      isFalse,
-    );
-    await bob.meet.setNearbyBackgroundScan(false);
-    expect(
-      MeetBook.fromJson(
-        jsonDecode(jsonEncode(bob.meet.book.toJson())),
-      ).nearbyBackgroundScan,
       isFalse,
     );
     await keeper.close();
