@@ -16,6 +16,7 @@ Map<String, String> get kPowerNames => <String, String>{
   'content': t('Bany treści'),
   'reports': t('Przyjmowanie zgłoszeń'),
   'alarm': t('Ogłoszenia alarmowe'),
+  'posts': t('Pisanie do całej piramidy'),
 };
 
 /// Power: delegations, reports, bans, referenda, alarms, the rules,
@@ -72,11 +73,14 @@ class PyramidPower extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 for (final MapEntry<String, String> p in kPowerNames.entries)
-                  PyrOption(
-                    text: p.value,
-                    selected: power == p.key,
-                    onTap: () => set(() => power = p.key),
-                  ),
+                  // Writing to the whole pyramid is given by the head
+                  // alone ([_delegatePosts]).
+                  if (p.key != 'posts')
+                    PyrOption(
+                      text: p.value,
+                      selected: power == p.key,
+                      onTap: () => set(() => power = p.key),
+                    ),
                 const SizedBox(height: 8),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -143,6 +147,49 @@ class PyramidPower extends StatelessWidget {
     );
     if (context.mounted) {
       snack(context, t('Potrzebny podpis drugiej osoby ze szczytu.'));
+    }
+  }
+
+  /// The head lets somebody write to the whole pyramid, for some days.
+  Future<void> _delegatePosts(BuildContext context) async {
+    final String? to = await pickMember(
+      context,
+      s,
+      except: me,
+      title: t('Kto może pisać do całej piramidy?'),
+    );
+    if (to == null || !context.mounted) {
+      return;
+    }
+    final int? days = int.tryParse(
+      (await askText(
+                context,
+                title: t('Na ile dni'),
+                label: t('Liczba dni, np. 30'),
+                keyboard: TextInputType.number,
+              ) ??
+              '')
+          .trim(),
+    );
+    if (days == null || days <= 0 || !context.mounted) {
+      return;
+    }
+    final bool done =
+        await pyr.delegatePosts(to, until: pyr.now + days * 24 * 3600 * 1000) !=
+        null;
+    if (context.mounted) {
+      snack(
+        context,
+        done
+            ? t(
+                '{name} może pisać do całej piramidy do {date}.',
+                <String, Object?>{
+                  'name': s.members[to]?.name ?? '?',
+                  'date': pyrDate(pyr.now + days * 24 * 3600 * 1000),
+                },
+              )
+            : t('Nie udało się.'),
+      );
     }
   }
 
@@ -582,6 +629,13 @@ class PyramidPower extends StatelessWidget {
                 onPressed: () => unawaited(_delegate(context)),
                 icon: const Icon(Icons.badge_rounded),
                 label: Text(t('Deleguj')),
+              ),
+            if (s.head == me)
+              OutlinedButton.icon(
+                key: const Key('pyr-delegate-posts'),
+                onPressed: () => unawaited(_delegatePosts(context)),
+                icon: const Icon(Icons.campaign_rounded),
+                label: Text(t('Pisanie do całej piramidy')),
               ),
             if (_top)
               OutlinedButton.icon(

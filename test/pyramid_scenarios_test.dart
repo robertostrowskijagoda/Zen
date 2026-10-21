@@ -93,10 +93,17 @@ void main() {
       await w.approve('A1', PyrT.ban);
       expect(w['B1'].state!.silencedAt(a2, now()), isTrue);
 
-      // Level 1 (A): A's own cell is the rest of the top, 2 of 3 do it.
+      // Level 1 (A), the top: 2 of 3 of the top and most of level 2.
       await s.ban(target: a, kind: 'pause', until: now() + day);
       await w.net.run();
       await w.approve('B', PyrT.ban);
+      expect(
+        w['A2'].state!.silencedAt(a, now()),
+        isFalse,
+        reason: 'level 2 has not agreed',
+      );
+      await w.approve('A1', PyrT.ban);
+      await w.approve('B1', PyrT.ban);
       expect(w['A2'].state!.silencedAt(a, now()), isTrue);
 
       // Revoked, the delegation stops working from now on; what B already
@@ -176,10 +183,13 @@ void main() {
       expect(path('A2'), isNull);
       expect(w['S'].state!.members[w['A2'].myKey!]!.active, isFalse);
 
-      // B is removed by its own cell (S and A1), not by anybody else.
+      // B (in the top) is removed by its own cell (S and A1) and most of
+      // level 2 (B1, the only one there), not by anybody else.
       await w['S'].proposeRemove(w['B'].myKey!);
       await w.net.run();
       await w.approve('A1', PyrT.remove);
+      expect(path('B'), '1', reason: 'level 2 has not agreed');
+      await w.approve('B1', PyrT.remove);
       expect(path('B'), isNull);
       final PyramidState st = w['B1'].state!;
       expect(st.occupant.keys.toSet(), <String>{'', '0', '00'});

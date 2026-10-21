@@ -54,15 +54,16 @@ final class FeedAlarmItem extends FeedItem {
   String get id => 'alarm-${alarm.id}';
 }
 
-/// The chips the Tablica shows for [pyramid]: „Wszystko”, „Znajomi” and
-/// „Przyjaciele” always; „Piramida” and „Kraj” only when there is something
-/// of them (always for a member).
+/// The chips the Tablica shows for [pyramid]: „Wszystko”, „Znajomi”,
+/// „Przyjaciele” and „Kraj” always (the countries followed there are
+/// picked in it); „Piramida” only when there is something of it (always
+/// for a member).
 List<FeedFilter> feedFiltersFor(PyramidFeed pyramid) => <FeedFilter>[
   FeedFilter.all,
   FeedFilter.friends,
   FeedFilter.close,
   if (pyramid.showsPyramid) FeedFilter.pyramid,
-  if (pyramid.showsNational) FeedFilter.national,
+  FeedFilter.national,
 ];
 
 typedef _Timed = ({int at, FeedItem item});

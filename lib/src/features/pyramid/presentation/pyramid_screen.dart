@@ -2176,6 +2176,8 @@ class PyramidPostsEntry extends StatelessWidget {
                 label: Text(t('Otwórz na Tablicy →')),
               ),
               PyramidBranchPostButton(pyr: pyr, branch: feed.branch),
+              if (pyr.postingDelegation != null)
+                PyramidWholePostButton(pyr: pyr),
             ],
           ),
         ],
@@ -2222,6 +2224,39 @@ class PyramidBranchPostButton extends StatelessWidget {
       }()),
       icon: const Icon(Icons.edit_rounded),
       label: Text(t('Napisz do gałęzi')),
+    );
+  }
+}
+
+/// „Do całej piramidy”: for somebody the head let write to the whole
+/// pyramid (the head's own posts go there anyway). The post shows who
+/// wrote it.
+class PyramidWholePostButton extends StatelessWidget {
+  const PyramidWholePostButton({required this.pyr, super.key});
+
+  final PyramidService pyr;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      key: const Key('pyr-post-all'),
+      onPressed: () => unawaited(() async {
+        final String? text = await askText(
+          context,
+          title: t('Do całej piramidy (z upoważnienia szefa)'),
+          maxLines: 6,
+        );
+        if (text != null &&
+            await pyr.post(text, toAll: true) != null &&
+            context.mounted) {
+          snack(
+            context,
+            t('Wysłane do całej piramidy, pod Twoim pseudonimem.'),
+          );
+        }
+      }()),
+      icon: const Icon(Icons.campaign_rounded),
+      label: Text(t('Do całej piramidy')),
     );
   }
 }

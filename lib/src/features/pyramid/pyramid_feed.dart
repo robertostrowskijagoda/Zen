@@ -32,9 +32,16 @@ final class PyrNationalPost {
     required this.pinned,
     required this.comments,
     this.from = '',
+    this.grant,
   });
 
   final PyramidRecord record;
+
+  /// For a post to the whole pyramid written by somebody else than the
+  /// head: the head's delegation of `posts` it was written with (signed,
+  /// carrying its keys), so a reader outside can check it
+  /// ([byGrantOfHead]).
+  final PyramidRecord? grant;
   final String name;
   final int depth;
 
@@ -55,8 +62,12 @@ final class PyrNationalPost {
   /// The section's nationality; '' for a post of the top.
   String get nat => record.str('nat');
 
-  /// The top's post to the whole pyramid (not a national-section one).
+  /// A post to the whole pyramid (not a national-section one): the head's,
+  /// or written with the head's delegation ([delegated]).
   bool get top => record.type == PyrT.post;
+
+  /// Written to the whole pyramid by somebody the head let do it.
+  bool get delegated => top && level != 0;
   String get author => record.candidates.firstOrNull ?? '';
   int get at => record.at;
 
@@ -79,6 +90,7 @@ final class PyrNationalPost {
       'c': comments,
     },
     if (from.isNotEmpty) 'f': from,
+    if (grant != null) 'g': grant!.toJson(),
   };
 
   /// Parses one: null for anything but a national-section record or a
@@ -99,8 +111,15 @@ final class PyrNationalPost {
       return null;
     }
     final bool section = r.type == PyrT.natPost && r.str('nat').isNotEmpty;
-    final bool ofTop = r.type == PyrT.post && r.integer('lvl') == 0;
+    final bool ofTop =
+        r.type == PyrT.post && (r.integer('lvl') == 0 || r.body['all'] == true);
     if (!section && !ofTop) {
+      return null;
+    }
+    final PyramidRecord? g = ofTop && r.integer('lvl') != 0
+        ? PyramidRecord.fromJson(json['g'])
+        : null;
+    if (ofTop && r.integer('lvl') != 0 && g == null) {
       return null;
     }
     final Object? m = json['m'];
@@ -117,6 +136,7 @@ final class PyrNationalPost {
       pinned: section && meta['p'] == true,
       comments: count(meta['c']),
       from: from ?? (f is String ? f : ''),
+      grant: g,
     );
   }
 }
@@ -211,6 +231,43 @@ Future<List<PyrCertifiedHead>> certifiedHeads(
   return heads;
 }
 
+/// Whether [post], to the whole pyramid by somebody else than the head,
+/// was written with the head's delegation: its [PyrNationalPost.grant] is a
+/// delegation of `posts` to the author, in force when it was written, that
+/// the post names, signed by the head the power key's line names for the
+/// delegation's time. (A revocation is not seen from outside: members
+/// see it in the records.)
+Future<bool> byGrantOfHead(
+  List<PyrCertifiedHead> heads,
+  PyrNationalPost post,
+) async {
+  final PyramidRecord? g = post.grant;
+  if (g == null ||
+      !post.delegated ||
+      g.type != PyrT.delegate ||
+      g.pyramid != post.pyramid ||
+      g.str('power') != 'posts' ||
+      g.str('to') != post.author ||
+      post.record.str('via') != g.id ||
+      g.at > post.at ||
+      post.at >= g.integer('until')) {
+    return false;
+  }
+  PyrCertifiedHead? then;
+  for (final PyrCertifiedHead h in heads) {
+    if (h.since > g.at) {
+      break;
+    }
+    then = h;
+  }
+  if (then == null ||
+      !g.sigs.containsKey(then.key) ||
+      (then.pq != null && g.pqIdOf(then.key) != then.pq)) {
+    return false;
+  }
+  return (await g.validSigs()).containsKey(then.key);
+}
+
 /// Whether [post] (a post of the top, level 0) was written by the head the
 /// power key's line ([certifiedHeads]) names for its time.
 bool byCertifiedHead(List<PyrCertifiedHead> heads, PyrNationalPost post) {
@@ -262,10 +319,15 @@ final class PyrFeedPost {
     this.comments = const <PyrComment>[],
     this.commentCount = 0,
     this.canComment = false,
+    this.delegated = false,
   });
 
   final String id;
   final PyrFeedKind kind;
+
+  /// To the whole pyramid, written with the head's delegation (the card
+  /// says so; [name] is who wrote it).
+  final bool delegated;
 
   /// The author's pyramid key.
   final String author;
@@ -469,10 +531,11 @@ PyramidFeed pyramidFeedOf({
   List<PyrNationalPost> top = const <PyrNationalPost>[],
   List<PyrNationalPost> national = const <PyrNationalPost>[],
   Set<String> voted = const <String>{},
+  Set<String> follow = const <String>{},
 }) {
   final PyramidState? s = state;
   if (s != null && me != null && s.isMember(me)) {
-    return _memberFeed(s, me, now, voted);
+    return _memberFeed(s, me, now, voted, follow);
   }
   final Map<String, PyrFeedPost> out = <String, PyrFeedPost>{};
   for (final PyrNationalPost p in top) {
@@ -488,7 +551,13 @@ PyramidFeed pyramidFeedOf({
   return PyramidFeed(posts: out.values.toList());
 }
 
-PyramidFeed _memberFeed(PyramidState s, String me, int now, Set<String> voted) {
+PyramidFeed _memberFeed(
+  PyramidState s,
+  String me,
+  int now,
+  Set<String> voted,
+  Set<String> follow,
+) {
   final Set<String> banned = s.bannedEntries(now);
   final Set<String> up = s.lineUp(me).toSet();
   final String nat = s.members[me]?.nat ?? '';
@@ -502,7 +571,7 @@ PyramidFeed _memberFeed(PyramidState s, String me, int now, Set<String> voted) {
     // what was written at the top went to the whole pyramid.
     final PyrFeedKind? kind = p.author == me
         ? PyrFeedKind.own
-        : p.level == 0
+        : p.toWhole
         ? PyrFeedKind.top
         : up.contains(p.author)
         ? PyrFeedKind.line
@@ -511,19 +580,24 @@ PyramidFeed _memberFeed(PyramidState s, String me, int now, Set<String> voted) {
       posts.add(_ofState(s, p, kind));
     }
   }
-  final String? lead = nat.isEmpty ? null : s.nationalLead(nat);
-  final Map<String, int> grants = s.natGrants[nat] ?? const <String, int>{};
-  final Map<String, int> pins = s.natPins[nat] ?? const <String, int>{};
+  // The own section, and the other countries this person follows (read
+  // from the records; commented only by that nationality).
+  final Set<String> sections = <String>{if (nat.isNotEmpty) nat, ...follow};
+  final Map<String, String?> leads = <String, String?>{
+    for (final String n in sections) n: s.nationalLead(n),
+  };
   for (final PyrPost p in s.natPosts.values) {
-    if (nat.isNotEmpty && p.nat == nat && !banned.contains(p.id)) {
+    final String pn = p.nat ?? '';
+    if (sections.contains(pn) && !banned.contains(p.id)) {
       posts.add(
         _ofState(
           s,
           p,
           PyrFeedKind.national,
-          lead: p.author == lead,
-          priority: (grants[p.author] ?? 0) > now,
-          pinnedAt: pins[p.id] ?? -1,
+          lead: p.author == leads[pn],
+          priority: (s.natGrants[pn]?[p.author] ?? 0) > now,
+          pinnedAt: s.natPins[pn]?[p.id] ?? -1,
+          canComment: pn == nat,
         ),
       );
     }
@@ -574,6 +648,7 @@ PyrFeedPost _ofState(
   bool lead = false,
   bool priority = false,
   int pinnedAt = -1,
+  bool canComment = true,
 }) {
   final String? path = s.pathOf(p.author);
   return PyrFeedPost(
@@ -594,7 +669,8 @@ PyrFeedPost _ofState(
     commentCount: p.comments.length,
     // A member, and the composition keeps to the author's branch (or the
     // section's nationality), as the records' rules do.
-    canComment: true,
+    canComment: canComment,
+    delegated: p.via != null,
   );
 }
 
@@ -613,4 +689,5 @@ PyrFeedPost _readOnly(PyrNationalPost p, PyrFeedKind kind) => PyrFeedPost(
   // A pinned post read from outside: its pin time is not known.
   pinnedAt: p.pinned ? 0 : -1,
   commentCount: p.comments,
+  delegated: p.delegated,
 );

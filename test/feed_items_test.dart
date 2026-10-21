@@ -183,17 +183,13 @@ void main() {
     final PyramidFeed onlyTop = PyramidFeed(
       posts: <PyrFeedPost>[post('top', PyrFeedKind.top, at: 10, level: 0)],
     );
-    expect(feedFiltersFor(onlyTop), <FeedFilter>[
-      FeedFilter.all,
-      FeedFilter.friends,
-      FeedFilter.close,
-      FeedFilter.pyramid,
-    ]);
+    expect(feedFiltersFor(onlyTop), FeedFilter.values);
     expect(feedFiltersFor(PyramidFeed.empty), <FeedFilter>[
       FeedFilter.all,
       FeedFilter.friends,
       FeedFilter.close,
-    ], reason: 'friends and close friends can always be told apart');
+      FeedFilter.national,
+    ], reason: '„Kraj” is always there: the countries are picked in it');
     expect(
       feedFiltersFor(const PyramidFeed(member: true, nat: 'PL')),
       FeedFilter.values,

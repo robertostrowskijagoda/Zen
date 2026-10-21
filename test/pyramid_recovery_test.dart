@@ -165,4 +165,40 @@ void main() {
       expect(w.pyr(x).sharedState()!['fol'], isNull);
     },
   );
+
+  test('a recovered head gets the power key back, and the same voting '
+      'cards', () async {
+    final PyramidWorld w = await PyramidWorld.six();
+    // A becomes the head; the power key is handed over to a key made from
+    // A's account.
+    await w['A'].proposeSwap('', w['A'].myKey!);
+    await w.net.run();
+    await w.approve('B', PyrT.swap);
+    await w.sync();
+    await w.duties(rounds: 2);
+    await w.sync();
+    expect(w['A'].holdsPowerKey, isTrue);
+    final String card = await w['A'].cardFor('vote-1');
+    expect(await w['A'].cardFor('vote-2'), isNot(card));
+
+    // A's phone is gone; the account comes back on a new one.
+    final LedgerDisk old = w['A'].disk;
+    final MemoryLedgerDisk fresh = MemoryLedgerDisk();
+    w.linkDevice(old, fresh);
+    await PyramidService.markRecovered(fresh);
+    w.net.setOnline(w.net['A'], false);
+    final SimPhone back = w.add('A-nowy', disk: fresh);
+    for (final String friend in <String>['S', 'B', 'A1', 'A2']) {
+      w.net.befriend(back, w.net[friend]);
+    }
+    final PyramidService again = w.pyr(back);
+    await again.load();
+    expect(again.holdsPowerKey, isFalse);
+    await w.sync();
+    await w.duties(rounds: 1);
+    expect(again.isMember, isTrue);
+    expect(again.myKey, w['A'].myKey);
+    expect(again.holdsPowerKey, isTrue);
+    expect(await again.cardFor('vote-1'), card);
+  });
 }

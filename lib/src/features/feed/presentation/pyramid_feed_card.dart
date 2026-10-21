@@ -9,6 +9,7 @@ import 'package:zen/src/features/feed/presentation/seen_tracker.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/profile/profile_fields.dart';
+import 'package:zen/src/features/pyramid/presentation/country_picker.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_screen.dart';
 import 'package:zen/src/features/pyramid/presentation/report_sheet.dart';
 import 'package:zen/src/features/pyramid/pyramid_feed.dart';
@@ -21,6 +22,9 @@ import 'package:zen/src/features/pyramid/pyramid_state.dart';
 String pyrFeedBadge(PyrFeedPost post) {
   final int level = post.level + 1;
   return switch (post.kind) {
+    PyrFeedKind.top when post.delegated => t(
+      'PIRAMIDA · do całej piramidy, z upoważnienia szefa',
+    ),
     PyrFeedKind.top => t('PIRAMIDA · szczyt'),
     PyrFeedKind.line => t('PIRAMIDA · Twoja linia · poziom {level}', {
       'level': level,
@@ -513,7 +517,7 @@ class PyramidFeedHeader extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final Color tone = national ? zenTone(zen, 1) : pyrTone(zen);
     if (!feed.member) {
-      return ZenInfo(
+      final Widget info = ZenInfo(
         key: const Key('feed-pyr-readonly'),
         icon: Icons.visibility_outlined,
         tone: tone,
@@ -526,6 +530,17 @@ class PyramidFeedHeader extends StatelessWidget {
                 'Tylko do czytania: posty szczytu do całej piramidy. '
                 'Przekazują Ci je znajomi z piramidy.',
               ),
+      );
+      if (!national) {
+        return info;
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          info,
+          const SizedBox(height: 10),
+          FollowedCountries(pyr: pyr),
+        ],
       );
     }
     final PyramidState? s = pyr.state;
@@ -555,6 +570,11 @@ class PyramidFeedHeader extends StatelessWidget {
               height: 1.35,
             ),
           ),
+          if (national)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: FollowedCountries(pyr: pyr),
+            ),
           if (national)
             Padding(
               padding: const EdgeInsets.only(top: 4),
@@ -591,8 +611,11 @@ class PyramidFeedHeader extends StatelessWidget {
                   icon: const Icon(Icons.edit_rounded),
                   label: Text(t('Napisz w sekcji')),
                 )
-              else
+              else ...<Widget>[
                 PyramidBranchPostButton(pyr: pyr, branch: feed.branch),
+                if (pyr.postingDelegation != null)
+                  PyramidWholePostButton(pyr: pyr),
+              ],
               if (national && s != null && me != null && lead == me)
                 OutlinedButton.icon(
                   onPressed: () => unawaited(() async {

@@ -52,13 +52,18 @@ class _PyramidTimelineViewState extends State<PyramidTimelineView> {
   @override
   void didUpdateWidget(PyramidTimelineView old) {
     super.didUpdateWidget(old);
-    if (!identical(old.s, widget.s)) {
+    // The pyramid changes in place too ([PyramidState.revision]).
+    if (!identical(old.s, widget.s) || widget.s.revision != _revision) {
       _load(atEnd: _count >= _timeline.length);
     }
   }
 
+  /// The [PyramidState.revision] the timeline was worked out from.
+  int _revision = -1;
+
   /// Works the timeline out (off the UI thread for a long history).
   void _load({required bool atEnd}) {
+    _revision = widget.s.revision;
     void take(PyrTimeline t) {
       _timeline = t;
       _ready = true;

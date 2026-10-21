@@ -293,7 +293,7 @@ final class _Treasury {
   /// The ledger as this phone has it (computed again only when the ledger,
   /// the statements or the pyramid changed).
   PyrLedgerView view(PyramidState s) {
-    final Object key = (s, _rev);
+    final Object key = (s, s.revision, _rev);
     final PyrLedgerView? had = _view;
     if (had != null && _viewKey == key) {
       return had;
@@ -319,7 +319,7 @@ final class _Treasury {
     if (st == null || v.counted.containsAll(st.ids)) {
       return v.balanceOf(me);
     }
-    final Object key = (s, _rev, st.by, st.at);
+    final Object key = (s, s.revision, _rev, st.by, st.at);
     PyrLedgerView? since = _since;
     if (since == null || _sinceKey != key) {
       _sinceKey = key;

@@ -85,6 +85,9 @@ final class PyramidWorld {
   final Map<String, List<String>> profileNationalities =
       <String, List<String>>{};
 
+  /// Each phone's region (a country code), by name.
+  final Map<String, String> regions = <String, String>{};
+
   /// A phone with the pyramid service, its data on [disk] (a fresh one in
   /// memory by default); [friendLevelOf] is its private friend levels.
   ///
@@ -122,6 +125,7 @@ final class PyramidWorld {
       nationalitiesOf: (String a) =>
           profileNationalities[net.byAddress[a]?.name] ?? const <String>[],
       myNationalities: () => profileNationalities[name] ?? const <String>[],
+      phoneRegion: () => regions[name],
     );
     p.services['pyr'] = s;
     p.attach(s.handle);

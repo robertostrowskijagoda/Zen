@@ -98,16 +98,18 @@ The top (2 of 3) can change the rules. A change is public at once and applies
 |---|---|
 | Absence before a place can be declared free | 30 to 3650 days |
 | Immunity (the top levels need their own cell's consent for bans) | 1 to 30 levels |
+| Transfers one person may order a day (protects the treasurers) | 5 to 200, 30 by default |
 | Treasurers (everyone on the top levels) | 3 to 6 levels, at least 15 people |
 | Cell vote duration | 24 to 720 hours |
 | Report escalation to the next level | 24 to 720 hours |
 | Issuance waiting time (veto window) | 24 to 720 hours |
 
-**The issuance limit** (how many points may be created in 30 days) has its
-own, stricter path:
+**The issuance limit** (how many points may be created in 30 days), the
+issuance waiting time and the **daily transfer limit** have their own,
+stricter path:
 
-- **Lower** (or a longer wait): applies at once. You confirm by holding the
-  button for 2 seconds.
+- **Lower** (or a longer wait, or fewer transfers a day): applies at once.
+  You confirm by holding the button for 2 seconds.
 - **Higher** (or a shorter wait): it is **announced** to every member at
   once, pinned on the feed, on the *Me* tab and at the top of the wallet,
   and applies only **30 days later**. Until then the top can cancel it. Only
@@ -122,20 +124,34 @@ own, stricter path:
   </picture>
 </p>
 
-- Points live in the pyramid. Your balance is computed from signed records
-  by every member's phone, so a changed app on one phone cannot create
-  money.
-- A transfer counts when a **majority of the treasurers** sign it. A
-  treasurer signs only an order that is covered, recent and has the next
-  number; signing two orders with one number is public proof of cheating.
-- **Issuance:** the top (2 of 3) creates points for an account, with a
-  reason, within the 30-day limit. It waits (24 hours by default), during
-  which the third member of the top can veto it.
-- Escrow payments, used by [gates](introductions-and-gates.md): the money is
-  set aside and released by a condition, or returned after a deadline.
+- **Transfers are private.** Only the payer, the person paid and the
+  treasurers learn of a transfer (who, to whom, how much, the title). Other
+  members do not even learn that it happened: a transfer is never a public
+  record. The order is sealed (post-quantum hybrid encryption) to each
+  treasurer separately.
+- A transfer counts when a **majority of the treasurers** of its time sign
+  it. A treasurer signs only an order that is covered, recent, has the next
+  number of the account and fits the daily limit, and never two orders with
+  one number: two majorities always share an honest treasurer, so nothing
+  is spent twice while most treasurers are honest. A treasurer who signs
+  two orders with one number leaves proof of it.
+- Every treasurer keeps the whole private ledger and syncs it with the
+  others; a new treasurer receives it the same way.
+- The person paid gets the order with the treasurers' signatures (a
+  receipt). Your wallet regularly asks the treasurers for a **signed
+  statement** of your balance; it shows the balance most of them agree on.
+  A treasurer who states another balance is shown with **Dispute**, which
+  files a complaint in the court ("Error in the wallet's accounts").
+- **Issuance:** the top (2 of 3) creates points within the 30-day limit.
+  The record shows the amount (everybody can check the limit), not who gets
+  it: that goes sealed to the treasurers and the recipient. It waits (24
+  hours by default), during which the third member of the top can veto it.
+- Escrow payments, used by [gates](introductions-and-gates.md) and the
+  market, go the same private way: the money is set aside and released by a
+  condition, or returned after a deadline.
 - After recovering your account (recovery circle, paper backup or key file)
-  your place, level and balance come back from the records your friends
-  keep.
+  your place and level come back from the records your friends keep, and
+  your balance and history from the treasurers' statements.
 
 ## Reports, the court and appeals
 
@@ -149,6 +165,10 @@ own, stricter path:
   / 30 days, one piece of content, from dating, or from admitting people. A
   ban never takes away anyone's place or vote. Only your own cell can remove
   you from the pyramid (the head above you and the other member, both).
+- **The top's immunity.** Removing or banning a member of the top cell
+  (levels 0–1, the head included) takes 2 of 3 of the top **and** a
+  majority of the people at level 2. (Removing one piece of their content
+  does not.) Appeals go as usual.
 - **The court.** Any member can file a complaint against another (a fraud
   warning, *don't lend this person money*, *be careful*, other), up to 3 open
   at a time. The head of the defendant's cell decides within 3 days: a
@@ -168,12 +188,25 @@ own, stricter path:
 
 - Each nationality has a section, led by its highest-placed member. The
   leader pins posts and gives others priority.
-- Members write posts to their branch. On the feed: posts of the top, of
-  your line upwards, your own, and (under *Country*) your nationality's
-  section, ordered like the pyramid itself: pinned, then higher authors
+- Members write posts to their branch. On the feed: posts to the whole
+  pyramid, of your line upwards, your own, and (under *Country*) national
+  sections, ordered like the pyramid itself: pinned, then higher authors
   first.
-- People outside the pyramid can read the top's posts and their
-  nationality's section when member friends pass them on.
+- **Posts to the whole pyramid** are the head's. The head can let specific
+  members write them too (a delegation with an end date, which the head
+  alone gives and takes back); such a post shows who wrote it and that it
+  is "on the head's authority".
+- The **Country** chip is always on the feed. Outside the pyramid it shows
+  the sections of your profile's nationalities, or of your phone's region
+  when the profile shows none; **Choose countries** picks any others
+  (several, from a searchable list of flags and names). Friends who are
+  members pass on what you ask for, a limited number of countries and not
+  more often than every few minutes per friend. Members always see their
+  own section and can follow others the same way (they read them, they
+  comment only in their own).
+- People outside the pyramid also read the posts to the whole pyramid when
+  member friends pass them on; a delegated post comes with the head's
+  signed delegation.
 
 ## History
 
@@ -198,9 +231,10 @@ top three levels and the part around you and the people you picked. Under it,
 |---|---|
 | pseudonym, place, level, nationality, birth year, who admitted whom | gender (a hash, unless shown) |
 | posts and comments in branches | your referendum vote (only your head knows it) |
-| transfers with amounts and titles, issuances, vetoes | the content of reports, at their recipients |
+| issuance amounts, vetoes, the limits | transfers (only the two sides and the treasurers) |
 | bans with reasons, verdicts, appeals and answers | branch statistics (only from 5 people up) |
-| cell vote results (not who voted for whom) | gate conditions |
+| cell vote results (not who voted for whom) | gate conditions, who gets an issuance |
+| | the content of reports, at their recipients |
 
 Records travel only between friends who are members (or follow the
 pyramid).
@@ -209,17 +243,23 @@ pyramid).
 
 - Until the original genesis is pinned in a release, a release build shows
   that the pyramid has not started; development builds use a test pyramid.
-- Transfers are **not private** to members: amounts and parties are in the
-  records (hiding them would need heavy zero-knowledge cryptography; not
-  done).
+- The treasurers (everyone down to level 3) see every transfer, like a
+  bank. A dishonest **majority** of treasurers could sign a spending twice
+  or a false statement: it would leave proof, but could not be stopped.
 - The anonymous vote request is classical (a ring signature): a future
   quantum computer could forge a request (a nuisance, not a result) or tell
   later who asked. The votes themselves are post-quantum. See the
   [security model](../SECURITY_MODEL.md).
 - Readers outside the pyramid trust their member friends that a verdict or
   post came from the right person; they cannot check the records.
-- The top's power key and voting cards are not part of account recovery:
-  a recovered head gets the place back, and the power key passes the usual
-  way (the top cell's consent after 72 hours).
+- The power key and the one-time voting cards are made from the account
+  key, so a recovered head gets the power key back (and a vote in progress
+  keeps its card). Only the founder's very first power key, made outside
+  the app, does not come back: the next head's key does.
+- Readers outside the pyramid cannot see that a delegation to write to the
+  whole pyramid was taken back before its end; members can.
+- Your phone folds the records into the pyramid once, then adds new
+  records as they come; only a record dated into the past makes it fold
+  everything again, in the background for a large pyramid.
 
 [Back to the guide](README.md)

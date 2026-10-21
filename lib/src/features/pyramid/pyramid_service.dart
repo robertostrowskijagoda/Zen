@@ -180,6 +180,11 @@ const int kPyrRecoveryFollowMs = 30 * 24 * 3600 * 1000;
 const int kPyrReportsPerSender = 10;
 const int kPyrReportsTotal = 150;
 
+/// At most this many countries followed on "Kraj" (and asked for from
+/// friends), and one catch-up of them per friend this often.
+const int kPyrFollowMax = 8;
+const int kPyrCatchUpEveryMs = 10 * 60 * 1000;
+
 /// Verdicts read from outside the pyramid, kept (the newest).
 const int kPyrOutsideVerdictsKept = 200;
 
@@ -525,6 +530,7 @@ final class PyramidService extends ChangeNotifier {
     this.ownPublicPosts,
     this.nationalitiesOf,
     this.myNationalities,
+    this.phoneRegion,
     int Function()? now,
     Random? random,
     this.tallyWait = const Duration(hours: 6),
@@ -586,8 +592,12 @@ final class PyramidService extends ChangeNotifier {
   final List<String> Function(String address)? nationalitiesOf;
 
   /// The nationalities in this person's own profile: the national
-  /// sections it reads, member or not.
+  /// sections it reads by default, outside the pyramid.
   final List<String> Function()? myNationalities;
+
+  /// The phone's region (a country code), when the system knows it: the
+  /// section read outside the pyramid when the profile shows none.
+  final String? Function()? phoneRegion;
 
   /// How long a cell head waits for the sums below before counting anyway.
   final Duration tallyWait;
@@ -825,22 +835,87 @@ final class PyramidService extends ChangeNotifier {
   /// the pinned genesis), or null without a [root].
   PyramidState? _fold() {
     final PyramidRoot? r = root;
+    if (r == null) {
+      return null;
+    }
+    foldCount++;
+    return PyramidState.fold(r.id, _records.values, now: _now(), late: _late);
+  }
+
+  /// Whole folds done so far (tests: new records extend the state).
+  @visibleForTesting
+  int foldCount = 0;
+
+  /// The pyramid folded from the start now, apart from [state] (tests:
+  /// what extending in place must give).
+  @visibleForTesting
+  PyramidState? foldedAfresh() {
+    final PyramidRoot? r = root;
     return r == null
         ? null
         : PyramidState.fold(r.id, _records.values, now: _now(), late: _late);
   }
 
-  /// The pyramid, folded (again once a minute at most).
+  /// This phone's one-time card for [scope] (tests: the same after a
+  /// recovery, another for another vote).
+  @visibleForTesting
+  Future<String> cardFor(String scope) async => (await _cardKey(scope)).id;
+
+  /// The pyramid. Folded from the start only when nothing is folded yet
+  /// or a record went into the past ([_refold], in the background for a big
+  /// pyramid); new records extend it in place ([PyramidState.extend]), and
+  /// time moves it on once a minute at most ([PyramidState.advanceTo]).
   PyramidState? get state {
     if (root == null) {
       return null;
     }
-    if (_state == null || _now() - _stateAt > 60 * 1000) {
+    final PyramidState? s = _state;
+    if (s == null) {
       _state = _fold();
+      _stateAt = _now();
+    } else if (_now() - _stateAt > 60 * 1000) {
+      s.advanceTo(_now());
       _stateAt = _now();
     }
     return _state;
   }
+
+  /// Folds the pyramid from the start: from [kPyrBackgroundFoldRecords]
+  /// records on in a background isolate (the UI keeps running), else here.
+  /// A fold overtaken by newer records is dropped (the next read folds).
+  Future<void> _refold() async {
+    final PyramidRoot? r = root;
+    if (r == null) {
+      return;
+    }
+    final int gen = ++_foldGen;
+    if (_records.length < kPyrBackgroundFoldRecords) {
+      _state = _fold();
+      _stateAt = _now();
+      return;
+    }
+    PyramidState? folded;
+    foldCount++;
+    try {
+      folded = await pyrFoldInBackground(
+        r.id,
+        _records.values.toList(),
+        now: _now(),
+        late: Map<String, int>.of(_late),
+      );
+    } on Object catch (error, stack) {
+      logZenError('Piramida: składanie w tle', error, stack);
+    }
+    if (gen != _foldGen) {
+      return;
+    }
+    _state = folded ?? _fold();
+    _stateAt = _now();
+  }
+
+  /// Bumped by every [_dirty] and [_refold]: a background fold that comes
+  /// back after either is not taken.
+  int _foldGen = 0;
 
   bool get isMember {
     final String? k = myKey;
@@ -849,6 +924,7 @@ final class PyramidService extends ChangeNotifier {
 
   void _dirty() {
     _state = null;
+    _foldGen++;
   }
 
   /// Tells listeners (for the money's part of this library).
@@ -1005,6 +1081,9 @@ final class PyramidService extends ChangeNotifier {
         _readPosts
           ..clear()
           ..addAll(_ints(json['rd']));
+        _followed
+          ..clear()
+          ..addAll(_countryCodes(json['nc']));
         _loadCardState(json['cv']);
       }
       await _treasury.load();
@@ -1086,6 +1165,7 @@ final class PyramidService extends ChangeNotifier {
       await _takeRecoveryMark();
       _keepGenesis();
       _dirty();
+      await _refold();
       notifyListeners();
     } on Object catch (error, stack) {
       logZenError('Odczyt piramidy', error, stack);
@@ -1164,6 +1244,11 @@ final class PyramidService extends ChangeNotifier {
       _recoveredAt = null;
       await disk.delete(keyRecovered);
       await _save();
+      // The power key, when this account held it.
+      final PyramidState? s = state;
+      if (s != null && me != null) {
+        await _restorePower(s, me);
+      }
       // The wallet comes back from the treasurers: their signed statements
       // and the operations behind them.
       await _treasury.recovered();
@@ -1375,6 +1460,7 @@ final class PyramidService extends ChangeNotifier {
           'sb': _sumsBelow,
           'ss': _sumsSent,
           'rd': _readPosts,
+          'nc': _followed,
           'cv': _cardStateJson(),
         }),
       ),
@@ -1495,17 +1581,22 @@ final class PyramidService extends ChangeNotifier {
     bool spread = true,
   }) async {
     final List<PyramidRecord> added = <PyramidRecord>[];
-    PyramidState? before;
+    bool wasMember = false;
     bool folded = false;
+    // A record kept already, now with more signatures: its place in the
+    // past may change what counted, so the pyramid is folded again.
+    bool replaced = false;
     Future<void> take(PyramidRecord r) async {
       final PyramidRecord? kept = await _check(r);
       if (kept == null) {
         return;
       }
       if (!folded) {
-        before = state;
+        final String? me = myKey;
+        wasMember = me != null && (state?.isMember(me) ?? false);
         folded = true;
       }
+      replaced = replaced || _records.containsKey(kept.id);
       _keep(kept);
       added.add(kept);
     }
@@ -1539,7 +1630,15 @@ final class PyramidService extends ChangeNotifier {
     if (added.isEmpty) {
       return added;
     }
-    _dirty();
+    final PyramidState? had = _state;
+    if (had == null ||
+        replaced ||
+        !had.extend(added, now: _now(), late: _late)) {
+      _dirty();
+      await _refold();
+    } else {
+      _stateAt = _now();
+    }
     await _save(records: true);
     if (spread) {
       for (final PyramidRecord x in added) {
@@ -1559,7 +1658,7 @@ final class PyramidService extends ChangeNotifier {
         }
       }
     }
-    await _afterChange(before);
+    await _afterChange(wasMember: wasMember);
     return added;
   }
 
@@ -1775,6 +1874,7 @@ final class PyramidService extends ChangeNotifier {
     final Map<String, int> since = _nationalSince(top: false);
     final Map<String, int> topSince = _nationalSince(top: true);
     final Map<String, int> verdictsSince = _verdictsSince();
+    final List<String> countries = feedCountries;
     for (final String f in to ?? host.friends()) {
       await _send(f, <String, dynamic>{
         'type': PyramidTypes.hello,
@@ -1784,6 +1884,9 @@ final class PyramidService extends ChangeNotifier {
         ],
         if (since.isNotEmpty) 'nf': since,
         if (topSince.isNotEmpty) 'tf': topSince,
+        // Outside the pyramid: the sections "Kraj" shows (members read
+        // them from the records).
+        if (!isMember && countries.isNotEmpty) 'nc': countries,
         if (verdictsSince.isNotEmpty) 'vf': verdictsSince,
       });
     }
@@ -1920,6 +2023,48 @@ final class PyramidService extends ChangeNotifier {
   bool get holdsPowerKey {
     final String? pk = state?.powerKey;
     return pk != null && _powerId == pk;
+  }
+
+  /// The seed of the power key this person's head takes over from power
+  /// key [old]: from the pyramid key's seed (so the same on every device of
+  /// the account and after recovery), never used before — every handover
+  /// starts from another key. Null without the seed.
+  Uint8List? _powerSeedAfter(String old) {
+    final Uint8List? seed = _seed;
+    final String? py = current;
+    return seed == null || py == null
+        ? null
+        : securitySubkey(seed, 'pyramid.power.$py.$old');
+  }
+
+  /// After a recovery (or on a device that lost it): the power key in force
+  /// comes back when a handover this person was seated by made it from
+  /// this account ([_powerSeedAfter]); a handover still waiting too.
+  Future<void> _restorePower(PyramidState s, String me) async {
+    final String? pk = s.powerKey;
+    if (pk != null && _powerId != pk) {
+      for (final PyramidRecord r in _records.values) {
+        if (r.type != PyrT.handover ||
+            r.str('head') != me ||
+            r.str('to') != pk ||
+            !s.applied.contains(r.id)) {
+          continue;
+        }
+        final Uint8List? seed = _powerSeedAfter(r.str('from'));
+        if (seed != null && (await LedgerKeyPair.fromSeed(seed)).id == pk) {
+          await _setPower(seed);
+          await _save();
+        }
+        break;
+      }
+    }
+    if (pk != null && s.head == me && s.handoverDue && _powerNext == null) {
+      final Uint8List? next = _powerSeedAfter(pk);
+      if (next != null) {
+        await _setPowerNext(next);
+        await _save();
+      }
+    }
   }
 
   /// Takes [seed] as the power key this person holds (null: none).
@@ -2467,8 +2612,16 @@ final class PyramidService extends ChangeNotifier {
       return had;
     }
     final Uint8List? seed = unb64(stored, length: 32);
+    // A new card from the pyramid key's seed and the scope: secret, never
+    // the same for two votes, and the same again after a recovery (the
+    // vote in progress is not lost; a card still votes once).
+    final Uint8List? own = _seed;
     final LedgerKeyPair pair = seed != null
         ? await LedgerKeyPair.fromSeed(seed)
+        : own != null
+        ? await LedgerKeyPair.fromSeed(
+            securitySubkey(own, 'pyramid.card.$scope'),
+          )
         : await LedgerKeyPair.generate();
     if (seed == null) {
       _cardSeeds[scope] = b64(pair.seed);
@@ -2992,15 +3145,21 @@ final class PyramidService extends ChangeNotifier {
     );
   }
 
+  /// Asks the own cell of [key] to remove them (2 of 3). A member of the
+  /// top cell needs most of level 2 as well.
   Future<PyramidRecord?> proposeRemove(String key) async {
     final PyramidState? s = state;
     if (s == null) {
       return null;
     }
+    final bool top = s.inTopCell(key);
     return propose(
       <String, dynamic>{'t': PyrT.remove, 'k': key},
-      candidates: s.ownCellOf(key),
-      need: 2,
+      candidates: <String>{
+        ...s.ownCellOf(key),
+        if (top) ...s.levelTwo,
+      }.toList(),
+      need: 2 + (top ? s.levelTwoNeed : 0),
     );
   }
 
@@ -3111,14 +3270,20 @@ final class PyramidService extends ChangeNotifier {
   /// later does not count.
   Future<PyramidRecord?> revokeDelegation(String id) async {
     final PyramidState? s = state;
+    final String? me = myKey;
     if (s == null) {
       return null;
     }
-    return topDecision(<String, dynamic>{
+    final Map<String, dynamic> body = <String, dynamic>{
       't': PyrT.revoke,
       'd': id,
       'acts': s.actsOf(id).toList()..sort(),
-    });
+    };
+    // Writing to the whole pyramid is the head's: taken back alone.
+    if (me != null && s.head == me && s.delegations[id]?.power == 'posts') {
+      return propose(body, candidates: <String>[me], need: 1);
+    }
+    return topDecision(body);
   }
 
   Future<PyramidRecord?> ban({
@@ -3133,6 +3298,23 @@ final class PyramidService extends ChangeNotifier {
   }) async {
     final PyramidState? s = state;
     final String? p = s?.pathOf(target);
+    if (s != null && p != null && p.length <= 1 && kind != 'content') {
+      // A member of the top: 2 of 3 of the top and most of level 2.
+      return propose(
+        <String, dynamic>{
+          't': PyrT.ban,
+          'target': target,
+          'kind': kind,
+          'until': ?until,
+          'eid': ?entryId,
+          'dk': ?datingKey,
+          'reason': reason,
+          'rep': ?rep,
+        },
+        candidates: <String>{...s.topCell, ...s.levelTwo}.toList(),
+        need: 2 + s.levelTwoNeed,
+      );
+    }
     final List<String> immunity =
         p != null &&
             p.length < s!.params.immunityDepth &&
@@ -3158,16 +3340,80 @@ final class PyramidService extends ChangeNotifier {
     );
   }
 
-  Future<PyramidRecord?> post(String text) async {
+  /// A post to this person's branch; with [toAll], to the whole pyramid —
+  /// the head's own, or through the head's delegation of `posts`
+  /// ([postingDelegation]); null when this person may not.
+  Future<PyramidRecord?> post(String text, {bool toAll = false}) async {
     final PyramidState? s = state;
     final String? k = myKey;
     final int? lvl = k == null ? null : s?.levelOf(k);
     if (lvl == null || text.trim().isEmpty) {
       return null;
     }
+    final String? via = toAll && lvl != 0 ? postingDelegation : null;
+    if (toAll && lvl != 0 && via == null) {
+      return null;
+    }
     return propose(
-      <String, dynamic>{'t': PyrT.post, 'text': text.trim(), 'lvl': lvl},
+      <String, dynamic>{
+        't': PyrT.post,
+        'text': text.trim(),
+        'lvl': lvl,
+        if (toAll) 'all': true,
+        'via': ?via,
+      },
       candidates: <String>[k!],
+      need: 1,
+    );
+  }
+
+  /// This person's delegation (from the head) to write to the whole
+  /// pyramid, while it is in force; null otherwise.
+  String? get postingDelegation {
+    final PyramidState? s = state;
+    final String? me = myKey;
+    if (s == null || me == null) {
+      return null;
+    }
+    for (final PyrDelegation d in s.delegations.values) {
+      if (d.to == me && d.power == 'posts' && !d.revoked && _now() < d.until) {
+        return d.id;
+      }
+    }
+    return null;
+  }
+
+  /// Whether this person may write to the whole pyramid: the head, or
+  /// with the head's delegation.
+  bool get canPostToAll {
+    final String? me = myKey;
+    return me != null && (state?.head == me || postingDelegation != null);
+  }
+
+  /// The head lets [to] write to the whole pyramid until [until] (at most
+  /// [limit] posts in 30 days, 0: no limit). Signed by the head alone;
+  /// revoked by the head ([revokeDelegation]).
+  Future<PyramidRecord?> delegatePosts(
+    String to, {
+    required int until,
+    int limit = 0,
+  }) async {
+    final PyramidState? s = state;
+    final String? me = myKey;
+    if (s == null || me == null || s.head != me || !s.isMember(to)) {
+      return null;
+    }
+    return propose(
+      <String, dynamic>{
+        't': PyrT.delegate,
+        'to': to,
+        'power': 'posts',
+        'scope': '',
+        'limit': limit,
+        'until': until,
+        'sub': false,
+      },
+      candidates: <String>[me],
       need: 1,
     );
   }
@@ -4563,6 +4809,91 @@ final class PyramidService extends ChangeNotifier {
       if (c.trim().isNotEmpty) c.trim().toUpperCase(),
   ];
 
+  /// Countries this person chose on "Kraj" (empty: none chosen).
+  final List<String> _followed = <String>[];
+
+  /// The countries friends outside the pyramid asked for in their hello
+  /// (address → codes), and when each was last caught up.
+  final Map<String, Set<String>> _askedCountries = <String, Set<String>>{};
+  final Map<String, int> _caughtUpAt = <String, int>{};
+
+  static final RegExp _countryCode = RegExp(r'^[A-Z]{2}$');
+
+  /// Country codes of [json] (anything else dropped), each once, at most
+  /// [kPyrFollowMax].
+  static List<String> _countryCodes(Object? json) {
+    final List<String> out = <String>[];
+    if (json is List) {
+      for (final Object? c in json.take(4 * kPyrFollowMax)) {
+        final String code = c is String ? c.trim().toUpperCase() : '';
+        if (_countryCode.hasMatch(code) && !out.contains(code)) {
+          out.add(code);
+        }
+        if (out.length == kPyrFollowMax) {
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
+  /// The countries chosen on "Kraj" (empty: the default).
+  List<String> get followedCountries => List<String>.unmodifiable(_followed);
+
+  /// The phone's region as a country code, if the system knows one.
+  String? get regionCountry {
+    final String code = (phoneRegion?.call() ?? '').trim().toUpperCase();
+    return _countryCode.hasMatch(code) ? code : null;
+  }
+
+  /// The national sections "Kraj" shows. A member: their own section and
+  /// the countries chosen. Anybody else: the countries chosen, else the
+  /// profile's nationalities, else the phone's region.
+  List<String> get feedCountries {
+    final PyramidState? s = state;
+    final String? me = myKey;
+    if (s != null && me != null && s.isMember(me)) {
+      final String own = s.members[me]?.nat ?? '';
+      return <String>[
+        if (own.isNotEmpty) own,
+        for (final String c in _followed)
+          if (c != own) c,
+      ];
+    }
+    if (_followed.isNotEmpty) {
+      return List<String>.unmodifiable(_followed);
+    }
+    final List<String> profile = _countryCodes(profileNationalities);
+    if (profile.isNotEmpty) {
+      return profile;
+    }
+    final String? region = regionCountry;
+    return region == null ? const <String>[] : <String>[region];
+  }
+
+  /// Follows [codes] on "Kraj" (at most [kPyrFollowMax]; none: back to the
+  /// default). Friends who are members are asked at once for what they
+  /// have of them.
+  Future<void> followCountries(Iterable<String> codes) async {
+    final List<String> next = _countryCodes(codes.toList());
+    _followed
+      ..clear()
+      ..addAll(next);
+    _dropUnfollowed();
+    _nationalRevision++;
+    await _save();
+    await _saveNational();
+    await greet();
+  }
+
+  /// Sections read from outside that "Kraj" does not show any more go.
+  void _dropUnfollowed() {
+    final Set<String> keep = feedCountries.toSet();
+    _nationalFeed.removeWhere(
+      (String _, PyrNationalPost x) => !x.top && !keep.contains(x.nat),
+    );
+  }
+
   /// The national section of [nat] as somebody who is not its member reads
   /// it (read-only): from the records this phone keeps (it is joining,
   /// say) and what friends who are members passed on. Pinned first, then
@@ -4621,13 +4952,15 @@ final class PyramidService extends ChangeNotifier {
     // Built again only when what it reads changed (the Tablica asks on
     // every build): the folded state, the posts from outside, the votes,
     // the profile's nationalities, the minute (ends of votes, alarms).
+    final List<String> countries = feedCountries;
     final Object key = (
       s,
+      s?.revision,
       me,
       _nationalRevision,
       myVotes.length,
       _now() ~/ 60000,
-      profileNationalities.join(','),
+      countries.join(','),
     );
     final PyramidFeed? kept = _feedKept;
     if (kept != null && _feedKey == key) {
@@ -4642,10 +4975,11 @@ final class PyramidService extends ChangeNotifier {
       national: member
           ? const <PyrNationalPost>[]
           : <PyrNationalPost>[
-              for (final String nat in profileNationalities.toSet())
+              for (final String nat in countries.toSet())
                 ...nationalSection(nat),
             ],
       voted: myVotes.keys.toSet(),
+      follow: member ? countries.toSet() : const <String>{},
     );
   }
 
@@ -4661,8 +4995,11 @@ final class PyramidService extends ChangeNotifier {
   PyrNationalPost? _readerCopy(PyramidState s, PyrPost p) {
     final PyramidRecord? r = _records[p.id];
     final String nat = p.nat ?? '';
-    final bool top = p.nat == null && p.level == 0;
-    if (r == null || (nat.isEmpty && !top)) {
+    final bool top = p.toWhole;
+    final PyramidRecord? grant = p.via == null ? null : _records[p.via];
+    if (r == null ||
+        (nat.isEmpty && !top) ||
+        (p.via != null && grant == null)) {
       return null;
     }
     final String? path = s.pathOf(p.author);
@@ -4674,6 +5011,7 @@ final class PyramidService extends ChangeNotifier {
       lead: !top && s.nationalLead(nat) == p.author,
       pinned: !top && (s.natPins[nat]?.containsKey(p.id) ?? false),
       comments: p.comments.length,
+      grant: grant,
     );
   }
 
@@ -4687,16 +5025,20 @@ final class PyramidService extends ChangeNotifier {
     return !s.members.values.any((PyrMember m) => _n(m.addr) == a);
   }
 
-  /// The nationalities [address]'s profile shows this device, as codes.
+  /// The sections the friend at [address] reads: the nationalities its
+  /// profile shows this device and the countries it asked for (at most
+  /// [kPyrFollowMax] of those).
   Set<String> _nationsOf(String address) => <String>{
     for (final String c in nationalitiesOf?.call(address) ?? const <String>[])
       c.trim().toUpperCase(),
+    ...?_askedCountries[_n(address)],
   };
 
   /// Whether [x] is read outside the pyramid: a national-section post or
-  /// one written at the top.
+  /// one to the whole pyramid.
   static bool _readOutside(PyramidRecord x) =>
-      x.type == PyrT.natPost || (x.type == PyrT.post && x.integer('lvl') == 0);
+      x.type == PyrT.natPost ||
+      (x.type == PyrT.post && (x.integer('lvl') == 0 || x.body['all'] == true));
 
   /// Passes posts just taken in on to friends outside the pyramid: the
   /// top's to every such friend, a section's to those whose profile shows
@@ -4780,34 +5122,48 @@ final class PyramidService extends ChangeNotifier {
     if (s == null || !isMember || !_outside(s, to)) {
       return;
     }
-    int after(Object? m) {
-      final Object? had = m is Map ? m[s.id] : null;
+    // Hellos can come often: one catch-up per friend in a while.
+    final int t = _now();
+    if (t - (_caughtUpAt[_n(to)] ?? -kPyrCatchUpEveryMs) < kPyrCatchUpEveryMs) {
+      return;
+    }
+    _caughtUpAt[_n(to)] = t;
+    if (_caughtUpAt.length > 2000) {
+      _caughtUpAt.removeWhere(
+        (String _, int at) => t - at >= kPyrCatchUpEveryMs,
+      );
+    }
+    // The newest the friend has: of the top per pyramid, of a section per
+    // pyramid and nationality ('<pyramid>|<nat>').
+    int after(Object? m, String key) {
+      final Object? had = m is Map ? m[key] : null;
       return had is int ? had : 0;
     }
 
-    final Set<String> nats = _nationsOf(to);
-    final Set<String> banned = s.bannedEntries(_now());
-    final int natAfter = after(since);
-    final int topAfter = after(topSince);
-    for (final (bool top, List<PyrPost> posts) in <(bool, List<PyrPost>)>[
+    final Set<String> banned = s.bannedEntries(t);
+    final int topAfter = after(topSince, s.id);
+    final List<(bool, List<PyrPost>)> kinds = <(bool, List<PyrPost>)>[
       (
         true,
         <PyrPost>[
           for (final PyrPost p in s.posts.values)
-            if (p.level == 0 && p.at > topAfter && !banned.contains(p.id)) p,
+            if (p.toWhole && p.at > topAfter && !banned.contains(p.id)) p,
         ],
       ),
-      (
-        false,
-        <PyrPost>[
-          for (final PyrPost p in s.natPosts.values)
-            if (nats.contains(p.nat) &&
-                p.at > natAfter &&
-                !banned.contains(p.id))
-              p,
-        ],
-      ),
-    ]) {
+      // One frame per nationality, so a new country is not crowded out.
+      for (final String nat in _nationsOf(to).take(2 * kPyrFollowMax))
+        (
+          false,
+          <PyrPost>[
+            for (final PyrPost p in s.natPosts.values)
+              if (p.nat == nat &&
+                  p.at > after(since, '${s.id}|$nat') &&
+                  !banned.contains(p.id))
+                p,
+          ],
+        ),
+    ];
+    for (final (bool top, List<PyrPost> posts) in kinds) {
       posts.sort((PyrPost a, PyrPost b) => b.at.compareTo(a.at));
       final List<Map<String, dynamic>> out = <Map<String, dynamic>>[
         for (final PyrPost p in posts.take(kPyrNationalBatch))
@@ -4825,14 +5181,15 @@ final class PyramidService extends ChangeNotifier {
     }
   }
 
-  /// The newest post of one kind (the top's, or the sections') this phone
-  /// has read from outside, per pyramid (in the hello: friends send only
-  /// what is newer).
+  /// The newest post of one kind this phone has read from outside (in the
+  /// hello: friends send only what is newer): of the top per pyramid, of a
+  /// section per pyramid and nationality (`'<pyramid>|<nat>'`).
   Map<String, int> _nationalSince({required bool top}) {
     final Map<String, int> out = <String, int>{};
     for (final PyrNationalPost p in _nationalFeed.values) {
-      if (p.top == top && (out[p.pyramid] ?? -1) < p.at) {
-        out[p.pyramid] = p.at;
+      final String key = top ? p.pyramid : '${p.pyramid}|${p.nat}';
+      if (p.top == top && (out[key] ?? -1) < p.at) {
+        out[key] = p.at;
       }
     }
     return out;
@@ -4849,11 +5206,11 @@ final class PyramidService extends ChangeNotifier {
     if (verdicts is List) {
       await _onOutsideVerdicts(from, verdicts);
     }
-    final Set<String> mine = profileNationalities.toSet();
     final Object? list = p['ps'];
     if (list is! List || isMember) {
       return;
     }
+    final Set<String> mine = feedCountries.toSet();
     final int t = _now();
     bool changed = false;
     List<PyrCertifiedHead>? heads;
@@ -4870,7 +5227,10 @@ final class PyramidService extends ChangeNotifier {
       final PyrNationalPost? had = _nationalFeed[post.id];
       if (had == null &&
           (!await post.record.verifySigners() ||
-              (post.top && !byCertifiedHead(await headsNow(), post)))) {
+              (post.top &&
+                  !(post.delegated
+                      ? await byGrantOfHead(await headsNow(), post)
+                      : byCertifiedHead(await headsNow(), post))))) {
         continue;
       }
       // The same signed record: only what the friend sees of it changes.
@@ -4885,6 +5245,7 @@ final class PyramidService extends ChangeNotifier {
               pinned: post.pinned,
               comments: post.comments,
               from: from,
+              grant: had.grant,
             );
       if (had == null ||
           jsonEncode(had.toJson()) != jsonEncode(next.toJson())) {
@@ -4892,11 +5253,9 @@ final class PyramidService extends ChangeNotifier {
         changed = true;
       }
     }
-    // Nationalities taken off the profile are not read any more.
+    // Sections "Kraj" does not show any more are not read any more.
     final int before = _nationalFeed.length;
-    _nationalFeed.removeWhere(
-      (String _, PyrNationalPost x) => !x.top && !mine.contains(x.nat),
-    );
+    _dropUnfollowed();
     changed = changed || _nationalFeed.length != before;
     if (!changed) {
       return;
@@ -6240,6 +6599,12 @@ final class PyramidService extends ChangeNotifier {
     _peers[from] = theirs;
     // A friend outside the pyramid reads the top's posts and its national
     // section, and sees the verdicts on the profiles of those they concern.
+    final List<String> asked = _countryCodes(p['nc']);
+    if (asked.isEmpty) {
+      _askedCountries.remove(from);
+    } else {
+      _askedCountries[from] = asked.toSet();
+    }
     await _catchUpNational(from, p['nf'], p['tf']);
     await _catchUpVerdicts(from, p['vf']);
   }
@@ -6877,7 +7242,7 @@ final class PyramidService extends ChangeNotifier {
 
   // ---- after changes ----
 
-  Future<void> _afterChange(PyramidState? before) async {
+  Future<void> _afterChange({required bool wasMember}) async {
     await _settleRecovery();
     final PyramidState? s = state;
     final String? me = myKey;
@@ -6909,7 +7274,7 @@ final class PyramidService extends ChangeNotifier {
 
     // Records arrive in batches: a newcomer gets the whole pyramid in one,
     // with no pyramid shown before it.
-    if (!(before?.isMember(me) ?? false) && s.isMember(me) && s.head != me) {
+    if (!wasMember && s.isMember(me) && s.head != me) {
       await tell(
         'joined-${s.id}',
         t('Jesteś w piramidzie'),
@@ -7167,6 +7532,10 @@ final class PyramidService extends ChangeNotifier {
   /// app signs at once), after 72 h most of the top cell — every half hour
   /// until it is in. A key handed on is forgotten; the new one is kept.
   Future<void> _powerDuties(PyramidState s, String me) async {
+    if (s.head == me && s.powerKey != null && _powerId != s.powerKey) {
+      // Lost with a device (a recovered account): derived again.
+      await _restorePower(s, me);
+    }
     if (_powerNextId != null && s.powerKey == _powerNextId) {
       await _setPower(_powerNext);
       await _save();
@@ -7189,7 +7558,13 @@ final class PyramidService extends ChangeNotifier {
     }
     _handoverSentAt = t;
     if (_powerNext == null) {
-      await _setPowerNext(randomBytes(32));
+      // From the account (and the key handed over): it comes back with a
+      // recovered account ([_restorePower]).
+      final Uint8List? next = _powerSeedAfter(old);
+      if (next == null) {
+        return;
+      }
+      await _setPowerNext(next);
       await _save();
     }
     final LedgerKeyPair next = await LedgerKeyPair.fromSeed(_powerNext!);

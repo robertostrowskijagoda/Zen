@@ -259,10 +259,13 @@ final class PyramidRecord {
         );
 
   /// Whether signatures of this record carry their ML-DSA keys: the kinds
-  /// of [PyrT.keyed] and the top's posts to the whole pyramid (level 0),
-  /// which are read outside it too.
+  /// of [PyrT.keyed], posts to the whole pyramid (the head's, level 0, or
+  /// with the head's delegation) and that delegation, which are read
+  /// outside it too.
   bool get signsWithKeys =>
-      PyrT.keyed.contains(type) || (type == PyrT.post && integer('lvl') == 0);
+      PyrT.keyed.contains(type) ||
+      (type == PyrT.post && (integer('lvl') == 0 || body['all'] == true)) ||
+      (type == PyrT.delegate && str('power') == 'posts');
 
   Future<PyramidRecord> signedBy(LedgerKeyPair pair) async => withSig(
     pair.id,

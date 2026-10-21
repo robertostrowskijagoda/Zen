@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart'
@@ -50,6 +51,24 @@ int pyrAdd(int a, int b) {
 /// 12345 → "123,45": money for people in the app's language (in Polish
 /// thousands grouped with a non-breaking space; "123.45" in English).
 String pyrMoney(int hundredths) => ZenFormat.money(hundredths);
+
+/// From this many records a whole fold runs in a background isolate.
+const int kPyrBackgroundFoldRecords = 1500;
+
+/// [PyramidState.fold] in a background isolate, in the app's language (the
+/// texts of the history are written while folding).
+Future<PyramidState> pyrFoldInBackground(
+  String pyramidId,
+  List<PyramidRecord> records, {
+  required int now,
+  Map<String, int> late = const <String, int>{},
+}) {
+  final (String, Map<String, Object?>) texts = ZenI18n.snapshot;
+  return Isolate.run(() {
+    ZenI18n.adopt(texts);
+    return PyramidState.fold(pyramidId, records, now: now, late: late);
+  });
+}
 
 /// The public commitment to a member's birth year and gender:
 /// the year is published in the member data too, the gender only as this
@@ -404,6 +423,8 @@ final class PyrPost {
     required this.level,
     required this.at,
     this.nat,
+    this.toAll = false,
+    this.via,
   });
 
   final String id;
@@ -414,7 +435,15 @@ final class PyrPost {
   final int level;
   final int at;
   final String? nat;
+
+  /// Written to the whole pyramid: by the head (level 0), or by somebody
+  /// the head let do it ([via]: the delegation of power `posts`).
+  final bool toAll;
+  final String? via;
   final List<PyrComment> comments = <PyrComment>[];
+
+  /// To the whole pyramid (the head's, or with the head's delegation).
+  bool get toWhole => nat == null && (level == 0 || toAll);
 }
 
 final class PyrComment {
@@ -750,6 +779,24 @@ final class PyramidState {
   /// tree (cleared on every move).
   final Map<String, String?> _natLead = <String, String?>{};
 
+  /// Bumped whenever this state changes in place ([extend], [advanceTo]):
+  /// what is worked out from it is worked out again.
+  int revision = 0;
+
+  /// The last record applied, and the time it folded at: [extend] takes
+  /// only records that come after it.
+  PyramidRecord? _lastRecord;
+  int _lastAt = 0;
+
+  /// The latest time a change by time (an election's end, an emission,
+  /// new rules) happened at: a record dated before it must be folded
+  /// from the start.
+  int _lastEvent = 0;
+
+  /// Proposals already counted (content without the time): a fresh copy
+  /// of one, signed again late, counts once.
+  final Set<String> _proposalsDone = <String>{};
+
   // ---- reading ----
 
   String? get head => occupant[''];
@@ -757,6 +804,32 @@ final class PyramidState {
     for (final String p in <String>['', '0', '1'])
       if (occupant[p] != null) occupant[p]!,
   ];
+
+  /// Who sits at level 2 (the four places under the top cell).
+  List<String> get levelTwo => <String>[
+    for (final MapEntry<String, String> e in occupant.entries)
+      if (e.key.length == 2) e.value,
+  ]..sort();
+
+  /// How many of [levelTwo] must agree to remove or ban a member of the
+  /// top: most of them (none when nobody sits there).
+  int get levelTwoNeed {
+    final int n = levelTwo.length;
+    return n == 0 ? 0 : n ~/ 2 + 1;
+  }
+
+  /// Whether [key] is in the top cell (levels 0–1, the head included):
+  /// removed or banned only by 2 of 3 of the top and most of level 2.
+  bool inTopCell(String key) {
+    final String? p = position[key];
+    return p != null && p.length <= 1;
+  }
+
+  /// Whether [signers] are enough to remove or ban a member of the top:
+  /// 2 of 3 of the top and most of level 2.
+  bool _topImmunityHolds(List<String> signers) =>
+      _countOf(signers, topCell) >= 2 &&
+      _countOf(signers, levelTwo) >= levelTwoNeed;
 
   bool isMember(String key) => position.containsKey(key);
   String? pathOf(String key) => position[key];
@@ -1285,56 +1358,118 @@ final class PyramidState {
       .._witnessed = witnessed
       .._poison = poison
       .._times = times;
-    // Proposals already counted (content without the time): a fresh copy
-    // of one, signed again late, counts once.
-    final Set<String> proposalsDone = <String>{};
     for (final PyramidRecord r in list) {
-      final int at = times[r.id] ?? r.at;
-      s._clock = at;
-      s._timedUpTo(at);
-      s
-        .._cause = r.id
-        .._causeAt = at;
-      final String? proposal = r.body['pn'] is String ? r.contentKey : null;
-      if (proposal != null && proposalsDone.contains(proposal)) {
-        s.rejected[r.id] = 'ta propozycja już weszła (inna kopia)';
-        continue;
-      }
-      if (poison.contains(r.id)) {
-        // It threw in an earlier round: refused before anything
-        // of it happened.
-        s.rejected[r.id] = 'błędny rekord';
-        continue;
-      }
-      String? why;
-      try {
-        why = s._apply(r);
-        debugAfterApply?.call(r);
-      } on Object {
-        // A malformed record never breaks the pyramid: it does not count,
-        // the same way on every phone.
-        why = 'błędny rekord';
-        s._threw.add(r.id);
-      }
-      s
-        .._noteHead(at)
-        .._noteTreasurers(at);
-      if (why == null) {
-        if (proposal != null) {
-          proposalsDone.add(proposal);
-        }
-        s.applied.add(r.id);
-        for (final String k in r.signers) {
-          s.lastSeen[k] = max(s.lastSeen[k] ?? 0, r.at);
-        }
-      } else {
-        s.rejected[r.id] = s._lateHit.contains(r.id)
-            ? 'akt z cofniętej delegacji, dopisany po jej cofnięciu'
-            : why;
-      }
+      s._applyOne(r, times[r.id] ?? r.at);
     }
     s._timedUpTo(now);
     return s;
+  }
+
+  /// Applies one record of the fold at [at] (its own time, or when it was
+  /// seen late): first what happened by time until then.
+  void _applyOne(PyramidRecord r, int at) {
+    _clock = at;
+    _timedUpTo(at);
+    _lastRecord = r;
+    _lastAt = at;
+    _cause = r.id;
+    _causeAt = at;
+    final String? proposal = r.body['pn'] is String ? r.contentKey : null;
+    if (proposal != null && _proposalsDone.contains(proposal)) {
+      rejected[r.id] = 'ta propozycja już weszła (inna kopia)';
+      return;
+    }
+    if (_poison.contains(r.id)) {
+      // It threw in an earlier round: refused before anything of it
+      // happened.
+      rejected[r.id] = 'błędny rekord';
+      return;
+    }
+    String? why;
+    try {
+      why = _apply(r);
+      debugAfterApply?.call(r);
+    } on Object {
+      // A malformed record never breaks the pyramid: it does not count,
+      // the same way on every phone.
+      why = 'błędny rekord';
+      _threw.add(r.id);
+    }
+    _noteHead(at);
+    _noteTreasurers(at);
+    if (why == null) {
+      if (proposal != null) {
+        _proposalsDone.add(proposal);
+      }
+      applied.add(r.id);
+      for (final String k in r.signers) {
+        lastSeen[k] = max(lastSeen[k] ?? 0, r.at);
+      }
+    } else {
+      rejected[r.id] = _lateHit.contains(r.id)
+          ? 'akt z cofniętej delegacji, dopisany po jej cofnięciu'
+          : why;
+    }
+  }
+
+  /// Applies [more] — records new to this state — in place, exactly as
+  /// [fold] of everything would, and moves time on to [now]: only when
+  /// all of them come after the last record applied and after every
+  /// change by time already made, none of them folds at another time
+  /// ([late]) and none breaks (a rule throwing, an act dated back past a
+  /// revocation). False otherwise: the state may then be half changed and
+  /// must be folded again from the start. Nothing else is worked out
+  /// again: new records are cheap, only an insertion into the past costs
+  /// a whole fold.
+  bool extend(
+    Iterable<PyramidRecord> more, {
+    required int now,
+    Map<String, int> late = const <String, int>{},
+  }) {
+    final List<PyramidRecord> list = <PyramidRecord>[
+      for (final PyramidRecord r in more)
+        if (r.id == id || r.pyramid == id) r,
+    ];
+    if (list.isEmpty) {
+      advanceTo(now);
+      return true;
+    }
+    for (final PyramidRecord r in list) {
+      final int? seen = late[r.id];
+      if (r.at > now + kPyrMaxSkewMs ||
+          applied.contains(r.id) ||
+          rejected.containsKey(r.id) ||
+          (seen != null && seen > r.at && PyrT.timed.contains(r.type))) {
+        return false;
+      }
+    }
+    list.sort(_order);
+    final PyramidRecord first = list.first;
+    final PyramidRecord? last = _lastRecord;
+    if ((last != null && _orderAt(last, _lastAt, first, first.at) >= 0) ||
+        first.at < _lastEvent) {
+      return false;
+    }
+    for (final PyramidRecord r in list) {
+      _applyOne(r, r.at);
+    }
+    if (_threw.isNotEmpty || _witnessIfLate().isNotEmpty) {
+      return false;
+    }
+    _timedUpTo(now);
+    revision++;
+    return true;
+  }
+
+  /// Moves time on to [now]: elections end, emissions and new rules take
+  /// effect, as a fold at [now] would have it.
+  void advanceTo(int now) {
+    final int had = _lastEvent;
+    final int seen = history.length;
+    _timedUpTo(now);
+    if (_lastEvent != had || history.length != seen) {
+      revision++;
+    }
   }
 
   /// The revoked delegations → the acts their revocation listed, when an
@@ -1374,6 +1509,7 @@ final class PyramidState {
           );
     for (final PyrElection e in due) {
       _closeElection(e, e.deadline);
+      _lastEvent = max(_lastEvent, e.deadline);
     }
     final List<PyrEmission> ready =
         emissions.values
@@ -1388,6 +1524,7 @@ final class PyramidState {
     for (final PyrEmission e in ready) {
       // The treasurers credit it, privately, to whom its note names.
       e.done = true;
+      _lastEvent = max(_lastEvent, e.effectiveAt);
       history.add(
         PyrHistory(
           e.effectiveAt,
@@ -1408,6 +1545,7 @@ final class PyramidState {
           );
     for (final PyrParamsChange c in rules) {
       c.done = true;
+      _lastEvent = max(_lastEvent, c.effectiveAt);
       params
         ..apply(c.params)
         ..version += 1;
@@ -1432,6 +1570,7 @@ final class PyramidState {
           );
     for (final PyrEmitChange c in raises) {
       c.done = true;
+      _lastEvent = max(_lastEvent, c.effectiveAt);
       _setEmission(c.limit, c.delayHours, c.xfers);
       history.add(
         PyrHistory(
@@ -1904,6 +2043,9 @@ final class PyramidState {
         if (cell.length < 2 || _countOf(by, cell) < 2) {
           return 'usunąć może tylko własna komórka (2 z 3)';
         }
+        if (p.length <= 1 && !_topImmunityHolds(by)) {
+          return 'szczyt: potrzebne 2 z 3 szczytu i większość poziomu 2';
+        }
         leftLevel[k] = p.length;
         // Appealed above the head who removed them.
         matters[r.id] = PyrMatter(
@@ -2040,7 +2182,11 @@ final class PyramidState {
           return 'brak listy znanych aktów';
         }
         final bool byIssuer =
-            d.parent != null && by.contains(delegations[d.parent]?.to);
+            (d.parent != null && by.contains(delegations[d.parent]?.to)) ||
+            // The head takes back writing to the whole pyramid alone.
+            (d.power == 'posts' &&
+                occupant[''] != null &&
+                by.contains(occupant['']));
         if (!_twoOfTop(r) && !byIssuer) {
           return 'cofnąć może szczyt albo wystawca';
         }
@@ -2098,12 +2244,26 @@ final class PyramidState {
         if (silencedAt(k, r.at)) {
           return 'autor ma przerwę';
         }
+        // To the whole pyramid: the head's own post (level 0), or one
+        // through the head's delegation of `posts`.
+        final bool toAll = b['all'] == true;
+        final String? via = b['via'] is String ? b['via'] as String : null;
+        if (toAll && r.integer('lvl') != 0) {
+          if (via == null ||
+              delegations[via]?.to != k ||
+              !_canUse(via, 'posts', '', r)) {
+            return 'do całej piramidy pisze szef albo osoba z jego delegacją';
+          }
+          _use(via, r);
+        }
         posts[r.id] = PyrPost(
           id: r.id,
           author: k,
           text: _clip(r.str('text'), 5000),
           level: r.integer('lvl'),
           at: r.at,
+          toAll: toAll,
+          via: toAll && r.integer('lvl') != 0 ? via : null,
         );
         return null;
       case PyrT.comment:
@@ -3506,6 +3666,8 @@ final class PyramidState {
     'content',
     'reports',
     'alarm',
+    // Posts to the whole pyramid: only the head gives it ([_delegate]).
+    'posts',
   };
 
   String? _delegate(PyramidRecord r) {
@@ -3527,7 +3689,18 @@ final class PyramidState {
       return 'zły limit albo termin';
     }
     final int limit = r.integer('limit');
-    if (parent == null) {
+    if (power == 'posts') {
+      // Writing to the whole pyramid is the head's: the head alone gives
+      // it, to the whole pyramid, never to be passed on.
+      final String? chief = occupant[''];
+      if (parent != null ||
+          scope.isNotEmpty ||
+          r.body['sub'] == true ||
+          chief == null ||
+          !r.signers.contains(chief)) {
+        return 'pisanie do całej piramidy deleguje tylko szef';
+      }
+    } else if (parent == null) {
       if (!_twoOfTop(r)) {
         return 'deleguje szczyt (2 z 3)';
       }
@@ -3615,6 +3788,14 @@ final class PyramidState {
       if (_countOf(r.signers, cell) < min(2, cell.length)) {
         return 'immunitet: potrzebna zgoda komórki tej osoby';
       }
+    }
+    // The top itself: 2 of 3 of the top and most of level 2 (a ban of one
+    // piece of content is not a ban of the person).
+    if (p != null &&
+        p.length <= 1 &&
+        kind != 'content' &&
+        !_topImmunityHolds(r.signers)) {
+      return 'szczyt: potrzebne 2 z 3 szczytu i większość poziomu 2';
     }
     if (delegated) {
       // Counted only once the ban counts (a refused one uses nothing up).

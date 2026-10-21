@@ -747,12 +747,13 @@ void main() {
           <LedgerKeyPair>[w.s],
           <String, dynamic>{'emit': e.id},
         );
-        // S and A remove B from the top (B's own cell), then B vetoes.
+        // S and A (B's own cell) with most of level 2 remove B from the
+        // top, then B vetoes.
         final PyramidRecord removeB = await rec(
           PyrT.remove,
           w.py,
           at + h,
-          <LedgerKeyPair>[w.s, w.a],
+          <LedgerKeyPair>[w.s, w.a, w.a1, w.a2],
           <String, dynamic>{'k': w.b.id},
         );
         final PyramidRecord v1 = await rec(

@@ -142,12 +142,13 @@ void main() {
     await w.net.run();
     expect(ids(w['O'].feed.pyramid), <String>[top.id]);
 
-    // No member friend: nothing, no pyramid chips.
+    // No member friend: nothing, no „Piramida” (but „Kraj” to pick in).
     expect(w['P'].feed.posts, isEmpty);
     expect(feedFiltersFor(w['P'].feed), <FeedFilter>[
       FeedFilter.all,
       FeedFilter.friends,
       FeedFilter.close,
+      FeedFilter.national,
     ]);
 
     // A friend that comes later, without a nationality in the profile,
@@ -161,12 +162,7 @@ void main() {
       <String>[for (final PyrNationalPost p in w['L'].topPosts()) p.id],
       <String>[top.id],
     );
-    expect(feedFiltersFor(w['L'].feed), <FeedFilter>[
-      FeedFilter.all,
-      FeedFilter.friends,
-      FeedFilter.close,
-      FeedFilter.pyramid,
-    ]);
+    expect(feedFiltersFor(w['L'].feed), FeedFilter.values);
     bool passed(Map<String, dynamic> m) => m['type'] == PyramidTypes.national;
     final int sent = w.net['B'].outbox.where(passed).length;
     await w['L'].greet();

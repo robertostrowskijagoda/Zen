@@ -1,3 +1,5 @@
+import 'dart:ui' show PlatformDispatcher;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -58,6 +60,8 @@ final Provider<PyramidService> pyramidServiceProvider =
         },
         myNationalities: () =>
             ref.read(userProfileControllerProvider).nationalities,
+        // "Kraj" outside the pyramid without a nationality in the profile.
+        phoneRegion: () => PlatformDispatcher.instance.locale.countryCode,
       );
       // The same pyramid on every device of the account.
       final LedgerNode? node = ref.read(ledgerNodeProvider);
