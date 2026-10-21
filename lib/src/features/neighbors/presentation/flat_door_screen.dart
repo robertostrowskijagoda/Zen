@@ -500,8 +500,94 @@ class _Sticker extends StatelessWidget {
   }
 }
 
-/// Residents of this flat: the QR a new housemate scans — only
-/// inside the flat, because it carries the flat's key — and leaving.
+/// A phone asking to become a resident: its name and device, "Dołącz" or
+/// "Odrzuć" (only the phone that showed the household code decides).
+class FlatJoinRequestCard extends StatelessWidget {
+  const FlatJoinRequestCard({
+    required this.service,
+    required this.request,
+    super.key,
+  });
+
+  final NeighborsService service;
+  final FlatJoinRequest request;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final Color tone = neighborsTone(zen);
+    return ZenCard(
+      key: Key('flat-join-request-${request.name}'),
+      tone: tone,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              ZenIconBadge(
+                icon: Icons.person_add_alt_1_rounded,
+                tone: tone,
+                size: 40,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      t('{name} chce zostać domownikiem', {
+                        'name': request.name.isEmpty ? t('Ktoś') : request.name,
+                      }),
+                      style: TextStyle(
+                        color: zen.textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        height: 1.3,
+                      ),
+                    ),
+                    if (request.device.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 3),
+                      Text(
+                        request.device,
+                        style: TextStyle(
+                          color: zen.textSecondary,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.end,
+            children: <Widget>[
+              TextButton(
+                key: Key('flat-join-decline-${request.name}'),
+                onPressed: () => unawaited(service.declineJoin(request.id)),
+                child: Text(t('Odrzuć')),
+              ),
+              FilledButton.tonalIcon(
+                key: Key('flat-join-approve-${request.name}'),
+                onPressed: () => unawaited(service.approveJoin(request.id)),
+                icon: const Icon(Icons.how_to_reg_rounded, size: 18),
+                label: Text(t('Dołącz')),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Residents of this flat: a one-time code a new housemate scans, the
+/// phones asking to join, first names, removing a phone, and leaving.
 class FlatHomeScreen extends ConsumerStatefulWidget {
   const FlatHomeScreen({super.key});
 
@@ -516,7 +602,50 @@ class FlatHomeScreen extends ConsumerStatefulWidget {
 }
 
 class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
-  bool _show = false;
+  /// The household code shown now (one-time, a few minutes).
+  FlatHomeCode? _code;
+
+  /// "Twoje imię w mieszkaniu": what housemates and neighbours see.
+  Future<void> _rename(NeighborsService service) async {
+    final TextEditingController name = TextEditingController(
+      text: service.myName,
+    );
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(t('Twoje imię w mieszkaniu')),
+        content: SizedBox(
+          width: 400,
+          child: TextField(
+            key: const Key('flat-my-name'),
+            controller: name,
+            maxLength: 40,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            decoration: InputDecoration(
+              helperText: t('Tak podpisujesz wiadomości do sąsiadów.'),
+              helperMaxLines: 3,
+            ),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('Zapisz')),
+          ),
+        ],
+      ),
+    );
+    final String text = name.text;
+    disposeLater(name);
+    if (ok == true) {
+      await service.setMyName(text);
+    }
+  }
 
   Future<void> _moveOut(NeighborsService service) async {
     final TextEditingController place = TextEditingController();
@@ -588,6 +717,7 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
     String name,
   ) async {
     final int needed = service.votesNeeded(member);
+    final bool two = (service.profile?.members.length ?? 0) == 2;
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
@@ -597,24 +727,31 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
         ),
         title: Text(t('Odłączyć „{name}”?', {'name': name})),
         content: Text(
-          tn(
-            needed,
-            one:
-                'Gdy zgodzi się większość pozostałych domowników '
-                '(wystarczy Twój głos), mieszkanie dostanie nowy klucz i nowy '
-                'kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi '
-                'dostaną informację. Starą naklejkę trzeba będzie wymienić.',
-            few:
-                'Gdy zgodzi się większość pozostałych domowników '
-                '(potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy '
-                'kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi '
-                'dostaną informację. Starą naklejkę trzeba będzie wymienić.',
-            many:
-                'Gdy zgodzi się większość pozostałych domowników '
-                '(potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy '
-                'kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi '
-                'dostaną informację. Starą naklejkę trzeba będzie wymienić.',
-          ),
+          two
+              ? t(
+                  'Poprosimy „{name}” o zgodę. Jeśli nie odpowie w ciągu 7 '
+                  'dni, telefon zostanie odłączony, a mieszkanie dostanie '
+                  'nowy klucz i nowy kod na drzwi.',
+                  {'name': name},
+                )
+              : tn(
+                  needed,
+                  one:
+                      'Gdy zgodzi się większość pozostałych domowników '
+                      '(wystarczy Twój głos), mieszkanie dostanie nowy klucz i nowy '
+                      'kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi '
+                      'dostaną informację. Starą naklejkę trzeba będzie wymienić.',
+                  few:
+                      'Gdy zgodzi się większość pozostałych domowników '
+                      '(potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy '
+                      'kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi '
+                      'dostaną informację. Starą naklejkę trzeba będzie wymienić.',
+                  many:
+                      'Gdy zgodzi się większość pozostałych domowników '
+                      '(potrzeba {n} głosów), mieszkanie dostanie nowy klucz i nowy '
+                      'kod na drzwi, a ten telefon zostanie bez dostępu. Sąsiedzi '
+                      'dostaną informację. Starą naklejkę trzeba będzie wymienić.',
+                ),
         ),
         actions: <Widget>[
           TextButton(
@@ -684,9 +821,9 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
       body: ListenableBuilder(
         listenable: service,
         builder: (BuildContext context, Widget? _) {
-          final FlatHomeCode? code = service.homeCode;
+          final FlatHomeCode? code = _code;
           final FlatProfile? p = service.profile;
-          if (code == null || p == null) {
+          if (p == null || !service.hasFlat) {
             return Center(
               child: SingleChildScrollView(
                 child: ZenEmpty(
@@ -711,8 +848,8 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                 tone: tone,
                 text: t(
                   'Każdy domownik może zmieniać profil, zapraszać i odpisywać '
-                  'sąsiadom. Żeby dodać kolejnego, niech zeskanuje ten kod '
-                  'w „Sąsiedzi → Dołącz”.',
+                  'sąsiadom. Żeby dodać kolejnego, niech zeskanuje kod '
+                  'domownika w „Sąsiedzi → Dołącz”.',
                 ),
                 actions: <Widget>[
                   ZenPill(
@@ -724,16 +861,75 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                   ),
                 ],
               ),
+              if (service.removalAsked != null)
+                Builder(
+                  builder: (BuildContext context) {
+                    final (String, int) asked = service.removalAsked!;
+                    final String who = service.residentName(asked.$1);
+                    return ZenCard(
+                      key: const Key('flat-removal-asked'),
+                      tone: zen.danger,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          Text(
+                            t('{name} chce odłączyć ten telefon', {
+                              'name': who.isEmpty ? t('Domownik') : who,
+                            }),
+                            style: TextStyle(
+                              color: zen.textPrimary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            t('Bez odpowiedzi stanie się to {date}.', {
+                              'date': flatDate(asked.$2),
+                            }),
+                            style: TextStyle(
+                              color: zen.textSecondary,
+                              fontSize: 13.5,
+                              height: 1.4,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            alignment: WrapAlignment.end,
+                            children: <Widget>[
+                              TextButton(
+                                key: const Key('flat-removal-refuse'),
+                                onPressed: () =>
+                                    unawaited(service.refuseRemoval()),
+                                child: Text(t('Nie zgadzam się')),
+                              ),
+                              FilledButton.tonal(
+                                key: const Key('flat-removal-agree'),
+                                onPressed: () => unawaited(_leave(service)),
+                                child: Text(t('Zgadzam się')),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              for (final FlatJoinRequest r in service.joinRequests)
+                FlatJoinRequestCard(service: service, request: r),
               ZenInfo(
-                icon: Icons.warning_amber_rounded,
-                tone: zen.danger,
+                icon: Icons.verified_user_outlined,
+                tone: tone,
                 text: t(
-                  'Pokazuj go tylko w mieszkaniu: kto go zeskanuje, staje się '
-                  'domownikiem.',
+                  'Kod domownika działa raz, przez 10 minut. Kto go zeskanuje, '
+                  'tylko prosi o dołączenie — potwierdzasz to na tym '
+                  'telefonie.',
                 ),
               ),
               const SizedBox(height: 12),
-              if (_show)
+              if (code != null)
                 Center(
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
@@ -761,25 +957,46 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                   style: FilledButton.styleFrom(
                     minimumSize: const Size.fromHeight(52),
                   ),
-                  onPressed: () => setState(() => _show = true),
+                  onPressed: () =>
+                      setState(() => _code = service.inviteHousemate()),
                   icon: const Icon(Icons.qr_code_rounded),
                   label: Text(t('Pokaż kod domownika')),
                 ),
-              if (_show && !Platform.isAndroid && !Platform.isIOS) ...<Widget>[
+              if (code != null) ...<Widget>[
                 const SizedBox(height: 8),
-                Center(
-                  child: TextButton.icon(
-                    // The household key: gone from the clipboard after a
-                    // minute.
-                    onPressed: () => unawaited(copyWithExpiry(code.toQr())),
-                    icon: const Icon(Icons.copy_rounded),
-                    label: Text(t('Kopiuj kod (dla komputera domownika)')),
-                  ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.center,
+                  children: <Widget>[
+                    TextButton.icon(
+                      key: const Key('flat-home-new'),
+                      onPressed: () =>
+                          setState(() => _code = service.inviteHousemate()),
+                      icon: const Icon(Icons.autorenew_rounded),
+                      label: Text(t('Nowy kod')),
+                    ),
+                    if (!Platform.isAndroid && !Platform.isIOS)
+                      TextButton.icon(
+                        // Gone from the clipboard after a minute.
+                        onPressed: () => unawaited(copyWithExpiry(code.toQr())),
+                        icon: const Icon(Icons.copy_rounded),
+                        label: Text(t('Kopiuj kod (dla komputera domownika)')),
+                      ),
+                  ],
                 ),
               ],
               ZenSection(t('Telefony domowników'), top: 28),
               ZenGroup(
                 children: <Widget>[
+                  ListTile(
+                    key: const Key('flat-my-name-tile'),
+                    leading: Icon(Icons.badge_rounded, color: tone),
+                    title: Text(t('Twoje imię w mieszkaniu')),
+                    subtitle: Text(service.myName),
+                    trailing: const Icon(Icons.edit_rounded),
+                    onTap: () => unawaited(_rename(service)),
+                  ),
                   for (final String m in p.members.keys)
                     Builder(
                       builder: (BuildContext context) {
@@ -809,7 +1026,19 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          subtitle: votes.isEmpty
+                          subtitle: service.removalDeadline(m) != null
+                              ? Text(
+                                  t(
+                                    'Czeka na zgodę — bez odpowiedzi '
+                                    'odłączenie {date}',
+                                    {
+                                      'date': flatDate(
+                                        service.removalDeadline(m)!,
+                                      ),
+                                    },
+                                  ),
+                                )
+                              : votes.isEmpty
                               ? null
                               : Text(
                                   t(

@@ -256,6 +256,7 @@ final class LockedDoorKit {
     this.flatKey,
     this.doorToken,
     this.sealSeed,
+    this.tempTokens = const <String, int>{},
   });
 
   /// The flat's door key (hex seed); `null` without a flat.
@@ -270,6 +271,10 @@ final class LockedDoorKit {
   final String? doorToken;
   final String? sealSeed;
 
+  /// Short-lived door tokens of invitations passed nearby (token → until
+  /// when).
+  final Map<String, int> tempTokens;
+
   bool get isEmpty => doorKey == null && mailboxDoorKeys.isEmpty;
 
   /// What tells a knock while locked; `null` without a flat.
@@ -279,7 +284,12 @@ final class LockedDoorKit {
     final String? seal = sealSeed;
     return key == null || token == null || seal == null
         ? null
-        : LockedKnockWatch(flatKey: key, doorToken: token, sealSeed: seal);
+        : LockedKnockWatch(
+            flatKey: key,
+            doorToken: token,
+            sealSeed: seal,
+            tempTokens: tempTokens,
+          );
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -289,6 +299,7 @@ final class LockedDoorKit {
     'fk': ?flatKey,
     'dt': ?doorToken,
     'ss': ?sealSeed,
+    if (tempTokens.isNotEmpty) 'tt': tempTokens,
   };
 
   static LockedDoorKit? fromJson(Object? json) {
@@ -300,6 +311,7 @@ final class LockedDoorKit {
     final Object? fk = json['fk'];
     final Object? dt = json['dt'];
     final Object? ss = json['ss'];
+    final Object? tt = json['tt'];
     return LockedDoorKit(
       doorKey: dk is String && _doorSeedPattern.hasMatch(dk) ? dk : null,
       mailboxDoorKeys: <String>[
@@ -310,6 +322,14 @@ final class LockedDoorKit {
       flatKey: fk is String && fk.isNotEmpty && fk.length <= 64 ? fk : null,
       doorToken: dt is String && dt.isNotEmpty && dt.length <= 64 ? dt : null,
       sealSeed: ss is String && _doorSeedPattern.hasMatch(ss) ? ss : null,
+      tempTokens: <String, int>{
+        if (tt is Map)
+          for (final MapEntry<dynamic, dynamic> e in tt.entries.take(32))
+            if (e.key is String &&
+                (e.key as String).length <= 64 &&
+                e.value is int)
+              e.key as String: e.value as int,
+      },
     );
   }
 }

@@ -55,10 +55,28 @@ Then your door answers right away, so the knocker learns that one of your
 phones is online. The knocker, too, shows only such a card; full profiles
 are exchanged after **Let in**.
 
-**Housemates.** A new housemate scans a code from a housemate's phone. Each
-phone keeps its own resident key. **Leave** on one phone makes the others
-create a new household key, a new sticker secret and new doors: the phone
-that left can no longer sign or read anything. (Reprint the sticker.)
+**Housemates.** A housemate taps **Show housemate code**: a one-time code
+that works for 10 minutes and does not contain the household key. The new
+phone scans it and asks to join; the housemate's phone shows its name and
+device with **Join** / **Reject**. Only after **Join** does the household key
+travel to the new phone, sealed to it (with a post-quantum key as well).
+Each phone keeps its own resident key and its own first name in the flat
+(**Your name in the flat**); messages to neighbours are signed with that
+name, never with the account name.
+
+**Leave** on one phone makes the others create a new household key, a new
+sticker secret and new doors: the phone that left can no longer sign or read
+anything. (Reprint the sticker.) To remove a phone that will not leave,
+housemates vote; a majority of the others decides. In a household of **two**,
+the other resident is asked first: **I agree** removes the phone at once,
+**I disagree** keeps it, and with no answer for 7 days it is removed. Both
+phones get a notification at each step.
+
+**Invitations nearby.** **Invite people nearby (Bluetooth)** passes an
+invitation with a code of its own that works for 24 hours, never the
+permanent code of the sticker. Any household phone accepts knocks with it
+until then; **New code** ends it at once.
+
 **New code** changes the sticker secret and the doors; old stickers stop
 working.
 
@@ -71,7 +89,8 @@ Zen account (never the other housemates') to make friends.
 |---|---|---|
 | Someone with a camera | the sticker: name and place, door addresses | your accounts, names, how many live there, whether anyone is home |
 | A knocker before *Let in* | the name, and only what you chose to show | your accounts, your full profile |
-| A neighbour you let in | your household profile, messages signed with the writer's account name | phone addresses and accounts (until *Show my profile*) |
+| A neighbour you let in | your household profile, messages signed with the writer's first name in the flat | phone addresses and accounts (until *Show my profile*) |
+| Someone who got an invitation nearby | the same as a knocker, for 24 hours | the permanent sticker code |
 | A friend keeping a mailbox door | ciphertext and counters | who knocks, which flat (unless they saw the sticker) |
 
 ## Limits
@@ -85,5 +104,7 @@ Zen account (never the other housemates') to make friends.
 - The sticker lists only the housemates whose doors were known when it was
   printed (up to 8).
 - A mailbox door accepts 10 knocks a week (4 a day, 2 from one knocker).
+- A housemate code works once and for 10 minutes; the phone that showed it
+  has to be on to confirm.
 
 [Back to the guide](README.md)

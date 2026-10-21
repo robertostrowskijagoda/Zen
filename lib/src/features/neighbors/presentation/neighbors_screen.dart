@@ -299,6 +299,9 @@ Future<void> knockOnFlatDoor(
         FlatScan.alreadyNeighbor => t('„{name}” już są na liście.', {
           'name': code.name,
         }),
+        FlatScan.expired => t(
+          'To zaproszenie już wygasło. Zeskanujcie kod z ich drzwi.',
+        ),
       }),
     ),
   );
@@ -366,7 +369,7 @@ class _Joining extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Text(
-              t('Czekam na telefon domownika…'),
+              t('Czekam, aż domownik potwierdzi…'),
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: zen.textPrimary,
@@ -376,7 +379,10 @@ class _Joining extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              t('Musi być włączony i w sieci.'),
+              t(
+                'Na telefonie, który pokazał kod, pojawi się prośba: '
+                '„Dołącz” albo „Odrzuć”.',
+              ),
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: zen.textSecondary,
@@ -453,7 +459,11 @@ class _NoFlatState extends ConsumerState<_NoFlat> {
       ).showSnackBar(SnackBar(content: Text(t('To nie jest kod domownika.'))));
       return;
     }
-    await widget.service.joinFlat(code);
+    if (!await widget.service.joinFlat(code) && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t('Ten kod już wygasł — poproś o nowy.'))),
+      );
+    }
   }
 
   @override
@@ -788,8 +798,9 @@ class _FlatHome extends ConsumerWidget {
     WidgetRef ref,
     FlatItem item,
   ) async {
-    final Map<String, dynamic>? wave = service.nearbyWave(item.id);
     final NearbyService nearby = ref.read(nearbyServiceProvider);
+    // A code of its own, valid a day: never the sticker's permanent one.
+    final Map<String, dynamic>? wave = await service.nearbyWave(item.id);
     if (wave == null) {
       return;
     }
@@ -990,6 +1001,9 @@ class _FlatHome extends ConsumerWidget {
             ],
           ),
         ),
+        // Phones asking to become residents (with a code this phone showed).
+        for (final FlatJoinRequest r in service.joinRequests)
+          FlatJoinRequestCard(service: service, request: r),
         if (knocks.isNotEmpty) ...<Widget>[
           ZenSection(t('Pukają do drzwi')),
           for (final FlatKnock k in knocks)

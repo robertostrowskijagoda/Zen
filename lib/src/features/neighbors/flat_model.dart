@@ -336,6 +336,10 @@ final class FlatProfile {
 /// ([mail], flat_door_mail.dart): run by the friends who keep the phone's
 /// offline mailboxes, named by addresses that say nothing about who they
 /// are.
+///
+/// The printed sticker carries the household's permanent token; an
+/// invitation passed to people nearby carries a token of its own that works
+/// only until [until] ([kNearbyCodeLife]).
 @immutable
 final class FlatDoorCode {
   const FlatDoorCode({
@@ -344,6 +348,7 @@ final class FlatDoorCode {
     required this.inbox,
     required this.name,
     this.mail,
+    this.until,
   });
 
   final String key;
@@ -358,6 +363,13 @@ final class FlatDoorCode {
   /// The mailbox doors and the key knocks for them are sealed to; `null`
   /// before the phone has worked them out.
   final FlatMailDoor? mail;
+
+  /// Until when a short-lived code works (milliseconds); `null` for the
+  /// sticker's permanent one.
+  final int? until;
+
+  /// Whether a short-lived code is over at [now].
+  bool expiredAt(int now) => until != null && until! <= now;
 
   static const int currentVersion = 3;
 
@@ -379,6 +391,7 @@ final class FlatDoorCode {
             'a': inbox,
             'n': name,
             ...?mail?.toJson(),
+            'u': ?until,
           }),
         ),
       )
@@ -429,31 +442,56 @@ final class FlatDoorCode {
       return null;
     }
     final String name = json['n'] as String;
+    final Object? until = json['u'];
     return FlatDoorCode(
       key: json['k'] as String,
       door: json['d'] as String,
       inbox: PeerShareCodec.normalizeAddress(inbox),
       name: name.length > 150 ? name.substring(0, 150) : name,
       mail: FlatMailDoor.read(json['s'], json['x']),
+      until: until is int ? until : null,
     );
   }
 }
 
-/// What a housemate shows to let a new resident in: scanned only
-/// inside the flat, because it carries the flat's private key.
+/// How long an invitation heard nearby works: its door code carries a
+/// token of its own, never the sticker's permanent one.
+const Duration kNearbyCodeLife = Duration(days: 1);
+
+/// How long a household code ("Pokaż kod domownika") works; it works once.
+const Duration kHomeCodeLife = Duration(minutes: 10);
+
+/// What a housemate shows to let a new resident in: a one-time token valid
+/// [kHomeCodeLife], the housemate's phone to ask, and which household it is
+/// (its public key and name). Never the household's key: that comes sealed
+/// to the new phone only once the housemate taps "Dołącz" on their phone.
 @immutable
 final class FlatHomeCode {
-  const FlatHomeCode({required this.seed, required this.address});
+  const FlatHomeCode({
+    required this.token,
+    required this.address,
+    required this.flatKey,
+    required this.name,
+    required this.until,
+  });
 
-  final String seed;
+  /// The one-time token.
+  final String token;
 
-  /// The housemate's phone, to send "I'm in" to.
+  /// The housemate's phone, to ask to join.
   final String address;
+
+  /// The household's public key and name.
+  final String flatKey;
+  final String name;
+
+  /// Until when it works (milliseconds).
+  final int until;
 
   static const String qrPrefix = 'zen-home:';
 
   String toQr() =>
-      '$qrPrefix${base64Url.encode(utf8.encode(jsonEncode(<String, String>{'s': seed, 'a': address}))).replaceAll('=', '')}';
+      '$qrPrefix${base64Url.encode(utf8.encode(jsonEncode(<String, dynamic>{'t': token, 'a': address, 'k': flatKey, 'n': name, 'u': until}))).replaceAll('=', '')}';
 
   static FlatHomeCode? parse(String text) {
     final String t = text.trim();
@@ -467,19 +505,67 @@ final class FlatHomeCode {
         ),
       );
       if (json is! Map ||
-          unb64(json['s'], length: 32) == null ||
+          json['t'] is! String ||
+          (json['t'] as String).isEmpty ||
+          (json['t'] as String).length > 64 ||
           json['a'] is! String ||
-          !isRoutablePeerAddress(json['a'] as String)) {
+          !isRoutablePeerAddress(json['a'] as String) ||
+          unb64(json['k'], length: 32) == null ||
+          json['n'] is! String ||
+          json['u'] is! int) {
         return null;
       }
+      final String name = json['n'] as String;
       return FlatHomeCode(
-        seed: json['s'] as String,
+        token: json['t'] as String,
         address: PeerShareCodec.normalizeAddress(json['a'] as String),
+        flatKey: json['k'] as String,
+        name: name.length > 150 ? name.substring(0, 150) : name,
+        until: json['u'] as int,
       );
     } on Object {
       return null;
     }
   }
+}
+
+/// What a new phone signs with its resident key when it asks to join with a
+/// household code ([ask]: the token, its name and device, its resident key
+/// and the keys the household key is sealed to).
+Uint8List flatJoinAskBytes(Map<String, Object?> ask) =>
+    canonicalJsonBytes(<String, Object?>{'t': 'zen_flat_join', ...ask});
+
+/// A new phone asking to become a resident with a household code: the
+/// phone that showed the code confirms it ("Dołącz") or not ("Odrzuć").
+@immutable
+final class FlatJoinRequest {
+  const FlatJoinRequest({
+    required this.id,
+    required this.name,
+    required this.device,
+    required this.resident,
+    required this.phone,
+    required this.seal,
+    required this.kem,
+    required this.at,
+  });
+
+  /// The code's token.
+  final String id;
+
+  /// The name the new resident gave, and their device ("Telefon (Android)").
+  final String name;
+  final String device;
+
+  /// Their resident key and phone.
+  final String resident;
+  final String phone;
+
+  /// Where the household key goes, sealed: X25519 (base64url) and a hybrid
+  /// ML-KEM-768 + X25519 key.
+  final String seal;
+  final Uint8List kem;
+  final int at;
 }
 
 /// What a resident signs (with their own resident key) to vote the

@@ -63,6 +63,7 @@ final class _Phone implements EventHost {
     flatKey: service.profile?.key,
     doorToken: service.door,
     sealSeed: service.sealSeed,
+    tempTokens: service.tempDoorTokens,
   );
 
   Future<void> _deliver(
@@ -126,6 +127,25 @@ final class _Phone implements EventHost {
   Future<void> notify(RuntimeSystemNotification n) async {}
 }
 
+/// [newcomer] joins [housemate]'s household: a one-time household code,
+/// and the housemate confirms it on their phone ("Dołącz").
+Future<bool> _join(_Phone newcomer, _Phone housemate) async {
+  final FlatHomeCode code = housemate.service.inviteHousemate()!;
+  if (!await newcomer.service.joinFlat(code)) {
+    return false;
+  }
+  await _settle();
+  final String? me = newcomer.service.residentKey;
+  final FlatJoinRequest request = housemate.service.joinRequests.firstWhere(
+    (FlatJoinRequest r) => r.resident == me,
+  );
+  if (!await housemate.service.approveJoin(request.id)) {
+    return false;
+  }
+  await _settle();
+  return true;
+}
+
 /// The household Nowakowie (Ania and Ola) and a knocker, Bartek.
 Future<(_Phone, _Phone, _Phone)> _household() async {
   final Map<String, _Phone> net = <String, _Phone>{};
@@ -133,7 +153,7 @@ Future<(_Phone, _Phone, _Phone)> _household() async {
   final _Phone ola = _Phone(net, 'ola');
   final _Phone bartek = _Phone(net, 'bartek');
   await ania.service.createFlat('Nowakowie', place: 'm. 12');
-  await ola.service.joinFlat(ania.service.homeCode!);
+  await _join(ola, ania);
   await _settle();
   await bartek.service.createFlat('Bartkowie');
   return (ania, ola, bartek);
@@ -311,6 +331,45 @@ void main() {
     expect(atOla.mayRing('one-more'), isFalse);
     ola.clock += 3600 * 1000;
     expect(atOla.mayRing(bartekKey), isTrue);
+  });
+
+  test('while locked, a knock with an invitation\'s short-lived code rings '
+      'until the code is over', () async {
+    final (_Phone ania, _Phone _, _Phone bartek) = await _household();
+    final String grill = (await ania.service.addItem(
+      FlatItemKind.invite,
+      'Grill',
+    ))!;
+    final FlatDoorCode code = FlatDoorCode.parse(
+      (await ania.service.nearbyWave(grill))!['q'] as String,
+    )!;
+    final LockedDoorKit kit = LockedDoorKit.fromJson(
+      jsonDecode(jsonEncode(ania.kit.toJson())),
+    )!;
+    expect(kit.tempTokens, <String, int>{code.door: code.until!});
+    ania.online = false;
+    await bartek.service.scanDoor(code);
+    final Map<String, dynamic> hello = _ofType(bartek, FlatTypes.hello);
+    LockedKnockWatch watch(Map<String, int> temp) => LockedKnockWatch(
+      flatKey: ania.service.profile!.key,
+      doorToken: ania.service.door,
+      sealSeed: ania.service.sealSeed!,
+      tempTokens: temp,
+      now: () => ania.clock,
+    );
+    expect(
+      await watch(kit.tempTokens).knocker(_at(bartek.inbox!, hello)),
+      bartek.service.profile!.key,
+    );
+    expect(
+      await watch(const <String, int>{}).knocker(_at(bartek.inbox!, hello)),
+      isNull,
+    );
+    ania.clock += kNearbyCodeLife.inMilliseconds;
+    expect(
+      await watch(kit.tempTokens).knocker(_at(bartek.inbox!, hello)),
+      isNull,
+    );
   });
 
   group('the locked receiver', () {

@@ -26,6 +26,7 @@ final class LockedKnockWatch {
     required this.flatKey,
     required this.doorToken,
     required String sealSeed,
+    this.tempTokens = const <String, int>{},
     int Function()? now,
   }) : _sealSeed = sealSeed,
        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
@@ -35,6 +36,14 @@ final class LockedKnockWatch {
 
   /// The token of the current door sticker.
   final String doorToken;
+
+  /// Short-lived tokens of invitations passed nearby (token → until when).
+  final Map<String, int> tempTokens;
+
+  /// Whether [token] opens the door now.
+  bool _opens(Object? token) =>
+      token == doorToken ||
+      (token is String && (tempTokens[token] ?? 0) > _now());
   final String _sealSeed;
   final int Function() _now;
   RelayIdentity? _seal;
@@ -97,7 +106,7 @@ final class LockedKnockWatch {
         from == flatKey ||
         body is! Map ||
         sig is! String ||
-        body['door'] != doorToken) {
+        !_opens(body['door'])) {
       return null;
     }
     final bool ok = await verifyLedgerSignature(
@@ -124,12 +133,23 @@ final class LockedKnockWatch {
     if (seal == null || seed == null) {
       return null;
     }
-    final Map<String, dynamic>? box = await FlatSeal.open(
-      p,
-      seal,
-      doorToken: doorToken,
-      kemSeed: flatSealKemSeed(seed),
-    );
+    final int now = _now();
+    Map<String, dynamic>? box;
+    for (final String token in <String>[
+      doorToken,
+      for (final MapEntry<String, int> t in tempTokens.entries)
+        if (t.value > now) t.key,
+    ]) {
+      box = await FlatSeal.open(
+        p,
+        seal,
+        doorToken: token,
+        kemSeed: flatSealKemSeed(seed),
+      );
+      if (box != null || p['p'] != 1) {
+        break;
+      }
+    }
     final Object? e = box?['e'];
     return e is Map ? Map<String, dynamic>.from(e) : null;
   }
