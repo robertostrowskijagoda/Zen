@@ -7,7 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/update/github_redirects.dart';
 
-/// What the release's `SHA256SUMS` says about a file (§14.3 point 5).
+/// What the release's `SHA256SUMS` says about a file.
 enum Sha256SumsVerdict {
   /// The file's sum is listed in the release's `SHA256SUMS`.
   match,
@@ -20,7 +20,7 @@ enum Sha256SumsVerdict {
 }
 
 /// Where the `SHA256SUMS` of release [version] lives (the tag is
-/// `v<version>`, RELEASES.md §2 point 6).
+/// `v<version>`, docs/RELEASES.md, section 2).
 Uri sha256SumsUri(String version) => Uri.parse(
   '${PeerShareCodec.repositoryUrl}/releases/download/'
   'v${Uri.encodeComponent(version)}/SHA256SUMS',

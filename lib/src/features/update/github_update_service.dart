@@ -89,8 +89,8 @@ final class GithubUpdateService extends ChangeNotifier {
   final GithubUpdateInstaller installer;
   final String currentVersion;
 
-  /// The maintainer keys a release's [kSignedSumsAssetName] must be signed
-  /// with. Empty (as today): only `SHA256SUMS`, which comes from the same
+  /// The maintainers' keys (hybrid ids) a release's [kSignedSumsAssetName]
+  /// must be signed with. Empty (as today): only `SHA256SUMS`, which comes from the same
   /// release as the file, so it protects against damage, not against a
   /// forged release.
   final List<String> releaseKeys;

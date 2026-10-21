@@ -418,7 +418,7 @@ void main() {
         final List<Uri> fetched = <Uri>[];
         final GithubUpdateService s = service(
           installer: installer,
-          releaseKeys: <String>[trusted.id],
+          releaseKeys: <String>[trusted.hybridId],
           fetchJson: (Uri uri) async =>
               _releaseJson('v1.12.0', assets: releaseAssets),
           download:

@@ -30,7 +30,7 @@ import java.io.IOException
 import java.security.MessageDigest
 
 /**
- * §14.2 on Android:
+ * Network updates on Android:
  *  - `zen/app_update`: the APK this app was installed from (to pass on),
  *    and handing a downloaded update to the system installer (the person
  *    confirms in the system dialog; nothing installs silently);
@@ -91,7 +91,7 @@ object ZenUpdateBridge {
                         }
                     }
                     "signingCertificates" -> {
-                        // §14.3: this app's own signing certificates and,
+                        // This app's own signing certificates and,
                         // when the system verified its signature, those of
                         // the APK at `path` (SHA-256, lower-case hex).
                         val path = call.argument<String>("path")

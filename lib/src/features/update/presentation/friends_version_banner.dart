@@ -13,7 +13,7 @@ import 'package:zen/src/features/update/presentation/updates_screen.dart';
 import 'package:zen/src/features/update/update_service.dart';
 
 /// The newest Zen version an accepted friend named in a ping or pong, when
-/// it is newer than this build; `null` otherwise (A17).
+/// it is newer than this build; `null` otherwise.
 ///
 /// Self-reported by friends: only a hint for the user, never a reason to
 /// trust or to skip a check.
@@ -30,7 +30,7 @@ final Provider<String?> friendsNewerVersionProvider = Provider<String?>(
 
 /// The newest maintainer-signed release newer than this build, when the
 /// signatures verified here (passed on by friends, but not taken on their
-/// word); `null` otherwise (A17).
+/// word); `null` otherwise.
 final Provider<String?> signedNewerVersionProvider = Provider<String?>((
   Ref ref,
 ) {

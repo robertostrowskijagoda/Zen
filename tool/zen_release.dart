@@ -1,10 +1,10 @@
 // Tool for the project maintainers: keys, signing and bundling releases
-// for network updates (§14.2), the signed donation details and mirrors
-// (§14.3), the warrant canary, and the APK certificate fingerprint (S15).
+// for network updates, the signed donation details and mirrors,
+// the warrant canary, and the APK certificate fingerprint.
 // Plain Dart, no Flutter:
 //
 //   dart run tool/zen_release.dart keygen maintainer.key
-//   dart run tool/zen_release.dart maintainers --write KEY1 KEY2 KEY3
+//   dart run tool/zen_release.dart maintainers --write ID1 ID2 ID3
 //   dart run tool/zen_release.dart create --version 1.10.0 --build 10 \
 //       --notes "Co nowego" --out release.json \
 //       --mirror https://codeberg.org/... \
@@ -25,7 +25,12 @@
 //   dart run tool/zen_release.dart fingerprint --keystore zen-release.jks \
 //       [--alias zen]                          # password: $ZEN_STOREPASS
 //
-// See docs/RELEASES.md §2 and §8.
+// Signatures are Zen's hybrid ones (Ed25519 + ML-DSA-65, zen_sig.dart),
+// made by the bridge's `cmd/zensig`: keygen, pubkey, sign and verify need
+// Go. A maintainer's public key is its hybrid id `<Ed25519>.<ML-DSA
+// fingerprint>`.
+//
+// See docs/RELEASES.md, sections 2 and 8.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -33,8 +38,12 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
-import 'package:cryptography/cryptography.dart';
+import 'package:zen/src/core/crypto/hybrid_signature_core.dart';
 import 'package:zen/src/features/update/apk_signing_block.dart';
+
+import 'zen_sig.dart';
+
+export 'zen_sig.dart' show ToolKey, useToolSigner;
 
 /// The official donation link, author and repository written into each
 /// release manifest by default (the app compares them with its own; a test
@@ -300,52 +309,37 @@ String replaceConstList(String source, String name, List<String> values) {
   return source.replaceFirst(declaration, 'const List<String> $name = $list;');
 }
 
-final Ed25519 _ed = Ed25519();
+Future<ToolKey> keyFromSeed(List<int> seed) => ToolKey.fromSeed(seed);
 
-Future<SimpleKeyPair> keyFromSeed(List<int> seed) =>
-    _ed.newKeyPairFromSeed(seed);
-
-Future<String> publicKeyOf(SimpleKeyPair pair) async =>
-    b64((await pair.extractPublicKey()).bytes);
+/// The key's public part as `kReleaseMaintainers` holds it: its hybrid id.
+Future<String> publicKeyOf(ToolKey key) async => key.hybridId;
 
 Future<Map<String, dynamic>> signRelease(
   Map<String, dynamic> release,
-  SimpleKeyPair key,
+  ToolKey key,
 ) async {
-  final Signature sig = await _ed.sign(
-    canonicalBytes(release['m']),
-    keyPair: key,
-  );
-  final String pub = await publicKeyOf(key);
+  final String sig = await key.sign(canonicalBytes(release['m']));
+  final String pub = key.hybridId;
   final List<dynamic> sigs = <dynamic>[
     for (final dynamic s in release['sigs'] as List<dynamic>)
       if ((s as Map<String, dynamic>)['k'] != pub) s,
-    <String, String>{'k': pub, 's': b64(sig.bytes)},
+    <String, String>{'k': pub, 's': sig},
   ];
   return <String, dynamic>{'m': release['m'], 'sigs': sigs};
 }
 
+/// The hybrid ids whose signature in [release] holds (both halves).
 Future<List<String>> validSigners(Map<String, dynamic> release) async {
   final List<int> message = canonicalBytes(release['m']);
   final List<String> ok = <String>[];
   for (final dynamic s in release['sigs'] as List<dynamic>) {
     final Map<String, dynamic> m = s as Map<String, dynamic>;
-    try {
-      final bool valid = await _ed.verify(
-        message,
-        signature: Signature(
-          base64Url.decode(m['s'] as String),
-          publicKey: SimplePublicKey(
-            base64Url.decode(m['k'] as String),
-            type: KeyPairType.ed25519,
-          ),
-        ),
-      );
-      if (valid) {
-        ok.add(m['k'] as String);
-      }
-    } on Object {
-      // not valid
+    final Object? k = m['k'];
+    final Object? sig = m['s'];
+    if (k is String &&
+        sig is String &&
+        await verifyByHybridId(k, message, sig)) {
+      ok.add(k);
     }
   }
   return ok;
@@ -354,7 +348,7 @@ Future<List<String>> validSigners(Map<String, dynamic> release) async {
 Future<Map<String, dynamic>> createRevocation({
   required int build,
   required String reason,
-  required SimpleKeyPair key,
+  required ToolKey key,
   int? at,
 }) async {
   final Map<String, dynamic> body = <String, dynamic>{
@@ -364,11 +358,10 @@ Future<Map<String, dynamic>> createRevocation({
     'at': at ?? DateTime.now().millisecondsSinceEpoch,
     'why': reason,
   };
-  final Signature sig = await _ed.sign(canonicalBytes(body), keyPair: key);
   return <String, dynamic>{
     ...body,
-    'k': await publicKeyOf(key),
-    's': b64(sig.bytes),
+    'k': key.hybridId,
+    's': await key.sign(canonicalBytes(body)),
   };
 }
 
@@ -400,7 +393,7 @@ Uint8List encodeBundle(
   return out.takeBytes();
 }
 
-Future<SimpleKeyPair> _readKey(String path) async =>
+Future<ToolKey> _readKey(String path) async =>
     keyFromSeed(base64Url.decode((await File(path).readAsString()).trim()));
 
 Map<String, dynamic> _readJson(String path) =>
@@ -444,8 +437,8 @@ List<String> _options(List<String> args, String name) => <String>[
 const String _usage = '''
 Użycie: dart run tool/zen_release.dart <polecenie>
   keygen PLIK                     nowy klucz opiekuna (prywatny do PLIKU)
-  pubkey PLIK                     klucz publiczny z pliku klucza
-  maintainers [--write] K1 [K2 K3]  lista kReleaseMaintainers (release.dart)
+  pubkey PLIK                     identyfikator klucza (Ed25519.ML-DSA)
+  maintainers [--write] ID1 [ID2 ID3]  lista kReleaseMaintainers (release.dart)
   create --version V --build N [--notes T] [--out release.json]
          [--donation URL] [--author A] [--repo URL] [--no-official]
          [--mirror URL]... platforma=plik...
@@ -493,19 +486,23 @@ Future<void> _run(String command, List<String> args) async {
       stdout.writeln(
         'Klucz prywatny zapisany w ${out.path} — trzymaj go offline.',
       );
-      stdout.writeln('Klucz publiczny (do kReleaseMaintainers):');
+      stdout.writeln(
+        'Identyfikator klucza (Ed25519.ML-DSA, do kReleaseMaintainers):',
+      );
       stdout.writeln(await publicKeyOf(await keyFromSeed(seed)));
     case 'pubkey':
       stdout.writeln(await publicKeyOf(await _readKey(positional.first)));
     case 'maintainers':
       for (final String key in positional) {
-        if (base64Url.decode(key).length != 32) {
-          throw FormatException('To nie jest klucz publiczny: $key');
+        if (parseHybridKeyId(key) == null) {
+          throw FormatException(
+            'To nie jest identyfikator klucza (Ed25519.ML-DSA): $key',
+          );
         }
       }
       if (positional.toSet().length != positional.length ||
           positional.isEmpty) {
-        throw const FormatException('Podaj różne klucze publiczne.');
+        throw const FormatException('Podaj różne identyfikatory kluczy.');
       }
       if (positional.length < 3) {
         stdout.writeln(

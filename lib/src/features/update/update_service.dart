@@ -119,7 +119,7 @@ final class UpdateStatus {
   final ReleaseRevocation? vetoed;
 }
 
-/// Brings new versions of the app from friends (§14.2) and passes them on:
+/// Brings new versions of the app from friends and passes them on:
 ///
 /// * a friend tells us about a release (`zen_rel`); we take it only when
 ///   enough maintainers signed it, and fetch the file for this platform
@@ -265,8 +265,8 @@ final class UpdateService extends ChangeNotifier {
   }
 
   /// Which signed details this build shows differently (`donation`,
-  /// `author`, `repo`): non-empty means this copy is probably modified
-  /// (§14.3). Empty while nothing signed is known.
+  /// `author`, `repo`): non-empty means this copy is probably modified.
+  /// Empty while nothing signed is known.
   List<String> get officialDifferences {
     final OfficialInfo? signed = book.enabled ? book.signedOfficial : null;
     return signed == null
@@ -655,7 +655,7 @@ Future<String?> ownApkPath() async {
 /// The running update service, or `null` while the ledger is off.
 final Provider<UpdateService?> updateServiceProvider = Provider<UpdateService?>(
   (Ref ref) {
-    // A store build is updated by its store (STAN D12).
+    // A store build is updated by its store.
     if (isStoreBuild) {
       return null;
     }

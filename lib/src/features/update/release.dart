@@ -3,11 +3,12 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 
-/// Network updates (§14.2): a new version travels from friend to friend
+/// Network updates: a new version travels from friend to friend
 /// like any file. The app takes it only when [kReleaseThreshold] of the
 /// project maintainers signed it, waits [kReleaseEmbargo] after first
 /// seeing it (time for anyone to notice a forced release and for any one
@@ -16,20 +17,22 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 const int kReleaseThreshold = 2;
 const Duration kReleaseEmbargo = Duration(days: 7);
 
-/// Public keys (Ed25519, base64url) of release maintainers. Empty for now.
+/// Hybrid ids of the release maintainers' keys ([LedgerKeyPair.hybridId]:
+/// the Ed25519 key and the fingerprint of the ML-DSA-65 key, so both
+/// halves of their signatures are pinned here). Empty for now.
 /// Network updates stay off while it holds fewer than [kReleaseThreshold]
-/// keys, until another way to approve versions is decided (docs/PLAN.md,
-/// §14.2, "Otwarta decyzja"). While it is empty nothing signed is taken:
+/// keys, until another way to approve versions is decided.
+/// While it is empty nothing signed is taken:
 /// no releases, vetoes, canaries or signed donation details.
 ///
-/// Turning it on (docs/RELEASES.md §8): each maintainer runs
+/// Turning it on (docs/RELEASES.md, section 8): each maintainer runs
 /// `dart run tool/zen_release.dart keygen <file>` on their own offline
-/// machine and sends only the public key; then
-/// `dart run tool/zen_release.dart maintainers --write <key1> <key2> <key3>`
+/// machine and sends only the hybrid id it prints; then
+/// `dart run tool/zen_release.dart maintainers --write <id1> <id2> <id3>`
 /// fills this list, and the next release built with it takes updates.
 ///
 /// The same keys sign the `SHA256SUMS` of GitHub releases ([SignedSums],
-/// RELEASES.md §8.6): once this list is not empty, the self-update from
+/// RELEASES.md, section 8.6): once this list is not empty, the self-update from
 /// GitHub installs only a file one of them signed. One key is enough for
 /// that; network updates still need [kReleaseThreshold] of them.
 const List<String> kReleaseMaintainers = <String>[];
@@ -164,8 +167,10 @@ bool isSafeReleaseLink(Object? value) {
   return uri.scheme == 'https';
 }
 
-/// How many of [maintainers] signed [message]: [signatures] maps a
-/// maintainer key to its signature (base64url). Each key counts once.
+/// How many of [maintainers] (hybrid ids) signed [message]: [signatures]
+/// maps a maintainer's hybrid id to its hybrid signature (base64url). Each
+/// key counts once, and only with both halves: the Ed25519 one and the
+/// ML-DSA one of exactly the pinned key.
 Future<int> countMaintainerSignatures({
   required Uint8List message,
   required Map<String, String> signatures,
@@ -175,8 +180,8 @@ Future<int> countMaintainerSignatures({
   for (final String key in maintainers.toSet()) {
     final String? sig = signatures[key];
     if (sig != null &&
-        await verifyLedgerSignature(
-          publicKey: key,
+        await verifyMaintainerSignature(
+          maintainer: key,
           message: message,
           signature: sig,
         )) {
@@ -184,6 +189,23 @@ Future<int> countMaintainerSignatures({
     }
   }
   return valid;
+}
+
+/// Whether [signature] over [message] is by the maintainer with the hybrid
+/// id [maintainer]: both halves, the ML-DSA one of the pinned key.
+Future<bool> verifyMaintainerSignature({
+  required String maintainer,
+  required Uint8List message,
+  required String signature,
+}) async {
+  final ({String ed, String pq})? key = parseHybridKeyId(maintainer);
+  return key != null &&
+      await verifyLedgerSignature(
+        publicKey: key.ed,
+        message: message,
+        signature: signature,
+        pqId: key.pq,
+      );
 }
 
 /// Reads the `sigs` list of a signed file (`[{k, s}]`), or null.
@@ -201,7 +223,7 @@ Map<String, String>? readSignatureList(Object? sigs) {
 }
 
 /// The fields of an official build that a modified copy would change to
-/// take the money or the credit (§14.3 point 6): signed in the release
+/// take the money or the credit: signed in the release
 /// manifest, compared with what this build shows.
 @immutable
 final class OfficialInfo {
@@ -265,8 +287,8 @@ final class OfficialInfo {
 }
 
 /// What the maintainers sign: the files (APK, ZIP… by SHA-256 and blob
-/// id), and optionally the official donation link and author (§14.3) and
-/// the mirrors of the repository (§14.2).
+/// id), and optionally the official donation link and author and
+/// the mirrors of the repository.
 @immutable
 final class ReleaseManifest {
   const ReleaseManifest({
@@ -416,7 +438,7 @@ final class SignedRelease {
 
   final ReleaseManifest manifest;
 
-  /// Maintainer key → signature (base64url).
+  /// Maintainer's hybrid id → hybrid signature (base64url).
   final Map<String, String> signatures;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -443,10 +465,12 @@ final class SignedRelease {
 
   /// Adds the signature of [maintainer].
   Future<SignedRelease> signedBy(LedgerKeyPair maintainer) async {
-    final Uint8List sig = await maintainer.sign(manifest.signedBytes());
+    // Keyed, as every maintainer signature: phones pin a maintainer by
+    // fingerprint and hold no other record of the key.
+    final Uint8List sig = await maintainer.signWithKey(manifest.signedBytes());
     return SignedRelease(manifest, <String, String>{
       ...signatures,
-      maintainer.id: b64(sig),
+      maintainer.hybridId: b64(sig),
     });
   }
 
@@ -466,8 +490,8 @@ final class SignedRelease {
       await validSignatures(maintainers) >= threshold;
 }
 
-/// The file of a GitHub release that carries [SignedSums]
-/// (docs/RELEASES.md §8.6).
+/// The file of a GitHub release that carries [SignedSums].
+/// (docs/RELEASES.md, section 8.6).
 const String kSignedSumsAssetName = 'SHA256SUMS.sig';
 
 /// What a maintainer signs for a GitHub release: its version and the
@@ -490,7 +514,7 @@ final class SignedSums {
   /// File name → lower-case hex SHA-256.
   final Map<String, String> files;
 
-  /// Maintainer key → signature (base64url).
+  /// Maintainer's hybrid id → hybrid signature (base64url).
   final Map<String, String> signatures;
 
   static Map<String, dynamic> _body(
@@ -564,11 +588,14 @@ final class SignedSums {
 
   /// Adds the signature of [maintainer].
   Future<SignedSums> signedBy(LedgerKeyPair maintainer) async {
-    final Uint8List sig = await maintainer.sign(signedBytes());
+    final Uint8List sig = await maintainer.signWithKey(signedBytes());
     return SignedSums(
       version: version,
       files: files,
-      signatures: <String, String>{...signatures, maintainer.id: b64(sig)},
+      signatures: <String, String>{
+        ...signatures,
+        maintainer.hybridId: b64(sig),
+      },
     );
   }
 
@@ -626,14 +653,14 @@ final class ReleaseRevocation {
     int? at,
   }) async {
     final int when = at ?? DateTime.now().millisecondsSinceEpoch;
-    final Uint8List sig = await maintainer.sign(
+    final Uint8List sig = await maintainer.signWithKey(
       canonicalJsonBytes(_body(build, when, reason)),
     );
     return ReleaseRevocation(
       build: build,
       at: when,
       reason: reason,
-      key: maintainer.id,
+      key: maintainer.hybridId,
       signature: b64(sig),
     );
   }
@@ -642,8 +669,8 @@ final class ReleaseRevocation {
     List<String> maintainers = kReleaseMaintainers,
   }) async =>
       maintainers.contains(key) &&
-      await verifyLedgerSignature(
-        publicKey: key,
+      await verifyMaintainerSignature(
+        maintainer: key,
         message: canonicalJsonBytes(_body(build, at, reason)),
         signature: signature,
       );

@@ -5,7 +5,7 @@ import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/update/release.dart';
 
-/// A warrant canary (§14.2 point 7): a statement the maintainers sign and
+/// A warrant canary: a statement the maintainers sign and
 /// renew before [CanaryStatement.until] ("no one has forced us to change
 /// the app or hand over keys"). If it is not renewed in time, people can
 /// assume they were silenced. It travels like vetoes — friend to friend, or
@@ -17,7 +17,7 @@ import 'package:zen/src/features/update/release.dart';
 /// ```json
 /// {"m": {"t": "zen_canary", "app": "zen", "at": 0, "until": 0,
 ///        "text": "…"},
-///  "sigs": [{"k": "<maintainer key>", "s": "<signature>"}]}
+///  "sigs": [{"k": "<maintainer's hybrid id>", "s": "<hybrid signature>"}]}
 /// ```
 @immutable
 final class CanaryStatement {
@@ -72,7 +72,7 @@ final class SignedCanary {
 
   final CanaryStatement statement;
 
-  /// Maintainer key → signature (base64url).
+  /// Maintainer's hybrid id → hybrid signature (base64url).
   final Map<String, String> signatures;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -99,10 +99,10 @@ final class SignedCanary {
 
   /// Adds the signature of [maintainer].
   Future<SignedCanary> signedBy(LedgerKeyPair maintainer) async {
-    final Uint8List sig = await maintainer.sign(statement.signedBytes());
+    final Uint8List sig = await maintainer.signWithKey(statement.signedBytes());
     return SignedCanary(statement, <String, String>{
       ...signatures,
-      maintainer.id: b64(sig),
+      maintainer.hybridId: b64(sig),
     });
   }
 

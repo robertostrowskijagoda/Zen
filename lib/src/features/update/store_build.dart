@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show appFlavor;
 
-/// Whether this is the store build of the app (Google Play, Galaxy Store;
-/// STAN D12): `flutter build appbundle --flavor appStoreOnly` (Android), or
+/// Whether this is the store build of the app (Google Play, Galaxy Store):
+/// `flutter build appbundle --flavor appStoreOnly` (Android), or
 /// any build with `--dart-define=ZEN_STORE=true`.
 ///
 /// Stores update the app themselves and forbid installing or handing out

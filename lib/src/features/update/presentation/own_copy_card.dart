@@ -6,7 +6,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/update/apk_signature.dart';
 import 'package:zen/src/features/update/own_copy.dart';
 
-/// What this installed copy of Zen says about itself (§14.3 point 2):
+/// What this installed copy of Zen says about itself:
 /// "Oficjalna kopia" when its signing certificate is a pinned official one,
 /// a red warning with the certificate's fingerprint when it is another, and
 /// a neutral "Nie można sprawdzić" while no official fingerprint is pinned.

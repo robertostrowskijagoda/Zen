@@ -19,7 +19,7 @@ import 'package:zen/src/features/update/sha256_sums.dart';
 import 'package:zen/src/features/update/store_build.dart';
 import 'package:zen/src/features/update/update_service.dart';
 
-/// "Aktualizacje i Podaj dalej" (§14.2).
+/// "Aktualizacje i Podaj dalej".
 class UpdatesScreen extends ConsumerStatefulWidget {
   const UpdatesScreen({super.key});
 
@@ -37,8 +37,8 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
   String? _message;
   bool _busy = false;
 
-  /// The last on-demand comparison with GitHub's `SHA256SUMS` (§14.3
-  /// point 5): its verdict, or the reason it could not be made.
+  /// The last on-demand comparison with GitHub's `SHA256SUMS`:
+  /// its verdict, or the reason it could not be made.
   Sha256SumsVerdict? _sumsVerdict;
   String? _sumsError;
   bool _sumsBusy = false;
@@ -138,7 +138,7 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
           // The newest release on GitHub (not in the store build).
           if (!isStoreBuild) const GithubUpdateCard(),
           ZenSection(t('Aktualizacje'), top: 16),
-          // A store build is updated by its store (STAN D12).
+          // A store build is updated by its store.
           if (isStoreBuild)
             ZenInfo(
               key: const Key('updates-store'),
@@ -452,7 +452,7 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
     );
   }
 
-  /// "Porównaj sumę z GitHubem" and what came of it (§14.3 point 5).
+  /// "Porównaj sumę z GitHubem" and what came of it.
   List<Widget> _sumsCheck(ZenColors zen, UpdateService service) {
     final Sha256SumsVerdict? verdict = _sumsVerdict;
     final String? error = _sumsError;
@@ -518,8 +518,8 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
     ];
   }
 
-  /// The signed donation details, the canary and the mirrors (§14.2,
-  /// §14.3) — only once something signed by the maintainers is known.
+  /// The signed donation details, the canary and the mirrors
+  /// — only once something signed by the maintainers is known.
   List<Widget> _integrity(BuildContext context, UpdateService service) {
     final ZenColors zen = ZenColors.of(context);
     final List<String> differences = service.officialDifferences;

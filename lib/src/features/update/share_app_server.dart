@@ -8,7 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 
-/// "Podaj dalej" (§14.2): this device hands the app's installer to someone
+/// "Podaj dalej": this device hands the app's installer to someone
 /// nearby over the local network — the same Wi-Fi, or this phone's own
 /// hotspot — with no internet and no store. The other person scans a QR
 /// code and their browser downloads the file.
@@ -239,7 +239,7 @@ final RegExp _wifiInterface = RegExp(
   caseSensitive: false,
 );
 
-/// Ranks [networks] for sharing (S13): this phone's hotspot first, then
+/// Ranks [networks] for sharing: this phone's hotspot first, then
 /// Wi-Fi, then the rest (wired), leaving out interfaces that never reach
 /// anyone nearby. The first one is the network the default route most
 /// likely uses on the local network.
@@ -288,7 +288,7 @@ Future<List<ShareNetwork>> localShareNetworks() async {
 
 /// The one network to share on: the one the person chose ([chosen], when
 /// it is still there), otherwise the best ranked. The server listens on
-/// that address only, never on every private address (S13).
+/// that address only, never on every private address.
 ShareNetwork? chooseShareNetwork(
   List<ShareNetwork> networks, {
   ShareNetwork? chosen,

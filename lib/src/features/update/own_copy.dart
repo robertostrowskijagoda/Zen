@@ -8,7 +8,7 @@ import 'package:zen/src/features/update/share_app_server.dart';
 import 'package:zen/src/features/update/store_build.dart';
 import 'package:zen/src/features/update/update_service.dart';
 
-/// What this installed copy of Zen says about itself (§14.3 point 2).
+/// What this installed copy of Zen says about itself.
 enum OwnCopyState {
   /// Signed with a pinned official certificate: "Oficjalna kopia".
   official,
@@ -59,7 +59,7 @@ OwnCopyState ownCopyState({
 
 /// The first 12 characters of a build's SHA-256 as `A1B2-C3D4-E5F6`: short
 /// enough to read out over the phone, so two people can check that their
-/// copies are the same file (§14.3 point 3).
+/// copies are the same file.
 String buildShortCode(String sha256Hex) {
   final String hex = sha256Hex.toUpperCase().padRight(12, '0');
   return <String>[

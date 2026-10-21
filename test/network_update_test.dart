@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app_version.dart';
+import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
@@ -106,23 +106,26 @@ Future<void> _settle() async {
 }
 
 void main() {
-  late List<SimpleKeyPair> toolKeys;
+  late List<tool.ToolKey> toolKeys;
   late List<LedgerKeyPair> keys;
   late List<String> maintainers;
 
   setUpAll(() async {
+    // The tool signs as the app does (the bridge when the run has it).
+    tool.useToolSigner(hybridSigner);
     keys = <LedgerKeyPair>[
       for (int i = 0; i < 3; i++)
         await LedgerKeyPair.fromSeed(
           Uint8List.fromList(List<int>.filled(32, i + 1)),
         ),
     ];
-    toolKeys = <SimpleKeyPair>[
+    toolKeys = <tool.ToolKey>[
       for (int i = 0; i < 3; i++)
         await tool.keyFromSeed(List<int>.filled(32, i + 1)),
     ];
-    maintainers = <String>[for (final LedgerKeyPair k in keys) k.id];
+    maintainers = <String>[for (final LedgerKeyPair k in keys) k.hybridId];
   });
+  tearDownAll(() => tool.useToolSigner(null));
 
   Future<Map<String, dynamic>> toolRelease(
     Uint8List apk, {
@@ -149,7 +152,8 @@ void main() {
     test(
       'the tool and the app agree on keys, blob ids and signatures',
       () async {
-        expect(await tool.publicKeyOf(toolKeys[0]), keys[0].id);
+        // Both halves: the Ed25519 key and the ML-DSA fingerprint.
+        expect(await tool.publicKeyOf(toolKeys[0]), keys[0].hybridId);
         final Uint8List apk = _bytes(600 * 1024);
         final ReleaseFile file = ReleaseFile.describe(
           apk,
@@ -196,6 +200,28 @@ void main() {
         expect(await eves.isTrusted(maintainers: maintainers), isFalse);
         // No maintainers: never trusted.
         expect(await three.isTrusted(maintainers: const <String>[]), isFalse);
+        // The maintainers' Ed25519 keys pinned with another ML-DSA key
+        // (what a forger of Ed25519 alone would bring): their real
+        // signatures carry their own ML-DSA keys, so nothing counts.
+        final Map<String, String> rekeyed = <String, String>{
+          for (final LedgerKeyPair k in keys)
+            '${k.id}.${eve.pqId}': three.signatures[k.hybridId]!,
+        };
+        expect(
+          await countMaintainerSignatures(
+            message: three.manifest.signedBytes(),
+            signatures: rekeyed,
+            maintainers: rekeyed.keys.toList(),
+          ),
+          0,
+        );
+        // Ed25519 ids alone are not maintainers' ids.
+        expect(
+          await three.validSignatures(<String>[
+            for (final LedgerKeyPair k in keys) k.id,
+          ]),
+          0,
+        );
       },
     );
 

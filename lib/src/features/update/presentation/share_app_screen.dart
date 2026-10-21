@@ -36,14 +36,14 @@ final class _ShareSource {
   final bool own;
 }
 
-/// "Podaj dalej" (§14.2): give the app to someone nearby over Wi-Fi or a
+/// "Podaj dalej": give the app to someone nearby over Wi-Fi or a
 /// hotspot (QR code → their browser downloads it), or — from a computer —
 /// install it on a phone connected by USB.
 class ShareAppScreen extends ConsumerStatefulWidget {
   const ShareAppScreen({super.key});
 
   static Future<void> open(BuildContext context) {
-    // A store build passes Zen on as a link, never as a file (STAN D12).
+    // A store build passes Zen on as a link, never as a file.
     if (isStoreBuild) {
       return showStoreShareDialog(context);
     }
@@ -67,8 +67,8 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
   ShareAppServer? _server;
   List<InternetAddress> _addresses = const <InternetAddress>[];
 
-  /// Networks this device could share on, and the one it shares on (S13:
-  /// the server listens on that one address only).
+  /// Networks this device could share on, and the one it shares on
+  /// (the server listens on that one address only).
   List<ShareNetwork> _networks = const <ShareNetwork>[];
   ShareNetwork? _network;
   StreamSubscription<int>? _downloadsSub;
@@ -80,7 +80,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
   String? _sha256;
   _ShareSource? _sha256Of;
 
-  /// What the signature of the chosen file says (§14.3), and of which
+  /// What the signature of the chosen file says, and of which
   /// file; null while it is being checked.
   ApkSignatureCheck? _signature;
   _ShareSource? _signatureOf;
@@ -164,7 +164,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     unawaited(_checkSignature(_source));
   }
 
-  /// Checks the signing certificate of [source] (§14.3): the APK this app
+  /// Checks the signing certificate of [source]: the APK this app
   /// came from needs no check.
   Future<ApkSignatureCheck?> _checkSignature(_ShareSource? source) async {
     if (source == null) {
@@ -606,7 +606,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     );
   }
 
-  /// What the signature of the chosen file says (§14.3).
+  /// What the signature of the chosen file says.
   Widget _signatureInfo(ZenColors zen) {
     final ApkSignatureCheck? check = identical(_signatureOf, _source)
         ? _signature

@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/update/store_build.dart';
 
-/// "Podaj dalej" in the store build (STAN D12): a link instead of the APK.
+/// "Podaj dalej" in the store build: a link instead of the APK.
 Future<void> showStoreShareDialog(BuildContext context) {
   return showDialog<void>(
     context: context,

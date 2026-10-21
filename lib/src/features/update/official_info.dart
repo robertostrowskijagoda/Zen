@@ -7,7 +7,7 @@ const String kOfficialAuthor = 'Robert Ostrowski-Jagoda';
 
 /// What this build shows people: the donation link of "O aplikacji", the
 /// author and the repository. Compared with the maintainers' signed
-/// [OfficialInfo] (§14.3 point 6) — taken from the very constants the
+/// [OfficialInfo] — taken from the very constants the
 /// screens use, so a copy that swaps the link is caught.
 OfficialInfo thisBuildOfficialInfo() => const OfficialInfo(
   donation: kDonationUrl,

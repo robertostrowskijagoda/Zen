@@ -7,13 +7,13 @@ import 'package:zen/src/features/update/apk_signing_block.dart';
 export 'package:zen/src/features/update/apk_signing_block.dart';
 
 /// SHA-256 fingerprints of the certificates that sign official Zen
-/// releases (RELEASES.md §2 point 4), as `keytool` prints them or as plain
+/// releases (docs/RELEASES.md, section 2), as `keytool` prints them or as plain
 /// hex. Empty until the first signed release: a computer then cannot tell
 /// an official APK from another one, and says so. Filled at release time
 /// with `dart run tool/zen_release.dart fingerprint app-release.apk --write`.
 const List<String> kOfficialApkCertificatesSha256 = <String>[];
 
-/// What the signature of an APK says (§14.3 point 3).
+/// What the signature of an APK says.
 enum ApkSignatureVerdict {
   /// Signed with the reference certificate (this app's own on Android, the
   /// official one on a computer).

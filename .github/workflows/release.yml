@@ -4,14 +4,15 @@
 # Zen-Linux-arm64.tar.gz, Zen-Linux-x64.deb, Zen-Linux-arm64.deb,
 # Zen-Linux-x64.flatpak,
 # Zen-macOS.zip (universal), Zen-unsigned.ipa (the iOS workflow),
-# LICENSES-GO.txt, LICENSE, NOTICE, SHA256SUMS of all of them and
+# LICENSES-GO.txt, LICENSE, NOTICE, THIRD_PARTY_NOTICES.md, SHA256SUMS of
+# all of them and
 # SHA256SUMS.sig (SHA256SUMS signed with the release signing key), and
 # attaches them to a draft release of that tag. Every build job uploads its
 # files as an artifact; the checksums job gathers them and writes SHA256SUMS,
 # the sign job signs it, and the last job attaches everything. Publish the
 # draft by hand after checking it (docs/RELEASES.md, section 3).
 #
-# The release key (security audit S-6):
+# The release key:
 # - Only a run of a tag v* ever touches it. The android job runs only for
 #   refs/tags/v*, and its "Release key" step checks the ref once more.
 #   Actions -> Release -> Run workflow from a BRANCH still builds the other
@@ -32,8 +33,8 @@
 #       then delete them from the repository secrets, so that no other job
 #       can read them. Without them the APK is not built (a warning).
 #     * ZEN_RELEASE_SIGNING_KEY: the release signing key (the contents of
-#       the file `dart run tool/zen_release.dart keygen` wrote; its public
-#       key is in kReleaseMaintainers, docs/RELEASES.md §8.6). The sign job
+#       the file `dart run tool/zen_release.dart keygen` wrote; its hybrid
+#       id is in kReleaseMaintainers, docs/RELEASES.md, section 8.6). The sign job
 #       signs SHA256SUMS with it. Without it SHA256SUMS.sig is not made (a
 #       warning), and builds that know a release key refuse to update
 #       themselves from that release.
@@ -476,7 +477,8 @@ jobs:
         run: |
           export LC_ALL=C
           rm -f dist/*.sha256
-          cp native/yggdrasil_bridge/LICENSES-GO.txt LICENSE NOTICE dist/
+          cp native/yggdrasil_bridge/LICENSES-GO.txt LICENSE NOTICE \
+            THIRD_PARTY_NOTICES.md dist/
           cd dist
           sums=$(sha256sum -- *)
           printf '%s\n' "$sums" > SHA256SUMS
@@ -518,8 +520,6 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          umask 077
-          printf '%s' "$SIGNING_KEY" > "$RUNNER_TEMP/zen-release.key"
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -534,22 +534,45 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: false
 
+      # The signature is hybrid (Ed25519 + ML-DSA-65): the tool signs with
+      # the bridge's Go (native/yggdrasil_bridge/cmd/zensig).
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        if: steps.key.outputs.ready == 'true'
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache: false
+
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         if: steps.key.outputs.ready == 'true'
         with:
           name: zen-release
           path: dist
 
-      - name: Sign
+      # Everything of the tag that builds or runs code (the locked
+      # dependencies and their build hooks, the tool, the Go signer) runs
+      # before the key is on disk.
+      - name: Prepare
         if: steps.key.outputs.ready == 'true'
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          flutter pub get
+          flutter pub get --enforce-lockfile
+          (cd native/yggdrasil_bridge && go build -o /dev/null ./cmd/zensig)
           mkdir -p signed
           dart run tool/zen_release.dart sums-manifest --version "${TAG#v}" \
             --out signed/SHA256SUMS.sig dist/SHA256SUMS
-          dart run tool/zen_release.dart sign signed/SHA256SUMS.sig "$RUNNER_TEMP/zen-release.key"
+
+      - name: Sign
+        if: steps.key.outputs.ready == 'true'
+        env:
+          SIGNING_KEY: ${{ secrets.ZEN_RELEASE_SIGNING_KEY }}
+        run: |
+          key="$RUNNER_TEMP/zen-release.key"
+          trap 'rm -f "$key"' EXIT
+          umask 077
+          printf '%s' "$SIGNING_KEY" > "$key"
+          dart run tool/zen_release.dart sign signed/SHA256SUMS.sig "$key"
+          rm -f "$key"
           dart run tool/zen_release.dart verify signed/SHA256SUMS.sig
 
       - name: Forget the signing key

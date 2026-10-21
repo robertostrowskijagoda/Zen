@@ -45,7 +45,7 @@ List<AdbDevice> parseAdbDevices(String output) {
   return out;
 }
 
-/// "Zainstaluj na telefonie" on a computer (§14.2): installs an APK on a
+/// "Zainstaluj na telefonie" on a computer: installs an APK on a
 /// phone connected by cable, with Android's own `adb` tool (Android SDK
 /// platform-tools). Works even where the store and websites are blocked.
 final class AdbInstaller {
@@ -131,7 +131,7 @@ final class AdbInstaller {
 /// [output].
 ///
 /// A different signing key never leads to "uninstall it first": that is
-/// exactly the path a fake copy needs (§14.3). The person learns that one
+/// exactly the path a fake copy needs. The person learns that one
 /// of the two copies may not be the real Zen and where to check.
 String describeAdbInstallResult({
   required int exitCode,

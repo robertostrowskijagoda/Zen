@@ -10,7 +10,7 @@ final String _official = 'ab' * 32;
 final String _other = 'cd' * 32;
 
 void main() {
-  group('self-check of the installed copy (§14.3 point 2)', () {
+  group('self-check of the installed copy', () {
     test('matches the pinned fingerprint, in any notation', () {
       expect(
         ownCopyState(own: <String>[_official], official: <String>[_official]),
@@ -53,7 +53,7 @@ void main() {
     });
   });
 
-  group('SHA256SUMS (§14.3 point 5)', () {
+  group('SHA256SUMS', () {
     final String zen = '11' * 32;
     final String win = '22' * 32;
     final String sums = '$zen  Zen.apk\n$win *Zen-Windows.zip\nnot a line\n';

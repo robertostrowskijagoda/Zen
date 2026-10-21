@@ -1,9 +1,9 @@
 import 'package:zen/src/features/update/canary.dart';
 import 'package:zen/src/features/update/release.dart';
 
-/// What this device knows about new versions (§14.2): trusted releases
+/// What this device knows about new versions: trusted releases
 /// newer than itself, when each was first seen, the maintainers' vetoes,
-/// the newest signed donation details (§14.3) and the newest canary.
+/// the newest signed donation details and the newest canary.
 /// Pure bookkeeping; [UpdateService] does the network and files.
 final class UpdateBook {
   UpdateBook({
