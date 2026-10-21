@@ -13,6 +13,7 @@ import 'package:zen/src/features/meet/encounters.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby_crypto.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/hybrid_kem.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 export 'package:zen/src/features/meet/nearby_crypto.dart';
@@ -20,15 +21,19 @@ export 'package:zen/src/features/meet/nearby_crypto.dart';
 /// Mesh payload of a conversation started nearby.
 const String kNearbyMessageType = 'nearby_msg';
 
-/// Hello without any address: the pseudonym, the message, the
-/// sender's token and a one-time X25519 key. Nobody learns an address until
-/// the other person answers.
-const int kNearbyHelloVersion = 7;
+/// Hello without any address: the pseudonym, the message, the sender's
+/// token and the id (`kh`, [nearbyPieceId]) of a one-time hybrid
+/// post-quantum public key (ML-KEM-768 + X25519, hybrid_kem.dart), which
+/// goes before it in parts ([nearbyParts], `h`). Nobody learns an address
+/// until the other person answers.
+const int kNearbyHelloVersion = 9;
 
 /// The answer to a [kNearbyHelloVersion] hello, over Bluetooth: the
-/// answering person's mesh address, pseudonym and message, sealed for the
-/// hello's one-time key (only that phone can open it).
-const int kNearbyReplyVersion = 8;
+/// answering person's mesh address, pseudonym and message, sealed with a
+/// key encapsulated to the hello's one-time key (only that phone can open
+/// it, also later with a quantum computer). The ciphertext goes before it
+/// in parts (`r`), named by `ch`.
+const int kNearbyReplyVersion = 10;
 
 /// Longest first message and longest answer over Bluetooth (a write holds
 /// about 1 KB).
@@ -272,11 +277,11 @@ final class NearbySession {
   final String peerToken;
   final List<NearbyLine> lines = <NearbyLine>[];
 
-  /// The one-time key of this phone's hello (memory only).
-  cg.SimpleKeyPair? _helloKeys;
+  /// The seed of this phone's one-time hello key (memory only).
+  Uint8List? _helloSeed;
 
-  /// The one-time key of their hello (memory only).
-  List<int>? _peerPublic;
+  /// The one-time hybrid public key of their hello (memory only).
+  Uint8List? _peerPublic;
 
   /// The key both sides worked out from the hello and the answer.
   List<int>? _shared;
@@ -332,8 +337,15 @@ final class NearbyService extends ChangeNotifier {
   final List<StreamSubscription<Object?>> _subs =
       <StreamSubscription<Object?>>[];
 
-  static final cg.X25519 _x25519 = cg.X25519();
   static final cg.Chacha20 _aead = cg.Chacha20.poly1305Aead();
+
+  /// Parts of hello keys and answer ciphertexts heard over Bluetooth.
+  final NearbyPieces _pieces = NearbyPieces();
+
+  /// Hellos and answers whose key or ciphertext has not come whole yet
+  /// (`what|sid` → the message), at most [kNearbyMaxPieces].
+  final Map<String, Map<dynamic, dynamic>> _waitingForPiece =
+      <String, Map<dynamic, dynamic>>{};
 
   final Map<String, NearbyPerson> _people = <String, NearbyPerson>{};
   final Map<String, NearbySession> _sessions = <String, NearbySession>{};
@@ -756,18 +768,24 @@ final class NearbyService extends ChangeNotifier {
     }
     await meet.nearbyPrivateKey();
     final String id = _newId();
-    final cg.SimpleKeyPair keys = await _x25519.newKeyPair();
-    final cg.SimplePublicKey publicKey = await keys.extractPublicKey();
+    final Uint8List seed = randomHybridSeed();
+    final Uint8List publicKey = await hybridKem.publicKeyOf(seed);
     final Map<String, dynamic> json = <String, dynamic>{
       'v': kNearbyHelloVersion,
       'sid': id,
       'n': myPseudonym,
       't': myToken,
-      'e': base64Url.encode(publicKey.bytes),
+      'kh': nearbyPieceId(publicKey),
       'm': message,
     };
-    if (!await radio.wave(person.device, _encode(json))) {
-      return null;
+    // The key first, in parts; the hello last.
+    for (final Map<String, dynamic> w in <Map<String, dynamic>>[
+      ...nearbyParts(id, 'h', publicKey),
+      json,
+    ]) {
+      if (!await radio.wave(person.device, _encode(w))) {
+        return null;
+      }
     }
     final NearbySession s =
         NearbySession(
@@ -776,7 +794,7 @@ final class NearbyService extends ChangeNotifier {
             startedByMe: true,
             peerToken: person.token,
           )
-          .._helloKeys = keys
+          .._helloSeed = seed
           ..lines.add(NearbyLine(true, message, _now()));
     _sessions[id] = s;
     notifyListeners();
@@ -834,7 +852,14 @@ final class NearbyService extends ChangeNotifier {
     Map<String, dynamic> json, {
     Duration listen = const Duration(seconds: 6),
     bool Function(NearbyPerson person)? only,
-  }) async {
+  }) => _lookAroundAnd(listen, () => waveAll(json, only: only));
+
+  /// Runs [send] while scanning: when the radio is not scanning it first
+  /// looks around for [listen] and stops again after.
+  Future<int> _lookAroundAnd(
+    Duration listen,
+    Future<int> Function() send,
+  ) async {
     // A short look around does not count: it would end halfway through.
     final bool wasScanning = scanning && !_windowOpen;
     if (!wasScanning) {
@@ -844,12 +869,37 @@ final class NearbyService extends ChangeNotifier {
       await Future<void>.delayed(listen);
     }
     try {
-      return await waveAll(json, only: only);
+      return await send();
     } finally {
       if (!wasScanning) {
         await stopScanning();
       }
     }
+  }
+
+  /// Sends [waves] one after another to every phone around ([only]: to
+  /// those it picks); how many got them all.
+  Future<int> _waveEach(
+    List<Map<String, dynamic>> waves,
+    bool Function(NearbyPerson person)? only,
+  ) async {
+    int sent = 0;
+    for (final NearbyPerson p in people) {
+      if (only != null && !only(p)) {
+        continue;
+      }
+      bool all = true;
+      for (final Map<String, dynamic> w in waves) {
+        if (!await radio.wave(p.device, _encode(w))) {
+          all = false;
+          break;
+        }
+      }
+      if (all) {
+        sent++;
+      }
+    }
+    return sent;
   }
 
   /// The friend whose alarm-wave token [token] (hex) is — a pair's id — or
@@ -887,7 +937,9 @@ final class NearbyService extends ChangeNotifier {
         }
         return;
       }
-      if (v == kNearbyHelloVersion) {
+      if (v == kNearbyPartVersion) {
+        _onPart(json);
+      } else if (v == kNearbyHelloVersion) {
         _onHello(json);
       } else if (v == kNearbyReplyVersion) {
         unawaitedLogged(_onReply(json), context: 'W pobliżu: odpowiedź');
@@ -923,16 +975,49 @@ final class NearbyService extends ChangeNotifier {
 
   static final RegExp _hex32 = RegExp(r'^[0-9a-f]{32}$');
 
-  static List<int>? _key32(Object? b64) {
-    if (b64 is! String || b64.length > 64) {
+  /// A part of a hello's key or an answer's ciphertext: a hello or an
+  /// answer that waited for it goes on once it is whole.
+  void _onPart(Map<dynamic, dynamic> json) {
+    final (String, String)? done = _pieces.add(json, _now());
+    if (done == null) {
+      return;
+    }
+    final Map<dynamic, dynamic>? waiting = _waitingForPiece.remove(
+      '${done.$2}|${done.$1}',
+    );
+    if (waiting == null) {
+      return;
+    }
+    if (done.$2 == 'h') {
+      _onHello(waiting);
+    } else {
+      unawaitedLogged(_onReply(waiting), context: 'W pobliżu: odpowiedź');
+    }
+  }
+
+  /// The piece [json] names under [field] ([what]: `h` or `r`), or `null`
+  /// when it has not come whole yet: then [json] waits for it.
+  Uint8List? _pieceFor(
+    Map<dynamic, dynamic> json,
+    String what,
+    String field,
+    String sid,
+  ) {
+    final Object? id = json[field];
+    if (id is! String || id.length != 24) {
       return null;
     }
-    try {
-      final List<int> bytes = base64Url.decode(base64Url.normalize(b64));
-      return bytes.length == 32 ? bytes : null;
-    } on FormatException {
-      return null;
+    final Uint8List? bytes = _pieces.take(sid, what, id, _now());
+    if (bytes == null) {
+      final String key = '$what|$sid';
+      if (!_waitingForPiece.containsKey(key)) {
+        while (_waitingForPiece.length >= kNearbyMaxPieces) {
+          _waitingForPiece.remove(_waitingForPiece.keys.first);
+        }
+        _waitingForPiece[key] = json;
+      }
     }
+    return bytes;
   }
 
   /// A hello without an address ([kNearbyHelloVersion]).
@@ -941,16 +1026,18 @@ final class NearbyService extends ChangeNotifier {
     final Object? name = json['n'];
     final Object? token = json['t'];
     final Object? text = json['m'];
-    final List<int>? publicKey = _key32(json['e']);
     if (id is! String ||
         !kAlarmIdPattern.hasMatch(id) ||
         name is! String ||
         token is! String ||
         !_hex32.hasMatch(token) ||
         text is! String ||
-        publicKey == null ||
         _blockedTokens.contains(token) ||
         _sessions.containsKey(id)) {
+      return;
+    }
+    final Uint8List? publicKey = _pieceFor(json, 'h', 'kh', id);
+    if (publicKey == null || publicKey.length != kHybridPublicKeyBytes) {
       return;
     }
     if (!_roomFor((NearbySession x) => x.peerToken == token)) {
@@ -965,26 +1052,22 @@ final class NearbyService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The key of a hello and its answer: X25519 of the two one-time keys,
-  /// bound to the conversation and both public keys.
-  static Future<List<int>> _sharedKey(
-    cg.SimpleKeyPair mine,
-    List<int> theirs, {
+  /// What the hybrid KEM binds the secret of a hello's answer to.
+  static List<int> _kemInfo(String sid) => utf8.encode('zen-nearby-hello|$sid');
+
+  /// The key of a hello and its answer: the hybrid KEM's secret, bound to
+  /// the conversation, the hello's key and the answer's ciphertext.
+  static List<int> _sharedKey(
+    List<int> secret, {
     required String sid,
     required List<int> helloPublic,
-    required List<int> replyPublic,
-  }) async {
-    final cg.SecretKey shared = await _x25519.sharedSecretKey(
-      keyPair: mine,
-      remotePublicKey: cg.SimplePublicKey(theirs, type: cg.KeyPairType.x25519),
-    );
-    return crypto.sha256.convert(<int>[
-      ...utf8.encode('zen-nearby-hello|$sid|'),
-      ...await shared.extractBytes(),
-      ...helloPublic,
-      ...replyPublic,
-    ]).bytes;
-  }
+    required List<int> ciphertext,
+  }) => crypto.sha256.convert(<int>[
+    ...utf8.encode('zen-nearby-hello-v2|$sid|'),
+    ...secret,
+    ...crypto.sha256.convert(helloPublic).bytes,
+    ...crypto.sha256.convert(ciphertext).bytes,
+  ]).bytes;
 
   static List<int> _replyAad(String sid) =>
       utf8.encode('zen-nearby-reply|$sid');
@@ -1002,20 +1085,22 @@ final class NearbyService extends ChangeNotifier {
   /// one-time key and written to the phones around (only that phone can
   /// open it; it no longer shows the same token after a few minutes).
   Future<bool> _answerOverAir(NearbySession s, String text) async {
-    final List<int>? theirs = s._peerPublic;
+    final Uint8List? theirs = s._peerPublic;
     final String address = ownAddress();
     if (theirs == null || address.isEmpty) {
       return false;
     }
-    final cg.SimpleKeyPair keys = await _x25519.newKeyPair();
-    final List<int> mine = (await keys.extractPublicKey()).bytes;
-    final List<int> shared = await _sharedKey(
-      keys,
+    final HybridEncapsulation kem = await hybridKem.encapsulate(
       theirs,
+      info: _kemInfo(s.id),
+    );
+    final List<int> shared = _sharedKey(
+      kem.secret,
       sid: s.id,
       helloPublic: theirs,
-      replyPublic: mine,
+      ciphertext: kem.ciphertext,
     );
+    kem.secret.fillRange(0, kem.secret.length, 0);
     final List<int> nonce = List<int>.generate(12, (_) => _random.nextInt(256));
     final cg.SecretBox box = await _aead.encrypt(
       utf8.encode(
@@ -1029,16 +1114,31 @@ final class NearbyService extends ChangeNotifier {
       nonce: nonce,
       aad: _replyAad(s.id),
     );
-    final int sent = await waveAround(<String, dynamic>{
-      'v': kNearbyReplyVersion,
-      'sid': s.id,
-      'e': base64Url.encode(mine),
-      'c': base64Url.encode(<int>[
-        ...nonce,
-        ...box.cipherText,
-        ...box.mac.bytes,
-      ]),
-    }, listen: replyListen);
+    final List<Map<String, dynamic>> waves = <Map<String, dynamic>>[
+      ...nearbyParts(s.id, 'r', kem.ciphertext),
+      <String, dynamic>{
+        'v': kNearbyReplyVersion,
+        'sid': s.id,
+        'ch': nearbyPieceId(kem.ciphertext),
+        'c': base64Url.encode(<int>[
+          ...nonce,
+          ...box.cipherText,
+          ...box.mac.bytes,
+        ]),
+      },
+    ];
+    // Only to the phone that said hello when it still shows the same
+    // token (the answer is longer now); else to every phone around.
+    final bool seen = people.any((NearbyPerson p) => p.token == s.peerToken);
+    final int sent = await _lookAroundAnd(
+      replyListen,
+      () => _waveEach(
+        waves,
+        seen && s.peerToken.isNotEmpty
+            ? (NearbyPerson p) => p.token == s.peerToken
+            : null,
+      ),
+    );
     if (sent == 0) {
       return false;
     }
@@ -1050,16 +1150,18 @@ final class NearbyService extends ChangeNotifier {
   Future<void> _onReply(Map<dynamic, dynamic> json) async {
     final Object? id = json['sid'];
     final Object? sealed = json['c'];
-    final List<int>? theirs = _key32(json['e']);
     final NearbySession? s = id is String ? _sessions[id] : null;
-    final cg.SimpleKeyPair? keys = s?._helloKeys;
+    final Uint8List? seed = s?._helloSeed;
     if (s == null ||
-        keys == null ||
+        seed == null ||
         !s.startedByMe ||
         s.address != null ||
-        theirs == null ||
         sealed is! String ||
         sealed.length > 2048) {
+      return;
+    }
+    final Uint8List? ciphertext = _pieceFor(json, 'r', 'ch', s.id);
+    if (ciphertext == null || ciphertext.length != kHybridCiphertextBytes) {
       return;
     }
     final List<int> bytes;
@@ -1071,14 +1173,18 @@ final class NearbyService extends ChangeNotifier {
     if (bytes.length < 12 + 16) {
       return;
     }
-    final List<int> mine = (await keys.extractPublicKey()).bytes;
-    final List<int> shared = await _sharedKey(
-      keys,
-      theirs,
-      sid: s.id,
-      helloPublic: mine,
-      replyPublic: theirs,
+    final Uint8List secret = await hybridKem.decapsulate(
+      seed,
+      ciphertext,
+      info: _kemInfo(s.id),
     );
+    final List<int> shared = _sharedKey(
+      secret,
+      sid: s.id,
+      helloPublic: await hybridKem.publicKeyOf(seed),
+      ciphertext: ciphertext,
+    );
+    secret.fillRange(0, secret.length, 0);
     final List<int> plain;
     try {
       plain = await _aead.decrypt(
@@ -1107,9 +1213,12 @@ final class NearbyService extends ChangeNotifier {
         !identical(_sessions[s.id], s)) {
       return;
     }
+    // The one-time key has done its work: gone from memory.
+    seed.fillRange(0, seed.length, 0);
     s
       ..address = PeerShareCodec.normalizeAddress(address)
       .._shared = shared
+      .._helloSeed = null
       ..lines.add(
         NearbyLine(false, _clip(text, kNearbyHelloMaxLength), _now()),
       );

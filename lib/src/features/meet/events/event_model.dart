@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -6,6 +9,9 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// picked, or as far as friends / friends of friends pass it on.
 enum EventReach {
   selected(0),
+
+  /// Only this person's close friends ("przyjaciele").
+  close(0),
   friends(0),
   friendsOfFriends(1),
   twoSteps(2);
@@ -14,6 +20,7 @@ enum EventReach {
 
   String get label => switch (this) {
     EventReach.selected => t('Wybrane osoby'),
+    EventReach.close => t('Przyjaciele'),
     EventReach.friends => t('Znajomi'),
     EventReach.friendsOfFriends => t('Znajomi znajomych'),
     EventReach.twoSteps => t('Znajomi znajomych znajomych'),
@@ -96,16 +103,30 @@ final class EventGuest {
     if (checkedIn) 'in': true,
   };
 
+  /// Reads a guest; on a list without addresses ([MeetEvent.toJson] with
+  /// `blind`) the guest's address is `#` and the guest's hash
+  /// ([MeetEvent.guestHash]).
   static EventGuest? fromJson(Object? json) {
-    if (json is! Map || json['a'] is! String) {
+    if (json is! Map) {
+      return null;
+    }
+    final Object? a = json['a'];
+    final Object? h = json['h'];
+    final String address;
+    if (a is String) {
+      address = PeerShareCodec.normalizeAddress(a);
+    } else if (h is String && _hashPattern.hasMatch(h)) {
+      address = '#$h';
+    } else {
       return null;
     }
     final Object? n = json['n'];
+    final Object? by = json['by'];
     return EventGuest(
-      address: PeerShareCodec.normalizeAddress(json['a'] as String),
+      address: address,
       name: n is String ? (n.length > 60 ? n.substring(0, 60) : n) : '',
       status: GuestStatus.byName(json['s']),
-      broughtBy: json['by'] is String ? json['by'] as String : null,
+      broughtBy: by is String && by.length <= 100 ? by : null,
       plusOnes: json['p1'] is int ? (json['p1'] as int).clamp(0, 5) : 0,
       checkedIn: json['in'] == true,
     );
@@ -143,7 +164,6 @@ final class MeetEvent {
     required this.organizerName,
     required this.title,
     required this.startsAt,
-    required this.ticketKey,
     this.kind = EventKind.other,
     this.description = '',
     this.place = '',
@@ -173,13 +193,58 @@ final class MeetEvent {
   /// Guests may ask to bring someone (+1); the organizer decides.
   final bool askForPlusOne;
 
-  /// Public key the tickets are signed with.
-  final String ticketKey;
   final Map<String, EventGuest> guests;
   final bool cancelled;
   final int updatedAt;
 
   bool get isMine => organizer == 'self';
+
+  /// What stands for [address] on a list without addresses: a hash bound
+  /// to this event, so it says nothing elsewhere. Only who already knows
+  /// the address can tell it is on the list.
+  static String guestHash(String eventId, String address) => crypto.sha256
+      .convert(
+        utf8.encode(
+          'zen-event-guest|$eventId|${PeerShareCodec.normalizeAddress(address)}',
+        ),
+      )
+      .toString()
+      .substring(0, 32);
+
+  /// [address] as a key of a list without addresses.
+  String blindKey(String address) => '#${guestHash(id, address)}';
+
+  /// The list came without addresses (friends of friends see first names
+  /// and how many they know, not where to find everyone).
+  bool get blind => guests.keys.any((String k) => k.startsWith('#'));
+
+  /// Which of [friends] the guest [g] is, also on a list without
+  /// addresses (`null`: none of them).
+  String? friendIn(EventGuest g, Iterable<String> friends) {
+    for (final String f in friends) {
+      final String a = PeerShareCodec.normalizeAddress(f);
+      if (g.address == a || g.address == blindKey(a)) {
+        return a;
+      }
+    }
+    return null;
+  }
+
+  /// How many of those coming are among [friends] ("znasz 5").
+  int knownGoing(Iterable<String> friends) {
+    final Set<String> keys = <String>{
+      for (final String f in friends) ...<String>[
+        PeerShareCodec.normalizeAddress(f),
+        blindKey(f),
+      ],
+    };
+    return guests.values
+        .where(
+          (EventGuest g) =>
+              g.status == GuestStatus.going && keys.contains(g.address),
+        )
+        .length;
+  }
 
   int get goingCount => guests.values
       .where((EventGuest g) => g.status == GuestStatus.going)
@@ -188,7 +253,8 @@ final class MeetEvent {
   bool get isFull => capacity > 0 && goingCount + 1 >= capacity;
 
   EventGuest? guest(String address) =>
-      guests[PeerShareCodec.normalizeAddress(address)];
+      guests[PeerShareCodec.normalizeAddress(address)] ??
+      guests[blindKey(address)];
 
   MeetEvent copyWith({
     String? title,
@@ -211,7 +277,6 @@ final class MeetEvent {
     reach: reach,
     capacity: capacity ?? this.capacity,
     askForPlusOne: askForPlusOne,
-    ticketKey: ticketKey,
     guests: guests ?? this.guests,
     cancelled: cancelled ?? this.cancelled,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -221,7 +286,9 @@ final class MeetEvent {
   /// ("Ola ← Kuba ← Ania").
   List<String> chainOf(String address) {
     final List<String> chain = <String>[];
-    String? at = PeerShareCodec.normalizeAddress(address);
+    String? at = address.startsWith('#')
+        ? address
+        : PeerShareCodec.normalizeAddress(address);
     final Set<String> seen = <String>{};
     while (at != null && seen.add(at)) {
       final EventGuest? g = guests[at];
@@ -234,7 +301,26 @@ final class MeetEvent {
     return chain;
   }
 
-  Map<String, dynamic> toJson() => <String, dynamic>{
+  /// A guest as a list without addresses has them: the hash, the first
+  /// name, the answer, who brought them (hashed too).
+  Map<String, dynamic> _blindGuest(EventGuest g) {
+    final String? by = g.broughtBy;
+    final String first = g.name.trim().split(RegExp(r'\s+')).first;
+    return <String, dynamic>{
+      'h': g.address.startsWith('#')
+          ? g.address.substring(1)
+          : guestHash(id, g.address),
+      'n': first,
+      's': g.status.name,
+      if (by != null) 'by': by.startsWith('#') ? by : blindKey(by),
+      if (g.checkedIn) 'in': true,
+    };
+  }
+
+  /// With [blind] the guest list has no addresses: what friends of friends
+  /// get, who see only first names and how many they know. Guests with a
+  /// ticket (and the organizer's friends) get the full list.
+  Map<String, dynamic> toJson({bool blind = false}) => <String, dynamic>{
     'id': id,
     'org': organizer,
     'orgName': organizerName,
@@ -246,9 +332,9 @@ final class MeetEvent {
     'reach': reach.name,
     if (capacity > 0) 'cap': capacity,
     if (!askForPlusOne) 'noPlus1': true,
-    'tk': ticketKey,
     'guests': <Map<String, dynamic>>[
-      for (final EventGuest g in guests.values) g.toJson(),
+      for (final EventGuest g in guests.values)
+        blind ? _blindGuest(g) : g.toJson(),
     ],
     if (cancelled) 'cancelled': true,
     'upd': updatedAt,
@@ -262,14 +348,12 @@ final class MeetEvent {
     final Object? org = json['org'];
     final Object? title = json['title'];
     final Object? at = json['at'];
-    final Object? tk = json['tk'];
     if (id is! String ||
         id.isEmpty ||
         id.length > 40 ||
         org is! String ||
         title is! String ||
-        at is! int ||
-        tk is! String) {
+        at is! int) {
       return null;
     }
     String clip(Object? v, int max) =>
@@ -287,7 +371,6 @@ final class MeetEvent {
       reach: EventReach.byName(json['reach']),
       capacity: json['cap'] is int ? (json['cap'] as int).clamp(0, 10000) : 0,
       askForPlusOne: json['noPlus1'] != true,
-      ticketKey: tk,
       guests: <String, EventGuest>{
         if (guests is List)
           for (final Object? g in guests.take(2000))
@@ -299,6 +382,8 @@ final class MeetEvent {
     );
   }
 }
+
+final RegExp _hashPattern = RegExp(r'^[0-9a-f]{32}$');
 
 String _clipText(Object? v, int max) =>
     v is String ? (v.length > max ? v.substring(0, max) : v) : '';

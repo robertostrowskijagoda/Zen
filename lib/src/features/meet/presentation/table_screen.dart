@@ -223,7 +223,7 @@ class _TableScreenState extends ConsumerState<TableScreen> {
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: zen.surface,
-                  borderRadius: BorderRadius.circular(22),
+                  borderRadius: context.zenRadius(22),
                   border: Border.all(color: zen.outlineSoft),
                 ),
                 child: Column(
@@ -294,7 +294,7 @@ class _DayToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    final BorderRadius r = BorderRadius.circular(14);
+    final BorderRadius r = context.zenRadius(14);
     return Semantics(
       button: true,
       selected: selected,

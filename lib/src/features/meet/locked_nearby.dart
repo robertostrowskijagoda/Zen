@@ -11,7 +11,7 @@ import 'package:zen/src/features/meet/encounters.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
-import 'package:zen/src/features/meet/nearby_keeper.dart';
+import 'package:zen/src/features/meet/nearby_look_policy.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
@@ -316,8 +316,10 @@ final class NearbyKitKeeper {
 ///    is shows after unlock) and is kept for the app; anything else is at
 ///    most the quiet unchecked note, like in the app;
 ///  - with "Rozglądaj się też w tle" and "Zapisuj, kogo mijam" on, a short
-///    low-power look around every [lookEvery]; friends in range (and how
-///    many others) are kept for "Mijani" at most every [keepEvery].
+///    low-power look around every [lookEvery] when the [policy] allows it
+///    (not on low battery, in battery saver or while the phone sleeps);
+///    friends in range (and how many others) are kept for "Mijani" at most
+///    every [keepEvery].
 final class LockedNearby {
   LockedNearby({
     required this.kit,
@@ -328,10 +330,11 @@ final class LockedNearby {
     Future<void> Function(List<String> keys)? alarmKeys,
     Future<EncounterPlace?> Function()? place,
     int Function()? now,
-    this.lookEvery = kNearbyLookEvery,
-    this.lookFor = kNearbyLookFor,
+    Duration lookEvery = kNearbyLookEvery,
+    Duration lookFor = kNearbyLookFor,
     this.keepEvery = const Duration(minutes: 30),
-  }) : _keep = keep,
+  }) : policy = NearbyLookPolicy(every: lookEvery, window: lookFor),
+       _keep = keep,
        _notices = notices,
        _claimAlarms = claimAlarms,
        _alarmKeys = alarmKeys,
@@ -359,8 +362,20 @@ final class LockedNearby {
   final Future<void> Function(List<String> keys)? _alarmKeys;
   final Future<EncounterPlace?> Function()? _place;
   final int Function() _now;
-  final Duration lookEvery;
-  final Duration lookFor;
+
+  /// When a look runs and for how long.
+  final NearbyLookPolicy policy;
+
+  Duration get lookEvery => policy.every;
+  Duration get lookFor => policy.window;
+
+  /// What the looks cost so far.
+  final NearbyLookStats stats = NearbyLookStats();
+
+  /// Results a low-power scan batched up arrive a moment after it stops:
+  /// they still count until then.
+  static const Duration batchGrace = Duration(seconds: 3);
+  int _graceUntil = 0;
 
   /// What was seen goes to the inbox at most this often (and when this
   /// stops).
@@ -490,21 +505,28 @@ final class LockedNearby {
     if (!_running || !kit.look || !kit.record || _windowOpen || _held > 0) {
       return false;
     }
-    final Map<Object?, Object?> state = await radio.state();
-    if (state['permitted'] != true || state['enabled'] != true) {
+    final NearbyLookSkip? why = policy.skipFor(await radio.state());
+    if (why != null) {
+      stats.skip(why);
       return false;
     }
     _windowOpen = true;
     try {
       if (!await radio.startScan(lowPower: true)) {
+        stats.skip(NearbyLookSkip.busy);
         return false;
       }
       await Future<void>.delayed(lookFor);
     } finally {
       _windowOpen = false;
+      _graceUntil = _now() + batchGrace.inMilliseconds;
       if (_held == 0) {
         await radio.stopScan();
       }
+    }
+    stats.ran(lookFor);
+    if (stats.looks % 48 == 0) {
+      logZenMessage('Locked nearby: $stats.');
     }
     if (_running && _now() - _keptAt >= keepEvery.inMilliseconds) {
       await keepEncounters();
@@ -518,7 +540,8 @@ final class LockedNearby {
     }
     switch (event['type']) {
       case 'seen':
-        if (!kit.record || (!_windowOpen && _held == 0)) {
+        if (!kit.record ||
+            (!_windowOpen && _held == 0 && _now() > _graceUntil)) {
           return;
         }
         final Object? token = event['token'];

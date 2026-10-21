@@ -84,6 +84,9 @@ void main() {
       hour: 19,
       firstDinner: DateTime(2026, 10, 1),
     );
+    for (final _Host h in <_Host>[bob, cela, dina]) {
+      await h.circles.answerInvite(c.id, true);
+    }
     final DateTime day = c.schedule(ania.clock).first.$1;
     expect(day, DateTime(2026, 10, 1, 19));
 
@@ -206,15 +209,24 @@ void main() {
   test('a circle has 4–8 members, the host included', () async {
     final (_Host ania, _Host bob, _Host cela, _Host dina, _Host edek) =
         await table();
-    Future<DinnerCircle> make(List<String> friends, {bool pairs = false}) =>
-        ania.circles.create(
-          name: 'Czwartki',
-          friends: friends,
-          weekday: DateTime.thursday,
-          hour: 19,
-          firstDinner: DateTime(2026, 10, 1),
-          pairs: pairs,
-        );
+    Future<DinnerCircle> make(
+      List<String> friends, {
+      bool pairs = false,
+      List<_Host> join = const <_Host>[],
+    }) async {
+      final DinnerCircle c = await ania.circles.create(
+        name: 'Czwartki',
+        friends: friends,
+        weekday: DateTime.thursday,
+        hour: 19,
+        firstDinner: DateTime(2026, 10, 1),
+        pairs: pairs,
+      );
+      for (final _Host h in join) {
+        await h.circles.answerInvite(c.id, true);
+      }
+      return ania.circles.circle(c.id)!;
+    }
 
     // Three people (host + 2) are too few, nine too many.
     await expectLater(
@@ -233,11 +245,10 @@ void main() {
     );
     expect(ania.circles.circles, isEmpty);
 
-    final DinnerCircle four = await make(<String>[
-      bob.address,
-      cela.address,
-      dina.address,
-    ]);
+    final DinnerCircle four = await make(
+      <String>[bob.address, cela.address, dina.address],
+      join: <_Host>[bob, cela, dina],
+    );
     expect(four.members, hasLength(4));
     expect(four.pairs, isFalse);
     expect(four.headcount, 4);
@@ -245,12 +256,11 @@ void main() {
     expect(DinnerCircle.validSize(9), isFalse);
 
     // "Pairs": every member stands for two people; it reaches the others.
-    final DinnerCircle couples = await make(<String>[
-      bob.address,
-      cela.address,
-      dina.address,
-      edek.address,
-    ], pairs: true);
+    final DinnerCircle couples = await make(
+      <String>[bob.address, cela.address, dina.address, edek.address],
+      pairs: true,
+      join: <_Host>[bob, cela, dina, edek],
+    );
     expect(couples.pairs, isTrue);
     expect(couples.headcount, 10);
     expect(edek.circles.circle(couples.id)!.pairs, isTrue);
@@ -270,6 +280,9 @@ void main() {
       hour: 19,
       firstDinner: DateTime(2026, 10, 1),
     );
+    for (final _Host h in <_Host>[bob, cela, dina]) {
+      await h.circles.answerInvite(c.id, true);
+    }
     await ania.circles.setOpen(c.id, true);
     final DateTime day = c.schedule(ania.clock).first.$1;
 
@@ -308,6 +321,9 @@ void main() {
         hour: 19,
         firstDinner: DateTime(2026, 10, 1),
       );
+      for (final _Host h in <_Host>[bob, cela, dina]) {
+        await h.circles.answerInvite(c.id, true);
+      }
       for (final _Host h in <_Host>[ania, bob, cela, dina]) {
         h.clock += 10;
       }

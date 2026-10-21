@@ -14,6 +14,7 @@ import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -97,6 +98,10 @@ const List<IntentKind> kFriendIntentOrder = <IntentKind>[
 /// "Na teraz": this person's own status on top (or the question
 /// what they are up for), then which friends are up for something now,
 /// grouped by kind.
+/// "Tylko przyjaciele": the friends' statuses shown (for this run of the
+/// app).
+final ValueNotifier<bool> _onlyClose = ValueNotifier<bool>(false);
+
 class IntentPanel extends ConsumerWidget {
   const IntentPanel({super.key});
 
@@ -149,26 +154,87 @@ class IntentPanel extends ConsumerWidget {
                   datingOn: datingOn,
                   onPick: open,
                 ),
-              FriendIntents(
-                byKind: <IntentKind, List<(String, IntentStatus)>>{
-                  for (final IntentKind k in kFriendIntentOrder)
-                    k: service.friendsWith(k),
-                },
-                now: now,
-                ownSet: mine != null,
-                nameOf: service.host.nameOf,
-                avatar: (String address, String name, double size) =>
-                    _StatusAvatar(address: address, name: name, size: size),
-                onOpen: (String address) => unawaited(
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (BuildContext context) => ConversationScreen(
-                        peerAddress: address,
-                        title: service.host.nameOf(address),
+              ValueListenableBuilder<bool>(
+                valueListenable: _onlyClose,
+                builder: (BuildContext context, bool onlyClose, Widget? _) {
+                  final Set<String> close = <String>{
+                    for (final String f in service.host.closeFriends())
+                      PeerShareCodec.normalizeAddress(f),
+                  };
+                  final Map<IntentKind, List<(String, IntentStatus)>> all =
+                      <IntentKind, List<(String, IntentStatus)>>{
+                        for (final IntentKind k in kFriendIntentOrder)
+                          k: service.friendsWith(k),
+                      };
+                  final bool any = all.values.any(
+                    (List<(String, IntentStatus)> l) => l.isNotEmpty,
+                  );
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      if (any && close.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: <Widget>[
+                              ChoiceChip(
+                                key: const Key('intent-filter-all'),
+                                label: Text(t('Wszyscy')),
+                                selected: !onlyClose,
+                                onSelected: (_) => _onlyClose.value = false,
+                              ),
+                              ChoiceChip(
+                                key: const Key('intent-filter-close'),
+                                label: Text(t('Tylko przyjaciele')),
+                                selected: onlyClose,
+                                onSelected: (_) => _onlyClose.value = true,
+                              ),
+                            ],
+                          ),
+                        ),
+                      FriendIntents(
+                        byKind: <IntentKind, List<(String, IntentStatus)>>{
+                          for (final MapEntry<
+                                IntentKind,
+                                List<(String, IntentStatus)>
+                              >
+                              e
+                              in all.entries)
+                            e.key: <(String, IntentStatus)>[
+                              for (final (String, IntentStatus) f in e.value)
+                                if (!onlyClose ||
+                                    close.contains(
+                                      PeerShareCodec.normalizeAddress(f.$1),
+                                    ))
+                                  f,
+                            ],
+                        },
+                        now: now,
+                        ownSet: mine != null,
+                        nameOf: service.host.nameOf,
+                        avatar: (String address, String name, double size) =>
+                            _StatusAvatar(
+                              address: address,
+                              name: name,
+                              size: size,
+                            ),
+                        onOpen: (String address) => unawaited(
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (BuildContext context) =>
+                                  ConversationScreen(
+                                    peerAddress: address,
+                                    title: service.host.nameOf(address),
+                                  ),
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                ),
+                    ],
+                  );
+                },
               ),
             ],
           );
@@ -254,7 +320,7 @@ class IntentPicker extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 5),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: context.zenRadius(24),
         gradient: zen.panelGradient(tone: zen.accent, alpha: 0.10),
         border: Border.all(color: zen.outlineSoft),
       ),
@@ -342,7 +408,7 @@ class _IntentChoice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    final BorderRadius r = BorderRadius.circular(wide ? 18 : 999);
+    final BorderRadius r = context.zenRadius(wide ? 18 : 999);
     final Text label = Text(
       kind.label,
       maxLines: wide ? 2 : 1,
@@ -505,7 +571,7 @@ class _MoreIntents extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    final BorderRadius r = BorderRadius.circular(999);
+    final BorderRadius r = context.zenRadius(999);
     return Material(
       color: zen.surfaceRaised,
       borderRadius: r,
@@ -573,7 +639,7 @@ class MyIntentCard extends StatelessWidget {
       margin: const EdgeInsets.symmetric(vertical: 5),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: context.zenRadius(24),
         gradient: LinearGradient(
           colors: <Color>[
             Color.alphaBlend(tone.withValues(alpha: 0.26), zen.surface),
@@ -685,7 +751,7 @@ class MyIntentCard extends StatelessWidget {
           if (share != null) ...<Widget>[
             const SizedBox(height: 8),
             ClipRRect(
-              borderRadius: BorderRadius.circular(99),
+              borderRadius: context.zenRadius(99),
               child: LinearProgressIndicator(
                 key: const Key('intent-mine-time'),
                 value: share,
@@ -781,7 +847,7 @@ class FriendIntents extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         decoration: BoxDecoration(
           color: zen.surfaceSunk,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: context.zenRadius(20),
           border: Border.all(color: zen.outlineSoft),
         ),
         child: Row(
@@ -861,7 +927,7 @@ class _IntentGroup extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final Color tone = intentTone(zen, kind);
     final bool urgent = kind == IntentKind.urgent;
-    final BorderRadius r = BorderRadius.circular(22);
+    final BorderRadius r = context.zenRadius(22);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Material(
@@ -1048,7 +1114,7 @@ class _FriendIntentRow extends StatelessWidget {
                         SizedBox(
                           width: 44,
                           child: ClipRRect(
-                            borderRadius: BorderRadius.circular(99),
+                            borderRadius: context.zenRadius(99),
                             child: LinearProgressIndicator(
                               value: share,
                               minHeight: 4,

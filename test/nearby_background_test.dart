@@ -31,6 +31,9 @@ final class _Radio implements NearbyRadio {
   bool? lowPower;
   int scansStarted = 0;
 
+  /// Battery, battery saver and Doze as the radio side reports them.
+  Map<Object?, Object?> power = <Object?, Object?>{};
+
   /// Phones in range: a scan sees them as soon as it starts.
   final List<Map<Object?, Object?>> around = <Map<Object?, Object?>>[];
 
@@ -46,6 +49,7 @@ final class _Radio implements NearbyRadio {
     'supported': true,
     'enabled': enabled,
     'permitted': permitted,
+    ...power,
   };
 
   @override
@@ -295,9 +299,10 @@ void main() {
     );
     expect(await keeper.refresh(recording: true), isFalse);
 
-    await bob.meet.setNearbyBackgroundScan(true);
+    expect(kit!.look, isTrue, reason: 'on by default');
+    await bob.meet.setNearbyBackgroundScan(false);
     expect(await keeper.refresh(recording: true), isTrue);
-    expect(kit!.look, isTrue);
+    expect(kit!.look, isFalse);
     bob.clock += Duration.millisecondsPerDay;
     expect(await keeper.refresh(recording: true), isTrue);
     expect(kit!.firstSlot, greaterThan(written.firstSlot));
@@ -458,6 +463,7 @@ void main() {
     final _Net net = _Net();
     final _Phone bob = _Phone(net, 'bob', <String>['ania']);
     await bob.meet.setNearbyVisible(true);
+    await bob.meet.setNearbyBackgroundScan(false);
     final _Kept kept = _Kept();
     final MemoryRuntimeSystemNotificationService notices =
         MemoryRuntimeSystemNotificationService();
@@ -691,15 +697,19 @@ void main() {
     final _Phone ania = _Phone(net, 'ania', <String>['bob']);
     final _Phone bob = _Phone(net, 'bob', <String>['ania']);
     await ania.meet.shareNearbySecret('bob');
-    bob.radio.around.add(<Object?, Object?>{
-      'type': 'seen',
-      // Her token and hint now, as her phone shows them.
-      'token': NearbyOwnKeys(
-        ania.meet.book.nearbyPrivate!,
-      ).advert(nearbySlot(bob.clock)),
-      'rssi': -65,
-      'device': 'mac-ania',
-    });
+    // Her token and hint now, as her phone shows them (it changes every
+    // slot, so it is shown again whenever the clock moves on).
+    void herTokenNow() => bob.radio.around
+      ..clear()
+      ..add(<Object?, Object?>{
+        'type': 'seen',
+        'token': NearbyOwnKeys(
+          ania.meet.book.nearbyPrivate!,
+        ).advert(nearbySlot(bob.clock)),
+        'rssi': -65,
+        'device': 'mac-ania',
+      });
+    herTokenNow();
     bool unlocked = true;
     final NearbyKeeper keeper = NearbyKeeper(
       nearby: bob.nearby,
@@ -707,12 +717,14 @@ void main() {
       lookFor: const Duration(milliseconds: 5),
       now: () => bob.clock,
     );
-    // Off by default (scanning is for the "W pobliżu" screen): nothing.
-    expect(bob.meet.book.nearbyBackgroundScan, isFalse);
+    // On by default; turned off: nothing.
+    expect(bob.meet.book.nearbyBackgroundScan, isTrue);
+    await bob.meet.setNearbyBackgroundScan(false);
     await keeper.start();
 
     bob.clock += kNearbyLookEvery.inMilliseconds;
     expect(await keeper.lookIfDue(), isFalse);
+    expect(keeper.lastSkip, NearbyLookSkip.off);
     expect(bob.radio.scansStarted, 0);
 
     await bob.meet.setNearbyBackgroundScan(true);
@@ -725,7 +737,17 @@ void main() {
       reason: 'the background service looks while the app is locked',
     );
     unlocked = true;
+    // Low battery: skipped, and tried again only at the next turn.
+    bob.radio.power = <Object?, Object?>{'battery': 10};
+    expect(await keeper.lookIfDue(), isFalse);
+    expect(keeper.lastSkip, NearbyLookSkip.lowBattery);
+    bob.radio.power = <Object?, Object?>{'battery': 10, 'charging': true};
+    expect(await keeper.lookIfDue(), isFalse, reason: 'not due yet');
+    bob.clock += kNearbyLookEvery.inMilliseconds;
+    herTokenNow();
     expect(await keeper.lookIfDue(), isTrue);
+    expect(keeper.stats.looks, 1);
+    expect(keeper.stats.skipped[NearbyLookSkip.lowBattery], 1);
     expect(bob.radio.scansStarted, 1);
     expect(bob.radio.lowPower, isTrue);
     expect(bob.radio.scanning, isFalse, reason: 'only a short look');
@@ -739,7 +761,7 @@ void main() {
     // "W pobliżu" opened during a look around: its scan stays on.
     bob.clock += kNearbyLookEvery.inMilliseconds;
     final Future<bool> look = keeper.lookIfDue();
-    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(const Duration(milliseconds: 2));
     await bob.nearby.startScanning();
     expect(await look, isTrue);
     expect(bob.nearby.scanning, isTrue);
@@ -750,7 +772,7 @@ void main() {
     bob.clock += kNearbyLookEvery.inMilliseconds;
     expect(await keeper.lookIfDue(), isFalse);
 
-    // Remembered; off in a new book and in a book from before the setting.
+    // Remembered; on in a new book and in a book from before the setting.
     expect(
       MeetBook.fromJson(
         jsonDecode(jsonEncode(bob.meet.book.toJson())),
@@ -759,13 +781,15 @@ void main() {
     );
     expect(
       MeetBook.fromJson(
-        jsonDecode(jsonEncode(MeetBook().toJson())),
+        jsonDecode(
+          jsonEncode((MeetBook()..nearbyBackgroundScan = false).toJson()),
+        ),
       ).nearbyBackgroundScan,
       isFalse,
     );
     expect(
       MeetBook.fromJson(<String, dynamic>{'v': 1}).nearbyBackgroundScan,
-      isFalse,
+      isTrue,
     );
     await keeper.close();
     await bob.nearby.close();

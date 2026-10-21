@@ -221,6 +221,11 @@ final class _World {
       firstDinner: DateTime(2026, 10, 1),
     );
     await net.settle();
+    // Everyone says "Dołączam".
+    for (final _Host h in <_Host>[bob, cela, dina]) {
+      await h.circles.answerInvite(circle.id, true);
+      await net.settle();
+    }
   }
 
   Future<FoodOffer> share(

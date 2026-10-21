@@ -68,8 +68,8 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
   final Set<ZenPermission> _asked = <ZenPermission>{};
   ZenPermission? _busy;
 
-  /// Shown to people nearby (off until the person turns it on).
-  bool _visible = false;
+  /// Shown to people nearby (on by default; the person can turn it off).
+  bool _visible = true;
   bool _finishing = false;
   StreamSubscription<bool>? _bluetooth;
   Timer? _later;

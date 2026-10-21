@@ -540,7 +540,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
         Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(26),
+            borderRadius: context.zenRadius(26),
             gradient: const LinearGradient(
               colors: <Color>[Color(0xFFEF5350), _alarmRed],
               begin: Alignment.topLeft,
@@ -859,7 +859,7 @@ class _AlarmReachViewState extends State<_AlarmReachView> {
               ),
               const SizedBox(height: 12),
               ClipRRect(
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: context.zenRadius(999),
                 child: LinearProgressIndicator(
                   value: total == 0 ? 0 : delivered / total,
                   minHeight: 6,
@@ -1315,7 +1315,7 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: zen.surfaceRaised,
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: context.zenRadius(14),
                         ),
                         child: Text(
                           '„${a.note}”',

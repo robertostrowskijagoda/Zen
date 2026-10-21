@@ -83,6 +83,8 @@ final Provider<FoodService> foodServiceProvider = Provider<FoodService>((
     disk: ref.read(ledgerDiskProvider),
     circles: ref.watch(circleServiceProvider),
     points: PyramidFoodPoints(ref),
+    // "Kółko i przyjaciele", "Gotuję dziś" for close friends only.
+    closeFriends: meet.host.closeFriends,
   );
   unawaitedLogged(food.load(), context: 'Odczyt jedzenia');
   listenFrames(ref, food.handle, 'Jedzenie');

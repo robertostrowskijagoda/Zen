@@ -148,6 +148,9 @@ enum FoodReach {
   /// The members of the circle it was made in.
   circle('circle'),
 
+  /// The circle and the cook's close friends ("przyjaciele").
+  close('close'),
+
   /// The circle and the cook's friends.
   friends('friends'),
 
@@ -160,7 +163,16 @@ enum FoodReach {
 
   String get label => switch (this) {
     FoodReach.circle => t('Kółko'),
+    FoodReach.close => t('Kółko i przyjaciele'),
     FoodReach.friends => t('Kółko i znajomi'),
+    FoodReach.friendsOfFriends => t('Też znajomi znajomych'),
+  };
+
+  /// For "Gotuję dziś — dosiądź się" (no circle).
+  String get seatsLabel => switch (this) {
+    FoodReach.circle => t('Kółko'),
+    FoodReach.close => t('Przyjaciele'),
+    FoodReach.friends => t('Znajomi'),
     FoodReach.friendsOfFriends => t('Też znajomi znajomych'),
   };
 
@@ -227,6 +239,10 @@ final class FoodRequest {
     this.paid = false,
     this.payment,
     this.place = '',
+    this.key,
+    this.seed,
+    this.chat,
+    this.vouched = false,
   });
 
   /// Who asks (on the cook's phone) or the cook (on the asker's phone).
@@ -254,11 +270,27 @@ final class FoodRequest {
   /// On the asker's phone, once accepted: where to come.
   final String place;
 
+  /// On the cook's phone: the request's public key (base64url), the place
+  /// is sealed to it (food_seal.dart).
+  final String? key;
+
+  /// On the asker's phone: the request's private seed (base64url).
+  final String? seed;
+
+  /// Once accepted, on both phones: the key of their small chat
+  /// (base64url).
+  final String? chat;
+
+  /// On the cook's phone: the friend in between ([via]) vouched for this
+  /// person ("Gotuję dziś — dosiądź się").
+  final bool vouched;
+
   FoodRequest copyWith({
     FoodRequestState? state,
     bool? paid,
     String? payment,
     String? place,
+    String? chat,
   }) => FoodRequest(
     address: address,
     name: name,
@@ -272,6 +304,10 @@ final class FoodRequest {
     paid: paid ?? this.paid,
     payment: payment ?? this.payment,
     place: place ?? this.place,
+    key: key,
+    seed: seed,
+    chat: chat ?? this.chat,
+    vouched: vouched,
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -287,6 +323,10 @@ final class FoodRequest {
     if (paid) 'paid': true,
     'pay': ?payment,
     if (place.isNotEmpty) 'pl': place,
+    'ek': ?key,
+    'sd': ?seed,
+    'ck': ?chat,
+    if (vouched) 'vch': true,
   };
 
   static FoodRequest? fromJson(Object? json) {
@@ -302,6 +342,8 @@ final class FoodRequest {
     final Object? via = json['v'];
     final Object? pk = json['pk'];
     final Object? pay = json['pay'];
+    String? b64(Object? v, int max) =>
+        v is String && v.isNotEmpty && v.length <= max ? v : null;
     return FoodRequest(
       address: PeerShareCodec.normalizeAddress(json['a'] as String),
       name: _clip(json['n'], 60),
@@ -317,6 +359,10 @@ final class FoodRequest {
           ? pay
           : null,
       place: _clip(json['pl'], kFoodMaxPlace),
+      key: b64(json['ek'], 2000),
+      seed: b64(json['sd'], 100),
+      chat: b64(json['ck'], 100),
+      vouched: json['vch'] == true,
     );
   }
 }
@@ -355,6 +401,7 @@ final class FoodOffer {
     this.updatedAt = 0,
     this.place = '',
     this.requests = const <String, FoodRequest>{},
+    this.seats = false,
   }) : left = left ?? portions;
 
   final String id;
@@ -403,6 +450,10 @@ final class FoodOffer {
 
   /// On the cook's phone only: requests by the asker's address.
   final Map<String, FoodRequest> requests;
+
+  /// "Gotuję dziś — dosiądź się": free seats at the cook's table (the
+  /// portions are seats), possibly without a circle.
+  final bool seats;
 
   /// Whether the cook said what they had to say about allergens.
   static bool allergensConsidered(
@@ -465,6 +516,7 @@ final class FoodOffer {
     updatedAt: updatedAt ?? this.updatedAt,
     place: place,
     requests: requests ?? this.requests,
+    seats: seats,
   );
 
   Map<String, dynamic> toJson({bool private = false}) => <String, dynamic>{
@@ -492,6 +544,7 @@ final class FoodOffer {
     'pk': ?pyramidKey,
     'py': ?pyramid,
     'reach': reach.code,
+    if (seats) 'seat': true,
     if (closed) 'closed': true,
     'upd': updatedAt,
     if (private && place.isNotEmpty) 'place': place,
@@ -595,6 +648,7 @@ final class FoodOffer {
       updatedAt: json['upd'] is int ? json['upd'] as int : 0,
       place: private ? _clip(json['place'], kFoodMaxPlace) : '',
       requests: requests,
+      seats: json['seat'] == true,
     );
   }
 }

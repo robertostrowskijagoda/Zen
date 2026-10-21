@@ -176,7 +176,7 @@ class _EventCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 8),
             decoration: BoxDecoration(
               color: tone.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: context.zenRadius(16),
             ),
             child: Column(
               children: <Widget>[
@@ -315,7 +315,9 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
           reach: _reach,
           capacity: int.tryParse(_capacity.text.trim()) ?? 0,
           askForPlusOne: _plusOne,
-          invite: _invite.toList(),
+          invite: _reach == EventReach.close
+              ? ref.read(meetServiceProvider).host.closeFriends()
+              : _invite.toList(),
         );
     if (!mounted) {
       return;
@@ -438,10 +440,12 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
           Text(
             switch (_reach) {
               EventReach.selected => t('Tylko osoby, które zaznaczysz niżej.'),
+              EventReach.close => t('Tylko Twoi przyjaciele.'),
               EventReach.friends => t('Wszyscy Twoi znajomi.'),
               EventReach.friendsOfFriends => t(
                 'Twoi znajomi i ich znajomi. Na liście gości zobaczysz, kto '
-                'kogo przyprowadził.',
+                'kogo przyprowadził. Znajomi znajomych widzą tylko imiona '
+                'gości, adresy dopiero z biletem.',
               ),
               EventReach.twoSteps => t(
                 'Znajomi, ich znajomi i znajomi tamtych. Każdy gość jest '
@@ -510,7 +514,14 @@ class _CreateEventScreenState extends ConsumerState<CreateEventScreen> {
               minimumSize: const Size.fromHeight(52),
             ),
             onPressed:
-                _busy || (_reach == EventReach.selected && _invite.isEmpty)
+                _busy ||
+                    (_reach == EventReach.selected && _invite.isEmpty) ||
+                    (_reach == EventReach.close &&
+                        ref
+                            .read(meetServiceProvider)
+                            .host
+                            .closeFriends()
+                            .isEmpty)
                 ? null
                 : () => unawaited(_create()),
             icon: const Icon(Icons.send_rounded),
@@ -573,19 +584,24 @@ class EventScreen extends ConsumerWidget {
         final List<EventGuest> going = e.guests.values
             .where((EventGuest g) => g.status == GuestStatus.going)
             .toList();
-        final int known = going
-            .where((EventGuest g) => myFriends.contains(g.address))
-            .length;
+        final int known = e.knownGoing(myFriends);
         final EventGuest? mine = events.myGuest(e);
         final EventTicket? ticket = events.ticket(e.id);
         final bool past = e.startsAt < events.now;
-        String nameOf(String a) => a == me
-            ? t('Ty')
-            : myFriends.contains(a)
-            ? meet.host.nameOf(a)
-            : (e.guest(a)?.name.isNotEmpty ?? false)
-            ? e.guest(a)!.name
-            : t('ktoś');
+        // On a list without addresses, friends are found by their hash.
+        String? friendOf(EventGuest g) => e.friendIn(g, myFriends);
+        String nameOf(String a) {
+          final EventGuest? g = e.guests[a] ?? e.guest(a);
+          final String? friend = g == null ? null : friendOf(g);
+          if (a == me || (g != null && e.guest(me) == g)) {
+            return t('Ty');
+          }
+          if (myFriends.contains(a) || friend != null) {
+            return meet.host.nameOf(friend ?? a);
+          }
+          return (g?.name.isNotEmpty ?? false) ? g!.name : t('ktoś');
+        }
+
         final ZenColors zen = ZenColors.of(context);
         final Color tone = e.cancelled
             ? zen.textMuted
@@ -642,7 +658,7 @@ class EventScreen extends ConsumerWidget {
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(26),
+                  borderRadius: context.zenRadius(26),
                   gradient: LinearGradient(
                     colors: <Color>[
                       Color.alphaBlend(
@@ -925,7 +941,7 @@ class EventScreen extends ConsumerWidget {
                         _GuestRow(
                           icon: g.checkedIn
                               ? Icons.how_to_reg_rounded
-                              : myFriends.contains(g.address)
+                              : friendOf(g) != null
                               ? Icons.person_rounded
                               : Icons.person_outline_rounded,
                           tone: g.checkedIn
@@ -936,7 +952,7 @@ class EventScreen extends ConsumerWidget {
                                   GuestStatus.declined => zen.textMuted,
                                   _ => zen.textSecondary,
                                 },
-                          name: g.address == me ? t('Ty') : g.name,
+                          name: nameOf(g.address),
                           details: <String>[
                             g.status.label,
                             if (chain(g).isNotEmpty) chain(g),
@@ -950,6 +966,7 @@ class EventScreen extends ConsumerWidget {
                               !e.isMine &&
                                   past &&
                                   g.address != me &&
+                                  !g.address.startsWith('#') &&
                                   !myFriends.contains(g.address) &&
                                   g.status == GuestStatus.going
                               ? FilledButton.tonalIcon(
@@ -1186,7 +1203,7 @@ class _LiveTicketCodeState extends State<_LiveTicketCode> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: context.zenRadius(18),
       ),
       child: code == null
           ? const SizedBox(
@@ -1577,12 +1594,91 @@ class _AfterEvent extends ConsumerWidget {
         ? pyramidKeyOfAddress(ps, e.organizer)
         : null;
     final bool canTip = host != null && host != me;
-    if (photos.isEmpty && !canAdd && !canThank && cards.isEmpty) {
+    final bool askHow = events.howDue(e);
+    // "Powtórzymy za miesiąc?": the organizer, once it is over.
+    final bool canRepeat =
+        e.isMine &&
+        !e.cancelled &&
+        events.now - e.startsAt >= EventService.howAfter.inMilliseconds;
+    if (photos.isEmpty &&
+        !canAdd &&
+        !canThank &&
+        cards.isEmpty &&
+        !askHow &&
+        !canRepeat) {
       return const SizedBox.shrink();
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        if (askHow)
+          ZenCard(
+            key: const Key('event-how'),
+            tone: tone,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  t('Jak było?'),
+                  style: TextStyle(
+                    color: zen.textPrimary,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    for (final (String code, String label)
+                        in <(String, String)>[
+                          ('g', t('Super')),
+                          ('o', t('Dobrze')),
+                          ('m', t('Tak sobie')),
+                        ])
+                      ActionChip(
+                        key: Key('event-how-$code'),
+                        label: Text(label),
+                        onPressed: () => unawaited(events.rate(e.id, code)),
+                      ),
+                  ],
+                ),
+                if (!e.isMine) ...<Widget>[
+                  const SizedBox(height: 8),
+                  Text(
+                    t(
+                      'Poznaliście kogoś nowego? Przy gościach jest '
+                      '„Spotkani?”. Gospodarzowi możesz podziękować niżej.',
+                    ),
+                    style: TextStyle(color: zen.textSecondary, fontSize: 13),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        if (canRepeat)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: FilledButton.tonalIcon(
+              key: const Key('event-repeat'),
+              onPressed: () async {
+                final MeetEvent? again = await events.repeat(e.id);
+                if (!context.mounted) {
+                  return;
+                }
+                if (again == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(t('Nikt nie przyszedł.'))),
+                  );
+                  return;
+                }
+                unawaited(EventScreen.open(context, again.id));
+              },
+              icon: const Icon(Icons.replay_rounded),
+              label: Text(t('Powtórzymy za miesiąc?')),
+            ),
+          ),
         if (photos.isNotEmpty || canAdd) ...<Widget>[
           ZenSection(
             t('Wspólny album ({count})', {'count': photos.length}),
@@ -1610,7 +1706,7 @@ class _AfterEvent extends ConsumerWidget {
               children: <Widget>[
                 for (final (int i, EventPhoto p) in photos.indexed)
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: context.zenRadius(12),
                     child: Material(
                       color: zen.surfaceMuted,
                       child: InkWell(

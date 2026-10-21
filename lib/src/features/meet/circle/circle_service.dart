@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -7,12 +6,19 @@ import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/meet/circle/circle_model.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
+import 'package:zen/src/features/meet/meet_thread.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
+export 'package:zen/src/features/meet/circle/circle_model.dart';
+
 abstract final class CircleTypes {
+  /// The circle itself (`c`), or, with `k`, one member's step: "ans" (an
+  /// invitation answered), "leave" ("Opuść kółko"), "chat" (the small chat
+  /// of one dinner).
   static const String circle = 'circle';
   static const String swap = 'circle_swap';
 
@@ -22,381 +28,19 @@ abstract final class CircleTypes {
   static const Set<String> all = <String>{circle, swap, guest};
 }
 
-/// A dinner circle has 4–8 members (people, or pairs when
-/// [DinnerCircle.pairs] is set), the host included.
-const int kCircleMinMembers = 4;
-const int kCircleMaxMembers = 8;
-
-/// Most kitty entries a circle keeps (the oldest are dropped).
-const int kCircleKittyMax = 200;
-
-/// One contribution to the circle's shared kitty ("wspólna kasa na
-/// składniki"), in grosze.
-@immutable
-final class KittyEntry {
-  const KittyEntry({
-    required this.by,
-    required this.cents,
-    required this.at,
-    this.note = '',
-  });
-
-  /// The member who paid in (positive) or was reimbursed (negative).
-  final String by;
-  final int cents;
-  final int at;
-  final String note;
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'a': by,
-    'c': cents,
-    't': at,
-    if (note.isNotEmpty) 'n': note,
-  };
-
-  static KittyEntry? fromJson(Object? json) {
-    if (json is! Map ||
-        json['a'] is! String ||
-        json['c'] is! int ||
-        json['t'] is! int) {
-      return null;
-    }
-    final Object? n = json['n'];
-    final int c = json['c'] as int;
-    if (c == 0 || c.abs() > 100000000) {
-      return null;
-    }
-    return KittyEntry(
-      by: PeerShareCodec.normalizeAddress(json['a'] as String),
-      cents: c,
-      at: json['t'] as int,
-      note: n is String ? (n.length > 60 ? n.substring(0, 60) : n) : '',
-    );
-  }
-}
-
-/// Someone from outside the circle a member brings to one dinner
-/// ("kółko otwarte"): once a month per member.
-@immutable
-final class CircleGuest {
-  const CircleGuest({
-    required this.name,
-    required this.day,
-    this.address,
-    this.vouchedBy,
-  });
-
-  final String name;
-
-  /// The dinner (yyyy-mm-dd).
-  final String day;
-
-  /// Their mesh address, when they are a friend of the member (they get an
-  /// invitation).
-  final String? address;
-
-  /// The member who vouches for this guest ("przyprowadzający ręczy");
-  /// null in guests saved before vouching existed.
-  final String? vouchedBy;
-
-  Map<String, String> toJson() => <String, String>{
-    'n': name,
-    'd': day,
-    'a': ?address,
-    'v': ?vouchedBy,
-  };
-
-  static CircleGuest? fromJson(Object? json) {
-    if (json is! Map || json['n'] is! String || json['d'] is! String) {
-      return null;
-    }
-    final String n = json['n'] as String;
-    final String d = json['d'] as String;
-    final Object? a = json['a'];
-    final Object? v = json['v'];
-    return CircleGuest(
-      vouchedBy: v is String && isRoutablePeerAddress(v)
-          ? PeerShareCodec.normalizeAddress(v)
-          : null,
-      name: n.length > 60 ? n.substring(0, 60) : n,
-      day: d.length > 10 ? d.substring(0, 10) : d,
-      address: a is String && isRoutablePeerAddress(a)
-          ? PeerShareCodec.normalizeAddress(a)
-          : null,
-    );
-  }
-}
-
-@immutable
-final class CircleMember {
-  const CircleMember(this.address, this.name);
-
-  final String address;
-  final String name;
-
-  Map<String, String> toJson() => <String, String>{'a': address, 'n': name};
-}
-
-/// Kółko obiadowe: friends taking turns hosting a regular dinner.
-/// Any member may change it; the newest copy wins and goes to everyone.
-@immutable
-final class DinnerCircle {
-  const DinnerCircle({
-    required this.id,
-    required this.name,
-    required this.members,
-    required this.weekday,
-    required this.hour,
-    required this.firstDinner,
-    this.everyWeeks = 1,
-    this.prefs = const <String, String>{},
-    this.items = const <String, Map<String, String>>{},
-    this.open = false,
-    this.guests = const <String, Map<String, CircleGuest>>{},
-    this.pairs = false,
-    this.kitty = const <KittyEntry>[],
-    this.updatedAt = 0,
-  });
-
-  final String id;
-  final String name;
-
-  /// In hosting order.
-  final List<CircleMember> members;
-
-  /// 1 = Monday … 7 = Sunday.
-  final int weekday;
-  final int hour;
-
-  /// The first dinner (local midnight of its day).
-  final int firstDinner;
-  final int everyWeeks;
-
-  /// Preferences and allergies, per member address.
-  final Map<String, String> prefs;
-
-  /// Per dinner (yyyy-mm-dd): item → who brings it ('' = nobody yet).
-  final Map<String, Map<String, String>> items;
-
-  /// "Kółko otwarte": once a month every member may bring one person from
-  /// outside the circle.
-  final bool open;
-
-  /// Guests brought along: month (yyyy-mm) → member address → guest.
-  final Map<String, Map<String, CircleGuest>> guests;
-
-  /// Every member stands for a pair (two people at the table).
-  final bool pairs;
-
-  /// Shared kitty for ingredients: who paid in what.
-  final List<KittyEntry> kitty;
-  final int updatedAt;
-
-  /// Whether [count] members (the host included) make a valid circle.
-  static bool validSize(int count) =>
-      count >= kCircleMinMembers && count <= kCircleMaxMembers;
-
-  /// People at the table: twice the members for a circle of pairs.
-  int get headcount => members.length * (pairs ? 2 : 1);
-
-  /// Total in the kitty, in grosze.
-  int get kittyTotal => kitty.fold(0, (int s, KittyEntry e) => s + e.cents);
-
-  /// What [member] has put into the kitty, in grosze.
-  int paidBy(String member) => kitty
-      .where((KittyEntry e) => PeerShareCodec.addressesEqual(e.by, member))
-      .fold(0, (int s, KittyEntry e) => s + e.cents);
-
-  /// An even share of the kitty per member, in grosze (rounded down).
-  int get kittyShare => members.isEmpty ? 0 : kittyTotal ~/ members.length;
-
-  static String dayKey(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-
-  static String monthKey(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}';
-
-  /// The guest [member] brings in the month of [day], if any.
-  CircleGuest? guestOf(String member, DateTime day) =>
-      guests[monthKey(day)]?[PeerShareCodec.normalizeAddress(member)];
-
-  /// Whether [member] may still bring someone in the month of [day].
-  bool canBringGuest(String member, DateTime day) =>
-      open && hasMember(member) && guestOf(member, day) == null;
-
-  /// Guests coming to the dinner on [day]: (who brings them, the guest).
-  List<(String, CircleGuest)> guestsOn(DateTime day) {
-    final String key = dayKey(day);
-    return <(String, CircleGuest)>[
-      for (final MapEntry<String, CircleGuest> e
-          in (guests[monthKey(day)] ?? const <String, CircleGuest>{}).entries)
-        if (e.value.day == key) (e.key, e.value),
-    ];
-  }
-
-  /// The [count] next dinners from [now] with their hosts.
-  List<(DateTime, CircleMember)> schedule(int now, {int count = 6}) {
-    if (members.isEmpty) {
-      return const <(DateTime, CircleMember)>[];
-    }
-    final DateTime start = DateTime.fromMillisecondsSinceEpoch(firstDinner);
-    final DateTime first = DateTime(start.year, start.month, start.day, hour);
-    final Duration step = Duration(days: 7 * everyWeeks);
-    final DateTime today = DateTime.fromMillisecondsSinceEpoch(now);
-    int n = 0;
-    DateTime at = first;
-    while (at.isBefore(DateTime(today.year, today.month, today.day))) {
-      n++;
-      at = DateTime(first.year, first.month, first.day + n * step.inDays, hour);
-    }
-    return <(DateTime, CircleMember)>[
-      for (int i = 0; i < count; i++)
-        (
-          DateTime(
-            first.year,
-            first.month,
-            first.day + (n + i) * step.inDays,
-            hour,
-          ),
-          members[(n + i) % members.length],
-        ),
-    ];
-  }
-
-  bool hasMember(String address) => members.any(
-    (CircleMember m) => PeerShareCodec.addressesEqual(m.address, address),
-  );
-
-  DinnerCircle copyWith({
-    List<CircleMember>? members,
-    Map<String, String>? prefs,
-    Map<String, Map<String, String>>? items,
-    bool? open,
-    Map<String, Map<String, CircleGuest>>? guests,
-    List<KittyEntry>? kitty,
-    int? updatedAt,
-  }) => DinnerCircle(
-    id: id,
-    name: name,
-    members: members ?? this.members,
-    weekday: weekday,
-    hour: hour,
-    firstDinner: firstDinner,
-    everyWeeks: everyWeeks,
-    prefs: prefs ?? this.prefs,
-    items: items ?? this.items,
-    open: open ?? this.open,
-    guests: guests ?? this.guests,
-    pairs: pairs,
-    kitty: kitty ?? this.kitty,
-    updatedAt: updatedAt ?? this.updatedAt,
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'id': id,
-    'name': name,
-    'members': <Map<String, String>>[
-      for (final CircleMember m in members) m.toJson(),
-    ],
-    'wd': weekday,
-    'h': hour,
-    'first': firstDinner,
-    'every': everyWeeks,
-    'prefs': prefs,
-    'items': items,
-    if (open) 'open': true,
-    if (pairs) 'pairs': true,
-    if (kitty.isNotEmpty)
-      'kitty': <Map<String, dynamic>>[
-        for (final KittyEntry e in kitty) e.toJson(),
-      ],
-    if (guests.isNotEmpty)
-      'guests': <String, dynamic>{
-        for (final MapEntry<String, Map<String, CircleGuest>> m
-            in guests.entries)
-          m.key: <String, dynamic>{
-            for (final MapEntry<String, CircleGuest> g in m.value.entries)
-              g.key: g.value.toJson(),
-          },
-      },
-    'upd': updatedAt,
-  };
-
-  static DinnerCircle? fromJson(Object? json) {
-    if (json is! Map ||
-        json['id'] is! String ||
-        json['name'] is! String ||
-        json['members'] is! List ||
-        json['first'] is! int) {
-      return null;
-    }
-    String clip(Object? v, int max) =>
-        v is String ? (v.length > max ? v.substring(0, max) : v) : '';
-    final List<CircleMember> members = <CircleMember>[
-      for (final Object? m in (json['members'] as List).take(20))
-        if (m is Map && m['a'] is String)
-          CircleMember(
-            PeerShareCodec.normalizeAddress(m['a'] as String),
-            clip(m['n'], 60),
-          ),
-    ];
-    final Object? prefs = json['prefs'];
-    final Object? items = json['items'];
-    final Object? guests = json['guests'];
-    final Object? kitty = json['kitty'];
-    return DinnerCircle(
-      pairs: json['pairs'] == true,
-      kitty: <KittyEntry>[
-        if (kitty is List)
-          for (final Object? e in kitty.take(kCircleKittyMax))
-            if (KittyEntry.fromJson(e) case final KittyEntry k) k,
-      ],
-      id: json['id'] as String,
-      name: clip(json['name'], 60),
-      members: members,
-      weekday: json['wd'] is int ? (json['wd'] as int).clamp(1, 7) : 4,
-      hour: json['h'] is int ? (json['h'] as int).clamp(0, 23) : 19,
-      firstDinner: json['first'] as int,
-      everyWeeks: json['every'] is int ? (json['every'] as int).clamp(1, 8) : 1,
-      prefs: <String, String>{
-        if (prefs is Map)
-          for (final MapEntry<dynamic, dynamic> e in prefs.entries)
-            if (e.key is String && e.value is String)
-              e.key as String: clip(e.value, 300),
-      },
-      items: <String, Map<String, String>>{
-        if (items is Map)
-          for (final MapEntry<dynamic, dynamic> d in items.entries)
-            if (d.key is String && d.value is Map)
-              d.key as String: <String, String>{
-                for (final MapEntry<dynamic, dynamic> i
-                    in (d.value as Map).entries)
-                  if (i.key is String && i.value is String)
-                    clip(i.key, 60): i.value as String,
-              },
-      },
-      open: json['open'] == true,
-      guests: <String, Map<String, CircleGuest>>{
-        if (guests is Map)
-          for (final MapEntry<dynamic, dynamic> m in guests.entries.take(36))
-            if (m.key is String && m.value is Map)
-              m.key as String: <String, CircleGuest>{
-                for (final MapEntry<dynamic, dynamic> g
-                    in (m.value as Map).entries)
-                  if (g.key is String && CircleGuest.fromJson(g.value) != null)
-                    PeerShareCodec.normalizeAddress(g.key as String):
-                        CircleGuest.fromJson(g.value)!,
-              },
-      },
-      updatedAt: json['upd'] is int ? json['upd'] as int : 0,
-    );
-  }
-}
-
 /// How far a phone's clock may be ahead: a copy of a circle dated later
 /// than that counts as made now (a date far ahead would freeze the circle
 /// against everyone else's later changes).
 const Duration kCircleClockSkew = Duration(minutes: 10);
+
+/// When "Jak było?" is asked: this long after a dinner starts...
+const Duration kCircleHowAfter = Duration(hours: 3);
+
+/// ...and until this long after it.
+const Duration kCircleHowUntil = Duration(hours: 48);
+
+/// The reminder comes within this long before a dinner.
+const Duration kCircleRemindBefore = Duration(hours: 24);
 
 final class CircleService extends ChangeNotifier {
   CircleService({
@@ -415,6 +59,16 @@ final class CircleService extends ChangeNotifier {
 
   final Map<String, DinnerCircle> _circles = <String, DinnerCircle>{};
 
+  /// Circles this person declined or left, and when: an older copy that
+  /// still lists them is not taken as a new invitation.
+  final Map<String, int> _declined = <String, int>{};
+
+  /// Reminders and "Jak było?" already shown (circle id | day | kind).
+  final Set<String> _shown = <String>{};
+
+  /// The small chat of each dinner (circle id | day).
+  final MeetThreads _threads = MeetThreads();
+
   /// Swap requests waiting for this person (circle id → who asks).
   final Map<String, String> swapRequests = <String, String>{};
 
@@ -424,7 +78,14 @@ final class CircleService extends ChangeNotifier {
 
   String get _me => _n(host.ownAddress());
 
-  List<DinnerCircle> get circles => _circles.values.toList();
+  /// Circles this person is a member of.
+  List<DinnerCircle> get circles =>
+      _circles.values.where((DinnerCircle c) => c.hasMember(_me)).toList();
+
+  /// Invitations waiting for "Dołączam" / "Nie, dziękuję".
+  List<DinnerCircle> get invitations => _circles.values
+      .where((DinnerCircle c) => !c.hasMember(_me) && c.isInvited(_me))
+      .toList();
 
   DinnerCircle? circle(String id) => _circles[id];
 
@@ -439,14 +100,26 @@ final class CircleService extends ChangeNotifier {
       final List<int>? raw = await disk.read(_key);
       _diskUnreadable = false;
       final Object? json = raw == null ? null : jsonDecode(utf8.decode(raw));
-      if (json is List) {
+      if (json is Map) {
         _circles.clear();
-        for (final Object? c in json) {
+        for (final Object? c in (json['c'] as List?) ?? const <Object?>[]) {
           final DinnerCircle? circle = DinnerCircle.fromJson(c);
           if (circle != null) {
             _circles[circle.id] = circle;
           }
         }
+        _declined.clear();
+        (json['dec'] as Map?)?.forEach((Object? k, Object? v) {
+          if (k is String && v is int) {
+            _declined[k] = v;
+          }
+        });
+        _shown
+          ..clear()
+          ..addAll(
+            ((json['shown'] as List?) ?? const <Object?>[]).whereType<String>(),
+          );
+        _threads.readJson(json['chat']);
       }
       notifyListeners();
     } on Object catch (error, stack) {
@@ -458,35 +131,70 @@ final class CircleService extends ChangeNotifier {
     if (_diskUnreadable) {
       return;
     }
+    while (_shown.length > 300) {
+      _shown.remove(_shown.first);
+    }
+    while (_declined.length > 200) {
+      _declined.remove(_declined.keys.first);
+    }
+    _threads.removeWhere(
+      (String key) => !_circles.containsKey(key.split('|').first),
+    );
     await disk.write(
       _key,
       utf8.encode(
-        jsonEncode(<Map<String, dynamic>>[
-          for (final DinnerCircle c in _circles.values) c.toJson(),
-        ]),
+        jsonEncode(<String, dynamic>{
+          'c': <Map<String, dynamic>>[
+            for (final DinnerCircle c in _circles.values) c.toJson(),
+          ],
+          'dec': _declined,
+          'shown': _shown.toList(),
+          'chat': _threads.toJson(),
+        }),
       ),
     );
     notifyListeners();
   }
 
-  Future<void> _publish(DinnerCircle c) async {
+  /// Everyone a copy of [c] goes to: the members and those invited.
+  Iterable<String> _audience(DinnerCircle c) => <String>{
+    for (final CircleMember m in c.members) m.address,
+    ...c.invited.keys,
+  }.where((String a) => a != _me);
+
+  /// Stores [c] and sends it to everyone in it. [bump]: a change of the
+  /// circle's settings (the newest copy wins them); per-member answers
+  /// merge entry by entry and leave the date alone, so they never override
+  /// someone else's newer settings.
+  Future<void> _publish(DinnerCircle c, {bool bump = true}) async {
     // Always newer than the copy we have, even when another phone's clock
     // ran a little ahead.
-    final DinnerCircle stamped = c.copyWith(
-      updatedAt: max(_now(), (_circles[c.id]?.updatedAt ?? 0) + 1),
+    final DinnerCircle stamped = bump
+        ? c.copyWith(
+            updatedAt: max(_now(), (_circles[c.id]?.updatedAt ?? 0) + 1),
+          )
+        : c;
+    final DinnerCircle kept = stamped.prunedBefore(
+      _now() - kCircleDinnerKeep.inMilliseconds,
     );
-    _circles[c.id] = stamped;
+    _circles[c.id] = kept;
     await _save();
-    for (final CircleMember m in stamped.members) {
-      if (m.address != _me) {
-        await _send(m.address, <String, dynamic>{
-          'type': CircleTypes.circle,
-          'c': stamped.toJson(),
-        });
-      }
+    for (final String to in _audience(kept)) {
+      await _send(to, <String, dynamic>{
+        'type': CircleTypes.circle,
+        'c': kept.toJson(),
+      });
     }
   }
 
+  String _newId(int length) => List<String>.generate(
+    length,
+    (_) => _random.nextInt(36).toRadixString(36),
+  ).join();
+
+  /// Founds a circle: this person is its first member, [friends] get an
+  /// invitation ("Dołączam" / "Nie, dziękuję"). 4–8 people with the
+  /// founder.
   Future<DinnerCircle> create({
     required String name,
     required List<String> friends,
@@ -507,17 +215,18 @@ final class CircleService extends ChangeNotifier {
         'a circle has $kCircleMinMembers–$kCircleMaxMembers members',
       );
     }
+    final int stamp = _now();
     final DinnerCircle c = DinnerCircle(
       pairs: pairs,
-      id: List<String>.generate(
-        14,
-        (_) => _random.nextInt(36).toRadixString(36),
-      ).join(),
+      id: _newId(14),
       name: name,
       members: <CircleMember>[
-        CircleMember(_me, host.ownName()),
-        for (final String f in unique) CircleMember(f, host.nameOf(f)),
+        CircleMember(_me, host.ownName(), pos: stamp, at: stamp),
       ],
+      invited: <String, CircleInvite>{
+        for (final String f in unique)
+          f: CircleInvite(name: host.nameOf(f), by: _me, at: stamp),
+      },
       weekday: weekday,
       hour: hour,
       firstDinner: DateTime(
@@ -531,15 +240,356 @@ final class CircleService extends ChangeNotifier {
     return _circles[c.id]!;
   }
 
+  /// Invites more of this person's friends (while the circle has room).
+  /// Returns how many were invited.
+  Future<int> invite(String id, List<String> friends) async {
+    final DinnerCircle? c = _circles[id];
+    if (c == null || !c.hasMember(_me)) {
+      return 0;
+    }
+    final int stamp = _now();
+    final Map<String, CircleInvite> invited = <String, CircleInvite>{
+      ...c.invited,
+    };
+    int added = 0;
+    for (final String f in friends.map(_n)) {
+      if (f == _me ||
+          c.hasMember(f) ||
+          invited.containsKey(f) ||
+          !host.isFriend(f) ||
+          c.members.length + invited.length >= kCircleMaxMembers) {
+        continue;
+      }
+      invited[f] = CircleInvite(name: host.nameOf(f), by: _me, at: stamp);
+      added++;
+    }
+    if (added > 0) {
+      await _publish(c.copyWith(invited: invited));
+    }
+    return added;
+  }
+
+  /// "Dołączam" ([yes]) or "Nie, dziękuję" to the invitation to [id]. The
+  /// members hear it; joining puts this person at the end of the queue.
+  Future<void> answerInvite(String id, bool yes) async {
+    final DinnerCircle? c = _circles[id];
+    if (c == null || c.hasMember(_me) || !c.isInvited(_me)) {
+      return;
+    }
+    final int stamp = max(_now(), c.invited[_me]!.at + 1);
+    final List<String> tell = _audience(c).toList();
+    if (yes) {
+      _circles[id] = c.copyWith(
+        members: <CircleMember>[
+          ...c.members,
+          CircleMember(_me, host.ownName(), pos: stamp, at: stamp),
+        ],
+        invited: <String, CircleInvite>{...c.invited}..remove(_me),
+      );
+    } else {
+      _circles.remove(id);
+      _declined[id] = stamp;
+    }
+    await _save();
+    for (final String to in tell) {
+      await _send(to, <String, dynamic>{
+        'type': CircleTypes.circle,
+        'k': 'ans',
+        'id': id,
+        'y': yes,
+        't': stamp,
+        'n': host.ownName(),
+      });
+    }
+  }
+
+  /// "Opuść kółko": the others hear it and the queue is worked out again
+  /// without this person.
+  Future<void> leave(String id) async {
+    final DinnerCircle? c = _circles[id];
+    if (c == null || !c.hasMember(_me)) {
+      return;
+    }
+    final int stamp = max(_now(), (c.member(_me)?.at ?? 0) + 1);
+    final List<String> tell = _audience(c).toList();
+    _circles.remove(id);
+    _declined[id] = stamp;
+    swapRequests.remove(id);
+    await _save();
+    for (final String to in tell) {
+      await _send(to, <String, dynamic>{
+        'type': CircleTypes.circle,
+        'k': 'leave',
+        'id': id,
+        't': stamp,
+      });
+    }
+  }
+
   Future<void> setMyPrefs(String id, String text) async {
     final DinnerCircle? c = _circles[id];
-    if (c == null) {
+    if (c == null || !c.hasMember(_me)) {
       return;
     }
     await _publish(
       c.copyWith(prefs: <String, String>{...c.prefs, _me: text.trim()}),
     );
   }
+
+  /// What this person does not eat (for the cook's count).
+  Future<void> setMyDiets(String id, Set<CircleDiet> diets) async {
+    final DinnerCircle? c = _circles[id];
+    if (c == null || !c.hasMember(_me)) {
+      return;
+    }
+    await _publish(
+      c.copyWith(
+        diets: <String, Set<CircleDiet>>{
+          ...c.diets,
+          _me: Set<CircleDiet>.of(diets),
+        },
+      ),
+    );
+  }
+
+  /// "Będę" / "Nie dam rady" / "Może" for the dinner on [day].
+  Future<void> rsvp(String id, DateTime day, CircleAttendance answer) async {
+    final DinnerCircle? c = _circles[id];
+    if (c == null || !c.hasMember(_me)) {
+      return;
+    }
+    await _publish(
+      c.copyWith(
+        rsvp: DinnerCircle.withMark<CircleAttendance>(
+          c.rsvp,
+          DinnerCircle.dayKey(day),
+          _me,
+          CircleMark<CircleAttendance>(answer, _now()),
+        ),
+      ),
+      bump: false,
+    );
+  }
+
+  /// "Wydałem(-am) na zakupy" for the dinner on [day], in grosze (0 takes
+  /// it back). Returns whether it was saved.
+  Future<bool> setSpent(String id, DateTime day, int cents) async {
+    final DinnerCircle? c = _circles[id];
+    if (c == null || !c.hasMember(_me) || cents < 0 || cents > 100000000) {
+      return false;
+    }
+    await _publish(
+      c.copyWith(
+        spent: DinnerCircle.withMark<int>(
+          c.spent,
+          DinnerCircle.dayKey(day),
+          _me,
+          CircleMark<int>(cents, _now()),
+        ),
+      ),
+      bump: false,
+    );
+    return true;
+  }
+
+  /// "Rozliczone ✓": [transfer] of the dinner on [day] was paid back, as
+  /// one of its two sides says.
+  Future<void> markSettled(
+    String id,
+    DateTime day,
+    CircleTransfer transfer,
+  ) async {
+    final DinnerCircle? c = _circles[id];
+    final String key = DinnerCircle.dayKey(day);
+    if (c == null ||
+        !c.hasMember(_me) ||
+        (transfer.from != _me && transfer.to != _me) ||
+        !c.settleUp(key).contains(transfer)) {
+      return;
+    }
+    await _publish(
+      c.copyWith(
+        settled: <String, Map<String, int>>{
+          ...c.settled,
+          key: <String, int>{...?c.settled[key], transfer.key: _now()},
+        },
+      ),
+      bump: false,
+    );
+  }
+
+  /// "Jak było?" after the dinner on [day].
+  Future<void> rate(String id, DateTime day, CircleHow how) async {
+    final DinnerCircle? c = _circles[id];
+    if (c == null || !c.hasMember(_me)) {
+      return;
+    }
+    await _publish(
+      c.copyWith(
+        how: DinnerCircle.withMark<CircleHow>(
+          c.how,
+          DinnerCircle.dayKey(day),
+          _me,
+          CircleMark<CircleHow>(how, _now()),
+        ),
+      ),
+      bump: false,
+    );
+  }
+
+  /// The dinner to ask "Jak było?" about now: the last one, from
+  /// [kCircleHowAfter] to [kCircleHowUntil] after it started, when this
+  /// person did not say "Nie dam rady" and did not answer yet.
+  DateTime? howPending(String id) {
+    final DinnerCircle? c = _circles[id];
+    final int nowMs = _now();
+    final (DateTime, CircleMember)? last = c?.lastDinner(nowMs);
+    if (c == null || last == null || !c.hasMember(_me)) {
+      return null;
+    }
+    final int since = nowMs - last.$1.millisecondsSinceEpoch;
+    final String day = DinnerCircle.dayKey(last.$1);
+    if (since < kCircleHowAfter.inMilliseconds ||
+        since > kCircleHowUntil.inMilliseconds ||
+        c.attendanceOf(_me, day) == CircleAttendance.no ||
+        c.how[day]?[_me] != null) {
+      return null;
+    }
+    return last.$1;
+  }
+
+  // ---- the small chat of a dinner ----
+
+  static String threadKey(String id, DateTime day) =>
+      '$id|${DinnerCircle.dayKey(day)}';
+
+  List<MeetThreadMessage> thread(String id, DateTime day) =>
+      _threads.thread(threadKey(id, day));
+
+  int unread(String id, DateTime day) => _threads.unread(threadKey(id, day));
+
+  Future<void> markRead(String id, DateTime day) async {
+    final String key = threadKey(id, day);
+    if (_threads.unread(key) == 0) {
+      return;
+    }
+    _threads.markRead(key, _now());
+    await _save();
+  }
+
+  /// Writes [text] in the chat of the dinner on [day] ("Spóźnię się 10
+  /// min"): every member gets it.
+  Future<bool> sendChat(String id, DateTime day, String text) async {
+    final DinnerCircle? c = _circles[id];
+    final String? clean = cleanThreadText(text);
+    if (c == null || clean == null || !c.hasMember(_me)) {
+      return false;
+    }
+    final MeetThreadMessage m = MeetThreadMessage(
+      id: newThreadMessageId(_random),
+      from: _me,
+      text: clean,
+      at: _now(),
+      mine: true,
+    );
+    _threads
+      ..add(threadKey(id, day), m)
+      ..markRead(threadKey(id, day), m.at);
+    await _save();
+    for (final CircleMember member in c.members) {
+      if (member.address != _me) {
+        await _send(member.address, <String, dynamic>{
+          'type': CircleTypes.circle,
+          'k': 'chat',
+          'id': id,
+          'd': DinnerCircle.dayKey(day),
+          'm': m.id,
+          'x': m.text,
+          't': m.at,
+        });
+      }
+    }
+    return true;
+  }
+
+  // ---- reminders ----
+
+  /// The day before a dinner, a reminder (to the cook with the count so
+  /// far); a few hours after it, "Jak było?". Each once. Called now and
+  /// then while the app runs.
+  Future<void> tick() async {
+    final int nowMs = _now();
+    bool changed = false;
+    for (final DinnerCircle c in circles) {
+      final (DateTime, CircleMember)? next = c
+          .schedule(nowMs, count: 1)
+          .firstOrNull;
+      if (next != null) {
+        final int start = next.$1.millisecondsSinceEpoch;
+        final String day = DinnerCircle.dayKey(next.$1);
+        if (start > nowMs &&
+            start - nowMs <= kCircleRemindBefore.inMilliseconds &&
+            _shown.add('${c.id}|$day|remind')) {
+          changed = true;
+          await _remind(c, next.$1, next.$2);
+        }
+      }
+      final DateTime? how = howPending(c.id);
+      if (how != null &&
+          _shown.add('${c.id}|${DinnerCircle.dayKey(how)}|how')) {
+        changed = true;
+        await host.notify(
+          RuntimeSystemNotification(
+            id: 'circle-how-${c.id}-${DinnerCircle.dayKey(how)}',
+            title: t('Jak było? {circle}', {'circle': c.name}),
+            body: t(
+              'Odpowiedz jednym stuknięciem. Zobacz też, kto gotuje '
+              'następnym razem.',
+            ),
+            createdAtMillis: nowMs,
+            category: RuntimeSystemNotificationCategory.social,
+            slotKey: 'circle:${c.id}',
+          ),
+        );
+      }
+    }
+    if (changed) {
+      await _save();
+    }
+  }
+
+  Future<void> _remind(DinnerCircle c, DateTime at, CircleMember cook) async {
+    final String when = ZenFormat.time(at);
+    final String day = DinnerCircle.dayKey(at);
+    final RuntimeSystemNotification notice;
+    if (cook.address == _me) {
+      notice = RuntimeSystemNotification(
+        id: 'circle-remind-${c.id}-$day',
+        title: t('Jutro gotujesz: {circle}', {'circle': c.name}),
+        body: circleCountText(c.headcountOn(at)),
+        createdAtMillis: _now(),
+        category: RuntimeSystemNotificationCategory.social,
+        slotKey: 'circle:${c.id}',
+      );
+    } else {
+      notice = RuntimeSystemNotification(
+        id: 'circle-remind-${c.id}-$day',
+        title: t('Jutro obiad: {circle}', {'circle': c.name}),
+        body: c.attendanceOf(_me, day) == null
+            ? t('O {time} gotuje {name}. Będziesz? Odpowiedz w aplikacji.', {
+                'time': when,
+                'name': cook.name,
+              })
+            : t('O {time} gotuje {name}.', {'time': when, 'name': cook.name}),
+        createdAtMillis: _now(),
+        category: RuntimeSystemNotificationCategory.social,
+        slotKey: 'circle:${c.id}',
+      );
+    }
+    await host.notify(notice);
+  }
+
+  // ---- the rest of a circle ----
 
   /// Adds something to bring to the dinner on [day] (unclaimed).
   Future<void> addItem(String id, DateTime day, String item) async {
@@ -595,16 +645,25 @@ final class CircleService extends ChangeNotifier {
     if (c == null || from == null) {
       return;
     }
-    final List<CircleMember> order = List<CircleMember>.of(c.members);
-    final int a = order.indexWhere((CircleMember m) => m.address == _me);
-    final int b = order.indexWhere((CircleMember m) => m.address == from);
-    if (a < 0 || b < 0) {
+    final CircleMember? a = c.member(_me);
+    final CircleMember? b = c.member(from);
+    if (a == null || b == null) {
+      notifyListeners();
       return;
     }
-    final CircleMember t = order[a];
-    order[a] = order[b];
-    order[b] = t;
-    await _publish(c.copyWith(members: order));
+    await _publish(
+      c.copyWith(
+        members: <CircleMember>[
+          for (final CircleMember m in c.members)
+            if (m.address == a.address)
+              m.withPos(b.pos)
+            else if (m.address == b.address)
+              m.withPos(a.pos)
+            else
+              m,
+        ],
+      ),
+    );
   }
 
   void declineSwap(String id) {
@@ -738,6 +797,8 @@ final class CircleService extends ChangeNotifier {
     await _publish(c.copyWith(guests: guests));
   }
 
+  // ---- incoming ----
+
   Future<bool> handle(SignalTransportFrame frame) async {
     final Object? type = frame.payload['type'];
     if (type is! String || !CircleTypes.all.contains(type)) {
@@ -745,48 +806,20 @@ final class CircleService extends ChangeNotifier {
     }
     final String from = _n(frame.from);
     if (type == CircleTypes.guest) {
-      // A friend brings us to their circle's dinner.
-      final Object? name = frame.payload['c'];
-      final Object? at = frame.payload['at'];
-      final Object? cook = frame.payload['cook'];
-      if (host.isFriend(from) && name is String && at is int) {
-        final DateTime d = DateTime.fromMillisecondsSinceEpoch(at);
-        final Map<String, Object?> args = <String, Object?>{
-          'circle': name.length > 60 ? name.substring(0, 60) : name,
-          'date': ZenFormat.dayMonth(d),
-          'time': ZenFormat.time(DateTime(d.year, d.month, d.day, d.hour)),
-        };
-        await host.notify(
-          RuntimeSystemNotification(
-            id: 'circle-guest-$from-$at',
-            title: t('{name} zaprasza Cię na obiad', {
-              'name': host.nameOf(from),
-            }),
-            body: cook is String && cook.isNotEmpty
-                ? t('„{circle}”, {date} o {time} — gotuje {cook}.', {
-                    ...args,
-                    'cook': cook.length > 60 ? cook.substring(0, 60) : cook,
-                  })
-                : t('„{circle}”, {date} o {time}.', args),
-            createdAtMillis: _now(),
-            category: RuntimeSystemNotificationCategory.social,
-            slotKey: 'circle-guest:$from',
-          ),
-        );
-      }
+      await _onGuest(from, frame.payload);
       return true;
     }
     if (type == CircleTypes.swap) {
       final Object? id = frame.payload['id'];
       final DinnerCircle? c = id is String ? _circles[id] : null;
-      if (c != null && c.hasMember(from)) {
+      if (c != null && c.hasMember(from) && c.hasMember(_me)) {
         swapRequests[c.id] = from;
         notifyListeners();
         await host.notify(
           RuntimeSystemNotification(
             id: 'circle-swap-${c.id}-$from',
             title: t('{name} chce zamienić się kolejką', {
-              'name': host.nameOf(from),
+              'name': c.nameIn(from) ?? host.nameOf(from),
             }),
             body: c.name,
             createdAtMillis: _now(),
@@ -797,37 +830,245 @@ final class CircleService extends ChangeNotifier {
       }
       return true;
     }
-    final DinnerCircle? parsed = DinnerCircle.fromJson(frame.payload['c']);
-    if (parsed == null || !parsed.hasMember(_me) || !parsed.hasMember(from)) {
-      return true;
+    switch (frame.payload['k']) {
+      case null:
+        await _onCopy(from, frame.payload);
+      case 'ans':
+        await _onAnswer(from, frame.payload);
+      case 'leave':
+        await _onLeave(from, frame.payload);
+      case 'chat':
+        await _onChat(from, frame.payload);
     }
-    final int latest = _now() + kCircleClockSkew.inMilliseconds;
-    final DinnerCircle got = parsed.updatedAt > latest
-        ? parsed.copyWith(updatedAt: latest)
-        : parsed;
+    return true;
+  }
+
+  int get _latest => _now() + kCircleClockSkew.inMilliseconds;
+
+  Future<void> _onGuest(String from, Map<String, dynamic> payload) async {
+    // A friend brings us to their circle's dinner.
+    final Object? name = payload['c'];
+    final Object? at = payload['at'];
+    final Object? cook = payload['cook'];
+    if (!host.isFriend(from) || name is! String || at is! int) {
+      return;
+    }
+    final DateTime d = DateTime.fromMillisecondsSinceEpoch(at);
+    final Map<String, Object?> args = <String, Object?>{
+      'circle': name.length > 60 ? name.substring(0, 60) : name,
+      'date': ZenFormat.dayMonth(d),
+      'time': ZenFormat.time(DateTime(d.year, d.month, d.day, d.hour)),
+    };
+    await host.notify(
+      RuntimeSystemNotification(
+        id: 'circle-guest-$from-$at',
+        title: t('{name} zaprasza Cię na obiad', {'name': host.nameOf(from)}),
+        body: cook is String && cook.isNotEmpty
+            ? t('„{circle}”, {date} o {time} — gotuje {cook}.', {
+                ...args,
+                'cook': cook.length > 60 ? cook.substring(0, 60) : cook,
+              })
+            : t('„{circle}”, {date} o {time}.', args),
+        createdAtMillis: _now(),
+        category: RuntimeSystemNotificationCategory.social,
+        slotKey: 'circle-guest:$from',
+      ),
+    );
+  }
+
+  /// A member's copy of a circle: a new invitation, or merged into ours.
+  Future<void> _onCopy(String from, Map<String, dynamic> payload) async {
+    final DinnerCircle? parsed = DinnerCircle.fromJson(payload['c']);
+    if (parsed == null) {
+      return;
+    }
+    final DinnerCircle got = parsed.clampedTo(_latest);
     final DinnerCircle? had = _circles[got.id];
-    if (had == null && !host.isFriend(from)) {
-      return true;
-    }
-    if (had != null &&
-        (had.updatedAt > got.updatedAt || !had.hasMember(from))) {
-      return true;
-    }
-    _circles[got.id] = got;
-    await _save();
     if (had == null) {
+      // New: an invitation from a friend who is a member.
+      final CircleInvite? invite = got.invited[_me];
+      if (invite == null ||
+          got.hasMember(_me) ||
+          !got.hasMember(from) ||
+          !host.isFriend(from) ||
+          invite.at <= (_declined[got.id] ?? -1) ||
+          invite.at <= (got.gone[_me] ?? -1)) {
+        return;
+      }
+      _circles[got.id] = got;
+      await _save();
       await host.notify(
         RuntimeSystemNotification(
           id: 'circle-${got.id}',
-          title: t('Nowe kółko obiadowe: {name}', {'name': got.name}),
-          body: t('Od {name}.', {'name': host.nameOf(from)}),
+          title: t('Zaproszenie do kółka: {name}', {'name': got.name}),
+          body: t('Od {name}. Dołączasz?', {'name': host.nameOf(from)}),
           createdAtMillis: _now(),
           category: RuntimeSystemNotificationCategory.social,
           slotKey: 'circle:${got.id}',
         ),
       );
+      return;
     }
-    return true;
+    if (!had.hasMember(from) && !got.hasMember(from)) {
+      return;
+    }
+    final DinnerCircle merged = DinnerCircle.merge(had, got);
+    if (!merged.hasMember(_me) && !merged.isInvited(_me)) {
+      // Not in it any more (this person left or declined elsewhere).
+      _circles.remove(had.id);
+      await _save();
+      return;
+    }
+    _circles[had.id] = merged.prunedBefore(
+      _now() - kCircleDinnerKeep.inMilliseconds,
+    );
+    await _save();
+  }
+
+  /// [from] answered the invitation: joins at the end of the queue, or is
+  /// out.
+  Future<void> _onAnswer(String from, Map<String, dynamic> payload) async {
+    final Object? id = payload['id'];
+    final Object? yes = payload['y'];
+    final Object? at = payload['t'];
+    final DinnerCircle? c = id is String ? _circles[id] : null;
+    final CircleInvite? invite = c?.invited[from];
+    if (c == null || invite == null || yes is! bool || at is! int) {
+      return;
+    }
+    final int when = max(invite.at + 1, min(at, _latest));
+    final Object? n = payload['n'];
+    final String name = invite.name.isNotEmpty
+        ? invite.name
+        : n is String && n.trim().isNotEmpty
+        ? (n.trim().length > 60 ? n.trim().substring(0, 60) : n.trim())
+        : host.nameOf(from);
+    final Map<String, CircleInvite> invited = <String, CircleInvite>{
+      ...c.invited,
+    }..remove(from);
+    final DinnerCircle updated = yes
+        ? c.copyWith(
+            members: <CircleMember>[
+              ...c.members,
+              CircleMember(from, name, pos: when, at: when),
+            ],
+            invited: invited,
+          )
+        : c.copyWith(
+            invited: invited,
+            gone: <String, int>{...c.gone, from: when},
+          );
+    _circles[c.id] = updated;
+    await _save();
+    if (!c.hasMember(_me)) {
+      return; // another invited person: nothing to tell
+    }
+    if (yes) {
+      await host.notify(
+        RuntimeSystemNotification(
+          id: 'circle-join-${c.id}-$from',
+          title: t('{name} dołącza do kółka', {'name': name}),
+          body: c.name,
+          createdAtMillis: _now(),
+          category: RuntimeSystemNotificationCategory.social,
+          slotKey: 'circle:${c.id}',
+        ),
+      );
+    } else if (invite.by == _me) {
+      await host.notify(
+        RuntimeSystemNotification(
+          id: 'circle-decline-${c.id}-$from',
+          title: t('{name} nie dołączy do kółka', {'name': name}),
+          body: c.name,
+          createdAtMillis: _now(),
+          category: RuntimeSystemNotificationCategory.social,
+          slotKey: 'circle:${c.id}',
+        ),
+      );
+    }
+  }
+
+  /// [from] left: out of the queue, which is worked out again.
+  Future<void> _onLeave(String from, Map<String, dynamic> payload) async {
+    final Object? id = payload['id'];
+    final Object? at = payload['t'];
+    final DinnerCircle? c = id is String ? _circles[id] : null;
+    final CircleMember? m = c?.member(from);
+    if (c == null || m == null || at is! int) {
+      return;
+    }
+    final int when = max(m.at + 1, min(at, _latest));
+    _circles[c.id] = c.copyWith(
+      members: <CircleMember>[
+        for (final CircleMember x in c.members)
+          if (x.address != from) x,
+      ],
+      gone: <String, int>{...c.gone, from: when},
+    );
+    if (swapRequests[c.id] == from) {
+      swapRequests.remove(c.id);
+    }
+    await _save();
+    if (c.hasMember(_me)) {
+      await host.notify(
+        RuntimeSystemNotification(
+          id: 'circle-leave-${c.id}-$from',
+          title: t('{name} opuszcza kółko', {'name': m.name}),
+          body: t('{circle}: kolejka gotowania ułożyła się na nowo.', {
+            'circle': c.name,
+          }),
+          createdAtMillis: _now(),
+          category: RuntimeSystemNotificationCategory.social,
+          slotKey: 'circle:${c.id}',
+        ),
+      );
+    }
+  }
+
+  Future<void> _onChat(String from, Map<String, dynamic> payload) async {
+    final Object? id = payload['id'];
+    final Object? day = payload['d'];
+    final Object? mid = payload['m'];
+    final Object? text = payload['x'];
+    final Object? at = payload['t'];
+    final DinnerCircle? c = id is String ? _circles[id] : null;
+    if (c == null ||
+        !c.hasMember(from) ||
+        !c.hasMember(_me) ||
+        !DinnerCircle.isDayKey(day) ||
+        !isThreadMessageId(mid) ||
+        text is! String ||
+        at is! int) {
+      return;
+    }
+    final String? clean = cleanThreadText(text);
+    if (clean == null) {
+      return;
+    }
+    final String key = '${c.id}|$day';
+    if (!_threads.add(
+      key,
+      MeetThreadMessage(
+        id: mid as String,
+        from: from,
+        text: clean,
+        at: min(at, _latest),
+      ),
+    )) {
+      return;
+    }
+    await _save();
+    final String name = c.nameIn(from) ?? host.nameOf(from);
+    await host.notify(
+      RuntimeSystemNotification(
+        id: 'circle-chat-${c.id}-$mid',
+        title: t('{name} · {circle}', {'name': name, 'circle': c.name}),
+        body: clean,
+        createdAtMillis: _now(),
+        category: RuntimeSystemNotificationCategory.social,
+        slotKey: 'circle-chat:$key',
+      ),
+    );
   }
 
   Future<void> _send(String to, Map<String, dynamic> payload) async {
@@ -838,3 +1079,13 @@ final class CircleService extends ChangeNotifier {
     }
   }
 }
+
+/// The cook's count in a few words: "5 osób · Bez glutenu: 1 · Może: 1 ·
+/// Bez odpowiedzi: 2".
+String circleCountText(CircleHeadcount h) => <String>[
+  tn(h.people, one: '{n} osoba', few: '{n} osoby', many: '{n} osób'),
+  for (final CircleDiet d in CircleDiet.values)
+    if ((h.diets[d] ?? 0) > 0) '${d.label}: ${h.diets[d]}',
+  if (h.maybe > 0) t('Może: {n}', {'n': h.maybe}),
+  if (h.unanswered > 0) t('Bez odpowiedzi: {n}', {'n': h.unanswered}),
+].join(' · ');

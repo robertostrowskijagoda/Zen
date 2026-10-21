@@ -24,9 +24,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
@@ -66,7 +68,11 @@ import javax.crypto.spec.SecretKeySpec
  *    changing addresses cannot crowd it out.
  *
  * Advertising is low power, so it can stay on all the time; scanning costs
- * more and runs only while someone asks for it. When Bluetooth is switched
+ * more and runs only while someone asks for it: fully while "W pobliżu" is
+ * open, otherwise in short low-power windows (a few seconds every five
+ * minutes, decided in Dart from the battery, battery saver and Doze that
+ * [state] reports), with results batched in the controller where the
+ * phone can, and flushed when the window ends. When Bluetooth is switched
  * off and on again, advertising and scanning start again by themselves
  * and every engine hears a "bluetooth" event.
  *
@@ -121,6 +127,12 @@ object ZenNearbyBridge {
     private var advertisedToken: ByteArray? = null
     private var scanCallback: ScanCallback? = null
     private var scanLowPower = false
+
+    /** Whether the low-power scan running now batches its results. */
+    private var scanBatched = false
+
+    /** How long a low-power scan may hold results back (batched). */
+    private const val LOW_POWER_REPORT_DELAY_MS = 3_000L
     private var gattServer: BluetoothGattServer? = null
 
     /** Prepared (long) writes per phone; touched on binder threads. */
@@ -138,8 +150,10 @@ object ZenNearbyBridge {
     private val waveTimes = HashMap<String, ArrayDeque<Long>>()
     private val allWaveTimes = ArrayDeque<Long>()
     private const val WAVE_WINDOW_MS = 60_000L
-    private const val MAX_WAVES_PER_PHONE = 6
-    private const val MAX_WAVES = 40
+    // A hello or an answer is a few writes: its post-quantum key or
+    // ciphertext goes in parts (nearby_crypto.dart, kNearbyMaxParts).
+    private const val MAX_WAVES_PER_PHONE = 16
+    private const val MAX_WAVES = 120
 
     /**
      * Alarm waves whose friend signature checked out (main thread): their
@@ -358,7 +372,16 @@ object ZenNearbyBridge {
 
     private fun state(context: Context): Map<String, Any> {
         val adapter = adapter(context)
+        val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val battery = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+        val level = battery?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
         return mapOf(
+            // The background look around skips low battery, battery saver
+            // and Doze (Dart's NearbyLookPolicy); -1: unknown.
+            "battery" to level,
+            "charging" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && battery?.isCharging == true),
+            "powerSave" to (power?.isPowerSaveMode == true),
+            "idle" to (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && power?.isDeviceIdleMode == true),
             "supported" to (adapter != null &&
                 context.packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)),
             "enabled" to (adapter?.isEnabled == true),
@@ -611,9 +634,16 @@ object ZenNearbyBridge {
         val filter = ScanFilter.Builder()
             .setManufacturerData(COMPANY_ID, MAGIC, byteArrayOf(0xFF.toByte(), 0xFF.toByte()))
             .build()
-        val settings = ScanSettings.Builder()
+        // A short low-power look lets the controller batch what it hears
+        // (the CPU and Dart are woken once per batch, not per advert); the
+        // batch is flushed when the look ends ([stopScan]).
+        val batched = lowPower && adapter.isOffloadedScanBatchingSupported
+        val builder = ScanSettings.Builder()
             .setScanMode(if (lowPower) ScanSettings.SCAN_MODE_LOW_POWER else ScanSettings.SCAN_MODE_LOW_LATENCY)
-            .build()
+        if (batched) {
+            builder.setReportDelay(LOW_POWER_REPORT_DELAY_MS)
+        }
+        val settings = builder.build()
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 report(result)
@@ -630,6 +660,7 @@ object ZenNearbyBridge {
         scanner.startScan(listOf(filter), settings, callback)
         scanCallback = callback
         scanLowPower = lowPower
+        scanBatched = batched
         return true
     }
 
@@ -658,8 +689,16 @@ object ZenNearbyBridge {
     private fun stopScan(context: Context) {
         val callback = scanCallback ?: return
         scanCallback = null
+        val batched = scanBatched
+        scanBatched = false
         try {
-            adapter(context)?.bluetoothLeScanner?.stopScan(callback)
+            val scanner = adapter(context)?.bluetoothLeScanner
+            if (batched) {
+                // What the controller still holds comes now (Dart takes it
+                // for a few seconds after the look).
+                scanner?.flushPendingScanResults(callback)
+            }
+            scanner?.stopScan(callback)
         } catch (_: Exception) {
         }
     }

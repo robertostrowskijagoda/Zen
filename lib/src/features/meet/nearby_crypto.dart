@@ -444,3 +444,156 @@ final class FriendNearbyKey {
     return _sameBytes(_chainHash(c, steps), anchor) ? c : null;
   }
 }
+
+// ---- longer waves in parts ----
+//
+// A hello and its answer carry a hybrid post-quantum key exchange
+// (ML-KEM-768 + X25519, hybrid_kem.dart): the hello's one-time public key
+// (1216 bytes) and the answer's ciphertext (1120 bytes) do not fit one
+// Bluetooth write, so each goes as a few parts before the message that
+// names it by hash. Parts are JSON like every wave, each well under one
+// write.
+
+/// Version of a part of a longer piece.
+const int kNearbyPartVersion = 11;
+
+/// Base64 characters of data in one part: with the frame around it a part
+/// stays under 500 bytes.
+const int kNearbyPartChars = 400;
+
+/// Parts of one piece at most (a hybrid key takes 5).
+const int kNearbyMaxParts = 6;
+
+/// Pieces being put together, and finished ones not yet taken, at most.
+const int kNearbyMaxPieces = 16;
+
+/// How long parts wait for the rest.
+const Duration kNearbyPieceLife = Duration(minutes: 2);
+
+/// The id of a piece (base64url of 16 bytes of its SHA-256): the message
+/// that uses it names it, so parts of another piece cannot take its place.
+String nearbyPieceId(List<int> bytes) =>
+    base64Url.encode(crypto.sha256.convert(bytes).bytes.sublist(0, 16));
+
+/// [bytes] as parts of conversation [sid]; [what] says which piece it is
+/// (`h`: the hello's key, `r`: the answer's ciphertext).
+List<Map<String, dynamic>> nearbyParts(
+  String sid,
+  String what,
+  List<int> bytes,
+) {
+  final String data = base64Url.encode(bytes);
+  final String id = nearbyPieceId(bytes);
+  final int count = (data.length + kNearbyPartChars - 1) ~/ kNearbyPartChars;
+  return <Map<String, dynamic>>[
+    for (int i = 0; i < count; i++)
+      <String, dynamic>{
+        'v': kNearbyPartVersion,
+        'sid': sid,
+        'w': what,
+        'h': id,
+        'i': i,
+        'k': count,
+        'd': data.substring(
+          i * kNearbyPartChars,
+          min((i + 1) * kNearbyPartChars, data.length),
+        ),
+      },
+  ];
+}
+
+final RegExp _pieceChars = RegExp(r'^[A-Za-z0-9_=-]+$');
+
+/// Parts heard over Bluetooth, put together into pieces. Bounded: a phone
+/// nearby can fill it, but only up to [kNearbyMaxPieces] small pieces that
+/// go after [kNearbyPieceLife].
+final class NearbyPieces {
+  final Map<String, ({int at, int count, Map<int, String> parts})> _open =
+      <String, ({int at, int count, Map<int, String> parts})>{};
+  final Map<String, ({int at, Uint8List bytes})> _done =
+      <String, ({int at, Uint8List bytes})>{};
+
+  static String _key(String sid, String what, String id) => '$sid|$what|$id';
+
+  void _expire(int now) {
+    _open.removeWhere(
+      (String _, ({int at, int count, Map<int, String> parts}) p) =>
+          now - p.at > kNearbyPieceLife.inMilliseconds,
+    );
+    _done.removeWhere(
+      (String _, ({int at, Uint8List bytes}) p) =>
+          now - p.at > kNearbyPieceLife.inMilliseconds,
+    );
+  }
+
+  /// Takes part [json] heard at [now]. Returns `(sid, what)` when it
+  /// finished a piece (whose bytes hash to its id), else `null`.
+  (String, String)? add(Map<dynamic, dynamic> json, int now) {
+    final Object? sid = json['sid'];
+    final Object? what = json['w'];
+    final Object? id = json['h'];
+    final Object? i = json['i'];
+    final Object? k = json['k'];
+    final Object? d = json['d'];
+    if (json['v'] != kNearbyPartVersion ||
+        sid is! String ||
+        !kAlarmIdPattern.hasMatch(sid) ||
+        (what != 'h' && what != 'r') ||
+        id is! String ||
+        id.length != 24 ||
+        k is! int ||
+        k < 1 ||
+        k > kNearbyMaxParts ||
+        i is! int ||
+        i < 0 ||
+        i >= k ||
+        d is! String ||
+        d.isEmpty ||
+        d.length > kNearbyPartChars ||
+        !_pieceChars.hasMatch(d)) {
+      return null;
+    }
+    _expire(now);
+    final String key = _key(sid, what as String, id);
+    if (_done.containsKey(key)) {
+      return null;
+    }
+    ({int at, int count, Map<int, String> parts})? piece = _open[key];
+    if (piece == null) {
+      while (_open.length >= kNearbyMaxPieces) {
+        _open.remove(_open.keys.first);
+      }
+      piece = _open[key] = (at: now, count: k, parts: <int, String>{});
+    }
+    if (piece.count != k) {
+      return null;
+    }
+    piece.parts.putIfAbsent(i, () => d);
+    if (piece.parts.length < k) {
+      return null;
+    }
+    _open.remove(key);
+    final Uint8List bytes;
+    try {
+      bytes = base64Url.decode(
+        <String>[for (int x = 0; x < k; x++) piece.parts[x]!].join(),
+      );
+    } on FormatException {
+      return null;
+    }
+    if (nearbyPieceId(bytes) != id) {
+      return null;
+    }
+    while (_done.length >= kNearbyMaxPieces) {
+      _done.remove(_done.keys.first);
+    }
+    _done[key] = (at: now, bytes: bytes);
+    return (sid, what);
+  }
+
+  /// The finished piece [id] of conversation [sid] (taken once), or `null`.
+  Uint8List? take(String sid, String what, String id, int now) {
+    _expire(now);
+    return _done.remove(_key(sid, what, id))?.bytes;
+  }
+}

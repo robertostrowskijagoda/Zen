@@ -92,6 +92,9 @@ const int kMaxFriendListEntries = 2000;
 /// What an address on a friend's list may look like (a mesh address).
 final RegExp _listAddress = RegExp(r'^[0-9A-Za-z:._-]{1,64}$');
 
+/// A device key fingerprint (SHA-256, lower-case hex).
+final RegExp _sessionKeyPattern = RegExp(r'^[0-9a-f]{64}$');
+
 /// A friend's alarm heard only over Bluetooth ends by itself after
 /// this long, unless the network copy came meanwhile.
 const Duration kNearbyAlarmLife = Duration(hours: 1);
@@ -200,6 +203,16 @@ final class MeetService extends ChangeNotifier {
   /// ledger): a friend's alarm key must be certified by that account.
   String? Function(String address)? accountOf;
 
+  /// The post-quantum device key (fingerprint, hex) a friend's address
+  /// proved in a hybrid-signed hello (set by the app from the ledger), or
+  /// null. It goes along in the friend list, so friends of friends know
+  /// it before they ever talk (pq_session.go pins it).
+  String? Function(String address)? sessionKeyOf;
+
+  /// Device keys a friend's friend list names (address → fingerprint): the
+  /// app pins them in the bridge (set by the app).
+  void Function(Map<String, String> keys)? onVouchedKeys;
+
   /// The alarm key while it is read ([alarmKey]).
   LedgerKeyPair? _alarmKeyPair;
 
@@ -216,6 +229,11 @@ final class MeetService extends ChangeNotifier {
     weak:
         _book.friendListAudience == FriendListAudience.friends &&
         isWeak(friend),
+    close:
+        _book.friendListAudience == FriendListAudience.close &&
+        host.closeFriends().any(
+          (String f) => PeerShareCodec.addressesEqual(f, friend),
+        ),
   );
 
   /// Whether [friend] may see [status]: "przyjaciele" only when
@@ -558,6 +576,8 @@ final class MeetService extends ChangeNotifier {
   Future<void> _onFriendList(String from, Map<String, dynamic> payload) async {
     final Object? l = payload['l'];
     final Map<String, String> list = <String, String>{};
+    // Their friends' device keys, as their own hellos proved them.
+    final Map<String, String> keys = <String, String>{};
     if (l is List) {
       for (final Object? item in l.take(kMaxFriendListEntries)) {
         if (item is! Map) {
@@ -569,11 +589,19 @@ final class MeetService extends ChangeNotifier {
         }
         final Object? n = item['n'];
         list[_key(a)] = n is String ? sanitizePeerName(n) : '';
+        final Object? k = item['k'];
+        if (k is String && _sessionKeyPattern.hasMatch(k)) {
+          keys[_key(a)] = k;
+        }
       }
     }
     list
       ..remove(from)
       ..removeWhere((String a, String _) => host.isSelf(a));
+    keys.removeWhere((String a, String _) => !list.containsKey(a));
+    if (keys.isNotEmpty) {
+      onVouchedKeys?.call(keys);
+    }
     final Object? d = payload['d'];
     final String digest = d is String && d.length <= 64 && d.isNotEmpty
         ? d
@@ -1917,7 +1945,11 @@ final class MeetService extends ChangeNotifier {
         for (final MapEntry<String, String> e
             in (friendsWithNames.entries.toList()
               ..sort((a, b) => a.key.compareTo(b.key))))
-          <String, String>{'a': _key(e.key), 'n': e.value},
+          <String, String>{
+            'a': _key(e.key),
+            'n': e.value,
+            if (_sessionKeyFor(e.key) case final String k) 'k': k,
+          },
     ];
     final String digest = crypto.sha256
         .convert(utf8.encode(jsonEncode(list)))
@@ -1943,6 +1975,11 @@ final class MeetService extends ChangeNotifier {
     if (only == null) {
       await _update<void>((MeetBook b) => b.friendListSent = digest);
     }
+  }
+
+  String? _sessionKeyFor(String address) {
+    final String? key = sessionKeyOf?.call(address)?.toLowerCase();
+    return key != null && _sessionKeyPattern.hasMatch(key) ? key : null;
   }
 
   /// The digest of an empty friend list (what someone who may not see the

@@ -7,7 +7,6 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
-import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/events/event_model.dart';
 import 'package:zen/src/features/meet/events/event_photo.dart';
@@ -53,14 +52,19 @@ abstract interface class EventHost {
   Future<void> notify(RuntimeSystemNotification notification);
 }
 
-/// A signed ticket: shown as a QR code at the door, checked by the
-/// organizer's phone without internet.
+/// A ticket: shown as a QR code at the door, checked by the organizer's
+/// phone without internet.
 ///
-/// Pinned to the guest's phone: "Będę" sends the organizer a key that only
-/// this phone holds, the organizer signs it into the ticket, and the code
-/// shown at the door carries a fresh signature with that key (renewed every
-/// 20 s, valid ±90 s, once). A screenshot passed on to someone else stops
-/// working after about a minute and a half.
+/// Hash-based, so a quantum computer gains nothing: only the organizer's
+/// phone ever checks a ticket, and it holds both keys involved. The
+/// organizer's tag is an HMAC-SHA256 with a key derived from the event's
+/// own secret, over the event, the guest, the name and the guest phone's
+/// pin. The pin is a secret only that phone and the organizer know
+/// ("Będę" carries it, inside the sealed signal), so the code shown at
+/// the door carries a fresh HMAC with it (renewed every 20 s, valid
+/// ±90 s, once): a screenshot passed on to someone else stops working
+/// after about a minute and a half, and nobody else can make one. It all
+/// fits a small QR code (a hybrid signature, 5.3 KB, would not).
 @immutable
 final class EventTicket {
   const EventTicket({
@@ -76,13 +80,15 @@ final class EventTicket {
   final String eventId;
   final String guest;
   final String name;
+
+  /// The organizer's tag ([tagOf]), base64url of 16 bytes.
   final String signature;
 
-  /// The guest phone's own public key (Ed25519) signed into the ticket.
+  /// The id of the guest phone's pin ([pinIdOf]), base64url of 16 bytes.
   final String pin;
 
   /// The live code shown at the door: the start of its 30 s window and the
-  /// phone's signature over it (`null` in a bare ticket).
+  /// phone's HMAC over it (`null` in a bare ticket).
   final int? liveAt;
   final String? proof;
 
@@ -97,31 +103,71 @@ final class EventTicket {
   /// How often the guest's phone renews the code on the screen.
   static const Duration liveRefresh = Duration(seconds: 20);
 
+  /// Bytes of a tag, a pin id and a live code (128 bits: forging one
+  /// means guessing it, which no computer does).
+  static const int macBytes = 16;
+
+  /// Bytes of a pin.
+  static const int pinBytes = 32;
+
   /// The start of the window [millis] falls in.
   static int windowOf(int millis) => millis - millis % liveWindow;
 
-  /// What the organizer signs.
-  static Uint8List signedBytes(
+  static String _mac(List<int> key, Map<String, dynamic> fields) => b64(
+    crypto.Hmac(
+      crypto.sha256,
+      key,
+    ).convert(canonicalJsonBytes(fields)).bytes.sublist(0, macBytes),
+  );
+
+  /// The id of a pin: what the ticket names (the pin itself never leaves
+  /// the two phones).
+  static String pinIdOf(List<int> pin) => b64(
+    crypto.sha256
+        .convert(<int>[...utf8.encode('zen-ticket-pin|'), ...pin])
+        .bytes
+        .sublist(0, macBytes),
+  );
+
+  /// The organizer's tag with [key] (derived from the event's secret).
+  static String tagOf(
+    List<int> key,
     String eventId,
     String guest,
     String name,
-    String pin,
-  ) => canonicalJsonBytes(<String, dynamic>{
+    String pinId,
+  ) => _mac(key, <String, dynamic>{
     't': 'zen_ticket',
     'e': eventId,
     'g': guest,
     'n': name,
-    'k': pin,
+    'k': pinId,
   });
 
-  /// What the guest's phone signs for the code shown at [at].
-  static Uint8List liveBytes(String eventId, String guest, int at) =>
-      canonicalJsonBytes(<String, dynamic>{
-        't': 'zen_ticket_live',
-        'e': eventId,
-        'g': guest,
-        'at': at,
-      });
+  /// The live code the guest's phone shows for [at], from its [pin].
+  static String liveCodeOf(
+    List<int> pin,
+    String eventId,
+    String guest,
+    int at,
+  ) => _mac(pin, <String, dynamic>{
+    't': 'zen_ticket_live',
+    'e': eventId,
+    'g': guest,
+    'at': at,
+  });
+
+  /// Whether two codes are the same (every byte compared).
+  static bool sameCode(String a, String b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    int diff = 0;
+    for (int i = 0; i < a.length; i++) {
+      diff |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+    }
+    return diff == 0;
+  }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'e': eventId,
@@ -135,12 +181,12 @@ final class EventTicket {
   String toQr() =>
       '$qrPrefix${base64Url.encode(utf8.encode(jsonEncode(toJson())))}';
 
-  /// The live code: the ticket plus the phone's signature for [at].
-  String toLiveQr(int at, String liveSignature) {
+  /// The live code: the ticket plus the phone's code for [at].
+  String toLiveQr(int at, String liveCode) {
     final Map<String, dynamic> json = <String, dynamic>{
       ...toJson(),
       'at': at,
-      'p': liveSignature,
+      'p': liveCode,
     };
     return '$qrPrefix${base64Url.encode(utf8.encode(jsonEncode(json)))}';
   }
@@ -150,10 +196,11 @@ final class EventTicket {
         json['e'] is! String ||
         json['g'] is! String ||
         json['n'] is! String ||
-        json['s'] is! String ||
-        unb64(json['k'], length: 32) == null) {
+        unb64(json['s'], length: macBytes) == null ||
+        unb64(json['k'], length: macBytes) == null) {
       return null;
     }
+    final Object? proof = json['p'];
     return EventTicket(
       eventId: json['e'] as String,
       guest: json['g'] as String,
@@ -161,7 +208,7 @@ final class EventTicket {
       signature: json['s'] as String,
       pin: json['k'] as String,
       liveAt: json['at'] is int ? json['at'] as int : null,
-      proof: json['p'] is String ? json['p'] as String : null,
+      proof: unb64(proof, length: macBytes) != null ? proof as String : null,
     );
   }
 
@@ -180,16 +227,9 @@ final class EventTicket {
     }
   }
 
-  /// The organizer's signature, classical Ed25519
-  /// ([LedgerKeyPair.signClassical]): the ticket and its live code must fit
-  /// one QR code, which a hybrid signature (5.3 KB) does not. It is checked
-  /// at the door during the event, so forging one would take a quantum
-  /// computer then.
-  Future<bool> verify(String ticketKey) => verifyClassicalSignature(
-    publicKey: ticketKey,
-    message: signedBytes(eventId, guest, name, pin),
-    signature: signature,
-  );
+  /// Whether the organizer's tag holds with [key].
+  bool verify(List<int> key) =>
+      sameCode(signature, tagOf(key, eventId, guest, name, pin));
 }
 
 /// What a check-in at the door found.
@@ -280,27 +320,30 @@ final class EventService extends ChangeNotifier {
   /// their own (by 'self').
   final Map<String, List<EventThanks>> _thanks = <String, List<EventThanks>>{};
 
+  /// "Jak było?": this person's own answer per event (kept here only).
+  final Map<String, String> _how = <String, String>{};
+
   final Map<String, MeetEvent> _events = <String, MeetEvent>{};
 
-  /// Ticket signing seeds of this person's events.
+  /// The secrets of this person's events (ticket tags and invitation
+  /// keys are derived from them).
   final Map<String, String> _seeds = <String, String>{};
 
   /// This person's tickets (event id → ticket).
   final Map<String, EventTicket> _tickets = <String, EventTicket>{};
 
-  /// As the organizer: the keys of the guests' phones (event id → guest
-  /// address → public key), sent with "Będę". Tickets are pinned to them.
+  /// As the organizer: the pins of the guests' phones (event id → guest
+  /// address → pin, base64url), sent with "Będę". Tickets are pinned to
+  /// them.
   final Map<String, Map<String, String>> _guestKeys =
       <String, Map<String, String>>{};
 
-  /// As a guest: this phone's own key for each event it said "Będę" to
-  /// (event id → seed, and → public key).
+  /// As a guest: this phone's pin for each event it said "Będę" to
+  /// (event id → pin, base64url).
   final Map<String, String> _pinSeeds = <String, String>{};
-  final Map<String, String> _pinKeys = <String, String>{};
-  final Map<String, LedgerKeyPair> _pinPairs = <String, LedgerKeyPair>{};
 
-  /// Live codes already used at the door (signature → when), so the same
-  /// code never opens it twice.
+  /// Live codes already used at the door (code → when), so the same code
+  /// never opens it twice.
   final Map<String, int> _usedCodes = <String, int>{};
 
   /// How an invitation reached us (event id → chain of people from the
@@ -333,10 +376,11 @@ final class EventService extends ChangeNotifier {
   EventTicket? ticket(String id) => _tickets[id];
 
   /// Whether this phone's ticket for [id] is pinned to this phone (the
-  /// organizer signed this phone's key into it).
+  /// organizer tagged this phone's pin into it).
   bool ticketPinned(String id) {
     final EventTicket? t = _tickets[id];
-    return t != null && t.pin == _pinKeys[id];
+    final Uint8List? pin = unb64(_pinSeeds[id], length: EventTicket.pinBytes);
+    return t != null && pin != null && t.pin == EventTicket.pinIdOf(pin);
   }
 
   /// The organizer's real address (for sending to them).
@@ -377,6 +421,67 @@ final class EventService extends ChangeNotifier {
   /// A guest who went may thank the host once the event has started.
   bool canThank(MeetEvent e) =>
       !e.isMine && !e.cancelled && _now() >= e.startsAt && _went(myGuest(e));
+
+  /// "Jak było?" is asked from [howAfter] after an event started, for a
+  /// week, of the organizer and of everyone who went.
+  static const Duration howAfter = Duration(hours: 3);
+  static const Duration howFor = Duration(days: 7);
+
+  /// This person's answer to "Jak było?" about [id] (a code of
+  /// `CircleHow`: 'g', 'o', 'm'), or `null`.
+  String? howOf(String id) => _how[id];
+
+  /// Whether to ask "Jak było?" about [e] now.
+  bool howDue(MeetEvent e) {
+    final int since = _now() - e.startsAt;
+    return !e.cancelled &&
+        _how[e.id] == null &&
+        since >= howAfter.inMilliseconds &&
+        since <= howFor.inMilliseconds &&
+        (e.isMine || _went(myGuest(e)));
+  }
+
+  /// Answers "Jak było?" about [id] ([code]: 'g', 'o' or 'm').
+  Future<void> rate(String id, String code) async {
+    if (!_events.containsKey(id) || !<String>{'g', 'o', 'm'}.contains(code)) {
+      return;
+    }
+    _how[id] = code;
+    await _save();
+  }
+
+  /// "Powtórzymy za miesiąc?": this person's event [id] again, four weeks
+  /// later, for the same people who came (those the organizer does not know
+  /// again through the friend who vouched for them). `null` when it is not
+  /// this person's or nobody came.
+  Future<MeetEvent?> repeat(String id) async {
+    final MeetEvent? e = _events[id];
+    if (e == null || !e.isMine || e.cancelled) {
+      return null;
+    }
+    final List<EventGuest> came = <EventGuest>[
+      for (final EventGuest g in e.guests.values)
+        if (_went(g)) g,
+    ];
+    if (came.isEmpty) {
+      return null;
+    }
+    return create(
+      title: e.title,
+      startsAt: e.startsAt + 28 * _day,
+      kind: e.kind,
+      description: e.description,
+      place: e.place,
+      capacity: e.capacity,
+      askForPlusOne: e.askForPlusOne,
+      invite: <String>[for (final EventGuest g in came) g.address],
+      vouchers: <String, String>{
+        for (final EventGuest g in came)
+          if (g.broughtBy != null && !host.isFriend(g.address))
+            g.address: g.broughtBy!,
+      },
+    );
+  }
 
   // ---- storage ----
 
@@ -426,15 +531,9 @@ final class EventService extends ChangeNotifier {
         }
       });
       _pinSeeds.clear();
-      _pinKeys.clear();
-      _pinPairs.clear();
       (json['pins'] as Map?)?.forEach((Object? k, Object? v) {
-        if (k is String &&
-            v is Map &&
-            unb64(v['s'], length: 32) != null &&
-            unb64(v['k'], length: 32) != null) {
-          _pinSeeds[k] = v['s'] as String;
-          _pinKeys[k] = v['k'] as String;
+        if (k is String && unb64(v, length: EventTicket.pinBytes) != null) {
+          _pinSeeds[k] = v as String;
         }
       });
       _via.clear();
@@ -452,6 +551,12 @@ final class EventService extends ChangeNotifier {
       (json['tok'] as Map?)?.forEach((Object? k, Object? v) {
         if (k is String && unb64(v, length: 32) != null) {
           _tokens[k] = v as String;
+        }
+      });
+      _how.clear();
+      (json['how'] as Map?)?.forEach((Object? k, Object? v) {
+        if (k is String && v is String && v.length == 1) {
+          _how[k] = v;
         }
       });
       _thanks.clear();
@@ -497,8 +602,6 @@ final class EventService extends ChangeNotifier {
       _thanks.remove(id);
       _guestKeys.remove(id);
       _pinSeeds.remove(id);
-      _pinKeys.remove(id);
-      _pinPairs.remove(id);
       _albums.remove(id);
       // Always, even when this copy never loaded the album (another copy of
       // the service, e.g. the one in the background, may have written it).
@@ -508,6 +611,7 @@ final class EventService extends ChangeNotifier {
     _via.removeWhere((String id, String _) => !_events.containsKey(id));
     _forwarded.removeWhere((String id) => !_events.containsKey(id));
     _tokens.removeWhere((String id, String _) => !_events.containsKey(id));
+    _how.removeWhere((String id, String _) => !_events.containsKey(id));
     await disk.write(
       _key,
       Uint8List.fromList(
@@ -530,14 +634,14 @@ final class EventService extends ChangeNotifier {
                 if (_events.containsKey(g.key) && g.value.isNotEmpty)
                   g.key: g.value,
             },
-            'pins': <String, dynamic>{
+            'pins': <String, String>{
               for (final MapEntry<String, String> p in _pinSeeds.entries)
-                if (_events.containsKey(p.key) && _pinKeys[p.key] != null)
-                  p.key: <String, String>{'s': p.value, 'k': _pinKeys[p.key]!},
+                if (_events.containsKey(p.key)) p.key: p.value,
             },
             'via': _via,
             'fwd': _forwarded.toList(),
             if (_tokens.isNotEmpty) 'tok': _tokens,
+            if (_how.isNotEmpty) 'how': _how,
             'thanks': <String, dynamic>{
               for (final MapEntry<String, List<EventThanks>> t
                   in _thanks.entries)
@@ -587,8 +691,10 @@ final class EventService extends ChangeNotifier {
     List<String> invite = const <String>[],
     Map<String, String> vouchers = const <String, String>{},
   }) async {
-    final LedgerKeyPair key = await LedgerKeyPair.generate();
-    final List<String> to = reach == EventReach.selected
+    final Uint8List secret = randomBytes(32);
+    // "Przyjaciele": the caller names them (the host knows no levels).
+    final List<String> to =
+        reach == EventReach.selected || reach == EventReach.close
         ? invite
         : host.friends();
     final MeetEvent e = MeetEvent(
@@ -603,7 +709,6 @@ final class EventService extends ChangeNotifier {
       reach: reach,
       capacity: capacity,
       askForPlusOne: askForPlusOne,
-      ticketKey: key.id,
       guests: <String, EventGuest>{
         for (final String a in to)
           _n(a): EventGuest(
@@ -617,7 +722,7 @@ final class EventService extends ChangeNotifier {
       updatedAt: _now(),
     );
     _events[e.id] = e;
-    _seeds[e.id] = b64(key.seed);
+    _seeds[e.id] = b64(secret);
     await _save();
     await _broadcast(
       e,
@@ -712,26 +817,39 @@ final class EventService extends ChangeNotifier {
     });
   }
 
-  /// The ticket of [g], pinned to the key of their phone (`null` before it
+  /// The ticket of [g], pinned to the pin of their phone (`null` before it
   /// came).
-  Future<EventTicket?> _ticketFor(MeetEvent e, EventGuest g) async {
-    final String? pin = _guestKeys[e.id]?[g.address];
-    if (pin == null) {
+  EventTicket? _ticketFor(MeetEvent e, EventGuest g) {
+    final Uint8List? pin = unb64(
+      _guestKeys[e.id]?[g.address],
+      length: EventTicket.pinBytes,
+    );
+    final Uint8List? key = _ticketKey(e.id);
+    if (pin == null || key == null) {
       return null;
     }
-    final LedgerKeyPair key = await LedgerKeyPair.fromSeed(
-      unb64(_seeds[e.id], length: 32)!,
-    );
-    // Classical: the ticket goes into a QR code at the door.
-    final Uint8List sig = await key.signClassical(
-      EventTicket.signedBytes(e.id, g.address, g.name, pin),
-    );
+    final String pinId = EventTicket.pinIdOf(pin);
     return EventTicket(
       eventId: e.id,
       guest: g.address,
       name: g.name,
-      signature: b64(sig),
-      pin: pin,
+      signature: EventTicket.tagOf(key, e.id, g.address, g.name, pinId),
+      pin: pinId,
+    );
+  }
+
+  /// The key of the organizer's ticket tags for its event [id] (derived
+  /// from the event's secret, so nothing new is stored).
+  Uint8List? _ticketKey(String id) {
+    final Uint8List? seed = unb64(_seeds[id], length: 32);
+    if (seed == null) {
+      return null;
+    }
+    return Uint8List.fromList(
+      crypto.Hmac(
+        crypto.sha256,
+        seed,
+      ).convert(utf8.encode('zen-event-tickets|$id')).bytes,
     );
   }
 
@@ -746,6 +864,9 @@ final class EventService extends ChangeNotifier {
   }) async {
     final String own = host.ownAddress();
     final Map<String, dynamic> eventJson = e.toJson()..['org'] = own;
+    // Friends of friends see the list without addresses until they have a
+    // ticket (or came in).
+    final Map<String, dynamic> blindJson = e.toJson(blind: true)..['org'] = own;
     final Uint8List? root = _rootKey(e.id);
     for (final String a in passFor) {
       final EventGuest? g = e.guest(a);
@@ -768,12 +889,13 @@ final class EventService extends ChangeNotifier {
         continue;
       }
       final EventTicket? t = g.status == GuestStatus.going && !e.cancelled
-          ? await _ticketFor(e, g)
+          ? _ticketFor(e, g)
           : null;
       final bool passes = e.reach.hops > 0 && g.broughtBy == null;
+      final bool full = host.isFriend(g.address) || t != null || g.checkedIn;
       await _send(g.address, <String, dynamic>{
         'type': EventTypes.event,
-        'e': eventJson,
+        'e': full ? eventJson : blindJson,
         if (t != null) 't': t.toJson(),
         if (passes) 'hops': e.reach.hops,
         if (passes && root != null) 'fk': b64(_hop(root, 'fwd', g.address)),
@@ -803,7 +925,7 @@ final class EventService extends ChangeNotifier {
       );
 
   /// The organizer's secret for the invitation keys of its event [id]
-  /// (derived from the event's ticket seed, so nothing new is stored).
+  /// (derived from the event's secret, so nothing new is stored).
   Uint8List? _rootKey(String id) {
     final Uint8List? seed = unb64(_seeds[id], length: 32);
     if (seed == null) {
@@ -854,26 +976,35 @@ final class EventService extends ChangeNotifier {
     if (t.eventId != e.id) {
       return (CheckIn.otherEvent, null);
     }
-    if (!await t.verify(e.ticketKey)) {
+    final Uint8List? key = _ticketKey(e.id);
+    if (key == null || !t.verify(key)) {
       return (CheckIn.invalid, null);
     }
     final EventGuest? g = e.guest(t.guest);
     if (g == null || g.status != GuestStatus.going) {
       return (CheckIn.notGoing, g);
     }
-    final String pin = _guestKeys[e.id]?[g.address] ?? t.pin;
+    // The pin this guest's phone sent last: a ticket made for an older
+    // one (another phone) no longer counts.
+    final Uint8List? pin = unb64(
+      _guestKeys[e.id]?[g.address],
+      length: EventTicket.pinBytes,
+    );
+    if (pin == null || EventTicket.pinIdOf(pin) != t.pin) {
+      return (CheckIn.invalid, null);
+    }
     final int now = _now();
     final int? at = t.liveAt;
     final String? proof = t.proof;
     if (at == null ||
         proof == null ||
+        at % EventTicket.liveWindow != 0 ||
         (now - at).abs() > EventTicket.liveSlack) {
       return (CheckIn.expired, g);
     }
-    if (!await verifyClassicalSignature(
-      publicKey: pin,
-      message: EventTicket.liveBytes(t.eventId, t.guest, at),
-      signature: proof,
+    if (!EventTicket.sameCode(
+      proof,
+      EventTicket.liveCodeOf(pin, t.eventId, t.guest, at),
     )) {
       return (CheckIn.invalid, null);
     }
@@ -902,62 +1033,51 @@ final class EventService extends ChangeNotifier {
 
   // ---- as a guest ----
 
-  /// Answers an invitation. "Będę" also sends this phone's own key for the
-  /// event, so the ticket gets pinned to this phone. Saying it
-  /// again pins a ticket that is not pinned yet.
+  /// Answers an invitation. "Będę" also sends this phone's pin for the
+  /// event, so the ticket gets pinned to this phone. Saying it again pins
+  /// a ticket that is not pinned yet.
   Future<void> rsvp(String id, GuestStatus status) async {
     final MeetEvent? e = _events[id];
     if (e == null || e.isMine) {
       return;
     }
-    final LedgerKeyPair? pin = status == GuestStatus.going
-        ? await _pinPair(id)
-        : null;
+    final String? pin = status == GuestStatus.going ? await _pin(id) : null;
     await _send(e.organizer, <String, dynamic>{
       'type': EventTypes.rsvp,
       'id': id,
       's': status.name,
       'n': host.ownName(),
-      if (pin != null) 'pk': pin.id,
+      'ps': ?pin,
       if (_via[id] != null) 'chain': jsonDecode(_via[id]!),
       if (_tokens[id] != null) 'tok': _tokens[id],
     });
   }
 
-  /// This phone's own key for the event [id] (made the first time).
-  Future<LedgerKeyPair> _pinPair(String id) async {
-    final LedgerKeyPair? had = _pinPairs[id];
-    if (had != null) {
-      return had;
+  /// This phone's pin for the event [id] (made the first time): a secret
+  /// only this phone and the organizer hold.
+  Future<String> _pin(String id) async {
+    final String? had = _pinSeeds[id];
+    if (unb64(had, length: EventTicket.pinBytes) != null) {
+      return had!;
     }
-    final Uint8List? seed = unb64(_pinSeeds[id], length: 32);
-    final LedgerKeyPair pair = seed == null
-        ? await LedgerKeyPair.generate()
-        : await LedgerKeyPair.fromSeed(seed);
-    _pinPairs[id] = pair;
-    if (seed == null) {
-      _pinSeeds[id] = b64(pair.seed);
-      _pinKeys[id] = pair.id;
-      await _save();
-    }
-    return pair;
+    final String made = b64(randomBytes(EventTicket.pinBytes));
+    _pinSeeds[id] = made;
+    await _save();
+    return made;
   }
 
   /// What this phone shows at the door for [id] right now (`null` without
-  /// a ticket): the ticket with a fresh signature of this phone's key,
-  /// which changes every 30 s, so a screenshot forwarded to someone else is
+  /// a ticket): the ticket with a fresh code from this phone's pin, which
+  /// changes every 30 s, so a screenshot forwarded to someone else is
   /// useless after about a minute and a half.
   Future<String?> ticketQr(String id) async {
     final EventTicket? t = _tickets[id];
-    if (t == null) {
+    final Uint8List? pin = unb64(_pinSeeds[id], length: EventTicket.pinBytes);
+    if (t == null || pin == null) {
       return null;
     }
-    final LedgerKeyPair pair = await _pinPair(id);
     final int at = EventTicket.windowOf(_now());
-    final Uint8List sig = await pair.signClassical(
-      EventTicket.liveBytes(t.eventId, t.guest, at),
-    );
-    return t.toLiveQr(at, b64(sig));
+    return t.toLiveQr(at, EventTicket.liveCodeOf(pin, t.eventId, t.guest, at));
   }
 
   /// The chain an invitation came through ({a, n} items), or empty.
@@ -1125,17 +1245,20 @@ final class EventService extends ChangeNotifier {
       reach: got.reach,
       capacity: got.capacity,
       askForPlusOne: got.askForPlusOne,
-      ticketKey: had?.ticketKey ?? got.ticketKey,
       guests: got.guests,
       cancelled: got.cancelled,
       updatedAt: got.updatedAt,
     );
     _events[got.id] = stored;
-    final EventTicket? ticket = EventTicket.fromJson(payload['t']);
+    // A ticket only from the organizer itself (the signal it came in is
+    // sealed and from the organizer's address); only the organizer can
+    // check its tag.
+    final EventTicket? ticket = fromOrganizer
+        ? EventTicket.fromJson(payload['t'])
+        : null;
     if (ticket != null &&
         ticket.eventId == got.id &&
-        _n(ticket.guest) == _n(host.ownAddress()) &&
-        await ticket.verify(stored.ticketKey)) {
+        _n(ticket.guest) == _n(host.ownAddress())) {
       _tickets[got.id] = ticket;
     }
     await _save();
@@ -1182,12 +1305,13 @@ final class EventService extends ChangeNotifier {
         ...fromOrganizer ? const <Map<String, String>>[] : chain,
         <String, String>{'a': _n(host.ownAddress()), 'n': host.ownName()},
       ];
-      final Set<String> skip = <String>{org, from, ...got.guests.keys};
+      final Set<String> skip = <String>{org, from};
       for (final String f in host.friends()) {
-        if (!skip.contains(_n(f))) {
+        if (!skip.contains(_n(f)) && got.guest(f) == null) {
           await _send(f, <String, dynamic>{
             'type': EventTypes.event,
-            'e': got.toJson(),
+            // Further on, the list goes without addresses.
+            'e': got.toJson(blind: true),
             'hops': left - 1,
             'chain': next,
             if (key != null) 'tok': b64(_hop(key, 'inv', f)),
@@ -1237,7 +1361,7 @@ final class EventService extends ChangeNotifier {
     }
     await _send(guest, <String, dynamic>{
       'type': EventTypes.event,
-      'e': got.toJson(),
+      'e': got.toJson(blind: true),
       'chain': <Map<String, String>>[
         <String, String>{'a': me, 'n': host.ownName()},
       ],
@@ -1251,11 +1375,12 @@ final class EventService extends ChangeNotifier {
       return;
     }
     final GuestStatus status = GuestStatus.byName(payload['s']);
-    // "Będę" comes with the key of the guest's phone: the ticket is pinned
+    // "Będę" comes with the pin of the guest's phone: the ticket is pinned
     // to it.
-    final Object? pk = payload['pk'];
+    final Object? pin = payload['ps'];
     if (status == GuestStatus.requested ||
-        (status == GuestStatus.going && unb64(pk, length: 32) == null)) {
+        (status == GuestStatus.going &&
+            unb64(pin, length: EventTicket.pinBytes) == null)) {
       return;
     }
     final Object? raw = payload['n'];
@@ -1280,7 +1405,7 @@ final class EventService extends ChangeNotifier {
           e.guest(chain.first['a']!)!.broughtBy == null &&
           _tokenFits(e, chain, from, payload['tok']);
       final bool reachable = switch (e.reach) {
-        EventReach.selected => false,
+        EventReach.selected || EventReach.close => false,
         EventReach.friends => friend,
         EventReach.friendsOfFriends ||
         EventReach.twoSteps => friend || viaChain,
@@ -1316,9 +1441,9 @@ final class EventService extends ChangeNotifier {
       await _broadcastTo(e, g);
       return;
     }
-    // A newer key replaces the older one (only that phone can send it).
+    // A newer pin replaces the older one (only that guest can send it).
     if (status == GuestStatus.going) {
-      (_guestKeys[e.id] ??= <String, String>{})[g.address] = pk as String;
+      (_guestKeys[e.id] ??= <String, String>{})[g.address] = pin as String;
     }
     final bool wasGoing = g.status == GuestStatus.going;
     final EventGuest updated = g.copyWith(
@@ -1360,7 +1485,8 @@ final class EventService extends ChangeNotifier {
   Future<void> _broadcastTo(MeetEvent e, EventGuest g) async {
     await _send(g.address, <String, dynamic>{
       'type': EventTypes.event,
-      'e': e.toJson()..['org'] = host.ownAddress(),
+      'e': e.toJson(blind: !host.isFriend(g.address) && !g.checkedIn)
+        ..['org'] = host.ownAddress(),
     });
   }
 

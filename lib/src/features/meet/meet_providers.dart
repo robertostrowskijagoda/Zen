@@ -104,6 +104,12 @@ final Provider<MeetService> meetServiceProvider = Provider<MeetService>((
     final LedgerNode? node = ref.read(ledgerNodeProvider);
     return node != null && node.isReady ? node.accountOf(a) : null;
   };
+  // Friends' device keys travel in the friend list; those of friends'
+  // friends are pinned before the first contact.
+  service.sessionKeyOf = (String a) =>
+      ref.read(ledgerNodeProvider)?.sessionKeyOf(a);
+  service.onVouchedKeys = (Map<String, String> keys) =>
+      ref.read(runtimeNodeRuntimeProvider).vouchSessionKeys(keys);
   unawaitedLogged(
     service.reload().then((_) async {
       // Before the friends are read there is nothing to send (and an empty
@@ -381,8 +387,19 @@ final Provider<CircleService> circleServiceProvider = Provider<CircleService>((
     host: appEventHost(ref, meet),
     disk: ref.read(ledgerDiskProvider),
   );
-  unawaitedLogged(circles.load(), context: 'Odczyt kółek');
+  unawaitedLogged(
+    circles.load().then((_) => circles.tick()),
+    context: 'Odczyt kółek',
+  );
   listenFrames(ref, circles.handle, 'Kółko obiadowe');
-  ref.onDispose(circles.dispose);
+  // The reminder the day before a dinner and "Jak było?" after it.
+  final Timer reminders = Timer.periodic(
+    const Duration(minutes: 15),
+    (_) => unawaitedLogged(circles.tick(), context: 'Kółko: przypomnienia'),
+  );
+  ref.onDispose(() {
+    reminders.cancel();
+    circles.dispose();
+  });
   return circles;
 });

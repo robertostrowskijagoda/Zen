@@ -7,8 +7,11 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/features/meet/presentation/circle_screen.dart';
+import 'package:zen/src/features/meet/presentation/eat_together_card.dart';
 import 'package:zen/src/features/meet/presentation/events_screen.dart';
+import 'package:zen/src/features/meet/presentation/food_screen.dart';
 import 'package:zen/src/features/meet/presentation/intent_widgets.dart';
+import 'package:zen/src/features/meet/presentation/nearby_screen.dart';
 import 'package:zen/src/features/meet/presentation/plan_screen.dart';
 import 'package:zen/src/features/meet/presentation/table_screen.dart';
 
@@ -42,10 +45,20 @@ class MeetHubScreen extends ConsumerWidget {
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
         children: <Widget>[
           ZenSection(t('Na teraz'), top: 4),
+          // "Ola jest niedaleko i chce coś zjeść — napisz?"
+          const EatTogetherCard(),
           const IntentPanel(),
           ZenSection(t('Poznawaj ludzi przez ludzi')),
           ZenTileGrid(
             children: <Widget>[
+              tile(
+                'meet-nearby',
+                4,
+                Icons.radar_rounded,
+                t('W pobliżu'),
+                t('Kto z Zen jest obok — przez Bluetooth'),
+                NearbyScreen.open,
+              ),
               tile(
                 'meet-events',
                 1,
@@ -69,6 +82,14 @@ class MeetHubScreen extends ConsumerWidget {
                 t('Kółka obiadowe'),
                 t('Gotujecie na zmianę, Zen pilnuje kolejki'),
                 CirclesScreen.open,
+              ),
+              tile(
+                'meet-seats',
+                6,
+                Icons.event_seat_rounded,
+                t('Gotuję dziś'),
+                t('Wolne miejsca przy Twoim stole i u znajomych'),
+                FoodScreen.open,
               ),
               tile(
                 'meet-plans',

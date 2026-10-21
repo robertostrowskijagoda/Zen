@@ -11,6 +11,7 @@ import 'package:zen/src/features/meet/circle/circle_service.dart';
 import 'package:zen/src/features/meet/circle/food_providers.dart';
 import 'package:zen/src/features/meet/circle/food_service.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
+import 'package:zen/src/features/meet/presentation/circle_widgets.dart';
 import 'package:zen/src/features/meet/presentation/events_screen.dart';
 import 'package:zen/src/features/meet/presentation/food_screen.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -133,6 +134,19 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                       ],
                     ),
                   ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 10, 0, 0),
+                    child: Text(
+                      t(
+                        'Każdy dostanie zaproszenie i sam zdecyduje: '
+                        '„Dołączam” albo „Nie, dziękuję”.',
+                      ),
+                      style: TextStyle(
+                        color: zen.textSecondary,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ),
                   SwitchListTile(
                     key: const Key('circle-pairs'),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 4),
@@ -210,7 +224,7 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                 onPressed: DinnerCircle.validSize(chosen.length + 1)
                     ? () => Navigator.of(context).pop(true)
                     : null,
-                child: Text(t('Utwórz')),
+                child: Text(t('Zaproś')),
               ),
             ],
           );
@@ -266,6 +280,22 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                   'kto gotuje, zbiera alergie i listę, kto co przynosi.',
                 ),
               ),
+              if (circles.invitations.isNotEmpty) ...<Widget>[
+                ZenSection(t('Zaproszenia')),
+                for (final DinnerCircle c in circles.invitations)
+                  CircleInviteCard(
+                    circle: c,
+                    service: circles,
+                    me: PeerShareCodec.normalizeAddress(
+                      ref.read(eventServiceProvider).host.ownAddress(),
+                    ),
+                    onJoined: () {
+                      if (context.mounted) {
+                        unawaited(CircleScreen.open(context, c.id));
+                      }
+                    },
+                  ),
+              ],
               if (circles.circles.isEmpty)
                 ZenEmpty(
                   icon: Icons.ramen_dining_rounded,
@@ -482,6 +512,124 @@ class CircleScreen extends ConsumerWidget {
     }
   }
 
+  /// "Opuść kółko", after asking.
+  Future<void> _leave(
+    BuildContext context,
+    WidgetRef ref,
+    DinnerCircle c,
+  ) async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(t('Opuścić kółko „{name}”?', {'name': c.name})),
+        content: Text(
+          t(
+            'Reszta kółka dostanie informację, a kolejka gotowania ułoży '
+            'się na nowo bez Ciebie. Wrócić możesz tylko z nowym '
+            'zaproszeniem.',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('circle-leave-confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('Opuść kółko')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) {
+      return;
+    }
+    await ref.read(circleServiceProvider).leave(c.id);
+    if (context.mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  /// "Zaproś": more friends, while there is room.
+  Future<void> _inviteMore(
+    BuildContext context,
+    WidgetRef ref,
+    DinnerCircle c,
+  ) async {
+    final SocialHubState social = ref.read(socialHubControllerProvider);
+    final List<FriendProfile> friends = <FriendProfile>[
+      for (final FriendProfile f in social.acceptedFriends)
+        if (!c.hasMember(f.address) && !c.isInvited(f.address)) f,
+    ];
+    final int room = kCircleMaxMembers - c.members.length - c.invited.length;
+    final Set<String> chosen = <String>{};
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => StatefulBuilder(
+        builder: (BuildContext context, StateSetter set) => AlertDialog(
+          title: Text(t('Zaproś do kółka')),
+          content: SizedBox(
+            width: 380,
+            child: friends.isEmpty
+                ? Text(t('Nie ma kogo zaprosić.'))
+                : ListView(
+                    shrinkWrap: true,
+                    children: <Widget>[
+                      Text(
+                        tn(
+                          room,
+                          one: 'Jest jeszcze {n} miejsce.',
+                          few: 'Są jeszcze {n} miejsca.',
+                          many: 'Jest jeszcze {n} miejsc.',
+                        ),
+                      ),
+                      for (final FriendProfile f in friends)
+                        CheckboxListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                          ),
+                          value: chosen.contains(f.address),
+                          title: Text(
+                            social.nameFor(f),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onChanged:
+                              chosen.contains(f.address) || chosen.length < room
+                              ? (bool? v) => set(() {
+                                  if (v ?? false) {
+                                    chosen.add(f.address);
+                                  } else {
+                                    chosen.remove(f.address);
+                                  }
+                                })
+                              : null,
+                        ),
+                    ],
+                  ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(t('Anuluj')),
+            ),
+            FilledButton(
+              key: const Key('circle-invite-send'),
+              onPressed: chosen.isEmpty
+                  ? null
+                  : () => Navigator.of(context).pop(true),
+              child: Text(t('Zaproś')),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok == true) {
+      await ref.read(circleServiceProvider).invite(c.id, chosen.toList());
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final CircleService circles = ref.watch(circleServiceProvider);
@@ -491,7 +639,10 @@ class CircleScreen extends ConsumerWidget {
       listenable: circles,
       builder: (BuildContext context, Widget? _) {
         final DinnerCircle? c = circles.circle(circleId);
-        if (c == null) {
+        final String me = PeerShareCodec.normalizeAddress(
+          ref.read(eventServiceProvider).host.ownAddress(),
+        );
+        if (c == null || (!c.hasMember(me) && !c.isInvited(me))) {
           return Scaffold(
             appBar: AppBar(),
             body: Center(
@@ -502,9 +653,18 @@ class CircleScreen extends ConsumerWidget {
             ),
           );
         }
-        final String me = PeerShareCodec.normalizeAddress(
-          ref.read(eventServiceProvider).host.ownAddress(),
-        );
+        if (!c.hasMember(me)) {
+          // Invited: what it is, and the answer.
+          return Scaffold(
+            appBar: AppBar(title: Text(c.name)),
+            body: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+              children: <Widget>[
+                CircleInviteCard(circle: c, service: circles, me: me),
+              ],
+            ),
+          );
+        }
         final List<(DateTime, CircleMember)> schedule = c.schedule(circles.now);
         final DateTime? next = schedule.isEmpty ? null : schedule.first.$1;
         final CircleGuest? myGuest = next == null ? null : c.guestOf(me, next);
@@ -514,6 +674,19 @@ class CircleScreen extends ConsumerWidget {
         final Map<String, String> items = next == null
             ? const <String, String>{}
             : c.items[DinnerCircle.dayKey(next)] ?? const <String, String>{};
+        final DateTime? how = circles.howPending(c.id);
+        // "Kto komu ile": the last dinner (two weeks at most), else the
+        // next one (shopping comes before it).
+        final (DateTime, CircleMember)? last = c.lastDinner(circles.now);
+        final DateTime? settleDay =
+            last != null &&
+                circles.now - last.$1.millisecondsSinceEpoch <
+                    const Duration(days: 14).inMilliseconds
+            ? last.$1
+            : next;
+        final String howDone = last == null
+            ? ''
+            : circleHowSummary(c, DinnerCircle.dayKey(last.$1));
         String nameOf(String a) =>
             c.members
                 .where((CircleMember m) => m.address == a)
@@ -521,7 +694,33 @@ class CircleScreen extends ConsumerWidget {
                 ?.name ??
             t('ktoś');
         return Scaffold(
-          appBar: AppBar(title: Text(c.name)),
+          appBar: AppBar(
+            title: Text(c.name),
+            actions: <Widget>[
+              PopupMenuButton<String>(
+                key: const Key('circle-menu'),
+                onSelected: (String v) {
+                  if (v == 'invite') {
+                    unawaited(_inviteMore(context, ref, c));
+                  } else if (v == 'leave') {
+                    unawaited(_leave(context, ref, c));
+                  }
+                },
+                itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                  if (!c.full)
+                    PopupMenuItem<String>(
+                      value: 'invite',
+                      child: Text(t('Zaproś do kółka')),
+                    ),
+                  PopupMenuItem<String>(
+                    key: const Key('circle-leave'),
+                    value: 'leave',
+                    child: Text(t('Opuść kółko')),
+                  ),
+                ],
+              ),
+            ],
+          ),
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
             children: <Widget>[
@@ -568,10 +767,42 @@ class CircleScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
-              ZenSection(
-                t('Kolejka'),
-                top: circles.swapRequests[c.id] != null ? 20 : 4,
-              ),
+              if (c.small)
+                ZenInfo(
+                  key: const Key('circle-small'),
+                  icon: Icons.group_add_rounded,
+                  tone: zen.warning,
+                  text: c.invited.isEmpty
+                      ? t(
+                          'W kółku jest mniej niż 4 osoby. Zaproś kogoś — '
+                          'menu u góry, „Zaproś do kółka”.',
+                        )
+                      : tn(
+                          c.invited.length,
+                          one: 'Czekamy na odpowiedź {n} osoby.',
+                          few: 'Czekamy na odpowiedź {n} osób.',
+                          many: 'Czekamy na odpowiedź {n} osób.',
+                        ),
+                ),
+              if (how != null)
+                CircleHowCard(circle: c, service: circles, day: how)
+              else if (howDone.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    t('Ostatnio: {summary}', {'summary': howDone}),
+                    style: TextStyle(color: zen.textSecondary, fontSize: 13),
+                  ),
+                ),
+              if (schedule.isNotEmpty)
+                CircleNextDinnerCard(
+                  circle: c,
+                  service: circles,
+                  at: schedule.first.$1,
+                  cook: schedule.first.$2,
+                  me: me,
+                ),
+              ZenSection(t('Kolejka')),
               if (schedule.isEmpty)
                 ZenCard(
                   child: Text(
@@ -659,6 +890,15 @@ class CircleScreen extends ConsumerWidget {
                     ],
                   ),
               ],
+              if (settleDay != null)
+                CircleSettleUp(
+                  circle: c,
+                  service: circles,
+                  day: settleDay,
+                  me: me,
+                  format: formatKitty,
+                  parse: parseKittyCents,
+                ),
               ZenSection(t('Kółko otwarte')),
               ZenGroup(
                 children: <Widget>[
@@ -818,12 +1058,32 @@ class CircleScreen extends ConsumerWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      subtitle: Text(c.prefs[m.address] ?? '—'),
+                      subtitle: Text(
+                        <String>[
+                          for (final CircleDiet d
+                              in c.diets[m.address] ?? const <CircleDiet>{})
+                            d.label,
+                          if ((c.prefs[m.address] ?? '').isNotEmpty)
+                            c.prefs[m.address]!,
+                        ].join(' · ').ifEmpty('—'),
+                      ),
                       trailing: m.address == me
                           ? IconButton(
+                              key: const Key('circle-prefs-edit'),
                               tooltip: t('Edytuj'),
                               icon: const Icon(Icons.edit_rounded),
                               onPressed: () async {
+                                final Set<CircleDiet>? diets =
+                                    await showCircleDietsDialog(
+                                      context,
+                                      c.diets[me] ?? const <CircleDiet>{},
+                                    );
+                                if (diets != null) {
+                                  await circles.setMyDiets(c.id, diets);
+                                }
+                                if (!context.mounted) {
+                                  return;
+                                }
                                 final String? prefs = await _ask(
                                   context,
                                   t('Twoje preferencje i alergie'),
@@ -836,6 +1096,17 @@ class CircleScreen extends ConsumerWidget {
                             )
                           : null,
                     ),
+                  for (final MapEntry<String, CircleInvite> i
+                      in c.invited.entries)
+                    ListTile(
+                      leading: const Icon(Icons.hourglass_top_rounded),
+                      title: Text(
+                        i.value.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(t('zaproszenie bez odpowiedzi')),
+                    ),
                 ],
               ),
             ],
@@ -844,6 +1115,10 @@ class CircleScreen extends ConsumerWidget {
       },
     );
   }
+}
+
+extension on String {
+  String ifEmpty(String other) => isEmpty ? other : this;
 }
 
 /// A [DinnerCircle.dayKey] ("2026-10-15") for people: "15.10.2026" in

@@ -18,6 +18,7 @@ import 'package:zen/src/features/meet/events/event_photo.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/presentation/circle_screen.dart'
     show parseKittyCents;
+import 'package:zen/src/features/meet/presentation/meet_thread_sheet.dart';
 import 'package:zen/src/features/meet/presentation/safe_photo.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 
@@ -52,11 +53,11 @@ String foodAllergenText(FoodOffer o) => switch (o.allergenInfo) {
 };
 
 /// Shared food: the offers within reach, and "Podziel się jedzeniem" for
-/// circle [circleId].
+/// circle [circleId]; without a circle, "Gotuję dziś — dosiądź się".
 class FoodScreen extends ConsumerWidget {
   const FoodScreen({this.circleId, super.key});
 
-  /// The circle a new offer goes to (`null`: only the list).
+  /// The circle a new offer goes to (`null`: the list, and free seats).
   final String? circleId;
 
   static Future<void> open(BuildContext context, {String? circleId}) =>
@@ -65,6 +66,10 @@ class FoodScreen extends ConsumerWidget {
           builder: (BuildContext context) => FoodScreen(circleId: circleId),
         ),
       );
+
+  /// "Gotuję dziś — dosiądź się": open seats at this person's table.
+  static Future<void> openSeats(BuildContext context) =>
+      FoodShareScreen.open(context, '', seats: true);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -82,7 +87,12 @@ class FoodScreen extends ConsumerWidget {
           key: const Key('food-screen'),
           appBar: AppBar(title: Text(t('Jedzenie do wzięcia'))),
           floatingActionButton: circle == null
-              ? null
+              ? FloatingActionButton.extended(
+                  key: const Key('food-seats'),
+                  onPressed: () => unawaited(FoodScreen.openSeats(context)),
+                  icon: const Icon(Icons.event_seat_rounded),
+                  label: Text(t('Gotuję dziś')),
+                )
               : FloatingActionButton.extended(
                   key: const Key('food-share'),
                   onPressed: () =>
@@ -102,6 +112,8 @@ class FoodScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 8),
+              for (final (FoodOffer o, String who, String name) in food.toVouch)
+                _VouchCard(food: food, offer: o, who: who, name: name),
               if (offers.isEmpty)
                 ZenEmpty(
                   icon: Icons.takeout_dining_rounded,
@@ -145,6 +157,8 @@ class FoodOfferCard extends ConsumerWidget {
             'cook': cook,
             'via': ref.read(eventServiceProvider).host.nameOf(via),
           })
+        : o.circleName.isEmpty
+        ? cook
         : t('{cook} · {circle}', {'cook': cook, 'circle': o.circleName});
     final String time = o.expiredAt(now)
         ? t('Zakończone')
@@ -165,7 +179,7 @@ class FoodOfferCard extends ConsumerWidget {
             children: <Widget>[
               if (photo.isNotEmpty) ...<Widget>[
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: context.zenRadius(12),
                   child: SizedBox(
                     width: 64,
                     height: 64,
@@ -179,7 +193,9 @@ class FoodOfferCard extends ConsumerWidget {
                 const SizedBox(width: 12),
               ] else ...<Widget>[
                 ZenIconBadge(
-                  icon: Icons.takeout_dining_rounded,
+                  icon: o.seats
+                      ? Icons.event_seat_rounded
+                      : Icons.takeout_dining_rounded,
                   tone: tone,
                   size: 40,
                 ),
@@ -256,7 +272,14 @@ class FoodOfferCard extends ConsumerWidget {
             children: <Widget>[
               ZenPill(
                 tone: tone,
-                text: o.left == 0
+                text: o.seats
+                    ? (o.left == 0
+                          ? t('Komplet przy stole')
+                          : t('Wolne miejsca: {left} z {all}', {
+                              'left': o.left,
+                              'all': o.portions,
+                            }))
+                    : o.left == 0
                     ? t('Wszystko rozdane')
                     : t('{left} z {all} porcji', {
                         'left': o.left,
@@ -351,7 +374,11 @@ class _TakerActions extends StatelessWidget {
                   : '${o.moneyLabel}. $kFoodMoneyNote',
           };
           return AlertDialog(
-            title: Text(t('Biorę: {title}', {'title': o.title})),
+            title: Text(
+              o.seats
+                  ? t('Dosiądę się: {title}', {'title': o.title})
+                  : t('Biorę: {title}', {'title': o.title}),
+            ),
             content: SizedBox(
               width: 380,
               child: ListView(
@@ -362,12 +389,19 @@ class _TakerActions extends StatelessWidget {
                       children: <Widget>[
                         Expanded(
                           child: Text(
-                            tn(
-                              portions,
-                              one: '{n} porcja',
-                              few: '{n} porcje',
-                              many: '{n} porcji',
-                            ),
+                            o.seats
+                                ? tn(
+                                    portions,
+                                    one: '{n} miejsce',
+                                    few: '{n} miejsca',
+                                    many: '{n} miejsc',
+                                  )
+                                : tn(
+                                    portions,
+                                    one: '{n} porcja',
+                                    few: '{n} porcje',
+                                    many: '{n} porcji',
+                                  ),
                             style: TextStyle(
                               color: zen.textPrimary,
                               fontWeight: FontWeight.w700,
@@ -452,7 +486,7 @@ class _TakerActions extends StatelessWidget {
               FilledButton(
                 key: const Key('food-take-confirm'),
                 onPressed: () => Navigator.of(context).pop(true),
-                child: Text(t('Biorę')),
+                child: Text(o.seats ? t('Dosiądę się') : t('Biorę')),
               ),
             ],
           );
@@ -518,13 +552,24 @@ class _TakerActions extends StatelessWidget {
         return FilledButton.icon(
           key: Key('food-take-${o.id}'),
           onPressed: () => unawaited(_take(context)),
-          icon: const Icon(Icons.restaurant_rounded),
-          label: Text(t('Biorę')),
+          icon: Icon(
+            o.seats ? Icons.event_seat_rounded : Icons.restaurant_rounded,
+          ),
+          label: Text(o.seats ? t('Dosiądę się') : t('Biorę')),
         );
       case FoodRequestState.pending:
         return Row(
           children: <Widget>[
-            Expanded(child: Text(t('Czekasz na odpowiedź.'), style: note)),
+            Expanded(
+              child: Text(
+                food.viaOf(o.id) != null && o.seats
+                    ? t('Czekasz na odpowiedź (najpierw ręczy {via}).', {
+                        'via': food.host.nameOf(food.viaOf(o.id)!),
+                      })
+                    : t('Czekasz na odpowiedź.'),
+                style: note,
+              ),
+            ),
             cancel,
           ],
         );
@@ -554,9 +599,9 @@ class _TakerActions extends StatelessWidget {
                 Icon(Icons.place_rounded, size: 18, color: zen.textMuted),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: Text(
+                  child: SelectableText(
                     req.place.isEmpty
-                        ? t('Miejsce ustalcie w wiadomości.')
+                        ? t('Miejsce ustalcie na czacie.')
                         : req.place,
                     key: const Key('food-place'),
                     style: note,
@@ -564,6 +609,8 @@ class _TakerActions extends StatelessWidget {
                 ),
               ],
             ),
+            const SizedBox(height: 4),
+            FoodChatButton(food: food, offer: o),
             if (req.exchange == FoodExchange.points) ...<Widget>[
               const SizedBox(height: 6),
               if (req.paid)
@@ -647,6 +694,11 @@ class _CookRequests extends ConsumerWidget {
                 Text(
                   r.via == null
                       ? r.name
+                      : r.vouched
+                      ? t('{name}, ręczy {via}', {
+                          'name': r.name,
+                          'via': nameOf(r.via!),
+                        })
                       : t('{name}, przez {via}', {
                           'name': r.name,
                           'via': nameOf(r.via!),
@@ -704,6 +756,7 @@ class _CookRequests extends ConsumerWidget {
                       ),
                     ],
                     FoodRequestState.accepted => <Widget>[
+                      FoodChatButton(food: food, offer: o, who: r.address),
                       FilledButton.tonal(
                         key: Key('food-done-${r.address}'),
                         onPressed: () =>
@@ -725,6 +778,7 @@ class _CookRequests extends ConsumerWidget {
                         t('Oddane'),
                         style: TextStyle(color: zen.success, fontSize: 13),
                       ),
+                      FoodChatButton(food: food, offer: o, who: r.address),
                     ],
                     FoodRequestState.declined => <Widget>[
                       Text(
@@ -749,20 +803,146 @@ class _CookRequests extends ConsumerWidget {
   }
 }
 
+/// "Napisz": the small chat of an accepted request (sealed for the two of
+/// them), with the unread count.
+class FoodChatButton extends StatelessWidget {
+  const FoodChatButton({
+    required this.food,
+    required this.offer,
+    this.who,
+    super.key,
+  });
+
+  final FoodService food;
+  final FoodOffer offer;
+
+  /// The one who asked (the cook's side); `null` on the asker's side.
+  final String? who;
+
+  @override
+  Widget build(BuildContext context) {
+    final FoodOffer o = offer;
+    if (!food.canChat(o.id, who: who)) {
+      return const SizedBox.shrink();
+    }
+    final int unread = food.unread(o.id, who: who);
+    final String other = who == null
+        ? food.cookNameOf(o)
+        : o.requests[who!]?.name ?? t('ktoś');
+    return TextButton.icon(
+      key: Key('food-chat-${o.id}-${who ?? 'cook'}'),
+      onPressed: () => unawaited(
+        showMeetThreadSheet(
+          context,
+          title: t('{name} · {title}', {'name': other, 'title': o.title}),
+          listenable: food,
+          messages: () => food.thread(o.id, who: who),
+          nameOf: (String _) => other,
+          send: (String text) => food.sendChat(o.id, text, who: who),
+          empty: t('Np. „Dzwoń domofonem 12” albo „Spóźnię się 10 min”.'),
+          onSeen: () => unawaited(food.markRead(o.id, who: who)),
+        ),
+      ),
+      icon: Badge(
+        isLabelVisible: unread > 0,
+        label: Text('$unread'),
+        child: const Icon(Icons.chat_bubble_outline_rounded),
+      ),
+      label: Text(t('Napisz')),
+    );
+  }
+}
+
+/// As the friend in between of "Gotuję dziś — dosiądź się": a friend of
+/// ours wants a seat; their request goes on only with "Ręczę".
+class _VouchCard extends StatelessWidget {
+  const _VouchCard({
+    required this.food,
+    required this.offer,
+    required this.who,
+    required this.name,
+  });
+
+  final FoodService food;
+  final FoodOffer offer;
+  final String who;
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return ZenCard(
+      key: Key('food-vouch-${offer.id}-$who'),
+      tone: zen.warning,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            t('{name} chce się dosiąść u {cook}', {
+              'name': name,
+              'cook': food.cookNameOf(offer),
+            }),
+            style: TextStyle(
+              color: zen.textPrimary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            t(
+              '„{title}”. {cook} nie zna tej osoby — dostanie prośbę tylko, '
+              'jeśli za nią ręczysz.',
+              {'title': offer.title, 'cook': food.cookNameOf(offer)},
+            ),
+            style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              FilledButton(
+                key: Key('food-vouch-yes-$who'),
+                onPressed: () => unawaited(food.vouch(offer.id, who, true)),
+                child: Text(t('Ręczę')),
+              ),
+              OutlinedButton(
+                onPressed: () => unawaited(food.vouch(offer.id, who, false)),
+                child: Text(t('Nie tym razem')),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// "Podziel się jedzeniem": the form for a new offer in circle
 /// [circleId].
 class FoodShareScreen extends ConsumerStatefulWidget {
-  const FoodShareScreen({required this.circleId, super.key});
+  const FoodShareScreen({
+    required this.circleId,
+    this.seats = false,
+    super.key,
+  });
 
+  /// The circle ('' for free seats without one).
   final String circleId;
 
-  static Future<void> open(BuildContext context, String circleId) =>
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (BuildContext context) =>
-              FoodShareScreen(circleId: circleId),
-        ),
-      );
+  /// "Gotuję dziś — dosiądź się": free seats at this person's table.
+  final bool seats;
+
+  static Future<void> open(
+    BuildContext context,
+    String circleId, {
+    bool seats = false,
+  }) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (BuildContext context) =>
+          FoodShareScreen(circleId: circleId, seats: seats),
+    ),
+  );
 
   @override
   ConsumerState<FoodShareScreen> createState() => _FoodShareScreenState();
@@ -774,16 +954,30 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
   final TextEditingController _place = TextEditingController();
   final TextEditingController _points = TextEditingController();
   final TextEditingController _money = TextEditingController();
-  late DateTime _from = DateTime.now();
-  late DateTime _until = DateTime.now().add(const Duration(hours: 4));
+  late DateTime _from = widget.seats ? _tonight() : DateTime.now();
+  late DateTime _until = _from.add(Duration(hours: widget.seats ? 2 : 4));
   int _portions = 2;
   String? _photo;
-  final Set<FoodMode> _modes = <FoodMode>{FoodMode.takeaway};
+  late final Set<FoodMode> _modes = <FoodMode>{
+    widget.seats ? FoodMode.dineIn : FoodMode.takeaway,
+  };
   final Set<FoodExchange> _exchanges = <FoodExchange>{FoodExchange.free};
   final Set<FoodDiet> _diet = <FoodDiet>{};
   final Set<FoodAllergen> _allergens = <FoodAllergen>{};
   FoodAllergenInfo? _allergenInfo;
-  FoodReach _reach = FoodReach.circle;
+  late FoodReach _reach = widget.circleId.isEmpty
+      ? FoodReach.friends
+      : FoodReach.circle;
+
+  /// Today at 19:00, or in an hour when that is past.
+  static DateTime _tonight() {
+    final DateTime now = DateTime.now();
+    final DateTime seven = DateTime(now.year, now.month, now.day, 19);
+    return seven.isAfter(now)
+        ? seven
+        : DateTime(now.year, now.month, now.day, now.hour + 1);
+  }
+
   bool _sending = false;
 
   @override
@@ -882,6 +1076,7 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
           moneyLabel: _money.text,
           reach: _reach,
           place: _place.text,
+          seats: widget.seats,
         );
     if (!mounted) {
       return;
@@ -924,14 +1119,19 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
     final Color tone = zenTone(zen, 3);
     final FoodService food = ref.watch(foodServiceProvider);
     final bool canPoints = food.points.myKey != null;
-    final DinnerCircle? circle = ref
-        .watch(circleServiceProvider)
-        .circle(widget.circleId);
+    final bool seats = widget.seats;
+    final DinnerCircle? circle = widget.circleId.isEmpty
+        ? null
+        : ref.watch(circleServiceProvider).circle(widget.circleId);
     final int now = DateTime.now().millisecondsSinceEpoch;
     final TextStyle hint = TextStyle(color: zen.textSecondary, fontSize: 12.5);
     return Scaffold(
       key: const Key('food-share-screen'),
-      appBar: AppBar(title: Text(t('Podziel się jedzeniem'))),
+      appBar: AppBar(
+        title: Text(
+          seats ? t('Gotuję dziś — dosiądź się') : t('Podziel się jedzeniem'),
+        ),
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: <Widget>[
@@ -942,7 +1142,7 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
             textCapitalization: TextCapitalization.sentences,
             onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
-              labelText: t('Co'),
+              labelText: seats ? t('Co gotujesz') : t('Co'),
               hintText: t('np. Pierogi ruskie, zupa dyniowa'),
               prefixIcon: const Icon(Icons.restaurant_rounded),
             ),
@@ -960,7 +1160,7 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
             children: <Widget>[
               if (_photo != null) ...<Widget>[
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: context.zenRadius(12),
                   child: SizedBox(
                     width: 56,
                     height: 56,
@@ -980,7 +1180,20 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
                 ),
             ],
           ),
-          ZenSection(t('Ile porcji'), top: 12),
+          if (seats)
+            ZenInfo(
+              icon: Icons.event_seat_rounded,
+              tone: tone,
+              text: t(
+                'Wolne miejsca przy Twoim stole dziś. Pierwsze prośby '
+                'przyjmujesz Ty, adres dostaje tylko przyjęty gość. Znajomi '
+                'znajomych proszą przez kogoś, kto za nich ręczy.',
+              ),
+            ),
+          ZenSection(
+            seats ? t('Ile wolnych miejsc') : t('Ile porcji'),
+            top: 12,
+          ),
           Row(
             children: <Widget>[
               IconButton(
@@ -991,12 +1204,19 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
                 icon: const Icon(Icons.remove_rounded),
               ),
               Text(
-                tn(
-                  _portions,
-                  one: '{n} porcja',
-                  few: '{n} porcje',
-                  many: '{n} porcji',
-                ),
+                seats
+                    ? tn(
+                        _portions,
+                        one: '{n} miejsce',
+                        few: '{n} miejsca',
+                        many: '{n} miejsc',
+                      )
+                    : tn(
+                        _portions,
+                        one: '{n} porcja',
+                        few: '{n} porcje',
+                        many: '{n} porcji',
+                      ),
                 key: const Key('food-portions'),
                 style: TextStyle(
                   color: zen.textPrimary,
@@ -1006,7 +1226,7 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
               ),
               IconButton(
                 tooltip: t('Więcej'),
-                onPressed: _portions < kFoodMaxPortions
+                onPressed: _portions < (seats ? 8 : kFoodMaxPortions)
                     ? () => setState(() => _portions++)
                     : null,
                 icon: const Icon(Icons.add_rounded),
@@ -1018,7 +1238,7 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
             children: <Widget>[
               ListTile(
                 leading: const Icon(Icons.schedule_rounded),
-                title: Text(t('Gotowe od')),
+                title: Text(seats ? t('Kolacja o') : t('Gotowe od')),
                 trailing: Text(foodWhen(_from.millisecondsSinceEpoch, now)),
                 onTap: () async {
                   final DateTime? d = await _pick(_from);
@@ -1056,13 +1276,14 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
                 style: TextStyle(color: zen.warning, fontSize: 12.5),
               ),
             ),
-          ZenSection(t('Jak'), top: 16),
-          _chips<FoodMode>(
-            FoodMode.values,
-            (FoodMode m) => m.label,
-            _modes.contains,
-            (FoodMode m, bool on) => on ? _modes.add(m) : _modes.remove(m),
-          ),
+          ZenSection(seats ? t('Gdzie') : t('Jak'), top: 16),
+          if (!seats)
+            _chips<FoodMode>(
+              FoodMode.values,
+              (FoodMode m) => m.label,
+              _modes.contains,
+              (FoodMode m, bool on) => on ? _modes.add(m) : _modes.remove(m),
+            ),
           if (_modes.isNotEmpty) ...<Widget>[
             const SizedBox(height: 8),
             TextField(
@@ -1174,11 +1395,13 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
             runSpacing: 6,
             children: <Widget>[
               for (final FoodReach r in FoodReach.values)
-                ChoiceChip(
-                  label: Text(r.label),
-                  selected: _reach == r,
-                  onSelected: (_) => setState(() => _reach = r),
-                ),
+                if (circle != null || r != FoodReach.circle)
+                  ChoiceChip(
+                    key: Key('food-reach-${r.code}'),
+                    label: Text(circle == null ? r.seatsLabel : r.label),
+                    selected: _reach == r,
+                    onSelected: (_) => setState(() => _reach = r),
+                  ),
             ],
           ),
           if (circle != null) ...<Widget>[
@@ -1199,8 +1422,10 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
           FilledButton.icon(
             key: const Key('food-submit'),
             onPressed: _ready && !_sending ? () => unawaited(_submit()) : null,
-            icon: const Icon(Icons.takeout_dining_rounded),
-            label: Text(t('Udostępnij')),
+            icon: Icon(
+              seats ? Icons.event_seat_rounded : Icons.takeout_dining_rounded,
+            ),
+            label: Text(seats ? t('Zaproś do stołu') : t('Udostępnij')),
           ),
         ],
       ),

@@ -249,6 +249,12 @@ void main() {
       hour: 19,
       firstDinner: DateTime(2026, 10, 1),
     );
+    // Nobody is in it before saying "Dołączam".
+    expect(bob.circles.circles, isEmpty);
+    expect(bob.circles.invitations.single.id, c.id);
+    for (final _Host h in <_Host>[bob, cela, dina]) {
+      await h.circles.answerInvite(c.id, true);
+    }
     final List<(DateTime, CircleMember)> s = bob.circles
         .circle(c.id)!
         .schedule(bob.clock, count: 4);
@@ -432,6 +438,9 @@ void main() {
       hour: 19,
       firstDinner: DateTime(2026, 10, 1),
     );
+    for (final _Host h in <_Host>[bob, cela, dina]) {
+      await h.circles.answerInvite(c.id, true);
+    }
     // A member's copy dated far ahead is taken as made now…
     final Map<String, dynamic> ahead = c.toJson()
       ..['name'] = 'Zamrożone'

@@ -187,6 +187,9 @@ enum FriendListAudience {
   /// acquaintance sees it only after asking and being let in.
   friends,
 
+  /// Only close friends ("przyjaciele"); others may ask and be let in.
+  close,
+
   /// Only friends this person let see it, after they asked.
   onRequest,
 
@@ -543,9 +546,10 @@ final class MeetBook {
   /// Addresses blocked in "W pobliżu", normalised.
   final Set<String> nearbyBlocked = <String>{};
 
-  /// Whether this phone shows itself to people nearby. Off until the
-  /// person turns it on (privacy by default).
-  bool nearbyVisible = false;
+  /// Whether this phone shows itself to people nearby: on by default
+  /// (low-power advertising; strangers see only a changing token, friends
+  /// recognise it), the person can turn it off.
+  bool nearbyVisible = true;
 
   /// Who may see this person's friend list.
   FriendListAudience friendListAudience = FriendListAudience.friends;
@@ -563,16 +567,19 @@ final class MeetBook {
 
   /// Whether [friend] may see the list now ([weak]: they are only a weak
   /// acquaintance).
-  bool showsFriendListTo(String friend, {bool weak = false}) =>
-      switch (friendListAudience) {
-        FriendListAudience.all => true,
-        FriendListAudience.friends =>
-          !weak || friendListAllowed.contains(_key(friend)),
-        FriendListAudience.nobody => false,
-        FriendListAudience.onRequest => friendListAllowed.contains(
-          _key(friend),
-        ),
-      };
+  bool showsFriendListTo(
+    String friend, {
+    bool weak = false,
+    bool close = false,
+  }) => switch (friendListAudience) {
+    FriendListAudience.all => true,
+    FriendListAudience.friends =>
+      !weak || friendListAllowed.contains(_key(friend)),
+    FriendListAudience.close =>
+      close || friendListAllowed.contains(_key(friend)),
+    FriendListAudience.nobody => false,
+    FriendListAudience.onRequest => friendListAllowed.contains(_key(friend)),
+  };
 
   /// Record sound during this person's alarm and send it to the friends
   /// who get the alarm (off by default).
@@ -609,9 +616,10 @@ final class MeetBook {
   static const int maxAlarmKeysPerFriend = 4;
 
   /// Look around for friends now and then without the "W pobliżu" screen
-  /// open (off by default: scanning is for that screen): a short
-  /// low-power scan every few minutes that only marks friends met in person.
-  bool nearbyBackgroundScan = false;
+  /// open: a short low-power scan every few minutes (never on low battery,
+  /// in battery saver or Doze, see `NearbyLookPolicy`) that only marks
+  /// friends met in person. On by default; the person can turn it off.
+  bool nearbyBackgroundScan = true;
 
   /// What was last sent as the friend list (to send again only on change).
   String friendListSent = '';
@@ -727,7 +735,8 @@ final class MeetBook {
     'given': nearbyGivenTo.toList(),
     if (nearbyPrivate != null) 'np': nearbyPrivate,
     if (nearbyBlocked.isNotEmpty) 'nb': nearbyBlocked.toList(),
-    if (nearbyVisible) 'visible': true,
+    // Always written: a book without it means on.
+    'visible': nearbyVisible,
     'la': friendListAudience.name,
     if (friendListAllowed.isNotEmpty) 'listOk': friendListAllowed.toList(),
     if (alarmRecordAudio) 'alarmAudio': true,
@@ -787,7 +796,7 @@ final class MeetBook {
         }
       }
     }
-    book.nearbyVisible = json['visible'] == true;
+    book.nearbyVisible = json['visible'] != false;
     book.friendListAudience =
         FriendListAudience.byName(json['la']) ?? FriendListAudience.friends;
     final Object? listOk = json['listOk'];
@@ -826,7 +835,7 @@ final class MeetBook {
         }
       }
     }
-    book.nearbyBackgroundScan = json['bgScan'] == true;
+    book.nearbyBackgroundScan = json['bgScan'] != false;
     book.friendListSent = json['listSent'] is String
         ? json['listSent'] as String
         : '';

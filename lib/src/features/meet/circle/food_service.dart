@@ -10,9 +10,12 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/circle/circle_service.dart';
 import 'package:zen/src/features/meet/circle/food_model.dart';
 import 'package:zen/src/features/meet/circle/food_points.dart';
+import 'package:zen/src/features/meet/circle/food_seal.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
+import 'package:zen/src/features/meet/meet_thread.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/hybrid_kem.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// Payload types of shared food.
@@ -22,13 +25,15 @@ abstract final class FoodTypes {
   /// through each friend (`hops`).
   static const String offer = 'food_offer';
 
-  /// "Biorę" (`s` absent), "cancel" or "paid": asker → cook. A friend of a
-  /// friend sends it to the friend the offer came through, who passes it on
-  /// with `by`.
+  /// "Biorę" (`s` absent, with the request's public key `ek`), "cancel",
+  /// "paid" or "chat" (sealed `box`): asker → cook. A friend of a friend
+  /// sends it to the friend the offer came through, who passes it on with
+  /// `by` (for free seats only once they vouch, `vch`).
   static const String request = 'food_req';
 
-  /// The cook's answer: "ok" (with the place), "no", "done". With `to`, for
-  /// the friend in between to pass on.
+  /// The cook's answer: "ok" (with the place sealed for the asker: `kc`,
+  /// `pl`), "no", "done", "chat" (sealed `box`). With `to`, for the friend
+  /// in between to pass on.
   static const String answer = 'food_ans';
 
   static const Set<String> all = <String>{offer, request, answer};
@@ -43,8 +48,15 @@ abstract final class FoodTypes {
 /// confirms the hand-over. Past "ready until" an offer closes by itself.
 ///
 /// Every message goes between friends or circle members; a friend of a
-/// friend talks to the cook through the friend who passed the offer on
-/// (who therefore also sees the place in the answer).
+/// friend talks to the cook through the friend who passed the offer on.
+/// The place and the small chat of an accepted request are sealed for the
+/// asker alone (food_seal.dart): the friend in between carries only
+/// ciphertext.
+///
+/// "Gotuję dziś — dosiądź się" is an offer of seats at the cook's table
+/// ([FoodOffer.seats], "Zjedz u mnie" only, with or without a circle):
+/// friends (or only close friends) see it, friends of friends through a
+/// friend who vouches for each of them ([vouch]).
 ///
 /// Private, on this phone only: who fed whom how often ([balanceWith]) and
 /// the no-shows the cook marked ([noShowsOf]).
@@ -54,13 +66,18 @@ final class FoodService extends ChangeNotifier {
     required this.disk,
     required this.circles,
     this.points = const NoFoodPoints(),
+    List<String> Function()? closeFriends,
     int Function()? now,
     Random? random,
-  }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch),
+  }) : _closeFriends = closeFriends ?? (() => const <String>[]),
+       _now = now ?? (() => DateTime.now().millisecondsSinceEpoch),
        _random = random ?? Random.secure();
 
   final EventHost host;
   final LedgerDisk disk;
+
+  /// This person's close friends ("przyjaciele"), for [FoodReach.close].
+  final List<String> Function() _closeFriends;
 
   /// Who is in which circle (the default audience).
   final CircleService circles;
@@ -108,6 +125,14 @@ final class FoodService extends ChangeNotifier {
 
   final Map<String, List<int>> _newFrom = <String, List<int>>{};
   Future<void> _queue = Future<void>.value();
+
+  /// The small chat of each accepted request (offer id | the other one).
+  final MeetThreads _threads = MeetThreads();
+
+  /// As the friend in between of free seats: friends of ours who asked,
+  /// waiting for "Ręczę" (offer id → who → their request).
+  final Map<String, Map<String, Map<String, dynamic>>> _toVouch =
+      <String, Map<String, Map<String, dynamic>>>{};
 
   int get now => _now();
 
@@ -237,6 +262,17 @@ final class FoodService extends ChangeNotifier {
       counts(_gave, json['gave']);
       counts(_got, json['got']);
       counts(_noShows, json['ns']);
+      _threads.readJson(json['chat']);
+      _toVouch.clear();
+      (json['tv'] as Map?)?.forEach((Object? k, Object? v) {
+        if (k is String && v is Map) {
+          _toVouch[k] = <String, Map<String, dynamic>>{
+            for (final MapEntry<dynamic, dynamic> e in v.entries)
+              if (e.key is String && e.value is Map<String, dynamic>)
+                e.key as String: e.value as Map<String, dynamic>,
+          };
+        }
+      });
       notifyListeners();
     } on Object catch (error, stack) {
       logZenError('Odczyt jedzenia', error, stack);
@@ -254,6 +290,10 @@ final class FoodService extends ChangeNotifier {
     _mine.removeWhere((String id, FoodRequest _) => gone(id));
     _forwarded.removeWhere(gone);
     _relayed.removeWhere((String id, Set<String> _) => gone(id));
+    _toVouch.removeWhere(
+      (String id, Map<String, Map<String, dynamic>> _) => gone(id),
+    );
+    _threads.removeWhere((String key) => gone(key.split('|').first));
     while (_hidden.length > maxForeignOffers) {
       _hidden.remove(_hidden.first);
     }
@@ -288,6 +328,8 @@ final class FoodService extends ChangeNotifier {
             'gave': _gave,
             'got': _got,
             'ns': _noShows,
+            'chat': _threads.toJson(),
+            'tv': _toVouch,
           }),
         ),
       ),
@@ -312,9 +354,19 @@ final class FoodService extends ChangeNotifier {
   bool _inCircle(FoodOffer o, String who) =>
       _circleOf(o)?.hasMember(who) ?? false;
 
+  Set<String> get _close => <String>{
+    for (final String f in _closeFriends())
+      if (host.isFriend(f)) _n(f),
+  };
+
   /// Whether [who] may see this person's offer [o] directly.
   bool _inAudience(FoodOffer o, String who) =>
-      _inCircle(o, who) || (o.reach != FoodReach.circle && host.isFriend(who));
+      _inCircle(o, who) ||
+      switch (o.reach) {
+        FoodReach.circle => false,
+        FoodReach.close => _close.contains(_n(who)),
+        FoodReach.friends || FoodReach.friendsOfFriends => host.isFriend(who),
+      };
 
   /// Everyone who gets this person's offer [o] directly.
   Set<String> _audience(FoodOffer o) {
@@ -323,7 +375,8 @@ final class FoodService extends ChangeNotifier {
       for (final CircleMember m
           in _circleOf(o)?.members ?? const <CircleMember>[])
         if (_n(m.address) != me) _n(m.address),
-      if (o.reach != FoodReach.circle)
+      if (o.reach == FoodReach.close) ..._close,
+      if (o.reach == FoodReach.friends || o.reach == FoodReach.friendsOfFriends)
         for (final String f in host.friends()) _n(f),
       // Those already asking, should the circle have changed under them.
       for (final FoodRequest r in o.requests.values)
@@ -357,12 +410,27 @@ final class FoodService extends ChangeNotifier {
     return o.cookName.isEmpty ? t('Ktoś') : o.cookName;
   }
 
+  /// Friends of ours waiting for "Ręczę" before their request for free
+  /// seats goes on: (offer, who, their name).
+  List<(FoodOffer, String, String)> get toVouch =>
+      <(FoodOffer, String, String)>[
+        for (final MapEntry<String, Map<String, Map<String, dynamic>>> o
+            in _toVouch.entries)
+          if (_offers[o.key] case final FoodOffer offer)
+            for (final String who in o.value.keys)
+              (offer, who, host.nameOf(who)),
+      ];
+
   // ---- the cook ----
 
   /// Puts out a dish in circle [circleId]. `null` when something is
   /// missing: a title, a way to take it, an exchange, the allergen
   /// information ("Brak informacji" counts), a sensible time, or, for "Za
   /// punkty", a price and a place in the pyramid.
+  ///
+  /// With [seats] ("Gotuję dziś — dosiądź się") the portions are seats at
+  /// this person's table, eaten there only; [circleId] may then be empty
+  /// (no circle: friends, close friends or friends of friends see it).
   Future<FoodOffer?> share({
     required String circleId,
     required String title,
@@ -380,14 +448,17 @@ final class FoodService extends ChangeNotifier {
     String moneyLabel = '',
     FoodReach reach = FoodReach.circle,
     String place = '',
+    bool seats = false,
   }) async {
-    final DinnerCircle? c = circles.circle(circleId);
+    final DinnerCircle? c = circleId.isEmpty ? null : circles.circle(circleId);
     final String name = title.trim();
     final int t = _now();
     final String? myKey = points.myKey;
     final bool withPoints = exchanges.contains(FoodExchange.points);
-    if (c == null ||
-        !c.hasMember(_me) ||
+    if ((c == null && (!seats || circleId.isNotEmpty)) ||
+        (c != null && !c.hasMember(_me)) ||
+        (c == null && reach == FoodReach.circle) ||
+        (seats && (modes.length != 1 || !modes.contains(FoodMode.dineIn))) ||
         name.isEmpty ||
         modes.isEmpty ||
         exchanges.isEmpty ||
@@ -411,8 +482,8 @@ final class FoodService extends ChangeNotifier {
       id: _newId(),
       cook: _me,
       cookName: host.ownName(),
-      circleId: c.id,
-      circleName: c.name,
+      circleId: c?.id ?? '',
+      circleName: c?.name ?? '',
       title: clip(name, kFoodMaxTitle),
       note: clip(note, kFoodMaxNote),
       photo: photo,
@@ -435,6 +506,7 @@ final class FoodService extends ChangeNotifier {
       reach: reach,
       updatedAt: t,
       place: clip(place, kFoodMaxPlace),
+      seats: seats,
     );
     _offers[o.id] = o;
     await _save();
@@ -484,13 +556,32 @@ final class FoodService extends ChangeNotifier {
         r.portions > o.left) {
       return false;
     }
+    final Uint8List? key = decodeHybridPublicKey(r.key);
+    if (key == null) {
+      return false;
+    }
+    // The place (and the chat) only for the one who asked: sealed to the
+    // key of their request, never readable by the friend in between.
+    final FoodPlaceSeal seal = await sealFoodPlace(
+      offerId: o.id,
+      place: o.place,
+      publicKey: key,
+    );
     final FoodOffer updated = _recount(
       o,
-      r.copyWith(state: FoodRequestState.accepted),
+      r.copyWith(state: FoodRequestState.accepted, chat: foodB64(seal.chatKey)),
     );
     _offers[id] = updated;
     await _save();
-    await _answer(updated, r, 'ok', place: o.place);
+    await _answer(
+      updated,
+      r,
+      'ok',
+      extra: <String, dynamic>{
+        'kc': foodB64(seal.kemCiphertext),
+        'pl': foodB64(seal.box),
+      },
+    );
     await _broadcast(updated);
     return true;
   }
@@ -589,13 +680,13 @@ final class FoodService extends ChangeNotifier {
     FoodOffer o,
     FoodRequest r,
     String s, {
-    String place = '',
+    Map<String, dynamic> extra = const <String, dynamic>{},
   }) async {
     final Map<String, dynamic> payload = <String, dynamic>{
+      ...extra,
       'type': FoodTypes.answer,
       'id': o.id,
       's': s,
-      if (place.isNotEmpty) 'pl': place,
     };
     final String? via = r.via;
     if (via == null) {
@@ -630,6 +721,8 @@ final class FoodService extends ChangeNotifier {
       return false;
     }
     final String? pk = exchange == FoodExchange.points ? points.myKey : null;
+    // A key pair of this request: the cook seals the place to it.
+    final HybridKeyPair keys = await newFoodRequestKeys();
     _mine[id] = FoodRequest(
       address: o.cook,
       name: o.cookName,
@@ -639,6 +732,7 @@ final class FoodService extends ChangeNotifier {
       at: _now(),
       via: _via[id],
       pyramidKey: pk,
+      seed: foodB64(keys.seed),
     );
     await _save();
     await _send(_via[id] ?? o.cook, <String, dynamic>{
@@ -648,6 +742,7 @@ final class FoodService extends ChangeNotifier {
       'm': mode.code,
       'x': exchange.code,
       'pk': ?pk,
+      'ek': foodB64(keys.publicKey),
     });
     return true;
   }
@@ -841,24 +936,34 @@ final class FoodService extends ChangeNotifier {
     }
     await _save();
     if (had == null && got.openAt(nowMs)) {
-      final String portions = tn(
-        got.left,
-        one: '{n} porcja',
-        few: '{n} porcje',
-        many: '{n} porcji',
-      );
+      final String portions = got.seats
+          ? tn(
+              got.left,
+              one: '{n} wolne miejsce',
+              few: '{n} wolne miejsca',
+              many: '{n} wolnych miejsc',
+            )
+          : tn(
+              got.left,
+              one: '{n} porcja',
+              few: '{n} porcje',
+              many: '{n} porcji',
+            );
       final String until = ZenFormat.dayMonthTime(
         DateTime.fromMillisecondsSinceEpoch(got.readyUntil),
       );
+      final Map<String, Object?> who = <String, Object?>{
+        'name': cookNameOf(got),
+        'title': got.title,
+      };
       // Ids start with "circle-": the shade hides such titles when content
       // is hidden (they name people and dishes).
       await host.notify(
         RuntimeSystemNotification(
           id: 'circle-food-${got.id}',
-          title: t('{name} dzieli się jedzeniem: {title}', {
-            'name': cookNameOf(got),
-            'title': got.title,
-          }),
+          title: got.seats
+              ? t('{name} gotuje dziś — dosiądź się: {title}', who)
+              : t('{name} dzieli się jedzeniem: {title}', who),
           body: direct
               ? t('{portions} · do {until}', {
                   'portions': portions,
@@ -897,30 +1002,7 @@ final class FoodService extends ChangeNotifier {
     final Object? by = payload['by'];
     final Object? s = payload['s'];
     if (!isMine(o)) {
-      // As the friend who passed the offer on: a friend of ours asks
-      // through us.
-      final Set<String> relayed = _relayed[o.id] ?? <String>{};
-      if (by != null ||
-          !_forwarded.contains(o.id) ||
-          _via.containsKey(o.id) ||
-          from == o.cook ||
-          !host.isFriend(from) ||
-          (!relayed.contains(from) && relayed.length >= kFoodMaxRequests)) {
-        return;
-      }
-      _relayed[o.id] = relayed..add(from);
-      await _save();
-      await _send(o.cook, <String, dynamic>{
-        'type': FoodTypes.request,
-        'id': o.id,
-        if (s is String) 's': s,
-        if (payload['n'] is int) 'n': payload['n'],
-        if (payload['m'] is String) 'm': payload['m'],
-        if (payload['x'] is String) 'x': payload['x'],
-        if (payload['pk'] is String) 'pk': payload['pk'],
-        'by': from,
-        'bn': host.nameOf(from),
-      });
+      await _relayRequest(o, from, payload);
       return;
     }
     final String who;
@@ -974,6 +1056,15 @@ final class FoodService extends ChangeNotifier {
       }
       return;
     }
+    if (s == 'chat') {
+      final Uint8List? key = foodBytes(had?.chat, maxChars: 100);
+      final Uint8List? box = foodBytes(payload['box']);
+      if (had == null || key == null || box == null) {
+        return;
+      }
+      await _takeChat(o, who, name, key, box, fromCook: false);
+      return;
+    }
     if (s == 'paid') {
       final Object? x = payload['x'];
       if (had == null ||
@@ -1011,11 +1102,12 @@ final class FoodService extends ChangeNotifier {
     if (s != null) {
       return;
     }
-    // "Biorę".
+    // "Biorę" (for free seats through a friend: only once they vouch).
     final Object? n = payload['n'];
     final FoodMode? mode = FoodMode.byCode(payload['m']);
     final FoodExchange? exchange = FoodExchange.byCode(payload['x']);
     final Object? pk = payload['pk'];
+    final Object? ek = payload['ek'];
     if (n is! int ||
         n < 1 ||
         n > kFoodMaxPerRequest ||
@@ -1023,6 +1115,8 @@ final class FoodService extends ChangeNotifier {
         exchange == null ||
         !o.modes.contains(mode) ||
         !o.exchanges.contains(exchange) ||
+        decodeHybridPublicKey(ek) == null ||
+        (o.seats && via != null && payload['vch'] != true) ||
         (exchange == FoodExchange.points &&
             (pk is! String || pk.isEmpty || pk.length > 200)) ||
         (had != null && had.state != FoodRequestState.cancelled) ||
@@ -1038,6 +1132,8 @@ final class FoodService extends ChangeNotifier {
       at: _now(),
       via: via,
       pyramidKey: exchange == FoodExchange.points ? pk as String : null,
+      key: ek as String,
+      vouched: via != null && payload['vch'] == true,
     );
     if (!o.openAt(_now()) || n > o.left) {
       // Nothing (or not enough) left: no, at once.
@@ -1048,25 +1144,130 @@ final class FoodService extends ChangeNotifier {
       requests: <String, FoodRequest>{...o.requests, who: r},
     );
     await _save();
-    final String portions = tn(
-      n,
-      one: '{n} porcja',
-      few: '{n} porcje',
-      many: '{n} porcji',
-    );
+    final String portions = o.seats
+        ? tn(n, one: '{n} miejsce', few: '{n} miejsca', many: '{n} miejsc')
+        : tn(n, one: '{n} porcja', few: '{n} porcje', many: '{n} porcji');
     await host.notify(
       RuntimeSystemNotification(
         id: 'circle-food-req-${o.id}-$who',
-        title: t('{name} prosi o jedzenie: {title}', {
-          'name': name,
-          'title': o.title,
-        }),
-        body: '$portions · ${mode.label} · ${exchange.label}',
+        title: o.seats
+            ? t('{name} chce się dosiąść: {title}', {
+                'name': name,
+                'title': o.title,
+              })
+            : t('{name} prosi o jedzenie: {title}', {
+                'name': name,
+                'title': o.title,
+              }),
+        body: via == null
+            ? '$portions · ${mode.label} · ${exchange.label}'
+            : '$portions · ${t('ręczy {name}', {'name': host.nameOf(via)})}',
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'food:${o.id}',
       ),
     );
+  }
+
+  /// As the friend who passed the offer on: a friend of ours asks through
+  /// us. Requests for free seats wait for "Ręczę" ([vouch]); the rest go
+  /// on to the cook at once, sealed parts untouched.
+  Future<void> _relayRequest(
+    FoodOffer o,
+    String from,
+    Map<String, dynamic> payload,
+  ) async {
+    final Object? s = payload['s'];
+    final Set<String> relayed = _relayed[o.id] ?? <String>{};
+    final Map<String, Map<String, dynamic>> waiting =
+        _toVouch[o.id] ?? <String, Map<String, dynamic>>{};
+    if (payload['by'] != null ||
+        !_forwarded.contains(o.id) ||
+        _via.containsKey(o.id) ||
+        from == o.cook ||
+        !host.isFriend(from) ||
+        (!relayed.contains(from) &&
+            relayed.length + waiting.length >= kFoodMaxRequests)) {
+      return;
+    }
+    if (o.seats && !relayed.contains(from)) {
+      if (s == null && !waiting.containsKey(from)) {
+        waiting[from] = <String, dynamic>{
+          if (payload['n'] is int) 'n': payload['n'],
+          if (payload['m'] is String) 'm': payload['m'],
+          if (payload['x'] is String) 'x': payload['x'],
+          if (payload['pk'] is String) 'pk': payload['pk'],
+          if (payload['ek'] is String) 'ek': payload['ek'],
+        };
+        _toVouch[o.id] = waiting;
+        await _save();
+        await host.notify(
+          RuntimeSystemNotification(
+            id: 'circle-food-vouch-${o.id}-$from',
+            title: t('{name} chce się dosiąść u {cook}', {
+              'name': host.nameOf(from),
+              'cook': cookNameOf(o),
+            }),
+            body: t('„{title}” — ręczysz za tę osobę?', {'title': o.title}),
+            createdAtMillis: _now(),
+            category: RuntimeSystemNotificationCategory.social,
+            slotKey: 'food:${o.id}',
+          ),
+        );
+      } else if (s == 'cancel' && waiting.remove(from) != null) {
+        await _save();
+      }
+      return;
+    }
+    _relayed[o.id] = relayed..add(from);
+    await _save();
+    await _send(o.cook, <String, dynamic>{
+      'type': FoodTypes.request,
+      'id': o.id,
+      if (s is String) 's': s,
+      if (payload['n'] is int) 'n': payload['n'],
+      if (payload['m'] is String) 'm': payload['m'],
+      if (payload['x'] is String) 'x': payload['x'],
+      if (payload['pk'] is String) 'pk': payload['pk'],
+      if (payload['ek'] is String) 'ek': payload['ek'],
+      if (payload['box'] is String) 'box': payload['box'],
+      'by': from,
+      'bn': host.nameOf(from),
+    });
+  }
+
+  /// "Ręczę" ([yes]) for [who], a friend of ours who wants a seat at the
+  /// table of offer [id]: their request goes on to the cook, saying we
+  /// vouch. Otherwise they hear "Tym razem nie".
+  Future<void> vouch(String id, String who, bool yes) async {
+    final FoodOffer? o = _offers[id];
+    final String w = _n(who);
+    final Map<String, dynamic>? ask = _toVouch[id]?.remove(w);
+    if (o == null || ask == null) {
+      return;
+    }
+    if (_toVouch[id]?.isEmpty ?? false) {
+      _toVouch.remove(id);
+    }
+    if (!yes) {
+      await _save();
+      await _send(w, <String, dynamic>{
+        'type': FoodTypes.answer,
+        'id': id,
+        's': 'no',
+      });
+      return;
+    }
+    _relayed[id] = (_relayed[id] ?? <String>{})..add(w);
+    await _save();
+    await _send(o.cook, <String, dynamic>{
+      ...ask,
+      'type': FoodTypes.request,
+      'id': id,
+      'by': w,
+      'bn': host.nameOf(w),
+      'vch': true,
+    });
   }
 
   Future<void> _onAnswer(String from, Map<String, dynamic> payload) async {
@@ -1078,7 +1279,8 @@ final class FoodService extends ChangeNotifier {
     }
     final Object? to = payload['to'];
     if (to != null) {
-      // As the friend in between: the cook answers a friend of ours.
+      // As the friend in between: the cook answers a friend of ours. The
+      // place and the chat are sealed for them; we only carry them.
       if (to is! String ||
           from != o.cook ||
           !_forwarded.contains(o.id) ||
@@ -1086,12 +1288,12 @@ final class FoodService extends ChangeNotifier {
           !host.isFriend(to)) {
         return;
       }
-      final Object? pl = payload['pl'];
       await _send(_n(to), <String, dynamic>{
         'type': FoodTypes.answer,
         'id': o.id,
         's': s,
-        if (pl is String) 'pl': pl,
+        for (final String k in <String>['kc', 'pl', 'box'])
+          if (payload[k] is String) k: payload[k],
       });
       return;
     }
@@ -1102,14 +1304,29 @@ final class FoodService extends ChangeNotifier {
     final String cookName = cookNameOf(o);
     switch (s) {
       case 'ok' when r.state == FoodRequestState.pending:
-        final Object? pl = payload['pl'];
-        String place = pl is String ? pl.trim() : '';
+        final Uint8List? seed = foodBytes(r.seed, maxChars: 100);
+        final Uint8List? kc = foodBytes(payload['kc']);
+        final Uint8List? box = foodBytes(payload['pl']);
+        final (String, Uint8List)? opened =
+            seed == null || kc == null || box == null
+            ? null
+            : await openFoodPlace(
+                offerId: o.id,
+                seed: seed,
+                kemCiphertext: kc,
+                box: box,
+              );
+        if (opened == null) {
+          logZenWarning('Jedzenie: the place did not open.');
+        }
+        String place = opened?.$1.trim() ?? '';
         if (place.length > kFoodMaxPlace) {
           place = place.substring(0, kFoodMaxPlace);
         }
         _mine[o.id] = r.copyWith(
           state: FoodRequestState.accepted,
           place: place,
+          chat: opened == null ? null : foodB64(opened.$2),
         );
         await _save();
         await host.notify(
@@ -1143,7 +1360,146 @@ final class FoodService extends ChangeNotifier {
           _got[o.cook] = (_got[o.cook] ?? 0) + 1;
         }
         await _save();
+      case 'chat':
+        final Uint8List? key = foodBytes(r.chat, maxChars: 100);
+        final Uint8List? box = foodBytes(payload['box']);
+        if (key != null && box != null) {
+          await _takeChat(o, o.cook, cookName, key, box, fromCook: true);
+        }
     }
+  }
+
+  // ---- the small chat of an accepted request ----
+
+  /// The thread of offer [id] with [who] (the cook's side) or with the cook
+  /// (the asker's side).
+  String _threadKey(FoodOffer o, String? who) =>
+      '${o.id}|${isMine(o) ? _n(who ?? '') : o.cook}';
+
+  List<MeetThreadMessage> thread(String id, {String? who}) {
+    final FoodOffer? o = _offers[id];
+    return o == null
+        ? const <MeetThreadMessage>[]
+        : _threads.thread(_threadKey(o, who));
+  }
+
+  int unread(String id, {String? who}) {
+    final FoodOffer? o = _offers[id];
+    return o == null ? 0 : _threads.unread(_threadKey(o, who));
+  }
+
+  Future<void> markRead(String id, {String? who}) async {
+    final FoodOffer? o = _offers[id];
+    if (o == null || _threads.unread(_threadKey(o, who)) == 0) {
+      return;
+    }
+    _threads.markRead(_threadKey(o, who), _now());
+    await _save();
+  }
+
+  /// Whether this person can write about offer [id] (with [who], for the
+  /// cook): the request was accepted and its chat key is here.
+  bool canChat(String id, {String? who}) {
+    final FoodOffer? o = _offers[id];
+    if (o == null) {
+      return false;
+    }
+    final FoodRequest? r = isMine(o) ? o.requests[_n(who ?? '')] : _mine[id];
+    return r != null && r.state.holds && r.chat != null;
+  }
+
+  /// Writes [text] about offer [id] ("Dzwoń domofonem 12", "Spóźnię się
+  /// 10 min"): to the cook, or, for the cook, to [who]. Sealed for the two
+  /// of them; through the friend in between when there is one.
+  Future<bool> sendChat(String id, String text, {String? who}) async {
+    final FoodOffer? o = _offers[id];
+    final String? clean = cleanThreadText(text);
+    if (o == null || clean == null || !canChat(id, who: who)) {
+      return false;
+    }
+    final bool cook = isMine(o);
+    final FoodRequest r = cook ? o.requests[_n(who!)]! : _mine[id]!;
+    final Uint8List? key = foodBytes(r.chat, maxChars: 100);
+    if (key == null) {
+      return false;
+    }
+    final MeetThreadMessage m = MeetThreadMessage(
+      id: newThreadMessageId(_random),
+      from: _me,
+      text: clean,
+      at: _now(),
+      mine: true,
+    );
+    final String box = foodB64(
+      await sealFoodChat(
+        key,
+        o.id,
+        fromCook: cook,
+        json: <String, dynamic>{'m': m.id, 'x': m.text, 't': m.at},
+      ),
+    );
+    _threads
+      ..add(_threadKey(o, who), m)
+      ..markRead(_threadKey(o, who), m.at);
+    await _save();
+    if (cook) {
+      await _answer(o, r, 'chat', extra: <String, dynamic>{'box': box});
+    } else {
+      await _send(_via[id] ?? o.cook, <String, dynamic>{
+        'type': FoodTypes.request,
+        'id': id,
+        's': 'chat',
+        'box': box,
+      });
+    }
+    return true;
+  }
+
+  Future<void> _takeChat(
+    FoodOffer o,
+    String other,
+    String name,
+    Uint8List key,
+    Uint8List box, {
+    required bool fromCook,
+  }) async {
+    final Map<String, dynamic>? json = await openFoodChat(
+      key,
+      o.id,
+      fromCook: fromCook,
+      box: box,
+    );
+    final Object? mid = json?['m'];
+    final Object? text = json?['x'];
+    final Object? at = json?['t'];
+    if (!isThreadMessageId(mid) || text is! String || at is! int) {
+      return;
+    }
+    final String? clean = cleanThreadText(text);
+    final String key2 = '${o.id}|$other';
+    if (clean == null ||
+        !_threads.add(
+          key2,
+          MeetThreadMessage(
+            id: mid as String,
+            from: other,
+            text: clean,
+            at: min(at, _now() + 10 * 60 * 1000),
+          ),
+        )) {
+      return;
+    }
+    await _save();
+    await host.notify(
+      RuntimeSystemNotification(
+        id: 'circle-food-chat-${o.id}-$mid',
+        title: t('{name} · {title}', {'name': name, 'title': o.title}),
+        body: clean,
+        createdAtMillis: _now(),
+        category: RuntimeSystemNotificationCategory.social,
+        slotKey: 'food-chat:$key2',
+      ),
+    );
   }
 
   Future<void> _send(String to, Map<String, dynamic> payload) async {

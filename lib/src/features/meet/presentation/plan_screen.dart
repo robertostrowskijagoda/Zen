@@ -349,7 +349,7 @@ class PlanCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             ClipRRect(
-              borderRadius: BorderRadius.circular(99),
+              borderRadius: context.zenRadius(99),
               child: LinearProgressIndicator(
                 value: (p.joinCount / p.threshold).clamp(0.0, 1.0),
                 minHeight: 8,
@@ -567,7 +567,7 @@ class _PersonChip extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(4, 4, 10, 4),
       decoration: BoxDecoration(
         color: joined ? tone.withValues(alpha: 0.14) : zen.surfaceRaised,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: context.zenRadius(999),
         border: Border.all(
           color: joined ? tone.withValues(alpha: 0.35) : zen.outlineSoft,
         ),

@@ -356,10 +356,11 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                       title: Text(t('Rozglądaj się też w tle')),
                       subtitle: Text(
                         t(
-                          'Co 5 minut telefon na 10 sekund oszczędnie sprawdza, '
-                          'czy obok są znajomi, i zapisuje ich w „Mijani”. '
-                          'Działa też przy zamkniętym Zen. Pełne szukanie tylko '
-                          'na tym ekranie.',
+                          'Co 5 minut telefon na kilka sekund oszczędnie '
+                          'sprawdza, czy obok są znajomi, i zapisuje ich w '
+                          '„Mijani”. Działa też przy zamkniętym Zen; nie przy '
+                          'baterii poniżej 15%, w oszczędzaniu baterii ani we '
+                          'śnie telefonu. Pełne szukanie tylko na tym ekranie.',
                         ),
                       ),
                       onChanged: (bool v) =>
@@ -681,12 +682,9 @@ class _NearbyChatScreenState extends ConsumerState<NearbyChatScreen> {
                           ),
                           decoration: BoxDecoration(
                             color: l.mine ? zen.accent : zen.surfaceRaised,
-                            borderRadius: BorderRadius.only(
-                              topLeft: const Radius.circular(18),
-                              topRight: const Radius.circular(18),
-                              bottomLeft: Radius.circular(l.mine ? 18 : 6),
-                              bottomRight: Radius.circular(l.mine ? 6 : 18),
-                            ),
+                            borderRadius: ZenLook.of(
+                              context,
+                            ).bubbleRadius(outgoing: l.mine),
                             border: l.mine
                                 ? null
                                 : Border.all(color: zen.outlineSoft),
