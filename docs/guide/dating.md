@@ -22,14 +22,17 @@ field.
 ## How it works
 
 1. **Lanterns.** Once a week every phone (dating on or off, so nobody stands
-   out) sends its friends a "lantern": nothing but a one-time key. Friends
-   pass it on, up to **3 steps**, and also through open
-   [gates](introductions-and-gates.md).
-2. **A private test.** A phone that sees a lantern asks a sealed question.
-   The answer tells only whether the two of you fit: both want the same kind
-   of meeting and each is what the other is looking for. Neither side learns
-   the other's wishes from a "no", and the friends in between see only
-   sealed boxes of a fixed size.
+   out) sends its friends a "lantern": nothing but the hash of a one-time
+   post-quantum key. Friends pass it on, up to **3 steps**, and also through
+   open [gates](introductions-and-gates.md).
+2. **A private test.** A phone that sees a lantern fetches the key, checks
+   it against the hash, and asks a sealed question that carries no wishes.
+   The answer is the lantern holder's offer (a few bits: whom they look for,
+   and how), sealed for the asker; the asker's phone compares it with its
+   own wishes. Only when you fit does it ask for the profile, naming its
+   wishes as the proof. A phone with dating off, or that hides from you,
+   offers nothing, which looks just like not fitting. The friends in
+   between see only sealed boxes of a fixed size.
 3. **Cards.** Profiles that fit show up as cards: "You know each other
    through Celina", mutual friends, recommendations. **Yes** sends back a
    signed token; **No** sends nothing. Two yeses make a pair, and the pair
@@ -65,21 +68,30 @@ itself; the list of hidden people never travels in your profile.
 - Your profile carries a separate dating key, not your account address.
 - Profiles are signed (Ed25519 + ML-DSA-65) and answers have a fixed size,
   so a go-between can't tell a real profile from a "no".
-- The boxes (answers, profiles, *Yes*, messages, matchmaking) are sealed with
-  a fresh post-quantum key each (ML-KEM-768 + X25519).
+- Everything after the lantern (questions, answers, profiles, *Yes*,
+  messages, matchmaking) is sealed with a fresh post-quantum key each
+  (ML-KEM-768 + X25519); the lantern itself is a SHA-256 hash. The test
+  needs no Diffie–Hellman, so nothing recorded today opens to a quantum
+  computer later.
 - **Open to meeting people** on the graph is a separate opt-in, off by
-  default, with an extra confirmation.
+  default, with an extra confirmation. The list of people it must not reach
+  goes only to your own friends, salted anew for each, so friends of friends
+  cannot test addresses against it.
 - **Report a minor** disables a profile on your phone at once and reports it
   to the pyramid; a phone that sees reports from two different people
   disables it too. Pyramid dating bans hide a profile as well.
 
 ## Limits
 
-- The lantern itself, the first question of the test and the lantern proof
-  are classical (X25519): see the [security model](../SECURITY_MODEL.md).
-- A modified app of a hidden friend, using a new key and asking through a
-  mutual friend, could get your profile under *only from them*; *from them
-  and their circle* closes that route.
+- A modified app of a dater learns, from each answer, whom the lantern's
+  holder looks for (as it could with the earlier test, in three answers);
+  answers per lantern and friend stay limited.
+- Under *only from them*, the first phone on the way says which key a hidden
+  friend told it, so a new key is noticed; a modified app that pretends to
+  pass on someone else's question through a mutual friend is not.
+- Who sent a sealed box is still proven with X25519 alongside the
+  post-quantum secret; what matters for authenticity (profiles,
+  recommendations, *Yes*, messages) is signed or MACed post-quantum.
 - A modified phone on the way can shorten the distance behind itself, not
   before itself.
 - Dating is closed only when the whole app is locked; it asks for no extra

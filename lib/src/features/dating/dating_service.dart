@@ -1146,7 +1146,7 @@ final class DatingService extends ChangeNotifier {
       at: t,
       box: await RelayIdentity.generateHybrid(),
     );
-    final DatingLantern lantern = DatingLantern(own.box.publicKeyBase64);
+    final DatingLantern lantern = own.lantern;
     final String id = _newId(16);
     _own[id] = t;
     _lanterns[id] = own;
@@ -1200,6 +1200,7 @@ final class DatingService extends ChangeNotifier {
     final Set<String> to = <String>{
       ...host.friends().map(_n),
       ...?groupPeers?.call().map(_n),
+      ...?gateContacts?.call().map(_n),
     };
     final int before = _keySent.length;
     _keySent.removeWhere((String a, int _) => !to.contains(a));
@@ -1297,6 +1298,7 @@ final class DatingService extends ChangeNotifier {
     int ttl = _maxBackTtl,
     int n = 0,
     bool g = false,
+    String? origin,
   }) async {
     final (String, String, int)? r = _routes[to];
     if (r == null || ttl <= 0) {
@@ -1313,6 +1315,7 @@ final class DatingService extends ChangeNotifier {
       'ttl': ttl - 1,
       'n': n,
       if (g) 'g': true,
+      'oa': ?origin,
     });
     return true;
   }
@@ -1621,7 +1624,7 @@ final class DatingService extends ChangeNotifier {
     _lanterns[id] = own;
     _seen[id] = t;
     await _save();
-    return (id, DatingLantern(own.box.publicKeyBase64));
+    return (id, own.lantern);
   }
 
   Future<void> _onIntroOffer(String from, Map<String, dynamic> p) async {
@@ -2337,11 +2340,12 @@ final class DatingService extends ChangeNotifier {
       try {
         final String from = _n(frame.from);
         // Friends send anything; people across an opened gate only lanterns
-        // and what travels back; the people of one's groups only their key.
+        // and what travels back (and their key); the people of one's groups
+        // only their key.
         final bool allowed =
             host.isFriend(from) ||
             (DatingTypes.viaGate.contains(type) && _isGate(from)) ||
-            (type == DatingTypes.key && _isPeer(from));
+            (type == DatingTypes.key && (_isPeer(from) || _isGate(from)));
         if (allowed) {
           await _handle(type, from, frame.payload);
         }
@@ -2600,7 +2604,7 @@ final class DatingService extends ChangeNotifier {
     }
     final (int, String)? best = _shortest[id];
     if (_seen.containsKey(id) &&
-        (best == null || best.$1 <= reach || best.$2 != lantern.key)) {
+        (best == null || best.$1 <= reach || best.$2 != lantern.hash)) {
       // Kept in memory and written with the next save: copies come often,
       // and the whole state is not rewritten for each.
       return;
@@ -2611,7 +2615,7 @@ final class DatingService extends ChangeNotifier {
     }
     final int t = _now();
     _seen[id] = t;
-    _shortest[id] = (reach, lantern.key);
+    _shortest[id] = (reach, lantern.hash);
     _routes[id] = (from, id, t);
     // Everyone passes lanterns on, with dating on or off — once, not kept
     // waiting for friends who are away (the lantern comes again next week),
@@ -2641,10 +2645,12 @@ final class DatingService extends ChangeNotifier {
     await _onLanternSeen(from, id, names, lantern, t, gate: gate);
   }
 
-  /// A lantern reached this phone: it asks the match test, with dating on
-  /// or off alike (with dating off, or farther than this person looks, it
-  /// asks with fillers only, so it never fits). The question is sealed to
-  /// the lantern's key and goes back the way the lantern came.
+  /// A lantern reached this phone: it asks the lantern's holder for the
+  /// lantern's keys (checked against the lantern's hash), then runs the
+  /// match test with dating on or off alike. The question carries no
+  /// wishes: the asker keeps them ([_asked] `s`, nothing when dating is off
+  /// or the lantern is further than this person looks) and compares them
+  /// with the sealed offer that comes back.
   Future<void> _onLanternSeen(
     String from,
     String id,
@@ -2654,24 +2660,19 @@ final class DatingService extends ChangeNotifier {
     bool gate = false,
     Map<String, dynamic>? intro,
   }) async {
-    final RelayIdentity? identity = _identity;
-    final Uint8List? lanternKey = decodeRelayKey(lantern.key);
-    if (lanternKey == null || identity == null || _lanterns.containsKey(id)) {
+    if (_identity == null || _lanterns.containsKey(id)) {
       await _save();
       return;
     }
     final int reach = datingReachOf(names.length + 1, gate: gate);
-    // The filter's distance works here, as fillers only (which looks just
-    // like not fitting); the asked wishes are never narrowed by the filter,
-    // since a proof of fit shows the owner every tag that was asked. An
-    // introduction does not depend on the distance.
+    // The filter's distance works here: further than it, nothing is asked
+    // (which looks just like not fitting). The asked wishes are never
+    // narrowed by the filter, since the profile request that proves a fit
+    // shows the holder every wish. An introduction does not depend on the
+    // distance.
     final bool looking =
         active && (intro != null || reach <= min(me.wants.hops, filter.hops));
-    final (RelayIdentity, List<String>) question = await DatingMatch.ask(
-      looking ? me.wants.seekTags(me.gender) : const <String>{},
-      _random,
-    );
-    // A one-off mark the answer comes back to.
+    // A one-off mark the answers come back to.
     final String mark = _newId(16);
     _own[mark] = t;
     final Object? oldMark = _asked[id]?['m'];
@@ -2679,8 +2680,10 @@ final class DatingService extends ChangeNotifier {
       _own.remove(oldMark);
     }
     _asked[id] = <String, dynamic>{
-      'k': lantern.key,
-      'b': question.$1.toJson(),
+      'h': lantern.hash,
+      's': looking
+          ? DatingMatch.bits(me.wants.seekTags(me.gender))
+          : DatingMatch.none,
       'f': from,
       'path': names,
       'm': mark,
@@ -2694,15 +2697,45 @@ final class DatingService extends ChangeNotifier {
         _own.remove(m);
       }
     }
+    await _save();
+    // The keys first: the lantern carries only their hash.
+    await _route(id, mark, const <String, dynamic>{'lk': 1}, from: null);
+  }
+
+  /// The keys of a lantern this phone asked about came back (to [mark]):
+  /// when they match the lantern's hash, the question goes out, sealed
+  /// (hybrid) to them, with nothing in it but this phone's keys.
+  Future<void> _onLanternKeys(String mark, Object? keys) async {
+    final RelayIdentity? identity = _identity;
+    if (keys is! Map || identity == null) {
+      return;
+    }
+    final Uint8List? x = decodeRelayKey(keys['k']);
+    final Uint8List? pq = decodeHybridPublicKey(keys['q']);
+    String? id;
+    for (final MapEntry<String, Map<String, dynamic>> e in _asked.entries) {
+      if (e.value['m'] == mark) {
+        id = e.key;
+        break;
+      }
+    }
+    final Map<String, dynamic>? asked = id == null ? null : _asked[id];
+    if (id == null ||
+        asked == null ||
+        x == null ||
+        pq == null ||
+        asked['lx'] != null ||
+        datingLanternHash(x, pq) != asked['h']) {
+      return;
+    }
+    asked
+      ..['lx'] = base64Url.encode(x)
+      ..['lq'] = base64Url.encode(pq);
     final Map<String, String> box = await DatingBox.seal(
       me: identity,
-      recipient: lanternKey,
-      payload: <String, dynamic>{
-        'k': 'match',
-        'id': id,
-        'q': question.$2,
-        'pq': myPq,
-      },
+      recipient: x,
+      recipientPq: pq,
+      payload: <String, dynamic>{'k': 'match', 'id': id, 'pq': myPq},
     );
     await _save();
     await _route(id, mark, box, from: null);
@@ -2711,15 +2744,17 @@ final class DatingService extends ChangeNotifier {
   /// Someone runs the match test with this phone's lantern [lantern]. The
   /// distance is not the asker's word: [d] is one more than the phones the
   /// question passed (each counts itself, the friend who handed it over
-  /// last), [gate] whether its way crossed a gate. A key costs nothing, so
-  /// the limits do not count keys: per lantern, a friend asking from one
-  /// step away is answered [kDatingMatchNearPerFriend] times and only with
-  /// the key their phone told this one ([_friendKey]); questions coming
-  /// through one friend from further [kDatingMatchFarPerFriend] times.
-  /// Questions through a friend hidden with their circle, and from keys of
-  /// hidden, blocked, banned or reported people, get fillers only. Every
-  /// question is answered alike, with dating on or off, with a new secret
-  /// each time; only a person who may see the profile can fit.
+  /// last), [gate] whether its way crossed a gate, [origin] what the first
+  /// phone on the way says about the asker's key ([datingOriginTag]; '-':
+  /// it does not know it). A key costs nothing, so the limits do not count
+  /// keys: per lantern, a friend asking from one step away is answered
+  /// [kDatingMatchNearPerFriend] times and only with the key their phone
+  /// told this one ([_friendKey]); questions coming through one friend from
+  /// further [kDatingMatchFarPerFriend] times. Questions through a friend
+  /// hidden with their circle, from keys of hidden, blocked, banned or
+  /// reported people, and from an asker whose key is not the one it told
+  /// its friends, get an empty offer. Every question is answered alike, with
+  /// dating on or off; only a person who may see the profile can fit.
   Future<void> _onMatchAsk(
     String from,
     Uint8List sender,
@@ -2729,9 +2764,15 @@ final class DatingService extends ChangeNotifier {
     Map<String, dynamic> msg, {
     required int d,
     required bool gate,
+    String? origin,
+    String? ephemeral,
   }) async {
     final String senderKey = base64Url.encode(sender);
-    if (mark == null || (!lantern.intro && d > kDatingMaxHops)) {
+    final Object? pq = msg['pq'];
+    final Uint8List? askerPq = decodeHybridPublicKey(pq);
+    if (mark == null ||
+        askerPq == null ||
+        (!lantern.intro && d > kDatingMaxHops)) {
       return;
     }
     final String slot = lantern.intro ? 'x' : '${d == 1 ? 'n' : 'f'}|$from';
@@ -2747,10 +2788,23 @@ final class DatingService extends ChangeNotifier {
     lantern.asks[slot] = used + 1;
     final bool theirKey =
         lantern.intro || d != 1 || _friendKey(from, senderKey);
+    // Asked from further: the first phone on the way vouches for the key
+    // the asker told it. Another key than the one inside (an app asking
+    // with a new key to slip past being hidden), or a hidden person's key,
+    // closes the test; so does an asker nobody on the way knows, while this
+    // person hides from anyone.
+    bool vouched = true;
+    if (d >= 2 && origin != null) {
+      vouched = origin == '-'
+          ? hiddenAddresses().isEmpty
+          : ephemeral != null &&
+                origin == datingOriginTag(senderKey, ephemeral);
+    }
     final int reach = datingReachOf(d, gate: gate);
     final bool open =
         active &&
         theirKey &&
+        vouched &&
         (lantern.intro || reach <= me.wants.hops) &&
         !(d == 1 && !lantern.intro && hiddenAddresses().contains(from)) &&
         !hiddenCircles().contains(from) &&
@@ -2758,17 +2812,9 @@ final class DatingService extends ChangeNotifier {
         !(isBanned?.call(senderKey) ?? false) &&
         !isMinorOff(senderKey) &&
         !_hiddenKey(senderKey);
-    final Object? q = msg['q'];
-    final (List<String>, List<String>)? answer = await DatingMatch.answer(
-      q,
-      open ? me.wants.offerTags(me.gender) : const <String>{},
-      _random,
-    );
-    if (answer == null) {
-      return;
-    }
-    final Object? pq = msg['pq'];
-    final Uint8List? askerPq = decodeHybridPublicKey(pq);
+    final String offer = open
+        ? DatingMatch.bits(me.wants.offerTags(me.gender))
+        : DatingMatch.none;
     // The id the asker knows the lantern by: the same one, except for an
     // introduction, where it is the matchmaker's route id.
     final Object? theirs = msg['id'];
@@ -2776,15 +2822,19 @@ final class DatingService extends ChangeNotifier {
         theirs is String && theirs.isNotEmpty && theirs.length <= 40
         ? theirs
         : id;
+    // The secret the profile's answer proves it comes from this lantern by.
+    final String nonce = base64Url.encode(
+      List<int>.generate(32, (_) => _random.nextInt(256)),
+    );
     final String answerId = _newId(16);
     _answers[answerId] = <String, dynamic>{
       'l': id,
       'r': reply,
       'k': senderKey,
-      'q': List<String>.from(q as List),
       'd': d,
       'open': open,
-      if (askerPq != null) 'pq': pq,
+      'pq': pq,
+      'n': nonce,
       'at': _now(),
     };
     while (_answers.length > _answersMax) {
@@ -2798,18 +2848,19 @@ final class DatingService extends ChangeNotifier {
         'k': 'match_re',
         'id': reply,
         'a': answerId,
-        'r': answer.$1,
-        'o': answer.$2,
-        'lq': base64Url.encode(lantern.box.pqPublicKey ?? Uint8List(0)),
+        'o': offer,
+        'n': nonce,
       },
     );
     await _route(mark, null, box, from: null);
   }
 
-  /// The answer to a match test (from [sender], the lantern's key). When the
-  /// two fit, this phone asks for the profile; otherwise it asks anyway for
-  /// a share of them ([decoyFetchShare]) and drops the answer, with dating on
-  /// or off alike, so asking tells nobody anything.
+  /// The answer to a match test (from [sender], the lantern's key): the
+  /// holder's sealed offer. When it shares a wish with this person's, this
+  /// phone asks for the profile, naming its wishes (the proof of fit);
+  /// otherwise it asks anyway for a share of them ([decoyFetchShare]),
+  /// naming none, and drops the answer — with dating on or off alike, so
+  /// asking tells nobody anything.
   Future<void> _onMatchAnswer(
     Uint8List sender,
     Map<String, dynamic> msg,
@@ -2817,10 +2868,17 @@ final class DatingService extends ChangeNotifier {
     final Object? id = msg['id'];
     final Map<String, dynamic>? asked = id is String ? _asked[id] : null;
     final RelayIdentity? identity = _identity;
+    final Uint8List? lanternKey = decodeRelayKey(asked?['lx']);
+    final Uint8List? lanternPq = decodeHybridPublicKey(asked?['lq']);
+    final Object? nonce = msg['n'];
     if (id is! String ||
         asked == null ||
         identity == null ||
-        asked['k'] != base64Url.encode(sender)) {
+        lanternKey == null ||
+        lanternPq == null ||
+        nonce is! String ||
+        unb64(nonce, length: 32) == null ||
+        asked['lx'] != base64Url.encode(sender)) {
       return;
     }
     _asked.remove(id);
@@ -2828,26 +2886,22 @@ final class DatingService extends ChangeNotifier {
     if (mark is String) {
       _own.remove(mark);
     }
-    final RelayIdentity? blind = RelayIdentity.fromJson(asked['b']);
-    final bool fits =
-        active &&
-        blind != null &&
-        await DatingMatch.fits(blind, msg['r'], msg['o']);
+    final Object? seek = asked['s'];
+    final bool fits = active && DatingMatch.fits(seek, msg['o']);
     if (!fits && _random.nextDouble() >= decoyFetchShare) {
       await _save();
       return;
     }
-    final Object? lq = msg['lq'];
-    final Uint8List? lanternPq = decodeHybridPublicKey(lq);
     final int t = _now();
     _wanted[id] = <String, dynamic>{
-      'k': asked['k'],
+      'lx': asked['lx'],
+      'lq': asked['lq'],
+      'n': nonce,
       'f': asked['f'],
       'path': asked['path'],
       'at': asked['at'],
       if (asked['g'] == true) 'g': true,
       if (asked['x'] != null) 'x': asked['x'],
-      if (lanternPq != null) 'lq': lq,
       if (!fits) 'dc': true,
     };
     while (_wanted.length > _wantedMax) {
@@ -2855,19 +2909,20 @@ final class DatingService extends ChangeNotifier {
     }
     final String fetchMark = _newId(16);
     _own[fetchMark] = t;
-    // The proof of fit is the blinding secret of the question: with it the
-    // owner sees that a common tag was asked. It goes out only on a fit (a
-    // request that did not fit carries a new random secret instead, and
-    // gets a cover), so the owner learns this person's wishes only when the
-    // two fit anyway.
-    final Object? b = fits
-        ? asked['b']
-        : (await RelayIdentity.generate()).toJson();
+    // The proof of fit is this person's wishes: the holder sees that they
+    // share one with its offer. They go out only on a fit (a request that
+    // did not fit names none, and gets a cover), so the holder learns this
+    // person's wishes only when the two fit anyway.
     final Map<String, String> box = await DatingBox.seal(
       me: identity,
-      recipient: sender,
+      recipient: lanternKey,
       recipientPq: lanternPq,
-      payload: <String, dynamic>{'k': 'fetch', 'id': id, 'a': msg['a'], 'b': b},
+      payload: <String, dynamic>{
+        'k': 'fetch',
+        'id': id,
+        'a': msg['a'],
+        's': fits ? seek : DatingMatch.none,
+      },
     );
     await _save();
     await _route(id, fetchMark, box, from: null);
@@ -2980,18 +3035,13 @@ final class DatingService extends ChangeNotifier {
     final Object? content = msg['p'];
     final Object? token = msg['t'];
     final Map<String, dynamic>? waiting = id is String ? _wanted[id] : null;
-    final Uint8List? lanternKey = decodeRelayKey(waiting?['k']);
-    final RelayIdentity? identity = _identity;
-    if (id is! String ||
-        content is! Map ||
-        waiting == null ||
-        lanternKey == null ||
-        identity == null) {
+    final Uint8List? nonce = unb64(waiting?['n'], length: 32);
+    if (id is! String || content is! Map || waiting == null || nonce == null) {
       return;
     }
-    // Only the sender of the lantern can answer for it.
-    if (msg['lp'] !=
-        await datingLanternProof(identity, lanternKey, id, sender)) {
+    // Only the holder of the lantern can answer for it: it alone knows the
+    // secret of its sealed answer to the match test.
+    if (msg['lp'] != datingLanternProof(nonce, id, sender)) {
       return;
     }
     _wanted.remove(id);
@@ -3041,7 +3091,7 @@ final class DatingService extends ChangeNotifier {
     _parts[token] = <String, dynamic>{
       'id': id,
       'k': kept ? sender : '',
-      'lk': waiting['k'],
+      'lk': waiting['lx'],
       if (waiting['lq'] != null) 'lq': waiting['lq'],
       'at': _now(),
     };
@@ -3129,7 +3179,8 @@ final class DatingService extends ChangeNotifier {
       return;
     }
     _answers.remove(answerId);
-    final RelayIdentity? blind = RelayIdentity.fromJson(msg['b']);
+    // The proof of fit: the asker's wishes share one with this person's
+    // offer (as it is now), and the test was open for that key.
     final bool proven =
         answered['open'] == true &&
         active &&
@@ -3137,11 +3188,9 @@ final class DatingService extends ChangeNotifier {
         !(isBanned?.call(senderKey) ?? false) &&
         !isMinorOff(senderKey) &&
         !_hiddenKey(senderKey) &&
-        blind != null &&
-        await DatingMatch.proves(
-          blind,
-          answered['q'],
-          me.wants.offerTags(me.gender),
+        DatingMatch.fits(
+          msg['s'],
+          DatingMatch.bits(me.wants.offerTags(me.gender)),
         );
     final int t = _now();
     final DatingProfile? mine = proven ? await _myProfile() : null;
@@ -3172,7 +3221,11 @@ final class DatingService extends ChangeNotifier {
         'id': reply,
         'p': content,
         't': token,
-        'lp': await datingLanternProof(lantern.box, sender, reply, key),
+        'lp': datingLanternProof(
+          unb64(answered['n'], length: 32) ?? const <int>[],
+          reply,
+          key,
+        ),
       },
     );
     await _route(mark, null, box, from: null);
@@ -3329,7 +3382,19 @@ final class DatingService extends ChangeNotifier {
     // Phones the message passed before the one that handed it here.
     final int n = steps is int ? steps.clamp(0, _maxBackTtl) : 0;
     final bool gate = p['g'] == true || _isGate(from);
+    final Object? e = box['e'];
+    final Object? oa = p['oa'];
     if (!_own.containsKey(to)) {
+      // The first phone on the way says which dating key the one who wrote
+      // told it ([datingOriginTag]; '-' when it does not know one); the
+      // others pass that on.
+      final String? origin = n == 0
+          ? (e is String && e.length <= 64
+                ? (_friendKeys[from] == null
+                      ? '-'
+                      : datingOriginTag(_friendKeys[from]!, e))
+                : null)
+          : (oa is String && oa.length <= 32 ? oa : null);
       await _route(
         to,
         mark as String?,
@@ -3339,8 +3404,14 @@ final class DatingService extends ChangeNotifier {
         ttl: ttl is int ? min(ttl, _maxBackTtl) : 0,
         n: n + 1,
         g: gate,
+        origin: origin,
       );
       await _save();
+      return;
+    }
+    // The keys of a lantern this phone asked about.
+    if (box['lkr'] != null) {
+      await _onLanternKeys(to, box['lkr']);
       return;
     }
     final RelayIdentity? id = _identity;
@@ -3350,6 +3421,24 @@ final class DatingService extends ChangeNotifier {
     // Sealed to one of this phone's lanterns: a match test, a request for
     // the profile or for a part of it, nothing else.
     final _OwnLantern? lantern = _lanterns[to];
+    if (lantern != null && box['lk'] == 1) {
+      // Its keys, to anyone who asks (every phone asks every lantern), so
+      // many per friend the questions come through.
+      final String slot = 'k|$from';
+      final int used = lantern.asks[slot] ?? 0;
+      if (mark is String && used < kDatingMatchFarPerFriend + 1) {
+        lantern.asks[slot] = used + 1;
+        _routes[mark] = (from, mark, _now());
+        await _route(mark, null, <String, dynamic>{
+          'lkr': <String, String>{
+            'k': base64Url.encode(lantern.box.publicKey),
+            'q': base64Url.encode(lantern.box.pqPublicKey ?? Uint8List(0)),
+          },
+        }, from: null);
+        await _save();
+      }
+      return;
+    }
     if (lantern != null) {
       final (Uint8List, Map<String, dynamic>)? asked = await DatingBox.open(
         me: lantern.box,
@@ -3371,6 +3460,8 @@ final class DatingService extends ChangeNotifier {
               asked.$2,
               d: n + 1,
               gate: gate,
+              origin: oa is String && oa.length <= 32 ? oa : null,
+              ephemeral: e is String ? e : null,
             );
           case 'fetch':
             await _onFetch(asked.$1, m, to, lantern, asked.$2);
@@ -3617,6 +3708,11 @@ final class _OwnLantern {
   final RelayIdentity box;
   final bool intro;
   final Map<String, int> asks;
+
+  /// What goes out: the hash of [box]'s keys.
+  DatingLantern get lantern => DatingLantern(
+    datingLanternHash(box.publicKey, box.pqPublicKey ?? Uint8List(0)),
+  );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'at': at,

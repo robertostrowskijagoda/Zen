@@ -475,34 +475,33 @@ final class DatingFilter {
 
 /// A lantern: the small thing every phone sends its friends every
 /// week, with dating on or off, passed on up to [kDatingMaxHops] steps. It
-/// carries only a one-off key (X25519), new with every lantern: no dating
-/// key, nothing about the person, nothing that links it to the lantern of
-/// the week before. Whether two people fit is found out in a private match
-/// test sealed to this key (`DatingMatch`), so every lantern looks alike,
-/// real or not, to everyone who sees or passes it on.
-///
-/// It stays classical and small on purpose: it floods three steps every
-/// week. Its post-quantum half (the lantern's hybrid key) travels only in
-/// the sealed answer to a match test.
+/// carries only the commitment ([hash], SHA-256) to a one-off hybrid key
+/// (ML-KEM-768 + X25519), new with every lantern: no dating key, nothing
+/// about the person, nothing that links it to the lantern of the week
+/// before. Whoever sees it asks the holder for the key itself, checks it
+/// against the hash, and runs the private match test (`DatingMatch`)
+/// sealed to it — so every lantern looks alike, real or not, to everyone
+/// who sees or passes it on, and nothing in it rests on X25519 alone.
 @immutable
 final class DatingLantern {
-  const DatingLantern(this.key);
+  const DatingLantern(this.hash);
 
-  /// The lantern's one-off key (X25519, base64url).
-  final String key;
+  /// SHA-256 of the lantern's one-off keys (base64url, see
+  /// `datingLanternHash`).
+  final String hash;
 
-  Map<String, dynamic> toJson() => <String, dynamic>{'v': 4, 'k': key};
+  Map<String, dynamic> toJson() => <String, dynamic>{'v': 5, 'h': hash};
 
   /// `null` for anything that is not a lantern this app makes.
   static DatingLantern? fromJson(Object? json) {
-    if (json is! Map || json['v'] != 4) {
+    if (json is! Map || json['v'] != 5) {
       return null;
     }
-    final Object? k = json['k'];
-    final Uint8List? key = k is String && k.length <= 44
-        ? decodeRelayKey(k)
+    final Object? h = json['h'];
+    final Uint8List? hash = h is String && h.length <= 44
+        ? unb64(h, length: 32)
         : null;
-    return key == null ? null : DatingLantern(base64Url.encode(key));
+    return hash == null ? null : DatingLantern(base64Url.encode(hash));
   }
 }
 

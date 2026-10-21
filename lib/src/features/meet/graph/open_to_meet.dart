@@ -42,12 +42,13 @@ enum OpenToMeet {
   };
 }
 
-/// Most hidden people one person's flag carries (as salted hashes).
-const int kOpenMaxHidden = 500;
+/// Most hidden people one person's flag carries (as salted hashes; the
+/// list is filled up with random ones to a multiple of [kOpenHidePad]).
+const int kOpenMaxHidden = 512;
 
-/// Most hidden people a flag passed on by a friend still carries: past it,
-/// the flag goes no further than the friend's friends.
-const int kOpenMaxHiddenRelayed = 64;
+/// The hide list's length is a multiple of this, so it does not tell how
+/// many people are hidden.
+const int kOpenHidePad = 32;
 
 /// Most friends' flags passed on in one frame.
 const int kOpenMaxRelayed = 2000;
@@ -61,7 +62,10 @@ final RegExp _hash = RegExp(r'^[0-9a-f]{32}$');
 String _n(String a) => PeerShareCodec.normalizeAddress(a);
 
 /// The salted hash of [address] in a person's "not for them" list: a
-/// friend who passes the flag on checks the next person against it.
+/// friend who passes the flag on checks the next person against it. The
+/// salt is new for every friend and the list goes no further than them, so
+/// a list cannot be checked by anyone else (only by that friend, for
+/// people they could pass the flag to).
 String openHideHash(String salt, String address) => crypto.sha256
     .convert(utf8.encode('zen-graph-open-hide|$salt|${_n(address)}'))
     .toString()
@@ -73,9 +77,11 @@ Set<String> _hashes(Object? ex, int max) => ex is! List
 
 /// A flag a friend passed on: whose ([OpenToMeet]), their name as the friend
 /// knows it, how many steps from the friend ([hops]: 1 = the friend's own
-/// friend, 2 = a friend of theirs), who knows them ([via], for 2), and —
-/// for the friend's own friends — the salt and hashes of the people it must
-/// not reach, so it can go one step further.
+/// friend, 2 = a friend of theirs) and who knows them ([via], for 2). It
+/// carries no list of the people it must not reach: that list goes only to
+/// the person's own friends, keyed for each of them ([FriendOpenness]), so
+/// nobody further can probe it. A friend's friend passes such a flag one
+/// step further unless it is marked [noRelay].
 @immutable
 final class RelayedOpen {
   const RelayedOpen({
@@ -83,8 +89,6 @@ final class RelayedOpen {
     this.name = '',
     this.hops = 1,
     this.via = '',
-    this.salt = '',
-    this.hide = const <String>{},
     this.noRelay = false,
   });
 
@@ -92,21 +96,16 @@ final class RelayedOpen {
   final String name;
   final int hops;
   final String via;
-  final String salt;
-  final Set<String> hide;
   final bool noRelay;
 
-  /// Whether this flag may be passed on to [address].
-  bool reaches(String address) =>
-      hops == 1 && !noRelay && !hide.contains(openHideHash(salt, address));
+  /// Whether this flag may be passed on one step further.
+  bool get relayable => hops == 1 && !noRelay;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'o': open.code,
     if (name.isNotEmpty) 'n': name,
     'h': hops,
     if (via.isNotEmpty) 'v': via,
-    if (salt.isNotEmpty) 'xs': salt,
-    if (hide.isNotEmpty) 'ex': hide.toList()..sort(),
     if (noRelay) 'nr': true,
   };
 
@@ -124,9 +123,7 @@ final class RelayedOpen {
     }
     final Object? name = json['n'];
     final Object? via = json['v'];
-    final Object? xs = json['xs'];
     final int hops = json['h'] == 2 ? 2 : 1;
-    final Object? ex = json['ex'];
     return RelayedOpen(
       open: o,
       name: name is String
@@ -134,13 +131,7 @@ final class RelayedOpen {
           : '',
       hops: hops,
       via: hops == 2 && via is String && _address.hasMatch(via) ? _n(via) : '',
-      salt: xs is String && xs.length <= 40 ? xs : '',
-      hide: hops == 1 ? _hashes(ex, kOpenMaxHiddenRelayed) : const <String>{},
-      noRelay:
-          hops != 1 ||
-          json['nr'] == true ||
-          (ex is List && ex.length > kOpenMaxHiddenRelayed) ||
-          xs is! String,
+      noRelay: hops != 1 || json['nr'] == true,
     );
   }
 }
@@ -233,8 +224,8 @@ final class FriendOpenness {
 final class OpenToMeetBook {
   OpenToMeet? mine;
 
-  /// Salt of this person's hidden list (new when the flag is first set).
-  String salt = '';
+  /// The salt of this person's hidden list, one for each friend it goes to.
+  final Map<String, String> salts = <String, String>{};
 
   /// People the flag must not reach (the dating profile's "Ukryj przed"
   /// as it was when the flag was saved; the live list is added on top).
@@ -248,9 +239,9 @@ final class OpenToMeetBook {
   final Map<String, (String, int)> sent = <String, (String, int)>{};
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    'v': 2,
+    'v': 3,
     if (mine != null) 'my': mine!.code,
-    if (salt.isNotEmpty) 'xs': salt,
+    if (salts.isNotEmpty) 'xs': salts,
     if (hiddenFrom.isNotEmpty) 'hf': hiddenFrom.toList()..sort(),
     'fr': <String, dynamic>{
       for (final MapEntry<String, FriendOpenness> e in friends.entries)
@@ -264,12 +255,18 @@ final class OpenToMeetBook {
 
   static OpenToMeetBook fromJson(Object? json) {
     final OpenToMeetBook book = OpenToMeetBook();
-    if (json is! Map || json['v'] != 2) {
+    if (json is! Map || json['v'] != 3) {
       return book;
     }
-    book
-      ..mine = OpenToMeet.byCode(json['my'])
-      ..salt = json['xs'] is String ? json['xs'] as String : '';
+    book.mine = OpenToMeet.byCode(json['my']);
+    final Object? xs = json['xs'];
+    if (xs is Map) {
+      for (final MapEntry<dynamic, dynamic> e in xs.entries) {
+        if (e.key is String && e.value is String) {
+          book.salts[e.key as String] = e.value as String;
+        }
+      }
+    }
     final Object? hf = json['hf'];
     if (hf is List) {
       book.hiddenFrom.addAll(
@@ -310,7 +307,11 @@ final class OpenToMeetBook {
 /// acquaintances) and to the people across this person's opened gates.
 /// Each friend passes it on to their own friends who see their friend list,
 /// and those once more to theirs — so it reaches people up to three steps
-/// away (as Dating does, no gate needed), each step checking the hide list.
+/// away (as Dating does, no gate needed). The hide list goes only to this
+/// person's own friends, salted anew for each: they keep the flag from the
+/// hidden people they would pass it to, and nobody further gets a list to
+/// probe. (Further away, a hidden friend's own app shows only what that
+/// friend says themselves, so it shows nothing.)
 /// Only the intention travels (and the name the friend knows); nothing of
 /// the dating profile itself.
 final class OpenToMeetService extends ChangeNotifier {
@@ -373,6 +374,12 @@ final class OpenToMeetService extends ChangeNotifier {
     _disposed = true;
     super.dispose();
   }
+
+  /// [length] random hex digits.
+  String _hex(int length) => List<String>.generate(
+    length,
+    (_) => _random.nextInt(16).toRadixString(16),
+  ).join();
 
   /// This person's own flag (`null`: not shown on the graph).
   OpenToMeet? get mine => _book.mine;
@@ -493,12 +500,6 @@ final class OpenToMeetService extends ChangeNotifier {
       _book.mine = to;
       _book.hiddenFrom.clear();
       if (to != null) {
-        if (_book.salt.isEmpty) {
-          _book.salt = List<String>.generate(
-            16,
-            (_) => _random.nextInt(16).toRadixString(16),
-          ).join();
-        }
         _book.hiddenFrom.addAll(hiddenFrom.map(_n));
       }
       await _save();
@@ -526,13 +527,26 @@ final class OpenToMeetService extends ChangeNotifier {
           for (final String w in host.friends().map(_n))
             if (isWeak?.call(w) ?? false) w,
         };
+        // A salt of its own for this friend: the list is good for checking
+        // only with it, and the friend passes no list on.
+        final String salt = _book.salts[f] ??= _hex(16);
         final List<String> hashes = <String>[
           for (final String a in notFor.take(kOpenMaxHidden))
-            openHideHash(_book.salt, a),
-        ]..sort();
+            openHideHash(salt, a),
+        ];
+        // Filled up (the same way every time, so an unchanged frame stays
+        // unchanged) with hashes of nobody.
+        for (
+          int i = 0;
+          hashes.isEmpty || hashes.length % kOpenHidePad != 0;
+          i++
+        ) {
+          hashes.add(openHideHash(salt, 'pad|$i'));
+        }
+        hashes.sort();
         out
           ..['o'] = mine.code
-          ..['xs'] = _book.salt
+          ..['xs'] = salt
           ..['ex'] = hashes;
         if (notFor.length > kOpenMaxHidden) {
           // The list does not fit: the flag goes no further than this
@@ -554,13 +568,10 @@ final class OpenToMeetService extends ChangeNotifier {
         if (w == f || o.own == null || !host.isFriend(w) || !o.reaches(f)) {
           continue;
         }
-        final bool further = o.hide.length <= kOpenMaxHiddenRelayed;
         relay[w] = RelayedOpen(
           open: o.own!,
           name: host.nameOf(w),
-          salt: further ? o.salt : '',
-          hide: further ? o.hide : const <String>{},
-          noRelay: !further,
+          noRelay: o.noRelay,
         ).toJson();
       }
       for (final String w in order) {
@@ -572,7 +583,7 @@ final class OpenToMeetService extends ChangeNotifier {
               relay.containsKey(a) ||
               a == f ||
               host.isFriend(a) ||
-              !o.reaches(f)) {
+              !o.relayable) {
             return;
           }
           relay[a] = RelayedOpen(
@@ -609,6 +620,7 @@ final class OpenToMeetService extends ChangeNotifier {
         final int before = _book.friends.length + _book.sent.length;
         _book.friends.removeWhere((String a, _) => !known.contains(a));
         _book.sent.removeWhere((String a, _) => !known.contains(a));
+        _book.salts.removeWhere((String a, _) => !known.contains(a));
         changed = before != _book.friends.length + _book.sent.length;
         if (changed) {
           _reindex();

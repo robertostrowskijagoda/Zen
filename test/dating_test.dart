@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -14,16 +13,44 @@ import 'package:zen/src/features/relay/relay_crypto.dart';
 import 'package:zen/src/features/relay/relay_engine.dart' show kSendOnceKey;
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/hybrid_kem.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-/// A question a probing phone got answered: its key, blinding secret, points
-/// and the answer.
-typedef _Probe = (
-  RelayIdentity,
-  RelayIdentity,
-  List<String>,
-  Map<String, dynamic>,
-);
+/// A question a probing phone got answered: its key, the wishes it would
+/// prove a fit with, and the answer.
+typedef _Probe = (RelayIdentity, String, Map<String, dynamic>);
+
+/// Asks the holder of the lantern [id] for its keys, as [phone]'s app would
+/// through its friend [next] (with [mark] for the answer), and returns them
+/// (X25519, hybrid), checked against the lantern's [hash] when given.
+Future<(Uint8List, Uint8List)> _lanternKeys(
+  _Phone phone,
+  _Phone next,
+  String id,
+  String mark, {
+  String? hash,
+}) async {
+  final int before = phone.received.length;
+  await phone.send(next.address, <String, dynamic>{
+    'type': DatingTypes.back,
+    'to': id,
+    'm': mark,
+    'box': const <String, dynamic>{'lk': 1},
+    'ttl': 7,
+    'n': 1,
+  });
+  final Map<String, dynamic> back = phone.received
+      .sublist(before)
+      .lastWhere((Map<String, dynamic> m) => m['type'] == DatingTypes.back);
+  final Map<dynamic, dynamic> keys =
+      (back['box'] as Map<dynamic, dynamic>)['lkr'] as Map<dynamic, dynamic>;
+  final Uint8List x = decodeRelayKey(keys['k'])!;
+  final Uint8List pq = decodeHybridPublicKey(keys['q'])!;
+  if (hash != null) {
+    expect(datingLanternHash(x, pq), hash);
+  }
+  return (x, pq);
+}
 
 final class _Net {
   final Map<String, _Phone> phones = <String, _Phone>{};
@@ -504,9 +531,7 @@ void main() {
       'id': 'obcy-1',
       'hops': 2,
       'path': const <String>[],
-      'l': DatingLantern(
-        base64Url.encode((await RelayIdentity.generate()).publicKey),
-      ).toJson(),
+      'l': DatingLantern(base64Url.encode(List<int>.filled(32, 1))).toJson(),
     });
     expect(ania.sent, hasLength(before));
   });
@@ -544,8 +569,8 @@ void main() {
     expect(cyryl.profilesIn(), 0, reason: 'a share of 0 asks for nothing');
   });
 
-  test('preferences fit both ways; the match test tells only whether two '
-      'people fit', () async {
+  test('preferences fit both ways; the match test is a sealed offer of a few '
+      'bits; the proof of a lantern\'s answer is a MAC only the two know', () {
     const DatingWants hers = DatingWants(
       genders: <DatingGender>{DatingGender.man},
       hops: 1,
@@ -559,101 +584,87 @@ void main() {
     );
 
     // Ania (a woman looking for men) has a lantern; who fits?
-    final Set<String> offer = hers.offerTags(DatingGender.woman);
-    Future<bool> fitsHer(DatingGender gender, Set<DatingGender> wants) async {
-      final (RelayIdentity, List<String>) q = await DatingMatch.ask(
-        DatingWants(genders: wants).seekTags(gender),
-        Random(1),
-      );
-      final (List<String>, List<String>)? a = await DatingMatch.answer(
-        jsonDecode(jsonEncode(q.$2)),
-        offer,
-        Random(2),
-      );
-      // Always the same number of points, real or filler.
-      expect(q.$2, hasLength(DatingMatch.slots));
-      expect(a!.$1, hasLength(DatingMatch.slots));
-      expect(a.$2, hasLength(DatingMatch.slots));
-      final bool fit = await DatingMatch.fits(q.$1, a.$1, a.$2);
-      // The proof of fit holds exactly when they fit; a made-up secret
-      // proves nothing.
-      expect(await DatingMatch.proves(q.$1, q.$2, offer), fit);
-      expect(
-        await DatingMatch.proves(await RelayIdentity.generate(), q.$2, offer),
-        isFalse,
-      );
-      return fit;
-    }
-
+    final String offer = DatingMatch.bits(hers.offerTags(DatingGender.woman));
+    bool fitsHer(DatingGender gender, Set<DatingGender> wants) =>
+        DatingMatch.fits(
+          DatingMatch.bits(DatingWants(genders: wants).seekTags(gender)),
+          offer,
+        );
     expect(
-      await fitsHer(DatingGender.man, <DatingGender>{DatingGender.woman}),
+      fitsHer(DatingGender.man, <DatingGender>{DatingGender.woman}),
       isTrue,
     );
+    expect(fitsHer(DatingGender.man, DatingGender.values.toSet()), isTrue);
     expect(
-      await fitsHer(DatingGender.man, DatingGender.values.toSet()),
-      isTrue,
-    );
-    expect(
-      await fitsHer(DatingGender.man, <DatingGender>{DatingGender.man}),
+      fitsHer(DatingGender.man, <DatingGender>{DatingGender.man}),
       isFalse,
       reason: 'his genders',
     );
     expect(
-      await fitsHer(DatingGender.woman, DatingGender.values.toSet()),
+      fitsHer(DatingGender.woman, DatingGender.values.toSet()),
       isFalse,
       reason: 'her genders',
     );
 
-    // Fillers only (dating off, or hidden) never fit.
-    final (RelayIdentity, List<String>) none = await DatingMatch.ask(
-      const <String>{},
-      Random(3),
+    // A fixed universe of 18 tags; every offer and wish is 18 bits, so every
+    // answer is the same size, real or empty (dating off, hidden).
+    expect(DatingMatch.universe, hasLength(18));
+    expect(DatingMatch.universe.toSet(), hasLength(18));
+    expect(
+      DatingMatch.universe.toSet(),
+      containsAll(
+        const DatingWants(
+          intent: DatingIntent.both,
+        ).offerTags(DatingGender.other),
+      ),
     );
-    final (List<String>, List<String>)? a = await DatingMatch.answer(
-      none.$2,
-      offer,
-      Random(4),
+    expect(offer, hasLength(18));
+    expect(DatingMatch.none, hasLength(18));
+    expect(DatingMatch.fits(DatingMatch.none, offer), isFalse);
+    expect(
+      DatingMatch.fits(
+        DatingMatch.bits(const DatingWants().seekTags(DatingGender.man)),
+        DatingMatch.none,
+      ),
+      isFalse,
     );
-    expect(await DatingMatch.fits(none.$1, a!.$1, a.$2), isFalse);
-    final (RelayIdentity, List<String>) man = await DatingMatch.ask(
-      const DatingWants().seekTags(DatingGender.man),
-      Random(5),
-    );
-    final (List<String>, List<String>)? off = await DatingMatch.answer(
-      man.$2,
-      const <String>{},
-      Random(6),
-    );
-    expect(await DatingMatch.fits(man.$1, off!.$1, off.$2), isFalse);
-    // Nothing in the answer is a tag in the clear.
-    expect(jsonEncode(<Object>[a.$1, a.$2]), isNot(contains('k>m')));
-    expect(await DatingMatch.answer(<String>['x'], offer, Random(7)), isNull);
+    expect(DatingMatch.tagsOf(offer), hers.offerTags(DatingGender.woman));
+    expect(DatingMatch.fits('x', offer), isFalse);
+    expect(DatingMatch.fits('2' * 18, offer), isFalse);
+    expect(DatingMatch.tagsOf('1' * 17), isEmpty);
+    // Nothing in an answer is a tag in the clear for a phone on the way: it
+    // travels only inside a hybrid box.
+    expect(offer, isNot(contains('k>m')));
 
-    // The proof of a lantern's answer: the same on both sides, nobody else.
-    final RelayIdentity lantern = await RelayIdentity.generate();
-    final RelayIdentity asker = await RelayIdentity.generate();
-    final RelayIdentity eve = await RelayIdentity.generate();
-    final String proof = await datingLanternProof(
-      lantern,
-      asker.publicKey,
-      'id1',
-      'ania-key',
-    );
+    // The proof of a lantern's answer: a MAC with the secret of the sealed
+    // answer, the same on both sides, different for anything else.
+    final List<int> nonce = List<int>.generate(32, (int i) => i);
+    final String proof = datingLanternProof(nonce, 'id1', 'ania-key');
+    expect(datingLanternProof(List<int>.of(nonce), 'id1', 'ania-key'), proof);
     expect(
-      await datingLanternProof(asker, lantern.publicKey, 'id1', 'ania-key'),
-      proof,
-    );
-    expect(
-      await datingLanternProof(eve, lantern.publicKey, 'id1', 'ania-key'),
+      datingLanternProof(List<int>.filled(32, 7), 'id1', 'ania-key'),
       isNot(proof),
     );
-    expect(
-      await datingLanternProof(asker, lantern.publicKey, 'id1', 'eve-key'),
-      isNot(proof),
-    );
+    expect(datingLanternProof(nonce, 'id2', 'ania-key'), isNot(proof));
+    expect(datingLanternProof(nonce, 'id1', 'eve-key'), isNot(proof));
+
+    // A lantern commits to both halves of its key.
+    final String h = datingLanternHash(<int>[1, 2], <int>[3, 4]);
+    expect(h, hasLength(44));
+    expect(datingLanternHash(<int>[1, 2], <int>[3, 5]), isNot(h));
+    expect(datingLanternHash(<int>[1, 3], <int>[3, 4]), isNot(h));
+
+    // The first phone on the way vouches for the asker's key without
+    // naming it.
+    final String tag = datingOriginTag('key-a', 'eph-1');
+    expect(datingOriginTag('key-a', 'eph-1'), tag);
+    expect(datingOriginTag('key-b', 'eph-1'), isNot(tag));
+    expect(datingOriginTag('key-a', 'eph-2'), isNot(tag));
+    expect(tag, isNot(contains('key-a')));
   });
 
-  test('a lantern carries only a new one-off key, with dating on or off; it '
+  test('a lantern carries only the hash of a new one-off key, with dating on '
+      'or off; it '
       'goes out only on the weekly schedule', () async {
     final _Net net = _Net();
     final _Phone ania = _Phone(net, 'ania');
@@ -687,24 +698,24 @@ void main() {
     final Map<String, dynamic> a2 = lanterns(ania).last;
     final Map<String, dynamic> b1 = lanterns(bob).first;
     for (final Map<String, dynamic> l in <Map<String, dynamic>>[a1, a2, b1]) {
-      expect((l['l'] as Map).keys.toSet(), <String>{'v', 'k'});
+      expect((l['l'] as Map).keys.toSet(), <String>{'v', 'h'});
       expect(jsonEncode(l['l']).length, lessThan(80));
       expect(DatingLantern.fromJson(l['l']), isNotNull);
     }
     expect(a1['id'], isNot(a2['id']));
-    expect(a1['l']['k'], isNot(a2['l']['k']));
-    expect(a1['l']['k'], isNot(ania.service.myKey));
+    expect(a1['l']['h'], isNot(a2['l']['h']));
+    expect(a1['l']['h'], isNot(ania.service.myKey));
     expect(jsonEncode(lanterns(cyryl)), isNot(contains(ania.service.myKey)));
 
     // Anything this app never makes is not a lantern.
     final Map<String, dynamic> json = a1['l'] as Map<String, dynamic>;
     Map<String, dynamic> withField(String field, Object? value) =>
         <String, dynamic>{...json, field: value};
-    expect(DatingLantern.fromJson(withField('v', 3)), isNull);
-    expect(DatingLantern.fromJson(withField('k', 5)), isNull);
-    expect(DatingLantern.fromJson(withField('k', 'x' * 65)), isNull);
-    expect(DatingLantern.fromJson(withField('k', 'AAAA')), isNull);
-    expect(DatingLantern.fromJson(withField('h', 'AAAA'))!.toJson(), json);
+    expect(DatingLantern.fromJson(withField('v', 4)), isNull);
+    expect(DatingLantern.fromJson(withField('h', 5)), isNull);
+    expect(DatingLantern.fromJson(withField('h', 'x' * 65)), isNull);
+    expect(DatingLantern.fromJson(withField('h', 'AAAA')), isNull);
+    expect(DatingLantern.fromJson(withField('k', 'AAAA'))!.toJson(), json);
     expect(DatingLantern.fromJson('x'), isNull);
   });
 
@@ -1604,15 +1615,20 @@ void main() {
           ania.sent.any((Map<String, dynamic> a) => a['id'] == m['id']),
     );
     final String id = lantern['id'] as String;
-    final Uint8List lanternKey = decodeRelayKey((lantern['l'] as Map)['k'])!;
+    final (Uint8List, Uint8List) keys = await _lanternKeys(
+      eve,
+      bob,
+      id,
+      'eve-keys',
+      hash: (lantern['l'] as Map)['h'] as String,
+    );
 
     // Eve's modified phone claims to be one step away, in every way it can.
     final RelayIdentity fresh = await RelayIdentity.generateHybrid();
-    final (RelayIdentity, List<String>) q = await DatingMatch.ask(
+    final String seek = DatingMatch.bits(
       const DatingWants(
         genders: <DatingGender>{DatingGender.woman},
       ).seekTags(DatingGender.man),
-      Random(1),
     );
     final int before = eve.received.length;
     await eve.send(bob.address, <String, dynamic>{
@@ -1621,12 +1637,12 @@ void main() {
       'm': 'eve-mark',
       'box': await DatingBox.seal(
         me: fresh,
-        recipient: lanternKey,
+        recipient: keys.$1,
+        recipientPq: keys.$2,
         payload: <String, dynamic>{
           'k': 'match',
           'id': id,
           'd': 1,
-          'q': q.$2,
           'pq': base64Url.encode(fresh.pqPublicKey!),
         },
       ),
@@ -1641,7 +1657,8 @@ void main() {
       box: answer['box'],
     ))!.$2;
     // Two steps, as Bob's phone counted: out of Ania's reach, so no fit.
-    expect(await DatingMatch.fits(q.$1, opened['r'], opened['o']), isFalse);
+    expect(DatingMatch.fits(seek, opened['o']), isFalse);
+    expect(opened['o'], DatingMatch.none);
     // Bob's key stays Bob's, and Bob still meets Ania.
     expect(ania.service.knownKeyOf(bob.address), bobKey);
     expect(ania.names(), contains('Bob'));
@@ -1799,9 +1816,9 @@ void main() {
           .where((Map<String, dynamic> p) => p['type'] == DatingTypes.lantern)
           .toList();
 
-      await send('zly-klucz', <String, dynamic>{...lantern, 'k': 5});
-      await send('zla-wersja', <String, dynamic>{...lantern, 'v': 3});
-      await send('krotki-klucz', <String, dynamic>{...lantern, 'k': 'AAAA'});
+      await send('zly-klucz', <String, dynamic>{...lantern, 'h': 5});
+      await send('zla-wersja', <String, dynamic>{...lantern, 'v': 4});
+      await send('krotki-klucz', <String, dynamic>{...lantern, 'h': 'AAAA'});
       await send('nic', null);
       expect(passed(), isEmpty);
 
@@ -1848,20 +1865,26 @@ void main() {
     int answers() => ania.sent
         .where((Map<String, dynamic> p) => p['type'] == DatingTypes.back)
         .length;
-    // Her own match test and request for Darek's profile.
+    // Her own request for the lantern's keys, match test and request for
+    // Darek's profile.
     final int start = answers();
-    expect(start, 2);
+    expect(start, 3);
     const int weeks = kDatingFetchesPerKeyPerDay + 5;
     for (int i = 0; i < weeks; i++) {
       await ania.service.maybePublish(force: true);
     }
-    // One match test per lantern; profiles only up to the daily limit.
-    expect(answers() - start, weeks + kDatingFetchesPerKeyPerDay);
+    // The keys and one match test per lantern; profiles only up to the daily
+    // limit.
+    expect(answers() - start, 2 * weeks + kDatingFetchesPerKeyPerDay);
     expect(darek.service.toDecide.single.profile.name, 'Ania');
     net.clock += 24 * 3600 * 1000 + 1;
     final int before = answers();
     await ania.service.maybePublish(force: true);
-    expect(answers(), before + 2, reason: 'a match test and a profile');
+    expect(
+      answers(),
+      before + 3,
+      reason: 'the keys, a match test and a profile',
+    );
   });
 
   test('a modified friend asking with a new key every time gets only a few '
@@ -1883,14 +1906,20 @@ void main() {
     });
     int marks = 0;
     late String lanternId;
-    late Uint8List lanternKey;
+    late (Uint8List, Uint8List) keys;
     Future<void> publish() async {
       await ania.service.maybePublish(force: true);
       final Map<String, dynamic> l = ania.sent.lastWhere(
         (Map<String, dynamic> p) => p['type'] == DatingTypes.lantern,
       );
       lanternId = l['id'] as String;
-      lanternKey = decodeRelayKey((l['l'] as Map)['k'])!;
+      keys = await _lanternKeys(
+        eve,
+        ania,
+        lanternId,
+        'keys-${marks++}',
+        hash: (l['l'] as Map)['h'] as String,
+      );
     }
 
     // Sends [payload] sealed to the lantern from [me], as Eve's phone would
@@ -1908,7 +1937,8 @@ void main() {
         'm': 'mark-${marks++}',
         'box': await DatingBox.seal(
           me: me,
-          recipient: lanternKey,
+          recipient: keys.$1,
+          recipientPq: keys.$2,
           payload: payload,
         ),
         'ttl': 7,
@@ -1925,34 +1955,32 @@ void main() {
     }
 
     // Probing: a new key for every question. Returns the answered questions
-    // (key, blinding secret, points, answer).
+    // (key, the wishes of a man looking for anyone, answer).
+    final String seek = DatingMatch.bits(
+      const DatingWants().seekTags(DatingGender.man),
+    );
     Future<List<_Probe>> probe(int times, {required int n}) async {
       final List<_Probe> got = <_Probe>[];
       for (int i = 0; i < times; i++) {
         final RelayIdentity fresh = await RelayIdentity.generateHybrid();
-        final (RelayIdentity, List<String>) q = await DatingMatch.ask(
-          const DatingWants().seekTags(DatingGender.man),
-          Random(i),
-        );
         final Map<String, dynamic>? a = await ask(fresh, <String, dynamic>{
           'k': 'match',
           'id': lanternId,
-          'q': q.$2,
           'pq': base64Url.encode(fresh.pqPublicKey!),
         }, n: n);
         if (a != null) {
-          got.add((fresh, q.$1, q.$2, a));
+          got.add((fresh, seek, a));
         }
       }
       return got;
     }
 
-    Future<Map<String, dynamic>?> fetch(_Probe p, RelayIdentity b) =>
+    Future<Map<String, dynamic>?> fetch(_Probe p, String wishes) =>
         ask(p.$1, <String, dynamic>{
           'k': 'fetch',
           'id': lanternId,
-          'a': p.$4['a'],
-          'b': b.toJson(),
+          'a': p.$3['a'],
+          's': wishes,
         });
 
     await publish();
@@ -1965,21 +1993,18 @@ void main() {
     );
     expect(answered, hasLength(kDatingMatchFarPerFriend));
     // A new secret for every answer: no two answers can be put together.
-    expect(answered[1].$4['o'], isNot(answered[2].$4['o']));
+    expect(answered[1].$3['n'], isNot(answered[2].$3['n']));
     // A man looking for anyone fits Ania (a woman looking for anyone).
     final _Probe far = answered.first;
-    expect(await DatingMatch.fits(far.$2, far.$4['r'], far.$4['o']), isTrue);
+    expect(DatingMatch.fits(far.$2, far.$3['o']), isTrue);
 
-    // Without a proof of fit (a made-up secret) only a cover comes back.
-    final Map<String, dynamic>? cover = await fetch(
-      far,
-      await RelayIdentity.generate(),
-    );
+    // Without a proof of fit (no wishes) only a cover comes back.
+    final Map<String, dynamic>? cover = await fetch(far, DatingMatch.none);
     expect((cover!['p'] as Map)['cover'], isTrue);
     // The same answer cannot be used twice.
     expect(await fetch(far, far.$2), isNull);
     // With the proof: the signed profile, as for anyone who fits — exactly
-    // as long as the cover.
+    // as long as the cover, and its proof made with the answer's secret.
     final Map<String, dynamic>? real = await fetch(
       answered.last,
       answered.last.$2,
@@ -1988,9 +2013,17 @@ void main() {
     expect(profile.name, 'Ania');
     expect(await profile.verify(), isTrue);
     expect(jsonEncode(real['p']).length, jsonEncode(cover['p']).length);
+    expect(
+      real['lp'],
+      datingLanternProof(
+        base64Url.decode(answered.last.$3['n'] as String),
+        lanternId,
+        ania.service.myKey!,
+      ),
+    );
 
     // Hidden from Eve and her circle: whatever keys come through her, they
-    // never fit and get no profile, even with a valid proof.
+    // never fit and get no profile, even with fitting wishes.
     await ania.service.saveMine((MyDating m) {
       m
         ..hiddenFriends.add(eve.address)
@@ -2000,10 +2033,96 @@ void main() {
     final List<_Probe> hidden = await probe(10, n: 1);
     expect(hidden, hasLength(10));
     for (final _Probe h in hidden) {
-      expect(await DatingMatch.fits(h.$2, h.$4['r'], h.$4['o']), isFalse);
+      expect(h.$3['o'], DatingMatch.none);
     }
-    final Map<String, dynamic>? none = await fetch(hidden.last, hidden.last.$2);
+    final Map<String, dynamic>? none = await fetch(hidden.last, seek);
     expect((none!['p'] as Map)['cover'], isTrue);
+  });
+
+  test('a hidden friend\'s app asking with a new key through a mutual friend '
+      'is noticed by the first phone on the way; pretending to pass a '
+      'question on is not (the limit the hiding option tells)', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone mia = _Phone(net, 'mia');
+    final _Phone eve = _Phone(net, 'eve');
+    net
+      ..link(ania, mia)
+      ..link(mia, eve)
+      ..link(ania, eve);
+    await mia.service.load();
+    await mia.service.maybePublish(force: true);
+    // Eve's phone told her friends her key.
+    await eve.service.load();
+    await eve.service.maybePublish(force: true);
+    await ania.service.load();
+    await ania.service.saveMine((MyDating m) {
+      m
+        ..enabled = true
+        ..name = 'Ania'
+        ..gender = DatingGender.woman
+        ..hiddenFriends.add(eve.address);
+    });
+    await ania.service.maybePublish(force: true);
+    final Map<String, dynamic> l = ania.sent.lastWhere(
+      (Map<String, dynamic> p) => p['type'] == DatingTypes.lantern,
+    );
+    final String id = l['id'] as String;
+    final (Uint8List, Uint8List) keys = await _lanternKeys(
+      eve,
+      mia,
+      id,
+      'eve-keys',
+      hash: (l['l'] as Map)['h'] as String,
+    );
+    final String seek = DatingMatch.bits(
+      const DatingWants().seekTags(DatingGender.man),
+    );
+    Future<String?> offerVia(int n) async {
+      final RelayIdentity fresh = await RelayIdentity.generateHybrid();
+      final int before = eve.received.length;
+      await eve.send(mia.address, <String, dynamic>{
+        'type': DatingTypes.back,
+        'to': id,
+        'm': 'eve-$n',
+        'box': await DatingBox.seal(
+          me: fresh,
+          recipient: keys.$1,
+          recipientPq: keys.$2,
+          payload: <String, dynamic>{
+            'k': 'match',
+            'id': id,
+            'pq': base64Url.encode(fresh.pqPublicKey!),
+          },
+        ),
+        'ttl': 7,
+        'n': n,
+      });
+      final List<Map<String, dynamic>> back = <Map<String, dynamic>>[
+        for (final Map<String, dynamic> m in eve.received.sublist(before))
+          if (m['type'] == DatingTypes.back) m,
+      ];
+      if (back.isEmpty) {
+        return null;
+      }
+      return (await DatingBox.open(me: fresh, box: back.single['box']))!.$2['o']
+          as String;
+    }
+
+    // Asking as herself with a new key: Mia's phone says which key Eve told
+    // her, Ania's sees it is another one, and offers nothing.
+    expect(await offerVia(0), DatingMatch.none);
+    expect(
+      mia.sent.any(
+        (Map<String, dynamic> m) =>
+            m['type'] == DatingTypes.back && m['oa'] is String,
+      ),
+      isTrue,
+    );
+    // Pretending to pass someone else's question on: Mia cannot tell (the
+    // honest UI says so).
+    final String? pretending = await offerVia(1);
+    expect(DatingMatch.fits(seek, pretending), isTrue);
   });
 
   test('a filter passes a profile by the kind of meeting, reach, gender, '
@@ -2220,21 +2339,14 @@ void main() {
         DatingWants owner,
         DatingGender ownerGender,
       ) async {
-        final Set<String> offer = owner.offerTags(ownerGender);
-        final (RelayIdentity, List<String>) q = await DatingMatch.ask(
-          asker.seekTags(askerGender),
-          Random(1),
-        );
-        final (List<String>, List<String>)? a = await DatingMatch.answer(
-          jsonDecode(jsonEncode(q.$2)),
-          offer,
-          Random(2),
-        );
-        expect(q.$2, hasLength(DatingMatch.slots));
-        expect(a!.$1, hasLength(DatingMatch.slots));
-        expect(a.$2, hasLength(DatingMatch.slots));
-        final bool fit = await DatingMatch.fits(q.$1, a.$1, a.$2);
-        expect(await DatingMatch.proves(q.$1, q.$2, offer), fit);
+        final String offer = DatingMatch.bits(owner.offerTags(ownerGender));
+        final String seek = DatingMatch.bits(asker.seekTags(askerGender));
+        expect(offer, hasLength(DatingMatch.universe.length));
+        expect(seek, hasLength(DatingMatch.universe.length));
+        // The proof of fit (the wishes) holds on the holder's side exactly
+        // when the asker sees a fit.
+        final bool fit = DatingMatch.fits(seek, offer);
+        expect(DatingMatch.fits(offer, seek), fit);
         return fit;
       }
 
@@ -2325,66 +2437,52 @@ void main() {
         isEmpty,
       );
 
-      // Every wish fits in the slots, and whatever the wishes — dates,
-      // friends, both, or none (dating off) — a question and an answer are the
-      // same number of points and seal to the same size: a decoy still looks
-      // like anything else.
+      // Whatever the wishes — dates, friends, both, or none (dating off) —
+      // a question carries none, an answer and a profile request are the same
+      // bit strings, and all seal (hybrid) to the same sizes: a decoy still
+      // looks like anything else.
       const List<DatingWants> kinds = <DatingWants>[
         DatingWants(),
         DatingWants(intent: DatingIntent.friends),
         DatingWants(intent: DatingIntent.both),
       ];
-      expect(
-        const DatingWants(intent: DatingIntent.both).offerTags(woman),
-        hasLength(DatingMatch.slots),
-      );
-      final RelayIdentity asker = await RelayIdentity.generate();
-      final RelayIdentity lantern = await RelayIdentity.generate();
-      final Set<int> questions = <int>{};
+      final RelayIdentity asker = await RelayIdentity.generateHybrid();
+      final RelayIdentity lantern = await RelayIdentity.generateHybrid();
+      final Set<int> requests = <int>{};
       final Set<int> answers = <int>{};
-      for (final Set<String> seek in <Set<String>>[
+      for (final Set<String> wishes in <Set<String>>[
         const <String>{},
         for (final DatingWants k in kinds) k.seekTags(man),
+        for (final DatingWants k in kinds) k.offerTags(woman),
       ]) {
-        final (RelayIdentity, List<String>) q = await DatingMatch.ask(
-          seek,
-          Random(8),
-        );
-        final Map<String, String> box = await DatingBox.seal(
+        final Map<String, String> fetch = await DatingBox.seal(
           me: asker,
           recipient: lantern.publicKey,
+          recipientPq: lantern.pqPublicKey,
           payload: <String, dynamic>{
-            'k': 'match',
+            'k': 'fetch',
             'id': 'l' * 16,
-            'd': 2,
-            'q': q.$2,
+            'a': 'a' * 16,
+            's': DatingMatch.bits(wishes),
           },
         );
-        questions.add(box['x']!.length);
-        for (final Set<String> offer in <Set<String>>[
-          const <String>{},
-          for (final DatingWants k in kinds) k.offerTags(woman),
-        ]) {
-          final (List<String>, List<String>)? a = await DatingMatch.answer(
-            q.$2,
-            offer,
-            Random(9),
-          );
-          final Map<String, String> back = await DatingBox.seal(
-            me: lantern,
-            recipient: asker.publicKey,
-            payload: <String, dynamic>{
-              'k': 'match_re',
-              'id': 'l' * 16,
-              'a': 'a' * 16,
-              'r': a!.$1,
-              'o': a.$2,
-            },
-          );
-          answers.add(back['x']!.length);
-        }
+        requests.add(fetch['x']!.length);
+        final Map<String, String> back = await DatingBox.seal(
+          me: lantern,
+          recipient: asker.publicKey,
+          recipientPq: asker.pqPublicKey,
+          payload: <String, dynamic>{
+            'k': 'match_re',
+            'id': 'l' * 16,
+            'a': 'a' * 16,
+            'o': DatingMatch.bits(wishes),
+            'n': base64Url.encode(List<int>.filled(32, 1)),
+          },
+        );
+        answers.add(back['x']!.length);
+        expect(DatingBox.isHybrid(back), isTrue);
       }
-      expect(questions, hasLength(1));
+      expect(requests, hasLength(1));
       expect(answers, hasLength(1));
     },
   );
@@ -2531,13 +2629,17 @@ void main() {
               (Map<String, dynamic> m) => m['type'] == DatingTypes.lantern,
             )['id']
             as String;
-    // The sizes of what [p] sent back for the lantern [id]: its match test,
-    // and its request for the profile.
+    // The sizes of what [p] sent back for the lantern [id], sealed: its
+    // match test, and its request for the profile (not the request for the
+    // lantern's keys, which every phone makes alike).
     // (Only what the phone itself sent: with three steps it also passes
     // other phones' questions on, counted by `n`.)
     List<int> asked(_Phone p, String id) => <int>[
       for (final Map<String, dynamic> m in p.sent)
-        if (m['type'] == DatingTypes.back && m['to'] == id && m['n'] == 0)
+        if (m['type'] == DatingTypes.back &&
+            m['to'] == id &&
+            m['n'] == 0 &&
+            (m['box'] as Map)['x'] is String)
           ((m['box'] as Map)['x'] as String).length,
     ];
     Set<String> names(DatingService s) => <String>{

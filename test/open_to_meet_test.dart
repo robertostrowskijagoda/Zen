@@ -95,7 +95,12 @@ void main() {
       expect(host.to(ania).single['o'], 'd');
       // The hidden person and the weak acquaintance: a friend who passes the
       // flag on keeps it from both.
-      expect(host.to(ania).single['ex'], hasLength(2));
+      // Filled up with random hashes: the count of hidden people is not
+      // told.
+      expect(host.to(ania).single['ex'], hasLength(kOpenHidePad));
+      // A salt of its own for every friend: one friend's list is no good for
+      // checking anybody's with another salt.
+      expect(s.payloadFor(yeti)['xs'], isNot(host.to(ania).single['xs']));
       final FriendOpenness atAnia = FriendOpenness.fromJson(
         host.to(ania).single,
       );
@@ -143,15 +148,17 @@ void main() {
       }),
     );
     expect(s.openOf(yeti), OpenToMeet.both);
-    // Yeti's flag changed here: friends who may see it were told, with
-    // Yeti's hide list, so it can go one step further.
+    // Yeti's flag changed here: friends who may see it were told — without
+    // Yeti's hide list (nobody further gets one to probe), but it may go one
+    // step further.
     final Map<dynamic, dynamic> toZosia =
         host.to(zosia).single['r'] as Map<dynamic, dynamic>;
     expect(toZosia.keys, <String>[yeti]);
     expect(toZosia[yeti]['o'], 'b');
     expect(toZosia[yeti]['h'], 1);
-    expect(toZosia[yeti]['xs'], 'salt');
-    expect(RelayedOpen.fromJson(toZosia[yeti])!.reaches(hidden), isFalse);
+    expect(toZosia[yeti].containsKey('xs'), isFalse);
+    expect(toZosia[yeti].containsKey('ex'), isFalse);
+    expect(RelayedOpen.fromJson(toZosia[yeti])!.relayable, isTrue);
     expect(host.to(hidden), isEmpty);
     expect(host.to(quiet), isEmpty);
     expect(host.to(yeti), isEmpty, reason: 'never back to Yeti');
@@ -228,7 +235,8 @@ void main() {
   });
 
   test('a flag goes three steps: a friend of a friend passes it on once more '
-      '(checking the hide list), and far people show for the graph', () async {
+      '(with no hide list to probe), a hidden friend\'s app still shows '
+      'nothing, and far people show for the graph', () async {
     final String fof = addr('a7');
     final String far = addr('a8');
     final _Host host = _Host(<String>[ania, zosia, hidden]);
@@ -262,12 +270,24 @@ void main() {
     expect(toZosia[yeti]['h'], 2);
     expect(toZosia[yeti]['v'], ania);
     expect(toZosia[yeti].containsKey('ex'), isFalse);
-    expect(RelayedOpen.fromJson(toZosia[yeti])!.reaches(quiet), isFalse);
+    expect(RelayedOpen.fromJson(toZosia[yeti])!.relayable, isFalse);
     expect(toZosia.containsKey(far), isFalse, reason: 'three steps is all');
-    expect(
-      (s.payloadFor(hidden)['r'] as Map?)?.containsKey(yeti) ?? false,
-      isFalse,
+    // Someone Yeti hides from who gets it three steps round anyway: being
+    // Yeti's friend, their app shows only what Yeti says themselves.
+    final _Host hiddenHost = _Host(<String>[yeti, ania]);
+    final OpenToMeetService atHidden = OpenToMeetService(
+      host: hiddenHost,
+      disk: MemoryLedgerDisk(),
     );
+    await atHidden.handle(
+      _frame(ania, <String, dynamic>{
+        'r': <String, dynamic>{
+          yeti: <String, dynamic>{'o': 'd', 'h': 2, 'v': zosia},
+        },
+      }),
+    );
+    expect(atHidden.openOf(yeti), isNull);
+    expect(atHidden.farOpen(), isEmpty);
     // For the graph's far ring: who is three steps away, and who knows them.
     final Map<String, ({String name, Set<String> via})> farOnes = s.farOpen();
     expect(farOnes.keys, <String>[far]);

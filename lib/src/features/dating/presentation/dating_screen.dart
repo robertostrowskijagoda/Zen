@@ -981,7 +981,7 @@ class DatingProfileScreen extends ConsumerWidget {
   ) async {
     final PyramidService pyramid = ref.read(pyramidServiceProvider);
     final String? mine = pyramid.myKey;
-    final int balance = mine == null ? 0 : pyramid.state?.balanceOf(mine) ?? 0;
+    final int balance = mine == null ? 0 : pyramid.balance;
     final TextEditingController amount = TextEditingController(text: '10');
     // Amounts are kept in hundredths (see parseMoney / formatMoney).
     final bool? ok = await showDialog<bool>(

@@ -362,7 +362,9 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                     t('Ukryj tylko przed nim / nią'),
                     t(
                       'Jego/jej znajomi mogą Cię dalej zobaczyć, także przez '
-                      'tę osobę.',
+                      'tę osobę. Uwaga: zmodyfikowana aplikacja tej osoby, '
+                      'udająca, że tylko przekazuje cudze pytanie, mogłaby '
+                      'to obejść.',
                     ),
                   ),
                   (

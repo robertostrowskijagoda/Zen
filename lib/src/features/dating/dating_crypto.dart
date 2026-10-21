@@ -322,196 +322,105 @@ Map<String, dynamic> datingPadded(
   };
 }
 
+/// The commitment a lantern carries: SHA-256 of its one-off hybrid key (the
+/// X25519 key and the ML-KEM-768 + X25519 key, as they are sent on request).
+/// Small enough to flood three steps every week; whoever asks gets the keys
+/// themselves and checks them against it, so a phone on the way cannot slip
+/// its own keys in (a hash, safe against a quantum computer).
+String datingLanternHash(List<int> x25519, List<int> pq) =>
+    b64(crypto.sha256.convert(<int>[...x25519, ...pq]).bytes);
+
 /// Proof that the answer to a profile request for the lantern [lanternId]
-/// comes from the one who sent that lantern and names the dating key
-/// [datingKey]. The owner computes it with the lantern's one-off
-/// key ([me]) and the asker's dating key ([them]); the asker with its dating
-/// key and the lantern's key — both get the same value, nobody else can.
-Future<String> datingLanternProof(
-  RelayIdentity me,
-  Uint8List them,
+/// comes from the one who holds that lantern and names the dating key
+/// [datingKey]: a MAC with the secret [nonce] the lantern's holder put in
+/// its answer to the match test. That answer is sealed (hybrid) for the
+/// asker, and the asker's keys came sealed (hybrid) to the lantern's key,
+/// so only the two of them know the nonce — now and later.
+String datingLanternProof(
+  List<int> nonce,
   String lanternId,
   String datingKey,
-) async {
-  final Mac mac = await Hmac.sha256().calculateMac(
-    utf8.encode('zen-date-lantern|$lanternId|$datingKey'),
-    secretKey: SecretKey(await _x25519(me, them)),
-  );
-  return base64Url.encode(mac.bytes);
-}
+) => b64(
+  crypto.Hmac(
+    crypto.sha256,
+    nonce,
+  ).convert(utf8.encode('zen-date-lantern|$lanternId|$datingKey')).bytes,
+);
+
+/// What the first phone on the way back says about who asked: a MAC of the
+/// question's ephemeral key [ephemeral] with the dating key the asker's own
+/// phone told it ([datingKey]). The lantern's holder checks it against the
+/// key inside the question: an app that asks with another key than the one
+/// it told its friends is noticed (and a hidden friend recognised). It
+/// names nobody to the phones on the way.
+String datingOriginTag(String datingKey, String ephemeral) => b64(
+  crypto.Hmac(
+    crypto.sha256,
+    utf8.encode(datingKey),
+  ).convert(utf8.encode('zen-date-origin|$ephemeral')).bytes.sublist(0, 16),
+);
 
 /// The private match test behind a lantern: whether two people fit
-/// (intention — dates or new friends — and wanted genders, both ways), and
-/// nothing else.
+/// (intention — dates or new friends — and wanted genders, both ways).
 ///
-/// Every wish is a tag ([DatingMatch.slots] at most, see `DatingWants`
-/// `offerTags` / `seekTags`); two people fit when they share a tag. Each
-/// tag is hashed to a point of Curve25519. The asker blinds its points with
-/// a one-off secret b; the lantern's owner raises them with a secret a, new
-/// for every answer, returns them shuffled, and sends its own points raised
-/// with a as well; the asker raises those with b and compares: H(t)^ab is the
-/// same on both sides only for a common tag (a Diffie–Hellman private set
-/// intersection). So:
-/// * the owner learns nothing about the asker's wishes from the question;
-/// * the asker learns whether (and in how many tags) they fit;
-/// * the phones in between see sealed boxes of always the same size.
-/// Unused slots are filled with random points, which look the same as the
-/// real ones. A phone with dating off (or a person it is hidden from) fills
-/// every slot, so it never fits, exactly like a person who does not fit.
-/// The profile itself goes out only after a proof of fit ([proves]): the
-/// asker reveals b, and the owner checks that a question point is one of its
-/// own tags blinded with b.
+/// Every wish is a tag of a small, fixed universe ([universe]: 2 ways of
+/// meeting × 3 genders × 3 genders = 18; see `DatingWants` `offerTags` /
+/// `seekTags`); two people fit when they share a tag. The test is a
+/// **sealed offer**: the lantern's holder answers with its offered tags as
+/// a fixed-length bit string, sealed (ML-KEM-768 + X25519) for the asker,
+/// and the asker compares them with its own wishes on its own phone. The
+/// question carries no wishes at all, so the holder learns nothing from it;
+/// the asker reveals its wishes only in the profile request that proves the
+/// fit, and only when they fit (as before, with a new private set
+/// intersection). Nothing in it rests on a discrete logarithm: a recording
+/// stays closed to a quantum computer.
 ///
-/// The test itself is classical (there is no post-quantum private set
-/// intersection in use); its answers and everything after them travel in
-/// hybrid boxes ([DatingBox]).
-///
-/// Limits: a modified app can put any points in a question, so every answer
-/// tells it how many of up to [slots] chosen tags the owner offers. Keys cost
-/// nothing; what bounds this is the number of answers per lantern and per
-/// friend the question came through (`kDatingMatchNearPerFriend`,
-/// `kDatingMatchFarPerFriend` in the service), not the asker's key.
+/// What it gives an asker who is not honest: the holder's offered tags for
+/// this answer. That is no more than the earlier Diffie–Hellman test gave:
+/// there a modified app chose 6 of the 18 tags per answer and learnt all of
+/// them in three answers, within the same limits per lantern and friend
+/// (`kDatingMatchNearPerFriend`, `kDatingMatchFarPerFriend` in the service).
+/// A phone with dating off, or that this person hides from, offers nothing
+/// — exactly like a person who does not fit.
 abstract final class DatingMatch {
-  /// Points on each side: one per way of meeting (dates, new friends) and
-  /// gender. Every question and answer carries all of them, real or filler.
-  static const int slots = 6;
+  /// Every tag, in a fixed order: the bit strings follow it.
+  static final List<String> universe = <String>[
+    for (final String m in <String>['d', 'f'])
+      for (final String o in <String>['k', 'm', 'i'])
+        for (final String g in <String>['k', 'm', 'i']) '$m:$o>$g',
+  ];
 
-  static final BigInt _p = (BigInt.one << 255) - BigInt.from(19);
-  static final Map<String, Uint8List> _points = <String, Uint8List>{};
+  /// [tags] as a bit string over [universe] ('1' for a tag in it).
+  static String bits(Set<String> tags) => <String>[
+    for (final String t in universe) tags.contains(t) ? '1' : '0',
+  ].join();
 
-  /// The point for [tag]: on the curve (not the twist), with no known
-  /// discrete logarithm.
-  static Future<Uint8List> point(String tag) async {
-    final Uint8List? known = _points[tag];
-    if (known != null) {
-      return known;
-    }
-    for (int i = 0; ; i++) {
-      final Hash h = await Sha256().hash(utf8.encode('zen-date-match|$i|$tag'));
-      final Uint8List u = Uint8List.fromList(h.bytes);
-      u[31] &= 0x7f;
-      BigInt x = BigInt.zero;
-      for (int j = 31; j >= 0; j--) {
-        x = (x << 8) | BigInt.from(u[j]);
-      }
-      if (x == BigInt.zero || x >= _p) {
-        continue;
-      }
-      // On the curve when x³ + 486662x² + x is a square mod p.
-      final BigInt v = (x * x * x + BigInt.from(486662) * x * x + x) % _p;
-      if (v != BigInt.zero &&
-          v.modPow((_p - BigInt.one) >> 1, _p) == BigInt.one) {
-        return _points[tag] = u;
-      }
-    }
-  }
+  /// Nothing offered or asked: what a phone with dating off sends.
+  static String get none => '0' * universe.length;
 
-  /// A random point of the same kind as a raised one (fills a slot).
-  static Future<String> _filler() async =>
-      base64Url.encode((await RelayIdentity.generate()).publicKey);
+  /// Whether [json] is a bit string of the right length.
+  static bool valid(Object? json) =>
+      json is String &&
+      json.length == universe.length &&
+      json.split('').every((String c) => c == '0' || c == '1');
 
-  static Future<List<String>> _raised(
-    RelayIdentity secret,
-    Set<String> tags,
-    Random random,
-  ) async {
-    final List<String> out = <String>[
-      for (final String tag in tags.take(slots))
-        base64Url.encode(await _x25519(secret, await point(tag))),
-    ];
-    while (out.length < slots) {
-      out.add(await _filler());
-    }
-    return out..shuffle(random);
-  }
+  /// The tags of a bit string (empty for anything malformed).
+  static Set<String> tagsOf(Object? json) => !valid(json)
+      ? const <String>{}
+      : <String>{
+          for (int i = 0; i < universe.length; i++)
+            if ((json as String)[i] == '1') universe[i],
+        };
 
-  static List<Uint8List>? _points3(Object? json) {
-    if (json is! List || json.length != slots) {
-      return null;
-    }
-    final List<Uint8List> out = <Uint8List>[];
-    for (final Object? p in json) {
-      final Uint8List? key = decodeRelayKey(p);
-      if (key == null) {
-        return null;
-      }
-      out.add(key);
-    }
-    return out;
-  }
-
-  /// The asker's side: a one-off blinding secret and its blinded [tags]
-  /// (empty: only fillers).
-  static Future<(RelayIdentity, List<String>)> ask(
-    Set<String> tags,
-    Random random,
-  ) async {
-    final RelayIdentity blind = await RelayIdentity.generate();
-    return (blind, await _raised(blind, tags, random));
-  }
-
-  /// The owner's side, with a new secret: the asker's points raised with it
-  /// (shuffled) and the owner's own [tags] raised with it (empty: only
-  /// fillers). `null` when [asked] is not what [ask] makes.
-  static Future<(List<String>, List<String>)?> answer(
-    Object? asked,
-    Set<String> tags,
-    Random random,
-  ) async {
-    final List<Uint8List>? points = _points3(asked);
-    if (points == null) {
-      return null;
-    }
-    final RelayIdentity secret = await RelayIdentity.generate();
-    final List<String> raised = <String>[
-      for (final Uint8List p in points)
-        base64Url.encode(await _x25519(secret, p)),
-    ]..shuffle(random);
-    return (raised, await _raised(secret, tags, random));
-  }
-
-  /// The owner's check of a proof of fit: whether one of the points the
-  /// asker sent ([asked]) is one of the owner's [tags] blinded with the
-  /// asker's revealed secret [blind].
-  static Future<bool> proves(
-    RelayIdentity blind,
-    Object? asked,
-    Set<String> tags,
-  ) async {
-    final List<Uint8List>? points = _points3(asked);
-    if (points == null) {
+  /// Whether the asked tags [seek] and the offered [offer] share one.
+  static bool fits(Object? seek, Object? offer) {
+    if (!valid(seek) || !valid(offer)) {
       return false;
     }
-    final Set<String> sent = <String>{
-      for (final Uint8List p in points) base64Url.encode(p),
-    };
-    for (final String tag in tags.take(slots)) {
-      if (sent.contains(
-        base64Url.encode(await _x25519(blind, await point(tag))),
-      )) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// The asker's verdict: whether the owner's answer ([raised], [offered])
-  /// shows a common tag.
-  static Future<bool> fits(
-    RelayIdentity blind,
-    Object? raised,
-    Object? offered,
-  ) async {
-    final List<Uint8List>? mine = _points3(raised);
-    final List<Uint8List>? theirs = _points3(offered);
-    if (mine == null || theirs == null) {
-      return false;
-    }
-    final Set<String> mineSet = <String>{
-      for (final Uint8List p in mine) base64Url.encode(p),
-    };
-    for (final Uint8List p in theirs) {
-      if (mineSet.contains(base64Url.encode(await _x25519(blind, p)))) {
+    final String a = seek as String;
+    final String b = offer as String;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] == '1' && b[i] == '1') {
         return true;
       }
     }
