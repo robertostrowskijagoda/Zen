@@ -498,6 +498,13 @@ Uint8List flatNewKeyBytes(String oldKey, String newKey, String target) =>
       'a': target,
     });
 
+/// What a resident signs (with their own resident key) when their phone
+/// leaves the household [flatKey] ("Opuść"): the others make a new key
+/// without it, and neighbours take this as the resident's own consent.
+Uint8List flatLeaveBytes(String flatKey, String resident) => canonicalJsonBytes(
+  <String, dynamic>{'t': 'zen_flat_leave', 'f': flatKey, 'a': resident},
+);
+
 /// What a resident signs (with their own resident key) to show a
 /// neighbour flat [to] their own account at [address] under [name] ("Pokaż
 /// mój profil").
@@ -814,22 +821,177 @@ final class NearbyFlatInvite {
   }
 }
 
+/// What a household shows a flat before either side lets the other in
+/// ("Co widzi pukający"): the name (and place) is on the door sticker
+/// anyway; the rest only when the residents tick it. The same goes out
+/// with this household's own knocks, as its card. Shared by the residents.
+@immutable
+final class FlatDoorView {
+  const FlatDoorView({
+    this.photo = false,
+    this.names = false,
+    this.items = false,
+    this.about = false,
+    this.note = '',
+  });
+
+  /// Longest note for knockers.
+  static const int maxNote = 200;
+
+  /// The household's photo.
+  final bool photo;
+
+  /// The residents' first names (as housemates know them).
+  final bool names;
+
+  /// Invitations, offers and needs.
+  final bool items;
+
+  /// "O nas".
+  final bool about;
+
+  /// A short note just for knockers ("Dzwonek nie działa — pukajcie").
+  final String note;
+
+  /// Nothing beyond what the sticker says: a knock gets no answer at all
+  /// before "Wpuść" (the door stays silent).
+  bool get bare => !photo && !names && !items && !about && note.isEmpty;
+
+  FlatDoorView copyWith({
+    bool? photo,
+    bool? names,
+    bool? items,
+    bool? about,
+    String? note,
+  }) => FlatDoorView(
+    photo: photo ?? this.photo,
+    names: names ?? this.names,
+    items: items ?? this.items,
+    about: about ?? this.about,
+    note: note ?? this.note,
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (photo) 'ph': true,
+    if (names) 'nm': true,
+    if (items) 'it': true,
+    if (about) 'ab': true,
+    if (note.isNotEmpty) 'nt': note,
+  };
+
+  static FlatDoorView fromJson(Object? json) {
+    if (json is! Map) {
+      return const FlatDoorView();
+    }
+    final Object? note = json['nt'];
+    return FlatDoorView(
+      photo: json['ph'] == true,
+      names: json['nm'] == true,
+      items: json['it'] == true,
+      about: json['ab'] == true,
+      note: note is String
+          ? (note.length > maxNote ? note.substring(0, maxNote) : note)
+          : '',
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is FlatDoorView &&
+      other.photo == photo &&
+      other.names == names &&
+      other.items == items &&
+      other.about == about &&
+      other.note == note;
+
+  @override
+  int get hashCode => Object.hash(photo, names, items, about, note);
+}
+
+/// A household's card: what a flat shows before it is let in, or before it
+/// lets the other in ([FlatDoorView]). [profile] is the household's
+/// profile cut down to what the card shows, signed with the household's
+/// key at revision 0 and without residents, so the full profile replaces
+/// it once it comes after "Wpuść".
+@immutable
+final class FlatCard {
+  const FlatCard({
+    required this.profile,
+    this.names = const <String>[],
+    this.note = '',
+  });
+
+  /// Residents' first names on a card at most.
+  static const int maxNames = FlatProfile.maxMembers;
+
+  final FlatProfile profile;
+
+  /// The residents' first names, when the household shows them.
+  final List<String> names;
+
+  /// The household's note for knockers.
+  final String note;
+
+  String get key => profile.key;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'p': profile.toJson(),
+    if (names.isNotEmpty) 'nm': names,
+    if (note.isNotEmpty) 'nt': note,
+  };
+
+  /// The card in [json] (a knock's or a door's answer body); `null`
+  /// without a profile. Its signature is checked by whoever takes it.
+  static FlatCard? fromJson(Object? json) {
+    if (json is! Map) {
+      return null;
+    }
+    final FlatProfile? profile = FlatProfile.fromJson(json['p']);
+    if (profile == null) {
+      return null;
+    }
+    final Object? names = json['nm'];
+    final Object? note = json['nt'];
+    return FlatCard(
+      profile: profile,
+      names: <String>[
+        if (names is List)
+          for (final Object? n in names.take(maxNames))
+            if (n is String && n.trim().isNotEmpty)
+              n.length > 40 ? n.substring(0, 40) : n,
+      ],
+      note: note is String
+          ? (note.length > FlatDoorView.maxNote
+                ? note.substring(0, FlatDoorView.maxNote)
+                : note)
+          : '',
+    );
+  }
+}
+
 /// Someone scanned our door and knocked: nothing goes back to them
-/// until a resident lets them in, so the knock alone tells them nothing
-/// about who lives here. It came to the door, or while this phone was
-/// offline, sealed through the friends who run its mailbox doors.
+/// until a resident lets them in (or the household shows knockers a card,
+/// [FlatDoorView]), so the knock alone tells them nothing about who lives
+/// here. It came to a resident's door, or while the phones were offline,
+/// sealed through the friends who run the mailbox doors; every resident's
+/// phone has it (the housemates pass it on), and the first answer counts
+/// for all ([FlatKnockDecision]).
 @immutable
 final class FlatKnock {
   const FlatKnock({
-    required this.profile,
+    required this.card,
     required this.sender,
     required this.at,
+    this.id = '',
     this.reply,
   });
 
-  /// The knocking flat's profile (signed, checked when it came); its
-  /// residents' keys are pinned when they are let in.
-  final FlatProfile profile;
+  /// The knocking flat's card (signed, checked when it came): only its
+  /// name and what it chose to show, never its residents.
+  final FlatCard card;
+
+  /// The knocking flat's (cut down) profile.
+  FlatProfile get profile => card.profile;
 
   /// The door that knocked (the knocker's phone's door, never its own
   /// address).
@@ -838,6 +1000,9 @@ final class FlatKnock {
   /// When they knocked (a knock held by friends: when a friend took it).
   final int at;
 
+  /// The knock's own id: every copy of one knock has it.
+  final String id;
+
   /// The knocker's own mailbox doors: the answer after "Wpuść" waits there
   /// too, if their phone is offline by then.
   final FlatMailDoor? reply;
@@ -845,9 +1010,10 @@ final class FlatKnock {
   String get key => profile.key;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    'p': profile.toJson(),
+    ...card.toJson(),
     'a': sender,
     'at': at,
+    if (id.isNotEmpty) 'id': id,
     'ra': ?reply?.toJson(),
   };
 
@@ -855,15 +1021,60 @@ final class FlatKnock {
     if (json is! Map || json['a'] is! String || json['at'] is! int) {
       return null;
     }
-    final FlatProfile? profile = FlatProfile.fromJson(json['p']);
-    return profile == null
+    final FlatCard? card = FlatCard.fromJson(json);
+    final Object? id = json['id'];
+    return card == null
         ? null
         : FlatKnock(
-            profile: profile,
+            card: card,
             sender: json['a'] as String,
             at: json['at'] as int,
+            id: id is String && id.length <= 40 ? id : '',
             reply: FlatMailDoor.fromJson(json['ra']),
           );
+  }
+}
+
+/// A knock answered on one of the residents' phones: let in ([ok]) or
+/// not. Every phone of the household closes that knock.
+@immutable
+final class FlatKnockDecision {
+  const FlatKnockDecision({
+    required this.flat,
+    required this.id,
+    required this.at,
+    required this.ok,
+  });
+
+  /// The flat that knocked.
+  final String flat;
+
+  /// The knock ([FlatKnock.id]).
+  final String id;
+  final int at;
+  final bool ok;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'f': flat,
+    'id': id,
+    'at': at,
+    if (ok) 'ok': true,
+  };
+
+  static FlatKnockDecision? fromJson(Object? json) {
+    if (json is! Map ||
+        json['f'] is! String ||
+        json['id'] is! String ||
+        (json['id'] as String).length > 40 ||
+        json['at'] is! int) {
+      return null;
+    }
+    return FlatKnockDecision(
+      flat: json['f'] as String,
+      id: json['id'] as String,
+      at: json['at'] as int,
+      ok: json['ok'] == true,
+    );
   }
 }
 

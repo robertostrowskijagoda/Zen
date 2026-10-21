@@ -76,7 +76,9 @@ final class _Net {
         continue;
       }
       if (p.inbox == to) {
-        if (kFlatDoorTypes.contains(type) && type != FlatTypes.seal) {
+        final Object? d = payload['d'];
+        if (kFlatDoorTypes.contains(type) &&
+            (type != FlatTypes.seal || (d is String && _n(d) == to))) {
           await p.service.handle(
             SignalTransportFrame(
               from: from,
@@ -288,39 +290,174 @@ void main() {
     },
   );
 
-  test(
-    'a sealed knock opens only with the door key it was sealed for',
-    () async {
-      final FlatDoorKeys keys = (await FlatDoorKeys.derive('42' * 32))!;
-      final FlatDoorKeys other = (await FlatDoorKeys.derive('43' * 32))!;
-      expect(keys.slots, hasLength(kDoorSlots));
-      expect(keys.slots.toSet(), hasLength(kDoorSlots));
-      expect(keys.slots, isNot(contains(other.slots.first)));
-      final Map<String, dynamic> box = (await FlatSeal.seal(<String, dynamic>{
-        'e': <String, dynamic>{'type': FlatTypes.hello, 'n': 'Bartkowie'},
-      }, keys.seal.publicKeyBase64))!;
-      expect(jsonEncode(box).contains('Bartkowie'), isFalse);
-      expect((await FlatSeal.open(box, keys.seal))!['e']['n'], 'Bartkowie');
-      expect(await FlatSeal.open(box, other.seal), isNull);
-      // A friend holds a slot key; it does not open the box.
-      final RelayIdentity slotKey = RelayIdentity(
-        privateKey: _unhex(keys.slotSeeds.first),
-        publicKey: keys.seal.publicKey,
-      );
-      expect(await FlatSeal.open(box, slotKey), isNull);
+  test('a sealed knock opens only with the household key and door code it was '
+      'sealed for, on every resident\'s phone', () async {
+    final List<int> household = List<int>.filled(32, 1);
+    final FlatDoorKeys keys = (await FlatDoorKeys.derive(
+      '42' * 32,
+      sealSeed: flatSealSeed(household, 'token'),
+    ))!;
+    // A housemate's phone: its own door, the same household.
+    final FlatDoorKeys housemate = (await FlatDoorKeys.derive(
+      '44' * 32,
+      sealSeed: flatSealSeed(household, 'token'),
+    ))!;
+    // "Nowy kod", and another household.
+    final FlatDoorKeys newCode = (await FlatDoorKeys.derive(
+      '42' * 32,
+      sealSeed: flatSealSeed(household, 'new token'),
+    ))!;
+    final FlatDoorKeys other = (await FlatDoorKeys.derive(
+      '43' * 32,
+      sealSeed: flatSealSeed(List<int>.filled(32, 2), 'token'),
+    ))!;
+    expect(keys.slots, hasLength(kDoorSlots));
+    expect(keys.slots.toSet(), hasLength(kDoorSlots));
+    expect(keys.slots, isNot(contains(other.slots.first)));
+    expect(keys.slots, isNot(contains(housemate.slots.first)));
+    final Map<String, dynamic> box = (await FlatSeal.seal(<String, dynamic>{
+      'e': <String, dynamic>{'type': FlatTypes.hello, 'n': 'Bartkowie'},
+    }, keys.seal.publicKeyBase64))!;
+    expect(jsonEncode(box).contains('Bartkowie'), isFalse);
+    expect((await FlatSeal.open(box, keys.seal))!['e']['n'], 'Bartkowie');
+    expect((await FlatSeal.open(box, housemate.seal))!['e']['n'], 'Bartkowie');
+    expect(await FlatSeal.open(box, newCode.seal), isNull);
+    expect(await FlatSeal.open(box, other.seal), isNull);
+    // The seed alone opens it (the locked background service has it).
+    final RelayIdentity fromSeed = (await flatSealIdentity(
+      flatSealSeed(household, 'token'),
+    ))!;
+    expect((await FlatSeal.open(box, fromSeed))!['e']['n'], 'Bartkowie');
+    // A friend holds a slot key; it does not open the box.
+    final RelayIdentity slotKey = RelayIdentity(
+      privateKey: _unhex(keys.slotSeeds.first),
+      publicKey: keys.seal.publicKey,
+    );
+    expect(await FlatSeal.open(box, slotKey), isNull);
 
-      // The door code carries the slots taken and the sealing key.
-      final FlatDoorCode code = FlatDoorCode(
-        key: base64Url.encode(List<int>.filled(32, 7)),
+    // The door code carries the slots taken and the sealing key.
+    final FlatDoorCode code = FlatDoorCode(
+      key: base64Url.encode(List<int>.filled(32, 7)),
+      door: 'abc',
+      inbox: _n('200::d1'),
+      name: 'Nowakowie',
+      mail: keys.mailDoor(<int>[3, 0]),
+    );
+    final FlatDoorCode back = FlatDoorCode.parse(code.toQr())!;
+    expect(back.mail!.slots, <String>[keys.slots[0], keys.slots[3]]);
+    expect(back.mail!.seal, keys.seal.publicKeyBase64);
+    expect(keys.mailDoor(const <int>[]), isNull);
+
+    // The housemates' doors go into the same list, sorted in with the
+    // mailbox doors: nothing tells which is which.
+    final List<String> doors = <String>[
+      for (int i = 0; i < kStickerResidentDoors + 2; i++)
+        _n('200::${(0xb0 + i).toRadixString(16)}'),
+    ];
+    final FlatMailDoor mixed = keys.mailDoor(
+      <int>[0, 1, 2, 3, 4, 5],
+      doors: <String>[...doors, _n('10.0.0.1'), keys.slots.first],
+    )!;
+    expect(mixed.slots, hasLength(kStickerSealDoors));
+    expect(mixed.slots, containsAll(keys.slots));
+    expect(mixed.slots, containsAll(doors.take(kStickerResidentDoors)));
+    int byBytes(String a, String b) {
+      final Uint8List x = addressBytes(a)!;
+      final Uint8List y = addressBytes(b)!;
+      for (int i = 0; i < 16; i++) {
+        if (x[i] != y[i]) {
+          return x[i] - y[i];
+        }
+      }
+      return 0;
+    }
+
+    for (int i = 1; i < mixed.slots.length; i++) {
+      expect(byBytes(mixed.slots[i - 1], mixed.slots[i]), lessThan(0));
+    }
+    final FlatDoorCode full = FlatDoorCode.parse(
+      FlatDoorCode(
+        key: code.key,
         door: 'abc',
         inbox: _n('200::d1'),
         name: 'Nowakowie',
-        mail: keys.mailDoor(<int>[3, 0]),
+        mail: mixed,
+      ).toQr(),
+    )!;
+    expect(full.mail!.slots, mixed.slots);
+    expect(
+      keys.mailDoor(const <int>[], doors: <String>[doors.first]),
+      isNotNull,
+    );
+  });
+
+  test(
+    'sealed knocks and answers are keyed against a quantum computer too: '
+    'a knock with the sticker\'s token, an answer with a hybrid key',
+    () async {
+      final List<int> household = List<int>.filled(32, 1);
+      final FlatDoorKeys keys = (await FlatDoorKeys.derive(
+        '42' * 32,
+        sealSeed: flatSealSeed(household, 'token'),
+      ))!;
+      final Map<String, dynamic> knock = (await FlatSeal.seal(
+        <String, dynamic>{
+          'e': <String, dynamic>{'n': 'Bartkowie'},
+        },
+        keys.seal.publicKeyBase64,
+        doorToken: 'token',
+      ))!;
+      expect(knock['p'], 1);
+      expect(
+        (await FlatSeal.open(knock, keys.seal, doorToken: 'token'))!['e']['n'],
+        'Bartkowie',
       );
-      final FlatDoorCode back = FlatDoorCode.parse(code.toQr())!;
-      expect(back.mail!.slots, <String>[keys.slots[0], keys.slots[3]]);
-      expect(back.mail!.seal, keys.seal.publicKeyBase64);
-      expect(keys.mailDoor(const <int>[]), isNull);
+      // The household key alone does not open it, nor another token.
+      expect(await FlatSeal.open(knock, keys.seal), isNull);
+      expect(await FlatSeal.open(knock, keys.seal, doorToken: 'old'), isNull);
+
+      // The knock names the knocker's mailbox doors with their hybrid key;
+      // the sticker has no room for it.
+      final FlatMailDoor reply = keys.mailDoor(<int>[0], withKem: true)!;
+      expect(reply.kem, keys.kemPublic);
+      expect(
+        FlatMailDoor.fromJson(jsonDecode(jsonEncode(reply.toJson())))!.kem,
+        keys.kemPublic,
+      );
+      expect(keys.mailDoor(<int>[0])!.toJson().containsKey('q'), isFalse);
+      expect(
+        FlatMailDoor.read(reply.slotsCode, reply.seal, 'not a key'),
+        isNull,
+      );
+      final Map<String, dynamic> answer = (await FlatSeal.seal(
+        <String, dynamic>{
+          'e': <String, dynamic>{'n': 'Nowakowie'},
+        },
+        reply.seal,
+        kem: reply.kem,
+      ))!;
+      expect(answer['q'], isA<String>());
+      expect(FlatSeal.looksSealed(answer), isTrue);
+      expect(
+        (await FlatSeal.open(
+          answer,
+          keys.seal,
+          kemSeed: keys.kemSeed,
+        ))!['e']['n'],
+        'Nowakowie',
+      );
+      expect(await FlatSeal.open(answer, keys.seal), isNull);
+      final FlatDoorKeys newCode = (await FlatDoorKeys.derive(
+        '42' * 32,
+        sealSeed: flatSealSeed(household, 'new token'),
+      ))!;
+      expect(
+        await FlatSeal.open(answer, keys.seal, kemSeed: newCode.kemSeed),
+        isNull,
+      );
+      // The seed of the hybrid key comes from the sealing seed (the locked
+      // background service has it).
+      expect(flatSealKemSeed(flatSealSeed(household, 'token')), keys.kemSeed);
     },
   );
 

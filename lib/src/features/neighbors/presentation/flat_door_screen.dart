@@ -20,6 +20,15 @@ import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 
+// A QR code scans only dark on light, and the sticker is printed on white
+// paper: these stay the same in every theme.
+const Color _paper = Color(0xFFFFFFFF);
+const Color _ink = Color(0xFF151515);
+const Color _inkSoft = Color(0xFF555555);
+const Color _inkFaint = Color(0xFF8A8A8A);
+const Color _paperTint = Color(0xFFF1F1F1);
+const Color _paperEdge = Color(0x22000000);
+
 /// The door sticker: QR, the flat's name and a line of invitation.
 class FlatDoorScreen extends ConsumerStatefulWidget {
   const FlatDoorScreen({super.key});
@@ -39,11 +48,107 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
   final TextEditingController _line = TextEditingController(
     text: t('Zeskanuj — zapraszamy na kawę!'),
   );
+  late final TextEditingController _note;
+
+  @override
+  void initState() {
+    super.initState();
+    _note = TextEditingController(
+      text: ref.read(neighborsServiceProvider).doorView.note,
+    );
+  }
 
   @override
   void dispose() {
     _line.dispose();
+    _note.dispose();
     super.dispose();
+  }
+
+  /// "Co widzi pukający": what a knocker sees before "Wpuść".
+  List<Widget> _knockerView(NeighborsService service, Color tone) {
+    final FlatDoorView v = service.doorView;
+    Widget option(String key, String title, bool value, FlatDoorView next) =>
+        SwitchListTile(
+          key: Key('flat-view-$key'),
+          title: Text(title),
+          value: value,
+          onChanged: (_) => unawaited(service.setDoorView(next)),
+        );
+    return <Widget>[
+      ZenSection(t('Co widzi pukający'), top: 24),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+        child: Text(
+          t(
+            'Zanim go wpuścicie, widzi tylko nazwę z naklejki. Zaznaczcie, '
+            'co jeszcze pokazać. To samo zobaczą ci, do których zapukacie.',
+          ),
+          style: TextStyle(
+            color: ZenColors.of(context).textSecondary,
+            fontSize: 13.5,
+            height: 1.4,
+          ),
+        ),
+      ),
+      ZenGroup(
+        children: <Widget>[
+          option('photo', t('Zdjęcie'), v.photo, v.copyWith(photo: !v.photo)),
+          option(
+            'names',
+            t('Imiona domowników'),
+            v.names,
+            v.copyWith(names: !v.names),
+          ),
+          option(
+            'items',
+            t('Zaproszenia i oferty'),
+            v.items,
+            v.copyWith(items: !v.items),
+          ),
+          option('about', t('„O nas”'), v.about, v.copyWith(about: !v.about)),
+        ],
+      ),
+      const SizedBox(height: 10),
+      TextField(
+        key: const Key('flat-view-note'),
+        controller: _note,
+        maxLength: FlatDoorView.maxNote,
+        minLines: 1,
+        maxLines: 3,
+        textCapitalization: TextCapitalization.sentences,
+        decoration: InputDecoration(
+          labelText: t('Notka dla pukających'),
+          hintText: t('Dzwonek nie działa — pukajcie'),
+          prefixIcon: const Icon(Icons.sticky_note_2_outlined),
+          suffixIcon: IconButton(
+            key: const Key('flat-view-note-save'),
+            tooltip: t('Zapisz'),
+            icon: const Icon(Icons.check_rounded),
+            onPressed: () {
+              FocusScope.of(context).unfocus();
+              unawaited(
+                service.setDoorView(
+                  service.doorView.copyWith(note: _note.text.trim()),
+                ),
+              );
+            },
+          ),
+        ),
+        onSubmitted: (String text) => unawaited(
+          service.setDoorView(service.doorView.copyWith(note: text.trim())),
+        ),
+      ),
+      if (!v.bare)
+        ZenInfo(
+          icon: Icons.wifi_tethering_rounded,
+          tone: tone,
+          text: t(
+            'Tę wizytówkę drzwi wysyłają od razu, więc pukający dowie się, '
+            'że któryś z Waszych telefonów jest w sieci.',
+          ),
+        ),
+    ];
   }
 
   /// Saves the sticker as a PNG the size of A6 at 300 dpi.
@@ -176,8 +281,8 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
             children: <Widget>[
               Container(
                 padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(26),
+                decoration: ShapeDecoration(
+                  shape: ZenLook.of(context).panelShape(zen, radius: 26),
                   gradient: LinearGradient(
                     colors: <Color>[
                       Color.alphaBlend(
@@ -189,7 +294,6 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
-                  border: Border.all(color: zen.outlineSoft),
                 ),
                 child: Center(
                   child: FittedBox(
@@ -198,9 +302,9 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
                       decoration: BoxDecoration(
                         boxShadow: <BoxShadow>[
                           BoxShadow(
-                            color: const Color(
-                              0xFF000000,
-                            ).withValues(alpha: 0.25),
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.shadow.withValues(alpha: 0.25),
                             blurRadius: 18,
                             offset: const Offset(0, 6),
                           ),
@@ -267,17 +371,18 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
                   ),
                 ],
               ),
+              ..._knockerView(service, tone),
               const SizedBox(height: 16),
               ZenInfo(
                 icon: Icons.shield_outlined,
                 tone: tone,
                 title: t('Co jest w kodzie?'),
                 text: t(
-                  'Klucz mieszkania, hasło tej naklejki i adres drzwi, pod '
-                  'który pukać — osobny adres, nie adres żadnego z Was. Kto '
-                  'go zeskanuje, wysyła Wam swój profil mieszkania i dostaje '
-                  'Wasz. Sąsiad bez aplikacji dostanie ją od kogoś, kto ją ma '
-                  '(„Podaj dalej”).',
+                  'Klucz mieszkania, hasło tej naklejki i adresy drzwi, pod '
+                  'które pukać — osobne adresy, nie adresy żadnego z Was. '
+                  'Kto go zeskanuje, puka: widzicie jego wizytówkę, a '
+                  'profilami wymieniacie się dopiero po „Wpuść”. Sąsiad bez '
+                  'aplikacji dostanie ją od kogoś, kto ją ma („Podaj dalej”).',
                 ),
               ),
               const SizedBox(height: 10),
@@ -285,9 +390,11 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
                 icon: Icons.info_outline_rounded,
                 tone: tone,
                 text: t(
-                  'Drzwi działają na tym telefonie: naklejka odpowiada, gdy '
-                  'Zen jest tu włączony i w sieci. „Nowy kod” zmienia hasło '
-                  'naklejki i adres drzwi.',
+                  'Pukanie widzą telefony wszystkich domowników, na Androidzie '
+                  'i komputerze także w tle. Gdy nikogo nie ma w sieci, '
+                  'pukanie do tygodnia przechowają znajomi z Waszymi '
+                  'skrzynkami. „Nowy kod” zmienia hasło naklejki i adresy '
+                  'drzwi.',
                 ),
               ),
             ],
@@ -308,7 +415,6 @@ class _Sticker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    const Color ink = Color(0xFF151515);
     // A printed sticker: it ignores the phone's text size.
     return MediaQuery.withNoTextScaling(
       child: Container(
@@ -317,16 +423,16 @@ class _Sticker extends StatelessWidget {
         height: 300 * 148 / 105,
         padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
         decoration: BoxDecoration(
-          color: const Color(0xFFFFFFFF),
-          border: Border.all(color: const Color(0x22000000)),
+          color: _paper,
+          border: Border.all(color: _paperEdge),
         ),
         child: Column(
           children: <Widget>[
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF1F1F1),
-                borderRadius: BorderRadius.circular(999),
+              decoration: const ShapeDecoration(
+                color: _paperTint,
+                shape: StadiumBorder(),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -334,13 +440,13 @@ class _Sticker extends StatelessWidget {
                   const Icon(
                     Icons.door_front_door_rounded,
                     size: 13,
-                    color: Color(0xFF555555),
+                    color: _inkSoft,
                   ),
                   const SizedBox(width: 5),
                   Text(
                     t('SĄSIEDZI'),
                     style: const TextStyle(
-                      color: Color(0xFF555555),
+                      color: _inkSoft,
                       fontSize: 11,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 1,
@@ -355,13 +461,17 @@ class _Sticker extends StatelessWidget {
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: zen.display(color: ink, size: 26, weight: FontWeight.w700),
+              style: zen.display(
+                color: _ink,
+                size: 26,
+                weight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 14),
             Expanded(
               child: QrImageView(
                 data: qr,
-                backgroundColor: const Color(0xFFFFFFFF),
+                backgroundColor: _paper,
                 padding: EdgeInsets.zero,
               ),
             ),
@@ -372,7 +482,7 @@ class _Sticker extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: ink,
+                color: _ink,
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
                 height: 1.25,
@@ -381,7 +491,7 @@ class _Sticker extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               t('Zen · sąsiedzi'),
-              style: const TextStyle(color: Color(0xFF8A8A8A), fontSize: 12),
+              style: const TextStyle(color: _inkFaint, fontSize: 12),
             ),
           ],
         ),
@@ -538,8 +648,11 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
         content: Text(
           t(
             'Ten telefon przestanie być domownikiem (np. ktoś się wyprowadza '
-            'sam). Pozostali zachowają profil, sąsiadów i wiadomości. Jeśli '
-            'to ostatni telefon, profil zniknie.',
+            'sam). Pozostali zachowają profil, sąsiadów i wiadomości, ale '
+            'dostaną nowy klucz mieszkania i nowy kod na drzwi — ten telefon '
+            'nie będzie już mógł nic podpisać ani przeczytać. Starą naklejkę '
+            'trzeba będzie wymienić. Jeśli to ostatni telefon, profil '
+            'zniknie.',
           ),
         ),
         actions: <Widget>[
@@ -627,15 +740,17 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFFFFFF),
-                        borderRadius: BorderRadius.circular(24),
+                        color: _paper,
+                        borderRadius: BorderRadius.circular(
+                          ZenLook.of(context).radius(24),
+                        ),
                         border: Border.all(color: zen.outlineSoft),
                       ),
                       child: QrImageView(
                         key: const Key('flat-home-qr'),
                         data: code.toQr(),
                         size: 240,
-                        backgroundColor: const Color(0xFFFFFFFF),
+                        backgroundColor: _paper,
                       ),
                     ),
                   ),

@@ -12,6 +12,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +58,20 @@ import (
 // mailbox door takes only sealed knocks (flat_seal) that name its own
 // address; the app here holds them for the friend without being able to
 // read them. It never sends.
+//
+// The sticker lists the other residents' doors in the same list, mixed in
+// with the mailbox doors: so the flat's own door also takes a sealed knock
+// that names it, and the app opens it with the household's key. A knock so
+// reaches every resident's phone that is on, also when the phone that
+// printed the sticker is off.
+//
+// Every door runs the session layer of the main node (pq_session.go) with
+// its own key: all traffic between doors — knocks, profiles, messages,
+// sealed knocks — goes sealed with hybrid post-quantum keys inside
+// Yggdrasil's own encryption, and a door takes nothing unsealed. The
+// session's device key comes from the door's key, so it is nobody's
+// identity either. A mailbox door sends only the session layer's own
+// control frames (its key record, challenges), never a flat frame.
 const (
 	// The only frame a mailbox door takes ("flat_seal").
 	doorSealType = "flat_seal"
@@ -83,7 +98,7 @@ const (
 )
 
 // doorTrafficTypes are the frames the flat's own door takes and sends
-// (FlatTypes.viaDoor in neighbors_service.dart): knocks and everything
+// (FlatTypes.atDoor in neighbors_service.dart): knocks and everything
 // between neighbour flats. Frames between housemates go phone to phone.
 var doorTrafficTypes = map[string]bool{
 	"flat_hello":     true,
@@ -97,6 +112,8 @@ var doorTrafficTypes = map[string]bool{
 	"flat_newkey":    true,
 	"flat_reveal":    true,
 	"flat_ack":       true,
+	// The household's card for a flat that knocked, before "Wpuść".
+	"flat_card": true,
 }
 
 // doorHostPeerAllowed tells which of the main node's peers the door host may
@@ -119,10 +136,14 @@ type doorNode struct {
 	// Only its fragment buffers (signal_reassembly.go) are used, so knocks
 	// split into fragments do not mix with the main node's.
 	assembler *bridgeNode
-	// Sends from the door (the flat's own door only; nil for a mailbox
-	// door). Only its write side is used: reading through it would answer
-	// the core's protocol packets.
-	rwc      *ipv6rwc.ReadWriteCloser
+	// Sends from the door. Only its write side is used: reading through it
+	// would answer the core's protocol packets.
+	rwc *ipv6rwc.ReadWriteCloser
+	// The session layer of the door (nil: plain, tests of the main node's
+	// plain mode only).
+	pq *pqEndpoint
+	// What the door saw and did, for diagnostics (doorStats).
+	stats    doorStats
 	host     *doorHost
 	stopOnce sync.Once
 	// Closed by stop; done is closed when run has returned.
@@ -130,6 +151,53 @@ type doorNode struct {
 	done chan struct{}
 	// A mailbox door run for a friend: it takes sealed knocks only.
 	mailbox bool
+}
+
+// doorStats counts what a door did with signals, for diagnostics (tests,
+// the log): what came in, what the session layer kept for itself, opened
+// or refused, what the door took, and what it wrote.
+type doorStats struct {
+	mu        sync.Mutex
+	counts    map[string]int
+	lastError string
+}
+
+func (s *doorStats) add(what string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.counts == nil {
+		s.counts = make(map[string]int)
+	}
+	s.counts[what]++
+}
+
+func (s *doorStats) fail(what string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.counts == nil {
+		s.counts = make(map[string]int)
+	}
+	s.counts[what]++
+	s.lastError = what + ": " + err.Error()
+}
+
+// String is the counts, sorted, and the last error.
+func (s *doorStats) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys := make([]string, 0, len(s.counts))
+	for key := range s.counts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys)+1)
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", key, s.counts[key]))
+	}
+	if s.lastError != "" {
+		parts = append(parts, "last error: "+s.lastError)
+	}
+	return strings.Join(parts, " ")
 }
 
 // doorHost carries a phone's doors to the mesh (see above).
@@ -426,9 +494,14 @@ func newDoorNode(main *bridgeNode, host *doorHost, seedHex string, mailbox bool)
 		done:      make(chan struct{}),
 		mailbox:   mailbox,
 	}
-	if !mailbox {
-		door.rwc = ipv6rwc.NewReadWriteCloser(doorCore)
-		door.rwc.SetMTU(door.rwc.MaxMTU())
+	door.rwc = ipv6rwc.NewReadWriteCloser(doorCore)
+	door.rwc.SetMTU(door.rwc.MaxMTU())
+	if !main.pqPlain {
+		door.pq, err = newPQEndpoint(private, net.IP(append([]byte(nil), door.ip[:]...)), door.writeWire)
+		if err != nil {
+			doorCore.Stop()
+			return nil, err
+		}
 	}
 	// The host calls the door (the door dials nobody).
 	if err := host.core.AddPeer(peerURI, ""); err != nil {
@@ -469,9 +542,20 @@ func (door *doorNode) run(main *bridgeNode) {
 			continue
 		}
 		message, ok := door.assembler.reassembleSignal(source.String(), payload)
-		if !ok || !door.takes(message) {
+		if !ok {
+			door.stats.add("fragment")
 			continue
 		}
+		door.stats.add("signal in")
+		message, ok = door.open(source, message)
+		if !ok {
+			continue
+		}
+		if !door.takes(message) {
+			door.stats.add("not taken")
+			continue
+		}
+		door.stats.add("taken")
 		main.signalInbox.push(signalMessage{
 			From:    source.String(),
 			Payload: message,
@@ -504,11 +588,37 @@ func (door *doorNode) trafficPacket(session []byte, from net.Addr) ([]byte, bool
 	return packet, true
 }
 
+// open is the signal text a reassembled signal from source carries, opened
+// by the door's session layer (control frames are answered there and give
+// nothing); anything unsealed is refused.
+func (door *doorNode) open(source net.IP, wire string) (string, bool) {
+	if door.pq == nil {
+		return wire, true
+	}
+	if !isPQWire(wire) {
+		door.stats.add("unsealed refused")
+		return "", false
+	}
+	plain, ok := door.pq.receive(source, []byte(wire))
+	if !ok {
+		// A control frame (answered inside), or data that did not open.
+		if len(wire) > len(pqMagic) && wire[len(pqMagic)] == pqKindData {
+			door.stats.add("sealed refused")
+		} else {
+			door.stats.add("session control")
+		}
+		return "", false
+	}
+	door.stats.add("opened")
+	return inflateSignalText(source.String(), string(plain))
+}
+
 // send sends a flat frame (payload, as the app encodes it) from the door to
-// remoteAddress, split into signal fragments as sendSignal does: to another
-// flat's door, or a sealed knock to a mailbox door.
+// remoteAddress, sealed by the door's session layer and split into signal
+// fragments as sendSignal does: to another flat's door, or a sealed knock to
+// a mailbox door.
 func (door *doorNode) send(remoteAddress, payload string) error {
-	if door.rwc == nil {
+	if door.mailbox {
 		return errors.New("a mailbox door sends nothing")
 	}
 	destination := net.ParseIP(strings.TrimSpace(remoteAddress))
@@ -519,7 +629,36 @@ func (door *doorNode) send(remoteAddress, payload string) error {
 		return errors.New("the door sends flat frames only")
 	}
 	wirePayload := buildSignalWirePayload(payload)
-	chunks := splitSignalPayloadRaw(wirePayload)
+	if door.pq == nil {
+		return door.writeWire(destination, []byte(wirePayload))
+	}
+	if err := door.pq.send(destination, []byte(wirePayload)); err != nil {
+		door.stats.fail("seal error", err)
+		return err
+	}
+	door.stats.add("sent")
+	return nil
+}
+
+// doorChunkSize is the base64 text one packet of a door carries: a whole
+// session-layer key record or opening frame fits one. While ironwood (and
+// ipv6rwc's address lookup) opens a session to a new peer it keeps only the
+// last packet written, so a frame split in small fragments always lost all
+// but its last on first contact and the session layer had to ask again.
+const doorChunkSize = 8 * 1024
+
+// writeWire splits a signal text into fragments and sends them from the
+// door's address to destination (the session layer's frames too).
+func (door *doorNode) writeWire(destination net.IP, wire []byte) error {
+	size := doorChunkSize
+	if limit := int(door.rwc.MTU()) - 1024; limit < size {
+		size = max(limit, signalChunkSize)
+	}
+	encoded := base64.StdEncoding.EncodeToString(wire)
+	chunks := make([]string, 0, len(encoded)/size+1)
+	for start := 0; start < len(encoded) || len(chunks) == 0; start += size {
+		chunks = append(chunks, encoded[start:min(start+size, len(encoded))])
+	}
 	packetID := fmt.Sprintf("%d-%d", time.Now().UnixNano(), nextSignalPacket.Add(1))
 	source := net.IP(append([]byte(nil), door.ip[:]...))
 	for index, chunk := range chunks {
@@ -534,11 +673,14 @@ func (door *doorNode) send(remoteAddress, payload string) error {
 		}
 		packet, err := buildYggPacket(source, destination, yggSignalPort, envelope)
 		if err != nil {
+			door.stats.fail("write error", err)
 			return err
 		}
 		if _, err := door.rwc.Write(packet); err != nil {
+			door.stats.fail("write error", err)
 			return err
 		}
+		door.stats.add("packet out")
 	}
 	return nil
 }
@@ -565,13 +707,15 @@ func (door *doorNode) linked() bool {
 	return false
 }
 
-// takes reports whether this door lets the signal text in: a flat frame at
-// the flat's own door, a sealed knock naming this door at a mailbox door.
+// takes reports whether this door lets the signal text in: a flat frame or
+// a sealed knock naming this door at the flat's own door (a housemate's
+// sticker lists it among the mailbox doors), only a sealed knock naming
+// this door at a mailbox door.
 func (door *doorNode) takes(message string) bool {
 	if door.mailbox {
 		return isSealedKnockFor(message, door.ip)
 	}
-	return isDoorTraffic(message)
+	return isDoorTraffic(message) || isSealedKnockFor(message, door.ip)
 }
 
 // isDoorTraffic reports whether a signal text is a flat frame for the

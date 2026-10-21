@@ -58,13 +58,69 @@ class FlatAvatar extends StatelessWidget {
       return ZenIconBadge(icon: icon, tone: neighborsTone(zen), size: size);
     }
     return ClipRRect(
-      borderRadius: BorderRadius.circular(size * 0.3),
+      borderRadius: BorderRadius.circular(
+        ZenLook.of(context).radius(size * 0.3),
+      ),
       child: SizedBox(
         width: size,
         height: size,
         // Re-encoded before showing: it may come from another flat.
         child: SafePhoto(data: profile.photo, clean: true, icon: icon),
       ),
+    );
+  }
+}
+
+/// What a flat's card shows besides its name ([FlatDoorView]): its note,
+/// the residents' first names, "O nas" and its invitations and offers, as
+/// far as that household shows them before "Wpuść".
+class FlatCardDetails extends StatelessWidget {
+  const FlatCardDetails({required this.card, super.key});
+
+  final FlatCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final FlatProfile p = card.profile;
+    Widget row(IconData icon, String text) => Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(icon, size: 16, color: zen.textMuted),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: zen.textSecondary,
+                fontSize: 13.5,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    final List<Widget> rows = <Widget>[
+      if (card.note.isNotEmpty) row(Icons.sticky_note_2_outlined, card.note),
+      if (card.names.isNotEmpty)
+        row(
+          Icons.people_alt_rounded,
+          t('Domownicy: {names}', {'names': card.names.join(', ')}),
+        ),
+      if (p.about.isNotEmpty) row(Icons.info_outline_rounded, p.about),
+      for (final FlatItem i in p.items.take(6))
+        row(flatItemIcon(i.kind), i.text),
+    ];
+    if (rows.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: rows,
     );
   }
 }
@@ -205,7 +261,10 @@ Future<void> knockOnFlatDoor(
           t('Zapukać do „{name}”?', <String, Object?>{'name': code.name}),
         ),
         content: Text(
-          t('Wyślecie im profil Waszego mieszkania, a oni odeślą swój.'),
+          t(
+            'Zobaczą Waszą wizytówkę. Profilami wymienicie się, gdy Was '
+            'wpuszczą.',
+          ),
         ),
         actions: <Widget>[
           TextButton(
@@ -262,17 +321,19 @@ class NeighborsScreen extends ConsumerWidget {
     return Scaffold(
       key: const Key('neighbors-screen'),
       appBar: ZenSectionBar(title: t('Sąsiedzi')),
-      body: ListenableBuilder(
-        listenable: service,
-        builder: (BuildContext context, Widget? _) {
-          if (service.joining && !service.hasFlat) {
-            return _Joining(service: service);
-          }
-          if (!service.hasFlat) {
-            return _NoFlat(service: service);
-          }
-          return _FlatHome(service: service);
-        },
+      body: SelectionArea(
+        child: ListenableBuilder(
+          listenable: service,
+          builder: (BuildContext context, Widget? _) {
+            if (service.joining && !service.hasFlat) {
+              return _Joining(service: service);
+            }
+            if (!service.hasFlat) {
+              return _NoFlat(service: service);
+            }
+            return _FlatHome(service: service);
+          },
+        ),
       ),
     );
   }
@@ -538,18 +599,16 @@ class _QuickAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    final BorderRadius r = BorderRadius.circular(20);
+    final ZenLook look = ZenLook.of(context);
+    final ShapeBorder shape = look.panelShape(zen, radius: 20);
     return Material(
-      color: zen.surface,
-      borderRadius: r,
+      color: look.panelColor(zen),
+      shape: shape,
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
-        borderRadius: r,
+        customBorder: shape,
         onTap: onTap,
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: r,
-            border: Border.all(color: zen.outlineSoft),
-          ),
+        child: Padding(
           padding: const EdgeInsets.fromLTRB(6, 14, 6, 12),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -785,7 +844,9 @@ class _FlatHome extends ConsumerWidget {
                     message: t('Zdjęcie mieszkania'),
                     child: InkWell(
                       key: const Key('flat-photo'),
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(
+                        ZenLook.of(context).radius(16),
+                      ),
                       onTap: () => unawaited(_photo(context)),
                       child: Stack(
                         clipBehavior: Clip.none,
@@ -963,6 +1024,8 @@ class _FlatHome extends ConsumerWidget {
                       ),
                     ],
                   ),
+                  // What they chose to show before being let in.
+                  FlatCardDetails(card: k.card),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 8,
@@ -1081,33 +1144,49 @@ class _FlatHome extends ConsumerWidget {
             text: t('Powieś kod na drzwiach albo zeskanuj kod sąsiada.'),
           ),
         for (final FlatDoorCode c in service.pending.values)
-          ZenCard(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-            child: Row(
-              children: <Widget>[
-                SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: Center(
-                    child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: tone,
-                      ),
+          Builder(
+            builder: (BuildContext context) {
+              // Their card, when the household shows knockers one.
+              final FlatCard? card = service.doorCard(c.key);
+              return ZenCard(
+                key: Key('flat-pending-${c.name}'),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        if (card != null && card.profile.photo.isNotEmpty)
+                          FlatAvatar(profile: card.profile, size: 40)
+                        else
+                          SizedBox(
+                            width: 40,
+                            height: 40,
+                            child: Center(
+                              child: SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: tone,
+                                ),
+                              ),
+                            ),
+                          ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _TwoLines(
+                            title: card?.profile.label ?? c.name,
+                            subtitle: t('Czekam, aż domownicy otworzą…'),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
+                    if (card != null) FlatCardDetails(card: card),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _TwoLines(
-                    title: c.name,
-                    subtitle: t('Czekam, aż domownicy otworzą…'),
-                  ),
-                ),
-              ],
-            ),
+              );
+            },
           ),
         for (final MapEntry<String, String> s in service.staleDoors.entries)
           ZenCard(
@@ -1303,11 +1382,9 @@ class _OwnItems extends StatelessWidget {
           if (items.isEmpty)
             Container(
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-              decoration: BoxDecoration(
-                color: zen.surfaceSunk,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: zen.outlineSoft),
-              ),
+              decoration: ZenLook.of(
+                context,
+              ).panel(zen, radius: 18, sunken: true),
               child: Row(
                 children: <Widget>[
                   Icon(flatItemIcon(kind), color: zen.textMuted, size: 20),

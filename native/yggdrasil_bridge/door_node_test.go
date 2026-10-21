@@ -65,6 +65,16 @@ func TestDoorFrameFilter(t *testing.T) {
 	if isDoorTraffic(`{"type":"flat_hello","p":"` + strings.Repeat("x", maxDoorFrameBytes) + `"}`) {
 		t.Fatal("an oversized frame must not pass")
 	}
+	// The household's card for a flat that knocked ("Co widzi pukający")
+	// goes from door to door; the knocks a household shares between its
+	// phones (in flat_house) never pass a door.
+	card := `{"type":"flat_card","f":"k","to":"k","b":{"p":{}},"s":"x"}`
+	if !isDoorTraffic(card) || !isDoorSendable(card) {
+		t.Fatal("a door card must pass and be sent")
+	}
+	if isDoorTraffic(`{"type":"flat_house","b":{"kn":[],"ring":true}}`) {
+		t.Fatal("the housemates' shared knocks must not pass a door")
+	}
 
 	// The app's own zstd wrapper (runtime_signal_codec.dart) is looked into.
 	wrap := func(inner string) string {
@@ -320,6 +330,22 @@ func TestDoorCarriesFlatTrafficAndIsNeverPeeredWithTheMainNode(t *testing.T) {
 	if extra, ok := node.signalInbox.wait(300 * time.Millisecond); ok {
 		t.Fatalf("the door let another frame in: %+v", extra)
 	}
+	// A sealed knock naming this door comes in too (a housemate's sticker
+	// lists it among the mailbox doors); one naming another door does not.
+	sealedHere := `{"type":"flat_seal","d":"` + door.address + `","c":"AAAA"}`
+	sealedThere := `{"type":"flat_seal","d":"201:257a:9b7e:ed64:6c2b:bb66:90d6:3167","c":"AAAA"}`
+	for _, payload := range []string{sealedThere, sealedHere} {
+		if err := sendSignal(node, door.address, payload); err != nil {
+			t.Fatalf("send: %v", err)
+		}
+	}
+	got, ok = node.signalInbox.wait(5 * time.Second)
+	if !ok || got.Payload != sealedHere || !got.Door {
+		t.Fatalf("expected only the sealed knock for this door, got %+v (ok=%v)", got, ok)
+	}
+	if extra, ok := node.signalInbox.wait(300 * time.Millisecond); ok {
+		t.Fatalf("the door let another frame in: %+v", extra)
+	}
 
 	// The door sends from its own address, and flat frames only.
 	profile := `{"type":"flat_profile","b":{}}`
@@ -502,7 +528,40 @@ func TestSealedKnockFilter(t *testing.T) {
 		t.Fatal("a compressed sealed knock must pass")
 	}
 	if isDoorTraffic(sealed) {
-		t.Fatal("the flat's own door takes no sealed knocks")
+		t.Fatal("a sealed knock is no traffic between flats")
+	}
+}
+
+// The sticker lists the other residents' doors among its mailbox doors, so
+// the flat's own door takes a sealed knock that names it, besides the
+// frames between flats; a mailbox door takes sealed knocks only.
+func TestTheFlatsOwnDoorTakesSealedKnocksNamingIt(t *testing.T) {
+	private, _ := doorSeed(strings.Repeat("42", 32))
+	ip := *address.AddrForKey(private.Public().(ed25519.PublicKey))
+	here := net.IP(ip[:]).String()
+	own := &doorNode{ip: ip}
+	mailbox := &doorNode{ip: ip, mailbox: true}
+	sealedHere := `{"type":"flat_seal","d":"` + here + `","c":"AAAA"}`
+	sealedThere := `{"type":"flat_seal","d":"201:257a:9b7e:ed64:6c2b:bb66:90d6:3167","c":"AAAA"}`
+	knock := `{"type":"flat_hello","b":{"door":"t"}}`
+	card := `{"type":"flat_card","b":{}}`
+	for _, payload := range []string{sealedHere, knock, card} {
+		if !own.takes(payload) {
+			t.Fatalf("the flat's own door must take %s", payload)
+		}
+	}
+	for _, payload := range []string{sealedThere, `{"type":"flat_house","b":{}}`, `{"type":"lg_hello"}`} {
+		if own.takes(payload) {
+			t.Fatalf("the flat's own door must not take %s", payload)
+		}
+	}
+	if !mailbox.takes(sealedHere) {
+		t.Fatal("a mailbox door takes a sealed knock naming it")
+	}
+	for _, payload := range []string{sealedThere, knock, card} {
+		if mailbox.takes(payload) {
+			t.Fatalf("a mailbox door must not take %s", payload)
+		}
 	}
 }
 
@@ -597,5 +656,102 @@ func TestMailboxDoorsTakeOnlySealedKnocksForThemselves(t *testing.T) {
 	}
 	if node.doorHost != host {
 		t.Fatal("the host stays while the flat's door runs")
+	}
+}
+
+// doorPairState is one line of what two doors know of each other: their
+// own counters, their session layers' view of the other, and ironwood's
+// sessions and paths between them.
+func doorPairState(a, b *doorNode) string {
+	ironwood := func(from *core.Core, to ed25519.PublicKey) string {
+		path := false
+		for _, p := range from.GetPaths() {
+			if bytes.Equal(p.Key, to) {
+				path = true
+			}
+		}
+		session := "no session"
+		for _, s := range from.GetSessions() {
+			if bytes.Equal(s.Key, to) {
+				session = fmt.Sprintf("session rx %d tx %d up %v", s.RXBytes, s.TXBytes, s.Uptime.Round(time.Millisecond))
+			}
+		}
+		return fmt.Sprintf("path %v, %s", path, session)
+	}
+	side := func(name string, from, to *doorNode) string {
+		return fmt.Sprintf("%s: [%s] pq of the other: [%s] ironwood: [%s]",
+			name, from.stats.String(), from.pq.peerState(net.ParseIP(to.address)),
+			ironwood(from.core, to.core.PublicKey()))
+	}
+	return side("door", a, b) + " | " + side("mailbox", b, a)
+}
+
+func TestDoorsSealTheirTrafficPostQuantum(t *testing.T) {
+	mesh := newTestMesh(t)
+	node := mesh.node
+	// The doors run the session layer unless the main node is plain.
+	node.pqPlain = false
+	startPacketLoop(node)
+	door, err := node.startDoor(strings.Repeat("61", 32))
+	if err != nil {
+		t.Fatalf("door: %v", err)
+	}
+	seed := strings.Repeat("62", 32)
+	addresses, err := node.setMailboxDoors([]string{seed})
+	if err != nil {
+		t.Fatalf("mailbox doors: %v", err)
+	}
+	mailbox := node.mailboxDoors[seed]
+	if door.pq == nil || mailbox.pq == nil {
+		t.Fatal("every door runs the session layer")
+	}
+	started := time.Now()
+	waitMesh(t, "the doors never got onto the mesh", func() bool {
+		return door.linked() && mailbox.linked()
+	})
+	t.Logf("%v: both doors linked: door %s, mailbox %s", time.Since(started).Round(time.Millisecond), door.address, mailbox.address)
+	warmPaths(t, door.core, mailbox.core)
+	t.Logf("%v: paths both ways: %s", time.Since(started).Round(time.Millisecond), doorPairState(door, mailbox))
+	sealed := `{"type":"flat_seal","d":"` + addresses[seed] + `","c":"AAAA"}`
+	// The first frames open the session (the mailbox door answers with its
+	// key record and a challenge), then the knock crosses sealed. Both doors
+	// talk to each other for the first time here, each way: an ironwood
+	// session that starts while the far side has no path back yet stalls
+	// for up to a minute (see warmPaths), so this step gets longer.
+	crossing := time.Now()
+	deadline := crossing.Add(90 * time.Second)
+	lastLog := time.Time{}
+	for {
+		if err := door.send(addresses[seed], sealed); err != nil {
+			t.Fatalf("door send: %v (%s)", err, doorPairState(door, mailbox))
+		}
+		message, ok := node.signalInbox.wait(500 * time.Millisecond)
+		if ok {
+			if message.Payload != sealed || !message.Door || message.From != door.address {
+				t.Fatalf("unexpected door signal: %+v", message)
+			}
+			break
+		}
+		if time.Since(lastLog) >= 2*time.Second {
+			lastLog = time.Now()
+			t.Logf("%v: waiting: %s", time.Since(crossing).Round(time.Millisecond), doorPairState(door, mailbox))
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no sealed knock crossed between the doors: %s", doorPairState(door, mailbox))
+		}
+	}
+	t.Logf("%v: the sealed knock crossed: %s", time.Since(crossing).Round(time.Millisecond), doorPairState(door, mailbox))
+	drainInbox(node)
+	// The same frame sent unsealed stays outside.
+	destination := net.ParseIP(addresses[seed])
+	if err := door.writeWire(destination, []byte(sealed)); err != nil {
+		t.Fatalf("plain write: %v", err)
+	}
+	if extra, ok := node.signalInbox.wait(800 * time.Millisecond); ok {
+		t.Fatalf("a door took an unsealed frame: %+v", extra)
+	}
+	// A mailbox door still sends no flat frame of its own.
+	if err := mailbox.send(door.address, `{"type":"flat_profile","b":{}}`); err == nil {
+		t.Fatal("a mailbox door sends nothing")
 	}
 }

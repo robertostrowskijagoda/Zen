@@ -32,6 +32,8 @@ final Provider<NeighborsService> neighborsServiceProvider =
         doorInbox: () => runtime.doorAddress,
         doorSend: runtime.sendFromDoor,
         mailboxes: () => boxes,
+        // A knock answered on a housemate's phone stops ringing here.
+        dismissNotification: meet.host.dismissNotification,
       );
       void syncDoorKey() {
         runtime
