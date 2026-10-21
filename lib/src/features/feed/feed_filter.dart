@@ -1,12 +1,16 @@
 import 'package:flutter/foundation.dart';
 
-/// The chips over the Tablica: „Wszystko · Znajomi · Piramida · Kraj”.
+/// The chips over the Tablica: „Wszystko · Znajomi · Przyjaciele ·
+/// Piramida · Kraj”.
 enum FeedFilter {
   /// Friends' posts and the pyramid's important ones, by time.
   all,
 
   /// Friends' and followed people's posts only.
   friends,
+
+  /// Posts of the friends marked "Przyjaciel" only.
+  close,
 
   /// The pyramid's posts in its order (§22.1) and the open referenda.
   pyramid,

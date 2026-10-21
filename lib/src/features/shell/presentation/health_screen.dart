@@ -173,52 +173,54 @@ class _HealthScreenState extends ConsumerState<HealthScreen>
           ),
         ],
       ),
-      body: SafeArea(
-        top: false,
-        child: ListenableBuilder(
-          listenable: clock,
-          builder: (BuildContext context, Widget? _) {
-            final HealthReport report = _report(shell, clock);
-            return ListView(
-              key: const Key('health-body'),
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-              children: <Widget>[
-                _summary(zen, report),
-                if (!_loaded)
-                  const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Center(child: CircularProgressIndicator()),
+      body: SelectionArea(
+        child: SafeArea(
+          top: false,
+          child: ListenableBuilder(
+            listenable: clock,
+            builder: (BuildContext context, Widget? _) {
+              final HealthReport report = _report(shell, clock);
+              return ListView(
+                key: const Key('health-body'),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                children: <Widget>[
+                  _summary(zen, report),
+                  if (!_loaded)
+                    const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                  for (final HealthItem i in report.items) _row(zen, i),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    key: const Key('health-copy'),
+                    onPressed: () async {
+                      await Clipboard.setData(
+                        ClipboardData(text: _asText(report)),
+                      );
+                      if (!context.mounted) {
+                        return;
+                      }
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(t('Raport skopiowany.'))),
+                      );
+                    },
+                    icon: const Icon(Icons.copy_rounded, size: 18),
+                    label: Text(t('Skopiuj raport')),
                   ),
-                for (final HealthItem i in report.items) _row(zen, i),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  key: const Key('health-copy'),
-                  onPressed: () async {
-                    await Clipboard.setData(
-                      ClipboardData(text: _asText(report)),
-                    );
-                    if (!context.mounted) {
-                      return;
-                    }
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(t('Raport skopiowany.'))),
-                    );
-                  },
-                  icon: const Icon(Icons.copy_rounded, size: 18),
-                  label: Text(t('Skopiuj raport')),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  t(
-                    'Raport nie zawiera adresów ani nazw — możesz go komuś '
-                    'wysłać ręcznie.',
+                  const SizedBox(height: 6),
+                  Text(
+                    t(
+                      'Raport nie zawiera adresów ani nazw — możesz go komuś '
+                      'wysłać ręcznie.',
+                    ),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: zen.textMuted, fontSize: 12),
                   ),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: zen.textMuted, fontSize: 12),
-                ),
-              ],
-            );
-          },
+                ],
+              );
+            },
+          ),
         ),
       ),
     );

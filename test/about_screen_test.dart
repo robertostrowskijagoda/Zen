@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/features/about/legal_documents.dart';
 import 'package:zen/src/features/about/presentation/about_screen.dart';
 import 'package:zen/src/features/update/own_copy.dart';
 
@@ -61,65 +62,123 @@ void main() {
     expect(find.byKey(const Key('about-logo-light')), findsNothing);
   });
 
-  testWidgets('about tells how to use Zen and how to pass it on', (
+  Future<void> openSection(WidgetTester tester, String name) async {
+    final Finder tile = find.byKey(Key('about-section-$name'));
+    await tester.scrollUntilVisible(
+      tile,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pump();
+    await tester.tap(tile);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byKey(const Key('about-page')), findsOneWidget);
+  }
+
+  Finder pageList() => find
+      .descendant(
+        of: find.byKey(const Key('about-page-body')),
+        matching: find.byType(Scrollable),
+      )
+      .first;
+
+  testWidgets('a header, a short description and the sections — no wall of '
+      'text', (WidgetTester tester) async {
+    await pumpAbout(tester, ZenTheme.dark());
+    expect(find.byKey(const Key('about-description')), findsOneWidget);
+    // The author attribution notice (NOTICE 1.2) on the About screen itself.
+    expect(find.byKey(const Key('about-attribution')), findsOneWidget);
+    expect(
+      find.textContaining('Zen by Robert Ostrowski-Jagoda'),
+      findsOneWidget,
+    );
+    expect(find.textContaining(kDonationUrl), findsOneWidget);
+    // Every section has its row (the list builds them as they scroll in).
+    for (final AboutSection section in AboutSection.values) {
+      await tester.scrollUntilVisible(
+        find.byKey(Key('about-section-${section.name}')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(
+        find.byKey(Key('about-section-${section.name}')),
+        findsOneWidget,
+        reason: section.name,
+      );
+    }
+    expect(
+      AboutSection.values.map((AboutSection s) => s.name),
+      containsAllInOrder(<String>[
+        'updates',
+        'security',
+        'licences',
+        'documents',
+        'contact',
+        'support',
+      ]),
+    );
+    // The long texts are on the section pages, not here.
+    expect(find.text('JAK UŻYWAĆ'), findsNothing);
+    expect(find.byKey(const Key('about-donate')), findsNothing);
+    // Content is selectable.
+    expect(find.byType(SelectionArea), findsOneWidget);
+  });
+
+  testWidgets('"Czym jest Zen" tells how to use Zen', (
     WidgetTester tester,
   ) async {
     await pumpAbout(tester, ZenTheme.dark());
-    final Finder list = find.byType(Scrollable).first;
-    await tester.scrollUntilVisible(
-      find.text('JAK UŻYWAĆ'),
-      300,
-      scrollable: list,
-    );
+    await openSection(tester, 'intro');
     await tester.scrollUntilVisible(
       find.text('Dodaj znajomego'),
       300,
-      scrollable: list,
+      scrollable: pageList(),
     );
+    expect(find.text('JAK UŻYWAĆ'), findsOneWidget);
+    expect(find.byType(SelectionArea), findsWidgets);
+  });
+
+  testWidgets('"Wersja i aktualizacje" shows the build and passes Zen on', (
+    WidgetTester tester,
+  ) async {
+    await pumpAbout(tester, ZenTheme.dark());
+    await openSection(tester, 'updates');
+    expect(find.byKey(const Key('about-version')), findsOneWidget);
     await tester.scrollUntilVisible(
       find.byKey(const Key('about-share-app')),
       300,
-      scrollable: list,
+      scrollable: pageList(),
     );
-    expect(find.byKey(const Key('about-share-app')), findsOneWidget);
     expect(find.text('Podaj Zen dalej'), findsOneWidget);
   });
 
-  testWidgets('about explains running an own Yggdrasil bridge, with links', (
+  testWidgets('"Czym jest Zen" explains an own Yggdrasil bridge, with links', (
     WidgetTester tester,
   ) async {
     await pumpAbout(tester, ZenTheme.light());
-    final Finder list = find.byType(Scrollable).first;
+    await openSection(tester, 'intro');
     await tester.scrollUntilVisible(
       find.byKey(const Key('about-public-peers')),
       300,
-      scrollable: list,
+      scrollable: pageList(),
     );
-    await tester.pump();
     expect(
       find.byKey(const Key('about-own-bridge'), skipOffstage: false),
       findsOneWidget,
     );
-    expect(find.byKey(const Key('about-public-peers')), findsOneWidget);
     expect(kYggdrasilUrl, startsWith('https://yggdrasil-network.github.io'));
   });
 
-  testWidgets('about links the privacy policy and the terms', (
+  testWidgets('"Dokumenty" opens the privacy policy and the terms in the app', (
     WidgetTester tester,
   ) async {
     await pumpAbout(tester, ZenTheme.light());
-    final Finder list = find.byType(Scrollable).first;
-    await tester.scrollUntilVisible(
-      find.byKey(const Key('about-privacy-policy')),
-      300,
-      scrollable: list,
-    );
+    await openSection(tester, 'documents');
+    expect(find.byKey(const Key('about-terms')), findsOneWidget);
     expect(find.byKey(const Key('about-privacy-policy')), findsOneWidget);
-    await tester.pump();
-    expect(
-      find.byKey(const Key('about-terms'), skipOffstage: false),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('about-licence')), findsOneWidget);
     expect(
       kPrivacyPolicyUrl,
       'https://github.com/robertostrowskijagoda/Zen/blob/main/docs/PRIVACY.md',
@@ -128,19 +187,44 @@ void main() {
       kTermsOfUseUrl,
       'https://github.com/robertostrowskijagoda/Zen/blob/main/docs/TERMS.md',
     );
+    expect(LegalDocument.privacy.url, kPrivacyPolicyUrl);
+    expect(LegalDocument.terms.url, kTermsOfUseUrl);
   });
 
-  testWidgets('about says whether this copy is the official one', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('"Bezpieczeństwo i prywatność" says whether this copy is the '
+      'official one', (WidgetTester tester) async {
     await pumpAbout(tester, ZenTheme.dark());
+    await openSection(tester, 'security');
     await tester.pump();
-    final Finder list = find.byType(Scrollable).first;
     await tester.scrollUntilVisible(
       find.byKey(const Key('own-copy-unknown')),
       300,
-      scrollable: list,
+      scrollable: pageList(),
     );
     expect(find.text('Nie można sprawdzić'), findsOneWidget);
+  });
+
+  testWidgets('"Wesprzyj Zen" has the collection', (WidgetTester tester) async {
+    await pumpAbout(tester, ZenTheme.dark());
+    await openSection(tester, 'support');
+    expect(find.byKey(const Key('about-donate')), findsOneWidget);
+  });
+
+  testWidgets('"Licencje i podziękowania" opens the licences and the notice', (
+    WidgetTester tester,
+  ) async {
+    await pumpAbout(tester, ZenTheme.dark());
+    await openSection(tester, 'licences');
+    expect(find.byKey(const Key('about-licenses')), findsOneWidget);
+    expect(find.byKey(const Key('about-licence-notice')), findsOneWidget);
+  });
+
+  testWidgets('"Kontakt" says where to report a bug', (
+    WidgetTester tester,
+  ) async {
+    await pumpAbout(tester, ZenTheme.dark());
+    await openSection(tester, 'contact');
+    expect(find.byKey(const Key('about-issues')), findsOneWidget);
+    expect(kIssuesUrl, endsWith('/issues'));
   });
 }

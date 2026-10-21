@@ -48,7 +48,7 @@ class _Panel extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final Color tone = accentTone ?? zen.accent;
-    final BorderRadius radius = BorderRadius.circular(22);
+    final BorderRadius radius = context.zenRadius(22);
     final Color base = glow ? zen.surfaceRaised : zen.surface;
     final Widget content = _PanelTone(
       tone: tone,
@@ -234,7 +234,7 @@ class _MetricTile extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Color.alphaBlend(tone.withValues(alpha: 0.08), zen.surface),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: context.zenRadius(18),
         border: Border.all(color: tone.withValues(alpha: 0.22)),
       ),
       child: Padding(
@@ -282,11 +282,77 @@ class _RuntimeErrorNotice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    return ZenInfo(
-      text: message,
-      title: t('Coś poszło nie tak'),
-      icon: Icons.error_outline_rounded,
-      tone: zen.danger,
+    // The details can be selected and copied (for a bug report).
+    return SelectionArea(
+      child: ZenInfo(
+        text: message,
+        title: t('Coś poszło nie tak'),
+        icon: Icons.error_outline_rounded,
+        tone: zen.danger,
+      ),
+    );
+  }
+}
+
+/// A tile like [ZenTile] whose title and subtitle wrap instead of being
+/// cut (settings pages: some languages are much longer than Polish).
+class _WrapTile extends StatelessWidget {
+  const _WrapTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.tone,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final Color? tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return ZenCard(
+      onTap: onTap,
+      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+      child: Row(
+        children: <Widget>[
+          ZenIconBadge(icon: icon, tone: tone),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: zen.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (subtitle.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: zen.textSecondary,
+                      fontSize: 13.5,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          Icon(Icons.chevron_right_rounded, color: zen.textMuted),
+        ],
+      ),
     );
   }
 }
@@ -498,7 +564,7 @@ class _ConversationCardState extends ConsumerState<_ConversationCard> {
         conversation.unreadCount > 0;
     final bool pending =
         conversation.status == FriendRelationshipStatus.pendingOutgoing;
-    final BorderRadius radius = BorderRadius.circular(20);
+    final BorderRadius radius = context.zenRadius(20);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       child: Material(
@@ -605,7 +671,7 @@ class _SheetHandle extends StatelessWidget {
         height: 4,
         decoration: BoxDecoration(
           color: zen.outlineStrong,
-          borderRadius: BorderRadius.circular(2),
+          borderRadius: context.zenRadius(2),
         ),
       ),
     );
@@ -642,15 +708,11 @@ class _SheetAction extends StatelessWidget {
         ),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape: RoundedRectangleBorder(borderRadius: context.zenRadius(16)),
       onTap: onTap,
     );
   }
 }
-
-RoundedRectangleBorder _sheetShape() => const RoundedRectangleBorder(
-  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-);
 
 void _showConversationActionSheet(
   BuildContext context,
@@ -665,7 +727,7 @@ void _showConversationActionSheet(
   showModalBottomSheet<void>(
     context: context,
     backgroundColor: zen.surfaceRaised,
-    shape: _sheetShape(),
+    shape: context.zenSheetShape(),
     isScrollControlled: true,
     builder: (BuildContext sheetContext) {
       return SafeArea(
@@ -765,7 +827,7 @@ void _showConversationActionSheet(
                 _SheetAction(
                   icon: Icons.edit_outlined,
                   label: t('Pseudonim'),
-                  tone: zenTone(zen, 2),
+                  tone: zen.tone(ZenTone.people),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
                     _promptFriendNickname(context, ref, conversation);
@@ -1354,9 +1416,9 @@ Color _shellStatusAccent(ZenColors zen, AppShellState state) {
     return zen.danger;
   }
   if (state.isConnected) {
-    return zen.accent;
+    return zen.tone(ZenTone.network);
   }
-  return zen.accentSecondary;
+  return zen.warning;
 }
 
 IconData _inboxIcon(InboxEntryType type) {
@@ -1375,15 +1437,15 @@ IconData _inboxIcon(InboxEntryType type) {
 
 Color _inboxTone(ZenColors zen, InboxEntryType type) {
   return switch (type) {
-    InboxEntryType.friendAccepted => zen.accent,
-    InboxEntryType.friendRequest => zen.accentSecondary,
+    InboxEntryType.friendAccepted => zen.tone(ZenTone.people),
+    InboxEntryType.friendRequest => zen.tone(ZenTone.people),
     InboxEntryType.friendRemoved => zen.warning,
     InboxEntryType.transferCancelled => zen.warning,
-    InboxEntryType.message => zen.textPrimary,
-    InboxEntryType.callInvite => zen.accent,
+    InboxEntryType.message => zen.tone(ZenTone.communication),
+    InboxEntryType.callInvite => zen.tone(ZenTone.communication),
     InboxEntryType.friendRejected => zen.warning,
     InboxEntryType.friendCancelled => zen.textMuted,
-    InboxEntryType.groupInvite => zen.accent,
+    InboxEntryType.groupInvite => zen.tone(ZenTone.people),
   };
 }
 

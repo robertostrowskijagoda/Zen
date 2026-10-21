@@ -126,8 +126,6 @@ class _LanguageOption extends StatelessWidget {
                         Text(
                           title,
                           locale: titleLocale,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 15,
@@ -139,8 +137,6 @@ class _LanguageOption extends StatelessWidget {
                           const SizedBox(height: 2),
                           Text(
                             subtitle!,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: zen.textSecondary,
                               fontSize: 13,
@@ -186,7 +182,7 @@ class _CodeBadge extends StatelessWidget {
       height: _size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(_size * 0.32),
+        borderRadius: context.zenRadius(_size * 0.32),
         gradient: LinearGradient(
           colors: <Color>[
             tone.withValues(alpha: 0.26),

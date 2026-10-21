@@ -140,7 +140,6 @@ Stream<LicenseEntry> goLicenseEntries(AssetBundle assets) async* {
       'JetBrains Mono',
       'Space Mono',
       'DM Sans',
-      'VT323',
     ], fonts);
   }
 }

@@ -54,18 +54,16 @@ final class FeedAlarmItem extends FeedItem {
   String get id => 'alarm-${alarm.id}';
 }
 
-/// The chips the Tablica shows for [pyramid]: „Piramida” and „Kraj” only
-/// when there is something of them (always for a member). Empty when there
-/// is nothing to choose between (friends' posts only).
-List<FeedFilter> feedFiltersFor(PyramidFeed pyramid) {
-  final List<FeedFilter> out = <FeedFilter>[
-    FeedFilter.all,
-    FeedFilter.friends,
-    if (pyramid.showsPyramid) FeedFilter.pyramid,
-    if (pyramid.showsNational) FeedFilter.national,
-  ];
-  return out.length > 2 ? out : const <FeedFilter>[];
-}
+/// The chips the Tablica shows for [pyramid]: „Wszystko”, „Znajomi” and
+/// „Przyjaciele” always; „Piramida” and „Kraj” only when there is something
+/// of them (always for a member).
+List<FeedFilter> feedFiltersFor(PyramidFeed pyramid) => <FeedFilter>[
+  FeedFilter.all,
+  FeedFilter.friends,
+  FeedFilter.close,
+  if (pyramid.showsPyramid) FeedFilter.pyramid,
+  if (pyramid.showsNational) FeedFilter.national,
+];
 
 typedef _Timed = ({int at, FeedItem item});
 
@@ -75,6 +73,8 @@ typedef _Timed = ({int at, FeedItem item});
 ///   [wall] and the pyramid's important posts (the top, the line up) —
 ///   never the national section nor one's own pyramid posts;
 /// - „Znajomi”: [wall] only;
+/// - „Przyjaciele”: the posts of [wall] whose author [isClose] says is a
+///   close friend ("Przyjaciel"; none without [isClose]);
 /// - „Piramida”: the referenda, then the pyramid's posts as §22.1 orders
 ///   them (the top, then the line from the highest);
 /// - „Kraj”: the national section only.
@@ -83,6 +83,7 @@ List<FeedItem> composeFeed(
   FeedFilter filter, {
   required List<FeedPost> wall,
   required PyramidFeed pyramid,
+  bool Function(FeedPost post)? isClose,
 }) {
   final Set<String> seen = <String>{};
   final List<FeedItem> out = <FeedItem>[];
@@ -114,6 +115,12 @@ List<FeedItem> composeFeed(
     case FeedFilter.friends:
       for (final FeedPost p in wall) {
         add(FeedFriendItem(p));
+      }
+    case FeedFilter.close:
+      for (final FeedPost p in wall) {
+        if (!p.isOwn && (isClose?.call(p) ?? false)) {
+          add(FeedFriendItem(p));
+        }
       }
     case FeedFilter.pyramid:
       for (final PyrFeedPost p in pyramid.pyramid) {

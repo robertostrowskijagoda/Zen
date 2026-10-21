@@ -784,7 +784,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
       decoration: BoxDecoration(
         color: zen.danger.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: context.zenRadius(18),
         border: Border.all(color: zen.danger.withValues(alpha: 0.30)),
       ),
       child: Row(
@@ -1000,7 +1000,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
             fit: BoxFit.cover,
           );
     return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: context.zenRadius(18),
       child: Stack(
         children: <Widget>[
           body,
@@ -1083,7 +1083,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
             margin: const EdgeInsets.symmetric(vertical: 6),
             decoration: BoxDecoration(
               color: zen.surfaceSunk,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: context.zenRadius(18),
             ),
             alignment: Alignment.center,
             child: const SizedBox(
@@ -1398,7 +1398,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                               ),
                               decoration: BoxDecoration(
                                 color: zen.danger.withValues(alpha: 0.10),
-                                borderRadius: BorderRadius.circular(18),
+                                borderRadius: context.zenRadius(18),
                                 border: Border.all(
                                   color: zen.danger.withValues(alpha: 0.30),
                                 ),

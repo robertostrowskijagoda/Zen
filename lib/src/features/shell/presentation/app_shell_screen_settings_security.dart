@@ -47,7 +47,7 @@ class _SettingsSecuritySection extends ConsumerWidget {
               children: <Widget>[
                 _SecurityStatusRow(
                   icon: Icons.password_rounded,
-                  tone: zenTone(zen, 0),
+                  tone: zen.tone(ZenTone.privacy),
                   title: t('Hasło lokalne'),
                   subtitle: t('Odblokowuje aplikację i Twoje dane'),
                   isSet: security.hasPassword,
@@ -175,7 +175,7 @@ class _SettingsSecuritySection extends ConsumerWidget {
                   key: const Key('settings-secure-screens-switch'),
                   secondary: ZenIconBadge(
                     icon: Icons.screenshot_monitor_outlined,
-                    tone: zenTone(zen, 5),
+                    tone: zen.tone(ZenTone.media),
                     size: 40,
                   ),
                   value: settings.secureScreens,
@@ -218,7 +218,7 @@ class _SettingsSecuritySection extends ConsumerWidget {
                     key: const Key('settings-disguise-icon-switch'),
                     secondary: ZenIconBadge(
                       icon: Icons.sticky_note_2_outlined,
-                      tone: zenTone(zen, 3),
+                      tone: zen.tone(ZenTone.appearance),
                       size: 40,
                     ),
                     value: settings.disguiseIcon,
@@ -651,7 +651,7 @@ class _BiometricUnlockTileState extends State<_BiometricUnlockTile> {
       key: const Key('settings-biometric-unlock-switch'),
       secondary: ZenIconBadge(
         icon: Icons.fingerprint_rounded,
-        tone: zenTone(zen, 3),
+        tone: zen.tone(ZenTone.privacy),
         size: 40,
       ),
       value: on,
@@ -725,7 +725,7 @@ class _DeviceIntegrityWarning extends ConsumerWidget {
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
       decoration: BoxDecoration(
         color: zen.danger.withValues(alpha: 0.09),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: context.zenRadius(18),
         border: Border.all(color: zen.danger.withValues(alpha: 0.35)),
       ),
       child: Column(
@@ -764,6 +764,18 @@ class _DeviceIntegrityWarning extends ConsumerWidget {
               height: 1.4,
             ),
           ),
+          if (integrity.tampered)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                t(
+                  'Dopóki tak jest, Zen nie wyśle przelewu ani nie użyje '
+                  'klucza władzy piramidy: zmieniona pamięć aplikacji '
+                  'mogłaby podpisać coś, czego nie chcesz.',
+                ),
+                style: TextStyle(color: zen.danger, fontSize: 13, height: 1.4),
+              ),
+            ),
           for (final String line in integrity.describe())
             Padding(
               padding: const EdgeInsets.only(top: 4),

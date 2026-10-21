@@ -6,13 +6,14 @@ import 'package:zen/src/features/pyramid/pyramid_feed.dart';
 
 /// What each chip of the Tablica shows: one content, one card.
 void main() {
-  FeedPost friend(String id, int at) => FeedPost(
+  FeedPost friend(String id, int at, {bool own = false}) => FeedPost(
     id: id,
     account: 'acc-$id',
     authorLabel: 'Kasia',
+    authorAddress: 'addr-$id',
     text: 'Zdjęcia z wycieczki',
     millis: at,
-    isOwn: false,
+    isOwn: own,
   );
 
   PyrFeedPost post(
@@ -73,6 +74,38 @@ void main() {
     expect(ids(FeedFilter.friends, member), <String>['f1', 'f2']);
   });
 
+  test('„Przyjaciele”: only the posts of close friends, never own ones', () {
+    final List<FeedPost> mixed = <FeedPost>[
+      friend('close1', 50),
+      friend('mid', 40),
+      friend('own', 30, own: true),
+      friend('close2', 20),
+    ];
+    bool isClose(FeedPost p) =>
+        p.authorAddress == 'addr-close1' ||
+        p.authorAddress == 'addr-close2' ||
+        p.authorAddress == 'addr-own';
+    List<String> shown(FeedFilter f) => <String>[
+      for (final FeedItem i in composeFeed(
+        f,
+        wall: mixed,
+        pyramid: member,
+        isClose: isClose,
+      ))
+        i.id,
+    ];
+    expect(shown(FeedFilter.close), <String>['close1', 'close2']);
+    // „Znajomi” keeps everyone; without a lookup nobody is a close friend.
+    expect(shown(FeedFilter.friends), <String>[
+      'close1',
+      'mid',
+      'own',
+      'close2',
+    ]);
+    expect(ids(FeedFilter.close, member), isEmpty);
+    expect(FeedFilter.parse('close'), FeedFilter.close);
+  });
+
   test('„Piramida”: the top, then the line from the highest, own posts at '
       'their level; the referendum card first', () {
     expect(ids(FeedFilter.pyramid, member), <String>[
@@ -93,6 +126,7 @@ void main() {
     for (final FeedFilter f in <FeedFilter>[
       FeedFilter.all,
       FeedFilter.friends,
+      FeedFilter.close,
       FeedFilter.pyramid,
     ]) {
       expect(
@@ -134,7 +168,7 @@ void main() {
   });
 
   test('a reader outside: the top in „Wszystko” and „Piramida”, the section '
-      'only in „Kraj”; chips only with such posts', () {
+      'only in „Kraj”; pyramid chips only with such posts', () {
     final PyramidFeed outside = PyramidFeed(
       posts: <PyrFeedPost>[
         post('top', PyrFeedKind.top, at: 10, level: 0),
@@ -152,13 +186,14 @@ void main() {
     expect(feedFiltersFor(onlyTop), <FeedFilter>[
       FeedFilter.all,
       FeedFilter.friends,
+      FeedFilter.close,
       FeedFilter.pyramid,
     ]);
-    expect(
-      feedFiltersFor(PyramidFeed.empty),
-      isEmpty,
-      reason: 'nothing to choose between',
-    );
+    expect(feedFiltersFor(PyramidFeed.empty), <FeedFilter>[
+      FeedFilter.all,
+      FeedFilter.friends,
+      FeedFilter.close,
+    ], reason: 'friends and close friends can always be told apart');
     expect(
       feedFiltersFor(const PyramidFeed(member: true, nat: 'PL')),
       FeedFilter.values,

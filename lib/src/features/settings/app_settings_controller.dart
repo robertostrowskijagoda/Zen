@@ -188,6 +188,17 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(paperBackupDone: value));
   }
 
+  /// The terms, the privacy policy and the licence notice of [version]
+  /// were accepted (on the first start, or again after they changed).
+  Future<void> acceptLegalDocuments(String version, {DateTime? at}) async {
+    await _save(
+      state.copyWith(
+        legalAcceptedVersion: version,
+        legalAcceptedAtMillis: (at ?? DateTime.now()).millisecondsSinceEpoch,
+      ),
+    );
+  }
+
   /// Who may invite this person to a new group.
   Future<void> setGroupInviteFrom(GroupInviteFrom value) async {
     await _save(state.copyWith(groupInviteFrom: value));

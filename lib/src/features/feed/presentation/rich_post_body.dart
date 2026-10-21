@@ -202,7 +202,7 @@ class _RichPostBodyState extends State<RichPostBody> {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: zen.surfaceSunk,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: context.zenRadius(14),
             border: Border.all(color: zen.outlineSoft),
           ),
           child: SingleChildScrollView(
@@ -222,7 +222,7 @@ class _RichPostBodyState extends State<RichPostBody> {
         RichBlockType.media =>
           b.media >= 0 && b.media < widget.mediaCount
               ? ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: context.zenRadius(18),
                   child: widget.mediaBuilder(context, b.media),
                 )
               : const SizedBox.shrink(),

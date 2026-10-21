@@ -2,14 +2,21 @@ part of 'app_shell_screen.dart';
 
 /// Thin top bar with the live connection status in terminal style (mono,
 /// pulsing dot). Tapping it opens the settings screen — there is no
-/// separate settings tab anymore.
+/// separate settings tab anymore. With the rail ([onToggleRail]) its first
+/// button shows or hides the rail; "Zablokuj teraz" sits next to the
+/// account menu once there is a password.
 class _StatusBar extends ConsumerWidget {
-  const _StatusBar();
+  const _StatusBar({this.railHidden = false, this.onToggleRail});
+
+  final bool railHidden;
+  final VoidCallback? onToggleRail;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ZenColors zen = ZenColors.of(context);
     final AppShellState state = ref.watch(appShellControllerProvider);
+    final AppSecurityService security = ref.watch(appSecurityServiceProvider);
+    final VoidCallback? toggleRail = onToggleRail;
     final int unreadCount = ref.watch(
       socialHubControllerProvider.select(
         (SocialHubState s) => s.acceptedFriends.fold<int>(
@@ -27,36 +34,75 @@ class _StatusBar extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 6, 10, 6),
+              padding: EdgeInsets.fromLTRB(
+                toggleRail == null ? 16 : 6,
+                6,
+                10,
+                6,
+              ),
               child: Row(
                 children: <Widget>[
-                  ZenStatusDot(on: state.isConnected, size: 7),
-                  const SizedBox(width: 8),
-                  if (state.isConnecting)
-                    Row(
-                      children: <Widget>[
-                        Text(
-                          t('Łączę'),
-                          style: TextStyle(
-                            color: zen.textPrimary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        ZenAnimatedDots(color: zen.textPrimary, size: 3),
-                      ],
-                    )
-                  else
-                    Text(
-                      state.connectionLabel,
-                      style: TextStyle(
+                  if (toggleRail != null) ...<Widget>[
+                    IconButton(
+                      key: Key(
+                        railHidden ? 'side-tabs-show' : 'side-tabs-hide',
+                      ),
+                      tooltip: railHidden ? t('Pokaż pasek') : t('Ukryj pasek'),
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints(
+                        minWidth: 36,
+                        minHeight: 36,
+                      ),
+                      padding: EdgeInsets.zero,
+                      onPressed: toggleRail,
+                      icon: Icon(
+                        railHidden
+                            ? Icons.keyboard_double_arrow_right_rounded
+                            : Icons.keyboard_double_arrow_left_rounded,
+                        size: 20,
                         color: zen.textSecondary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  const Spacer(),
+                    const SizedBox(width: 4),
+                  ],
+                  ZenStatusDot(on: state.isConnected, size: 7),
+                  const SizedBox(width: 8),
+                  // Takes the free room: a long label in another language
+                  // wraps instead of pushing the buttons off the bar.
+                  Expanded(
+                    child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: state.isConnecting
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                Flexible(
+                                  child: Text(
+                                    t('Łączę'),
+                                    style: TextStyle(
+                                      color: zen.textPrimary,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                ZenAnimatedDots(
+                                  color: zen.textPrimary,
+                                  size: 3,
+                                ),
+                              ],
+                            )
+                          : Text(
+                              state.connectionLabel,
+                              style: TextStyle(
+                                color: zen.textSecondary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                    ),
+                  ),
                   if (unreadCount > 0) ...<Widget>[
                     ZenNeonFlicker(
                       color: zen.textPrimary,
@@ -98,6 +144,35 @@ class _StatusBar extends ConsumerWidget {
                     ),
                     const SizedBox(width: 4),
                   ],
+                  // Lock now, one tap away (only once there is a password).
+                  ListenableBuilder(
+                    listenable: security,
+                    builder: (BuildContext context, Widget? _) =>
+                        security.canQuickLock
+                        ? Padding(
+                            padding: const EdgeInsetsDirectional.only(end: 4),
+                            child: IconButton(
+                              key: const Key('side-tabs-lock'),
+                              tooltip: t('Zablokuj teraz'),
+                              visualDensity: VisualDensity.compact,
+                              constraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
+                              padding: EdgeInsets.zero,
+                              onPressed: security.lock,
+                              icon: Icon(
+                                Icons.lock_outline_rounded,
+                                size: 20,
+                                color: zen.textSecondary,
+                              ),
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                  // Your avatar: the account menu (switch, add, lock).
+                  const AccountMenuButton(),
+                  const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.all(7),
                     decoration: BoxDecoration(
@@ -131,13 +206,9 @@ Future<void> _openSettingsScreen(BuildContext context) {
   );
 }
 
-/// Shows your QR code and invite code: the "Zaproś" tab of the rail, or a
-/// page of its own in the plain messenger layout (no rail there).
+/// Shows your QR code and invite code ("Zaproś", also at the top of the
+/// settings) on a page of its own.
 void _openInviteTab(BuildContext context, WidgetRef ref) {
-  if (ref.read(ledgerNodeEnabledProvider)) {
-    _shellTabRequest.value = 'invite';
-    return;
-  }
   unawaited(
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -147,7 +218,7 @@ void _openInviteTab(BuildContext context, WidgetRef ref) {
   );
 }
 
-enum _ChatFilter { all, unread, online }
+enum _ChatFilter { all, close, unread, online }
 
 class _ChatsPage extends ConsumerStatefulWidget {
   const _ChatsPage({super.key});
@@ -236,6 +307,15 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
         allAcceptedConversations
             .where((ConversationPreview c) => c.isOnline)
             .toList(growable: false),
+      // Friends marked "Przyjaciel" (the level is private, on this device).
+      _ChatFilter.close =>
+        allAcceptedConversations
+            .where(
+              (ConversationPreview c) =>
+                  ref.read(friendLevelLookupProvider).of(c.address) ==
+                  FriendLevel.close,
+            )
+            .toList(growable: false),
       _ChatFilter.all => allAcceptedConversations,
     };
     final String groupQuery = _searchController.text.trim().toLowerCase();
@@ -253,7 +333,8 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
         )
         .where(
           (GroupProfile g) =>
-              _selectedFilter != _ChatFilter.unread || g.unreadCount > 0,
+              _selectedFilter != _ChatFilter.close &&
+              (_selectedFilter != _ChatFilter.unread || g.unreadCount > 0),
         )
         .toList(growable: false);
     final Set<String> backgroundAlertIds = backgroundAlerts
@@ -280,9 +361,9 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
     final bool plainMessenger = !ref.watch(ledgerNodeEnabledProvider);
     return Scaffold(
       appBar: ZenSectionBar(
-        title: t('Skrzynka'),
+        title: t('Czaty'),
         actions: <Widget>[
-          // With the rail, the code lives in its "Zaproś" tab.
+          // With the rail, the code is under Ustawienia → Zaproś.
           if (plainMessenger)
             Padding(
               padding: const EdgeInsets.only(right: 8),
@@ -314,6 +395,9 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                         textInputAction: TextInputAction.search,
                         decoration: InputDecoration(
                           hintText: t('Szukaj rozmowy'),
+                          // Wraps rather than ending in "…" (French,
+                          // Italian on a narrow phone).
+                          hintMaxLines: 2,
                           prefixIcon: const Icon(
                             Icons.search_rounded,
                             size: 20,
@@ -345,6 +429,14 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                               isSelected: _selectedFilter == _ChatFilter.all,
                               onTap: () => setState(
                                 () => _selectedFilter = _ChatFilter.all,
+                              ),
+                            ),
+                            _FilterChip(
+                              key: const Key('chats-filter-close'),
+                              label: t('Przyjaciele'),
+                              isSelected: _selectedFilter == _ChatFilter.close,
+                              onTap: () => setState(
+                                () => _selectedFilter = _ChatFilter.close,
                               ),
                             ),
                             _FilterChip(
@@ -584,7 +676,7 @@ class _EmptyChats extends StatelessWidget {
         icon: switch (filter) {
           _ChatFilter.unread => Icons.check_circle_outline_rounded,
           _ChatFilter.online => Icons.person_off_outlined,
-          _ChatFilter.all => Icons.search_off_rounded,
+          _ChatFilter.all || _ChatFilter.close => Icons.search_off_rounded,
         },
         tone: filter == _ChatFilter.unread ? zen.success : zen.textMuted,
         title: note,
@@ -610,6 +702,7 @@ class _EmptyChats extends StatelessWidget {
 
 class _FilterChip extends StatelessWidget {
   const _FilterChip({
+    super.key,
     required this.label,
     required this.isSelected,
     required this.onTap,
@@ -624,18 +717,19 @@ class _FilterChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
+    final BorderRadius pill = ZenLook.of(context).chipRadius;
     return Material(
-      color: Colors.transparent,
+      type: MaterialType.transparency,
       child: InkWell(
         onTap: onTap,
-        borderRadius: ZenRadii.pill,
+        borderRadius: pill,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           curve: Curves.easeOutCubic,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
             color: isSelected ? zen.accent : zen.surfaceRaised,
-            borderRadius: ZenRadii.pill,
+            borderRadius: pill,
             border: Border.all(
               color: isSelected
                   ? zen.accent
@@ -675,344 +769,383 @@ class _SettingsScreen extends ConsumerWidget {
     return Scaffold(
       key: const Key('profile-page'),
       appBar: ZenSectionBar(title: t('Ustawienia')),
-      body: SafeArea(
-        top: false,
-        child: ListView(
-          key: const Key('settings-tab-body'),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          children: <Widget>[
-            // Your profile is edited on the profile tab, not here.
-            const _QuickLockPanel(),
-            // Friends run a newer Zen: a quiet hint, gone otherwise.
-            const FriendsNewerVersionBanner(),
-            _SettingsGroup(
-              title: t('Prywatność i bezpieczeństwo'),
-              tiles: <Widget>[
-                _SettingsNavTile(
-                  key: const Key('settings-nav-security'),
-                  icon: Icons.shield_outlined,
-                  title: t('Bezpieczeństwo'),
-                  subtitle: t('Hasło, blokada aplikacji, szyfrowanie danych'),
-                  pageTitle: t('Bezpieczeństwo'),
-                  pageChildren: const <Widget>[_SettingsSecuritySection()],
-                ),
-                _SettingsSwitchTile(
-                  key: const Key('settings-hide-notification-content'),
-                  icon: Icons.notifications_off_outlined,
-                  toneIndex: 1,
-                  title: t('Powiadomienia bez treści'),
-                  subtitle: t(
-                    'Tylko „Nowa wiadomość” — treść nie trafia do historii '
-                    'powiadomień systemu.',
-                  ),
-                  value: settings.hideNotificationContent,
-                  onChanged: (bool value) => unawaited(
-                    ref
-                        .read(appSettingsControllerProvider.notifier)
-                        .setHideNotificationContent(value),
-                  ),
-                ),
-                if (ref.watch(ledgerNodeEnabledProvider))
+      body: SelectionArea(
+        child: SafeArea(
+          top: false,
+          child: ListView(
+            key: const Key('settings-tab-body'),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            children: <Widget>[
+              // Inviting someone and the app's own page come first.
+              _SettingsGroup(
+                title: '',
+                tiles: <Widget>[
                   _SettingsNavTile(
-                    key: const Key('settings-nav-account'),
-                    icon: Icons.key_outlined,
-                    toneIndex: 2,
-                    title: t('Konto i odzyskiwanie'),
-                    subtitle: ref.watch(accountSecureReminderProvider)
-                        ? t(
-                            'Zabezpiecz konto na wypadek zgubionego telefonu: '
-                            'krąg odzyskiwania albo kopia zapasowa klucza',
-                          )
-                        : t('Hasło konta, krąg odzyskiwania, nowe urządzenie'),
-                    onTap: () => unawaited(AccountRecoveryScreen.open(context)),
+                    key: const Key('settings-nav-invite'),
+                    icon: Icons.qr_code_2_rounded,
+                    tone: ZenTone.people,
+                    title: t('Zaproś'),
+                    subtitle: t('Twój kod QR i dodawanie znajomych'),
+                    onTap: () => _openInviteTab(context, ref),
                   ),
-                if (ref.watch(ledgerNodeEnabledProvider))
                   _SettingsNavTile(
-                    key: const Key('settings-nav-devices'),
-                    icon: Icons.devices_rounded,
-                    toneIndex: 3,
-                    title: t('Urządzenia'),
+                    key: const Key('settings-nav-about'),
+                    icon: Icons.info_outline_rounded,
+                    tone: ZenTone.system,
+                    title: t('O aplikacji'),
+                    subtitle: t('Wersja, dokumenty, licencje, kontakt'),
+                    onTap: () => unawaited(AboutScreen.open(context)),
+                  ),
+                ],
+              ),
+              // Your profile is edited on the profile tab, not here.
+              const _QuickLockPanel(),
+              // Friends run a newer Zen: a quiet hint, gone otherwise.
+              const FriendsNewerVersionBanner(),
+              _SettingsGroup(
+                title: t('Prywatność i bezpieczeństwo'),
+                tiles: <Widget>[
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-security'),
+                    tone: ZenTone.privacy,
+                    icon: Icons.shield_outlined,
+                    title: t('Bezpieczeństwo'),
+                    subtitle: t('Hasło, blokada aplikacji, szyfrowanie danych'),
+                    pageTitle: t('Bezpieczeństwo'),
+                    pageChildren: const <Widget>[_SettingsSecuritySection()],
+                  ),
+                  _SettingsSwitchTile(
+                    key: const Key('settings-hide-notification-content'),
+                    icon: Icons.notifications_off_outlined,
+                    tone: ZenTone.privacy,
+                    title: t('Powiadomienia bez treści'),
                     subtitle: t(
-                      'Konto na kilku urządzeniach, odłączanie '
-                      'zgubionego',
+                      'Tylko „Nowa wiadomość” — treść nie trafia do historii '
+                      'powiadomień systemu.',
                     ),
-                    onTap: () => unawaited(AccountDevicesScreen.open(context)),
+                    value: settings.hideNotificationContent,
+                    onChanged: (bool value) => unawaited(
+                      ref
+                          .read(appSettingsControllerProvider.notifier)
+                          .setHideNotificationContent(value),
+                    ),
                   ),
-                _SettingsNavTile(
-                  key: const Key('settings-blocked-button'),
-                  icon: Icons.block_outlined,
-                  toneIndex: 4,
-                  title: t('Zablokowani'),
-                  subtitle: blockedCount == 0
-                      ? t('Nikogo nie blokujesz')
-                      : t('Zablokowane osoby: {count}', {
-                          'count': blockedCount,
-                        }),
-                  onTap: () => _openBlockedFriendsScreen(context),
-                ),
-                _SettingsNavTile(
-                  key: const Key('settings-nav-group-invites'),
-                  icon: Icons.group_add_outlined,
-                  toneIndex: 5,
-                  title: t('Zaproszenia do grup'),
-                  subtitle: settings.groupInviteFrom.label,
-                  pageTitle: t('Zaproszenia do grup'),
-                  pageChildren: const <Widget>[GroupInviteFromTile()],
-                ),
-                _SettingsNavTile(
-                  key: const Key('settings-nav-stranger-messages'),
-                  icon: Icons.mark_chat_unread_outlined,
-                  toneIndex: 2,
-                  title: t('Wiadomości spoza znajomych'),
-                  subtitle: t('Kto może napisać pierwszy'),
-                  pageTitle: t('Wiadomości spoza znajomych'),
-                  pageChildren: const <Widget>[StrangerMessagesFromTile()],
-                ),
-              ],
-            ),
-            _SettingsGroup(
-              title: t('Wiadomości i połączenia'),
-              tiles: <Widget>[
-                const _RelayNavTile(),
-                if (ref.watch(ledgerNodeEnabledProvider))
+                  if (ref.watch(ledgerNodeEnabledProvider))
+                    _SettingsNavTile(
+                      key: const Key('settings-nav-account'),
+                      icon: Icons.key_outlined,
+                      tone: ZenTone.privacy,
+                      title: t('Konto i odzyskiwanie'),
+                      subtitle: ref.watch(accountSecureReminderProvider)
+                          ? t(
+                              'Zabezpiecz konto na wypadek zgubionego telefonu: '
+                              'krąg odzyskiwania albo kopia zapasowa klucza',
+                            )
+                          : t(
+                              'Hasło konta, krąg odzyskiwania, nowe urządzenie',
+                            ),
+                      onTap: () =>
+                          unawaited(AccountRecoveryScreen.open(context)),
+                    ),
                   _SettingsNavTile(
-                    key: const Key('settings-nav-recordings'),
-                    icon: Icons.fiber_manual_record_outlined,
-                    toneIndex: 6,
-                    title: t('Nagrania rozmów'),
-                    subtitle: t('Zaszyfrowane na tym urządzeniu'),
-                    onTap: () => unawaited(CallRecordingsScreen.open(context)),
+                    key: const Key('settings-nav-accounts'),
+                    icon: Icons.manage_accounts_outlined,
+                    tone: ZenTone.people,
+                    title: t('Konta na tym urządzeniu'),
+                    subtitle: t('ID konta, lista kont, usuwanie'),
+                    onTap: () => unawaited(AccountsScreen.open(context)),
                   ),
-                _SettingsNavTile(
-                  key: const Key('settings-nav-gifs'),
-                  icon: Icons.gif_box_outlined,
-                  toneIndex: 7,
-                  title: t('GIF-y'),
-                  subtitle: settings.usesOwnGifKey
-                      ? t('Własny klucz API')
-                      : t('Domyślny klucz aplikacji'),
-                  pageTitle: t('GIF-y'),
-                  pageChildren: const <Widget>[_GifKeySection()],
-                ),
-                _SettingsSwitchTile(
-                  key: const Key('settings-auto-media'),
-                  icon: Icons.download_for_offline_outlined,
-                  toneIndex: 1,
-                  title: t('Pobieraj zdjęcia i filmy'),
-                  subtitle: t(
-                    'Media z postów pobierają się same. Wyłącz, żeby '
-                    'oszczędzać transfer.',
-                  ),
-                  value: settings.autoDownloadMedia,
-                  onChanged: (bool value) => unawaited(
-                    ref
-                        .read(appSettingsControllerProvider.notifier)
-                        .setAutoDownloadMedia(value),
-                  ),
-                ),
-                _SettingsSwitchTile(
-                  key: const Key('settings-media-wifi-only'),
-                  icon: Icons.wifi_rounded,
-                  toneIndex: 1,
-                  title: t('Media tylko przez Wi-Fi'),
-                  subtitle: t(
-                    'Zdjęcia i filmy nie pobierają się same przez dane '
-                    'komórkowe. Można je pobrać dotknięciem.',
-                  ),
-                  value: settings.mediaOnlyOnWifi,
-                  onChanged: (bool value) => unawaited(
-                    ref
-                        .read(appSettingsControllerProvider.notifier)
-                        .setMediaOnlyOnWifi(value),
-                  ),
-                ),
-                _SettingsSwitchTile(
-                  key: const Key('settings-in-app-sounds'),
-                  icon: Icons.music_note_outlined,
-                  toneIndex: 1,
-                  title: t('Dźwięki w aplikacji'),
-                  subtitle: t(
-                    'Ciche dźwięki przy wysłaniu wiadomości i w rozmowach. '
-                    'Alarm przyjaciela słychać zawsze.',
-                  ),
-                  value: settings.inAppSounds,
-                  onChanged: (bool value) => unawaited(
-                    ref
-                        .read(appSettingsControllerProvider.notifier)
-                        .setInAppSounds(value),
-                  ),
-                ),
-                _SettingsNavTile(
-                  key: const Key('settings-nav-storage-limits'),
-                  icon: Icons.sd_storage_outlined,
-                  toneIndex: 2,
-                  title: t('Limity przechowywania'),
-                  subtitle: t(
-                    'Największe dozwolone rozmiary w każdej kategorii',
-                  ),
-                  pageTitle: t('Limity przechowywania'),
-                  pageChildren: const <Widget>[StorageLimitsSection()],
-                ),
-                if (Platform.isAndroid)
+                  if (ref.watch(ledgerNodeEnabledProvider))
+                    _SettingsNavTile(
+                      key: const Key('settings-nav-devices'),
+                      icon: Icons.devices_rounded,
+                      tone: ZenTone.network,
+                      title: t('Urządzenia'),
+                      subtitle: t(
+                        'Konto na kilku urządzeniach, odłączanie '
+                        'zgubionego',
+                      ),
+                      onTap: () =>
+                          unawaited(AccountDevicesScreen.open(context)),
+                    ),
                   _SettingsNavTile(
-                    key: const Key('settings-nav-delivery'),
-                    icon: Icons.notifications_active_outlined,
-                    toneIndex: 3,
-                    title: t('Powiadomienia i praca w tle'),
+                    key: const Key('settings-blocked-button'),
+                    icon: Icons.block_outlined,
+                    tone: ZenTone.safety,
+                    title: t('Zablokowani'),
+                    subtitle: blockedCount == 0
+                        ? t('Nikogo nie blokujesz')
+                        : t('Zablokowane osoby: {count}', {
+                            'count': blockedCount,
+                          }),
+                    onTap: () => _openBlockedFriendsScreen(context),
+                  ),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-group-invites'),
+                    icon: Icons.group_add_outlined,
+                    tone: ZenTone.people,
+                    title: t('Zaproszenia do grup'),
+                    subtitle: settings.groupInviteFrom.label,
+                    pageTitle: t('Zaproszenia do grup'),
+                    pageChildren: const <Widget>[GroupInviteFromTile()],
+                  ),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-stranger-messages'),
+                    icon: Icons.mark_chat_unread_outlined,
+                    tone: ZenTone.communication,
+                    title: t('Wiadomości spoza znajomych'),
+                    subtitle: t('Kto może napisać pierwszy'),
+                    pageTitle: t('Wiadomości spoza znajomych'),
+                    pageChildren: const <Widget>[StrangerMessagesFromTile()],
+                  ),
+                ],
+              ),
+              _SettingsGroup(
+                title: t('Wiadomości i połączenia'),
+                tiles: <Widget>[
+                  const _RelayNavTile(),
+                  if (ref.watch(ledgerNodeEnabledProvider))
+                    _SettingsNavTile(
+                      key: const Key('settings-nav-recordings'),
+                      icon: Icons.fiber_manual_record_outlined,
+                      tone: ZenTone.media,
+                      title: t('Nagrania rozmów'),
+                      subtitle: t('Zaszyfrowane na tym urządzeniu'),
+                      onTap: () =>
+                          unawaited(CallRecordingsScreen.open(context)),
+                    ),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-gifs'),
+                    icon: Icons.gif_box_outlined,
+                    tone: ZenTone.media,
+                    title: t('GIF-y'),
+                    subtitle: settings.usesOwnGifKey
+                        ? t('Własny klucz API')
+                        : t('Domyślny klucz aplikacji'),
+                    pageTitle: t('GIF-y'),
+                    pageChildren: const <Widget>[_GifKeySection()],
+                  ),
+                  _SettingsSwitchTile(
+                    key: const Key('settings-auto-media'),
+                    icon: Icons.download_for_offline_outlined,
+                    tone: ZenTone.media,
+                    title: t('Pobieraj zdjęcia i filmy'),
                     subtitle: t(
-                      'Uprawnienia, dostarczanie w tle, ekran połączeń',
+                      'Media z postów pobierają się same. Wyłącz, żeby '
+                      'oszczędzać transfer.',
                     ),
-                    pageTitle: t('Powiadomienia i praca w tle'),
+                    value: settings.autoDownloadMedia,
+                    onChanged: (bool value) => unawaited(
+                      ref
+                          .read(appSettingsControllerProvider.notifier)
+                          .setAutoDownloadMedia(value),
+                    ),
+                  ),
+                  _SettingsSwitchTile(
+                    key: const Key('settings-media-wifi-only'),
+                    icon: Icons.wifi_rounded,
+                    tone: ZenTone.network,
+                    title: t('Media tylko przez Wi-Fi'),
+                    subtitle: t(
+                      'Zdjęcia i filmy nie pobierają się same przez dane '
+                      'komórkowe. Można je pobrać dotknięciem.',
+                    ),
+                    value: settings.mediaOnlyOnWifi,
+                    onChanged: (bool value) => unawaited(
+                      ref
+                          .read(appSettingsControllerProvider.notifier)
+                          .setMediaOnlyOnWifi(value),
+                    ),
+                  ),
+                  _SettingsSwitchTile(
+                    key: const Key('settings-in-app-sounds'),
+                    icon: Icons.music_note_outlined,
+                    tone: ZenTone.media,
+                    title: t('Dźwięki w aplikacji'),
+                    subtitle: t(
+                      'Ciche dźwięki przy wysłaniu wiadomości i w rozmowach. '
+                      'Alarm przyjaciela słychać zawsze.',
+                    ),
+                    value: settings.inAppSounds,
+                    onChanged: (bool value) => unawaited(
+                      ref
+                          .read(appSettingsControllerProvider.notifier)
+                          .setInAppSounds(value),
+                    ),
+                  ),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-storage-limits'),
+                    icon: Icons.sd_storage_outlined,
+                    tone: ZenTone.system,
+                    title: t('Limity przechowywania'),
+                    subtitle: t(
+                      'Największe dozwolone rozmiary w każdej kategorii',
+                    ),
+                    pageTitle: t('Limity przechowywania'),
+                    pageChildren: const <Widget>[StorageLimitsSection()],
+                  ),
+                  if (Platform.isAndroid)
+                    _SettingsNavTile(
+                      key: const Key('settings-nav-delivery'),
+                      icon: Icons.notifications_active_outlined,
+                      tone: ZenTone.communication,
+                      title: t('Powiadomienia i praca w tle'),
+                      subtitle: t(
+                        'Uprawnienia, dostarczanie w tle, ekran połączeń',
+                      ),
+                      pageTitle: t('Powiadomienia i praca w tle'),
+                      pageChildren: const <Widget>[
+                        _BackgroundDeliverySection(),
+                        SizedBox(height: 12),
+                        _BatteryOptimizationSection(),
+                        SizedBox(height: 12),
+                        _FullScreenCallSection(),
+                      ],
+                    ),
+                ],
+              ),
+              _SettingsGroup(
+                title: t('Aplikacja'),
+                tiles: <Widget>[
+                  // The same steps as on the first start.
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-permissions'),
+                    icon: Icons.verified_user_outlined,
+                    tone: ZenTone.privacy,
+                    title: t('Uprawnienia i Bluetooth'),
+                    subtitle: Platform.isAndroid
+                        ? t('Powiadomienia, Bluetooth, praca w tle, mikrofon')
+                        : t('Powiadomienia, mikrofon i kamera'),
+                    onTap: () => unawaited(PermissionsScreen.open(context)),
+                  ),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-health'),
+                    icon: Icons.health_and_safety_outlined,
+                    tone: ZenTone.network,
+                    title: t('Dlaczego nie działa?'),
+                    subtitle: t(
+                      'Sieć, praca w tle, powiadomienia, zegar, miejsce',
+                    ),
+                    onTap: () => unawaited(HealthScreen.open(context)),
+                  ),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-appearance'),
+                    icon: Icons.palette_outlined,
+                    tone: ZenTone.appearance,
+                    title: t('Wygląd'),
+                    subtitle: t('{palette} · {mode}', {
+                      'palette': settings.palette.label,
+                      'mode': settings.themeMode.label,
+                    }),
+                    pageTitle: t('Wygląd'),
+                    pageChildren: const <Widget>[_AppearanceSection()],
+                  ),
+                  _SettingsNavTile(
+                    key: const ValueKey<String>('settings-language-tile'),
+                    icon: Icons.translate_rounded,
+                    tone: ZenTone.communication,
+                    title: t('Język'),
+                    subtitle: ZenI18n.language.nativeName,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext context) =>
+                            const LanguageScreen(),
+                      ),
+                    ),
+                  ),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-data'),
+                    icon: Icons.storage_outlined,
+                    tone: ZenTone.system,
+                    title: t('Dane i pamięć'),
+                    subtitle: settings.autoCleanupDays == 0
+                        ? t('Limit zdarzeń: {limit}', {
+                            'limit': settings.inboxLimitLabel,
+                          })
+                        : t(
+                            'Limit zdarzeń: {limit} · czyszczenie po {days} dn.',
+                            {
+                              'limit': settings.inboxLimitLabel,
+                              'days': settings.autoCleanupDays,
+                            },
+                          ),
+                    pageTitle: t('Dane i pamięć'),
+                    pageChildren: const <Widget>[_DataSection()],
+                  ),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-updates'),
+                    icon: Icons.system_update_alt_rounded,
+                    tone: ZenTone.people,
+                    title: t('Aktualizacje i Podaj dalej'),
+                    subtitle: t('Wersja {version} · nowe wersje od znajomych', {
+                      'version': kAppVersion,
+                    }),
+                    onTap: () => unawaited(UpdatesScreen.open(context)),
+                  ),
+                ],
+              ),
+              _SettingsGroup(
+                title: t('Zaawansowane'),
+                tiles: <Widget>[
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-network'),
+                    icon: Icons.hub_outlined,
+                    tone: ZenTone.network,
+                    title: t('Sieć i usługa'),
+                    subtitle: state.connectionLabel,
+                    pageTitle: t('Sieć i usługa'),
                     pageChildren: const <Widget>[
-                      _BackgroundDeliverySection(),
-                      SizedBox(height: 12),
-                      _BatteryOptimizationSection(),
-                      SizedBox(height: 12),
-                      _FullScreenCallSection(),
+                      _LiveTechInfoSection(),
+                      _OfflineLinksPanel(),
+                      _BridgeHostSection(),
                     ],
                   ),
-              ],
-            ),
-            _SettingsGroup(
-              title: t('Aplikacja'),
-              tiles: <Widget>[
-                // The same steps as on the first start.
-                _SettingsNavTile(
-                  key: const Key('settings-nav-permissions'),
-                  icon: Icons.verified_user_outlined,
-                  toneIndex: 1,
-                  title: t('Uprawnienia i Bluetooth'),
-                  subtitle: Platform.isAndroid
-                      ? t('Powiadomienia, Bluetooth, praca w tle, mikrofon')
-                      : t('Powiadomienia, mikrofon i kamera'),
-                  onTap: () => unawaited(PermissionsScreen.open(context)),
-                ),
-                _SettingsNavTile(
-                  key: const Key('settings-nav-health'),
-                  icon: Icons.health_and_safety_outlined,
-                  toneIndex: 2,
-                  title: t('Dlaczego nie działa?'),
-                  subtitle: t(
-                    'Sieć, praca w tle, powiadomienia, zegar, miejsce',
-                  ),
-                  onTap: () => unawaited(HealthScreen.open(context)),
-                ),
-                _SettingsNavTile(
-                  key: const Key('settings-nav-appearance'),
-                  icon: Icons.palette_outlined,
-                  toneIndex: 2,
-                  title: t('Wygląd'),
-                  subtitle: t('{palette} · {mode}', {
-                    'palette': settings.palette.label,
-                    'mode': settings.themeMode.label,
-                  }),
-                  pageTitle: t('Wygląd'),
-                  pageChildren: const <Widget>[_AppearanceSection()],
-                ),
-                _SettingsNavTile(
-                  key: const ValueKey<String>('settings-language-tile'),
-                  icon: Icons.translate_rounded,
-                  toneIndex: 3,
-                  title: t('Język'),
-                  subtitle: ZenI18n.language.nativeName,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (BuildContext context) => const LanguageScreen(),
-                    ),
-                  ),
-                ),
-                _SettingsNavTile(
-                  key: const Key('settings-nav-data'),
-                  icon: Icons.storage_outlined,
-                  toneIndex: 4,
-                  title: t('Dane i pamięć'),
-                  subtitle: settings.autoCleanupDays == 0
-                      ? t('Limit zdarzeń: {limit}', {
-                          'limit': settings.inboxLimitLabel,
-                        })
-                      : t(
-                          'Limit zdarzeń: {limit} · czyszczenie po {days} dn.',
-                          {
-                            'limit': settings.inboxLimitLabel,
-                            'days': settings.autoCleanupDays,
-                          },
-                        ),
-                  pageTitle: t('Dane i pamięć'),
-                  pageChildren: const <Widget>[_DataSection()],
-                ),
-                _SettingsNavTile(
-                  key: const Key('settings-nav-updates'),
-                  icon: Icons.system_update_alt_rounded,
-                  toneIndex: 5,
-                  title: t('Aktualizacje i Podaj dalej'),
-                  subtitle: t('Wersja {version} · nowe wersje od znajomych', {
-                    'version': kAppVersion,
-                  }),
-                  onTap: () => unawaited(UpdatesScreen.open(context)),
-                ),
-                if (!kFeatureFlagsLocked)
                   _SettingsNavTile(
-                    key: const Key('settings-nav-experimental'),
-                    icon: Icons.science_outlined,
-                    toneIndex: 6,
-                    title: t('Funkcje eksperymentalne'),
-                    subtitle: t('Piramida, portfel, randki, sąsiedzi'),
-                    onTap: () =>
-                        unawaited(ExperimentalFeaturesScreen.open(context)),
+                    key: const Key('settings-nav-public-peers'),
+                    icon: Icons.public_rounded,
+                    tone: ZenTone.network,
+                    title: t('Publiczne węzły'),
+                    subtitle: t('Przez które węzły Zen łączy się z siecią'),
+                    pageTitle: t('Publiczne węzły'),
+                    pageChildren: const <Widget>[PublicPeersSection()],
                   ),
-              ],
-            ),
-            _SettingsGroup(
-              title: t('Zaawansowane'),
-              tiles: <Widget>[
-                _SettingsNavTile(
-                  key: const Key('settings-nav-network'),
-                  icon: Icons.hub_outlined,
-                  toneIndex: 6,
-                  title: t('Sieć i usługa'),
-                  subtitle: state.connectionLabel,
-                  pageTitle: t('Sieć i usługa'),
-                  pageChildren: const <Widget>[
-                    _LiveTechInfoSection(),
-                    _OfflineLinksPanel(),
-                    _BridgeHostSection(),
-                  ],
-                ),
-                _SettingsNavTile(
-                  key: const Key('settings-nav-diagnostics'),
-                  icon: Icons.receipt_long_outlined,
-                  toneIndex: 7,
-                  title: t('Diagnostyka'),
-                  subtitle: t('Dziennik zdarzeń do zgłaszania błędów'),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (BuildContext context) =>
-                          const _DiagnosticsScreen(),
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-diagnostics'),
+                    icon: Icons.receipt_long_outlined,
+                    tone: ZenTone.system,
+                    title: t('Diagnostyka'),
+                    subtitle: t('Dziennik zdarzeń do zgłaszania błędów'),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext context) =>
+                            const _DiagnosticsScreen(),
+                      ),
                     ),
                   ),
-                ),
-                _SettingsNavTile(
-                  key: const Key('settings-nav-reset'),
-                  icon: Icons.delete_forever_outlined,
-                  title: t('Usuń wszystkie dane'),
-                  subtitle: t('Znajomi, rozmowy i klucze z tego urządzenia'),
-                  danger: true,
-                  pageTitle: t('Usuń wszystkie dane'),
-                  pageChildren: const <Widget>[_ResetDataPanel()],
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Center(
-              child: Text(
-                'Zen $kAppVersion',
-                style: TextStyle(
-                  color: ZenColors.of(context).textMuted,
-                  fontSize: 12,
+                  _SettingsNavTile(
+                    key: const Key('settings-nav-reset'),
+                    tone: ZenTone.safety,
+                    icon: Icons.delete_forever_outlined,
+                    title: t('Usuń wszystkie dane'),
+                    subtitle: t('Znajomi, rozmowy i klucze z tego urządzenia'),
+                    danger: true,
+                    pageTitle: t('Usuń wszystkie dane'),
+                    pageChildren: const <Widget>[_ResetDataPanel()],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Center(
+                child: Text(
+                  'Zen $kAppVersion',
+                  style: TextStyle(
+                    color: ZenColors.of(context).textMuted,
+                    fontSize: 12,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1029,25 +1162,25 @@ class _SettingsGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
+    final ZenLook look = ZenLook.of(context);
     final List<Widget> rows = <Widget>[];
     for (int i = 0; i < tiles.length; i++) {
       if (i > 0) {
-        rows.add(
-          Divider(height: 1, indent: 68, endIndent: 16, color: zen.outlineSoft),
-        );
+        rows.add(const ZenDivider(indent: 68, endIndent: 16));
       }
       rows.add(tiles[i]);
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        ZenSection(title, top: 22),
+        if (title.isEmpty)
+          const SizedBox(height: 12)
+        else
+          ZenSection(title, top: 22),
+        // The panel of the look (its fill, outline and corners).
         Material(
-          color: zen.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22),
-            side: BorderSide(color: zen.outlineSoft),
-          ),
+          color: look.panelColor(zen),
+          shape: look.panelShape(zen),
           clipBehavior: Clip.antiAlias,
           child: Column(children: rows),
         ),
@@ -1091,10 +1224,10 @@ class _SettingsRowBody extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
+                  // Never cut: long titles and descriptions wrap (some
+                  // languages are much longer than Polish).
                   Text(
                     title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 15,
@@ -1106,8 +1239,6 @@ class _SettingsRowBody extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: zen.textSecondary,
                         fontSize: 13,
@@ -1139,7 +1270,7 @@ class _SettingsNavTile extends StatelessWidget {
     this.pageTitle,
     this.pageChildren,
     this.danger = false,
-    this.toneIndex = 0,
+    this.tone = ZenTone.system,
   });
 
   final IconData icon;
@@ -1150,8 +1281,8 @@ class _SettingsNavTile extends StatelessWidget {
   final List<Widget>? pageChildren;
   final bool danger;
 
-  /// The row's colour in the palette ([zenTone]).
-  final int toneIndex;
+  /// What the row is about: its colour in every theme.
+  final ZenTone tone;
 
   @override
   Widget build(BuildContext context) {
@@ -1169,7 +1300,7 @@ class _SettingsNavTile extends StatelessWidget {
           ),
       child: _SettingsRowBody(
         icon: icon,
-        tone: danger ? zen.danger : zenTone(zen, toneIndex),
+        tone: zen.tone(danger ? ZenTone.safety : tone),
         title: title,
         subtitle: subtitle,
         danger: danger,
@@ -1191,7 +1322,7 @@ class _SettingsSwitchTile extends StatelessWidget {
     required this.subtitle,
     required this.value,
     required this.onChanged,
-    this.toneIndex = 0,
+    this.tone = ZenTone.system,
   });
 
   final IconData icon;
@@ -1199,7 +1330,9 @@ class _SettingsSwitchTile extends StatelessWidget {
   final String subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
-  final int toneIndex;
+
+  /// What the row is about: its colour in every theme.
+  final ZenTone tone;
 
   @override
   Widget build(BuildContext context) {
@@ -1209,7 +1342,7 @@ class _SettingsSwitchTile extends StatelessWidget {
         onTap: () => onChanged(!value),
         child: _SettingsRowBody(
           icon: icon,
-          tone: zenTone(zen, toneIndex),
+          tone: zen.tone(tone),
           title: title,
           subtitle: subtitle,
           trailing: Switch.adaptive(value: value, onChanged: onChanged),
@@ -1229,13 +1362,15 @@ class _SettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: SafeArea(
-        top: false,
-        child: ListView(
-          key: const Key('settings-page-body'),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-          children: children,
+      appBar: AppBar(title: PageTitle(title)),
+      body: SelectionArea(
+        child: SafeArea(
+          top: false,
+          child: ListView(
+            key: const Key('settings-page-body'),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            children: children,
+          ),
         ),
       ),
     );
@@ -1253,7 +1388,7 @@ class _RelayNavTile extends ConsumerWidget {
       return _SettingsNavTile(
         key: const Key('settings-relay-button'),
         icon: Icons.markunread_mailbox_outlined,
-        toneIndex: 5,
+        tone: ZenTone.network,
         title: t('Skrzynki offline'),
         subtitle: t('Znajomi, którzy przechowają Twoje wiadomości'),
         pageTitle: t('Skrzynki offline'),
@@ -1275,7 +1410,7 @@ class _RelayNavTile extends ConsumerWidget {
         return _SettingsNavTile(
           key: const Key('settings-relay-button'),
           icon: Icons.markunread_mailbox_outlined,
-          toneIndex: 5,
+          tone: ZenTone.network,
           title: t('Skrzynki offline'),
           subtitle: overview.relays.isEmpty
               ? t('Dodaj znajomych, żeby wiadomości mogły na Ciebie czekać')
@@ -1504,12 +1639,12 @@ class _QuickLockPanel extends ConsumerWidget {
         final Color tone = canLock ? zen.accent : zen.warning;
         return Container(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(26),
+            borderRadius: context.zenRadius(26),
             gradient: LinearGradient(
               colors: <Color>[
                 Color.alphaBlend(tone.withValues(alpha: 0.24), zen.surface),
                 Color.alphaBlend(
-                  zen.accentSecondary.withValues(alpha: 0.08),
+                  zen.tone(ZenTone.privacy).withValues(alpha: 0.08),
                   zen.surface,
                 ),
               ],
@@ -1695,7 +1830,7 @@ class _GifKeySectionState extends ConsumerState<_GifKeySection> {
     final bool ownKey = ref.watch(
       appSettingsControllerProvider.select((AppSettings s) => s.usesOwnGifKey),
     );
-    final Color tone = zenTone(zen, 7);
+    final Color tone = zen.tone(ZenTone.media);
     return _Panel(
       accentTone: tone,
       child: Column(
@@ -1829,43 +1964,21 @@ class _AppearanceSection extends ConsumerWidget {
       AppThemeMode.system => MediaQuery.platformBrightnessOf(context),
     };
     return _Panel(
-      accentTone: zen.accentTertiary,
+      accentTone: zen.tone(ZenTone.appearance),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           _SectionIntro(
             title: t('Motyw'),
-            caption: t('Kolory i charakter całej aplikacji.'),
+            caption: t('Kolory, kształty i ruch całej aplikacji.'),
           ),
           const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints c) {
-              // Two previews per row on a phone, more on a wide window.
-              const double gap = 10;
-              final int columns = (c.maxWidth / 170).floor().clamp(2, 6);
-              final double width = (c.maxWidth - gap * (columns - 1)) / columns;
-              return Wrap(
-                key: const Key('settings-palette-picker'),
-                spacing: gap,
-                runSpacing: gap,
-                children: <Widget>[
-                  for (final AppPalette p in AppPalette.values)
-                    SizedBox(
-                      width: width,
-                      child: _PaletteCard(
-                        palette: p,
-                        colors: ZenColors.forPalette(
-                          p,
-                          settings.accentTheme,
-                          brightness,
-                        ),
-                        selected: settings.palette == p,
-                        onTap: () => controller.setPalette(p),
-                      ),
-                    ),
-                ],
-              );
-            },
+          // The palettes in their groups, each a live miniature.
+          ZenThemePicker(
+            selected: settings.palette,
+            accent: settings.accentTheme,
+            brightness: brightness,
+            onSelect: controller.setPalette,
           ),
           const SizedBox(height: 20),
           _SectionIntro(title: t('Tryb')),
@@ -1930,279 +2043,6 @@ class _AppearanceSection extends ConsumerWidget {
             ),
           ],
         ],
-      ),
-    );
-  }
-}
-
-/// A palette to pick: a tiny screen drawn in its colours (rail, title,
-/// a card with an unread dot, a button), its name and character.
-class _PaletteCard extends StatelessWidget {
-  const _PaletteCard({
-    required this.palette,
-    required this.colors,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final AppPalette palette;
-  final ZenColors colors;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ZenColors zen = ZenColors.of(context);
-    final ZenColors c = colors;
-    final ZenLook look = ZenLook.forPalette(palette);
-    final BorderRadius radius = BorderRadius.circular(18);
-    Widget line(Color color, double widthFactor, {double height = 5}) {
-      return FractionallySizedBox(
-        widthFactor: widthFactor,
-        alignment: Alignment.centerLeft,
-        child: Container(
-          height: height,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(3),
-          ),
-        ),
-      );
-    }
-
-    return Semantics(
-      selected: selected,
-      button: true,
-      label: palette.label,
-      child: Material(
-        color: zen.surface,
-        borderRadius: radius,
-        child: InkWell(
-          key: Key('settings-palette-${palette.name}'),
-          borderRadius: radius,
-          onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOutCubic,
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              borderRadius: radius,
-              border: Border.all(
-                color: selected ? zen.accent : zen.outlineSoft,
-                width: selected ? 2 : 1,
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                ExcludeSemantics(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      height: 78,
-                      color: c.background,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
-                          // The tab rail with its active tab.
-                          Container(
-                            width: 16,
-                            color: c.surfaceSunk,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 3,
-                              vertical: 8,
-                            ),
-                            child: Column(
-                              children: <Widget>[
-                                for (int i = 0; i < 4; i++)
-                                  Container(
-                                    height: 9,
-                                    margin: const EdgeInsets.only(bottom: 5),
-                                    decoration: BoxDecoration(
-                                      color: i == 1
-                                          ? c.accent.withValues(alpha: 0.30)
-                                          : c.outline,
-                                      borderRadius: BorderRadius.circular(3),
-                                      border: i == 1
-                                          ? Border.all(color: c.accent)
-                                          : null,
-                                      boxShadow: i == 1
-                                          ? c.neonGlow(c.accent, radius: 6)
-                                          : null,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(7, 8, 7, 7),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: <Widget>[
-                                  Row(
-                                    children: <Widget>[
-                                      Container(
-                                        width: 3,
-                                        height: 9,
-                                        decoration: BoxDecoration(
-                                          color: c.accent,
-                                          borderRadius: BorderRadius.circular(
-                                            2,
-                                          ),
-                                          boxShadow: c.neonGlow(
-                                            c.accent,
-                                            radius: 6,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Expanded(
-                                        child: line(
-                                          c.textPrimary,
-                                          0.55,
-                                          height: 6,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 7),
-                                  Expanded(
-                                    child: Container(
-                                      padding: const EdgeInsets.fromLTRB(
-                                        6,
-                                        6,
-                                        6,
-                                        6,
-                                      ),
-                                      decoration: look.bevelled
-                                          ? ShapeDecoration(
-                                              color: c.surface,
-                                              shape: ZenBevelBorder.of(c),
-                                            )
-                                          : BoxDecoration(
-                                              color: c.surface,
-                                              borderRadius:
-                                                  BorderRadius.circular(
-                                                    7 * look.corner,
-                                                  ),
-                                              border: Border.all(
-                                                color: look.outlined
-                                                    ? c.accent.withValues(
-                                                        alpha: 0.7,
-                                                      )
-                                                    : c.outlineSoft,
-                                              ),
-                                            ),
-                                      child: Row(
-                                        children: <Widget>[
-                                          Expanded(
-                                            child: Column(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: <Widget>[
-                                                line(c.textPrimary, 0.8),
-                                                const SizedBox(height: 4),
-                                                line(c.textMuted, 0.6),
-                                              ],
-                                            ),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Container(
-                                            width: 8,
-                                            height: 8,
-                                            decoration: BoxDecoration(
-                                              color: c.accentSecondary,
-                                              shape: BoxShape.circle,
-                                              boxShadow: c.neonGlow(
-                                                c.accentSecondary,
-                                                radius: 6,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Align(
-                                    alignment: Alignment.centerRight,
-                                    child: Container(
-                                      width: 34,
-                                      height: 10,
-                                      decoration: BoxDecoration(
-                                        color: c.glow > 0
-                                            ? c.surfaceRaised
-                                            : c.accent,
-                                        borderRadius: BorderRadius.circular(
-                                          look.bevelled ? 0 : 999,
-                                        ),
-                                        border: c.glow > 0
-                                            ? Border.all(color: c.accent)
-                                            : null,
-                                        boxShadow: c.neonGlow(
-                                          c.accent,
-                                          radius: 6,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(6, 8, 4, 4),
-                  child: Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Text(
-                              palette.label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: zen.textPrimary,
-                                fontSize: 14.5,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              palette.tagline,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: zen.textSecondary,
-                                fontSize: 12,
-                                height: 1.25,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (selected)
-                        Icon(
-                          Icons.check_circle_rounded,
-                          size: 20,
-                          color: zen.accent,
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -2299,7 +2139,7 @@ class _DataSectionState extends ConsumerState<_DataSection> {
         selection: TextSelection.collapsed(offset: cleanupText.length),
       );
     }
-    final Color tone = zenTone(zen, 4);
+    final Color tone = zen.tone(ZenTone.system);
     return _Panel(
       key: const Key('settings-preferences-panel'),
       accentTone: tone,
@@ -2342,7 +2182,7 @@ class _DataSectionState extends ConsumerState<_DataSection> {
                     padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
                     decoration: BoxDecoration(
                       color: zen.surfaceSunk,
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: context.zenRadius(16),
                       border: Border.all(color: zen.outlineSoft),
                     ),
                     child: Column(
@@ -2550,8 +2390,6 @@ class _BackgroundAlertsBannerState
               Expanded(
                 child: Text(
                   t('Powiadomienia ({count})', {'count': alerts.length}),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: zen.textPrimary,
                     fontSize: 15.5,
@@ -2623,11 +2461,7 @@ class _BackgroundAlertsBannerState
                     : Icons.notifications_none_rounded,
                 size: 18,
               ),
-              label: Text(
-                launchIntent?.actionLabel ?? t('Otwórz'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+              label: Text(launchIntent?.actionLabel ?? t('Otwórz')),
             ),
           ],
         ],
@@ -2648,11 +2482,7 @@ class _AddFriendCallout extends StatelessWidget {
             key: const Key('open-add-friend-sheet-button'),
             onPressed: () => showAddFriendSheet(context),
             icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
-            label: Text(
-              t('Znajomy'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+            label: Text(t('Znajomy'), textAlign: TextAlign.center),
           ),
         ),
         const SizedBox(width: 10),
@@ -2661,11 +2491,7 @@ class _AddFriendCallout extends StatelessWidget {
             key: const Key('open-create-group-sheet-button'),
             onPressed: () => CreateGroupSheet.show(context),
             icon: const Icon(Icons.group_add_rounded, size: 18),
-            label: Text(
-              t('Grupa'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+            label: Text(t('Grupa'), textAlign: TextAlign.center),
           ),
         ),
       ],
@@ -2699,7 +2525,7 @@ class _GroupCardState extends ConsumerState<_GroupCard> {
                 state.activeCall?.status != CallSessionStatus.ringing),
       ),
     );
-    final BorderRadius radius = BorderRadius.circular(20);
+    final BorderRadius radius = context.zenRadius(20);
     final Color tone = _groupTone(zen, group);
 
     return Padding(
@@ -2824,7 +2650,7 @@ void _showGroupActionSheet(
   showModalBottomSheet<void>(
     context: context,
     backgroundColor: zen.surfaceRaised,
-    shape: _sheetShape(),
+    shape: context.zenSheetShape(),
     isScrollControlled: true,
     builder: (BuildContext sheetContext) {
       return SafeArea(
@@ -2969,7 +2795,7 @@ class _LocalCodePanel extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: context.zenRadius(28),
         gradient: LinearGradient(
           colors: <Color>[zen.accent, zen.accentSecondary, zen.accentTertiary],
           begin: Alignment.topLeft,
@@ -2988,7 +2814,7 @@ class _LocalCodePanel extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
         decoration: BoxDecoration(
           color: zen.surface,
-          borderRadius: BorderRadius.circular(26),
+          borderRadius: context.zenRadius(26),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3014,7 +2840,7 @@ class _LocalCodePanel extends StatelessWidget {
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(22),
+                  borderRadius: context.zenRadius(22),
                   boxShadow: <BoxShadow>[
                     BoxShadow(
                       color: zen.accent.withValues(alpha: 0.18),
@@ -3050,7 +2876,7 @@ class _LocalCodePanel extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 color: zen.surfaceSunk,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: context.zenRadius(16),
                 border: Border.all(color: zen.outlineSoft),
               ),
               child: SelectionArea(
@@ -3095,8 +2921,9 @@ class _LocalCodePanel extends StatelessWidget {
   }
 }
 
-/// "Zaproś" in the rail: your QR code and invite code, requests from people
-/// who just scanned it, and adding someone by their code.
+/// "Zaproś" (at the top of the settings): your QR code and invite code,
+/// requests from people who just scanned it, and adding someone by their
+/// code.
 class _MyCodeScreen extends ConsumerWidget {
   const _MyCodeScreen();
 
@@ -3123,9 +2950,7 @@ class _MyCodeScreen extends ConsumerWidget {
         .toList(growable: false);
 
     return Scaffold(
-      appBar: ZenSectionBar(
-        title: Navigator.of(context).canPop() ? t('Mój kod') : t('Zaproś'),
-      ),
+      appBar: ZenSectionBar(title: t('Mój kod')),
       body: SafeArea(
         top: false,
         child: ListView(
@@ -3154,27 +2979,27 @@ class _MyCodeScreen extends ConsumerWidget {
             ),
             if (profile != null) _LocalCodePanel(profile: profile),
             const SizedBox(height: 12),
-            ZenTile(
+            _WrapTile(
               key: const Key('invite-add-friend'),
               icon: Icons.person_add_alt_1_rounded,
-              tone: zen.accentSecondary,
+              tone: zen.tone(ZenTone.people),
               title: t('Mam czyjś kod'),
               subtitle: t('Dodaj znajomego — wklej jego kod albo zeskanuj QR'),
               onTap: () => showAddFriendSheet(context),
             ),
-            ZenTile(
+            _WrapTile(
               key: const Key('invite-share-app'),
               icon: Icons.install_mobile_rounded,
-              tone: zen.success,
+              tone: zen.tone(ZenTone.people),
               title: t('Znajomy nie ma Zen?'),
               subtitle: t('Podaj dalej: aplikacja z ręki do ręki, bez sklepu'),
               onTap: () => unawaited(ShareAppScreen.open(context)),
             ),
             if (!kIsWeb && Platform.isAndroid)
-              ZenTile(
+              _WrapTile(
                 key: const Key('invite-open-links'),
                 icon: Icons.qr_code_scanner_rounded,
-                tone: zenTone(zen, 3),
+                tone: zen.tone(ZenTone.network),
                 title: t('Kody Zen prosto do aplikacji'),
                 subtitle: t(
                   'Włącz „Otwieraj obsługiwane linki”: kod zeskanowany '
@@ -3226,7 +3051,7 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: context.zenRadius(22),
         border: Border.all(color: zen.accent.withValues(alpha: 0.5)),
         boxShadow: <BoxShadow>[
           BoxShadow(
@@ -3276,7 +3101,7 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
               decoration: BoxDecoration(
                 color: zen.surfaceSunk,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: context.zenRadius(14),
               ),
               child: Text(
                 '„$note”',
@@ -3315,11 +3140,7 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
                       }
                     }
                   },
-                  child: Text(
-                    t('Odrzuć'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: Text(t('Odrzuć'), textAlign: TextAlign.center),
                 ),
               ),
               const SizedBox(width: 10),
@@ -3370,11 +3191,7 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
                       }
                     }
                   },
-                  child: Text(
-                    t('Akceptuj'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: Text(t('Akceptuj'), textAlign: TextAlign.center),
                 ),
               ),
             ],
@@ -3480,7 +3297,7 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
                     text: t(
                       'Gdy coś się wydarzy w tle, wpisy pojawią się tutaj.',
                     ),
-                    tone: zenTone(zen, 7),
+                    tone: zen.tone(ZenTone.system),
                   ),
                 ),
               )
@@ -3492,7 +3309,7 @@ class _DiagnosticsScreenState extends State<_DiagnosticsScreen> {
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: zen.surfaceSunk,
-                      borderRadius: BorderRadius.circular(18),
+                      borderRadius: context.zenRadius(18),
                       border: Border.all(color: zen.outlineSoft),
                     ),
                     child: SelectableText(
@@ -4066,77 +3883,88 @@ class _ResetDataPanelState extends ConsumerState<_ResetDataPanel>
           ),
           const SizedBox(height: 16),
           ClipRRect(
-            borderRadius: BorderRadius.circular(18),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                key: const Key('desktop-reset-data-button'),
-                onTapDown: _running || _confirming ? null : (_) => _startHold(),
-                onTapUp: _running || _confirming ? null : (_) => _cancelHold(),
-                onTapCancel: _running || _confirming ? null : _cancelHold,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: zen.danger.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: zen.danger.withValues(alpha: 0.35),
+            borderRadius: context.zenRadius(18),
+            // Raw pointer events, not a tap: a ten-second press is a long
+            // press, which the page's text selection wins (the tap is then
+            // cancelled and the hold stops).
+            child: Listener(
+              onPointerDown: (_) {
+                if (!_running && !_confirming) {
+                  _startHold();
+                }
+              },
+              onPointerUp: (_) => _cancelHold(),
+              onPointerCancel: (_) => _cancelHold(),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  key: const Key('desktop-reset-data-button'),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: zen.danger.withValues(alpha: 0.08),
+                      borderRadius: context.zenRadius(18),
+                      border: Border.all(
+                        color: zen.danger.withValues(alpha: 0.35),
+                      ),
                     ),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Row(
-                          children: <Widget>[
-                            Icon(
-                              _running
-                                  ? Icons.hourglass_top_rounded
-                                  : Icons.delete_forever_outlined,
-                              color: zen.danger,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                actionLabel,
-                                style: Theme.of(context).textTheme.titleSmall
-                                    ?.copyWith(
-                                      color: zen.danger,
-                                      fontWeight: FontWeight.w800,
-                                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Row(
+                            children: <Widget>[
+                              Icon(
+                                _running
+                                    ? Icons.hourglass_top_rounded
+                                    : Icons.delete_forever_outlined,
+                                color: zen.danger,
                               ),
-                            ),
-                            if (_running)
-                              const SizedBox.square(
-                                dimension: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  actionLabel,
+                                  style: Theme.of(context).textTheme.titleSmall
+                                      ?.copyWith(
+                                        color: zen.danger,
+                                        fontWeight: FontWeight.w800,
+                                      ),
                                 ),
                               ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(999),
-                          child: LinearProgressIndicator(
-                            key: const Key('desktop-reset-data-progress'),
-                            minHeight: 8,
-                            value: _running ? null : progress,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              zen.danger,
+                              if (_running)
+                                const SizedBox.square(
+                                  dimension: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          ClipRRect(
+                            borderRadius: context.zenRadius(999),
+                            child: LinearProgressIndicator(
+                              key: const Key('desktop-reset-data-progress'),
+                              minHeight: 8,
+                              value: _running ? null : progress,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                zen.danger,
+                              ),
+                              backgroundColor: zen.danger.withValues(
+                                alpha: 0.12,
+                              ),
                             ),
-                            backgroundColor: zen.danger.withValues(alpha: 0.12),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          helperLabel,
-                          style: TextStyle(
-                            color: zen.textSecondary,
-                            height: 1.35,
+                          const SizedBox(height: 8),
+                          Text(
+                            helperLabel,
+                            style: TextStyle(
+                              color: zen.textSecondary,
+                              height: 1.35,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -4508,10 +4336,7 @@ class _AddFriendSheetState extends ConsumerState<_AddFriendSheet> {
       padding: EdgeInsets.only(bottom: viewInsets.bottom),
       child: Material(
         color: zen.surfaceRaised,
-        shape: RoundedRectangleBorder(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-          side: BorderSide(color: zen.outlineSoft),
-        ),
+        shape: context.zenSheetShape(),
         clipBehavior: Clip.antiAlias,
         child: SafeArea(
           top: false,

@@ -577,7 +577,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                                     ),
                                     decoration: BoxDecoration(
                                       color: zen.surfaceMuted,
-                                      borderRadius: ZenRadii.drop,
+                                      borderRadius: ZenLook.of(
+                                        context,
+                                      ).bubbleRadius(outgoing: false),
                                     ),
                                     child: Column(
                                       crossAxisAlignment:
@@ -761,6 +763,10 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       filter,
       wall: posts,
       pyramid: pyramid,
+      isClose: (FeedPost p) =>
+          node != null &&
+          p.authorAddress.isNotEmpty &&
+          node.levelOf(p.authorAddress) == FriendLevel.close,
     );
     final List<Widget> header = <Widget>[
       _ComposerPrompt(
@@ -787,7 +793,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(
             color: zen.danger.withValues(alpha: 0.10),
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: context.zenRadius(18),
             border: Border.all(color: zen.danger.withValues(alpha: 0.30)),
           ),
           child: Row(
@@ -887,6 +893,15 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
             icon: Icons.flag_outlined,
             title: t('Jeszcze nic'),
             text: t('W sekcji krajowej nikt jeszcze nie pisał.'),
+          ),
+          FeedFilter.close => ZenEmpty(
+            key: const Key('feed-end'),
+            icon: Icons.favorite_outline_rounded,
+            title: t('Nic od przyjaciół'),
+            text: t(
+              'Tu są tylko posty osób, które oznaczysz jako „Przyjaciel” '
+              '(poziom znajomości w ich profilu).',
+            ),
           ),
           _ => ZenEmpty(
             key: const Key('feed-end'),
@@ -1187,7 +1202,7 @@ String postTimeLabel(int millis, {bool withYear = false}) {
 }
 
 /// "Co słychać?" at the top of the wall; opens the post editor.
-/// „Wszystko · Znajomi · Piramida · Kraj” over the list.
+/// „Wszystko · Znajomi · Przyjaciele · Piramida · Kraj” over the list.
 class _FilterChips extends StatelessWidget {
   const _FilterChips({
     required this.filters,
@@ -1202,6 +1217,7 @@ class _FilterChips extends StatelessWidget {
   String _label(FeedFilter f) => switch (f) {
     FeedFilter.all => t('Wszystko'),
     FeedFilter.friends => t('Znajomi'),
+    FeedFilter.close => t('Przyjaciele'),
     FeedFilter.pyramid => t('Piramida'),
     FeedFilter.national => t('Kraj'),
   };
@@ -1242,7 +1258,7 @@ class _ComposerPrompt extends StatelessWidget {
       key: const Key('feed-composer-card'),
       color: zen.surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: context.zenRadius(24),
         side: BorderSide(color: zen.outlineSoft),
       ),
       clipBehavior: Clip.antiAlias,
@@ -1266,7 +1282,7 @@ class _ComposerPrompt extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: zen.surfaceSunk,
-                        borderRadius: BorderRadius.circular(999),
+                        borderRadius: context.zenRadius(999),
                         border: Border.all(color: zen.outlineSoft),
                       ),
                       child: Text(
@@ -1294,7 +1310,7 @@ class _ComposerPrompt extends StatelessWidget {
                     icon: Icons.add_photo_alternate_rounded,
                     label: t('Zdjęcie'),
                     tooltip: t('Post ze zdjęciem'),
-                    tone: zenTone(zen, 2),
+                    tone: zen.tone(ZenTone.media),
                     onTap: onPhoto,
                   ),
                 ),
@@ -1335,7 +1351,7 @@ class _ComposerAction extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final Widget body = InkWell(
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: context.zenRadius(14),
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
@@ -1408,7 +1424,7 @@ class _PostCard extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
       decoration: BoxDecoration(
         color: zen.surface,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: context.zenRadius(24),
         border: Border.all(color: zen.outlineSoft),
         boxShadow: <BoxShadow>[
           BoxShadow(
@@ -1565,7 +1581,7 @@ class _PostCard extends StatelessWidget {
                       text: t('Udostępnił(a): {names}', {
                         'names': post.resharedBy.join(', '),
                       }),
-                      tone: zenTone(zen, 3),
+                      tone: zen.tone(ZenTone.people),
                     ),
                   if (post.audience != Audience.public)
                     _Pill(
@@ -1614,7 +1630,7 @@ class _PostCard extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(4, 2, 8, 2),
               child: InkWell(
                 key: Key('feed-like-summary-${post.id}'),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: context.zenRadius(8),
                 onTap: onShowLikers,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1840,7 +1856,7 @@ class _Pill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: t.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: context.zenRadius(999),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -2291,22 +2307,24 @@ class _PostVideoState extends State<PostVideo> {
         ),
       );
     }
+    // The poster before playback, in the colours of the theme.
+    final ZenColors zen = ZenColors.of(context);
     return InkWell(
       key: Key('feed-video-${widget.ref.id}'),
       onTap: _loading ? null : () => unawaited(_tap()),
       child: Container(
         height: 200,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: <Color>[Color(0xFF1C1C24), Color(0xFF0B0B10)],
+            colors: <Color>[zen.surfaceRaised, zen.surfaceSunk],
           ),
         ),
         alignment: Alignment.center,
         padding: const EdgeInsets.all(12),
         child: _loading
-            ? const CircularProgressIndicator(color: Colors.white)
+            ? CircularProgressIndicator(color: zen.accent)
             : SingleChildScrollView(
                 physics: const NeverScrollableScrollPhysics(),
                 child: Column(
@@ -2316,15 +2334,15 @@ class _PostVideoState extends State<PostVideo> {
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: Colors.white.withValues(alpha: 0.14),
+                        color: zen.textPrimary.withValues(alpha: 0.10),
                         border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.35),
+                          color: zen.textPrimary.withValues(alpha: 0.30),
                         ),
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.play_arrow_rounded,
                         size: 40,
-                        color: Colors.white,
+                        color: zen.textPrimary,
                       ),
                     ),
                     if (_error != null)
@@ -2335,8 +2353,8 @@ class _PostVideoState extends State<PostVideo> {
                           textAlign: TextAlign.center,
                           maxLines: 3,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white70,
+                          style: TextStyle(
+                            color: zen.textSecondary,
                             fontSize: 13,
                           ),
                         ),
@@ -2367,7 +2385,7 @@ class PostGallery extends StatelessWidget {
   Widget build(BuildContext context) {
     final int n = images.length;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: context.zenRadius(18),
       child: GridView.count(
         crossAxisCount: n == 1 ? 1 : 2,
         childAspectRatio: n == 1 ? 4 / 3 : (n == 2 ? 3 / 4 : 1),
@@ -2449,7 +2467,7 @@ class ProfileMediaGrid extends StatelessWidget {
                 ? null
                 : () => onRemove!(i.entry!),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: context.zenRadius(16),
               child: isAudioMime(i.ref.mime)
                   ? PostAudio(ref: i.ref, node: node, entry: i.entry)
                   : isVideoMime(i.ref.mime)

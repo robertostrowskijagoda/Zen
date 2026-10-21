@@ -26,10 +26,10 @@ class _RelayMailboxPanel extends ConsumerWidget {
         final String subtitle = overview.relays.isEmpty
             ? t('Dodaj znajomych, żeby wiadomości mogły na Ciebie czekać.')
             : '$mailboxes · $mode';
-        return ZenTile(
+        return _WrapTile(
           key: const Key('settings-relay-button'),
           icon: Icons.markunread_mailbox_outlined,
-          tone: zenTone(zen, 5),
+          tone: zen.tone(ZenTone.network),
           title: t('Skrzynki offline'),
           subtitle: subtitle,
           onTap: () => Navigator.of(context).push(
@@ -83,7 +83,7 @@ class _RelayMailboxScreen extends ConsumerWidget {
                     ZenHero(
                       title: t('Wiadomości poczekają na Ciebie'),
                       icon: Icons.markunread_mailbox_outlined,
-                      tone: zenTone(zen, 5),
+                      tone: zen.tone(ZenTone.network),
                       text: t(
                         'Kiedy jesteś offline, wiadomości do Ciebie czekają '
                         'u wybranych znajomych. Są zaszyfrowane Twoim '
@@ -99,7 +99,7 @@ class _RelayMailboxScreen extends ConsumerWidget {
                           key: const Key('relay-auto-switch'),
                           secondary: ZenIconBadge(
                             icon: Icons.auto_awesome_rounded,
-                            tone: zenTone(zen, 5),
+                            tone: zen.tone(ZenTone.network),
                             size: 40,
                           ),
                           title: Text(t('Wybieraj automatycznie')),
@@ -197,7 +197,7 @@ class _RelayMailboxScreen extends ConsumerWidget {
                           key: const Key('relay-share-groups-switch'),
                           secondary: ZenIconBadge(
                             icon: Icons.groups_rounded,
-                            tone: zenTone(zen, 2),
+                            tone: zen.tone(ZenTone.people),
                             size: 40,
                           ),
                           title: Text(t('Ujawniaj skrzynki członkom grup')),
@@ -250,13 +250,13 @@ class _RelayMailboxScreen extends ConsumerWidget {
                       children: <Widget>[
                         _RelayStatRow(
                           icon: Icons.outbox_outlined,
-                          tone: zenTone(zen, 0),
+                          tone: zen.tone(ZenTone.communication),
                           label: t('Czeka na doręczenie'),
                           value: '${overview.outboxCount}',
                         ),
                         _RelayStatRow(
                           icon: Icons.inventory_2_outlined,
-                          tone: zenTone(zen, 3),
+                          tone: zen.tone(ZenTone.people),
                           label: t('Przechowujesz dla znajomych'),
                           value: t('{count} ({people} os.)', {
                             'count': overview.heldEnvelopeCount,
@@ -266,7 +266,7 @@ class _RelayMailboxScreen extends ConsumerWidget {
                         if (overview.heldBlobBytes > 0)
                           _RelayStatRow(
                             icon: Icons.attach_file_rounded,
-                            tone: zenTone(zen, 1),
+                            tone: zen.tone(ZenTone.media),
                             label: t('Załączniki znajomych u Ciebie'),
                             value: t('{mb} MB', {
                               'mb': (overview.heldBlobBytes / (1024 * 1024))
@@ -276,7 +276,7 @@ class _RelayMailboxScreen extends ConsumerWidget {
                         if (overview.publicKeyFingerprint.isNotEmpty)
                           _RelayStatRow(
                             icon: Icons.fingerprint_rounded,
-                            tone: zenTone(zen, 6),
+                            tone: zen.tone(ZenTone.privacy),
                             label: t('Odcisk klucza'),
                             value: overview.publicKeyFingerprint,
                             mono: true,
@@ -312,7 +312,7 @@ class _RelayBlobQuotaTile extends StatelessWidget {
       key: const Key('relay-blob-quota'),
       leading: ZenIconBadge(
         icon: Icons.attach_file_rounded,
-        tone: zenTone(zen, 1),
+        tone: zen.tone(ZenTone.media),
         size: 40,
       ),
       title: Text(t('Miejsce na załączniki znajomych')),

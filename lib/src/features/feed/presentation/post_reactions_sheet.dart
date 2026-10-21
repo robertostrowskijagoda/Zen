@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
-import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
@@ -421,7 +420,9 @@ class _CommentRow extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
                 decoration: BoxDecoration(
                   color: zen.surfaceMuted,
-                  borderRadius: ZenRadii.drop,
+                  borderRadius: ZenLook.of(
+                    context,
+                  ).bubbleRadius(outgoing: false),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
