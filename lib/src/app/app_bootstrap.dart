@@ -6,8 +6,12 @@ import 'package:zen/src/app/persistent_stores.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/features/about/legal_documents.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
 import 'package:zen/src/features/account/device_chat_sync.dart';
+import 'package:zen/src/features/account/multi/account_registry.dart';
+import 'package:zen/src/features/account/multi/account_scope.dart';
+import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/chat/disappearing_messages.dart';
 import 'package:zen/src/features/groups/group_store.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -160,6 +164,14 @@ final class ZenBootstrapResult {
           hasTestProfile: ZenInstance.profile != null,
         ),
       ),
+      // The terms, the privacy policy and the licence notice, accepted
+      // before anything else; skipped the same way.
+      legalConsentRequiredProvider.overrideWithValue(
+        zenStartupGatesRequired(
+          environment: Platform.environment,
+          hasTestProfile: ZenInstance.profile != null,
+        ),
+      ),
       // The "Zabezpiecz konto" card once after that.
       accountSecureStepRequiredProvider.overrideWithValue(
         zenStartupGatesRequired(
@@ -201,15 +213,30 @@ final class ZenBootstrapper {
     AppSettingsStoreBuilder? appSettingsStoreBuilder,
     PersistentStoresBuilder? persistentStoresBuilder,
     RuntimeNodeRuntimeBuilder? runtimeBuilder,
+    this.opening,
+    Future<void> Function()? prepareAccounts,
     this.maxCriticalStepRetries = 1,
   }) : assert(maxCriticalStepRetries >= 0),
        _prepareForegroundLaunch = prepareForegroundLaunch,
+       _prepareAccounts =
+           prepareAccounts ??
+           // The accounts folder (salt, decoys) on every real install;
+           // not where a test hands in its own folder.
+           (supportDirectoryLoader == null
+               ? () => ZenAccountRegistry().prepare()
+               : null),
        _supportDirectoryLoader =
            supportDirectoryLoader ?? ZenInstance.supportDirectory,
        _appSecurityServiceBuilder =
            appSecurityServiceBuilder ??
-           // Biometric unlock goes through the device's security hardware.
-           (() => LocalAppSecurityService(keyVault: platformKeyVault())),
+           // Biometric unlock goes through the device's security hardware
+           // (shared by the accounts: an additional one never destroys
+           // the hardware key).
+           (() => LocalAppSecurityService(
+             keyVault: ZenAccounts.current.isDefault
+                 ? platformKeyVault()
+                 : SharedKeyVault(platformKeyVault()),
+           )),
        _appSettingsStoreBuilder =
            appSettingsStoreBuilder ?? buildZenAppSettingsStoreForDirectory,
        _persistentStoresBuilder =
@@ -217,6 +244,12 @@ final class ZenBootstrapper {
        _runtimeBuilder = runtimeBuilder ?? buildDefaultRuntimeNodeRuntime;
 
   final Future<void> Function()? _prepareForegroundLaunch;
+  final Future<void> Function()? _prepareAccounts;
+
+  /// The account to open (another one than at the last start, switched
+  /// to in this process); `null`: the account open now (the default one
+  /// at the app's start).
+  final ZenAccountOpening? opening;
   final SupportDirectoryLoader _supportDirectoryLoader;
   final AppSecurityServiceBuilder _appSecurityServiceBuilder;
   final AppSettingsStoreBuilder _appSettingsStoreBuilder;
@@ -225,6 +258,20 @@ final class ZenBootstrapper {
   final int maxCriticalStepRetries;
 
   Future<ZenBootstrapResult> bootstrap() async {
+    final ZenAccountOpening? opening = this.opening;
+    if (opening != null) {
+      // Before anything reads a folder or a secret: all of them are this
+      // account's from here on.
+      ZenAccounts.activate(opening.scope);
+    }
+    final Future<void> Function()? prepareAccounts = _prepareAccounts;
+    if (prepareAccounts != null) {
+      try {
+        await prepareAccounts();
+      } on Object catch (error, stackTrace) {
+        logZenError('Preparing the accounts folder failed', error, stackTrace);
+      }
+    }
     await _runCriticalStep<void>('prepare foreground runtime', () async {
       final Future<void> Function()? prepareForegroundLaunch =
           _prepareForegroundLaunch;
@@ -296,6 +343,12 @@ final class ZenBootstrapper {
   Future<AppSecurityService> initSecurity({
     required AppSettings settings,
   }) async {
+    final AppSecurityService? opened = opening?.security;
+    if (opened != null) {
+      // Its password was checked before the switch: it opens unlocked.
+      await opened.applySettings(settings);
+      return opened;
+    }
     final AppSecurityService appSecurityService = _appSecurityServiceBuilder();
     await appSecurityService.initialize(settings: settings);
     return appSecurityService;

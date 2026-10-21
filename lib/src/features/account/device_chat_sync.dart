@@ -27,7 +27,13 @@ Map<String, dynamic> chatMessageToSync(ChatMessage m) => <String, dynamic>{
   if (m.mimeType != null) 'mt': m.mimeType,
   if (m.attachmentSizeBytes != null) 'sz': m.attachmentSizeBytes,
   if (m.durationMs != null) 'du': m.durationMs,
-  'ds': m.deliveryState.name,
+  // Still being queued here is "sent" there: the other device's own queue
+  // does not know it, and would otherwise take it for one that got lost.
+  'ds':
+      (m.deliveryState == ChatMessageDeliveryState.sending
+              ? ChatMessageDeliveryState.sent
+              : m.deliveryState)
+          .name,
   if (m.readAtMillis != null) 'r': m.readAtMillis,
 };
 

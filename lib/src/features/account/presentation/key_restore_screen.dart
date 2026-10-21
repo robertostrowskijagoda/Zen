@@ -367,7 +367,7 @@ class _FingerprintCard extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
         color: zen.surfaceSunk,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: context.zenRadius(16),
         border: Border.all(color: zen.outlineSoft),
       ),
       child: Column(

@@ -16,6 +16,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/about/go_licenses.dart';
+import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/media/linux_video_player.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 
@@ -83,16 +84,46 @@ class _ZenBootstrapApp extends StatefulWidget {
 class _ZenBootstrapAppState extends State<_ZenBootstrapApp> {
   static const Duration _bootstrapTimeout = Duration(seconds: 30);
 
-  final ZenBootstrapper _bootstrapper = ZenBootstrapper(
+  ZenBootstrapper _bootstrapper = ZenBootstrapper(
     prepareForegroundLaunch: prepareAndroidBackgroundRuntimeForForegroundLaunch,
   );
 
   late Future<ZenBootstrapResult> _bootstrapFuture;
 
+  /// Bumped when another account opens: its app gets fresh providers.
+  int _accountGeneration = 0;
+
   @override
   void initState() {
     super.initState();
     _bootstrapFuture = _bootstrap();
+    ZenAccountHost.instance.addListener(_openAccount);
+  }
+
+  @override
+  void dispose() {
+    ZenAccountHost.instance.removeListener(_openAccount);
+    super.dispose();
+  }
+
+  /// Another account was asked for (the account menu, the lock screen):
+  /// the app starts again for it, in this process.
+  void _openAccount() {
+    final ZenAccountOpening? opening = ZenAccountHost.instance.take();
+    if (opening == null) {
+      return;
+    }
+    setState(() {
+      _accountGeneration += 1;
+      _bootstrapper = ZenBootstrapper(
+        prepareForegroundLaunch:
+            prepareAndroidBackgroundRuntimeForForegroundLaunch,
+        opening: opening,
+      );
+      _bootstrapFuture = _bootstrap().whenComplete(
+        ZenAccountHost.instance.settled,
+      );
+    });
   }
 
   @override
@@ -105,6 +136,7 @@ class _ZenBootstrapAppState extends State<_ZenBootstrapApp> {
               if (snapshot.hasData) {
                 final ZenBootstrapResult result = snapshot.data!;
                 return ProviderScope(
+                  key: ValueKey<int>(_accountGeneration),
                   overrides: [...result.buildProviderOverrides()],
                   child: const ZenRewriteApp(),
                 );
@@ -298,7 +330,7 @@ class _BootstrapSurface extends StatelessWidget {
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
                         decoration: BoxDecoration(
                           color: zen.danger.withValues(alpha: 0.09),
-                          borderRadius: BorderRadius.circular(20),
+                          borderRadius: context.zenRadius(20),
                           border: Border.all(
                             color: zen.danger.withValues(alpha: 0.28),
                           ),

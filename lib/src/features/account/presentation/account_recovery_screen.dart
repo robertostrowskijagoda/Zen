@@ -20,6 +20,7 @@ import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
@@ -308,6 +309,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
       candidate.seed,
       deviceName: thisDeviceName,
     );
+    // The pyramid key comes from the account key: the place and the
+    // wallet come back with the records friends keep.
+    await PyramidService.markRecovered(node.disk);
     await service.endRecovery();
     _candidates = null;
     _recoverPassword.clear();
@@ -497,7 +501,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
           ),
           const SizedBox(height: 4),
           ClipRRect(
-            borderRadius: BorderRadius.circular(99),
+            borderRadius: context.zenRadius(99),
             child: LinearProgressIndicator(
               value: value,
               minHeight: 6,
@@ -518,7 +522,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
     decoration: BoxDecoration(
       color: zen.surfaceSunk,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: context.zenRadius(16),
       border: Border.all(color: zen.outlineSoft),
     ),
     child: Column(
@@ -645,7 +649,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
     decoration: BoxDecoration(
       color: zen.surfaceSunk,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: context.zenRadius(16),
       border: Border.all(color: zen.outlineSoft),
     ),
     child: Column(
@@ -718,7 +722,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     final int? collectingUntil = ready ? service.collectingUntil : null;
 
     final ZenColors zen = ZenColors.of(context);
-    final Color tone = zenTone(zen, 5);
+    final Color tone = zen.tone(ZenTone.privacy);
     return Scaffold(
       key: const Key('account-recovery-screen'),
       appBar: AppBar(title: Text(t('Konto i odzyskiwanie'))),
@@ -751,7 +755,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                     padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
                     decoration: BoxDecoration(
                       color: zen.accent.withValues(alpha: 0.09),
-                      borderRadius: BorderRadius.circular(18),
+                      borderRadius: context.zenRadius(18),
                       border: Border.all(
                         color: zen.accent.withValues(alpha: 0.24),
                       ),
@@ -986,7 +990,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                       _cardHeader(
                         zen,
                         icon: Icons.restore_rounded,
-                        tone: zenTone(zen, 6),
+                        tone: zen.tone(ZenTone.network),
                         title: t('Nowy telefon? Odzyskaj konto'),
                         status: collectingUntil == null
                             ? null
@@ -1033,7 +1037,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                           padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
                           decoration: BoxDecoration(
                             color: zen.surfaceSunk,
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: context.zenRadius(16),
                             border: Border.all(color: zen.outlineSoft),
                           ),
                           child: Row(

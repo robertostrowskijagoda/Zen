@@ -36,15 +36,57 @@ abstract final class ZenInstance {
     _profile = clean.isEmpty ? null : clean;
   }
 
+  /// The folder, inside an instance's data folder, that holds the data of
+  /// its additional accounts (and the decoys among them).
+  static const String accountsFolder = 'accounts';
+
   static Future<Directory>? _base;
 
-  /// The app's own data folder (a sub-folder per profile).
+  /// The folder of the additional account open in this isolate (inside
+  /// [accountsFolder]); `null` for the default account.
+  static String? _account;
+
+  /// The open account's folder name; `null` for the default account.
+  static String? get accountFolder => _account;
+
+  /// Opens the account kept in [folder] (inside [accountsFolder]) for
+  /// everything that asks for [supportDirectory] in this isolate; `null`
+  /// opens the default account.
+  static void useAccountFolder(String? folder) {
+    _account = folder == null || folder.isEmpty ? null : folder;
+  }
+
+  /// For tests: the base folder instead of the platform's.
+  @visibleForTesting
+  static void debugSetBaseDirectory(Directory? directory) {
+    _base = directory == null ? null : Future<Directory>.value(directory);
+  }
+
+  /// The open account's data folder: the instance's folder
+  /// ([instanceDirectory]) for the default account, a folder in its
+  /// [accountsFolder] for an additional one.
   ///
   /// On Windows this is under `%LOCALAPPDATA%`, not the roaming profile:
   /// a roaming profile (or a profile backup restored on another computer)
   /// would copy the keys and the posting log to a second machine and fork
   /// the log without a word.
   static Future<Directory> supportDirectory() async {
+    final Directory instance = await instanceDirectory();
+    final String? account = _account;
+    if (account == null) {
+      return instance;
+    }
+    final Directory dir = Directory(
+      '${instance.path}${Platform.pathSeparator}$accountsFolder'
+      '${Platform.pathSeparator}$account',
+    );
+    await dir.create(recursive: true);
+    return dir;
+  }
+
+  /// The app's own data folder (a sub-folder per profile): the default
+  /// account's data, and the [accountsFolder] of the others.
+  static Future<Directory> instanceDirectory() async {
     final Directory base = await _cachedBase();
     final String? p = _profile;
     if (p == null) {

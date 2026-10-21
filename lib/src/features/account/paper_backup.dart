@@ -7,6 +7,7 @@ import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
+import 'package:zen/src/features/pyramid/pyramid_service.dart';
 
 /// Paper copy of the account key.
 ///
@@ -192,7 +193,10 @@ final class PaperBackupAccount {
 
 /// Makes this installation a new device of the account in [backup]
 /// (replaces the identity on [disk]; the ledger restarts afterwards).
-/// Refuses a seed that is not the key of the confirmed account.
+/// Refuses a seed that is not the key of the confirmed account. The
+/// pyramid key comes from the account key, and the device is marked to
+/// take the pyramid's records back ([PyramidService.markRecovered]), so
+/// the place in the pyramid and the wallet return.
 Future<LedgerIdentity> adoptPaperBackup(
   LedgerDisk disk,
   PaperBackupAccount backup, {
@@ -201,5 +205,11 @@ Future<LedgerIdentity> adoptPaperBackup(
   if ((await LedgerKeyPair.fromSeed(backup.seed)).id != backup.account) {
     throw StateError('The key does not belong to the confirmed account.');
   }
-  return LedgerIdentity.adoptAccount(disk, backup.seed, deviceName: deviceName);
+  final LedgerIdentity identity = await LedgerIdentity.adoptAccount(
+    disk,
+    backup.seed,
+    deviceName: deviceName,
+  );
+  await PyramidService.markRecovered(disk);
+  return identity;
 }

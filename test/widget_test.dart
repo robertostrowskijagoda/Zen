@@ -163,7 +163,7 @@ void main() {
     expect(find.byKey(const Key('chats-tab-body')), findsOneWidget);
     expect(find.byKey(const Key('chats-status-chip')), findsOneWidget);
     expect(find.byKey(const Key('chats-search-field')), findsOneWidget);
-    expect(find.text('Skrzynka'), findsOneWidget);
+    expect(find.text('Czaty'), findsOneWidget);
     expect(find.byKey(const Key('inbox-tab-body')), findsNothing);
   });
 
@@ -457,6 +457,8 @@ void main() {
     await _openProfileFromShell(tester);
 
     await _openSettingsPage(tester, 'settings-nav-appearance');
+    await tester.ensureVisible(find.text('Ciemny'));
+    await tester.pump();
     await tester.tap(find.text('Ciemny'));
     await tester.pumpAndSettle();
     expect((await settingsStore.load())!.themeMode, AppThemeMode.dark);

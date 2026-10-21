@@ -507,7 +507,7 @@ class _PaperBackupViewState extends State<PaperBackupView> {
     padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
     decoration: BoxDecoration(
       color: zen.surfaceSunk,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: context.zenRadius(12),
       border: Border.all(color: zen.outlineSoft),
     ),
     child: Column(
@@ -584,7 +584,7 @@ class _PaperBackupViewState extends State<PaperBackupView> {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: context.zenRadius(20),
           ),
           child: QrImageView(
             key: const Key('paper-backup-qr'),

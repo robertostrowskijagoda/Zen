@@ -172,7 +172,7 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
                 ZenHero(
                   title: t('Jedno konto, wiele urządzeń'),
                   icon: Icons.devices_rounded,
-                  tone: zenTone(zen, 7),
+                  tone: zen.tone(ZenTone.network),
                   text: t(
                     'Twoje konto może działać na kilku urządzeniach naraz. '
                     'Znajomi widzą je jako jedną osobę: wiadomości i '
@@ -187,7 +187,7 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
                     icon: d.name.contains('Telefon') || d.name == 'iPhone'
                         ? Icons.smartphone_rounded
                         : Icons.computer_rounded,
-                    tone: d.isThis ? zen.accent : zenTone(zen, 7),
+                    tone: d.isThis ? zen.accent : zen.tone(ZenTone.network),
                     title: d.name,
                     subtitle: d.isThis
                         ? t('To urządzenie')
@@ -297,7 +297,7 @@ class _MessageBox extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
         color: t.withValues(alpha: 0.09),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: context.zenRadius(18),
         border: Border.all(color: t.withValues(alpha: 0.24)),
       ),
       child: Row(
@@ -396,7 +396,7 @@ Widget _digitsBox(BuildContext context, String digits) {
     margin: const EdgeInsets.symmetric(vertical: 14),
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
     decoration: BoxDecoration(
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: context.zenRadius(24),
       gradient: LinearGradient(
         colors: <Color>[
           Color.alphaBlend(zen.accent.withValues(alpha: 0.22), zen.surface),
@@ -567,7 +567,7 @@ class _LinkSendScreenState extends ConsumerState<_LinkSendScreen> {
           ZenHero(
             title: t('Przenieś konto na nowe urządzenie'),
             icon: Icons.add_link_rounded,
-            tone: zenTone(zen, 7),
+            tone: zen.tone(ZenTone.network),
             text: t(
               'Na nowym urządzeniu otwórz Ustawienia → Urządzenia → „To nowe '
               'urządzenie: dołącz do konta”. Pokaże kod. Zeskanuj go albo '
@@ -737,7 +737,7 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
           ZenHero(
             title: t('Dołącz to urządzenie'),
             icon: Icons.login_rounded,
-            tone: zenTone(zen, 7),
+            tone: zen.tone(ZenTone.network),
             text: t(
               'Na urządzeniu, które już ma Twoje konto, otwórz Ustawienia → '
               'Urządzenia → „Podłącz nowe urządzenie” i zeskanuj ten kod '
@@ -765,7 +765,7 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: context.zenRadius(20),
                     ),
                     child: QrImageView(
                       data: profile.qrData,

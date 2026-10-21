@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -217,6 +218,24 @@ const FlutterSecureStorage _earlierZenKeychain = FlutterSecureStorage(
   mOptions: MacOsOptions(usesDataProtectionKeychain: false),
 );
 
+/// Which entries a [SecureStorageCredentialsStore] reads and writes.
+enum _SecretScope {
+  /// The account open in this isolate ([SecureStorageCredentialsStore
+  /// .activeNamespace]).
+  active,
+
+  /// The device's own entries, whatever account is open.
+  device,
+
+  /// One account's entries, named by the store.
+  fixed,
+}
+
+/// The system's secret store, one account at a time: the default account
+/// keeps the plain entry names; an additional account's entries are
+/// named by a keyed hash of the name under the account's secret
+/// ([scopedSecretName]), so nothing in the store tells which account an
+/// entry belongs to, or that there is more than one.
 final class SecureStorageCredentialsStore
     implements AppSecurityCredentialsStore {
   const SecureStorageCredentialsStore([
@@ -224,10 +243,146 @@ final class SecureStorageCredentialsStore
     this._earlierKeychain = const FlutterSecureStorageBackend(
       _earlierZenKeychain,
     ),
-  ]);
+  ]) : _scope = _SecretScope.active,
+       _namespace = null;
+
+  /// The device's own entries (the account registry), never an account's.
+  const SecureStorageCredentialsStore.device([
+    this._keychain = const FlutterSecureStorageBackend(_zenKeychain),
+    this._earlierKeychain = const FlutterSecureStorageBackend(
+      _earlierZenKeychain,
+    ),
+  ]) : _scope = _SecretScope.device,
+       _namespace = null;
+
+  /// The entries of the account whose secret is [namespace] (`null`: the
+  /// default account), whatever account is open.
+  const SecureStorageCredentialsStore.account(
+    Uint8List? namespace, [
+    this._keychain = const FlutterSecureStorageBackend(_zenKeychain),
+    this._earlierKeychain = const FlutterSecureStorageBackend(
+      _earlierZenKeychain,
+    ),
+  ]) : _scope = _SecretScope.fixed,
+       _namespace = namespace;
 
   final SecureKeyValueBackend _keychain;
   final SecureKeyValueBackend _earlierKeychain;
+  final _SecretScope _scope;
+  final Uint8List? _namespace;
+
+  /// The secret of the account open in this isolate; `null` for the
+  /// default account. Set when an account is opened; the Android
+  /// background service's isolate never sets it (it serves the default
+  /// account only).
+  static Uint8List? activeNamespace;
+
+  /// The prefix of every entry Zen writes.
+  static const String zenEntryPrefix = 'zen_';
+
+  /// The prefix of an additional account's entries.
+  static const String _scopedPrefix = 'zen_x_';
+
+  /// The same backends, for the account with [namespace] (`null`: the
+  /// default account).
+  SecureStorageCredentialsStore forAccount(Uint8List? namespace) =>
+      SecureStorageCredentialsStore.account(
+        namespace,
+        _keychain,
+        _earlierKeychain,
+      );
+
+  /// The same backends, for the device's own entries.
+  SecureStorageCredentialsStore forDevice() =>
+      SecureStorageCredentialsStore.device(_keychain, _earlierKeychain);
+
+  Uint8List? get _effectiveNamespace => switch (_scope) {
+    _SecretScope.active => activeNamespace,
+    _SecretScope.device => null,
+    _SecretScope.fixed => _namespace,
+  };
+
+  /// The stored name of [key] for the account with [namespace]: the key
+  /// itself for the default account, else `zen_x_` and 40 hex digits of
+  /// HMAC-SHA256(namespace, key).
+  static String scopedSecretName(Uint8List? namespace, String key) {
+    if (namespace == null) {
+      return key;
+    }
+    final String mac = crypto.Hmac(
+      crypto.sha256,
+      namespace,
+    ).convert(utf8.encode(key)).toString();
+    return '$_scopedPrefix${mac.substring(0, 40)}';
+  }
+
+  /// The entry that lists an additional account's key names (so the
+  /// account can be wiped without a plain index anywhere else).
+  static const String _keyListName = '\u0000keys';
+
+  Future<void> _remember(Uint8List namespace, String key) async {
+    final String listName = scopedSecretName(namespace, _keyListName);
+    // Read every time (writes are rare): the background isolate may have
+    // added to it meanwhile.
+    final Set<String> known = await _readKeyList(listName);
+    if (!known.add(key)) {
+      return;
+    }
+    await _write(listName, jsonEncode(known.toList()..sort()));
+  }
+
+  Future<Set<String>> _readKeyList(String listName) async {
+    final String? raw = await _keychain.read(listName);
+    if (raw == null) {
+      return <String>{};
+    }
+    try {
+      final Object? json = jsonDecode(raw);
+      return json is List ? json.whereType<String>().toSet() : <String>{};
+    } on FormatException {
+      return <String>{};
+    }
+  }
+
+  /// Deletes every entry of this store's account (an additional account:
+  /// all it ever wrote; the default account is reset by its own service).
+  Future<void> deleteAccountEntries() async {
+    await _moved();
+    final Uint8List? namespace = _effectiveNamespace;
+    if (namespace == null) {
+      return;
+    }
+    final String listName = scopedSecretName(namespace, _keyListName);
+    final Set<String> keys = await _readKeyList(listName);
+    for (final String key in keys) {
+      await _deleteRaw(scopedSecretName(namespace, key));
+    }
+    await _deleteRaw(listName);
+  }
+
+  /// Deletes every entry Zen ever wrote on this device, of every account
+  /// (the device wipe).
+  Future<void> deleteEverything() async {
+    final Set<String> names = <String>{
+      for (final SecureKeyValueBackend backend in <SecureKeyValueBackend>[
+        _keychain,
+        if (_onIos || _onMacOs) _earlierKeychain,
+      ])
+        ...(await backend.readAll()).keys,
+    };
+    for (final String name in names) {
+      if (name.startsWith(zenEntryPrefix)) {
+        await _deleteRaw(name);
+      }
+    }
+  }
+
+  Future<void> _deleteRaw(String name) async {
+    await _keychain.delete(name);
+    if (_onIos || _onMacOs) {
+      await _earlierKeychain.delete(name);
+    }
+  }
 
   /// Set once every item of an iOS keychain has been rewritten with
   /// [kZenKeychainAccessibility].
@@ -251,8 +406,9 @@ final class SecureStorageCredentialsStore
       !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
 
   @override
-  Future<String?> read(String key) async {
+  Future<String?> read(String rawKey) async {
     await _moved();
+    final String key = scopedSecretName(_effectiveNamespace, rawKey);
     final String? value = await _keychain.read(key);
     if (value != null || !(_onIos || _onMacOs)) {
       return value;
@@ -271,20 +427,21 @@ final class SecureStorageCredentialsStore
   }
 
   @override
-  Future<void> write(String key, String value) async {
+  Future<void> write(String rawKey, String value) async {
     await _moved();
-    await _write(key, value);
+    final Uint8List? namespace = _effectiveNamespace;
+    if (namespace != null) {
+      await _remember(namespace, rawKey);
+    }
+    await _write(scopedSecretName(namespace, rawKey), value);
   }
 
   @override
-  Future<void> delete(String key) async {
+  Future<void> delete(String rawKey) async {
     await _moved();
-    await _keychain.delete(key);
-    if (_onIos || _onMacOs) {
-      // A copy with the earlier accessibility must not come back through
-      // [read] (a wipe deletes the keys this way).
-      await _earlierKeychain.delete(key);
-    }
+    // A copy with the earlier accessibility must not come back through
+    // [read] (a wipe deletes the keys this way).
+    await _deleteRaw(scopedSecretName(_effectiveNamespace, rawKey));
   }
 
   Future<void> _write(String key, String value) async {

@@ -217,3 +217,33 @@ final class MemoryKeyVault implements PlatformKeyVault {
     );
   }
 }
+
+/// The device's vault as an additional account uses it. The hardware key
+/// is one for the whole device, shared by every account on it: an
+/// additional account turning biometric unlock off, or being wiped, drops
+/// only its own sealed copy and never destroys the key the other accounts
+/// rely on. The device wipe destroys it through the default account.
+final class SharedKeyVault implements PlatformKeyVault {
+  const SharedKeyVault(this._inner);
+
+  final PlatformKeyVault _inner;
+
+  @override
+  Future<bool> isAvailable() => _inner.isAvailable();
+
+  @override
+  bool get enforcesUserPresence => _inner.enforcesUserPresence;
+
+  @override
+  Future<String> describe() => _inner.describe();
+
+  @override
+  Future<Uint8List?> seal(Uint8List secret) => _inner.seal(secret);
+
+  @override
+  Future<Uint8List?> open(Uint8List sealed, {required String reason}) =>
+      _inner.open(sealed, reason: reason);
+
+  @override
+  Future<void> wipe() async {}
+}

@@ -5,6 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/account/multi/account_registry.dart';
+import 'package:zen/src/features/account/multi/account_scope.dart';
+import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
@@ -13,14 +16,37 @@ import 'package:zen/src/features/runtime/runtime_notification_center.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/exported_files.dart';
+import 'package:zen/src/features/security/platform_key_vault.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
-/// Wipes every piece of local state (conversations, invites, settings,
-/// lock credentials, node identity) and restarts the runtime from a clean
-/// slate. Used by the settings "reset data" panel and by the panic
-/// password flow, so both paths must stay perfectly in sync.
+/// Wipes every piece of local state of the account open now
+/// (conversations, invites, settings, lock credentials, node identity).
+/// The default account restarts from a clean slate in place; an
+/// additional account is wiped whole ([ZenAccountRegistry.wipeAccount])
+/// and the app goes back to the default account. The other accounts on
+/// the device stay as they are (see [performZenDeviceWipe]).
 Future<void> performZenLocalDataReset(WidgetRef ref) async {
+  final ZenAccountScope account = ref.read(zenAccountProvider);
+  if (!account.isDefault) {
+    await _wipeAdditionalAccount(ref, account);
+    return;
+  }
+  await _resetDefaultAccountInPlace(
+    ref,
+    destroyKeys: ref.read(appSecurityServiceProvider).reset,
+    keepAccounts: true,
+  );
+}
+
+/// The default account starts over in place: its node stops, its keys
+/// go ([destroyKeys]), then its files (the other accounts' folders too
+/// unless [keepAccounts]), and the app carries on from a clean slate.
+Future<void> _resetDefaultAccountInPlace(
+  WidgetRef ref, {
+  required Future<void> Function() destroyKeys,
+  required bool keepAccounts,
+}) async {
   // The background service runs the node and writes the sealed inbox: it
   // stops first, or it could write some of it back after the wipe.
   try {
@@ -37,15 +63,23 @@ Future<void> performZenLocalDataReset(WidgetRef ref) async {
   final Directory supportDirectory = await ref.read(
     supportDirectoryResolverProvider,
   )();
+  try {
+    // While the index of them is still there (a device wipe takes every
+    // entry of the secret store with the keys).
+    await const ExportedFilesIndex().deleteAll();
+  } on Object catch (error, stackTrace) {
+    logZenError('Deleting exported files failed', error, stackTrace);
+  }
   await shredKeysThenDeleteLocalData(
-    destroyKeys: ref.read(appSecurityServiceProvider).reset,
+    destroyKeys: destroyKeys,
     supportDirectory: supportDirectory,
+    // The other accounts (and decoys) stay unless the whole device goes.
     // The default profile's folder also holds the test profiles'.
-    keepInSupport: ZenInstance.profile == null
-        ? const <String>{ZenInstance.profilesFolder}
-        : const <String>{},
+    keepInSupport: <String>{
+      if (ZenInstance.profile == null) ZenInstance.profilesFolder,
+      if (keepAccounts) ZenInstance.accountsFolder,
+    },
     scratch: await findZenScratchPlaces(),
-    deleteExports: () => const ExportedFilesIndex().deleteAll(),
   );
   // The diagnostics log is plain text: it goes with the support
   // folder, and again here in case a line written during the wipe brought
@@ -59,6 +93,101 @@ Future<void> performZenLocalDataReset(WidgetRef ref) async {
   await ref.read(runtimeNotificationCenterProvider).clear();
   await ref.read(runtimeSystemNotificationServiceProvider).clear();
   await runtime.start();
+}
+
+/// Wipes the additional account [account]: its node stops, its keys
+/// and folder go, and the default account opens (locked).
+Future<void> _wipeAdditionalAccount(
+  WidgetRef ref,
+  ZenAccountScope account,
+) async {
+  final ZenAccountRegistry registry = ref.read(zenAccountRegistryProvider);
+  final ZenAccountHost host = ref.read(zenAccountHostProvider);
+  await leaveZenAccount(ref);
+  try {
+    // Its own copies first, while its index still names them.
+    await const ExportedFilesIndex().deleteAll();
+  } on Object catch (error, stackTrace) {
+    logZenError('Deleting exported files failed', error, stackTrace);
+  }
+  await registry.wipeAccount(account);
+  host.request(const ZenAccountOpening(scope: ZenAccountScope.defaultAccount));
+}
+
+/// Wipes the whole device: every account on it — the default one, the
+/// listed and the hidden ones — every entry Zen has in the system's secret
+/// store, the hardware key, the files and caches; then the app starts as
+/// newly installed. What the lock screen's "start over" and the panic
+/// password do.
+Future<void> performZenDeviceWipe(WidgetRef ref) async {
+  final ZenAccountScope account = ref.read(zenAccountProvider);
+  final AppSecurityService security = ref.read(appSecurityServiceProvider);
+  final ZenAccountRegistry registry = ref.read(zenAccountRegistryProvider);
+  Future<void> destroyAllKeys() async {
+    // The open account's own reset first (for the default account it also
+    // destroys the hardware key; an additional one only drops its copy).
+    await security.reset();
+    try {
+      await const SecureStorageCredentialsStore.device().deleteEverything();
+    } on Object catch (error, stackTrace) {
+      logZenError(
+        'Deleting the secret store entries failed',
+        error,
+        stackTrace,
+      );
+    }
+    try {
+      await platformKeyVault().wipe();
+    } on Object catch (error, stackTrace) {
+      logZenError('Wiping the hardware key failed', error, stackTrace);
+    }
+  }
+
+  if (account.isDefault) {
+    // On the default account (the lock screen's case) the app starts over
+    // in place, every other account's folder gone with the rest.
+    await _resetDefaultAccountInPlace(
+      ref,
+      destroyKeys: destroyAllKeys,
+      keepAccounts: false,
+    );
+    registry.forget();
+    return;
+  }
+  final AndroidBackgroundServiceController service = ref.read(
+    androidBackgroundServiceControllerProvider,
+  );
+  final ZenAccountHost host = ref.read(zenAccountHostProvider);
+  // Started before the first wait: everything is read from [ref] at once.
+  final Future<void> leaving = leaveZenAccount(ref);
+  try {
+    await service.stop();
+  } on Object catch (error, stackTrace) {
+    logZenError(
+      'Stopping the background service before a wipe failed',
+      error,
+      stackTrace,
+    );
+  }
+  await leaving;
+  try {
+    await const ExportedFilesIndex().deleteAll();
+  } on Object catch (error, stackTrace) {
+    logZenError('Deleting exported files failed', error, stackTrace);
+  }
+  await shredKeysThenDeleteLocalData(
+    destroyKeys: destroyAllKeys,
+    supportDirectory: await ZenInstance.instanceDirectory(),
+    // The default profile's folder also holds the test profiles'.
+    keepInSupport: ZenInstance.profile == null
+        ? const <String>{ZenInstance.profilesFolder}
+        : const <String>{},
+    scratch: await findZenScratchPlaces(),
+  );
+  registry.forget();
+  await ZenDiagnosticsLog.clear();
+  // The default account opens, as on a new install.
+  host.request(const ZenAccountOpening(scope: ZenAccountScope.defaultAccount));
 }
 
 /// Places outside the support folder where Zen leaves files.

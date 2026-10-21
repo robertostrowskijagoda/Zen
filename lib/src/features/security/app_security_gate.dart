@@ -9,8 +9,13 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/about/legal_documents.dart';
+import 'package:zen/src/features/about/presentation/legal_consent_stage.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
+import 'package:zen/src/features/account/multi/account_scope.dart';
+import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/account/presentation/account_secure_stage.dart';
+import 'package:zen/src/features/account/presentation/accounts_ui.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/permissions/permissions_service.dart';
@@ -23,10 +28,12 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
 /// The wipe behind "Nie pamiętam hasła — zacznij od nowa" and the panic
-/// password. A provider so tests can stand in for it.
+/// password: the whole device, every account on it (the lock screen is
+/// the default account's; the others are not named anywhere on it). A
+/// provider so tests can stand in for it.
 final Provider<Future<void> Function(WidgetRef ref)> zenLocalDataResetProvider =
     Provider<Future<void> Function(WidgetRef ref)>(
-      (Ref ref) => performZenLocalDataReset,
+      (Ref ref) => performZenDeviceWipe,
     );
 
 class AppSecurityGate extends ConsumerStatefulWidget {
@@ -247,9 +254,29 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
         if (_wiping.value) {
           return _unlockOverlay();
         }
+        if (ref.watch(legalConsentPendingProvider) &&
+            !(security.encryptionEnabled &&
+                security.hasPassword &&
+                security.isLocked)) {
+          // Before anything is made (the app password, the account): the
+          // terms, the privacy policy and the licence notice; asked again
+          // when their version changes (after unlocking, if locked).
+          return Navigator(
+            key: const ValueKey<String>('gate-legal-consent'),
+            onGenerateRoute: (RouteSettings route) => MaterialPageRoute<void>(
+              settings: route,
+              builder: (BuildContext context) => const LegalConsentStage(),
+            ),
+          );
+        }
+        // An additional account always has its own password.
+        final bool additional = !ref.read(zenAccountProvider).isDefault;
         if (!security.hasPassword &&
-            ref.watch(appPasswordRequiredProvider) &&
-            !ref.watch(appSettingsControllerProvider).allowNoAppPassword) {
+            ((ref.watch(appPasswordRequiredProvider) &&
+                    !ref
+                        .watch(appSettingsControllerProvider)
+                        .allowNoAppPassword) ||
+                additional)) {
           // An app password is required by default. Its own Navigator
           // (the gate sits above the root one) so the setup questions can
           // open dialogs; it brings its own Overlay for the text fields.
@@ -290,10 +317,33 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
           }
           return child!;
         }
+        if (!ref.read(zenAccountProvider).isDefault) {
+          // An additional account never shows a lock screen of its own
+          // (it would show that the account exists): locked, it goes back
+          // to the default account's.
+          _returnToDefault();
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
         return _unlockOverlay();
       },
       child: widget.child,
     );
+  }
+
+  bool _returning = false;
+
+  void _returnToDefault() {
+    if (_returning || ref.read(zenAccountHostProvider).switching) {
+      return;
+    }
+    _returning = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(returnToDefaultZenAccount(ref));
+      }
+    });
   }
 
   /// The gate sits above the root Navigator (MaterialApp.builder), so the
@@ -329,6 +379,9 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
 
   /// "Nie pamiętam hasła": the page that erases the device is open.
   bool _forgot = false;
+
+  /// "Inne konto": the panel that opens another account is open.
+  bool _other = false;
   bool _wipeFailed = false;
 
   /// How long the password must not be tried, counted down by [_tick].
@@ -509,6 +562,11 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
+    if (_other) {
+      return _GateScaffold(
+        child: OtherAccountPanel(onBack: () => setState(() => _other = false)),
+      );
+    }
     if (_forgot) {
       return _GateScaffold(
         child: _ForgotPasswordPanel(
@@ -665,6 +723,20 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
                     ? null
                     : () => setState(() => _forgot = true),
                 child: Text(t('Nie pamiętam hasła — zacznij od nowa')),
+              ),
+            ),
+            // Discreet: the same on every device, accounts or not.
+            Center(
+              child: TextButton(
+                key: const Key('app-unlock-other-account'),
+                style: TextButton.styleFrom(
+                  foregroundColor: zen.textMuted,
+                  textStyle: const TextStyle(fontSize: 12.5),
+                ),
+                onPressed: _isSubmitting
+                    ? null
+                    : () => setState(() => _other = true),
+                child: Text(t('Inne konto')),
               ),
             ),
           ],
@@ -849,7 +921,7 @@ class _GateScaffold extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(22, 28, 22, 22),
                     decoration: BoxDecoration(
                       color: zen.surface.withValues(alpha: 0.92),
-                      borderRadius: BorderRadius.circular(30),
+                      borderRadius: context.zenRadius(30),
                       border: Border.all(color: zen.outlineSoft),
                       boxShadow: <BoxShadow>[
                         BoxShadow(
@@ -917,7 +989,7 @@ class _GateError extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: zen.danger.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: context.zenRadius(14),
         border: Border.all(color: zen.danger.withValues(alpha: 0.3)),
       ),
       child: Row(
@@ -1188,12 +1260,14 @@ class _PasswordSetupScreenState extends ConsumerState<_PasswordSetupScreen> {
                 : const Icon(Icons.lock_rounded, size: 20),
             label: Text(_busy ? t('Ustawiam…') : t('Ustaw hasło')),
           ),
-          const SizedBox(height: 6),
-          TextButton(
-            key: const Key('app-password-skip'),
-            onPressed: _busy ? null : _skip,
-            child: Text(t('Bez hasła (niezalecane)')),
-          ),
+          if (ref.watch(zenAccountProvider).isDefault) ...<Widget>[
+            const SizedBox(height: 6),
+            TextButton(
+              key: const Key('app-password-skip'),
+              onPressed: _busy ? null : _skip,
+              child: Text(t('Bez hasła (niezalecane)')),
+            ),
+          ],
         ],
       ),
     );
