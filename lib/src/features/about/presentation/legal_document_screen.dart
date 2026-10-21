@@ -57,6 +57,9 @@ class LegalDocumentScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ZenColors zen = ZenColors.of(context);
     final AsyncValue<LegalTexts> texts = ref.watch(legalTextsProvider);
+    // The document in the app's language when it is translated, else in
+    // English (the source).
+    final String language = ZenI18n.code;
     return Scaffold(
       key: Key('legal-document-${document.name}'),
       appBar: AppBar(
@@ -65,7 +68,8 @@ class LegalDocumentScreen extends ConsumerWidget {
           IconButton(
             key: const Key('legal-document-online'),
             tooltip: t('Otwórz na GitHubie'),
-            onPressed: () => unawaited(openOrCopyLink(context, document.url)),
+            onPressed: () =>
+                unawaited(openOrCopyLink(context, document.urlFor(language))),
             icon: const Icon(Icons.open_in_new_rounded),
           ),
         ],
@@ -78,7 +82,9 @@ class LegalDocumentScreen extends ConsumerWidget {
               key: const Key('legal-document-body'),
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
               children: <Widget>[
-                if (document != LegalDocument.licence)
+                if (language != 'en' &&
+                    !value.isTranslated(document, language) &&
+                    document != LegalDocument.licence)
                   ZenInfo(
                     icon: Icons.translate_rounded,
                     text: t(
@@ -87,7 +93,8 @@ class LegalDocumentScreen extends ConsumerWidget {
                     ),
                   ),
                 LegalMarkdownView(
-                  source: value.of(document),
+                  key: Key('legal-document-text-${document.name}'),
+                  source: value.inLanguage(document, language),
                   onLink: (String href) => _onLink(context, href),
                 ),
               ],
@@ -105,7 +112,7 @@ class LegalDocumentScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              SelectableText(document.url),
+              SelectableText(document.urlFor(language)),
             ],
           ),
           _ => const Center(child: CircularProgressIndicator()),

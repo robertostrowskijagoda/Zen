@@ -12,17 +12,33 @@ import 'package:zen/src/features/settings/app_settings_controller.dart';
 const String kRepositoryFilesUrl =
     'https://github.com/robertostrowskijagoda/Zen/blob/main/';
 
+/// The languages the documents are translated into (besides English, the
+/// source): `docs/TERMS.<code>.md`, `docs/PRIVACY.<code>.md` and
+/// `docs/NOTICE.<code>.md`. A translation is the same version as its
+/// English source.
+const Set<String> kLegalTranslations = <String>{'pl'};
+
 /// The documents a person accepts before using Zen. The app carries them
 /// (pubspec assets), so they are read in the app, also offline.
 enum LegalDocument {
-  terms('docs/TERMS.md'),
-  privacy('docs/PRIVACY.md'),
-  licence('NOTICE');
+  terms('docs/TERMS.md', 'docs/TERMS'),
+  privacy('docs/PRIVACY.md', 'docs/PRIVACY'),
+  licence('NOTICE', 'docs/NOTICE');
 
-  const LegalDocument(this.path);
+  const LegalDocument(this.path, this._translationStem);
 
-  /// The path in the repository, also the asset's key.
+  /// The path in the repository of the English source, also the asset's
+  /// key.
   final String path;
+
+  final String _translationStem;
+
+  /// The path of the translation into [code], or `null` when there is none.
+  String? translationPath(String code) =>
+      kLegalTranslations.contains(code) ? '$_translationStem.$code.md' : null;
+
+  /// The path of what is shown in [code]: the translation, else English.
+  String pathFor(String code) => translationPath(code) ?? path;
 
   String get title => switch (this) {
     LegalDocument.terms => t('Regulamin'),
@@ -36,14 +52,18 @@ enum LegalDocument {
     LegalDocument.licence => t('GPL-3.0 z dodatkowymi warunkami (NOTICE)'),
   };
 
-  /// The same document on GitHub.
+  /// The same document on GitHub (the English source).
   String get url => '$kRepositoryFilesUrl$path';
 
-  /// The document a link in one of them points at, by its repository
-  /// path; `null` for anything else.
+  /// The document on GitHub in [code] (its translation, else English).
+  String urlFor(String code) => '$kRepositoryFilesUrl${pathFor(code)}';
+
+  /// The document a link in one of them points at, by its repository path
+  /// (the source or a translation); `null` for anything else.
   static LegalDocument? ofPath(String path) {
     for (final LegalDocument d in values) {
-      if (d.path == path) {
+      if (d.path == path ||
+          kLegalTranslations.any((String c) => d.translationPath(c) == path)) {
         return d;
       }
     }
@@ -108,14 +128,30 @@ final class LegalLinkTarget {
   String toString() => document?.name ?? url ?? '';
 }
 
-/// The texts of the documents, as the app carries them.
+/// The texts of the documents, as the app carries them: the English
+/// sources ([texts], which set the version) and their translations.
 @immutable
 final class LegalTexts {
-  const LegalTexts(this.texts);
+  const LegalTexts(
+    this.texts, [
+    this.translations = const <String, Map<LegalDocument, String>>{},
+  ]);
 
   final Map<LegalDocument, String> texts;
 
+  /// By language code, the translated documents.
+  final Map<String, Map<LegalDocument, String>> translations;
+
+  /// The English source of [doc].
   String of(LegalDocument doc) => texts[doc] ?? '';
+
+  /// Whether [doc] is translated into [code].
+  bool isTranslated(LegalDocument doc, String code) =>
+      (translations[code]?[doc] ?? '').isNotEmpty;
+
+  /// [doc] in the language [code] when it is translated, else English.
+  String inLanguage(LegalDocument doc, String code) =>
+      isTranslated(doc, code) ? translations[code]![doc]! : of(doc);
 
   /// The version the person accepts: see [legalDocumentsVersion].
   String get version => legalDocumentsVersion(texts);
@@ -149,13 +185,28 @@ String legalDocumentsVersion(Map<LegalDocument, String> texts) {
 /// install): the person accepted the versions published online.
 const String kLegalVersionUnavailable = 'unavailable';
 
-/// The documents from the app's assets.
+/// The documents from the app's assets, with their translations (a
+/// missing translation is simply not there: the English one is shown).
 final FutureProvider<LegalTexts> legalTextsProvider =
     FutureProvider<LegalTexts>((Ref ref) async {
+      final Map<String, Map<LegalDocument, String>> translations =
+          <String, Map<LegalDocument, String>>{};
+      for (final String code in kLegalTranslations) {
+        for (final LegalDocument doc in LegalDocument.values) {
+          try {
+            final String text = await rootBundle.loadString(
+              doc.translationPath(code)!,
+            );
+            (translations[code] ??= <LegalDocument, String>{})[doc] = text;
+          } on Object {
+            // Not carried: English is shown.
+          }
+        }
+      }
       return LegalTexts(<LegalDocument, String>{
         for (final LegalDocument doc in LegalDocument.values)
           doc: await rootBundle.loadString(doc.path),
-      });
+      }, translations);
     });
 
 /// The version to accept now: the documents' own, [kLegalVersionUnavailable]

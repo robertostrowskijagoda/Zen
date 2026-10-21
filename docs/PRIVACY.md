@@ -1,6 +1,6 @@
 # Zen - Privacy Policy
 
-*Version for Zen 1.11.0 - last updated 21 October 2026.*
+*Version for Zen 1.11.0 - last updated 22 October 2026.*
 *The app's primary language is Polish; this document is in English. If a
 translation differs, ask on GitHub.*
 
@@ -200,8 +200,11 @@ another Zen user.
   through the same checks as other pictures (it must be a well-formed GIF within
   size, frame and dimension limits; it is not re-encoded, so it keeps moving).
 - Klipy's own terms and privacy policy apply to what Klipy does with this
-  data. The author has no control over it. **If you do not want this, do not
-  use GIFs.**
+  data. The author has no control over it.
+- **GIF search can be turned off** in Settings -> *GIF-y*. When it is off, Zen
+  sends nothing to klipy.com and the GIF button disappears. GIFs from your
+  phone's keyboard still work: most keyboards insert them as ordinary
+  pictures, which Zen sends like any other image.
 
 ## 7. Other third parties
 

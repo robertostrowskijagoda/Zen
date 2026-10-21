@@ -30,8 +30,20 @@ final Provider<GifCatalog Function(String apiKey)> gifCatalogFactoryProvider =
           (String apiKey) => KlipyGifCatalog(apiKey: apiKey),
     );
 
-/// The user's own key when they set one, otherwise the shared app key.
+/// Whether GIF search is on (Ustawienia → GIF-y). Off, nothing is ever sent
+/// to klipy.com: the catalog is empty and nothing is downloaded.
+final Provider<bool> gifSearchEnabledProvider = Provider<bool>(
+  (Ref ref) => ref.watch(
+    appSettingsControllerProvider.select((settings) => settings.gifSearch),
+  ),
+);
+
+/// The user's own key when they set one, otherwise the shared app key;
+/// [EmptyGifCatalog] while GIF search is off.
 final Provider<GifCatalog> gifCatalogProvider = Provider<GifCatalog>((Ref ref) {
+  if (!ref.watch(gifSearchEnabledProvider)) {
+    return const EmptyGifCatalog();
+  }
   final String ownKey = ref.watch(
     appSettingsControllerProvider.select((settings) => settings.gifApiKey),
   );
@@ -40,10 +52,22 @@ final Provider<GifCatalog> gifCatalogProvider = Provider<GifCatalog>((Ref ref) {
   );
 });
 
-/// Downloads the bytes of a catalog GIF; swapped out in tests.
+/// Downloads the bytes of a catalog GIF; swapped out in tests. While GIF
+/// search is off it refuses everything without a request.
 final Provider<GifDownloader> gifDownloaderProvider = Provider<GifDownloader>(
-  (Ref ref) => HttpGifDownloader(),
+  (Ref ref) => ref.watch(gifSearchEnabledProvider)
+      ? HttpGifDownloader()
+      : const DisabledGifDownloader(),
 );
+
+/// GIF search is off: no GIF is downloaded and no request is made.
+final class DisabledGifDownloader implements GifDownloader {
+  const DisabledGifDownloader();
+
+  @override
+  Future<Uint8List> download(String url) async =>
+      throw StateError('GIF search is turned off');
+}
 
 final class GifCatalogEntry {
   const GifCatalogEntry({

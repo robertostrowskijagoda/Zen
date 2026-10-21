@@ -27,171 +27,178 @@ class _StatusBar extends ConsumerWidget {
     );
     return Material(
       color: zen.surfaceSunk,
-      child: InkWell(
-        key: const Key('chats-status-chip'),
-        onTap: () => _openSettingsScreen(context),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                toggleRail == null ? 16 : 6,
-                6,
-                10,
-                6,
-              ),
-              child: Row(
-                children: <Widget>[
-                  if (toggleRail != null) ...<Widget>[
-                    IconButton(
-                      key: Key(
-                        railHidden ? 'side-tabs-show' : 'side-tabs-hide',
+      // For a screen reader the bar is the settings button (its own buttons
+      // — the rail, help, lock, accounts — are read on their own).
+      child: Semantics(
+        button: true,
+        child: InkWell(
+          key: const Key('chats-status-chip'),
+          onTap: () => _openSettingsScreen(context),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  toggleRail == null ? 16 : 6,
+                  6,
+                  10,
+                  6,
+                ),
+                child: Row(
+                  children: <Widget>[
+                    if (toggleRail != null) ...<Widget>[
+                      IconButton(
+                        key: Key(
+                          railHidden ? 'side-tabs-show' : 'side-tabs-hide',
+                        ),
+                        tooltip: railHidden
+                            ? t('Pokaż pasek')
+                            : t('Ukryj pasek'),
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(
+                          minWidth: 36,
+                          minHeight: 36,
+                        ),
+                        padding: EdgeInsets.zero,
+                        onPressed: toggleRail,
+                        icon: Icon(
+                          railHidden
+                              ? Icons.keyboard_double_arrow_right_rounded
+                              : Icons.keyboard_double_arrow_left_rounded,
+                          size: 20,
+                          color: zen.textSecondary,
+                        ),
                       ),
-                      tooltip: railHidden ? t('Pokaż pasek') : t('Ukryj pasek'),
-                      visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints(
-                        minWidth: 36,
-                        minHeight: 36,
-                      ),
-                      padding: EdgeInsets.zero,
-                      onPressed: toggleRail,
-                      icon: Icon(
-                        railHidden
-                            ? Icons.keyboard_double_arrow_right_rounded
-                            : Icons.keyboard_double_arrow_left_rounded,
-                        size: 20,
-                        color: zen.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                  ],
-                  ZenStatusDot(on: state.isConnected, size: 7),
-                  const SizedBox(width: 8),
-                  // Takes the free room: a long label in another language
-                  // wraps instead of pushing the buttons off the bar.
-                  Expanded(
-                    child: Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: state.isConnecting
-                          ? Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: <Widget>[
-                                Flexible(
-                                  child: Text(
-                                    t('Łączę'),
-                                    style: TextStyle(
-                                      color: zen.textPrimary,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
+                      const SizedBox(width: 4),
+                    ],
+                    ZenStatusDot(on: state.isConnected, size: 7),
+                    const SizedBox(width: 8),
+                    // Takes the free room: a long label in another language
+                    // wraps instead of pushing the buttons off the bar.
+                    Expanded(
+                      child: Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: state.isConnecting
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: <Widget>[
+                                  Flexible(
+                                    child: Text(
+                                      t('Łączę'),
+                                      style: TextStyle(
+                                        color: zen.textPrimary,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
                                     ),
                                   ),
+                                  const SizedBox(width: 6),
+                                  ZenAnimatedDots(
+                                    color: zen.textPrimary,
+                                    size: 3,
+                                  ),
+                                ],
+                              )
+                            : Text(
+                                state.connectionLabel,
+                                style: TextStyle(
+                                  color: zen.textSecondary,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
                                 ),
-                                const SizedBox(width: 6),
-                                ZenAnimatedDots(
-                                  color: zen.textPrimary,
-                                  size: 3,
+                              ),
+                      ),
+                    ),
+                    if (unreadCount > 0) ...<Widget>[
+                      ZenNeonFlicker(
+                        color: zen.textPrimary,
+                        glowRadius: 0,
+                        glowAlpha: 0,
+                        child: Text(
+                          tn(
+                            unreadCount,
+                            one: '{n} nowa',
+                            few: '{n} nowe',
+                            many: '{n} nowych',
+                          ),
+                          style: zen.mono(
+                            color: zen.textPrimary,
+                            size: 10,
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    if (!state.isConnected) ...<Widget>[
+                      // Not connected: "Dlaczego nie działa?".
+                      IconButton(
+                        key: const Key('status-health'),
+                        tooltip: t('Dlaczego nie działa?'),
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(
+                          minWidth: 36,
+                          minHeight: 36,
+                        ),
+                        padding: EdgeInsets.zero,
+                        onPressed: () => unawaited(HealthScreen.open(context)),
+                        icon: Icon(
+                          Icons.help_outline_rounded,
+                          size: 20,
+                          color: zen.warning,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+                    // Lock now, one tap away (only once there is a password).
+                    ListenableBuilder(
+                      listenable: security,
+                      builder: (BuildContext context, Widget? _) =>
+                          security.canQuickLock
+                          ? Padding(
+                              padding: const EdgeInsetsDirectional.only(end: 4),
+                              child: IconButton(
+                                key: const Key('side-tabs-lock'),
+                                tooltip: t('Zablokuj teraz'),
+                                visualDensity: VisualDensity.compact,
+                                constraints: const BoxConstraints(
+                                  minWidth: 36,
+                                  minHeight: 36,
                                 ),
-                              ],
+                                padding: EdgeInsets.zero,
+                                onPressed: security.lock,
+                                icon: Icon(
+                                  Icons.lock_outline_rounded,
+                                  size: 20,
+                                  color: zen.textSecondary,
+                                ),
+                              ),
                             )
-                          : Text(
-                              state.connectionLabel,
-                              style: TextStyle(
-                                color: zen.textSecondary,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
+                          : const SizedBox.shrink(),
                     ),
-                  ),
-                  if (unreadCount > 0) ...<Widget>[
-                    ZenNeonFlicker(
-                      color: zen.textPrimary,
-                      glowRadius: 0,
-                      glowAlpha: 0,
-                      child: Text(
-                        tn(
-                          unreadCount,
-                          one: '{n} nowa',
-                          few: '{n} nowe',
-                          many: '{n} nowych',
-                        ),
-                        style: zen.mono(
-                          color: zen.textPrimary,
-                          size: 10,
-                          letterSpacing: 0.6,
-                        ),
-                      ),
-                    ),
+                    // Your avatar: the account menu (switch, add, lock).
+                    const AccountMenuButton(),
                     const SizedBox(width: 8),
-                  ],
-                  if (!state.isConnected) ...<Widget>[
-                    // Not connected: "Dlaczego nie działa?".
-                    IconButton(
-                      key: const Key('status-health'),
-                      tooltip: t('Dlaczego nie działa?'),
-                      visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints(
-                        minWidth: 36,
-                        minHeight: 36,
+                    Container(
+                      padding: const EdgeInsets.all(7),
+                      decoration: BoxDecoration(
+                        color: zen.surfaceRaised,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: zen.outlineSoft),
                       ),
-                      padding: EdgeInsets.zero,
-                      onPressed: () => unawaited(HealthScreen.open(context)),
-                      icon: Icon(
-                        Icons.help_outline_rounded,
-                        size: 20,
-                        color: zen.warning,
+                      child: Icon(
+                        Icons.tune_rounded,
+                        size: 18,
+                        color: zen.textSecondary,
+                        semanticLabel: t('Ustawienia'),
                       ),
                     ),
-                    const SizedBox(width: 4),
                   ],
-                  // Lock now, one tap away (only once there is a password).
-                  ListenableBuilder(
-                    listenable: security,
-                    builder: (BuildContext context, Widget? _) =>
-                        security.canQuickLock
-                        ? Padding(
-                            padding: const EdgeInsetsDirectional.only(end: 4),
-                            child: IconButton(
-                              key: const Key('side-tabs-lock'),
-                              tooltip: t('Zablokuj teraz'),
-                              visualDensity: VisualDensity.compact,
-                              constraints: const BoxConstraints(
-                                minWidth: 36,
-                                minHeight: 36,
-                              ),
-                              padding: EdgeInsets.zero,
-                              onPressed: security.lock,
-                              icon: Icon(
-                                Icons.lock_outline_rounded,
-                                size: 20,
-                                color: zen.textSecondary,
-                              ),
-                            ),
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                  // Your avatar: the account menu (switch, add, lock).
-                  const AccountMenuButton(),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.all(7),
-                    decoration: BoxDecoration(
-                      color: zen.surfaceRaised,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: zen.outlineSoft),
-                    ),
-                    child: Icon(
-                      Icons.tune_rounded,
-                      size: 18,
-                      color: zen.textSecondary,
-                      semanticLabel: t('Ustawienia'),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-            Container(height: 1, color: zen.outlineSoft),
-          ],
+              Container(height: 1, color: zen.outlineSoft),
+            ],
+          ),
         ),
       ),
     );
@@ -919,11 +926,13 @@ class _SettingsScreen extends ConsumerWidget {
                     icon: Icons.gif_box_outlined,
                     tone: ZenTone.media,
                     title: t('GIF-y'),
-                    subtitle: settings.usesOwnGifKey
+                    subtitle: !settings.gifSearch
+                        ? t('Wyłączone')
+                        : settings.usesOwnGifKey
                         ? t('Własny klucz API')
                         : t('Domyślny klucz aplikacji'),
                     pageTitle: t('GIF-y'),
-                    pageChildren: const <Widget>[_GifKeySection()],
+                    pageChildren: const <Widget>[_GifSettingsSection()],
                   ),
                   _SettingsSwitchTile(
                     key: const Key('settings-auto-media'),
@@ -1189,11 +1198,15 @@ class _SettingsGroup extends StatelessWidget {
         else
           ZenSection(title, top: 22),
         // The panel of the look (its fill, outline and corners).
-        Material(
-          color: look.panelColor(zen),
-          shape: look.panelShape(zen),
-          clipBehavior: Clip.antiAlias,
-          child: Column(children: rows),
+        look.raise(
+          zen,
+          look.panelShape(zen),
+          Material(
+            color: look.panelColor(zen),
+            shape: look.panelShape(zen),
+            clipBehavior: Clip.antiAlias,
+            child: Column(children: rows),
+          ),
         ),
       ],
     );
@@ -1750,6 +1763,57 @@ class _QuickLockPanel extends ConsumerWidget {
   }
 }
 
+/// "GIF-y": GIF search on or off (it is the one outside service,
+/// klipy.com), and the own key while it is on.
+class _GifSettingsSection extends ConsumerWidget {
+  const _GifSettingsSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ZenColors zen = ZenColors.of(context);
+    final bool on = ref.watch(
+      appSettingsControllerProvider.select((AppSettings s) => s.gifSearch),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _SettingsGroup(
+          title: '',
+          tiles: <Widget>[
+            _SettingsSwitchTile(
+              key: const Key('settings-gif-search'),
+              icon: Icons.gif_box_outlined,
+              tone: ZenTone.media,
+              title: t('Wyszukiwarka GIF-ów'),
+              subtitle: t(
+                'Przycisk GIF w czatach szuka w serwisie klipy.com — to '
+                'jedyna funkcja Zen, która łączy się z zewnętrzną usługą.',
+              ),
+              value: on,
+              onChanged: (bool value) => unawaited(
+                ref
+                    .read(appSettingsControllerProvider.notifier)
+                    .setGifSearch(value),
+              ),
+            ),
+          ],
+        ),
+        ZenInfo(
+          key: const Key('settings-gif-keyboard-note'),
+          icon: Icons.keyboard_outlined,
+          tone: zen.tone(ZenTone.media),
+          text: t(
+            'GIF-y z klawiatury telefonu działają zawsze — większość klawiatur '
+            'wstawia je jako zwykłe obrazki. Gdy wyszukiwarka jest wyłączona, '
+            'Zen nie wysyła nic do klipy.com, a przycisku GIF nie ma.',
+          ),
+        ),
+        if (on) ...<Widget>[const SizedBox(height: 12), const _GifKeySection()],
+      ],
+    );
+  }
+}
+
 /// Lets the user plug in their own Klipy key; the shared key stays the
 /// default and comes back when the field is cleared.
 class _GifKeySection extends ConsumerStatefulWidget {
@@ -1967,8 +2031,7 @@ class _AppearanceSection extends ConsumerWidget {
     final AppSettingsController controller = ref.read(
       appSettingsControllerProvider.notifier,
     );
-    // The previews follow the chosen mode (a dark-only palette keeps the
-    // app dark, not the previews).
+    // The previews follow the chosen mode.
     final Brightness brightness = switch (settings.themeMode) {
       AppThemeMode.light => Brightness.light,
       AppThemeMode.dark => Brightness.dark,
@@ -2018,16 +2081,6 @@ class _AppearanceSection extends ConsumerWidget {
                 ),
             ],
           ),
-          if (settings.palette.darkOnly) ...<Widget>[
-            const SizedBox(height: 8),
-            Text(
-              t('{palette} ma tylko wersję ciemną.', {
-                'palette': settings.palette.label,
-              }),
-              key: const Key('settings-palette-dark-only'),
-              style: TextStyle(color: zen.textSecondary, fontSize: 13),
-            ),
-          ],
           // The accent is the colour of Klasyczny; the other palettes have
           // their own.
           if (settings.palette == AppPalette.classic) ...<Widget>[

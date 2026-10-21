@@ -11,6 +11,8 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/features/about/legal_documents.dart';
 import 'package:zen/src/features/about/presentation/legal_document_screen.dart';
+import 'package:zen/src/features/census/census_providers.dart';
+import 'package:zen/src/features/census/network_census.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/presentation/page_title.dart';
@@ -110,8 +112,64 @@ class AboutScreen extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
+            const _NetworkCountsCard(),
             for (final AboutSection section in AboutSection.values)
               _SectionTile(section: section),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "Sieć Zen": the anonymous estimate of people in the network and the
+/// exact number of pyramid members (network_census.dart); nothing while
+/// neither is known.
+class _NetworkCountsCard extends ConsumerWidget {
+  const _NetworkCountsCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ZenColors zen = ZenColors.of(context);
+    final NetworkCounts counts = ref.watch(networkCountsProvider);
+    final CensusView? census = counts.census;
+    final int? pyramid = counts.pyramidMembers;
+    if (census == null && pyramid == null) {
+      return const SizedBox.shrink();
+    }
+    final TextStyle line = TextStyle(color: zen.textSecondary, height: 1.35);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: ZenCard(
+        key: const Key('about-network'),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              t('Sieć Zen'),
+              style: TextStyle(
+                color: zen.textPrimary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (census != null)
+              Text(
+                tn(
+                  roundCensusEstimate(census.estimate),
+                  one: 'Ok. {n} osoba w sieci Zen (szacunek)',
+                  few: 'Ok. {n} osoby w sieci Zen (szacunek)',
+                  many: 'Ok. {n} osób w sieci Zen (szacunek)',
+                ),
+                key: const Key('about-network-estimate'),
+                style: line,
+              ),
+            if (pyramid != null)
+              Text(
+                t('W piramidzie: {count}', <String, Object?>{'count': pyramid}),
+                key: const Key('about-network-pyramid'),
+                style: line,
+              ),
           ],
         ),
       ),

@@ -23,14 +23,18 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                 toneIndex: 0,
                 onPressed: canText && idle ? _pickEmoji : null,
               ),
-              const SizedBox(width: 6),
-              _ComposerActionButton(
-                key: const Key('conversation-gif-button'),
-                icon: Icons.gif_box_outlined,
-                tooltip: 'GIF',
-                toneIndex: 1,
-                onPressed: canCompose && idle ? _pickAndSendGif : null,
-              ),
+              // GIF search can be turned off (it is the one outside service,
+              // klipy.com): then there is no button.
+              if (ref.watch(gifSearchEnabledProvider)) ...<Widget>[
+                const SizedBox(width: 6),
+                _ComposerActionButton(
+                  key: const Key('conversation-gif-button'),
+                  icon: Icons.gif_box_outlined,
+                  tooltip: 'GIF',
+                  toneIndex: 1,
+                  onPressed: canCompose && idle ? _pickAndSendGif : null,
+                ),
+              ],
               const SizedBox(width: 6),
               _ComposerActionButton(
                 key: const Key('conversation-camera-button'),

@@ -1287,8 +1287,6 @@ class _ComposerPrompt extends StatelessWidget {
                       ),
                       child: Text(
                         t('Co słychać?'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: zen.textSecondary,
                           fontSize: 15,
@@ -1363,8 +1361,6 @@ class _ComposerAction extends StatelessWidget {
             Flexible(
               child: Text(
                 label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: zen.textSecondary,
                   fontSize: 13.5,
@@ -2258,51 +2254,58 @@ class _PostVideoState extends State<PostVideo> {
   Widget build(BuildContext context) {
     final VideoPlayerController? p = _player;
     if (p != null && p.value.isInitialized) {
-      return GestureDetector(
-        key: Key('feed-video-${widget.ref.id}'),
-        onTap: () => unawaited(_tap()),
-        child: AspectRatio(
-          aspectRatio: p.value.aspectRatio,
-          child: Stack(
-            alignment: Alignment.center,
-            children: <Widget>[
-              VideoPlayer(p),
-              if (!p.value.isPlaying)
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.black.withValues(alpha: 0.45),
+      // A screen reader says what a tap does: play or pause.
+      return Semantics(
+        button: true,
+        label: p.value.isPlaying ? t('Pauza') : t('Odtwórz'),
+        child: GestureDetector(
+          key: Key('feed-video-${widget.ref.id}'),
+          onTap: () => unawaited(_tap()),
+          child: AspectRatio(
+            aspectRatio: p.value.aspectRatio,
+            child: Stack(
+              alignment: Alignment.center,
+              children: <Widget>[
+                VideoPlayer(p),
+                if (!p.value.isPlaying)
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.black.withValues(alpha: 0.45),
+                    ),
+                    child: const Icon(
+                      Icons.play_arrow_rounded,
+                      size: 40,
+                      color: Colors.white,
+                    ),
                   ),
-                  child: const Icon(
-                    Icons.play_arrow_rounded,
-                    size: 40,
-                    color: Colors.white,
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                      color: Colors.black45,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      _muted
+                          ? Icons.volume_off_rounded
+                          : Icons.volume_up_rounded,
+                      size: 16,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
-              Positioned(
-                right: 8,
-                top: 8,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(
-                    color: Colors.black45,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    _muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                    size: 16,
-                    color: Colors.white,
-                  ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: VideoProgressIndicator(p, allowScrubbing: true),
                 ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: VideoProgressIndicator(p, allowScrubbing: true),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       );

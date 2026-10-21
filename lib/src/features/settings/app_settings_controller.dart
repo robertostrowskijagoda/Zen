@@ -121,6 +121,11 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(gifApiKey: key));
   }
 
+  /// GIF search (klipy.com) on or off.
+  Future<void> setGifSearch(bool value) async {
+    await _save(state.copyWith(gifSearch: value));
+  }
+
   Future<void> setHideNotificationContent(bool value) async {
     await _save(state.copyWith(hideNotificationContent: value));
   }

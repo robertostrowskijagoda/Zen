@@ -426,62 +426,65 @@ class _SideTabs extends ConsumerWidget {
       hue: _shellTabs[i].group?.hue(zen),
       onTap: () => onSelect(i),
     );
-    return GestureDetector(
-      // Swipe the rail to the left to hide it.
-      onHorizontalDragEnd: (DragEndDetails d) {
-        if ((d.primaryVelocity ?? 0) < -200) {
-          onHide();
-        }
-      },
-      child: Container(
-        key: const Key('side-tabs'),
-        width: _railWidth,
-        decoration: ZenLook.of(context).railDecoration(zen),
-        child: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints c) {
-            // Every button fits on screen: on a short phone they get
-            // slimmer (down to a still comfortable tap target) instead of
-            // the last ones sliding out of sight. The open tab is taller by
-            // its label, each group by its line.
-            final double extent =
-                ((c.maxHeight -
-                            16 -
-                            _sideTabLabelExtent -
-                            groups * _railGroupGap) /
-                        shown.length)
-                    .clamp(_sideTabMinExtent, _sideTabMaxExtent);
-            final List<Widget> top = <Widget>[];
-            _RailGroup? group;
-            for (final int i in shown) {
-              final _ShellTab tab = _shellTabs[i];
-              if (tab.group == null) {
-                continue;
+    // Keyboard focus walks the whole rail before it moves on to the page.
+    return FocusTraversalGroup(
+      child: GestureDetector(
+        // Swipe the rail to the left to hide it.
+        onHorizontalDragEnd: (DragEndDetails d) {
+          if ((d.primaryVelocity ?? 0) < -200) {
+            onHide();
+          }
+        },
+        child: Container(
+          key: const Key('side-tabs'),
+          width: _railWidth,
+          decoration: ZenLook.of(context).railDecoration(zen),
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints c) {
+              // Every button fits on screen: on a short phone they get
+              // slimmer (down to a still comfortable tap target) instead of
+              // the last ones sliding out of sight. The open tab is taller by
+              // its label, each group by its line.
+              final double extent =
+                  ((c.maxHeight -
+                              16 -
+                              _sideTabLabelExtent -
+                              groups * _railGroupGap) /
+                          shown.length)
+                      .clamp(_sideTabMinExtent, _sideTabMaxExtent);
+              final List<Widget> top = <Widget>[];
+              _RailGroup? group;
+              for (final int i in shown) {
+                final _ShellTab tab = _shellTabs[i];
+                if (tab.group == null) {
+                  continue;
+                }
+                if (tab.group != group) {
+                  group = tab.group;
+                  top.add(_RailGroupLine(group: group!));
+                }
+                top.add(button(i, extent));
               }
-              if (tab.group != group) {
-                group = tab.group;
-                top.add(_RailGroupLine(group: group!));
-              }
-              top.add(button(i, extent));
-            }
-            return SingleChildScrollView(
-              key: const Key('side-tabs-scroll'),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minHeight: c.maxHeight),
-                child: IntrinsicHeight(
-                  child: Column(
-                    children: <Widget>[
-                      const SizedBox(height: 4),
-                      ...top,
-                      const Spacer(),
-                      for (final int i in shown)
-                        if (_shellTabs[i].group == null) button(i, extent),
-                      const SizedBox(height: 8),
-                    ],
+              return SingleChildScrollView(
+                key: const Key('side-tabs-scroll'),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: c.maxHeight),
+                  child: IntrinsicHeight(
+                    child: Column(
+                      children: <Widget>[
+                        const SizedBox(height: 4),
+                        ...top,
+                        const Spacer(),
+                        for (final int i in shown)
+                          if (_shellTabs[i].group == null) button(i, extent),
+                        const SizedBox(height: 8),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
