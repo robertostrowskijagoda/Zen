@@ -19,6 +19,7 @@ import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
+import 'package:zen/src/features/account/multi/background_accounts.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
 import 'package:zen/src/features/calls/group_call_media.dart';
@@ -36,6 +37,8 @@ import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/presentation/alarm_audio.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
+import 'package:zen/src/features/relay/locked_outbox.dart';
+import 'package:zen/src/features/relay/locked_outbox_writer.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
@@ -843,6 +846,10 @@ final class _AndroidBackgroundRuntimeBridgeState
   /// tokens on, also when nothing else changed.
   Timer? _lockedKitsTimer;
 
+  /// Keeps the outbox kit (this device's queue, sealed for its recipients)
+  /// in step for the locked service.
+  LockedOutboxKitWriter? _outboxKitWriter;
+
   @override
   void initState() {
     super.initState();
@@ -899,6 +906,8 @@ final class _AndroidBackgroundRuntimeBridgeState
     _drainRetry = null;
     _lockedKitsTimer?.cancel();
     _lockedKitsTimer = null;
+    _outboxKitWriter?.detach();
+    _outboxKitWriter = null;
     _kitMeet?.removeListener(_onMeetChanged);
     _kitMeet = null;
     _kitNeighbors?.removeListener(_onKitSourceChanged);
@@ -1020,6 +1029,7 @@ final class _AndroidBackgroundRuntimeBridgeState
     }
     _initialized = true;
     _scheduleSync();
+    _attachOutboxKitWriter();
     _lockedKitsTimer = Timer.periodic(const Duration(minutes: 15), (_) {
       if (mounted) {
         unawaitedLogged(
@@ -1030,6 +1040,29 @@ final class _AndroidBackgroundRuntimeBridgeState
     });
     // Permissions are asked for on the permissions screen, not
     // here: several system dialogs at once at every start got in the way.
+  }
+
+  /// The locked service keeps delivering this device's queue from the
+  /// outbox kit: written whenever the queue changes, and before handoff.
+  void _attachOutboxKitWriter() {
+    final RelayEngine? relay = ref.read(relayEngineProvider);
+    if (relay == null || _outboxKitWriter != null) {
+      return;
+    }
+    final SupportDirectoryResolver support = ref.read(
+      supportDirectoryResolverProvider,
+    );
+    final AppSecurityCredentialsStore credentials = ref
+        .read(appSecurityServiceProvider)
+        .credentialsStore;
+    _outboxKitWriter = LockedOutboxKitWriter(
+      engine: relay,
+      write: (Object? json) => lockedOutboxKitFile(
+        supportDirectory: support,
+        credentials: credentials,
+        createKey: true,
+      ).write(json),
+    )..attach();
   }
 
   void _scheduleSync() {
@@ -1132,6 +1165,10 @@ final class _AndroidBackgroundRuntimeBridgeState
     // written finishes before the service reads it.
     final Future<void> kitWritten = _alarmKitWriting;
     final Future<void> lockedKitsWritten = _lockedKitsWriting;
+    // This device's queue, sealed for its recipients, for the service to
+    // keep delivering.
+    final Future<void> outboxKitWritten =
+        _outboxKitWriter?.flush() ?? Future<void>.value();
     // The service is about to own the node; a heartbeat from here on would
     // only keep it parked.
     _heartbeatTimer?.cancel();
@@ -1143,6 +1180,7 @@ final class _AndroidBackgroundRuntimeBridgeState
       await published;
       await kitWritten;
       await lockedKitsWritten;
+      await outboxKitWritten;
       // Saved and closed: nothing writes the ledger while the app is locked.
       await ledger?.suspend();
       final bool coreWasRunning = core.isStarted;
@@ -1297,6 +1335,8 @@ final class _AndroidBackgroundRuntimeBridgeState
         credentials: credentials,
         createKey: true,
       ).write(kit.toJson()),
+      // Circles' dinners: reminded of while locked too.
+      reminders: () => ref.read(circleServiceProvider).lockedReminders(),
     );
     final EncounterLog encounters = ref.read(encounterLogProvider);
     final NeighborsService neighbors = ref.read(neighborsServiceProvider);
@@ -1640,17 +1680,72 @@ final class _AndroidBackgroundRuntimeBridgeState
 /// node with its identity under the background key, and the
 /// [LockedReceiver] on it. Nothing here can open the master key's stores.
 final class _LockedReceiverSession {
-  _LockedReceiverSession._(this._runtime, this._receiver, this._nearby);
+  _LockedReceiverSession._(
+    RuntimeNodeRuntime this._runtime,
+    LockedReceiver this._receiver,
+    this._nearby, {
+    LockedOutbox? outbox,
+  }) : _outbox = outbox;
 
-  final RuntimeNodeRuntime _runtime;
-  final LockedReceiver _receiver;
+  /// No node of the default account ("Odbieraj w tle" off for it): only
+  /// the other accounts' ([_also]), if any.
+  _LockedReceiverSession._without()
+    : _runtime = null,
+      _receiver = null,
+      _nearby = null,
+      _outbox = null;
+
+  final RuntimeNodeRuntime? _runtime;
+  final LockedReceiver? _receiver;
+
+  /// The additional accounts with "Odbieraj w tle" on: a receive-only node
+  /// each, with generic notifications (background_accounts.dart).
+  final List<BackgroundAccountNode> _also = <BackgroundAccountNode>[];
+
+  /// This device's queue from the outbox kit, still going out while locked
+  /// (`null`: nothing was queued).
+  final LockedOutbox? _outbox;
 
   /// People nearby from the nearby kit (`null`: the app never wrote one).
   final LockedNearby? _nearby;
 
-  /// `null` when the app never published a capability (it was never
-  /// unlocked since it was installed or wiped): nothing to receive with.
+  /// The default account's node (when "Odbieraj w tle" is on for it) and
+  /// those of the additional accounts that have it on. `null` when the
+  /// default account should receive but the app never published a
+  /// capability (not unlocked since it was installed or wiped).
   static Future<_LockedReceiverSession?> open(
+    AndroidBackgroundBootstrapPayload payload, {
+    required RuntimeSystemNotificationService notices,
+  }) async {
+    ZenBackgroundAccountList accounts = const ZenBackgroundAccountList();
+    try {
+      accounts = await ZenBackgroundAccounts().load();
+    } on Object catch (error, stackTrace) {
+      logZenError('Reading the background accounts failed', error, stackTrace);
+    }
+    final _LockedReceiverSession? session = accounts.defaultOn
+        ? await _openDefault(payload, notices: notices)
+        : _LockedReceiverSession._without();
+    if (session == null || accounts.additional.isEmpty) {
+      return session;
+    }
+    final Directory instance = await ZenInstance.instanceDirectory();
+    session._also.addAll(
+      await BackgroundAccountNode.openAll(
+        accounts,
+        accounts: Directory(
+          '${instance.path}${Platform.pathSeparator}'
+          '${ZenInstance.accountsFolder}',
+        ),
+        notices: notices,
+        waitTimeout: payload.settings.signalWaitTimeout,
+      ),
+    );
+    return session;
+  }
+
+  /// The default account's node, as before there were other accounts.
+  static Future<_LockedReceiverSession?> _openDefault(
     AndroidBackgroundBootstrapPayload payload, {
     required RuntimeSystemNotificationService notices,
   }) async {
@@ -1680,6 +1775,13 @@ final class _LockedReceiverSession {
     );
     final LockedDoorKit? doorKit = LockedDoorKit.fromJson(
       await lockedDoorKitFile(
+        supportDirectory: () async => support,
+        credentials: credentials,
+      ).read(),
+    );
+    // What this device still had to send, sealed for each recipient.
+    final LockedOutboxKit? outboxKit = LockedOutboxKit.fromJson(
+      await lockedOutboxKitFile(
         supportDirectory: () async => support,
         credentials: credentials,
       ).read(),
@@ -1744,25 +1846,50 @@ final class _LockedReceiverSession {
               ),
       ),
       nearby,
+      outbox: outboxKit == null || outboxKit.items.isEmpty
+          ? null
+          : LockedOutbox(transport: runtime, kit: outboxKit),
     );
   }
 
   Future<void> start() async {
-    await _setShortcutOwner(true);
-    await _receiver.start();
-    await _nearby?.start();
+    final LockedReceiver? receiver = _receiver;
+    if (receiver != null) {
+      await _setShortcutOwner(true);
+      await receiver.start();
+      await _outbox?.start();
+      await _nearby?.start();
+    }
+    for (final BackgroundAccountNode node in _also) {
+      try {
+        await node.start();
+      } on Object catch (error, stackTrace) {
+        logZenError('Starting a background account failed', error, stackTrace);
+      }
+    }
   }
 
   /// The power-button shortcut while this service runs the node.
-  Future<void> onPowerShortcut() => _receiver.onPowerShortcut();
+  Future<void> onPowerShortcut() async => _receiver?.onPowerShortcut();
 
   Future<void> dispose() async {
-    await _setShortcutOwner(false);
-    // First: what it saw goes to the inbox, and alarm waves go back to the
-    // app before it drains the inbox.
-    await _nearby?.stop();
-    await _receiver.stop();
-    _runtime.dispose();
+    final LockedReceiver? receiver = _receiver;
+    if (receiver != null) {
+      await _setShortcutOwner(false);
+      // First: what it saw goes to the inbox, and alarm waves go back to
+      // the app before it drains the inbox.
+      await _nearby?.stop();
+      await _outbox?.stop();
+      await receiver.stop();
+      _runtime?.dispose();
+    }
+    for (final BackgroundAccountNode node in _also) {
+      try {
+        await node.stop();
+      } on Object catch (error, stackTrace) {
+        logZenError('Stopping a background account failed', error, stackTrace);
+      }
+    }
   }
 
   /// The shortcut comes here while this service runs the network (the

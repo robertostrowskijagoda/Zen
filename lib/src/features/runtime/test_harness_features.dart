@@ -61,7 +61,7 @@ Future<Map<String, dynamic>?> handleFeatureHarness(
                     .take(8)
                     .toList(),
                 'term': s.term,
-                'balance': me == null ? 0 : s.balanceOf(me),
+                'balance': me == null ? 0 : pyr.balance,
                 'posts': s.posts.length,
                 'referenda': <String, dynamic>{
                   for (final PyrReferendum r in s.referenda.values)

@@ -8,6 +8,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/multi/account_registry.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
+import 'package:zen/src/features/account/multi/background_accounts.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
@@ -103,7 +104,16 @@ Future<void> _wipeAdditionalAccount(
 ) async {
   final ZenAccountRegistry registry = ref.read(zenAccountRegistryProvider);
   final ZenAccountHost host = ref.read(zenAccountHostProvider);
+  final ZenBackgroundAccounts background = ref.read(
+    zenBackgroundAccountsProvider,
+  );
   await leaveZenAccount(ref);
+  try {
+    // Off the background list while its key still marks it as real.
+    await background.forget(account);
+  } on Object catch (error, stackTrace) {
+    logZenError('Leaving the background list failed', error, stackTrace);
+  }
   try {
     // Its own copies first, while its index still names them.
     await const ExportedFilesIndex().deleteAll();
