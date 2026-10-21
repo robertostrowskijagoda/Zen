@@ -1,0 +1,10 @@
+# Licences of native libraries and assets that the Dart packages' own
+# licences do not cover. file<TAB>name shown on the Licencje page[<TAB>name...]
+zen_assets.txt	zen
+material_icons.txt	Material Icons
+webrtc.txt	WebRTC (libwebrtc)
+zstd.txt	Zstandard (libzstd)
+android_libraries.txt	AndroidX	Kotlin	kotlinx.coroutines	Tink	AudioSwitch	Apache Tika
+protobuf.txt	Protocol Buffers
+desugar_jdk_libs.txt	desugar_jdk_libs
+ios_pods.txt	DKImagePickerController	DKPhotoGallery	SDWebImage	SwiftyGif

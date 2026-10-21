@@ -49,4 +49,46 @@ void main() {
       expect(file.readAsStringSync().trim(), isNotEmpty, reason: entry.file);
     }
   });
+
+  test('the native index parses a file and one or more names', () {
+    final List<NativeLicenseIndexEntry> entries = parseNativeLicenseIndex(
+      '# comment\n\na.txt\tA\tB\nlonely.txt\n',
+    );
+    expect(entries, hasLength(1));
+    expect(entries.single.file, 'a.txt');
+    expect(entries.single.names, <String>['A', 'B']);
+  });
+
+  test('every native license text and NOTICE is there and bundled', () {
+    final List<NativeLicenseIndexEntry> entries = parseNativeLicenseIndex(
+      File('$kNativeLicensesDir/index.txt').readAsStringSync(),
+    );
+    expect(entries, isNotEmpty);
+    for (final NativeLicenseIndexEntry entry in entries) {
+      final File file = File('$kNativeLicensesDir/${entry.file}');
+      expect(file.existsSync(), isTrue, reason: entry.file);
+      expect(file.readAsStringSync().trim(), isNotEmpty, reason: entry.file);
+    }
+    final String pubspec = File('pubspec.yaml').readAsStringSync();
+    expect(pubspec, contains('- $kNativeLicensesDir/'));
+    expect(pubspec, contains('- $kNoticePath\n'));
+    expect(File(kNoticePath).readAsStringSync(), contains('section 7'));
+  });
+
+  test('every bundled font family is in the font license file', () {
+    final String pubspec = File('pubspec.yaml').readAsStringSync();
+    final String ofl = File(kFontLicensePath).readAsStringSync();
+    final Iterable<RegExpMatch> families = RegExp(
+      r'^\s*- family:\s*(.+?)\s*$',
+      multiLine: true,
+    ).allMatches(pubspec);
+    expect(families, isNotEmpty);
+    for (final RegExpMatch m in families) {
+      expect(
+        ofl,
+        contains('The ${m.group(1)} Project Authors'),
+        reason: '${m.group(1)}: add its copyright line to $kFontLicensePath',
+      );
+    }
+  });
 }

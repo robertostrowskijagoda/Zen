@@ -90,11 +90,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "Huragan Kodu" "\0"
+            VALUE "CompanyName", "Robert Ostrowski-Jagoda" "\0"
             VALUE "FileDescription", "Zen" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "zen" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 Huragan Kodu. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Robert Ostrowski-Jagoda. GPL-3.0-only with additional terms (NOTICE)." "\0"
             VALUE "OriginalFilename", "zen.exe" "\0"
             VALUE "ProductName", "Zen" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

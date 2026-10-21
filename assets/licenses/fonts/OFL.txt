@@ -3,6 +3,7 @@ Copyright 2021 The Hanken Grotesk Project Authors (https://github.com/marcologou
 Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
 Copyright 2016 The Space Mono Project Authors (https://github.com/googlefonts/spacemono)
 Copyright 2014 The DM Sans Project Authors (https://github.com/googlefonts/dm-fonts)
+Copyright 2011, The VT323 Project Authors (peter.hull@oikoi.com)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

@@ -55,11 +55,60 @@ List<GoLicenseIndexEntry> parseGoLicenseIndex(String index) {
   return entries;
 }
 
+/// Licenses of the native libraries and of the assets that neither the Dart
+/// packages nor the Go bridge cover (WebRTC, Android and iOS libraries,
+/// Material Icons, Zen's own sounds and images). See THIRD_PARTY_NOTICES.md.
+const String kNativeLicensesDir = 'assets/licenses/native';
+
+/// Zen's additional terms under GPL section 7.
+const String kNoticePath = 'NOTICE';
+
+/// The name Flutter gives Zen's own entry (the GPL text in LICENSE); NOTICE
+/// and the statement on Zen's own assets join it.
+const String kZenLicenseEntryName = 'zen';
+
+/// One line of `assets/licenses/native/index.txt`.
+@immutable
+final class NativeLicenseIndexEntry {
+  const NativeLicenseIndexEntry({required this.file, required this.names});
+
+  /// File name inside [kNativeLicensesDir].
+  final String file;
+
+  /// Names the "Licencje" page lists the text under.
+  final List<String> names;
+}
+
+/// Parses the native index: `file<TAB>name[<TAB>name…]` per line, `#`
+/// starts a comment line.
+List<NativeLicenseIndexEntry> parseNativeLicenseIndex(String index) {
+  final List<NativeLicenseIndexEntry> entries = <NativeLicenseIndexEntry>[];
+  for (final String raw in const LineSplitter().convert(index)) {
+    final String line = raw.trim();
+    if (line.isEmpty || line.startsWith('#')) {
+      continue;
+    }
+    final List<String> parts = line
+        .split('\t')
+        .map((String part) => part.trim())
+        .where((String part) => part.isNotEmpty)
+        .toList();
+    if (parts.length < 2) {
+      continue;
+    }
+    entries.add(
+      NativeLicenseIndexEntry(file: parts.first, names: parts.sublist(1)),
+    );
+  }
+  return entries;
+}
+
 bool _goLicensesRegistered = false;
 
-/// Adds the Go bridge's licenses (and the fonts') to the "Licencje" page.
-/// Flutter lists only the Dart packages by itself. The texts load only when
-/// the page opens.
+/// Adds the licenses Flutter does not list by itself (it lists only the Dart
+/// packages) to the "Licencje" page: NOTICE, the Go bridge's modules, the
+/// native libraries and assets, and the fonts. The texts load only when the
+/// page opens.
 void registerGoLicenses({AssetBundle? bundle}) {
   if (_goLicensesRegistered) {
     return;
@@ -72,9 +121,17 @@ void registerGoLicenses({AssetBundle? bundle}) {
 /// The bundled fonts (assets/fonts), all under the SIL Open Font License.
 const String kFontLicensePath = 'assets/licenses/fonts/OFL.txt';
 
-/// One license entry per module listed in the index, then the fonts.
+/// NOTICE, one license entry per Go module listed in the index, the native
+/// libraries and assets, then the fonts.
 Stream<LicenseEntry> goLicenseEntries(AssetBundle assets) async* {
+  final String? notice = await _load(assets, kNoticePath);
+  if (notice != null) {
+    yield LicenseEntryWithLineBreaks(const <String>[
+      kZenLicenseEntryName,
+    ], notice);
+  }
   yield* _goModuleEntries(assets);
+  yield* _nativeEntries(assets);
   final String? fonts = await _load(assets, kFontLicensePath);
   if (fonts != null) {
     yield LicenseEntryWithLineBreaks(const <String>[
@@ -83,6 +140,7 @@ Stream<LicenseEntry> goLicenseEntries(AssetBundle assets) async* {
       'JetBrains Mono',
       'Space Mono',
       'DM Sans',
+      'VT323',
     ], fonts);
   }
 }
@@ -106,6 +164,22 @@ Stream<LicenseEntry> _goModuleEntries(AssetBundle assets) async* {
       '$sourceLine\n\n'
       '$text',
     );
+  }
+}
+
+Stream<LicenseEntry> _nativeEntries(AssetBundle assets) async* {
+  final String? index = await _load(assets, '$kNativeLicensesDir/index.txt');
+  if (index == null) {
+    return;
+  }
+  for (final NativeLicenseIndexEntry entry in parseNativeLicenseIndex(index)) {
+    final String? text = await _load(
+      assets,
+      '$kNativeLicensesDir/${entry.file}',
+    );
+    if (text != null) {
+      yield LicenseEntryWithLineBreaks(entry.names, text);
+    }
   }
 }
 

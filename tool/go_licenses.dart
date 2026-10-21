@@ -24,8 +24,10 @@ const Map<String, List<String>> _nestedLicenses = <String, List<String>>{
   ],
 };
 
+/// PATENTS is the Go project's patent grant (the standard library and
+/// golang.org/x), kept next to its BSD licence.
 final RegExp _licenseFileName = RegExp(
-  r'^(licen[cs]e|copying|copyright|notice)',
+  r'^(licen[cs]e|copying|copyright|notice|patents)',
   caseSensitive: false,
 );
 

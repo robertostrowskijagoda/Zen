@@ -1,0 +1,18 @@
+Zen's own sounds, images and icons
+Copyright (C) 2026 Robert Ostrowski-Jagoda
+
+- Sounds (assets/sounds and the Android, iOS and macOS notification
+  sounds): synthesised from scratch by tool/sounds/generate_sounds.py, which
+  rebuilds them bit for bit. No recorded or third-party samples.
+- The Zen logo and wordmark, the app and tray icons, the small notification
+  icon, the "notes" disguise icon (assets/branding and the platform icon
+  files) and the screenshots in docs/img: made for Zen.
+
+They are part of Zen and licensed like it, under GPL-3.0-only with the
+additional terms in NOTICE. NOTICE section 3 grants no rights to the name
+"Zen" or to the logo and icons as marks.
+
+The texts of the user interface use the fonts listed under "Fredoka",
+"Hanken Grotesk", "JetBrains Mono", "Space Mono", "DM Sans" and "VT323"
+(SIL Open Font License 1.1); its icons and the call icons of the Android
+notifications are Material Icons (Apache License 2.0).

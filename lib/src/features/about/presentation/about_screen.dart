@@ -76,7 +76,7 @@ class AboutScreen extends StatelessWidget {
         children: <Widget>[
           _LogoCard(storeBuild: storeBuild ?? isStoreBuild),
 
-          // §21: the collection comes first.
+          // The collection comes first.
           ZenSection(t('Wesprzyj Zen')),
           _DonateCard(
             onOpen: () => _openLink(context, kDonationUrl),

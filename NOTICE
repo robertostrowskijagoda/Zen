@@ -114,6 +114,7 @@ to grant it. This never takes away the rights anyone has under the GPL.
                           THIRD-PARTY COMPONENTS
 ==========================================================================
 
-Libraries and fonts included in Zen keep their own licences: in the app
-under "O aplikacji -> Licencje", in LICENSES-GO.txt next to the desktop
-builds, and in assets/licenses/ in the source code.
+Libraries, fonts and icons included in Zen keep their own licences: in the
+app under "O aplikacji -> Licencje", in THIRD_PARTY_NOTICES.md and
+LICENSES-GO.txt next to the desktop builds, and in THIRD_PARTY_NOTICES.md
+and assets/licenses/ in the source code.
