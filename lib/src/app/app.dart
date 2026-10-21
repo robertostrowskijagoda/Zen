@@ -43,7 +43,7 @@ class ZenRewriteApp extends ConsumerStatefulWidget {
 
 class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
     with WidgetsBindingObserver {
-  /// Runs the services (A15); started by `RuntimeSignalBridge` once the
+  /// Runs the services; started by `RuntimeSignalBridge` once the
   /// security gate lets the app through. This widget forwards the return to
   /// the screen and flag changes.
   late final ZenCore _core;

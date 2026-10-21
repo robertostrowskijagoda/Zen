@@ -5,8 +5,11 @@
 //   flutter test --no-pub tool/ui_tour/theme_concepts_test.dart --update-goldens
 //
 // Shots: scratch/concepts/<palette>_<mode>/<screen>.png (outside the repo),
-// layout problems in scratch/concepts/<palette>_<mode>.txt.
-// CONCEPTS_ONLY=neon_dark,calm_light renders just those.
+// layout problems in scratch/concepts/<palette>_<mode>.txt. A dark-only
+// palette (winamp) has no _light shots. neon_dark also gets an animation
+// strip: the conversation opening, frames anim_00.png … anim_05.png at
+// 0, 200, … 1000 ms (for a GIF).
+// CONCEPTS_ONLY=neon_dark,winamp_dark renders just those.
 import 'dart:async';
 import 'dart:io';
 
@@ -16,6 +19,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app.dart';
+import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
@@ -55,6 +59,7 @@ Future<void> _loadFonts() async {
     'assets/fonts/JetBrainsMono-Variable.ttf',
   ]);
   await load('DM Sans', <String>['assets/fonts/DMSans-Variable.ttf']);
+  await load('VT323', <String>['assets/fonts/VT323-Regular.ttf']);
   await load('Space Mono', <String>[
     'assets/fonts/SpaceMono-Regular.ttf',
     'assets/fonts/SpaceMono-Bold.ttf',
@@ -133,12 +138,17 @@ void main() {
       if (only.isNotEmpty && !only.contains(config)) {
         continue;
       }
+      if (palette.darkOnly && !dark) {
+        continue;
+      }
       testWidgets('concept $config', (WidgetTester tester) async {
         tester.view.physicalSize = const Size(412 * 2.625, 915 * 2.625);
         tester.view.devicePixelRatio = 2.625;
         tester.platformDispatcher.platformBrightnessTestValue = brightness;
         addTearDown(tester.view.reset);
         addTearDown(tester.platformDispatcher.clearAllTestValues);
+        final bool motion = ZenMotion.enabled;
+        addTearDown(() => ZenMotion.enabled = motion);
 
         final List<String> problems = <String>[];
         String where = 'start';
@@ -283,6 +293,39 @@ void main() {
         await shot('conversation');
         nav().pop();
         await _settle(tester);
+        if (config == 'neon_dark') {
+          // The animation strip: the same conversation opening with motion
+          // on (the wipe, the flicker, the bubbles coming in, the glow).
+          where = 'animation';
+          ZenMotion.enabled = true;
+          unawaited(
+            nav().push(
+              MaterialPageRoute<void>(
+                builder: (_) => const ConversationScreen(
+                  peerAddress: 'ada.ygg',
+                  title: 'Ada',
+                ),
+              ),
+            ),
+          );
+          for (int i = 0; i < 6; i++) {
+            if (i == 0) {
+              await tester.pump();
+            } else {
+              await tester.pump(const Duration(milliseconds: 200));
+            }
+            final String frame = 'anim_${i.toString().padLeft(2, '0')}';
+            // ignore: avoid_print
+            print('[concepts $config] $frame');
+            await expectLater(
+              find.byType(MaterialApp).first,
+              matchesGoldenFile('../../scratch/concepts/$config/$frame.png'),
+            );
+          }
+          ZenMotion.enabled = motion;
+          nav().pop();
+          await _settle(tester);
+        }
         where = 'profile';
         if (await tap(find.byKey(const Key('side-tab-profile')))) {
           await shot('profile');

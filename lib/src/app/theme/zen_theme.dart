@@ -3,8 +3,11 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/theme/zen_concept.dart';
+import 'package:zen/src/app/theme/zen_look.dart';
 import 'package:zen/src/app/theme/zen_palettes.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
+
+export 'package:zen/src/app/theme/zen_look.dart';
 
 /// Faces bundled with the grayscale canvas: display for titles, grotesk for
 /// body copy, mono for system labels.
@@ -12,6 +15,9 @@ abstract final class ZenText {
   static const String displayFamily = 'Fredoka';
   static const String sansFamily = 'Hanken Grotesk';
   static const String monoFamily = 'JetBrains Mono';
+
+  /// The pixel face of the retro look (VT323).
+  static const String pixelFamily = 'VT323';
 }
 
 /// A theme's typographic personality.
@@ -28,6 +34,8 @@ final class ZenTypeface {
     this.monoTracking = 0.2,
     this.bodyTracking = 0,
     this.titleTracking = -0.4,
+    this.monoScale = 1,
+    this.displayScale = 1,
   });
 
   final String label;
@@ -40,15 +48,45 @@ final class ZenTypeface {
   final double monoTracking;
   final double bodyTracking;
   final double titleTracking;
+
+  /// Size factors of the mono and display faces: a pixel face draws small
+  /// for its nominal size.
+  final double monoScale;
+  final double displayScale;
 }
 
-/// One pairing ships with the canvas.
+/// The pairings that ship with the canvas (the default, Neon, Retro).
 abstract final class ZenTypefaces {
   static const ZenTypeface zen = ZenTypeface(
     label: 'Fredoka + Hanken + JetBrains',
     sans: ZenText.sansFamily,
     mono: ZenText.monoFamily,
     display: ZenText.displayFamily,
+  );
+
+  /// Neon: mono titles, like lettering bent from one tube.
+  static const ZenTypeface neon = ZenTypeface(
+    label: 'JetBrains + Hanken',
+    sans: ZenText.sansFamily,
+    mono: ZenText.monoFamily,
+    display: ZenText.monoFamily,
+    displayFallback: <String>[ZenText.monoFamily, 'Space Mono'],
+    titleTracking: 0,
+    displayScale: 0.86,
+  );
+
+  /// Retro: pixel titles and labels, a plain grotesk for reading.
+  static const ZenTypeface retro = ZenTypeface(
+    label: 'VT323 + Hanken',
+    sans: ZenText.sansFamily,
+    mono: ZenText.pixelFamily,
+    display: ZenText.pixelFamily,
+    monoFallback: <String>[ZenText.monoFamily, 'Space Mono'],
+    displayFallback: <String>[ZenText.monoFamily, 'Space Mono'],
+    monoTracking: 0.6,
+    titleTracking: 0,
+    monoScale: 1.45,
+    displayScale: 1.3,
   );
 }
 
@@ -81,6 +119,7 @@ final class ZenColors extends ThemeExtension<ZenColors> {
     this.glow = 0,
     this.gradient = 1,
     this.toneSaturation = 0.85,
+    this.duotone = false,
   });
 
   final Color background;
@@ -121,6 +160,10 @@ final class ZenColors extends ThemeExtension<ZenColors> {
   /// Saturation of the feature tones around the accent ([zenTone]).
   final double toneSaturation;
 
+  /// Feature tones are only the accent and, now and then, its partner
+  /// instead of a rainbow around the accent ([zenTone]).
+  final bool duotone;
+
   /// A soft glow of [tone] behind an active element; null without glow.
   List<BoxShadow>? neonGlow(Color tone, {double radius = 12}) {
     if (glow <= 0) {
@@ -160,7 +203,7 @@ final class ZenColors extends ThemeExtension<ZenColors> {
     return TextStyle(
       fontFamily: typeface.mono,
       fontFamilyFallback: typeface.monoFallback,
-      fontSize: size,
+      fontSize: size * typeface.monoScale,
       color: color,
       fontWeight: weight,
       letterSpacing: letterSpacing ?? typeface.monoTracking,
@@ -178,7 +221,7 @@ final class ZenColors extends ThemeExtension<ZenColors> {
     return TextStyle(
       fontFamily: typeface.display,
       fontFamilyFallback: typeface.displayFallback,
-      fontSize: size,
+      fontSize: size * typeface.displayScale,
       color: color,
       fontWeight: weight,
       letterSpacing: letterSpacing,
@@ -474,6 +517,7 @@ final class ZenColors extends ThemeExtension<ZenColors> {
     double? glow,
     double? gradient,
     double? toneSaturation,
+    bool? duotone,
   }) {
     return ZenColors(
       background: background ?? this.background,
@@ -500,6 +544,7 @@ final class ZenColors extends ThemeExtension<ZenColors> {
       glow: glow ?? this.glow,
       gradient: gradient ?? this.gradient,
       toneSaturation: toneSaturation ?? this.toneSaturation,
+      duotone: duotone ?? this.duotone,
     );
   }
 
@@ -533,6 +578,7 @@ final class ZenColors extends ThemeExtension<ZenColors> {
       glow: lerpDouble(glow, other.glow, t)!,
       gradient: lerpDouble(gradient, other.gradient, t)!,
       toneSaturation: lerpDouble(toneSaturation, other.toneSaturation, t)!,
+      duotone: t < 0.5 ? duotone : other.duotone,
     );
   }
 }
@@ -569,21 +615,34 @@ abstract final class ZenTheme {
     AppAccentTheme accent = AppSettings.defaultAccentTheme,
     AppPalette palette = AppSettings.defaultPalette,
   ]) {
-    return _build(ZenColors.forPalette(palette, accent, Brightness.dark));
+    return _build(
+      ZenColors.forPalette(palette, accent, Brightness.dark),
+      ZenPalettes.look(palette),
+    );
   }
 
   static ThemeData light([
     AppAccentTheme accent = AppSettings.defaultAccentTheme,
     AppPalette palette = AppSettings.defaultPalette,
   ]) {
-    return _build(ZenColors.forPalette(palette, accent, Brightness.light));
+    return _build(
+      ZenColors.forPalette(palette, accent, Brightness.light),
+      ZenPalettes.look(palette),
+    );
   }
 
-  static ThemeData _build(ZenColors colors) {
+  static ThemeData _build(ZenColors colors, ZenLook look) {
     final bool compactUi = !kIsWeb;
-    const double cardRadius = 22;
-    const double fieldRadius = 16;
-    const double buttonRadius = 999;
+    // Neon draws lines instead of fills; retro draws bevelled chrome with
+    // square corners.
+    final bool neon = look.outlined;
+    final bool retro = look.bevelled;
+    // A lit (glowing) style: the neon palettes, not the retro LCD.
+    final bool lit = colors.glow > 0 && !retro;
+    final double cardRadius = look.radius(22);
+    final double fieldRadius = look.radius(16);
+    final double sheetRadius = look.radius(28);
+    final double buttonRadius = retro ? 0 : 999;
     final Size buttonMinSize = Size(0, compactUi ? 46 : 48);
     final EdgeInsetsGeometry fieldPadding = EdgeInsets.symmetric(
       horizontal: compactUi ? 16 : 18,
@@ -592,6 +651,42 @@ abstract final class ZenTheme {
     final bool isDark =
         ThemeData.estimateBrightnessForColor(colors.background) ==
         Brightness.dark;
+
+    OutlinedBorder buttonShape([bool pressed = false]) => retro
+        ? ZenBevelBorder.of(colors, sunken: pressed)
+        : RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(buttonRadius),
+          );
+    // Retro buttons press in.
+    final WidgetStateProperty<OutlinedBorder> buttonShapes =
+        WidgetStateProperty.resolveWith<OutlinedBorder>(
+          (Set<WidgetState> states) =>
+              buttonShape(states.contains(WidgetState.pressed)),
+        );
+    // Dialogs, menus and sheets: the outline of the look.
+    ShapeBorder floatingShape(double radius, {bool topOnly = false}) {
+      if (retro) {
+        return ZenBevelBorder.of(colors);
+      }
+      final BorderRadius r = topOnly
+          ? BorderRadius.vertical(top: Radius.circular(radius))
+          : BorderRadius.circular(radius);
+      return RoundedRectangleBorder(
+        borderRadius: r,
+        side: neon
+            ? BorderSide(color: colors.accent.withValues(alpha: 0.45))
+            : topOnly
+            ? BorderSide.none
+            : BorderSide(color: colors.outlineSoft),
+      );
+    }
+
+    final PageTransitionsBuilder? pages = switch (look.pages) {
+      ZenPageMotion.platform => null,
+      ZenPageMotion.soft => const ZenSoftPageTransitionsBuilder(),
+      ZenPageMotion.neonWipe => const ZenNeonWipeTransitionsBuilder(),
+      ZenPageMotion.stepped => const ZenSteppedPageTransitionsBuilder(),
+    };
 
     final ColorScheme scheme =
         (isDark ? const ColorScheme.dark() : const ColorScheme.light())
@@ -613,7 +708,7 @@ abstract final class ZenTheme {
               error: colors.danger,
               onError: colors.onAccent,
               // Neon: elevation shadows (the FAB, menus) become a glow.
-              shadow: colors.glow > 0
+              shadow: lit
                   ? colors.accent.withValues(alpha: 0.55 * colors.glow)
                   : null,
             );
@@ -636,18 +731,13 @@ abstract final class ZenTheme {
           ? colors.textPrimary.withValues(alpha: 0.04)
           : null,
       focusColor: colors.concept ? colors.accent.withValues(alpha: 0.16) : null,
-      pageTransitionsTheme: colors.concept
-          ? const PageTransitionsTheme(
+      pageTransitionsTheme: pages == null
+          ? null
+          : PageTransitionsTheme(
               builders: <TargetPlatform, PageTransitionsBuilder>{
-                TargetPlatform.android: ZenSoftPageTransitionsBuilder(),
-                TargetPlatform.iOS: ZenSoftPageTransitionsBuilder(),
-                TargetPlatform.linux: ZenSoftPageTransitionsBuilder(),
-                TargetPlatform.macOS: ZenSoftPageTransitionsBuilder(),
-                TargetPlatform.windows: ZenSoftPageTransitionsBuilder(),
-                TargetPlatform.fuchsia: ZenSoftPageTransitionsBuilder(),
+                for (final TargetPlatform p in TargetPlatform.values) p: pages,
               },
-            )
-          : null,
+            ),
       visualDensity: compactUi ? VisualDensity.compact : VisualDensity.standard,
       materialTapTargetSize: compactUi
           ? MaterialTapTargetSize.shrinkWrap
@@ -659,11 +749,11 @@ abstract final class ZenTheme {
       fontFamilyFallback: colors.typeface.sansFallback,
       fontWeight: FontWeight.w700,
       fontSize: 14,
-      letterSpacing: 0.1,
+      letterSpacing: neon ? 0.6 : 0.1,
     );
 
     return base.copyWith(
-      extensions: <ThemeExtension<dynamic>>[colors],
+      extensions: <ThemeExtension<dynamic>>[colors, look],
       dividerColor: colors.outline,
       dividerTheme: DividerThemeData(
         color: colors.outline,
@@ -671,20 +761,32 @@ abstract final class ZenTheme {
         thickness: 1,
       ),
       appBarTheme: AppBarTheme(
-        backgroundColor: colors.background.withValues(alpha: 0.95),
+        backgroundColor: retro
+            ? colors.surface
+            : colors.background.withValues(alpha: 0.95),
         foregroundColor: colors.textPrimary,
         elevation: 0,
         scrolledUnderElevation: 0,
-        shape: Border(bottom: BorderSide(color: colors.outlineSoft)),
+        shape: Border(
+          bottom: BorderSide(
+            color: neon
+                ? colors.accent.withValues(alpha: 0.32)
+                : retro
+                ? colors.surfaceSunk
+                : colors.outlineSoft,
+          ),
+        ),
         titleTextStyle: TextStyle(
           fontFamily: colors.typeface.display,
           fontFamilyFallback: colors.typeface.displayFallback,
           color: colors.textPrimary,
-          fontSize: 20,
+          fontSize: 20 * colors.typeface.displayScale,
           fontWeight: FontWeight.w600,
           letterSpacing: -0.1,
         ),
-        actionsIconTheme: IconThemeData(color: colors.textSecondary),
+        actionsIconTheme: IconThemeData(
+          color: neon ? colors.accent : colors.textSecondary,
+        ),
       ),
       iconTheme: IconThemeData(color: colors.textSecondary),
       textTheme: _trackedTextTheme(
@@ -703,10 +805,7 @@ abstract final class ZenTheme {
         color: colors.surface,
         elevation: 0,
         margin: const EdgeInsets.symmetric(vertical: 6),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(cardRadius)),
-          side: BorderSide(color: colors.outlineSoft),
-        ),
+        shape: look.panelShape(colors),
       ),
       expansionTileTheme: ExpansionTileThemeData(
         iconColor: colors.textSecondary,
@@ -716,7 +815,11 @@ abstract final class ZenTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: colors.surfaceRaised,
+        fillColor: neon
+            ? colors.surface
+            : retro
+            ? colors.surfaceSunk
+            : colors.surfaceRaised,
         contentPadding: fieldPadding,
         isDense: false,
         hintStyle: TextStyle(color: colors.textMuted, fontSize: 15),
@@ -736,24 +839,29 @@ abstract final class ZenTheme {
         ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.all(Radius.circular(fieldRadius)),
-          borderSide: BorderSide(color: colors.outlineSoft),
+          borderSide: BorderSide(
+            color: neon || retro ? colors.outline : colors.outlineSoft,
+          ),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.all(Radius.circular(fieldRadius)),
-          borderSide: BorderSide(color: colors.outlineSoft),
+          borderSide: BorderSide(
+            color: neon || retro ? colors.outline : colors.outlineSoft,
+          ),
         ),
-        focusedBorder: colors.glow > 0
+        focusedBorder: lit
             ? ZenGlowInputBorder(
-                borderRadius: const BorderRadius.all(
-                  Radius.circular(fieldRadius),
-                ),
+                borderRadius: BorderRadius.all(Radius.circular(fieldRadius)),
                 borderSide: BorderSide(color: colors.accent, width: 1.4),
                 glowColor: colors.accent,
                 glow: colors.glow,
               )
             : OutlineInputBorder(
                 borderRadius: BorderRadius.all(Radius.circular(fieldRadius)),
-                borderSide: BorderSide(color: colors.accent, width: 1.6),
+                borderSide: BorderSide(
+                  color: colors.accent,
+                  width: retro ? 1 : 1.6,
+                ),
               ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.all(Radius.circular(fieldRadius)),
@@ -766,8 +874,9 @@ abstract final class ZenTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: colors.accent,
-          foregroundColor: colors.onAccent,
+          // Retro: a chrome key with an LCD-green label.
+          backgroundColor: retro ? colors.surfaceRaised : colors.accent,
+          foregroundColor: retro ? colors.accent : colors.onAccent,
           minimumSize: buttonMinSize,
           padding: EdgeInsets.symmetric(
             horizontal: compactUi ? 16 : 18,
@@ -775,30 +884,45 @@ abstract final class ZenTheme {
           ),
           textStyle: buttonText,
           elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(buttonRadius),
-          ),
-        ),
+          shape: buttonShape(),
+          // Neon: the primary button glows.
+          backgroundBuilder: neon
+              ? (
+                  BuildContext context,
+                  Set<WidgetState> states,
+                  Widget? child,
+                ) => DecoratedBox(
+                  decoration: ShapeDecoration(
+                    shape: buttonShape(),
+                    shadows: states.contains(WidgetState.disabled)
+                        ? null
+                        : colors.neonGlow(colors.accent, radius: 16),
+                  ),
+                  child: child,
+                )
+              : null,
+        ).copyWith(shape: buttonShapes),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: colors.textPrimary,
-          backgroundColor: Colors.transparent,
+          foregroundColor: neon ? colors.accent : colors.textPrimary,
+          backgroundColor: retro ? colors.surface : Colors.transparent,
           minimumSize: buttonMinSize,
           padding: EdgeInsets.symmetric(
             horizontal: compactUi ? 16 : 18,
             vertical: compactUi ? 10 : 12,
           ),
           textStyle: buttonText,
-          side: BorderSide(color: colors.outline, width: 1.2),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(buttonRadius),
+          side: BorderSide(
+            color: neon ? colors.accent.withValues(alpha: 0.6) : colors.outline,
+            width: neon ? 1 : 1.2,
           ),
-        ),
+          shape: buttonShape(),
+        ).copyWith(shape: buttonShapes),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: colors.textPrimary,
+          foregroundColor: neon ? colors.accent : colors.textPrimary,
           minimumSize: Size(0, compactUi ? 36 : 40),
           padding: EdgeInsets.symmetric(
             horizontal: compactUi ? 12 : 16,
@@ -812,7 +936,7 @@ abstract final class ZenTheme {
       ),
       iconButtonTheme: IconButtonThemeData(
         style: IconButton.styleFrom(
-          foregroundColor: colors.textSecondary,
+          foregroundColor: neon ? colors.accent : colors.textSecondary,
           minimumSize: Size.square(compactUi ? 34 : 40),
           padding: EdgeInsets.all(compactUi ? 6 : 8),
           visualDensity: compactUi
@@ -869,22 +993,30 @@ abstract final class ZenTheme {
                 ? BorderSide(color: colors.accent)
                 : BorderSide(color: colors.outline),
           ),
-          shape: WidgetStatePropertyAll<OutlinedBorder>(
-            RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(buttonRadius),
-            ),
-          ),
+          shape: retro
+              ? buttonShapes
+              : WidgetStatePropertyAll<OutlinedBorder>(
+                  RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(buttonRadius),
+                  ),
+                ),
         ),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: colors.surfaceMuted,
+        backgroundColor: neon ? colors.surface : colors.surfaceMuted,
         contentTextStyle: TextStyle(color: colors.textPrimary, fontSize: 14),
         actionTextColor: colors.accent,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(cardRadius),
-          side: BorderSide(color: colors.outline),
-        ),
+        shape: retro
+            ? ZenBevelBorder.of(colors)
+            : RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(cardRadius),
+                side: BorderSide(
+                  color: neon
+                      ? colors.accent.withValues(alpha: 0.45)
+                      : colors.outline,
+                ),
+              ),
       ),
       listTileTheme: ListTileThemeData(
         iconColor: colors.textSecondary,
@@ -906,10 +1038,12 @@ abstract final class ZenTheme {
         ),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: colors.surfaceRaised,
+        backgroundColor: neon ? colors.surface : colors.surfaceRaised,
         selectedColor: colors.accent,
         checkmarkColor: colors.onAccent,
-        side: BorderSide(color: colors.outlineSoft),
+        side: BorderSide(
+          color: neon ? colors.outlineStrong : colors.outlineSoft,
+        ),
         labelStyle: TextStyle(
           color: colors.textPrimary,
           fontWeight: FontWeight.w600,
@@ -924,7 +1058,9 @@ abstract final class ZenTheme {
           fontFamily: colors.typeface.sans,
           fontFamilyFallback: colors.typeface.sansFallback,
         ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+        shape: retro
+            ? ZenBevelBorder.of(colors)
+            : RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
       ),
       checkboxTheme: CheckboxThemeData(
         fillColor: WidgetStateProperty.resolveWith<Color>(
@@ -948,26 +1084,50 @@ abstract final class ZenTheme {
               ? colors.textPrimary.withValues(alpha: 0.55)
               : colors.textPrimary.withValues(alpha: 0.28),
         ),
-        radius: const Radius.circular(999),
+        radius: Radius.circular(retro ? 0 : 999),
         thickness: const WidgetStatePropertyAll<double>(5),
       ),
       tooltipTheme: TooltipThemeData(
         decoration: BoxDecoration(
           color: colors.surfaceRaised,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: colors.outline),
+          borderRadius: BorderRadius.circular(retro ? 0 : 999),
+          border: Border.all(
+            color: neon ? colors.accent.withValues(alpha: 0.5) : colors.outline,
+          ),
         ),
         textStyle: TextStyle(color: colors.textPrimary, fontSize: 12),
       ),
       popupMenuTheme: PopupMenuThemeData(
         color: colors.surface,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(cardRadius),
-          side: BorderSide(color: colors.outline),
-        ),
+        shape: retro
+            ? ZenBevelBorder.of(colors)
+            : RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(cardRadius),
+                side: BorderSide(
+                  color: neon
+                      ? colors.accent.withValues(alpha: 0.45)
+                      : colors.outline,
+                ),
+              ),
       ),
-      floatingActionButtonTheme: colors.glow > 0
+      floatingActionButtonTheme: retro
+          // Retro: a chrome key.
+          ? FloatingActionButtonThemeData(
+              backgroundColor: colors.surfaceRaised,
+              foregroundColor: colors.accent,
+              elevation: 0,
+              focusElevation: 0,
+              hoverElevation: 0,
+              highlightElevation: 0,
+              extendedTextStyle: TextStyle(
+                fontFamily: colors.typeface.sans,
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
+              ),
+              shape: ZenBevelBorder.of(colors),
+            )
+          : lit
           // Neon: a dark tube with a lit outline; its elevation shadow is
           // the accent glow (see `shadow` above).
           ? FloatingActionButtonThemeData(
@@ -1001,14 +1161,21 @@ abstract final class ZenTheme {
               shape: const StadiumBorder(),
             ),
       tabBarTheme: TabBarThemeData(
-        labelColor: colors.textPrimary,
+        labelColor: neon ? colors.accent : colors.textPrimary,
         unselectedLabelColor: colors.textMuted,
         indicatorColor: colors.accent,
         indicatorSize: TabBarIndicatorSize.label,
-        // The fixed palettes: a rounded bar (lit for neon) that glides
-        // between the tabs, no ripple under the label.
+        // The fixed palettes: a rounded bar (lit for neon, a light running
+        // along it with Neon, a flat LCD line in retro) that glides between
+        // the tabs, no ripple under the label.
         indicator: colors.concept
-            ? ZenTabIndicator(color: colors.accent, glow: colors.glow)
+            ? ZenTabIndicator(
+                color: colors.accent,
+                glow: retro ? 0 : colors.glow,
+                sweepColor: look.tabSweep ? colors.accentSecondary : null,
+                thickness: retro ? 2 : 3,
+                rounded: !retro,
+              )
             : null,
         splashFactory: colors.concept ? NoSplash.splashFactory : null,
         overlayColor: colors.concept
@@ -1026,7 +1193,19 @@ abstract final class ZenTheme {
           fontSize: 14,
         ),
       ),
-      badgeTheme: colors.concept
+      badgeTheme: retro
+          // Retro: an LCD count, green pixel digits on black.
+          ? BadgeThemeData(
+              backgroundColor: colors.surfaceSunk,
+              textColor: colors.accent,
+              textStyle: TextStyle(
+                fontFamily: ZenText.pixelFamily,
+                fontFamilyFallback: colors.typeface.monoFallback,
+                fontSize: 14,
+                height: 1,
+              ),
+            )
+          : colors.concept
           ? BadgeThemeData(
               backgroundColor: colors.accent,
               textColor: colors.onAccent,
@@ -1039,23 +1218,18 @@ abstract final class ZenTheme {
           fontFamily: colors.typeface.display,
           fontFamilyFallback: colors.typeface.displayFallback,
           color: colors.textPrimary,
-          fontSize: 21,
+          fontSize: 21 * colors.typeface.displayScale,
           fontWeight: FontWeight.w600,
         ),
         insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(28),
-          side: BorderSide(color: colors.outlineSoft),
-        ),
+        shape: floatingShape(sheetRadius),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: colors.surface,
         surfaceTintColor: Colors.transparent,
         showDragHandle: true,
-        dragHandleColor: colors.outlineStrong,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
+        dragHandleColor: neon ? colors.accent : colors.outlineStrong,
+        shape: floatingShape(sheetRadius, topOnly: true),
       ),
     );
   }

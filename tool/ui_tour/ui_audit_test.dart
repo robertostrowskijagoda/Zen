@@ -214,13 +214,7 @@ void main() {
       await seed('pyramid', () async {
         await container
             .read(pyramidServiceProvider)
-            .createPyramid(
-              name: 'Piramida Mokotów i okolice',
-              myName: 'Robert',
-              nat: 'PL',
-              birthYear: 1990,
-              gender: 'm',
-            );
+            .found(myName: 'Robert', nat: 'PL', birthYear: 1990, gender: 'm');
         await container
             .read(pyramidServiceProvider)
             .post(

@@ -92,9 +92,10 @@ void main() {
             brightness,
           );
           final String where = '$palette / $brightness';
+          // A dark-only palette stays dark in the light mode.
           expect(
             ThemeData.estimateBrightnessForColor(colors.background),
-            brightness,
+            palette.darkOnly ? Brightness.dark : brightness,
             reason: '$where background',
           );
           expect(

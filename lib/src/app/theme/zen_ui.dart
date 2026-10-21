@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/theme/zen_concept.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
+import 'package:zen/src/app/theme/zen_retro.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 
 /// Corner recipes from the grayscale canvas.
@@ -80,47 +82,159 @@ class ZenSectionBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
+    final ZenLook look = ZenLook.of(context);
     return AppBar(
       key: const Key('section-bar'),
       actions: actions,
       bottom: bottom,
-      titleSpacing: 20,
+      titleSpacing: look.header == ZenHeaderStyle.spectrum ? 12 : 20,
       toolbarHeight: kToolbarHeight + 8,
-      title: Row(
+      title: switch (look.header) {
+        ZenHeaderStyle.bar => _bar(zen),
+        ZenHeaderStyle.neonTube => _neonTube(zen),
+        ZenHeaderStyle.spectrum => _spectrum(zen),
+      },
+    );
+  }
+
+  Widget _titleText(TextStyle style) => Text(
+    title,
+    key: const Key('section-title'),
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: style,
+  );
+
+  Widget _bar(ZenColors zen) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Container(
+          width: 5,
+          height: 24,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: <Color>[
+                zen.accent,
+                zen.gradientPartner(zen.accent, zen.accentSecondary),
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+            borderRadius: BorderRadius.circular(3),
+            boxShadow: zen.neonGlow(zen.accent, radius: 10),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Flexible(
+          child: _titleText(
+            zen.display(
+              color: zen.textPrimary,
+              size: 26,
+              weight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Neon: a thin lit tube and a glowing title, lighting up once.
+  Widget _neonTube(ZenColors zen) {
+    return ZenFlickerOn(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Container(
-            width: 5,
-            height: 24,
+            width: 3,
+            height: 26,
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: <Color>[
-                  zen.accent,
-                  zen.gradientPartner(zen.accent, zen.accentSecondary),
-                ],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
-              borderRadius: BorderRadius.circular(3),
-              boxShadow: zen.neonGlow(zen.accent, radius: 10),
+              color: zen.accent,
+              borderRadius: BorderRadius.circular(2),
+              boxShadow: <BoxShadow>[
+                BoxShadow(
+                  color: zen.accent.withValues(alpha: 0.9),
+                  blurRadius: 6,
+                ),
+                BoxShadow(
+                  color: zen.accent.withValues(alpha: 0.45),
+                  blurRadius: 18,
+                  spreadRadius: 1,
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 14),
           Flexible(
-            child: Text(
-              title,
-              key: const Key('section-title'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: zen.display(
-                color: zen.textPrimary,
-                size: 26,
-                weight: FontWeight.w600,
-              ),
+            child: _titleText(
+              zen
+                  .display(
+                    color: zen.textPrimary,
+                    size: 26,
+                    weight: FontWeight.w500,
+                    letterSpacing: 1.2,
+                  )
+                  .copyWith(
+                    shadows: <Shadow>[
+                      Shadow(
+                        color: zen.accent.withValues(alpha: 0.75),
+                        blurRadius: 12,
+                      ),
+                      Shadow(
+                        color: zen.accent.withValues(alpha: 0.35),
+                        blurRadius: 26,
+                      ),
+                    ],
+                  ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  /// Retro: the title on an LCD strip, a spectrum analyzer beside it.
+  Widget _spectrum(ZenColors zen) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Flexible(
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(10, 2, 12, 2),
+            decoration: ShapeDecoration(
+              color: zen.surfaceSunk,
+              shape: ZenBevelBorder.of(zen, sunken: true),
+            ),
+            child: _titleText(
+              zen
+                  .display(
+                    color: zen.accent,
+                    size: 26,
+                    weight: FontWeight.w400,
+                    letterSpacing: 1,
+                    height: 1.1,
+                  )
+                  .copyWith(
+                    shadows: <Shadow>[
+                      Shadow(
+                        color: zen.accent.withValues(alpha: 0.45),
+                        blurRadius: 6,
+                      ),
+                    ],
+                  ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Container(
+          padding: const EdgeInsets.all(4),
+          decoration: ShapeDecoration(
+            color: zen.surfaceSunk,
+            shape: ZenBevelBorder.of(zen, sunken: true),
+          ),
+          child: const ZenSpectrumStrip(),
+        ),
+      ],
     );
   }
 }
@@ -217,14 +331,30 @@ class ZenBlobAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
+    final ZenLook look = ZenLook.of(context);
     final String initial =
         (glyph ?? (name.trim().isEmpty ? '?' : name.trim().characters.first))
             .toUpperCase();
+    // Neon: a lit ring, glowing while the person is online.
+    final Color ring = look.outlined
+        ? zen.accent.withValues(alpha: online ? 0.95 : 0.55)
+        : look.bevelled
+        ? zen.outlineStrong
+        : zen.outline;
     return SizedBox.square(
       dimension: size,
       child: Stack(
         clipBehavior: Clip.none,
         children: <Widget>[
+          if (look.outlined && online)
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: zen.neonGlow(zen.accent, radius: 12),
+                ),
+              ),
+            ),
           // A true circle: the border is drawn on the same shape as the clip
           // (a square border inside a rounded clip showed its corners).
           ClipOval(
@@ -232,7 +362,7 @@ class ZenBlobAvatar extends StatelessWidget {
               decoration: BoxDecoration(
                 color: zen.surfaceSunk,
                 shape: BoxShape.circle,
-                border: Border.all(color: zen.outline),
+                border: Border.all(color: ring, width: look.outlined ? 1.4 : 1),
                 image: image == null
                     ? null
                     : DecorationImage(image: image!, fit: BoxFit.cover),

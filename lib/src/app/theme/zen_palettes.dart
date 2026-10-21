@@ -4,9 +4,11 @@ import 'package:zen/src/features/settings/app_settings.dart';
 
 /// The fixed palettes of Ustawienia → Wygląd. Klasyczny is computed from
 /// the chosen accent ([ZenColors.resolve]); the others are hand-tuned, each
-/// in a light and a dark variant, and share the calmer component style
-/// ([ZenColors.concept]). Every pair keeps the contrast the theme test
-/// checks (labels on the accent 4.5:1, body text 4.5:1, secondary 3:1).
+/// in a light and a dark variant (Retro only dark, [AppPalette.darkOnly]),
+/// and share the calmer component style ([ZenColors.concept]); Neon and
+/// Retro add their own component character ([look]). Every pair keeps the
+/// contrast the theme test checks (labels on the accent 4.5:1, body text
+/// 4.5:1, secondary 3:1).
 abstract final class ZenPalettes {
   static ZenColors resolve(
     AppPalette palette,
@@ -16,12 +18,115 @@ abstract final class ZenPalettes {
     final bool dark = brightness == Brightness.dark;
     return switch (palette) {
       AppPalette.classic => ZenColors.resolve(accent, brightness),
-      AppPalette.calm => dark ? _calmDark : _calmLight,
       AppPalette.neon => dark ? _neonDark : _neonLight,
+      AppPalette.winamp => _retroDark,
+      AppPalette.calm => dark ? _calmDark : _calmLight,
+      AppPalette.graphite => dark ? _graphiteDark : _graphiteLight,
       AppPalette.forest => dark ? _forestDark : _forestLight,
       AppPalette.dusk => dark ? _duskDark : _duskLight,
     };
   }
+
+  /// The component character of [palette].
+  static ZenLook look(AppPalette palette) => switch (palette) {
+    AppPalette.classic => ZenLook.classic,
+    AppPalette.neon => ZenLook.neon,
+    AppPalette.winamp => ZenLook.retro,
+    AppPalette.calm ||
+    AppPalette.graphite ||
+    AppPalette.forest ||
+    AppPalette.dusk => ZenLook.soft,
+  };
+
+  // Neon: true black, almost no greys, one electric cyan and a hot
+  // magenta kept for a few accents; off-white text.
+  static const ZenColors _neonDark = ZenColors(
+    background: Color(0xFF000000),
+    surface: Color(0xFF050508),
+    surfaceRaised: Color(0xFF0A0B10),
+    surfaceMuted: Color(0xFF101219),
+    surfaceSunk: Color(0xFF000000),
+    outline: Color(0xFF113A42),
+    outlineSoft: Color(0xFF0B252B),
+    outlineStrong: Color(0xFF1B6C78),
+    textPrimary: Color(0xFFF2F8FA),
+    textSecondary: Color(0xFFA6C2CA),
+    textMuted: Color(0xFF63848D),
+    accent: Color(0xFF00F0FF),
+    accentSecondary: Color(0xFFFF2BD6),
+    accentTertiary: Color(0xFF7DF9FF),
+    accentSoft: Color(0xFF00262B),
+    onAccent: Color(0xFF000000),
+    success: Color(0xFF2BFFC6),
+    warning: Color(0xFFFFE45C),
+    danger: Color(0xFFFF2B6B),
+    typeface: ZenTypefaces.neon,
+    concept: true,
+    glow: 1.3,
+    gradient: 0,
+    toneSaturation: 0.7,
+    duotone: true,
+  );
+
+  // Neon, light: a deliberately plain companion, white with ink-dark cyan
+  // lines and the same few accents.
+  static const ZenColors _neonLight = ZenColors(
+    background: Color(0xFFFFFFFF),
+    surface: Color(0xFFFFFFFF),
+    surfaceRaised: Color(0xFFF4FAFB),
+    surfaceMuted: Color(0xFFE9F4F6),
+    surfaceSunk: Color(0xFFF6FBFC),
+    outline: Color(0xFFA6DCE3),
+    outlineSoft: Color(0xFFCFEDF1),
+    outlineStrong: Color(0xFF4FAFBC),
+    textPrimary: Color(0xFF04080A),
+    textSecondary: Color(0xFF3A5157),
+    textMuted: Color(0xFF6A8389),
+    accent: Color(0xFF007C8A),
+    accentSecondary: Color(0xFFC2008F),
+    accentTertiary: Color(0xFF00636E),
+    accentSoft: Color(0xFFE0F5F7),
+    onAccent: Color(0xFFFFFFFF),
+    success: Color(0xFF00806A),
+    warning: Color(0xFF9A6A00),
+    danger: Color(0xFFC8004F),
+    typeface: ZenTypefaces.neon,
+    concept: true,
+    glow: 0.45,
+    gradient: 0,
+    toneSaturation: 0.7,
+    duotone: true,
+  );
+
+  // Retro: charcoal chrome around black LCD wells, LCD green with a
+  // yellow-green and an orange peak, like an old desktop music player.
+  static const ZenColors _retroDark = ZenColors(
+    background: Color(0xFF0B0C0F),
+    surface: Color(0xFF17181E),
+    surfaceRaised: Color(0xFF22232B),
+    surfaceMuted: Color(0xFF2B2C36),
+    surfaceSunk: Color(0xFF000000),
+    outline: Color(0xFF34363F),
+    outlineSoft: Color(0xFF26272F),
+    outlineStrong: Color(0xFF5B5E6B),
+    textPrimary: Color(0xFFDCEBD4),
+    textSecondary: Color(0xFF9AB192),
+    textMuted: Color(0xFF6C7E65),
+    accent: Color(0xFF4AF626),
+    accentSecondary: Color(0xFFDCE93A),
+    accentTertiary: Color(0xFFFF9F1C),
+    accentSoft: Color(0xFF12260F),
+    onAccent: Color(0xFF000000),
+    success: Color(0xFF4AF626),
+    warning: Color(0xFFDCE93A),
+    danger: Color(0xFFFF4A3A),
+    typeface: ZenTypefaces.retro,
+    concept: true,
+    glow: 0.35,
+    gradient: 0.2,
+    toneSaturation: 0.5,
+    duotone: true,
+  );
 
   // Cisza, light: sand and stone, one slate accent.
   static const ZenColors _calmLight = ZenColors(
@@ -77,8 +182,8 @@ abstract final class ZenPalettes {
     toneSaturation: 0.22,
   );
 
-  // Neon nocą, light: pale grey with the same cyan and magenta lines.
-  static const ZenColors _neonLight = ZenColors(
+  // Grafit, light: pale grey with the same cyan and magenta lines.
+  static const ZenColors _graphiteLight = ZenColors(
     background: Color(0xFFF2F4F7),
     surface: Color(0xFFFFFFFF),
     surfaceRaised: Color(0xFFECEFF3),
@@ -105,8 +210,8 @@ abstract final class ZenPalettes {
     toneSaturation: 0.7,
   );
 
-  // Neon nocą: muted charcoal, thin cyan and magenta neon.
-  static const ZenColors _neonDark = ZenColors(
+  // Grafit: muted charcoal, thin cyan and magenta neon.
+  static const ZenColors _graphiteDark = ZenColors(
     background: Color(0xFF0D0F12),
     surface: Color(0xFF13161A),
     surfaceRaised: Color(0xFF191D22),

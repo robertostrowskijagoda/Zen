@@ -7,16 +7,19 @@ const IconData kPyramidIcon = Icons.change_history_rounded;
 /// An [Icon], except that [kPyramidIcon] is drawn as the pyramid glyph, so
 /// the pyramid looks the same in the rail, headers, badges and chips.
 class ZenIcon extends StatelessWidget {
-  const ZenIcon(this.icon, {this.color, this.size, super.key});
+  const ZenIcon(this.icon, {this.color, this.size, this.shadows, super.key});
 
   final IconData icon;
   final Color? color;
   final double? size;
 
+  /// A glow under the glyph (the neon look); the pyramid glyph has none.
+  final List<Shadow>? shadows;
+
   @override
   Widget build(BuildContext context) {
     if (icon != kPyramidIcon) {
-      return Icon(icon, color: color, size: size);
+      return Icon(icon, color: color, size: size, shadows: shadows);
     }
     final IconThemeData theme = IconTheme.of(context);
     return PyramidGlyph(
