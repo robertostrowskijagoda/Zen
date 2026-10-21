@@ -43,6 +43,10 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
 
   bool get _android => !kIsWeb && Platform.isAndroid;
 
+  /// Computers: Windows, macOS and Linux with Bluetooth LE.
+  bool get _desktop =>
+      !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+
   @override
   void initState() {
     super.initState();
@@ -199,16 +203,16 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
       body: ListenableBuilder(
         listenable: _nearby,
         builder: (BuildContext context, Widget? _) {
-          if (!_android) {
+          if (!_android && !_desktop) {
             return Center(
               child: SingleChildScrollView(
                 child: ZenEmpty(
                   icon: Icons.phone_android_rounded,
                   tone: tone,
-                  title: t('Tylko na Androidzie'),
+                  title: t('Nie na tym urządzeniu'),
                   text: t(
-                    'Osoby w pobliżu działają na telefonie z Androidem '
-                    '(Bluetooth). Na iPhonie i na komputerze ich nie ma.',
+                    'Osoby w pobliżu działają na Androidzie i na komputerach '
+                    'z Bluetooth LE. Na iPhonie ich nie ma.',
                   ),
                 ),
               ),
@@ -224,7 +228,12 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                   icon: Icons.bluetooth_disabled_rounded,
                   tone: zen.warning,
                   title: t('Brak Bluetooth LE'),
-                  text: t('Ten telefon nie ma Bluetooth LE.'),
+                  text: _desktop
+                      ? t(
+                          'W pobliżu nie działa na tym komputerze: nie ma '
+                          'Bluetooth LE albo Zen nie może go używać.',
+                        )
+                      : t('Ten telefon nie ma Bluetooth LE.'),
                 ),
               ),
             );
@@ -244,6 +253,23 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                   'start.',
                 ),
               ),
+              if (_desktop)
+                ZenInfo(
+                  key: const Key('nearby-desktop'),
+                  icon: Icons.computer_rounded,
+                  tone: tone,
+                  text: _state['canAdvertise'] == false
+                      ? t(
+                          'Ten komputer tylko rozgląda się: widzi telefony '
+                          'obok, ale sam się nie pokazuje (system na to nie '
+                          'pozwala). Pisać do ludzi obok można z telefonu.',
+                        )
+                      : t(
+                          'Komputer pokazuje się i rozgląda jak telefon, '
+                          'dopóki Zen działa (także w zasobniku). Pisać do '
+                          'ludzi obok można z telefonu.',
+                        ),
+                ),
               if (_state['permitted'] != true)
                 ZenCard(
                   tone: zen.warning,
@@ -531,19 +557,22 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
       tone: tone,
       title: p.pseudonym,
       subtitle: badges.join(' · '),
-      trailing: FilledButton.tonal(
-        // Already talking: the conversation opens instead of a new hello.
-        onPressed: () => unawaited(
-          talks.isEmpty
-              ? _wave(p)
-              : NearbyChatScreen.open(context, talks.first.id),
-        ),
-        style: FilledButton.styleFrom(
-          minimumSize: const Size(0, 38),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-        ),
-        child: Text(t('Napisz')),
-      ),
+      // A computer cannot write to anyone nearby (no GATT there).
+      trailing: _state['canWave'] == false && talks.isEmpty
+          ? null
+          : FilledButton.tonal(
+              // Already talking: the conversation opens instead of a new hello.
+              onPressed: () => unawaited(
+                talks.isEmpty
+                    ? _wave(p)
+                    : NearbyChatScreen.open(context, talks.first.id),
+              ),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(0, 38),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+              ),
+              child: Text(t('Napisz')),
+            ),
     );
   }
 }

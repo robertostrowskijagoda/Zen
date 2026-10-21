@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -9,6 +11,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/ask/ask_service.dart';
 import 'package:zen/src/features/meet/circle/circle_service.dart';
+import 'package:zen/src/features/meet/desktop_nearby_radio.dart';
 import 'package:zen/src/features/meet/encounters.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
@@ -227,7 +230,8 @@ final Provider<NearbyService> nearbyServiceProvider = Provider<NearbyService>((
   final MeetService meet = ref.watch(meetServiceProvider);
   final SignalTransport transport = ref.read(signalTransportProvider);
   final NearbyService nearby = NearbyService(
-    radio: ChannelNearbyRadio(),
+    // The phone's own radio, or the computer's Bluetooth.
+    radio: platformNearbyRadio(),
     meet: meet,
     ownAddress: () => ref.read(runtimeNodeSnapshotProvider).localAddress,
     sendMesh: (String to, Map<String, dynamic> payload) =>
@@ -264,6 +268,22 @@ final Provider<NearbyService> nearbyServiceProvider = Provider<NearbyService>((
     nearby.dispose();
   });
   return nearby;
+});
+
+/// Whether "W pobliżu" works here: always offered on Android (its screen
+/// walks through permissions and Bluetooth), on a computer only with a
+/// Bluetooth LE adapter Zen can use.
+final FutureProvider<bool> nearbySupportedProvider = FutureProvider<bool>((
+  Ref ref,
+) async {
+  if (!kIsWeb && Platform.isAndroid) {
+    return true;
+  }
+  final Map<Object?, Object?> state = await ref
+      .read(nearbyServiceProvider)
+      .radio
+      .state();
+  return state['supported'] == true;
 });
 
 /// [EventHost] on top of a [MeetHost] (the app and the background

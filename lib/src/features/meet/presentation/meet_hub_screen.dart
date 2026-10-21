@@ -6,6 +6,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/presentation/circle_screen.dart';
 import 'package:zen/src/features/meet/presentation/eat_together_card.dart';
 import 'package:zen/src/features/meet/presentation/events_screen.dart';
@@ -23,6 +24,8 @@ class MeetHubScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ZenColors zen = ZenColors.of(context);
+    // On computers only with Bluetooth LE Zen can use.
+    final bool nearby = ref.watch(nearbySupportedProvider).value ?? false;
     Widget tile(
       String key,
       int tone,
@@ -51,14 +54,15 @@ class MeetHubScreen extends ConsumerWidget {
           ZenSection(t('Poznawaj ludzi przez ludzi')),
           ZenTileGrid(
             children: <Widget>[
-              tile(
-                'meet-nearby',
-                4,
-                Icons.radar_rounded,
-                t('W pobliżu'),
-                t('Kto z Zen jest obok — przez Bluetooth'),
-                NearbyScreen.open,
-              ),
+              if (nearby)
+                tile(
+                  'meet-nearby',
+                  4,
+                  Icons.radar_rounded,
+                  t('W pobliżu'),
+                  t('Kto z Zen jest obok — przez Bluetooth'),
+                  NearbyScreen.open,
+                ),
               tile(
                 'meet-events',
                 1,

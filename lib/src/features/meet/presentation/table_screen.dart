@@ -6,7 +6,6 @@ import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
-import 'package:zen/src/features/meet/events/event_model.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/presentation/events_screen.dart';
 import 'package:zen/src/features/meet/table/table_service.dart';
@@ -30,11 +29,15 @@ class _TableScreenState extends ConsumerState<TableScreen> {
   late final TextEditingController _city = TextEditingController(
     text: _table.myWish?.city ?? '',
   );
+  late final TextEditingController _area = TextEditingController(
+    text: _table.myWish?.area ?? '',
+  );
   late Set<int> _days = <int>{...?_table.myWish?.days};
 
   @override
   void dispose() {
     _city.dispose();
+    _area.dispose();
     super.dispose();
   }
 
@@ -102,14 +105,30 @@ class _TableScreenState extends ConsumerState<TableScreen> {
               Text(
                 g.via == null
                     ? t('• {name} (Twój znajomy)', {'name': g.name})
-                    : t('• {name}, przez {via}', {
+                    : g.area.isEmpty
+                    ? t('• {name}, przez {via}', {
                         'name': g.name,
+                        'via': ref
+                            .read(meetServiceProvider)
+                            .host
+                            .nameOf(g.via!),
+                      })
+                    : t('• {name} ({area}), przez {via}', {
+                        'name': g.name,
+                        'area': g.area,
                         'via': ref
                             .read(meetServiceProvider)
                             .host
                             .nameOf(g.via!),
                       }),
               ),
+            const SizedBox(height: 8),
+            Text(
+              t(
+                'Każdy dostanie zaproszenie i odpowie. Adres poznają tylko '
+                'ci, których przyjmiesz.',
+              ),
+            ),
             const SizedBox(height: 8),
             Text(eventDate(when.millisecondsSinceEpoch)),
           ],
@@ -129,14 +148,52 @@ class _TableScreenState extends ConsumerState<TableScreen> {
     if (ok != true || !mounted) {
       return;
     }
-    final MeetEvent e = await _table.setTable(
-      city: city,
-      when: when,
-      guests: guests,
-    );
-    if (mounted) {
-      await EventScreen.open(context, e.id);
+    final String? place = await _askPlace();
+    if (place == null || !mounted) {
+      return;
     }
+    await _table.setTable(city: city, when: when, guests: guests, place: place);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(t('Zaproszenia wysłane. Odpowiedzi zobaczysz niżej.')),
+        ),
+      );
+    }
+  }
+
+  /// Where the dinner is: only the guests this person accepts see it.
+  Future<String?> _askPlace() async {
+    final TextEditingController input = TextEditingController();
+    final String? place = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(t('Gdzie kolacja?')),
+        content: TextField(
+          key: const Key('table-place'),
+          controller: input,
+          autofocus: true,
+          maxLength: 160,
+          decoration: InputDecoration(
+            labelText: t('Adres (ulica, piętro)'),
+            helperText: t('Zobaczą go tylko przyjęci goście.'),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('table-place-ok'),
+            onPressed: () => Navigator.of(context).pop(input.text.trim()),
+            child: Text(t('Zaproś')),
+          ),
+        ],
+      ),
+    );
+    disposeLater(input);
+    return place;
   }
 
   @override
@@ -174,7 +231,19 @@ class _TableScreenState extends ConsumerState<TableScreen> {
                   prefixIcon: const Icon(Icons.location_city_rounded),
                 ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 8),
+              TextField(
+                key: const Key('table-area'),
+                controller: _area,
+                maxLength: kTableMaxArea,
+                textCapitalization: TextCapitalization.words,
+                decoration: InputDecoration(
+                  labelText: t('Okolica (opcjonalnie)'),
+                  hintText: t('np. Wrzeszcz'),
+                  prefixIcon: const Icon(Icons.map_outlined),
+                ),
+              ),
+              const SizedBox(height: 6),
               Text(
                 t('Kiedy możesz? Nic nie zaznaczysz — każdy dzień.'),
                 style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
@@ -210,14 +279,27 @@ class _TableScreenState extends ConsumerState<TableScreen> {
                     value: on,
                     title: Text(t('Chcę na Stół na sześć')),
                     subtitle: Text(
-                      t('Widzą to tylko znajomi i znajomi znajomych.'),
+                      t(
+                        'Znajomi widzą to z Twoim imieniem, znajomi '
+                        'znajomych tylko imię, miasto, okolicę i dni — bez '
+                        'adresu.',
+                      ),
                     ),
                     onChanged: (bool v) => unawaited(
-                      _table.setWish(city: v ? _city.text : null, days: _days),
+                      _table.setWish(
+                        city: v ? _city.text : null,
+                        days: _days,
+                        area: _area.text,
+                      ),
                     ),
                   ),
                 ],
               ),
+              if (_table.invitations.isNotEmpty) ...<Widget>[
+                ZenSection(t('Zaproszenia do stołu')),
+                for (final TableInvite i in _table.invitations)
+                  _GuestInvite(table: _table, invite: i),
+              ],
               ZenSection(t('2. Albo zorganizuj kolację')),
               Container(
                 padding: const EdgeInsets.all(16),
@@ -270,10 +352,162 @@ class _TableScreenState extends ConsumerState<TableScreen> {
                   ],
                 ),
               ),
+              for (final String e in _table.tables) ...<Widget>[
+                ZenSection(
+                  t('Twój stół · {date}', {
+                    'date': eventDate(_table.sentFor(e).first.at),
+                  }),
+                  action: t('Wydarzenie'),
+                  onAction: () => unawaited(EventScreen.open(context, e)),
+                ),
+                ZenGroup(
+                  children: <Widget>[
+                    for (final TableInvite i in _table.sentFor(e))
+                      _HostInviteRow(table: _table, invite: i),
+                  ],
+                ),
+              ],
             ],
           );
         },
       ),
+    );
+  }
+}
+
+/// An invitation to someone else's table: "Chcę" / "Nie, dziękuję", then
+/// the answer and, once accepted, the place.
+class _GuestInvite extends ConsumerWidget {
+  const _GuestInvite({required this.table, required this.invite});
+
+  final TableService table;
+  final TableInvite invite;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ZenColors zen = ZenColors.of(context);
+    final TableInvite i = invite;
+    final String Function(String) nameOf = ref
+        .read(meetServiceProvider)
+        .host
+        .nameOf;
+    return ZenCard(
+      key: Key('table-invite-${i.id}'),
+      tone: zenTone(zen, 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            i.via == null
+                ? t('{date}, {city} — u {name}', {
+                    'date': eventDate(i.at),
+                    'city': i.city,
+                    'name': i.name,
+                  })
+                : t('{date}, {city} — u {name}, przez {via}', {
+                    'date': eventDate(i.at),
+                    'city': i.city,
+                    'name': i.name,
+                    'via': nameOf(i.via!),
+                  }),
+            style: TextStyle(
+              color: zen.textPrimary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          switch (i.state) {
+            TableInviteState.sent => Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                FilledButton(
+                  key: Key('table-yes-${i.id}'),
+                  onPressed: () => unawaited(table.answer(i.id, true)),
+                  child: Text(t('Chcę')),
+                ),
+                OutlinedButton(
+                  onPressed: () => unawaited(table.answer(i.id, false)),
+                  child: Text(t('Nie, dziękuję')),
+                ),
+              ],
+            ),
+            TableInviteState.asked => Text(
+              t('Czekasz na odpowiedź gospodarza.'),
+              style: TextStyle(color: zen.textSecondary),
+            ),
+            TableInviteState.declined => Text(
+              t('Tym razem nie.'),
+              style: TextStyle(color: zen.textSecondary),
+            ),
+            TableInviteState.accepted => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                SelectableText(
+                  i.place.isEmpty ? t('Miejsce ustalcie na czacie.') : i.place,
+                  key: const Key('table-place-shown'),
+                  style: TextStyle(color: zen.textPrimary),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      unawaited(EventScreen.open(context, i.event)),
+                  child: Text(t('Wydarzenie')),
+                ),
+              ],
+            ),
+          },
+        ],
+      ),
+    );
+  }
+}
+
+/// One guest of this person's table: their answer, and "Przyjmij" /
+/// "Odmów".
+class _HostInviteRow extends ConsumerWidget {
+  const _HostInviteRow({required this.table, required this.invite});
+
+  final TableService table;
+  final TableInvite invite;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ZenColors zen = ZenColors.of(context);
+    final TableInvite i = invite;
+    final String who = i.via == null
+        ? i.name
+        : t('{name}, przez {via}', {
+            'name': i.name,
+            'via': ref.read(meetServiceProvider).host.nameOf(i.via!),
+          });
+    return ListTile(
+      key: Key('table-guest-${i.id}'),
+      title: Text(who, maxLines: 2, overflow: TextOverflow.ellipsis),
+      subtitle: Text(switch (i.state) {
+        TableInviteState.sent => t('zaproszenie wysłane'),
+        TableInviteState.asked => t('chce przyjść'),
+        TableInviteState.accepted => t('przyjęte'),
+        TableInviteState.declined => t('nie tym razem'),
+      }),
+      trailing: i.state == TableInviteState.asked
+          ? Wrap(
+              spacing: 4,
+              children: <Widget>[
+                IconButton(
+                  key: Key('table-accept-${i.id}'),
+                  tooltip: t('Przyjmij'),
+                  color: zen.success,
+                  icon: const Icon(Icons.check_rounded),
+                  onPressed: () => unawaited(table.accept(i.id)),
+                ),
+                IconButton(
+                  tooltip: t('Odmów'),
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => unawaited(table.decline(i.id)),
+                ),
+              ],
+            )
+          : null,
     );
   }
 }

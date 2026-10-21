@@ -222,6 +222,11 @@ class EncountersSection extends StatelessWidget {
     final String friend = e.friend;
     final EncounterPlace? place = e.place;
     final bool met = hasMet(friend);
+    // Confirmed only within a week of passing.
+    final bool mayConfirm = encounterMayConfirm(
+      e,
+      (now ?? DateTime.now)().millisecondsSinceEpoch,
+    );
     final String when = encounterSpan(e.start, e.end, withDate: older);
     return ZenTile(
       key: Key('encounter-$friend-${e.start}'),
@@ -244,7 +249,7 @@ class EncountersSection extends StatelessWidget {
             ),
           if (met)
             Icon(Icons.verified_rounded, color: zen.success)
-          else
+          else if (mayConfirm)
             // Being near is only a hint: the meeting is signed when
             // confirmed.
             TextButton(

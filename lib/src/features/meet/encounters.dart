@@ -84,6 +84,14 @@ final class EncounterPlace {
   int get hashCode => Object.hash(lat, lon);
 }
 
+/// How long after passing a friend "Spotkani?" may still be confirmed from
+/// "Mijani" (later it is a memory, not a meeting).
+const Duration kEncounterMetWindow = Duration(days: 7);
+
+/// Whether "Spotkani?" may still be confirmed for [e] at [now].
+bool encounterMayConfirm(Encounter e, int now) =>
+    now - e.end <= kEncounterMetWindow.inMilliseconds;
+
 /// A friend was near from [start] to [end] (milliseconds).
 @immutable
 final class Encounter {

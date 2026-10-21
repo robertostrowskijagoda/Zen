@@ -351,6 +351,11 @@ final class EventService extends ChangeNotifier {
   final Map<String, String> _via = <String, String>{};
   final Set<String> _forwarded = <String>{};
 
+  /// Events whose invitation may come from an organizer who is not a
+  /// friend (event id → when it was expected): a "Stół na sześć" this
+  /// person said "Chcę" to through a friend in between.
+  final Map<String, int> _expected = <String, int>{};
+
   /// The invitation token the friend who passed an invitation on gave us
   /// (event id → token): the organizer takes our answer only with it
   /// (see [_hop]).
@@ -547,6 +552,12 @@ final class EventService extends ChangeNotifier {
         ..addAll(
           ((json['fwd'] as List?) ?? const <Object?>[]).whereType<String>(),
         );
+      _expected.clear();
+      (json['exp'] as Map?)?.forEach((Object? k, Object? v) {
+        if (k is String && v is int) {
+          _expected[k] = v;
+        }
+      });
       _tokens.clear();
       (json['tok'] as Map?)?.forEach((Object? k, Object? v) {
         if (k is String && unb64(v, length: 32) != null) {
@@ -640,6 +651,7 @@ final class EventService extends ChangeNotifier {
             },
             'via': _via,
             'fwd': _forwarded.toList(),
+            if (_expected.isNotEmpty) 'exp': _expected,
             if (_tokens.isNotEmpty) 'tok': _tokens,
             if (_how.isNotEmpty) 'how': _how,
             'thanks': <String, dynamic>{
@@ -755,6 +767,47 @@ final class EventService extends ChangeNotifier {
 
   Future<void> cancel(String id) =>
       _change(id, (MeetEvent e) => e.copyWith(cancelled: true));
+
+  /// Takes the invitation to event [id] from its organizer even when they
+  /// are no friend (this person agreed to come through a friend in
+  /// between). Kept for [maxAhead] at most.
+  Future<void> expect(String id) async {
+    if (!_idPattern.hasMatch(id)) {
+      return;
+    }
+    final int t = _now();
+    _expected
+      ..removeWhere((String _, int at) => t - at > maxAhead)
+      ..[id] = t;
+    while (_expected.length > 200) {
+      _expected.remove(_expected.keys.first);
+    }
+    await _save();
+  }
+
+  /// Puts [address] on this person's event [id] as invited, brought by
+  /// [broughtBy] (a friend in between), without passing anything through
+  /// them: the copy goes to the guest directly.
+  Future<void> addGuest(
+    String id,
+    String address, {
+    required String name,
+    String? broughtBy,
+  }) => _change(
+    id,
+    (MeetEvent e) => e.guests.containsKey(_n(address))
+        ? e
+        : e.copyWith(
+            guests: <String, EventGuest>{
+              ...e.guests,
+              _n(address): EventGuest(
+                address: _n(address),
+                name: name,
+                broughtBy: broughtBy == null ? null : _n(broughtBy),
+              ),
+            },
+          ),
+  );
 
   Future<void> inviteMore(String id, List<String> addresses) => _change(
     id,
@@ -1214,7 +1267,8 @@ final class EventService extends ChangeNotifier {
       // (the last link of the chain). Someone who is not a friend is never
       // taken on their word, not even naming a friend who vouches: such an
       // invitation comes through that friend ([EventTypes.pass]).
-      if (!host.isFriend(from) ||
+      if ((!host.isFriend(from) &&
+              !(fromOrganizer && _expected.containsKey(got.id))) ||
           !_idPattern.hasMatch(got.id) ||
           (!fromOrganizer && (chain.isEmpty || chain.last['a'] != from)) ||
           !_takeNew(from)) {

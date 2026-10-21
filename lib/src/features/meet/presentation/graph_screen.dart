@@ -2872,6 +2872,30 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                   icon: const Icon(Icons.account_circle_outlined),
                   label: Text(t('Profil')),
                 ),
+                const SizedBox(height: 8),
+                // The gate to this person's own friends, free for this
+                // friend (nobody asks for it here: they ask in a chat).
+                StatefulBuilder(
+                  builder: (BuildContext context, StateSetter set) {
+                    final bool free = intro.gates.isFreeFor(n.address);
+                    return SwitchListTile(
+                      key: const Key('graph-gate-free'),
+                      contentPadding: EdgeInsets.zero,
+                      value: free,
+                      title: Text(t('Otwórz za darmo')),
+                      subtitle: Text(
+                        t(
+                          'Twoja brama do Twoich znajomych jest dla tej osoby '
+                          'za darmo, bez względu na cenę.',
+                        ),
+                      ),
+                      onChanged: (bool v) => unawaited(() async {
+                        await intro.setGateFree(n.address, free: v);
+                        set(() {});
+                      }()),
+                    );
+                  },
+                ),
                 if (listMissing) ...<Widget>[
                   const SizedBox(height: 8),
                   OutlinedButton.icon(

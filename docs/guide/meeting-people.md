@@ -41,9 +41,19 @@ writing to them (worked out only on your phone).
 
 ## Table for six
 
-Say you'd like to have dinner with new people (your city and days). Someone
-who hosts picks five people from friends of friends, so that guests mostly
-don't know each other, and invites them through the friend who links them.
+Say you'd like to have dinner with new people (your city, an optional
+area such as a district, and your days). Your friends see the wish with
+your name; friends of friends see only your first name, city, area and days,
+never your address.
+
+- **The host** picks five people, so that guests mostly don't know each
+  other. Invitations to friends of friends go through the friend who links
+  you; the go-between passes them on without learning the place.
+- **The guest** answers **I'd like to come** or **No, thanks**. *I'd like to
+  come* seals your address to the host's one-time key (ML-KEM-768 + X25519).
+- **The host** accepts or declines each answer. Only accepted guests get the
+  place and the host's address, sealed to their own key, and then the event
+  itself straight from the host.
 
 ## Dinner circles
 
@@ -80,7 +90,7 @@ don't know each other, and invites them through the friend who links them.
   answering device. The *answer path* shows who passed it on and who
   answered, without content.
 
-## Nearby (Bluetooth, Android)
+## Nearby (Bluetooth)
 
 - **Visible nearby** is on by default. Your phone broadcasts a random token
   that changes every 10 minutes, together with the Bluetooth address.
@@ -92,13 +102,24 @@ don't know each other, and invites them through the friend who links them.
   Bluetooth, sealed with a one-time hybrid key (ML-KEM-768 + X25519).
   Network addresses are exchanged only between people who answered each
   other.
-- **Keep looking in the background too** (on by default): every 5 minutes an
-  8-second low-power look, skipped below 15 % battery, in battery saver or
-  when the phone sleeps. About 0.3 % of the radio's time.
+- **Keep looking in the background too** (on by default): by default every
+  5 minutes an 8-second low-power look, skipped below 15 % battery, in
+  battery saver or when the phone sleeps. About 0.3 % of the radio's time.
+  **Settings → Looking around in the background** sets how often (2 to 30
+  minutes) and how long (4 to 15 seconds), with an estimate of the battery
+  cost.
 - **Passed by:** a private log of friends you passed, built only from what
   Nearby heard, kept encrypted on the phone for 30 days (a place rounded to
   about 100 m, only if the alarm's location permission is on). Strangers are
-  only counted per hour.
+  only counted per hour. **Met?** can be confirmed there for up to 7 days
+  after passing; older entries stay only as a memory.
+- **On a computer** with Bluetooth LE the Nearby tile appears too. Windows
+  and Linux (BlueZ) show the same rotating token and look around; a Mac only
+  looks around, because macOS does not let apps broadcast this kind of
+  data. It works while Zen runs, also minimised to the tray. Computers
+  cannot write to people nearby or send Bluetooth alarm waves; use the
+  phone for that. Without Bluetooth LE the screen says Nearby does not work
+  on this computer.
 
 ## Alarm
 
@@ -129,9 +150,13 @@ don't know each other, and invites them through the friend who links them.
 
 ## Limits
 
-- Nearby, the Bluetooth wave and background looking are Android only.
-- Dinner reminders are checked while Zen runs (every 15 minutes).
-- A go-between in food sharing could swap the key in a stranger's request:
-  the sealing protects against a curious go-between, not a malicious one.
+- Nearby works on Android and on computers with Bluetooth LE (a Mac only
+  looks around); not on iPhone. Writing to people nearby, the Bluetooth
+  wave and looking around while the phone is locked are Android only.
+- Dinner reminders are checked while Zen runs (every 15 minutes) and, on
+  Android, by the background service while the phone is locked.
+- A go-between in food sharing or Table for six could swap the key in a
+  request: the sealing protects against a curious go-between, not a
+  malicious one.
 
 [Back to the guide](README.md)
