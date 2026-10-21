@@ -27,6 +27,16 @@ abstract final class ZenDiagnosticsLog {
   static List<String> _privatePlaces = const <String>[];
   static String? _home;
 
+  /// Lines written before [attach] (the first moments of a start, before
+  /// the data folder is known), the latest [earlyLineLimit] of them, with
+  /// the time they were written. They go into the file when the log is
+  /// attached: without them a start whose window came up before its data
+  /// folder was ready reads as if it stopped at the attach.
+  static final List<(DateTime, String)> _early = <(DateTime, String)>[];
+
+  /// How many lines written before [attach] are kept for it.
+  static const int earlyLineLimit = 200;
+
   static File? get file => _file;
 
   /// Points the log at [supportDirectory]. [source] tags every line so the two
@@ -45,6 +55,13 @@ abstract final class ZenDiagnosticsLog {
       _home = _homeDirectory();
       _file = target;
       write('--- $source attached (${Platform.operatingSystemVersion}) ---');
+      final List<(DateTime, String)> early = List<(DateTime, String)>.of(
+        _early,
+      );
+      _early.clear();
+      for (final (DateTime time, String line) in early) {
+        _append(target, time, line);
+      }
     } catch (error) {
       _console('[ZEN] Attaching the diagnostics log failed: $error');
     }
@@ -72,22 +89,32 @@ abstract final class ZenDiagnosticsLog {
   static void write(String line) {
     final File? target = _file;
     if (target == null) {
+      if (_early.length >= earlyLineLimit) {
+        _early.removeAt(0);
+      }
+      _early.add((DateTime.now(), line));
       return;
     }
+    _append(target, DateTime.now(), line);
+  }
+
+  /// Queues [line], written at [time], for [target] (redacted here: an
+  /// early line only once the app's folders are known).
+  static void _append(File target, DateTime time, String line) {
     final String redacted = redactDiagnosticsText(
       line,
       privatePlaces: _privatePlaces,
       homeDirectory: _home,
     );
     final String entry =
-        '${DateTime.now().toIso8601String()} [$_source] '
+        '${time.toIso8601String()} [$_source] '
         '$redacted\n';
     _writes = _writes
-        .then((_) => _append(target, entry))
+        .then((_) => _appendEntry(target, entry))
         .catchError((Object _) {});
   }
 
-  static Future<void> _append(File target, String entry) async {
+  static Future<void> _appendEntry(File target, String entry) async {
     await target.writeAsString(entry, mode: FileMode.append, flush: false);
     final int length = await target.length();
     if (length <= keepBytes * 2) {
@@ -129,6 +156,7 @@ abstract final class ZenDiagnosticsLog {
   /// data (the panic password's too). Queued after the lines already
   /// written, so none of them brings the file back afterwards.
   static Future<void> clear() async {
+    _early.clear();
     final File? target = _file;
     if (target == null) {
       return;
