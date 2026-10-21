@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/app_data_reset.dart';
@@ -13,6 +14,7 @@ import 'package:zen/src/features/account/multi/account_id.dart';
 import 'package:zen/src/features/account/multi/account_registry.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
+import 'package:zen/src/features/account/multi/background_accounts.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -817,7 +819,13 @@ class AccountsScreen extends ConsumerStatefulWidget {
 
 class _AccountsScreenState extends ConsumerState<AccountsScreen> {
   bool? _listed;
+  bool? _background;
   bool _wiping = false;
+
+  /// Only the Android background service receives for accounts that are
+  /// not open.
+  static bool get _backgroundSupported =>
+      defaultTargetPlatform == TargetPlatform.android;
 
   @override
   void initState() {
@@ -827,6 +835,18 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
 
   Future<void> _load() async {
     final ZenAccountScope account = ref.read(zenAccountProvider);
+    if (_backgroundSupported) {
+      try {
+        final bool on = await ref
+            .read(zenBackgroundAccountsProvider)
+            .isOn(account);
+        if (mounted) {
+          setState(() => _background = on);
+        }
+      } on Object {
+        // Not readable: the switch stays off.
+      }
+    }
     if (account.isDefault) {
       return;
     }
@@ -849,6 +869,91 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
           name: ref.read(userProfileControllerProvider).displayName,
         );
     ref.invalidate(zenListedAccountsProvider);
+  }
+
+  /// "Odbieraj w tle": on only after the warning (the battery, and for an
+  /// additional account what it gives up of being hidden).
+  Future<void> _setBackground(bool value) async {
+    final ZenAccountScope account = ref.read(zenAccountProvider);
+    final ZenBackgroundAccounts settings = ref.read(
+      zenBackgroundAccountsProvider,
+    );
+    if (value && !await _confirmBackground(account)) {
+      return;
+    }
+    final bool done = await settings.setOn(account, value);
+    if (!mounted) {
+      return;
+    }
+    if (!done) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(
+            t('Najwyżej {n} kont dodatkowych może odbierać w tle.', {
+              'n': ZenBackgroundAccounts.slots,
+            }),
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() => _background = value);
+  }
+
+  Future<bool> _confirmBackground(ZenAccountScope account) async {
+    final bool? yes = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialog) {
+        final ZenColors zen = ZenColors.of(dialog);
+        return AlertDialog(
+          key: const Key('accounts-background-warning'),
+          icon: Icon(Icons.battery_alert_rounded, color: zen.warning, size: 32),
+          title: Text(t('Odbierać w tle?')),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  t(
+                    'Każde konto odbierające w tle to osobny węzeł sieci, '
+                    'który działa cały czas, gdy Zen jest zablokowany albo '
+                    'zamknięty. Telefon zużyje więcej baterii i danych.',
+                  ),
+                ),
+                if (!account.isDefault) ...<Widget>[
+                  const SizedBox(height: 12),
+                  Text(
+                    t(
+                      'To konto przestaje być w pełni ukryte: ktoś z pełnym '
+                      'dostępem do tego telefonu (np. z uprawnieniami roota) '
+                      'może ustalić, że istnieje, i odczytać jego adres w '
+                      'sieci oraz listę osób, od których przyjmuje '
+                      'wiadomości. Rozmowy i reszta danych zostają '
+                      'zaszyfrowane hasłem. Powiadomienia tego konta są '
+                      'ogólne: bez nazw, treści i nazwy konta.',
+                    ),
+                    style: TextStyle(color: zen.warning),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialog).pop(false),
+              child: Text(t('Anuluj')),
+            ),
+            FilledButton(
+              key: const Key('accounts-background-confirm'),
+              onPressed: () => Navigator.of(dialog).pop(true),
+              child: Text(t('Włącz')),
+            ),
+          ],
+        );
+      },
+    );
+    return yes ?? false;
   }
 
   Future<void> _wipe(Future<void> Function(WidgetRef ref) wipe) async {
@@ -923,6 +1028,30 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
                   ),
                 ),
               ],
+              if (_backgroundSupported) ...<Widget>[
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  key: const Key('accounts-background-switch'),
+                  contentPadding: EdgeInsets.zero,
+                  value: _background ?? false,
+                  onChanged: _background == null
+                      ? null
+                      : (bool value) => unawaited(_setBackground(value)),
+                  title: Text(t('Odbieraj w tle')),
+                  subtitle: Text(
+                    account.isDefault
+                        ? t(
+                            'Gdy Zen jest zablokowany albo zamknięty. Każde '
+                            'konto w tle zużywa więcej baterii.',
+                          )
+                        : t(
+                            'Gdy Zen jest zablokowany albo zamknięty. Zużywa '
+                            'więcej baterii, a ktoś z pełnym dostępem do '
+                            'telefonu mógłby ustalić, że to konto istnieje.',
+                          ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               ZenTile(
                 key: const Key('accounts-add'),
@@ -942,11 +1071,12 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
               ZenInfo(
                 icon: Icons.notifications_paused_outlined,
                 text: t(
-                  'W tle (zablokowana aplikacja, telefon w kieszeni) odbiera '
-                  'tylko konto domyślne. Konto dodatkowe odbiera, gdy jest '
-                  'otwarte; to, co przyszło pod jego nieobecność, czeka u '
-                  'zaufanych znajomych albo u nadawcy i dochodzi po '
-                  'otwarciu.',
+                  'W tle (zablokowana aplikacja, telefon w kieszeni) '
+                  'domyślnie odbiera tylko konto domyślne; każde konto może '
+                  'to zmienić przełącznikiem „Odbieraj w tle”. Konto bez '
+                  'niego odbiera, gdy jest otwarte; to, co przyszło pod jego '
+                  'nieobecność, czeka u zaufanych znajomych albo u nadawcy i '
+                  'dochodzi po otwarciu.',
                 ),
               ),
               const SizedBox(height: 8),

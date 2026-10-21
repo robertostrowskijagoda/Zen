@@ -1157,13 +1157,16 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
   final String configJson = await _loadOrCreateNodeConfig(
     bridge,
     config.nodeConfigProtector,
+    config.supportDirectory,
   );
   // The user's public peers (public_peers.dart) before the node dials any.
   await applyStoredPublicPeers(bridge);
   final Map<String, dynamic> startResult = bridge.startNode(configJson);
   final int handle = _readNodeHandle(startResult);
   // The device keys pinned in earlier runs, before any signal comes in.
-  final Directory runtimeDirectory = (await _runtimeConfigFile()).parent;
+  final Directory runtimeDirectory = (await _runtimeConfigFile(
+    config.supportDirectory,
+  )).parent;
   final NodeKeyPinKeeper pins = NodeKeyPinKeeper(
     readPins: () => bridge.pqPins(handle),
     writePins: (String pinsJson) => bridge.setPqPins(handle, pinsJson),
@@ -1276,10 +1279,11 @@ const String kNodeConfigStorageKey = 'runtime/yggdrasil.config';
 
 Future<String> _loadOrCreateNodeConfig(
   NodeSignalBridge bridge,
-  KeyedBinaryPayloadProtector? protector,
-) async {
+  KeyedBinaryPayloadProtector? protector, [
+  Future<Directory> Function()? supportDirectory,
+]) async {
   return loadOrCreateNodeConfigJson(
-    file: await _runtimeConfigFile(),
+    file: await _runtimeConfigFile(supportDirectory),
     generateConfig: () => normalizeRuntimeNodeConfig(
       bridge.generateConfigJson(),
       isAndroid: Platform.isAndroid,
@@ -1422,8 +1426,11 @@ Future<void> _writeAtomically(File file, Uint8List bytes) async {
   await tmp.rename(file.path);
 }
 
-Future<File> _runtimeConfigFile() async {
-  final Directory supportDirectory = await ZenInstance.supportDirectory();
+Future<File> _runtimeConfigFile([
+  Future<Directory> Function()? supportDirectoryOf,
+]) async {
+  final Directory supportDirectory =
+      await (supportDirectoryOf ?? ZenInstance.supportDirectory)();
   final Directory runtimeDirectory = Directory(
     '${supportDirectory.path}${Platform.pathSeparator}runtime',
   );
@@ -1539,7 +1546,13 @@ final class RuntimeSignalBootstrapConfig {
     this.waitTimeout = const Duration(seconds: 5),
     this.nodeConfigProtector,
     this.fallbackPollInterval = const Duration(seconds: 1),
+    this.supportDirectory,
   });
+
+  /// The folder of the account whose node this is; `null`: the account
+  /// open in this isolate. Set for the other accounts the background
+  /// service (or a computer's tray) receives for.
+  final Future<Directory> Function()? supportDirectory;
 
   /// How long one blocking signal wait lasts before it is renewed (signals
   /// arrive as they come; this only bounds one wait).
