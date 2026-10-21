@@ -7,6 +7,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattServer
 import android.bluetooth.BluetoothGattServerCallback
 import android.bluetooth.BluetoothGattService
@@ -14,6 +15,7 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
@@ -49,9 +51,14 @@ import java.security.SecureRandom
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Bluetooth links with friends nearby (§5.1 item 6; `zen/bt_link` + events
+ * Bluetooth links with friends nearby (item 6; `zen/bt_link` + events
  * on `zen/bt_link/events`). Dart decides whom to link with
  * (native_stream_local_link.dart); this file drives the radio and pumps
  * each Bluetooth stream into the endpoint the Go bridge gave Dart: it
@@ -71,6 +78,12 @@ import java.util.concurrent.Executors
  *    without pairing), and classic RFCOMM (insecure) with devices paired
  *    in the system settings (computers running Zen on Windows, phones on
  *    Android 9 and older), under the Zen RFCOMM service class.
+ *  - GATT streams, for Windows (no BLE L2CAP channels there): …0005 is
+ *    written with response by the GATT client, …0006 notified by the
+ *    server; an empty value ends the stream. This GATT server takes them
+ *    (a client subscribing to …0006 opens one), and a device whose GATT
+ *    service has both but no PSM (a Windows computer) is reached as a
+ *    GATT client.
  *
  * Permissions are the ones of people nearby ([ZenNearbyBridge]). Battery:
  * advertising and scanning run only in the windows Dart asks for; the
@@ -85,6 +98,9 @@ object ZenBluetoothLinkBridge {
     private val ADVERT: UUID = UUID.fromString("5a454e00-6c69-6e6b-0000-000000000002")
     private val PSM: UUID = UUID.fromString("5a454e00-6c69-6e6b-0000-000000000003")
     private val RFCOMM: UUID = UUID.fromString("5a454e00-6c69-6e6b-0000-000000000004")
+    private val STREAM_IN: UUID = UUID.fromString("5a454e00-6c69-6e6b-0000-000000000005")
+    private val STREAM_OUT: UUID = UUID.fromString("5a454e00-6c69-6e6b-0000-000000000006")
+    private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     private const val COMPANY_ID = 0xFFFF
     private val MAGIC = byteArrayOf(0x5A, 0x4C)
 
@@ -105,6 +121,11 @@ object ZenBluetoothLinkBridge {
     private const val LOOPBACK_WAIT_MS = 5_000
     private const val GATT_READ_MS = 10_000L
     private const val GATT_REREAD_MS = 120_000L
+    private const val GATT_CONNECT_MS = 20_000L
+    private const val GATT_WRITE_MS = 10_000L
+    private const val GATT_MTU = 517
+    // GATT values a stream keeps while it waits for Dart's endpoint.
+    private const val MAX_GATT_QUEUED = 512
     private const val SEEN_EVERY_MS = 3_000L
     private const val BUFFER = 8192
     private const val MAX_SEEN = 512
@@ -117,7 +138,7 @@ object ZenBluetoothLinkBridge {
     }
 
     /** One stream pumped into the bridge. */
-    private class Pipe(val device: String, val bt: BluetoothSocket, val loop: Socket) {
+    private class Pipe(val device: String, val bt: Closeable, val loop: Socket) {
         @Volatile
         private var closed = false
 
@@ -135,6 +156,46 @@ object ZenBluetoothLinkBridge {
         }
     }
 
+    /**
+     * A byte stream over the Zen service's stream characteristics. [send]
+     * hands the radio one piece of at most [mtu] - 3 bytes and waits until
+     * it took it; values from the radio wait in [inbound] (an empty array
+     * ends the stream).
+     */
+    private class GattPipe(val device: String) : Closeable {
+        val inbound = LinkedBlockingQueue<ByteArray>()
+
+        @Volatile
+        var mtu = 23
+
+        @Volatile
+        var closed = false
+            private set
+        var send: (ByteArray) -> Boolean = { false }
+        var onClose: () -> Unit = {}
+
+        fun received(value: ByteArray) {
+            if (closed) return
+            if (value.isEmpty() || inbound.size >= MAX_GATT_QUEUED) {
+                close()
+                return
+            }
+            inbound.offer(value)
+        }
+
+        override fun close() {
+            synchronized(this) {
+                if (closed) return
+                closed = true
+            }
+            inbound.offer(ByteArray(0))
+            try {
+                onClose()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     private val clients = ArrayList<Client>()
     private val main = Handler(Looper.getMainLooper())
     private val io = Executors.newCachedThreadPool()
@@ -145,6 +206,8 @@ object ZenBluetoothLinkBridge {
     // Main thread, except where marked.
     private var l2capServer: BluetoothServerSocket? = null
     private var rfcommServer: BluetoothServerSocket? = null
+    /** Read by notifications on worker threads. */
+    @Volatile
     private var gattServer: BluetoothGattServer? = null
     private var advertiseCallback: AdvertiseCallback? = null
     private var scanCallback: ScanCallback? = null
@@ -164,8 +227,14 @@ object ZenBluetoothLinkBridge {
     private var gattBusy = false
 
     /** Incoming streams waiting for Dart's endpoint, and pumped streams. */
-    private val incoming = ConcurrentHashMap<String, Pair<String, BluetoothSocket>>()
+    private val incoming = ConcurrentHashMap<String, Pair<String, Closeable>>()
     private val streams = ConcurrentHashMap<String, Pipe>()
+
+    /** GATT streams clients opened to this device's server, by address. */
+    private val gattServerPipes = ConcurrentHashMap<String, GattPipe>()
+    private val gattMtus = ConcurrentHashMap<String, Int>()
+    private val notifyLock = Any()
+    private val notifySent = Semaphore(0)
 
     fun register(engine: FlutterEngine, activity: FragmentActivity) {
         attach(engine, activity.applicationContext, activity)
@@ -259,8 +328,14 @@ object ZenBluetoothLinkBridge {
                             waiting?.let { quietly(it.second) }
                             result.success(false)
                         } else {
-                            pipe(waiting.first, waiting.second, port, token) { ok ->
-                                main.post { result.success(ok) }
+                            val reply: (Boolean) -> Unit = { ok -> main.post { result.success(ok) } }
+                            when (val stream = waiting.second) {
+                                is BluetoothSocket -> pipe(waiting.first, stream, port, token, reply)
+                                is GattPipe -> pipeGatt(stream, port, token, reply)
+                                else -> {
+                                    quietly(stream)
+                                    reply(false)
+                                }
                             }
                         }
                     }
@@ -423,6 +498,65 @@ object ZenBluetoothLinkBridge {
         }
     }
 
+    /** Pumps a GATT stream into the bridge's endpoint, like [pipe]. */
+    private fun pipeGatt(gatt: GattPipe, port: Int, token: ByteArray, done: (Boolean) -> Unit) {
+        io.execute {
+            val loop = Socket()
+            try {
+                loop.tcpNoDelay = true
+                loop.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), port), LOOPBACK_WAIT_MS)
+                loop.getOutputStream().write(token)
+            } catch (error: IOException) {
+                Log.w(TAG, "The bridge's endpoint is gone", error)
+                quietly(loop)
+                gatt.close()
+                done(false)
+                return@execute
+            }
+            val id = randomId()
+            val pipe = Pipe(gatt.device, gatt, loop)
+            streams[id] = pipe
+            val finish = {
+                pipe.close()
+                streams.remove(id)
+            }
+            io.execute {
+                try {
+                    val out = loop.getOutputStream()
+                    while (true) {
+                        val value = gatt.inbound.take()
+                        if (value.isEmpty()) break
+                        out.write(value)
+                        out.flush()
+                    }
+                } catch (_: Exception) {
+                    // Either side closed.
+                }
+                finish()
+            }
+            io.execute {
+                val buffer = ByteArray(BUFFER)
+                try {
+                    val input = loop.getInputStream()
+                    reading@ while (true) {
+                        val n = input.read(buffer)
+                        if (n < 0) break
+                        var offset = 0
+                        while (offset < n) {
+                            val length = minOf(maxOf(gatt.mtu - 3, 20), n - offset)
+                            if (!gatt.send(buffer.copyOfRange(offset, offset + length))) break@reading
+                            offset += length
+                        }
+                    }
+                } catch (_: IOException) {
+                    // Either side closed.
+                }
+                finish()
+            }
+            done(true)
+        }
+    }
+
     private fun copy(from: InputStream, to: OutputStream, maxPacket: Int) {
         val buffer = ByteArray(BUFFER)
         try {
@@ -459,7 +593,7 @@ object ZenBluetoothLinkBridge {
             done(false)
             return
         }
-        if (!classic && (!hasLe(context) || channel <= 0)) {
+        if (!classic && !hasLe(context)) {
             done(false)
             return
         }
@@ -467,6 +601,11 @@ object ZenBluetoothLinkBridge {
             ?: if (BluetoothAdapter.checkBluetoothAddress(address)) adapter.getRemoteDevice(address) else null
         if (device == null) {
             done(false)
+            return
+        }
+        if (!classic && channel <= 0) {
+            // No L2CAP channel (a Windows computer): a GATT stream.
+            connectGattStream(context, device, port, token, done)
             return
         }
         io.execute {
@@ -603,6 +742,93 @@ object ZenBluetoothLinkBridge {
                         value.copyOfRange(offset, value.size),
                     )
                 }
+
+                override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
+                    if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                        gattMtus.remove(device.address)
+                        gattServerPipes[device.address]?.close()
+                    }
+                }
+
+                override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
+                    gattMtus[device.address] = mtu
+                    gattServerPipes[device.address]?.mtu = mtu
+                }
+
+                override fun onDescriptorReadRequest(
+                    device: BluetoothDevice,
+                    requestId: Int,
+                    offset: Int,
+                    descriptor: BluetoothGattDescriptor,
+                ) {
+                    val value = if (gattServerPipes.containsKey(device.address)) {
+                        BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    } else {
+                        BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE
+                    }
+                    server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, value)
+                }
+
+                override fun onDescriptorWriteRequest(
+                    device: BluetoothDevice,
+                    requestId: Int,
+                    descriptor: BluetoothGattDescriptor,
+                    preparedWrite: Boolean,
+                    responseNeeded: Boolean,
+                    offset: Int,
+                    value: ByteArray?,
+                ) {
+                    val stream = descriptor.uuid == CCCD && descriptor.characteristic?.uuid == STREAM_OUT
+                    if (stream) {
+                        if (value != null && value.isNotEmpty() && (value[0].toInt() and 0x01) != 0) {
+                            openServerGattPipe(device)
+                        } else {
+                            gattServerPipes[device.address]?.close()
+                        }
+                    }
+                    if (responseNeeded) {
+                        server?.sendResponse(
+                            device,
+                            requestId,
+                            if (stream) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_FAILURE,
+                            0,
+                            null,
+                        )
+                    }
+                }
+
+                override fun onCharacteristicWriteRequest(
+                    device: BluetoothDevice,
+                    requestId: Int,
+                    characteristic: BluetoothGattCharacteristic,
+                    preparedWrite: Boolean,
+                    responseNeeded: Boolean,
+                    offset: Int,
+                    value: ByteArray?,
+                ) {
+                    val pipe = if (characteristic.uuid == STREAM_IN && !preparedWrite) {
+                        gattServerPipes[device.address]
+                    } else {
+                        null
+                    }
+                    // In order: the client waits for this answer before the next.
+                    if (value != null) {
+                        pipe?.received(value)
+                    }
+                    if (responseNeeded) {
+                        server?.sendResponse(
+                            device,
+                            requestId,
+                            if (pipe != null) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_FAILURE,
+                            0,
+                            null,
+                        )
+                    }
+                }
+
+                override fun onNotificationSent(device: BluetoothDevice, status: Int) {
+                    notifySent.release()
+                }
             },
         )
         val service = BluetoothGattService(SERVICE, BluetoothGattService.SERVICE_TYPE_PRIMARY)
@@ -615,8 +841,274 @@ object ZenBluetoothLinkBridge {
                 ),
             )
         }
+        service.addCharacteristic(
+            BluetoothGattCharacteristic(
+                STREAM_IN,
+                BluetoothGattCharacteristic.PROPERTY_WRITE,
+                BluetoothGattCharacteristic.PERMISSION_WRITE,
+            ),
+        )
+        val out = BluetoothGattCharacteristic(
+            STREAM_OUT,
+            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            BluetoothGattCharacteristic.PERMISSION_READ,
+        )
+        out.addDescriptor(
+            BluetoothGattDescriptor(
+                CCCD,
+                BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE,
+            ),
+        )
+        service.addCharacteristic(out)
         server?.addService(service)
         gattServer = server
+    }
+
+    /**
+     * A GATT client subscribed to the stream: its pipe exists at once (its
+     * first writes may come right after), Dart hears of it on the main
+     * thread. Binder threads.
+     */
+    private fun openServerGattPipe(device: BluetoothDevice) {
+        val address = device.address
+        if (gattServerPipes[address]?.closed == false) {
+            return
+        }
+        val pipe = GattPipe(address)
+        pipe.mtu = gattMtus[address] ?: 23
+        pipe.send = { value -> notifyGatt(device, value) }
+        pipe.onClose = {
+            gattServerPipes.remove(address, pipe)
+            // The end, for the client.
+            io.execute { notifyGatt(device, ByteArray(0)) }
+        }
+        gattServerPipes[address] = pipe
+        main.post {
+            val owner = owner()
+            if (owner == null || pipe.closed || incoming.size >= MAX_INCOMING || streams.size >= MAX_STREAMS) {
+                pipe.close()
+                return@post
+            }
+            val id = randomId()
+            incoming[id] = address to pipe
+            main.postDelayed({ incoming.remove(id)?.let { quietly(it.second) } }, INCOMING_WAIT_MS)
+            send(owner, mapOf("type" to "incoming", "id" to id))
+        }
+    }
+
+    /** Notifies [device] of [value] and waits until it went out (one at a time). */
+    @SuppressLint("MissingPermission")
+    private fun notifyGatt(device: BluetoothDevice, value: ByteArray): Boolean {
+        val server = gattServer ?: return false
+        val characteristic = server.getService(SERVICE)?.getCharacteristic(STREAM_OUT) ?: return false
+        synchronized(notifyLock) {
+            notifySent.drainPermits()
+            val started = try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    server.notifyCharacteristicChanged(device, characteristic, false, value) ==
+                        BluetoothStatusCodes.SUCCESS
+                } else {
+                    notifyGattLegacy(server, device, characteristic, value)
+                }
+            } catch (_: Exception) {
+                false
+            }
+            return started && notifySent.tryAcquire(GATT_WRITE_MS, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    @SuppressLint("MissingPermission")
+    private fun notifyGattLegacy(
+        server: BluetoothGattServer,
+        device: BluetoothDevice,
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray,
+    ): Boolean {
+        characteristic.value = value
+        return server.notifyCharacteristicChanged(device, characteristic, false)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun writeGatt(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeCharacteristic(characteristic, value, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
+                BluetoothStatusCodes.SUCCESS
+        } else {
+            writeGattLegacy(gatt, characteristic, value)
+        }
+
+    @Suppress("DEPRECATION")
+    @SuppressLint("MissingPermission")
+    private fun writeGattLegacy(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray): Boolean {
+        characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        characteristic.value = value
+        return gatt.writeCharacteristic(characteristic)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun writeDescriptor(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, value: ByteArray): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS
+        } else {
+            writeDescriptorLegacy(gatt, descriptor, value)
+        }
+
+    @Suppress("DEPRECATION")
+    @SuppressLint("MissingPermission")
+    private fun writeDescriptorLegacy(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, value: ByteArray): Boolean {
+        descriptor.value = value
+        return gatt.writeDescriptor(descriptor)
+    }
+
+    /**
+     * Opens a GATT stream to [device] (a Windows computer) and pumps it into
+     * the endpoint: connect, a larger MTU, subscribe to …0006, then writes
+     * with response to …0005, one at a time.
+     */
+    @SuppressLint("MissingPermission")
+    private fun connectGattStream(
+        context: Context,
+        device: BluetoothDevice,
+        port: Int,
+        token: ByteArray,
+        done: (Boolean) -> Unit,
+    ) {
+        val pipe = GattPipe(device.address)
+        val connection = AtomicReference<BluetoothGatt?>(null)
+        val input = AtomicReference<BluetoothGattCharacteristic?>(null)
+        val settled = AtomicBoolean(false)
+        val discovering = AtomicBoolean(false)
+        val written = Semaphore(0)
+        val writeOk = AtomicBoolean(false)
+        fun fail() {
+            if (settled.compareAndSet(false, true)) {
+                pipe.close()
+                done(false)
+            }
+        }
+        pipe.onClose = {
+            written.release()
+            connection.getAndSet(null)?.let { gatt ->
+                io.execute {
+                    try {
+                        gatt.disconnect()
+                        gatt.close()
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+        }
+        pipe.send = send@{ value ->
+            val gatt = connection.get() ?: return@send false
+            val characteristic = input.get() ?: return@send false
+            written.drainPermits()
+            writeOk.set(false)
+            val started = try {
+                writeGatt(gatt, characteristic, value)
+            } catch (_: Exception) {
+                false
+            }
+            started && written.tryAcquire(GATT_WRITE_MS, TimeUnit.MILLISECONDS) && writeOk.get() && !pipe.closed
+        }
+        val callback = object : BluetoothGattCallback() {
+            fun discover(gatt: BluetoothGatt) {
+                if (discovering.compareAndSet(false, true) && !gatt.discoverServices()) {
+                    fail()
+                }
+            }
+
+            override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+                if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    if (!gatt.requestMtu(GATT_MTU)) {
+                        discover(gatt)
+                    }
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    fail()
+                    pipe.close()
+                }
+            }
+
+            override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    pipe.mtu = mtu
+                }
+                discover(gatt)
+            }
+
+            override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                val service = gatt.getService(SERVICE)
+                val out = service?.getCharacteristic(STREAM_OUT)
+                val into = service?.getCharacteristic(STREAM_IN)
+                val subscription = out?.getDescriptor(CCCD)
+                if (status != BluetoothGatt.GATT_SUCCESS || out == null || into == null || subscription == null ||
+                    !gatt.setCharacteristicNotification(out, true)
+                ) {
+                    fail()
+                    return
+                }
+                input.set(into)
+                if (!writeDescriptor(gatt, subscription, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)) {
+                    fail()
+                }
+            }
+
+            override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+                if (descriptor.uuid != CCCD) {
+                    return
+                }
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    fail()
+                } else if (settled.compareAndSet(false, true)) {
+                    pipeGatt(pipe, port, token, done)
+                }
+            }
+
+            override fun onCharacteristicChanged(
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                value: ByteArray,
+            ) {
+                if (characteristic.uuid == STREAM_OUT) {
+                    pipe.received(value)
+                }
+            }
+
+            @Deprecated("Before Android 13")
+            override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && characteristic.uuid == STREAM_OUT) {
+                    @Suppress("DEPRECATION")
+                    val value = characteristic.value?.copyOf() ?: return
+                    pipe.received(value)
+                }
+            }
+
+            override fun onCharacteristicWrite(
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                status: Int,
+            ) {
+                if (characteristic.uuid == STREAM_IN) {
+                    writeOk.set(status == BluetoothGatt.GATT_SUCCESS)
+                    written.release()
+                }
+            }
+        }
+        val gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+        if (gatt == null) {
+            fail()
+            return
+        }
+        connection.set(gatt)
+        if (pipe.closed) {
+            // Failed before connectGatt returned.
+            try {
+                gatt.close()
+            } catch (_: Exception) {
+            }
+            return
+        }
+        main.postDelayed({ fail() }, GATT_CONNECT_MS)
     }
 
     @SuppressLint("MissingPermission")
@@ -700,7 +1192,7 @@ object ZenBluetoothLinkBridge {
         }
     }
 
-    private fun reportSeen(address: String, advertBytes: ByteArray, channel: Int) {
+    private fun reportSeen(address: String, advertBytes: ByteArray, channel: Int, connectable: Boolean = channel > 0) {
         send(
             owner(),
             mapOf(
@@ -708,12 +1200,15 @@ object ZenBluetoothLinkBridge {
                 "device" to address,
                 "advert" to hex(advertBytes),
                 "psm" to channel,
-                "connectable" to (channel > 0),
+                "connectable" to connectable,
             ),
         )
     }
 
-    /** Reads the advert and the PSM of a device that shows them on GATT. */
+    /**
+     * Reads the advert and the PSM of a device that shows them on GATT, and
+     * whether it takes GATT streams (Windows: PSM 0).
+     */
     @SuppressLint("MissingPermission")
     private fun readOverGatt(context: Context, device: BluetoothDevice) {
         val address = device.address
@@ -726,7 +1221,7 @@ object ZenBluetoothLinkBridge {
         var readAdvert: ByteArray? = null
         var finished = false
         var connection: BluetoothGatt? = null
-        fun finish(channel: Int) {
+        fun finish(channel: Int, stream: Boolean = false) {
             if (finished) return
             finished = true
             gattBusy = false
@@ -736,8 +1231,8 @@ object ZenBluetoothLinkBridge {
             } catch (_: Exception) {
             }
             val bytes = readAdvert
-            if (channel > 0 && bytes != null && bytes.size >= MIN_ADVERT && bytes.size <= MAX_ADVERT) {
-                reportSeen(address, bytes, channel)
+            if ((channel > 0 || stream) && bytes != null && bytes.size >= MIN_ADVERT && bytes.size <= MAX_ADVERT) {
+                reportSeen(address, bytes, channel, connectable = true)
             }
         }
         fun onRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray?, status: Int) {
@@ -751,7 +1246,10 @@ object ZenBluetoothLinkBridge {
                         finish(0)
                     }
                 } else if (characteristic.uuid == PSM && value.size >= 2) {
-                    finish((value[0].toInt() and 0xFF) or ((value[1].toInt() and 0xFF) shl 8))
+                    val service = gatt.getService(SERVICE)
+                    val stream = service?.getCharacteristic(STREAM_IN) != null &&
+                        service?.getCharacteristic(STREAM_OUT) != null
+                    finish((value[0].toInt() and 0xFF) or ((value[1].toInt() and 0xFF) shl 8), stream)
                 } else {
                     finish(0)
                 }
@@ -865,6 +1363,9 @@ object ZenBluetoothLinkBridge {
         } catch (_: Exception) {
         }
         gattServer = null
+        gattServerPipes.values.forEach { it.close() }
+        gattServerPipes.clear()
+        gattMtus.clear()
         gattBusy = false
         seen.clear()
         seenAt.clear()

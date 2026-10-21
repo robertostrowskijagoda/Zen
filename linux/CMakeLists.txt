@@ -138,9 +138,11 @@ install(FILES "${YGGDRASIL_BRIDGE_DIR}/LICENSES-GO.txt"
   DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime
   OPTIONAL)
-# Zen's own licence (GPL-3.0-only) and its additional terms.
+# Zen's own licence (GPL-3.0-only), its additional terms and the
+# third-party notices.
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE"
   "${CMAKE_CURRENT_SOURCE_DIR}/../NOTICE"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../THIRD_PARTY_NOTICES.md"
   DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)
 

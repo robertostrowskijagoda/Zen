@@ -26,7 +26,10 @@ import (
 //   - BLE: GATT service 5a454e00-6c69-6e6b-0000-000000000001 (advertised),
 //     characteristics …0002 (the advert) and …0003 (the L2CAP PSM, uint16
 //     little-endian); manufacturer data of company 0xFFFF: "ZL", the PSM
-//     (uint16 little-endian), the advert.
+//     (uint16 little-endian), the advert. GATT streams where there are no
+//     L2CAP channels (Windows, PSM 0; Android takes and opens them): …0005
+//     written with response by the client, …0006 notified by the server, an
+//     empty value ends the stream.
 //   - RFCOMM: the service class 5a454e00-6c69-6e6b-0000-000000000004.
 const (
 	// Incoming streams wait this long for the app's endpoint.

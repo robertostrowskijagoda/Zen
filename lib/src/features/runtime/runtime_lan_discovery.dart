@@ -10,7 +10,7 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 
-// Secrets for direct links nearby (§5.1 item 6): friends' devices and the
+// Secrets for direct links nearby: friends' devices and the
 // account's own devices on the same Wi-Fi, in a Wi-Fi Direct group or over
 // Bluetooth connect directly, also without internet
 // (native/yggdrasil_bridge/local_link.go).

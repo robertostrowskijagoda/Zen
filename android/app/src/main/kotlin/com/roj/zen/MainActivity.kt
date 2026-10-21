@@ -20,7 +20,7 @@ import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 
-// FragmentActivity: the system biometric prompt (key vault, §14.1) and
+// FragmentActivity: the system biometric prompt (key vault) and
 // local_auth need it.
 class MainActivity : FlutterFragmentActivity() {
 
@@ -85,13 +85,14 @@ class MainActivity : FlutterFragmentActivity() {
         ZenWifiDirectBridge.register(flutterEngine, this)
         ZenBluetoothLinkBridge.register(flutterEngine, this)
         ZenPermissionsBridge.register(flutterEngine, this)
+        ZenLocationBridge.register(flutterEngine, this, this)
         ZenAlarmShortcut.register(flutterEngine, this, background = false)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         ZenCallBridge.unregister(flutterEngine)
         // Only this engine's share of the radio stops; the background
-        // service keeps whatever it still uses (§15, §16.3).
+        // service keeps whatever it still uses.
         ZenNearbyBridge.unregister(flutterEngine)
         ZenWifiDirectBridge.unregister(flutterEngine)
         ZenBluetoothLinkBridge.unregister(flutterEngine)

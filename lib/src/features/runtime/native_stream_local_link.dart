@@ -5,8 +5,9 @@ import 'package:flutter/services.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/runtime/local_link.dart';
 
-// Links over a native byte stream (§5.1 item 6): Bluetooth (Android and
-// Apple through their bridges, Linux and Windows through the Go bridge,
+// Links over a native byte stream: Bluetooth (Android and
+// Apple through their bridges, Linux through the Go bridge, Windows through
+// the runner (BLE) and the Go bridge (paired devices),
 // bluetooth_local_links.dart) and Apple's Multipeer Connectivity. The radio
 // shows the bridge's advert (a Bloom filter only friends can test, renewed
 // every cycle) and looks for others' in short windows; this file decides

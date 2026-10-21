@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
-import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
@@ -11,36 +10,46 @@ import 'package:zen/src/features/runtime/local_link.dart';
 import 'package:zen/src/features/runtime/native_stream_local_link.dart';
 import 'package:zen/src/features/runtime/yggdrasil_bridge_ffi.dart';
 
-// Bluetooth and Multipeer links on each platform (§5.1 item 6):
+// Bluetooth and Multipeer links on each platform:
 //  - Android: BLE advertising, L2CAP channels (Android 10+) and RFCOMM with
 //    paired devices (ZenBluetoothLinkBridge.kt);
 //  - iPhone, iPad, Mac: CoreBluetooth L2CAP channels, and Multipeer
 //    Connectivity between Apple devices (ZenLocalLinksBridge.swift);
 //  - Linux: BlueZ over D-Bus for the adverts (bluez_le.dart), the Go
 //    bridge's L2CAP sockets for the streams;
-//  - Windows: RFCOMM with paired devices through the Go bridge (Windows
-//    gives apps no BLE L2CAP channels).
+//  - Windows: BLE adverts and GATT streams through the runner (Windows
+//    gives apps no BLE L2CAP channels; bluetooth_le_bridge.cpp), with
+//    Android and other Windows computers; RFCOMM with paired devices
+//    through the Go bridge ([WindowsBluetoothRadio]).
 // The radios share one format (bluetooth_link.go) so every pair of
 // platforms that both have a way can link.
 
-/// The platforms with Bluetooth links.
+/// Whether this device has Bluetooth links.
 bool get bluetoothLinksPlatform =>
-    Platform.isAndroid ||
-    Platform.isIOS ||
-    Platform.isMacOS ||
-    Platform.isLinux ||
-    Platform.isWindows;
+    localTransportsOf(localLinksHost).contains(LocalLinkTransport.bluetooth);
 
-/// The platforms with Multipeer Connectivity.
-bool get multipeerLinksPlatform => Platform.isIOS || Platform.isMacOS;
+/// Whether this device has Multipeer Connectivity.
+bool get multipeerLinksPlatform =>
+    localTransportsOf(localLinksHost).contains(LocalLinkTransport.multipeer);
 
-NativeStreamLocalLink bluetoothLocalLink() => NativeStreamLocalLink(
-  transport: LocalLinkTransport.bluetooth,
-  radio: Platform.isLinux || Platform.isWindows
-      ? GoBluetoothRadio(le: Platform.isLinux ? BluezLe() : null)
-      : const MethodChannelLinkRadio('zen/bt_link'),
-  supportedPlatform: bluetoothLinksPlatform,
-);
+/// The Bluetooth radio of [platform].
+NativeLinkRadio bluetoothRadioFor(TargetPlatform platform) =>
+    switch (platform) {
+      TargetPlatform.windows => WindowsBluetoothRadio(),
+      TargetPlatform.linux => GoBluetoothRadio(le: BluezLe()),
+      _ => const MethodChannelLinkRadio('zen/bt_link'),
+    };
+
+NativeStreamLocalLink bluetoothLocalLink([TargetPlatform? platform]) {
+  final TargetPlatform on = platform ?? localLinksHost;
+  return NativeStreamLocalLink(
+    transport: LocalLinkTransport.bluetooth,
+    radio: bluetoothRadioFor(on),
+    supportedPlatform: localTransportsOf(
+      on,
+    ).contains(LocalLinkTransport.bluetooth),
+  );
+}
 
 NativeStreamLocalLink multipeerLocalLink() => NativeStreamLocalLink(
   transport: LocalLinkTransport.multipeer,
@@ -104,8 +113,9 @@ final class _FfiGoBluetoothApi implements GoBluetoothApi {
   }
 }
 
-/// Bluetooth on Linux and Windows: the streams are the Go bridge's (polled
-/// while running), the adverts BlueZ's ([le], Linux only).
+/// Bluetooth through the Go bridge: on Linux the streams (polled while
+/// running) with BlueZ's adverts ([le]); on Windows the RFCOMM streams with
+/// paired devices, inside [WindowsBluetoothRadio].
 final class GoBluetoothRadio implements NativeLinkRadio {
   GoBluetoothRadio({
     GoBluetoothApi? go,
@@ -307,6 +317,131 @@ final class GoBluetoothRadio implements NativeLinkRadio {
       _poll?.cancel();
       _poll = null;
       _events.add(<Object?, Object?>{'type': 'radio', 'on': false});
+    }
+  }
+}
+
+/// Bluetooth on Windows: BLE adverts and GATT streams from the runner
+/// ([le]: `zen/bt_link`, bluetooth_le_bridge.cpp) and RFCOMM with paired
+/// devices from the Go bridge ([classic]). An incoming stream goes back to
+/// the side that reported it.
+final class WindowsBluetoothRadio implements NativeLinkRadio {
+  WindowsBluetoothRadio({NativeLinkRadio? classic, NativeLinkRadio? le})
+    : _classic = classic ?? GoBluetoothRadio(),
+      _le = le ?? const MethodChannelLinkRadio('zen/bt_link');
+
+  final NativeLinkRadio _classic;
+  final NativeLinkRadio _le;
+
+  /// Incoming streams the runner reported and Dart has not answered yet
+  /// (a set literal keeps the order: the oldest goes first when full).
+  final Set<String> _leIncoming = <String>{};
+  static const int _maxIncoming = 64;
+  final List<StreamSubscription<Map<Object?, Object?>>> _subscriptions =
+      <StreamSubscription<Map<Object?, Object?>>>[];
+  late final StreamController<Map<Object?, Object?>> _events =
+      StreamController<Map<Object?, Object?>>.broadcast(
+        onListen: _listen,
+        onCancel: _cancel,
+      );
+
+  @override
+  Future<Map<String, Object?>> state() async {
+    final List<Map<String, Object?>> both = await Future.wait(
+      <Future<Map<String, Object?>>>[_classic.state(), _le.state()],
+    );
+    final Map<String, Object?> classic = both[0];
+    final Map<String, Object?> le = both[1];
+    final bool leOn = le['supported'] == true;
+    final bool pairedOn =
+        classic['supported'] == true && classic['paired'] == true;
+    return <String, Object?>{
+      'supported': leOn || pairedOn,
+      'permitted': true,
+      'enabled':
+          (leOn && le['enabled'] == true) ||
+          (pairedOn && classic['enabled'] == true),
+      'advertBytes': le['advertBytes'] ?? 0,
+      'discovery': leOn && le['discovery'] == true,
+      'paired': pairedOn,
+    };
+  }
+
+  @override
+  Future<bool> requestPermissions() async => true;
+
+  @override
+  Future<bool> start() async {
+    final List<bool> started = await Future.wait(<Future<bool>>[
+      _classic.start(),
+      _le.start(),
+    ]);
+    return started.contains(true);
+  }
+
+  @override
+  Future<void> stop() async {
+    _leIncoming.clear();
+    await Future.wait(<Future<void>>[_classic.stop(), _le.stop()]);
+  }
+
+  @override
+  Future<void> advertise(String advertHex, Duration window) =>
+      _le.advertise(advertHex, window);
+
+  @override
+  Future<void> scan(Duration window) => _le.scan(window);
+
+  @override
+  Future<List<String>> pairedDevices() => _classic.pairedDevices();
+
+  @override
+  Future<bool> connect(
+    String device,
+    LocalLinkEndpoint endpoint, {
+    int psm = 0,
+    bool classic = false,
+    String? advert,
+  }) => classic
+      ? _classic.connect(device, endpoint, classic: true)
+      : _le.connect(device, endpoint, psm: psm, advert: advert);
+
+  @override
+  Future<bool> accept(String id, LocalLinkEndpoint endpoint) =>
+      _leIncoming.remove(id)
+      ? _le.accept(id, endpoint)
+      : _classic.accept(id, endpoint);
+
+  @override
+  Future<void> reject(String id) =>
+      _leIncoming.remove(id) ? _le.reject(id) : _classic.reject(id);
+
+  @override
+  Stream<Map<Object?, Object?>> get events => _events.stream;
+
+  void _listen() {
+    _subscriptions
+      ..add(_classic.events.listen(_events.add, onError: _events.addError))
+      ..add(_le.events.listen(_fromLe, onError: _events.addError));
+  }
+
+  void _fromLe(Map<Object?, Object?> event) {
+    final Object? id = event['id'];
+    if (event['type'] == 'incoming' && id is String) {
+      if (_leIncoming.length >= _maxIncoming) {
+        _leIncoming.remove(_leIncoming.first);
+      }
+      _leIncoming.add(id);
+    }
+    _events.add(event);
+  }
+
+  Future<void> _cancel() async {
+    final List<StreamSubscription<Map<Object?, Object?>>> subscriptions =
+        List<StreamSubscription<Map<Object?, Object?>>>.of(_subscriptions);
+    _subscriptions.clear();
+    for (final StreamSubscription<Map<Object?, Object?>> s in subscriptions) {
+      await s.cancel();
     }
   }
 }

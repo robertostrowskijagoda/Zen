@@ -144,6 +144,10 @@ final class _Radio implements WifiDirectRadio {
   }
 
   @override
+  Future<void> keepClients(Set<String> linked, Duration grace) async =>
+      calls.add('keep ${linked.length}');
+
+  @override
   Stream<Map<Object?, Object?>> get events => _events.stream;
 }
 

@@ -7,7 +7,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * The Wi-Fi multicast lock (`zen/multicast`) for LAN discovery (§5.1 item 6):
+ * The Wi-Fi multicast lock (`zen/multicast`) for LAN discovery:
  * Android reliably delivers broadcasts and multicast on Wi-Fi only to apps
  * holding a `WifiManager.MulticastLock`, and holding one costs battery, so
  * it is held only while "Znajomi w tej samej sieci Wi-Fi" is on and the app

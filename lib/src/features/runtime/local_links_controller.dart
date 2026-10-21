@@ -16,7 +16,7 @@ import 'package:zen/src/features/runtime/wifi_direct_local_link.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-// "Łączność bez internetu" (§5.1 item 6): keeps the running node's local
+// "Łączność bez internetu": keeps the running node's local
 // links in line with the settings, the devices the ledger knows and
 // whether the app is used, and runs the native transports (local_link.dart).
 
@@ -226,12 +226,17 @@ final class LocalLinksController {
   }
 }
 
-/// The native transports of this platform.
-List<LocalLink> platformLocalLinks() => <LocalLink>[
-  if (Platform.isAndroid) WifiDirectLocalLink(),
-  if (bluetoothLinksPlatform) bluetoothLocalLink(),
-  if (multipeerLinksPlatform) multipeerLocalLink(),
-];
+/// The native transports of [platform] (this device's by default).
+List<LocalLink> platformLocalLinks([TargetPlatform? platform]) {
+  final TargetPlatform on = platform ?? localLinksHost;
+  final Set<LocalLinkTransport> has = localTransportsOf(on);
+  return <LocalLink>[
+    if (has.contains(LocalLinkTransport.wifiDirect))
+      WifiDirectLocalLink(supportedPlatform: true),
+    if (has.contains(LocalLinkTransport.bluetooth)) bluetoothLocalLink(on),
+    if (has.contains(LocalLinkTransport.multipeer)) multipeerLocalLink(),
+  ];
+}
 
 /// The devices this one links with: friends' devices and the account's own,
 /// each with its pair secret.
@@ -323,7 +328,7 @@ final class LocalLinksModule extends ZenModule {
 
   /// Links keep going with nobody looking: in the background service, and
   /// on Android in the app too — its core runs there only while it owns
-  /// the node, on screen or unlocked in the background (§14.1).
+  /// the node, on screen or unlocked in the background.
   bool get _background =>
       _ref.read(zenHostProvider) == ZenHost.backgroundService ||
       Platform.isAndroid;

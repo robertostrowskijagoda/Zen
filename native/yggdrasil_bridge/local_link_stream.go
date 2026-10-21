@@ -58,8 +58,12 @@ type localLink struct {
 	id        string
 	transport string
 	address   string
-	own       bool
-	since     time.Time
+	// The other side's IP for a link over a network (LAN, Wi-Fi Direct);
+	// empty over a native stream. The Windows Wi-Fi Direct group owner
+	// keeps only clients that made a link (wifi_direct_bridge.cpp).
+	remote string
+	own    bool
+	since  time.Time
 	// The node's peering for it (no query), as GetPeers lists it.
 	peerURI string
 	conn    io.Closer
@@ -220,14 +224,15 @@ func (m *localLinkManager) hasLink(address string) bool {
 }
 
 // handshakeAndAttach runs the handshake on conn and makes it a peering; it
-// owns conn (closed on failure).
-func (m *localLinkManager) handshakeAndAttach(conn net.Conn, transport string) (*localLink, error) {
+// owns conn (closed on failure). remote is the other side's IP over a
+// network ("" over a native stream).
+func (m *localLinkManager) handshakeAndAttach(conn net.Conn, transport, remote string) (*localLink, error) {
 	session, err := localLinkHandshake(conn, m.peers(), m.core.PublicKey())
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
-	link, err := m.attach(session, transport)
+	link, err := m.attach(session, transport, remote)
 	if err != nil {
 		_ = session.conn.Close()
 		return nil, err
@@ -236,7 +241,7 @@ func (m *localLinkManager) handshakeAndAttach(conn net.Conn, transport string) (
 }
 
 // attach makes a session a Yggdrasil peering (see the top of this file).
-func (m *localLinkManager) attach(session *localLinkSession, transport string) (*localLink, error) {
+func (m *localLinkManager) attach(session *localLinkSession, transport, remote string) (*localLink, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
@@ -246,6 +251,7 @@ func (m *localLinkManager) attach(session *localLinkSession, transport string) (
 		id:        randomLocalID(),
 		transport: transport,
 		address:   session.peer.address,
+		remote:    remote,
 		own:       session.peer.own,
 		since:     time.Now(),
 		peerURI:   fmt.Sprintf("tcp://127.0.0.1:%d", port),
@@ -403,7 +409,7 @@ func (m *localLinkManager) serveEndpoint(endpoint *localStreamEndpoint) {
 		}
 		_ = conn.SetReadDeadline(time.Time{})
 		_ = endpoint.listener.Close()
-		if _, err := m.handshakeAndAttach(conn, endpoint.transport); err != nil {
+		if _, err := m.handshakeAndAttach(conn, endpoint.transport, ""); err != nil {
 			m.infof("local link over %s not made: %v", endpoint.transport, err)
 		}
 		return
@@ -441,6 +447,7 @@ func (m *localLinkManager) status() map[string]any {
 			"id":        link.id,
 			"transport": link.transport,
 			"address":   link.address,
+			"remote":    link.remote,
 			"own":       link.own,
 			"since":     link.since.UnixMilli(),
 			"up":        up[link.peerURI],

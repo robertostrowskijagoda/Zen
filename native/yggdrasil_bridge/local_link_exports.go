@@ -57,7 +57,8 @@ func YggSetLocalLinksJson(handle C.int, payload *C.char) *C.char {
 }
 
 // YggGetLocalLinksJson: {"lan": {"on", "running", "interfaces", "error"?},
-// "peers": n, "links": [{"id", "transport", "address", "own", "since", "up"}]}.
+// "peers": n, "links": [{"id", "transport", "address", "remote", "own",
+// "since", "up"}]}.
 //
 //export YggGetLocalLinksJson
 func YggGetLocalLinksJson(handle C.int) *C.char {

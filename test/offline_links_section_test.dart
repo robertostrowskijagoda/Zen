@@ -165,7 +165,7 @@ void main() {
     );
   });
 
-  testWidgets('elsewhere than on Android there is no Wi-Fi Direct switch', (
+  testWidgets('without Wi-Fi Direct (Linux, Apple) there is no switch', (
     WidgetTester tester,
   ) async {
     await pumpSection(tester, wifiDirect: _FakeLink(), android: false);
@@ -175,6 +175,35 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+    'Windows offers Wi-Fi Direct between Windows computers and BLE links',
+    (WidgetTester tester) async {
+      final _FakeLink wifiDirect = _FakeLink();
+      final MemoryAppSettingsStore store = await pumpSection(
+        tester,
+        wifiDirect: wifiDirect,
+        bluetooth: _FakeLink(LocalLinkTransport.bluetooth),
+      );
+      expect(find.text('Wi-Fi Direct (Windows)'), findsOneWidget);
+      expect(find.text('Wi-Fi Direct (Android)'), findsNothing);
+      expect(
+        find.textContaining('komputerami znajomych z Windows'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('z telefonami z Androidem i komputerami z Windows'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('settings-wifi-direct-switch')));
+      await tester.pump();
+      await tester.pump();
+      expect(wifiDirect.permissionRequests, 1);
+      expect((await store.load())?.wifiDirect, isTrue);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
 
   testWidgets('Bluetooth is off by default and asks for the permission', (
     WidgetTester tester,

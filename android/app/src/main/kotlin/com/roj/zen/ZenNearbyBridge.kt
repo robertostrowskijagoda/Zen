@@ -44,18 +44,23 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * People nearby over Bluetooth LE (§15), without any plugin:
+ * People nearby over Bluetooth LE, without any plugin:
  *  - advertising: manufacturer data (id 0xFFFF, "ZN" + 16-byte token +
  *    4-byte hint; a new token every 10 minutes, and advertising restarts
  *    with it, so the Bluetooth address changes together with the token;
- *    only friends can tell whose it is);
+ *    only friends can tell whose it is). An engine either hands the token
+ *    of now (the app, which works it out itself) or a schedule of tokens
+ *    worked out in advance, one per slot (the background service, which
+ *    has no key to work them out): the schedule is followed here, with a
+ *    restart at each slot boundary, without waking Dart, and nothing is
+ *    shown once it is over (never a stale token);
  *  - scanning: reports every Zen token seen (and its hint), with signal
  *    strength;
  *  - a tiny GATT server with one writable characteristic: someone nearby
  *    can "wave" (leave a short hello with their mesh address) without
  *    either side learning the other's account. Anyone can write to it (no
  *    pairing), so waves are limited per phone here and checked in Dart
- *    (an alarm wave rings only when a friend signed it, §16.3). An alarm
+ *    (an alarm wave rings only when a friend signed it). An alarm
  *    wave signed with a friend's key (handed over by Dart as a pair key
  *    "p:…") is checked here too and counted apart, so a flood of other waves from
  *    changing addresses cannot crowd it out.
@@ -68,9 +73,10 @@ import javax.crypto.spec.SecretKeySpec
  * The radio is shared by every Flutter engine that uses it: the app's (with
  * its Activity) and the background service's (no Activity, so it can only
  * report missing permissions). Advertising and scanning run while any
- * engine still wants them; an alarm wave is answered by exactly one engine
- * (§16.3): the background service while it takes them and the app is not on
- * screen, otherwise the app.
+ * engine still wants them; an alarm wave is answered by exactly one engine:
+ * the background service while it takes them (it does only while it runs
+ * the node, i.e. while the app is locked or closed — on screen behind its
+ * lock screen the app could not answer them either), otherwise the app.
  */
 object ZenNearbyBridge {
     private const val TAG = "ZenNearby"
@@ -88,6 +94,13 @@ object ZenNearbyBridge {
 
         /** The token this engine wants shown (`null`: not visible). */
         var token: ByteArray? = null
+
+        /**
+         * Tokens worked out in advance, [ADVERT_BYTES] each, for the slots
+         * from [scheduleStart] on (`null`: none); used instead of [token].
+         */
+        var schedule: ByteArray? = null
+        var scheduleStart = 0L
         var tokenSetAt = 0L
         var scanning = false
         var lowPower = false
@@ -96,7 +109,7 @@ object ZenNearbyBridge {
         var alarmReceiver = false
 
         /**
-         * Friends' alarm keys this engine knows (§16.3): "p:" + a pair key
+         * Friends' alarm keys this engine knows: "p:" + a pair key
          * (base64url).
          */
         var alarmKeys: List<String> = emptyList()
@@ -117,6 +130,9 @@ object ZenNearbyBridge {
 
     /** Bluetooth on/off, registered once per process. */
     private var stateReceiver: BroadcastReceiver? = null
+
+    /** The next token change of a schedule (main thread). */
+    private var rotation: Runnable? = null
 
     /** When waves came (main thread): per phone and in all. */
     private val waveTimes = HashMap<String, ArrayDeque<Long>>()
@@ -146,6 +162,13 @@ object ZenNearbyBridge {
     private const val PAIR_KEY_PREFIX = "p:"
     private const val TOKEN_BYTES = 16
     private const val HINT_BYTES = 4
+    private const val ADVERT_BYTES = TOKEN_BYTES + HINT_BYTES
+
+    /** A schedule holds at most this many slots (two weeks). */
+    private const val MAX_SCHEDULE_SLOTS = 2016
+
+    /** After a slot boundary, so the new slot has surely begun. */
+    private const val ROTATION_MARGIN_MS = 500L
     private const val MAX_ALARM_KEYS = 4096
     private val ALARM_ID = Regex("^[0-9A-Za-z_-]{1,40}$")
     private val HEX32 = Regex("^[0-9a-f]{32}$")
@@ -164,7 +187,7 @@ object ZenNearbyBridge {
     }
 
     /**
-     * The background service's engine (§16.3: alarm waves while the app is
+     * The background service's engine (alarm waves while the app is
      * closed). Without an Activity it cannot ask for permissions.
      */
     fun registerBackground(engine: FlutterEngine, context: Context) {
@@ -223,12 +246,34 @@ object ZenNearbyBridge {
                             result.success(false)
                         } else {
                             client.token = token
+                            client.schedule = null
+                            client.tokenSetAt = SystemClock.elapsedRealtime()
+                            result.success(applyAdvertising(context))
+                        }
+                    }
+                    "startAdvertisingSchedule" -> {
+                        val start = call.argument<Number>("start")?.toLong()
+                        val adverts = call.argument<ByteArray>("adverts")
+                        if (start == null ||
+                            adverts == null ||
+                            adverts.isEmpty() ||
+                            adverts.size % ADVERT_BYTES != 0 ||
+                            adverts.size / ADVERT_BYTES > MAX_SCHEDULE_SLOTS
+                        ) {
+                            result.success(false)
+                        } else {
+                            // Kept also while Bluetooth is off: shown once
+                            // it is back on.
+                            client.token = null
+                            client.schedule = adverts.copyOf()
+                            client.scheduleStart = start
                             client.tokenSetAt = SystemClock.elapsedRealtime()
                             result.success(applyAdvertising(context))
                         }
                     }
                     "stopAdvertising" -> {
                         client.token = null
+                        client.schedule = null
                         applyAdvertising(context)
                         result.success(null)
                     }
@@ -425,11 +470,54 @@ object ZenNearbyBridge {
     }
 
     /**
+     * What [client] wants shown now: its token, or its schedule's token of
+     * the current slot (`null` before or past the schedule).
+     */
+    private fun wantedAdvert(client: Client): ByteArray? {
+        val schedule = client.schedule ?: return client.token
+        val index = System.currentTimeMillis() / NEARBY_SLOT_MS - client.scheduleStart
+        if (index < 0 || index >= schedule.size / ADVERT_BYTES) {
+            return null
+        }
+        val from = index.toInt() * ADVERT_BYTES
+        return schedule.copyOfRange(from, from + ADVERT_BYTES)
+    }
+
+    /**
+     * While any engine follows a schedule, applies it again right after the
+     * next slot boundary (the foreground service keeps the CPU awake, so the
+     * delay holds).
+     */
+    private fun scheduleRotation(context: Context) {
+        rotation?.let { main.removeCallbacks(it) }
+        rotation = null
+        if (clients.none { it.schedule != null }) {
+            return
+        }
+        val now = System.currentTimeMillis()
+        val next = (now / NEARBY_SLOT_MS + 1) * NEARBY_SLOT_MS
+        val task = Runnable {
+            rotation = null
+            try {
+                applyAdvertising(context)
+            } catch (error: Exception) {
+                Log.w(TAG, "Changing the token failed", error)
+            }
+        }
+        rotation = task
+        main.postDelayed(task, next - now + ROTATION_MARGIN_MS)
+    }
+
+    /**
      * Shows the newest wanted token while any engine wants to be visible (both
      * engines compute the same one; restarting for an equal token is skipped).
      */
     private fun applyAdvertising(context: Context): Boolean {
-        val token = clients.filter { it.token != null }.maxByOrNull { it.tokenSetAt }?.token
+        scheduleRotation(context)
+        val token = clients
+            .mapNotNull { client -> wantedAdvert(client)?.let { client.tokenSetAt to it } }
+            .maxByOrNull { it.first }
+            ?.second
         if (token == null) {
             stopAdvertising(context)
             return true
@@ -497,7 +585,7 @@ object ZenNearbyBridge {
 
     /**
      * Scans while any engine wants it; in low-power mode only when every one
-     * of them is fine with it (the background look around, §15).
+     * of them is fine with it (the background look around).
      */
     private fun applyScan(context: Context): Boolean {
         val wanted = clients.filter { it.scanning }
@@ -833,7 +921,7 @@ object ZenNearbyBridge {
 
     /**
      * Every engine gets the wave; "elsewhere" tells it that the other engine
-     * answers alarm waves, so an alarm rings once (§16.3). A friend's signed
+     * answers alarm waves, so an alarm rings once. A friend's signed
      * alarm wave is checked first and counted apart ([allowVerifiedWave]);
      * anything else goes through the limits per phone and in all.
      */
@@ -847,7 +935,7 @@ object ZenNearbyBridge {
             Log.w(TAG, "Too many waves: one dropped")
             return
         }
-        val serviceTakesAlarms = !MainActivity.isResumed &&
+        val serviceTakesAlarms =
             clients.any { it.background && it.alarmReceiver && it.sink != null }
         for (client in clients.toList()) {
             val elsewhere = if (client.background) !serviceTakesAlarms else serviceTakesAlarms

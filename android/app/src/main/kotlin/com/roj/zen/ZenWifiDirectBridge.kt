@@ -29,8 +29,8 @@ import io.flutter.plugin.common.MethodChannel
 import java.security.SecureRandom
 
 /**
- * Wi-Fi Direct for direct links with friends nearby without a Wi-Fi network
- * (§5.1 item 6; `zen/wifi_direct` + events on `zen/wifi_direct/events`).
+ * Wi-Fi Direct for direct links with friends nearby without a Wi-Fi network.
+ * (item 6; `zen/wifi_direct` + events on `zen/wifi_direct/events`).
  * It only makes a network: once phones share a Wi-Fi Direct group, the
  * bridge's LAN discovery runs over it (lan_discovery.go) and links friends
  * as on any Wi-Fi. Dart decides everything (wifi_direct_local_link.dart);

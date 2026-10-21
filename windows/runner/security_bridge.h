@@ -6,7 +6,7 @@
 
 #include <functional>
 
-// §14.1 on Windows:
+// Security channels on Windows:
 //   "zen/secure_window"  setSecure({secure}) -> bool
 //       WDA_EXCLUDEFROMCAPTURE: the window is left out of screenshots,
 //       recordings and screen sharing (Windows 10 2004+; older: black).

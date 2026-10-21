@@ -12,11 +12,13 @@ class MainFlutterWindow: NSWindow {
     self.center()
 
     RegisterGeneratedPlugins(registry: flutterViewController)
-    // Screen protection and the Secure Enclave key vault (§14.1).
+    // Screen protection and the Secure Enclave key vault.
     SecurityBridge.register(
       with: flutterViewController.engine.binaryMessenger, window: self)
-    // Bluetooth and Multipeer links with friends nearby (§5.1 item 6).
+    // Bluetooth and Multipeer links with friends nearby.
     ZenLocalLinksBridge.register(with: flutterViewController.engine.binaryMessenger)
+    // Where the device is (the alarm), from Core Location.
+    ZenLocationBridge.register(with: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }

@@ -16,7 +16,7 @@ import (
 	"github.com/wlynxg/anet"
 )
 
-// LAN discovery (§5.1 item 6): friends and the account's own devices on
+// LAN discovery: friends and the account's own devices on
 // the same Wi-Fi, cable network or Wi-Fi Direct group find each other and
 // link directly (local_link.go), with or without internet.
 //
@@ -86,9 +86,10 @@ func lanInterfaceEligible(name string, flags net.Flags, goos string, phone bool)
 	}
 }
 
-// lanTransportFor names the link by the interface it came over.
+// lanTransportFor names the link by the interface it came over (Android's
+// p2p-…, Windows' Wi-Fi Direct virtual adapters).
 func lanTransportFor(name string) string {
-	if strings.HasPrefix(name, "p2p") {
+	if strings.HasPrefix(name, "p2p") || lanWifiDirectAdapter(name) {
 		return "wifi-direct"
 	}
 	return "lan"
@@ -494,7 +495,7 @@ func (lan *lanDiscovery) dial(ip net.IP, port int, now time.Time) {
 		if err != nil {
 			return
 		}
-		if _, err := lan.m.handshakeAndAttach(conn, lanTransportFor(ifi.name)); err != nil {
+		if _, err := lan.m.handshakeAndAttach(conn, lanTransportFor(ifi.name), key); err != nil {
 			lan.m.infof("local link to a LAN device not made: %v", err)
 		}
 	}()
@@ -534,7 +535,7 @@ func (lan *lanDiscovery) acceptLoop() {
 		}
 		go func(conn net.Conn, transport string) {
 			defer lan.releaseHandshake(source)
-			if _, err := lan.m.handshakeAndAttach(conn, transport); err != nil {
+			if _, err := lan.m.handshakeAndAttach(conn, transport, source); err != nil {
 				lan.m.infof("local link from a LAN device not made: %v", err)
 			}
 		}(conn, lanTransportFor(ifi.name))

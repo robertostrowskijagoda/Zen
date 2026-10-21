@@ -1,15 +1,16 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/runtime/local_link.dart';
 
-// Wi-Fi Direct (Android 10+, §5.1 item 6): with no Wi-Fi network around,
+// Wi-Fi Direct (Android 10+ item 6): with no Wi-Fi network around,
 // friends' phones nearby form a Wi-Fi Direct group, and the bridge's LAN
 // discovery links them over it like over any Wi-Fi (lan_discovery.go). The
-// radio is ZenWifiDirectBridge.kt; this file decides what it does.
+// radio is ZenWifiDirectBridge.kt, on Windows wifi_direct_bridge.cpp (the
+// same calls; Windows links with Windows only, as neither side can read the
+// other's records); this file decides what it does.
 //
 // Every phone publishes a service record with the bridge's advert (a Bloom
 // filter only friends can test, renewed every cycle) and looks for others'
@@ -24,12 +25,21 @@ import 'package:zen/src/features/runtime/local_link.dart';
 // A matching record proves nothing (it can be replayed, and its group can be
 // anyone's), so a joined group is kept only once a friend's pair handshake
 // succeeded over it: with no link after [joinHandshakeTimeout] the phone
-// leaves and does not join that group again for [refuseGroupFor].
+// leaves and does not join that group again for [refuseGroupFor]. The other
+// way round, anybody nearby can join an owner's group (its passphrase is in
+// its record); where the radio can let one client go (Windows, the group's
+// `checks`), the owner keeps only clients that made a friend's link within
+// [joinHandshakeTimeout].
 // A group with no link for a while is removed. Nothing runs while the
 // phone is on a Wi-Fi network (the LAN covers that) or the app is neither
 // used nor running its background service.
 
-/// The radio side (ZenWifiDirectBridge.kt); a fake in tests.
+/// Whether this device has Wi-Fi Direct links (Android, Windows).
+bool get wifiDirectLinksPlatform =>
+    localTransportsOf(localLinksHost).contains(LocalLinkTransport.wifiDirect);
+
+/// The radio side (ZenWifiDirectBridge.kt, wifi_direct_bridge.cpp); a fake
+/// in tests.
 abstract interface class WifiDirectRadio {
   /// `{supported, permitted, enabled, wifi, group}`.
   Future<Map<String, Object?>> state();
@@ -41,6 +51,11 @@ abstract interface class WifiDirectRadio {
   Future<bool> createGroup();
   Future<bool> joinGroup(String name, String passphrase);
   Future<bool> removeGroup();
+
+  /// The group's owner lets go of clients connected for at least [grace]
+  /// that made no link from any of [linked] (their IPs); only where the
+  /// group says it [WifiDirectGroup.checksClients].
+  Future<void> keepClients(Set<String> linked, Duration grace);
 
   /// `{type: peer|group|wifi|p2p, …}`.
   Stream<Map<Object?, Object?>> get events;
@@ -108,6 +123,12 @@ final class MethodChannelWifiDirectRadio implements WifiDirectRadio {
   Future<bool> removeGroup() async => await _call<bool>('removeGroup') ?? false;
 
   @override
+  Future<void> keepClients(Set<String> linked, Duration grace) => _call<void>(
+    'keepClients',
+    <String, Object>{'ips': linked.toList(), 'graceMs': grace.inMilliseconds},
+  );
+
+  @override
   Stream<Map<Object?, Object?>> get events => _events
       .receiveBroadcastStream()
       .where((Object? e) => e is Map)
@@ -122,12 +143,17 @@ final class WifiDirectGroup {
     required this.name,
     this.passphrase,
     this.clients = 0,
+    this.checksClients = false,
   });
 
   final bool owner;
   final String name;
   final String? passphrase;
   final int clients;
+
+  /// The radio lets a client without a friend's link go
+  /// ([WifiDirectRadio.keepClients]).
+  final bool checksClients;
 
   static WifiDirectGroup? fromJson(Object? json) {
     if (json is! Map) {
@@ -144,6 +170,7 @@ final class WifiDirectGroup {
       name: name,
       passphrase: passphrase is String ? passphrase : null,
       clients: clients is int ? clients : 0,
+      checksClients: json['checks'] == true,
     );
   }
 }
@@ -161,7 +188,7 @@ final class WifiDirectLocalLink extends LocalLink {
     this.joinHandshakeTimeout = const Duration(seconds: 60),
     this.refuseGroupFor = const Duration(minutes: 30),
   }) : _radio = radio,
-       _supportedPlatform = supportedPlatform ?? Platform.isAndroid,
+       _supportedPlatform = supportedPlatform ?? wifiDirectLinksPlatform,
        _now = now ?? DateTime.now;
 
   /// Bloom filter bytes in a service record: it must fit a TXT entry.
@@ -416,13 +443,22 @@ final class WifiDirectLocalLink extends LocalLink {
       await _radio.discover(discoveryWindow);
       return;
     }
-    final int links = api
+    final List<LocalLinkInfo> own = api
         .status()
-        .upLinks
+        .links
         .where(
           (LocalLinkInfo l) => l.transport == LocalLinkTransport.wifiDirect,
         )
-        .length;
+        .toList();
+    if (group.owner && group.checksClients && group.clients > 0) {
+      // Only friends stay: a client that made no link over the group (no
+      // pair handshake) in time is let go.
+      await _radio.keepClients(<String>{
+        for (final LocalLinkInfo l in own)
+          if (l.remote.isNotEmpty) l.remote,
+      }, joinHandshakeTimeout);
+    }
+    final int links = own.where((LocalLinkInfo l) => l.up).length;
     final DateTime now = _now();
     if (links > 0) {
       _lastLinkAt = now;

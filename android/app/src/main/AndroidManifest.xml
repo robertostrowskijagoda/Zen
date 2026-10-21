@@ -25,7 +25,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
-    <!-- The alarm's fresh position while Zen is closed (§16.3): read under a
+    <!-- The alarm's fresh position while Zen is closed: read under a
          service of the location type, only after the person allowed the
          location (the service is never started without it). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
@@ -41,17 +41,17 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- Network updates (§14.2): hand a downloaded version to the system
+    <!-- Network updates: hand a downloaded version to the system
          installer; the person always confirms. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- "Podaj dalej": a local-only hotspot to pass the app on without
          internet. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-    <!-- Links with friends nearby without a Wi-Fi network (§5.1 item 6). -->
+    <!-- Links with friends nearby without a Wi-Fi network. -->
     <uses-feature
         android:name="android.hardware.wifi.direct"
         android:required="false" />
-    <!-- People nearby (§15) and links with friends nearby (§5.1 item 6):
+    <!-- People nearby and links with friends nearby:
          Bluetooth, never used to find where you are. -->
     <uses-feature
         android:name="android.hardware.bluetooth_le"
@@ -67,11 +67,11 @@
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <!-- Hotspot (until Android 12) and the alarm's location (§16.3). -->
+    <!-- Hotspot (until Android 12) and the alarm's location. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- The alarm's place also from the lock screen / background service
-         (asked on the permissions screen, §25.2). -->
+         (asked on the permissions screen). -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <!-- Exact reminders (Android 12+, a special access given by the person). -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
@@ -152,7 +152,7 @@
                 <data android:path="/robertostrowskijagoda/zen"/>
             </intent-filter>
         </activity>
-        <!-- The launcher entries (§14.2, "Kamuflaż ikony"): exactly one of
+        <!-- The launcher entries ("Kamuflaż ikony"): exactly one of
              these two aliases is enabled. MainActivity itself has no
              LAUNCHER filter, so it stays enabled in both states (links and
              notifications keep opening it); ZenSystemBridge "setDisguise"
@@ -231,6 +231,13 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Peer-to-peer messenger node. Zen has no server and uses no push service: this service keeps end-to-end encrypted connections to the contacts the user added, so that messages, calls and emergency alarms from them reach the phone while the app is closed. It runs with a visible ongoing notification." />
         </service>
+        <!-- The alarm's position while Zen is closed and has no background
+             location permission (ZenLocationBridge.kt): up only for that
+             one reading. -->
+        <service
+            android:name=".ZenLocationService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
         <!-- "Podaj dalej": hands a copy of the app's installer (cache/shared_apk
              only) to the system share sheet, e.g. Quick Share or Bluetooth. -->
         <provider

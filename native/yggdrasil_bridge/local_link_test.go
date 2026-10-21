@@ -351,10 +351,10 @@ func TestLocalStreamBecomesAYggdrasilPeer(t *testing.T) {
 	left, right := net.Pipe()
 	done := make(chan error, 1)
 	go func() {
-		_, err := managerB.handshakeAndAttach(right, "test")
+		_, err := managerB.handshakeAndAttach(right, "test", "")
 		done <- err
 	}()
-	if _, err := managerA.handshakeAndAttach(left, "test"); err != nil {
+	if _, err := managerA.handshakeAndAttach(left, "test", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err != nil {
@@ -374,8 +374,8 @@ func TestLocalStreamBecomesAYggdrasilPeer(t *testing.T) {
 
 	// A second stream to the same device is not linked again.
 	again, other := net.Pipe()
-	go func() { _, _ = managerB.handshakeAndAttach(other, "test") }()
-	if _, err := managerA.handshakeAndAttach(again, "test"); err == nil {
+	go func() { _, _ = managerB.handshakeAndAttach(other, "test", "") }()
+	if _, err := managerA.handshakeAndAttach(again, "test", ""); err == nil {
 		t.Fatal("one link per device")
 	}
 
@@ -384,6 +384,40 @@ func TestLocalStreamBecomesAYggdrasilPeer(t *testing.T) {
 	waitForPeer(t, coreB, coreA.PublicKey(), false)
 	if managerB.hasLink(coreA.Address().String()) {
 		t.Fatal("the other side sees the link go")
+	}
+}
+
+func TestLinkOverANetworkNamesTheOtherSidesIP(t *testing.T) {
+	_, coreB, managerA, managerB := testManagers(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	done := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			done <- err
+			return
+		}
+		_, err = managerB.handshakeAndAttach(conn, "wifi-direct", "127.0.0.1")
+		done <- err
+	}()
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := managerA.handshakeAndAttach(conn, "wifi-direct", "127.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	links := managerA.status()["links"].([]map[string]any)
+	if len(links) != 1 || links[0]["remote"] != "127.0.0.1" ||
+		links[0]["address"] != coreB.Address().String() {
+		t.Fatalf("links: %+v", links)
 	}
 }
 

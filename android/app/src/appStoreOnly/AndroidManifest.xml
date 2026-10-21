@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The "appStoreOnly" flavor (Google Play, Galaxy Store; STAN D12), merged
+<!-- The "appStoreOnly" flavor (Google Play, Galaxy Store), merged
      over src/main/AndroidManifest.xml. Stores update the app themselves and
      do not allow it to install APKs: the permission is removed, and Dart
      hides self-update and APK sharing

@@ -7,8 +7,12 @@ project(runner LANGUAGES CXX)
 #
 # Any new source files that you add to the application should be added here.
 add_executable(${BINARY_NAME} WIN32
+  "bluetooth_le_bridge.cpp"
   "call_recorder.cpp"
+  "local_links_common.cpp"
+  "location_bridge.cpp"
   "security_bridge.cpp"
+  "wifi_direct_bridge.cpp"
   "flutter_window.cpp"
   "main.cpp"
   "utils.cpp"
@@ -38,8 +42,15 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 # Call recording (call_recorder.cpp): WASAPI through COM.
 target_link_libraries(${BINARY_NAME} PRIVATE "ole32.lib" "mmdevapi.lib")
-# Screen protection and the key vault (security_bridge.cpp, §14.1).
+# Screen protection and the key vault (security_bridge.cpp).
 target_link_libraries(${BINARY_NAME} PRIVATE "ncrypt.lib" "crypt32.lib")
+# Local links (bluetooth_le_bridge.cpp, wifi_direct_bridge.cpp): C++/WinRT
+# (headers from the Windows SDK), Winsock for the loopback streams, the WLAN
+# and IP helper APIs to keep out of the normal Wi-Fi's way.
+target_link_libraries(${BINARY_NAME} PRIVATE "windowsapp.lib" "ws2_32.lib"
+  "wlanapi.lib" "iphlpapi.lib" "bcrypt.lib")
+# The C++/WinRT projections make objects with many sections.
+target_compile_options(${BINARY_NAME} PRIVATE /bigobj)
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

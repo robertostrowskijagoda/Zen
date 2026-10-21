@@ -1,9 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
-// Direct links with friends' and own devices nearby, without internet
-// (§5.1 item 6). The Go bridge does the work (local_link*.go): it finds
+// Direct links with friends' and own devices nearby, without internet. The Go bridge does the work (local_link*.go): it finds
 // devices on local networks itself, and peers Yggdrasil over any byte
 // stream a native transport gives it. This file is the Dart side of that:
 // the bridge's calls ([LocalLinkNodeApi]), what it reports
@@ -14,7 +14,8 @@ enum LocalLinkTransport {
   /// The same Wi-Fi or cable network (beacons, then TCP).
   lan('lan'),
 
-  /// A Wi-Fi Direct group (Android); then the same as [lan] over it.
+  /// A Wi-Fi Direct group (Android, or Windows with Windows); then the same
+  /// as [lan] over it.
   wifiDirect('wifi-direct'),
 
   /// A Bluetooth stream.
@@ -38,6 +39,46 @@ enum LocalLinkTransport {
   }
 }
 
+/// The native transports [platform] has (beyond the LAN, which the bridge
+/// runs everywhere): Wi-Fi Direct on Android and between Windows computers,
+/// Bluetooth everywhere but Fuchsia, Multipeer on Apple devices.
+Set<LocalLinkTransport> localTransportsOf(TargetPlatform platform) =>
+    switch (platform) {
+      TargetPlatform.android ||
+      TargetPlatform.windows => const <LocalLinkTransport>{
+        LocalLinkTransport.wifiDirect,
+        LocalLinkTransport.bluetooth,
+      },
+      TargetPlatform.iOS || TargetPlatform.macOS => const <LocalLinkTransport>{
+        LocalLinkTransport.bluetooth,
+        LocalLinkTransport.multipeer,
+      },
+      TargetPlatform.linux => const <LocalLinkTransport>{
+        LocalLinkTransport.bluetooth,
+      },
+      TargetPlatform.fuchsia => const <LocalLinkTransport>{},
+    };
+
+/// The platform this runs on, from `dart:io` (tests do not change it).
+TargetPlatform get localLinksHost {
+  if (Platform.isAndroid) {
+    return TargetPlatform.android;
+  }
+  if (Platform.isIOS) {
+    return TargetPlatform.iOS;
+  }
+  if (Platform.isMacOS) {
+    return TargetPlatform.macOS;
+  }
+  if (Platform.isWindows) {
+    return TargetPlatform.windows;
+  }
+  if (Platform.isLinux) {
+    return TargetPlatform.linux;
+  }
+  return TargetPlatform.fuchsia;
+}
+
 /// One live link, as the bridge reports it.
 @immutable
 final class LocalLinkInfo {
@@ -48,6 +89,7 @@ final class LocalLinkInfo {
     required this.own,
     required this.since,
     required this.up,
+    this.remote = '',
   });
 
   final String id;
@@ -65,6 +107,10 @@ final class LocalLinkInfo {
   /// Yggdrasil's peering over it is up.
   final bool up;
 
+  /// The other side's IP for a link over a network (LAN, Wi-Fi Direct);
+  /// '' over a native stream.
+  final String remote;
+
   static LocalLinkInfo? fromJson(Object? json) {
     if (json is! Map) {
       return null;
@@ -72,6 +118,7 @@ final class LocalLinkInfo {
     final Object? id = json['id'];
     final Object? address = json['address'];
     final Object? since = json['since'];
+    final Object? remote = json['remote'];
     if (id is! String || address is! String) {
       return null;
     }
@@ -82,6 +129,7 @@ final class LocalLinkInfo {
       own: json['own'] == true,
       since: DateTime.fromMillisecondsSinceEpoch(since is int ? since : 0),
       up: json['up'] == true,
+      remote: remote is String ? remote : '',
     );
   }
 }

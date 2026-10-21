@@ -15,9 +15,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Classic Bluetooth (RFCOMM) on Windows through Winsock. Windows offers no
-// BLE L2CAP channels to apps, so links here are with phones and computers
-// paired in the system's Bluetooth settings: the listener's channel is
+// Classic Bluetooth (RFCOMM) on Windows through Winsock, with phones and
+// computers paired in the system's Bluetooth settings (BLE links are GATT
+// streams in the runner, bluetooth_le_bridge.cpp, as Windows offers apps no
+// BLE L2CAP channels): the listener's channel is
 // published over SDP under the Zen RFCOMM service class, and paired devices
 // are reached by that class (Winsock looks the channel up). Android does
 // the same (ZenBluetoothLinkBridge.kt). The structures below are the 64-bit

@@ -8,6 +8,7 @@ require (
 	github.com/klauspost/compress v1.18.5
 	github.com/wlynxg/anet v0.0.5
 	github.com/yggdrasil-network/yggdrasil-go v0.5.14
+	golang.org/x/crypto v0.53.0
 	golang.org/x/sys v0.46.0
 )
 
@@ -18,7 +19,6 @@ require (
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/hjson/hjson-go/v4 v4.6.0 // indirect
 	github.com/quic-go/quic-go v0.60.0 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 )

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,12 +8,13 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/runtime/bluetooth_local_links.dart';
 import 'package:zen/src/features/runtime/local_link.dart';
 import 'package:zen/src/features/runtime/local_links_controller.dart';
+import 'package:zen/src/features/runtime/wifi_direct_local_link.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-/// Whether this device offers the "Wi-Fi Direct (Android)" switch.
+/// Whether this device offers the "Wi-Fi Direct" switch (Android, Windows).
 final Provider<bool> wifiDirectAvailableProvider = Provider<bool>(
-  (Ref ref) => Platform.isAndroid,
+  (Ref ref) => wifiDirectLinksPlatform,
 );
 
 /// Whether this device offers the "Bluetooth" switch.
@@ -108,13 +108,37 @@ String bluetoothLinksNote(TargetPlatform platform) => switch (platform) {
     'Na iPhonie i iPadzie działa tylko, gdy Zen jest otwarty na ekranie.',
   ),
   TargetPlatform.windows => t(
-    'Na Windows tylko z telefonami i komputerami sparowanymi w ustawieniach '
-    'Bluetooth systemu (bez iPhone’ów).',
+    'Na Windows z telefonami z Androidem i komputerami z Windows w pobliżu, '
+    'a z urządzeniami sparowanymi w ustawieniach Bluetooth systemu także '
+    'przez klasyczny Bluetooth (bez iPhone’ów i Maków).',
   ),
   _ => t('Działa, gdy Zen jest otwarty.'),
 };
 
-/// "Łączność bez internetu" (§5.1 item 6): friends nearby link directly, so
+/// The "Wi-Fi Direct" switch's title on this platform.
+String wifiDirectTitle(TargetPlatform platform) =>
+    platform == TargetPlatform.windows
+    ? t('Wi-Fi Direct (Windows)')
+    : t('Wi-Fi Direct (Android)');
+
+/// What the "Wi-Fi Direct" switch does on this platform.
+String wifiDirectNote(TargetPlatform platform) =>
+    platform == TargetPlatform.windows
+    ? t(
+        'Gdy komputer nie jest połączony z siecią Wi-Fi, łączy się '
+        'bezpośrednio z komputerami znajomych z Windows w pobliżu. Nie '
+        'przeszkadza w zwykłym Wi-Fi: po połączeniu z siecią przestaje '
+        'działać, a na kartach Wi-Fi, które nie umieją obu naraz, jest '
+        'wyłączone. Działa, gdy Zen jest otwarty.',
+      )
+    : t(
+        'Gdy w pobliżu nie ma sieci Wi-Fi, telefony znajomych '
+        'tworzą między sobą własną sieć. Działa, gdy Zen jest '
+        'otwarty albo działa w tle; zużywa trochę więcej '
+        'baterii.',
+      );
+
+/// "Łączność bez internetu": friends nearby link directly, so
 /// chats and calls work without internet. The settings page puts it in a
 /// panel.
 class OfflineLinksSection extends ConsumerStatefulWidget {
@@ -292,15 +316,13 @@ class _OfflineLinksSectionState extends ConsumerState<OfflineLinksSection> {
             onChanged: settings.lanDiscoveryOn
                 ? (bool value) => unawaited(_setWifiDirect(value))
                 : null,
-            title: Text(t('Wi-Fi Direct (Android)'), style: titleStyle),
+            title: Text(
+              wifiDirectTitle(defaultTargetPlatform),
+              style: titleStyle,
+            ),
             subtitle: Text(
               settings.lanDiscoveryOn
-                  ? t(
-                      'Gdy w pobliżu nie ma sieci Wi-Fi, telefony znajomych '
-                      'tworzą między sobą własną sieć. Działa, gdy Zen jest '
-                      'otwarty albo działa w tle; zużywa trochę więcej '
-                      'baterii.',
-                    )
+                  ? wifiDirectNote(defaultTargetPlatform)
                   : t('Najpierw włącz „Znajomi w tej samej sieci Wi-Fi”.'),
               style: bodyStyle,
             ),

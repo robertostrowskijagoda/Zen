@@ -2,8 +2,11 @@
 
 #include <optional>
 
+#include "bluetooth_le_bridge.h"
 #include "call_recorder.h"
+#include "location_bridge.h"
 #include "security_bridge.h"
+#include "wifi_direct_bridge.h"
 #include "flutter/generated_plugin_registrant.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
@@ -29,9 +32,15 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   // Call recording on Windows (flutter_webrtc has no recorder here).
   call_recorder::Register(flutter_controller_->engine()->messenger());
-  // Screen protection and the hardware key vault (§14.1).
+  // Screen protection and the hardware key vault.
   security_bridge::Register(flutter_controller_->engine()->messenger(),
                             [this]() { return GetHandle(); });
+  // Links with friends nearby without internet: Bluetooth LE (GATT streams)
+  // and Wi-Fi Direct between Windows computers.
+  bluetooth_le_bridge::Register(flutter_controller_->engine()->messenger());
+  wifi_direct_bridge::Register(flutter_controller_->engine()->messenger());
+  // Where the computer is (the alarm), from Windows' location service.
+  location_bridge::Register(flutter_controller_->engine()->messenger());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {

@@ -24,14 +24,16 @@ class ZenApplication : Application() {
                 taskEngine?.let { forgetTaskEngine(it) }
                 taskEngine = flutterEngine
                 // People nearby and the power-button alarm keep working while
-                // the app is closed (§15, §16.3). No Activity here: the
+                // the app is closed. No Activity here: the
                 // nearby bridge only reports missing permissions.
                 ZenNearbyBridge.registerBackground(flutterEngine, this@ZenApplication)
-                // Wi-Fi Direct links with friends nearby (§5.1 item 6).
+                // Wi-Fi Direct links with friends nearby.
                 ZenWifiDirectBridge.registerBackground(flutterEngine, this@ZenApplication)
-                // Bluetooth links with friends nearby (§5.1 item 6).
+                // Bluetooth links with friends nearby.
                 ZenBluetoothLinkBridge.registerBackground(flutterEngine, this@ZenApplication)
                 ZenAlarmShortcut.register(flutterEngine, this@ZenApplication, background = true)
+                // The alarm's position (no Activity: never asks).
+                ZenLocationBridge.register(flutterEngine, this@ZenApplication, null)
             }
 
             override fun onTaskStart(starter: FlutterForegroundTaskStarter) {}
