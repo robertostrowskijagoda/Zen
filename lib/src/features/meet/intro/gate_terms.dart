@@ -45,8 +45,8 @@ const int kGateRelayEntries = 40;
 /// People listed for one passed-on gatekeeper, at most.
 const int kGateRelayList = 200;
 
-/// Friends with their own terms, at most.
-const int kGateMaxExceptions = 500;
+/// People on the "open for free" list, at most.
+const int kGateMaxFree = 500;
 
 final RegExp _gateAddress = RegExp(r'^[0-9A-Za-z:._-]{1,64}$');
 
@@ -108,32 +108,62 @@ final class GateTerms {
   String toString() => 'GateTerms($price, consent: $consent)';
 }
 
-/// This person's own gate settings: the terms for everyone, the friends
-/// with their own, and whether friends may pass the terms on.
+/// Who asks a gatekeeper, as their price sees it: a close friend
+/// ("Przyjaciele"), a friend ("Znajomi", weak acquaintances too), or
+/// someone further away ("Dalsi": friends of friends and beyond, who reach
+/// the gatekeeper through an earlier gate).
+enum GateTier {
+  close,
+  friend,
+  far;
+
+  String get label => switch (this) {
+    GateTier.close => t('Przyjaciele'),
+    GateTier.friend => t('Znajomi'),
+    GateTier.far => t('Dalsi'),
+  };
+}
+
+/// This person's own gate settings: one set of terms for each [GateTier],
+/// the people for whom the gate is open for free, and whether friends may
+/// pass the terms on.
 final class GateSettings {
   GateSettings();
 
-  /// Terms for friends without their own and for people introduced here
-  /// through a friend's gate.
-  GateTerms defaults = GateTerms.standard;
+  final Map<GateTier, GateTerms> tiers = <GateTier, GateTerms>{
+    for (final GateTier t in GateTier.values) t: GateTerms.standard,
+  };
 
-  /// Friends (normalised addresses) with their own terms.
-  final Map<String, GateTerms> perFriend = <String, GateTerms>{};
+  /// People (normalised addresses) for whom the gate is open for free,
+  /// whatever their tier's price ("Otwórz za darmo").
+  final Set<String> freeFor = <String>{};
 
-  /// Friends may pass these terms and this person's friend list on to
-  /// their friends ([kGateRelayDepth] steps): longer ways go through here.
+  /// Friends may pass the terms for [GateTier.far] and this person's friend
+  /// list on to their friends ([kGateRelayDepth] steps): longer ways go
+  /// through here.
   bool relay = false;
 
-  GateTerms termsFor(String address) =>
-      perFriend[PeerShareCodec.normalizeAddress(address)] ?? defaults;
+  GateTerms of(GateTier tier) => tiers[tier] ?? GateTerms.standard;
+
+  /// Whether the gate is open for free for [address].
+  bool isFreeFor(String address) =>
+      freeFor.contains(PeerShareCodec.normalizeAddress(address));
+
+  /// The terms for [address] of [tier]: the tier's, without the price for
+  /// someone on the free list (whether this person decides each time stays
+  /// as the tier says).
+  GateTerms termsFor(String address, GateTier tier) {
+    final GateTerms base = of(tier);
+    return isFreeFor(address) && !base.free
+        ? GateTerms(consent: base.consent)
+        : base;
+  }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    'd': defaults.toJson(),
-    if (perFriend.isNotEmpty)
-      'f': <String, dynamic>{
-        for (final MapEntry<String, GateTerms> e in perFriend.entries)
-          e.key: e.value.toJson(),
-      },
+    'c': of(GateTier.close).toJson(),
+    'f': of(GateTier.friend).toJson(),
+    'd': of(GateTier.far).toJson(),
+    if (freeFor.isNotEmpty) 'free': freeFor.toList()..sort(),
     if (relay) 'r': true,
   };
 
@@ -142,18 +172,15 @@ final class GateSettings {
     if (json is! Map) {
       return s;
     }
-    s.defaults = GateTerms.fromJson(json['d']) ?? GateTerms.standard;
-    final Object? f = json['f'];
-    if (f is Map) {
-      for (final MapEntry<dynamic, dynamic> e in f.entries.take(
-        kGateMaxExceptions,
-      )) {
-        final GateTerms? terms = GateTerms.fromJson(e.value);
-        if (e.key is String && _gateAddress.hasMatch(e.key as String)) {
-          if (terms != null) {
-            s.perFriend[PeerShareCodec.normalizeAddress(e.key as String)] =
-                terms;
-          }
+    s.tiers
+      ..[GateTier.close] = GateTerms.fromJson(json['c']) ?? GateTerms.standard
+      ..[GateTier.friend] = GateTerms.fromJson(json['f']) ?? GateTerms.standard
+      ..[GateTier.far] = GateTerms.fromJson(json['d']) ?? GateTerms.standard;
+    final Object? free = json['free'];
+    if (free is List) {
+      for (final Object? a in free.take(kGateMaxFree)) {
+        if (a is String && _gateAddress.hasMatch(a)) {
+          s.freeFor.add(PeerShareCodec.normalizeAddress(a));
         }
       }
     }

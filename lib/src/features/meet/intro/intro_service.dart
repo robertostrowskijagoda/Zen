@@ -9,6 +9,7 @@ import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/meet/intro/gate_route.dart';
@@ -516,7 +517,8 @@ abstract interface class IntroFriending {
 /// - X asks a friend F to see F's friend list; F decides (or their setting
 ///   does, see [FriendListAudience]) and can take it back.
 /// - A gate: X asks F for an introduction to Y (F's friend). F's terms for
-///   X decide ([GateSettings]): free or for a price in pyramid points, with
+///   X decide ([GateSettings]: by X's tier — close friend, friend, further
+///   away — or free for X personally): free or for a price in points, with
 ///   F's consent or opened by F's app at once. Y gets the introduction
 ///   (may write back, may befriend) and X may write to Y and ask Y for the
 ///   next gate. A payment waits in the pyramid and is F's only once the
@@ -1284,27 +1286,52 @@ final class IntroService extends ChangeNotifier {
 
   // ---- gates: this person's terms (F) ----
 
-  /// The terms for everyone without their own.
-  Future<void> setGateDefaults(GateTerms terms) async {
+  /// The terms for everyone of [tier] (close friends, friends, those
+  /// further away).
+  Future<void> setGateTier(GateTier tier, GateTerms terms) async {
     await _ready();
-    _gates.defaults = terms;
+    _gates.tiers[tier] = terms;
     await _save();
     await shareGates();
   }
 
-  /// [friend]'s own terms; null: the terms for everyone again.
-  Future<void> setGateFor(String friend, GateTerms? terms) async {
+  /// Opens the gate for free for [person] ([free]), or back to the price of
+  /// their tier. Nobody asks for it here: people ask in a chat.
+  Future<void> setGateFree(String person, {required bool free}) async {
     await _ready();
-    final String a = _n(friend);
-    if (terms == null) {
-      _gates.perFriend.remove(a);
-    } else if (_gates.perFriend.length < kGateMaxExceptions ||
-        _gates.perFriend.containsKey(a)) {
-      _gates.perFriend[a] = terms;
+    final String a = _n(person);
+    if (free) {
+      if (_gates.freeFor.length >= kGateMaxFree &&
+          !_gates.freeFor.contains(a)) {
+        return;
+      }
+      _gates.freeFor.add(a);
+    } else {
+      _gates.freeFor.remove(a);
     }
     await _save();
     await shareGates();
   }
+
+  /// [person]'s tier for this person's gates: a close friend, a friend, or
+  /// someone further away (not a friend).
+  GateTier gateTierOf(String person) {
+    final String a = _n(person);
+    if (!host.isFriend(a)) {
+      return GateTier.far;
+    }
+    FriendLevel? level;
+    try {
+      level = meet().levelOf?.call(a);
+    } on Object {
+      level = null;
+    }
+    return level == FriendLevel.close ? GateTier.close : GateTier.friend;
+  }
+
+  /// What this person's gate costs [person] now.
+  GateTerms gateTermsFor(String person) =>
+      _gates.termsFor(person, gateTierOf(person));
 
   /// Whether friends may pass this person's terms and friend list on.
   Future<void> setGateRelay(bool on) async {
@@ -1397,9 +1424,10 @@ final class IntroService extends ChangeNotifier {
       }
     }
     return GateCard(
-      terms: _gates.termsFor(q),
+      terms: gateTermsFor(q),
       relay: _gates.relay,
-      open: _gates.relay ? _gates.defaults : null,
+      // Passed on to those further away: the price for them.
+      open: _gates.relay ? _gates.of(GateTier.far) : null,
       // The nearest gatekeepers first, as far as the card's budget goes.
       relayed: trimRelayed(
         relayed,
@@ -1650,7 +1678,7 @@ final class IntroService extends ChangeNotifier {
       return;
     }
     c.waitPay = false;
-    await _admitGate(c, consent: _gates.termsFor(c.asker).consent);
+    await _admitGate(c, consent: gateTermsFor(c.asker).consent);
   }
 
   /// A gate request that may go on: to this person's decision, or opened
@@ -2552,7 +2580,7 @@ final class IntroService extends ChangeNotifier {
     if (asking || needsMe.length >= kIntroMaxOpen) {
       return;
     }
-    final GateTerms terms = _gates.termsFor(from);
+    final GateTerms terms = gateTermsFor(from);
     if (!terms.free && payment == null) {
       // Not paid (an old card): the asker learns the price.
       await _priceResult(from, id, terms.price);

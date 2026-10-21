@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/chat/stranger_chats.dart';
+import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/meet/graph/gate_prices.dart';
@@ -274,6 +275,14 @@ _line() async {
 }
 
 const GateTerms _free = GateTerms();
+
+/// The same terms for close friends, friends and those further away.
+Future<void> _all(_Phone p, GateTerms terms) async {
+  for (final GateTier tier in GateTier.values) {
+    await p.intro.setGateTier(tier, terms);
+  }
+}
+
 const GateTerms _freeAtOnce = GateTerms(consent: false);
 
 void main() {
@@ -336,19 +345,34 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
     });
 
-    test('settings: for everyone, per friend, passed on; kept on disk and '
-        'sent to friends as cards', () async {
-      final (:net, :ania, :bartek, :celina, darek: _, ewa: _) = await _line();
-      expect(bartek.intro.gates.termsFor(ania.address), GateTerms.standard);
-      await bartek.intro.setGateDefaults(const GateTerms(price: 300));
-      await bartek.intro.setGateFor(ania.address, _freeAtOnce);
-      await bartek.intro.setGateRelay(true);
-      expect(bartek.intro.gates.termsFor(ania.address), _freeAtOnce);
-      expect(
-        bartek.intro.gates.termsFor(celina.address),
+    test('settings: a price for close friends, friends and those further '
+        'away, free for chosen people, passed on; kept on disk and sent to '
+        'friends as cards', () async {
+      final (:net, :ania, :bartek, :celina, :darek, ewa: _) = await _line();
+      expect(bartek.intro.gateTermsFor(ania.address), GateTerms.standard);
+      bartek.meet.levelOf = (String a) =>
+          a == ania.address ? FriendLevel.close : FriendLevel.friend;
+      await bartek.intro.setGateTier(GateTier.close, _freeAtOnce);
+      await bartek.intro.setGateTier(
+        GateTier.friend,
         const GateTerms(price: 300),
       );
-      // Each friend heard their own terms.
+      await bartek.intro.setGateTier(GateTier.far, const GateTerms(price: 900));
+      await bartek.intro.setGateRelay(true);
+      expect(bartek.intro.gateTierOf(ania.address), GateTier.close);
+      expect(bartek.intro.gateTierOf(celina.address), GateTier.friend);
+      expect(bartek.intro.gateTierOf(darek.address), GateTier.far);
+      expect(bartek.intro.gateTermsFor(ania.address), _freeAtOnce);
+      expect(
+        bartek.intro.gateTermsFor(celina.address),
+        const GateTerms(price: 300),
+      );
+      expect(
+        bartek.intro.gateTermsFor(darek.address),
+        const GateTerms(price: 900),
+      );
+      // Each friend heard their own terms; those further away get the
+      // price for them passed on.
       expect(ania.intro.cardOf(bartek.address)!.terms, _freeAtOnce);
       expect(
         celina.intro.cardOf(bartek.address)!.terms,
@@ -357,22 +381,44 @@ void main() {
       expect(ania.intro.cardOf(bartek.address)!.relay, isTrue);
       expect(
         ania.intro.cardOf(bartek.address)!.open,
-        const GateTerms(price: 300),
+        const GateTerms(price: 900),
       );
       // Nothing new: nothing sent again.
       final int cards = bartek.sentOf(IntroTypes.gate).length;
       await bartek.intro.shareGates();
       expect(bartek.sentOf(IntroTypes.gate).length, cards);
 
+      // Free for Celina: no price, and (as for a priced tier) no consent.
+      await bartek.intro.setGateFree(celina.address, free: true);
+      expect(
+        bartek.intro.gateTermsFor(celina.address),
+        const GateTerms(consent: false),
+      );
+      expect(celina.intro.cardOf(bartek.address)!.terms.free, isTrue);
+      // A free tier stays as it is (Bartek still decides when it says so).
+      await bartek.intro.setGateTier(GateTier.friend, _free);
+      expect(bartek.intro.gateTermsFor(celina.address), _free);
+      await bartek.intro.setGateTier(
+        GateTier.friend,
+        const GateTerms(price: 300),
+      );
+
       // The app opens again on the same store.
       bartek.intro = bartek.open();
       await bartek.intro.load();
-      expect(bartek.intro.gates.termsFor(ania.address), _freeAtOnce);
+      expect(bartek.intro.gates.isFreeFor(celina.address), isTrue);
+      expect(bartek.intro.gates.of(GateTier.far), const GateTerms(price: 900));
       expect(bartek.intro.gates.relay, isTrue);
-      await bartek.intro.setGateFor(ania.address, null);
+      await bartek.intro.setGateFree(celina.address, free: false);
       expect(
-        ania.intro.cardOf(bartek.address)!.terms,
+        celina.intro.cardOf(bartek.address)!.terms,
         const GateTerms(price: 300),
+      );
+      expect(
+        GateSettings.fromJson(
+          jsonDecode(jsonEncode(bartek.intro.gates.toJson())),
+        ).of(GateTier.close),
+        _freeAtOnce,
       );
       expect(net.clock, greaterThan(0));
     });
@@ -398,7 +444,7 @@ void main() {
 
     test('a free gate without consent opens at once', () async {
       final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = await _line();
-      await bartek.intro.setGateDefaults(_freeAtOnce);
+      await _all(bartek, _freeAtOnce);
       final IntroCase? c = await ania.intro.askIntro(
         middle: bartek.address,
         target: celina.address,
@@ -415,7 +461,7 @@ void main() {
       () async {
         final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) =
             await _line();
-        await bartek.intro.setGateDefaults(const GateTerms(price: 500));
+        await _all(bartek, const GateTerms(price: 500));
         final IntroCase? c = await ania.intro.askIntro(
           middle: bartek.address,
           target: celina.address,
@@ -431,7 +477,7 @@ void main() {
     test('bought without consent: Bartek\'s app opens it, the points are his '
         'once it opens', () async {
       final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = await _line();
-      await bartek.intro.setGateDefaults(const GateTerms(price: 500));
+      await _all(bartek, const GateTerms(price: 500));
       final ReachPlan plan = ania.intro.planTo(celina.address);
       expect(plan.best, ReachChoice.gates);
       expect(plan.gates!.price, 500);
@@ -453,9 +499,7 @@ void main() {
       () async {
         final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) =
             await _line();
-        await bartek.intro.setGateDefaults(
-          const GateTerms(price: 500, consent: true),
-        );
+        await _all(bartek, const GateTerms(price: 500, consent: true));
         final GatePlan plan = ania.intro.planTo(celina.address).gates!;
         expect(plan.pending, 1);
         final GateRun? run = await ania.intro.openWay(
@@ -477,11 +521,11 @@ void main() {
     test('more than the price is never kept: it goes back and the asker '
         'learns the price', () async {
       final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) = await _line();
-      await bartek.intro.setGateDefaults(const GateTerms(price: 500));
+      await _all(bartek, const GateTerms(price: 500));
       final GatePlan plan = ania.intro.planTo(celina.address).gates!;
       expect(plan.price, 500);
       // Bartek lowers it before Ania's request comes: she pays the old one.
-      await bartek.intro.setGateDefaults(const GateTerms(price: 300));
+      await _all(bartek, const GateTerms(price: 300));
       final GateRun? run = await ania.intro.openWay(
         plan,
         target: celina.address,
@@ -494,7 +538,7 @@ void main() {
 
     test('a payment not in the pyramid yet: the gate waits for it', () async {
       final (:net, :ania, :bartek, :celina, darek: _, ewa: _) = await _line();
-      await bartek.intro.setGateDefaults(const GateTerms(price: 500));
+      await _all(bartek, const GateTerms(price: 500));
       net.bank.slow = true;
       final GateRun? run = await ania.intro.openWay(
         ania.intro.planTo(celina.address).gates!,
@@ -513,9 +557,7 @@ void main() {
         'counts as none', () async {
       final (net: _, :ania, :bartek, :celina, darek: _, :ewa) = await _line();
       _befriend(bartek, ewa);
-      await bartek.intro.setGateDefaults(
-        const GateTerms(price: 500, consent: true),
-      );
+      await _all(bartek, const GateTerms(price: 500, consent: true));
       final GateRun? run = await ania.intro.openWay(
         ania.intro.planTo(celina.address).gates!,
         target: celina.address,
@@ -760,11 +802,12 @@ void main() {
     >
     setUpWay({bool celinaConsent = false}) async {
       final (:net, :ania, :bartek, :celina, :darek, ewa: _) = await _line();
-      await celina.intro.setGateDefaults(
-        GateTerms(price: 300, consent: celinaConsent),
-      );
+      await _all(celina, GateTerms(price: 300, consent: celinaConsent));
       await celina.intro.setGateRelay(true);
-      await bartek.intro.setGateFor(ania.address, const GateTerms(price: 500));
+      await bartek.intro.setGateTier(
+        GateTier.friend,
+        const GateTerms(price: 500),
+      );
       // Ania knows Darek only from what Bartek passed on about Celina.
       expect(ania.meet.book.friendsOf(celina.address), isEmpty);
       expect(
@@ -957,18 +1000,21 @@ void main() {
         isNull,
         reason: 'Bartek has not said yet',
       );
-      await bartek.intro.setGateFor(ania.address, const GateTerms(price: 500));
+      await bartek.intro.setGateTier(
+        GateTier.friend,
+        const GateTerms(price: 500),
+      );
       expect(
         prices.gateOf(celina.address, via: bartek.address),
         const GatePrice.price(500, shown: '5 pkt'),
       );
-      await bartek.intro.setGateFor(ania.address, _free);
+      await bartek.intro.setGateTier(GateTier.friend, _free);
       expect(
         prices.gateOf(celina.address, via: bartek.address),
         const GatePrice.consent(),
       );
-      await bartek.intro.setGateFor(
-        ania.address,
+      await bartek.intro.setGateTier(
+        GateTier.friend,
         const GateTerms(price: 500, consent: true),
       );
       final GatePrice? both = prices.gateOf(
@@ -977,7 +1023,7 @@ void main() {
       );
       expect(both!.consent, isTrue);
       expect(both.label, '5 pkt · za zgodą');
-      await celina.intro.setGateDefaults(_freeAtOnce);
+      await _all(celina, _freeAtOnce);
       await celina.intro.setGateRelay(true);
       expect(
         prices.gateOf(darek.address, via: celina.address),
@@ -1110,7 +1156,7 @@ void main() {
         await p.meet.shareFriendList(p.meet.friendNames!(), force: true);
       }
       for (final _Phone p in line.reversed) {
-        await p.intro.setGateDefaults(_freeAtOnce);
+        await _all(p, _freeAtOnce);
         await p.intro.setGateRelay(true);
       }
       for (final _Phone p in line.reversed) {

@@ -21,10 +21,21 @@
 ## Gates
 
 A **gate** is the terms on which a friend opens the way to one of their
-friends: free, with their consent, for a price in points, or closed. Every
-friend sets gates for their own friends, privately, with exceptions per
-person, and may allow their terms to be passed further on, which is how
-your phone learns about longer routes.
+friends. Every gatekeeper sets just three prices, in pyramid points, each of
+which may be 0 (free):
+
+- **Close friends** (*Przyjaciele*),
+- **Friends** (*Znajomi*, weak acquaintances included),
+- **Further away** (*Dalsi*: friends of friends and beyond, who reach the
+  gatekeeper through an earlier gate),
+
+plus whether they want to approve each request (by default yes for a free
+gate, no for a paid one). On top of that, a gatekeeper can **open the gate
+for free** for chosen people (*Otwórz za darmo*, from a friend's card on the
+graph or in the gate settings). There is no request mechanism for that: if
+someone wants it, they ask in a chat. A gatekeeper may also allow their
+terms to be passed further on, which is how your phone learns about longer
+routes (those further away see the *Further away* price).
 
 <p align="center">
   <img src="../images/gates-route.svg" width="760" alt="A route through two gates, compared with a direct first message">
@@ -34,9 +45,10 @@ your phone learns about longer routes.
 
 - writing straight away, when the person accepts first messages from
   strangers, at their price;
-- a chain of gates of any length, as far as your phone knows the terms:
-  the cheapest first, then the one with fewer consents to wait for, then the
-  one with fewer gates.
+- a chain of gates of any length, as far as your phone knows the terms,
+  each gate at the price that applies to you there (your tier with that
+  gatekeeper, or free if they opened it for you): the cheapest first, then
+  the one with fewer consents to wait for, then the one with fewer gates.
 
 **Opening the way.** **Open the way** goes gate by gate. Each gate is paid
 only when its turn comes, as an escrow payment: the gatekeeper keeps it
@@ -57,8 +69,9 @@ write 3 messages before you answer.
 
 ## Privacy
 
-- Gate terms are private between you and each friend, unless you allow them
-  to travel further (up to 6 steps, at most 40 gatekeepers per card, nearest
+- Gate terms are private between you and each friend, and the "free for"
+  list never leaves your phone (each friend only learns their own price),
+  unless you allow your *Further away* price to travel further (up to 6 steps, at most 40 gatekeepers per card, nearest
   first).
 - The person at the end decides; a go-between does not learn their answer.
 

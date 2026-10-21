@@ -862,9 +862,10 @@ Future<GateTerms?> editGateTerms(
   return GateTerms(price: amount, consent: consent);
 }
 
-/// "Bramy do moich znajomych": how this person opens the way to their
-/// friends — for everyone and for chosen friends — and whether the terms
-/// may travel further.
+/// "Bramy do moich znajomych": the price of opening the way for close
+/// friends, for friends and for those further away (each may be free),
+/// the people the gate is open to for free, and whether the terms may
+/// travel further.
 class GateSettingsTile extends ConsumerWidget {
   const GateSettingsTile({super.key});
 
@@ -887,21 +888,26 @@ class GateSettingsTile extends ConsumerWidget {
           return f == null ? intro.host.nameOf(a) : social.nameFor(f);
         }
 
-        Future<void> addException() async {
-          final List<FriendProfile> left = <FriendProfile>[
-            for (final MapEntry<String, FriendProfile> e in byAddress.entries)
-              if (!gates.perFriend.containsKey(e.key)) e.value,
-          ];
+        Future<void> addFree() async {
+          final List<FriendProfile> left =
+              <FriendProfile>[
+                for (final MapEntry<String, FriendProfile> e
+                    in byAddress.entries)
+                  if (!gates.freeFor.contains(e.key)) e.value,
+              ]..sort(
+                (FriendProfile a, FriendProfile b) =>
+                    social.nameFor(a).compareTo(social.nameFor(b)),
+              );
           final String? who = await showDialog<String>(
             context: context,
             builder: (BuildContext context) => SimpleDialog(
               key: const Key('gate-pick-friend'),
-              title: Text(t('Dla kogo inne warunki?')),
+              title: Text(t('Komu otworzyć bramę za darmo?')),
               children: <Widget>[
                 if (left.isEmpty)
                   Padding(
                     padding: const EdgeInsets.all(16),
-                    child: Text(t('Wszyscy znajomi mają już swoje warunki.')),
+                    child: Text(t('Wszyscy znajomi mają już bramę za darmo.')),
                   ),
                 for (final FriendProfile f in left)
                   SimpleDialogOption(
@@ -917,20 +923,13 @@ class GateSettingsTile extends ConsumerWidget {
               ],
             ),
           );
-          if (who == null || !context.mounted) {
-            return;
-          }
-          final GateTerms? terms = await editGateTerms(
-            context,
-            initial: gates.defaults,
-            title: t('Brama dla: {name}', {'name': nameOf(who)}),
-            member: member,
-          );
-          if (terms != null) {
-            await intro.setGateFor(who, terms);
+          if (who != null) {
+            await intro.setGateFree(who, free: true);
           }
         }
 
+        final List<String> free = gates.freeFor.toList()
+          ..sort((String a, String b) => nameOf(a).compareTo(nameOf(b)));
         return Padding(
           key: const Key('gate-settings'),
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
@@ -948,9 +947,10 @@ class GateSettingsTile extends ConsumerWidget {
               const SizedBox(height: 4),
               Text(
                 t(
-                  'Znajomy prosi, żebyś przedstawił(a) go komuś ze swoich '
-                  'znajomych — to otwiera mu bramę. Ustal, czy robisz to za '
-                  'darmo, czy za punkty, i czy chcesz o tym decydować.',
+                  'Ktoś prosi, żebyś przedstawił(a) go komuś ze swoich '
+                  'znajomych — to otwiera mu bramę. Ustal cenę osobno dla '
+                  'przyjaciół, znajomych i dalszych osób (może być 0) i czy '
+                  'chcesz o tym decydować.',
                 ),
                 style: TextStyle(
                   color: zen.textSecondary,
@@ -958,57 +958,59 @@ class GateSettingsTile extends ConsumerWidget {
                   height: 1.35,
                 ),
               ),
-              ListTile(
-                key: const Key('gate-defaults'),
-                contentPadding: EdgeInsets.zero,
-                title: Text(t('Dla wszystkich')),
-                subtitle: Text(gates.defaults.label),
-                trailing: const Icon(Icons.edit_outlined),
-                onTap: () => unawaited(() async {
-                  final GateTerms? terms = await editGateTerms(
-                    context,
-                    initial: gates.defaults,
-                    title: t('Brama dla wszystkich'),
-                    member: member,
-                  );
-                  if (terms != null) {
-                    await intro.setGateDefaults(terms);
-                  }
-                }()),
-              ),
-              for (final MapEntry<String, GateTerms> e
-                  in gates.perFriend.entries)
+              for (final GateTier tier in GateTier.values)
                 ListTile(
-                  key: Key('gate-friend-${e.key}'),
+                  key: Key('gate-tier-${tier.name}'),
                   contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: Text(nameOf(e.key)),
-                  subtitle: Text(e.value.label),
+                  title: Text(tier.label),
+                  subtitle: Text(gates.of(tier).label),
+                  trailing: const Icon(Icons.edit_outlined),
                   onTap: () => unawaited(() async {
                     final GateTerms? terms = await editGateTerms(
                       context,
-                      initial: e.value,
-                      title: t('Brama dla: {name}', {'name': nameOf(e.key)}),
+                      initial: gates.of(tier),
+                      title: t('Brama dla: {name}', {'name': tier.label}),
                       member: member,
                     );
                     if (terms != null) {
-                      await intro.setGateFor(e.key, terms);
+                      await intro.setGateTier(tier, terms);
                     }
                   }()),
+                ),
+              const SizedBox(height: 4),
+              Text(
+                t('Otwarte za darmo'),
+                style: zen.label(color: zen.textSecondary),
+              ),
+              Text(
+                t(
+                  'Dla tych osób brama jest za darmo, bez względu na cenę. '
+                  'Kto chce, pyta Cię w rozmowie.',
+                ),
+                style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+              ),
+              for (final String a in free)
+                ListTile(
+                  key: Key('gate-free-$a'),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: const Icon(Icons.lock_open_rounded),
+                  title: Text(nameOf(a)),
                   trailing: IconButton(
-                    key: Key('gate-friend-remove-${e.key}'),
-                    tooltip: t('Jak dla wszystkich'),
+                    key: Key('gate-free-remove-$a'),
+                    tooltip: t('Zwykła cena'),
                     icon: const Icon(Icons.close_rounded),
-                    onPressed: () => unawaited(intro.setGateFor(e.key, null)),
+                    onPressed: () =>
+                        unawaited(intro.setGateFree(a, free: false)),
                   ),
                 ),
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
-                  key: const Key('gate-add-exception'),
-                  onPressed: () => unawaited(addException()),
+                  key: const Key('gate-add-free'),
+                  onPressed: () => unawaited(addFree()),
                   icon: const Icon(Icons.person_add_alt_rounded, size: 18),
-                  label: Text(t('Inne warunki dla znajomego')),
+                  label: Text(t('Otwórz za darmo dla…')),
                 ),
               ),
               SwitchListTile(
