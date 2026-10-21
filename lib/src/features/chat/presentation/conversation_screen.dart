@@ -32,6 +32,7 @@ import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/disappearing_timer_dialog.dart';
+import 'package:zen/src/features/chat/presentation/message_delivery_badge.dart';
 import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
 import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
@@ -211,7 +212,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         titleSpacing: 0,
         title: InkWell(
           key: const Key('conversation-open-profile'),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: context.zenRadius(12),
           onTap: () => showPeerProfileSheet(context, widget.peerAddress),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
@@ -310,7 +311,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                     vertical: 6,
                   ),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: context.zenRadius(999),
                     side: BorderSide(color: zen.success.withValues(alpha: 0.5)),
                   ),
                 ),
@@ -620,6 +621,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                 else
                                   _MessageBubble(
                                     message: message,
+                                    conversationKey: widget.peerAddress,
                                     entranceDelay:
                                         animateEntrance &&
                                             fromEnd < _entranceStaggerLimit

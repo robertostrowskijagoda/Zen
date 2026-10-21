@@ -76,7 +76,7 @@ class _FriendNicknameDialogState extends State<_FriendNicknameDialog> {
                 ),
                 decoration: BoxDecoration(
                   color: zen.surfaceMuted,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: context.zenRadius(14),
                 ),
                 child: Row(
                   children: <Widget>[

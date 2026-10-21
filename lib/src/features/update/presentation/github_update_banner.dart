@@ -91,7 +91,7 @@ class _BannerTile extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(14, 8, 4, 8),
       decoration: BoxDecoration(
         color: tone.withValues(alpha: 0.09),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: context.zenRadius(18),
         border: Border.all(color: tone.withValues(alpha: 0.24)),
       ),
       child: Column(
@@ -160,7 +160,7 @@ class _UpdateProgress extends StatelessWidget {
         children: <Widget>[
           if (step != null) ...<Widget>[
             ClipRRect(
-              borderRadius: BorderRadius.circular(99),
+              borderRadius: context.zenRadius(99),
               child: LinearProgressIndicator(
                 value: state == GithubInstallState.downloading
                     ? service.progress

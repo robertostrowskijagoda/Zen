@@ -267,7 +267,7 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
                     fit: StackFit.expand,
                     children: <Widget>[
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: context.zenRadius(16),
                         child: _media[i].isVideo
                             ? ColoredBox(
                                 color: zen.surfaceSunk,
@@ -298,7 +298,7 @@ class _GalleryAddScreenState extends State<GalleryAddScreen> {
                   DecoratedBox(
                     decoration: BoxDecoration(
                       color: zen.surfaceSunk,
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: context.zenRadius(16),
                     ),
                     child: const Center(
                       child: SizedBox.square(

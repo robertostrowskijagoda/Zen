@@ -61,7 +61,7 @@ class FriendsNewerVersionBanner extends ConsumerWidget {
       return copyWarning;
     }
     final ZenColors zen = ZenColors.of(context);
-    final BorderRadius radius = BorderRadius.circular(18);
+    final BorderRadius radius = context.zenRadius(18);
     final Widget tile = Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(

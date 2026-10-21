@@ -348,10 +348,7 @@ void main() {
         'dating',
         'neighbors',
         'pyramid',
-        'wallet',
-        'nearby',
-        'invite',
-        'about',
+        'films',
         'alarm',
       ]) {
         where = 'tab $tab';

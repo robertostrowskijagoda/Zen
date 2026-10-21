@@ -301,9 +301,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
     final _CaptureOption? option = await showModalBottomSheet<_CaptureOption>(
       context: context,
       backgroundColor: zen.surfaceRaised,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+      shape: context.zenSheetShape(),
       builder: (BuildContext sheetContext) {
         return SafeArea(
           child: Padding(
@@ -859,11 +857,11 @@ class _EmojiPickerSheetState extends State<_EmojiPickerSheet> {
                 filled: true,
                 fillColor: zen.surface,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: context.zenRadius(16),
                   borderSide: BorderSide(color: zen.outlineSoft),
                 ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: context.zenRadius(16),
                   borderSide: BorderSide(color: zen.outlineSoft),
                 ),
               ),
@@ -892,7 +890,7 @@ class _EmojiPickerSheetState extends State<_EmojiPickerSheet> {
                       final item = filtered[index];
                       return InkWell(
                         key: Key('emoji-$index'),
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: context.zenRadius(12),
                         onTap: () => Navigator.of(context).pop(item.emoji),
                         child: Center(
                           child: Text(
@@ -1141,16 +1139,16 @@ class _ConversationGifPickerDialogState
                           final GifCatalogEntry entry = _entries[index];
                           return InkWell(
                             key: Key('conversation-gif-tile-$index'),
-                            borderRadius: BorderRadius.circular(20),
+                            borderRadius: context.zenRadius(20),
                             onTap: () => Navigator.of(context).pop(entry),
                             child: Ink(
                               decoration: BoxDecoration(
                                 color: zen.surfaceRaised,
-                                borderRadius: BorderRadius.circular(20),
+                                borderRadius: context.zenRadius(20),
                                 border: Border.all(color: zen.outlineSoft),
                               ),
                               child: ClipRRect(
-                                borderRadius: BorderRadius.circular(20),
+                                borderRadius: context.zenRadius(20),
                                 child: Stack(
                                   fit: StackFit.expand,
                                   children: <Widget>[
@@ -1454,7 +1452,7 @@ class _VoiceAttachmentContentState extends State<_VoiceAttachmentContent> {
                   ),
                   const SizedBox(height: 4),
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: context.zenRadius(999),
                     child: LinearProgressIndicator(
                       minHeight: 5,
                       value: progress > 0 ? progress : 0.0,
@@ -1578,7 +1576,7 @@ class _MediaAttachmentPanel extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: context.zenRadius(14),
             border: Border.all(color: accent.withAlpha(90)),
           ),
           child: Padding(
@@ -1780,7 +1778,7 @@ class _VideoAttachmentPreviewScreenState
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: Colors.black,
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: context.zenRadius(28),
                 border: Border.all(color: zen.outline),
               ),
               child: Padding(
@@ -1799,7 +1797,7 @@ class _VideoAttachmentPreviewScreenState
                         children: <Widget>[
                           Expanded(
                             child: ClipRRect(
-                              borderRadius: BorderRadius.circular(20),
+                              borderRadius: context.zenRadius(20),
                               child: ColoredBox(
                                 color: Colors.black,
                                 child: Center(
@@ -1817,7 +1815,7 @@ class _VideoAttachmentPreviewScreenState
                           const SizedBox(height: 16),
                           if (progress != null)
                             ClipRRect(
-                              borderRadius: BorderRadius.circular(999),
+                              borderRadius: context.zenRadius(999),
                               child: LinearProgressIndicator(
                                 minHeight: 6,
                                 value: progress,

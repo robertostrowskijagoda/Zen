@@ -30,10 +30,7 @@ import 'package:zen/src/features/update/update_service.dart';
 final Provider<ZenCore> zenCoreProvider = Provider<ZenCore>((Ref ref) {
   final ZenCore core = ZenCore(
     modules: zenAppModules(ref),
-    loadFlags: () async {
-      await ref.read(featureFlagsProvider.notifier).loaded;
-      return ref.read(featureFlagsProvider);
-    },
+    loadFlags: () async => ref.read(featureFlagsProvider),
   );
   ref.onDispose(() {
     unawaitedLogged(core.stop(), context: 'Stopping ZenCore failed');

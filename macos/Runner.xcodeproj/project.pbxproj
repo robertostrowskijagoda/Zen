@@ -30,6 +30,8 @@
 		7C1D2E3F405162738495A6B9 /* SecurityBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C1D2E3F405162738495A6B8 /* SecurityBridge.swift */; };
 		5A454E4C0000000000000004 /* ZenLocalLinksBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A454E4C0000000000000003 /* ZenLocalLinksBridge.swift */; };
 		5A454E4D0000000000000004 /* ZenLocationBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A454E4D0000000000000003 /* ZenLocationBridge.swift */; };
+		5A454E4E0000000000000004 /* ZenIntegrityBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A454E4E0000000000000003 /* ZenIntegrityBridge.swift */; };
+		5A454E560000000000000004 /* ZenVideoBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A454E560000000000000003 /* ZenVideoBridge.swift */; };
 		78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */ = {isa = PBXBuildFile; productRef = 78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */; };
 		7D2BFF0000000000000000A2 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 7D2BFF0000000000000000A1 /* InfoPlist.strings */; };
 		5A0D510100000000000000A2 /* zen_message.caf in Resources */ = {isa = PBXBuildFile; fileRef = 5A0D510100000000000000A1 /* zen_message.caf */; };
@@ -90,6 +92,8 @@
 		7C1D2E3F405162738495A6B8 /* SecurityBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityBridge.swift; sourceTree = "<group>"; };
 		5A454E4C0000000000000003 /* ZenLocalLinksBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../../ios/Runner/ZenLocalLinksBridge.swift"; sourceTree = "<group>"; };
 		5A454E4D0000000000000003 /* ZenLocationBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../../ios/Runner/ZenLocationBridge.swift"; sourceTree = "<group>"; };
+		5A454E4E0000000000000003 /* ZenIntegrityBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../../ios/Runner/ZenIntegrityBridge.swift"; sourceTree = "<group>"; };
+		5A454E560000000000000003 /* ZenVideoBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../../ios/Runner/ZenVideoBridge.swift"; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		7D2B000000000000000000A1 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
@@ -210,6 +214,8 @@
 				7C1D2E3F405162738495A6B8 /* SecurityBridge.swift */,
 				5A454E4C0000000000000003 /* ZenLocalLinksBridge.swift */,
 				5A454E4D0000000000000003 /* ZenLocationBridge.swift */,
+				5A454E4E0000000000000003 /* ZenIntegrityBridge.swift */,
+				5A454E560000000000000003 /* ZenVideoBridge.swift */,
 				33E51913231747F40026EE4D /* DebugProfile.entitlements */,
 				33E51914231749380026EE4D /* Release.entitlements */,
 				33CC11242044D66E0003C045 /* Resources */,
@@ -455,6 +461,8 @@
 				7C1D2E3F405162738495A6B9 /* SecurityBridge.swift in Sources */,
 				5A454E4C0000000000000004 /* ZenLocalLinksBridge.swift in Sources */,
 				5A454E4D0000000000000004 /* ZenLocationBridge.swift in Sources */,
+				5A454E4E0000000000000004 /* ZenIntegrityBridge.swift in Sources */,
+				5A454E560000000000000004 /* ZenVideoBridge.swift in Sources */,
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,
 				335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */,
 			);

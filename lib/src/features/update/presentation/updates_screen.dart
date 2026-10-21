@@ -187,7 +187,7 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
               decoration: BoxDecoration(
                 color: zen.accent.withValues(alpha: 0.09),
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: context.zenRadius(18),
                 border: Border.all(color: zen.accent.withValues(alpha: 0.24)),
               ),
               child: Row(
@@ -235,7 +235,7 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
           ZenHero(
             title: t('Daj Zen komuś obok'),
             icon: Icons.volunteer_activism_rounded,
-            tone: zenTone(zen, 2),
+            tone: zen.tone(ZenTone.people),
             text: isStoreBuild
                 ? t('Wyślij znajomemu link do Zen.')
                 : t(
@@ -260,7 +260,7 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: context.zenRadius(26),
         gradient: LinearGradient(
           colors: <Color>[
             Color.alphaBlend(zen.accent.withValues(alpha: 0.26), zen.surface),
@@ -365,7 +365,7 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
       UpdatePhase.downloading => zen.accent,
       UpdatePhase.waiting => zen.warning,
       UpdatePhase.ready => zen.accent,
-      UpdatePhase.otherPlatform => zenTone(zen, 6),
+      UpdatePhase.otherPlatform => zen.tone(ZenTone.system),
     };
     return ZenCard(
       key: Key('updates-status-${s.phase.name}'),
@@ -408,7 +408,7 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
           if (s.phase == UpdatePhase.downloading) ...<Widget>[
             const SizedBox(height: 14),
             ClipRRect(
-              borderRadius: BorderRadius.circular(99),
+              borderRadius: context.zenRadius(99),
               child: LinearProgressIndicator(
                 value: s.progress,
                 minHeight: 6,

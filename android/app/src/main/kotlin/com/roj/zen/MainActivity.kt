@@ -87,6 +87,7 @@ class MainActivity : FlutterFragmentActivity() {
         ZenPermissionsBridge.register(flutterEngine, this)
         ZenLocationBridge.register(flutterEngine, this, this)
         ZenAlarmShortcut.register(flutterEngine, this, background = false)
+        ZenVideoBridge.register(flutterEngine, this)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {

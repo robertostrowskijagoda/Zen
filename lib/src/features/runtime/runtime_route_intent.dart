@@ -19,6 +19,10 @@ enum RuntimeRouteTarget {
   /// The Tablica with a filter (`zen://feed?f=pyramid`); [rawInput] holds
   /// the filter's name.
   feed,
+
+  /// The knocks waiting at the flat's door (`zen://knocks`): the
+  /// neighbours section.
+  flatKnocks,
 }
 
 @immutable
@@ -107,6 +111,11 @@ final class RuntimeRouteIntent {
     );
   }
 
+  /// The knocks at the flat's door ("Ktoś puka do drzwi").
+  factory RuntimeRouteIntent.flatKnocks({required String id}) {
+    return RuntimeRouteIntent(id: id, target: RuntimeRouteTarget.flatKnocks);
+  }
+
   /// The Tablica, filtered by [filter] (a name of the feed's filters).
   factory RuntimeRouteIntent.feed({
     required String id,
@@ -177,10 +186,14 @@ final class RuntimeRouteIntent {
     RuntimeRouteTarget.groupConversation => t('Otwórz grupę'),
     RuntimeRouteTarget.flatDoor => t('Zapukaj do sąsiadów'),
     RuntimeRouteTarget.feed => t('Otwórz Tablicę'),
+    RuntimeRouteTarget.flatKnocks => t('Otwórz Sąsiadów'),
   };
 }
 
 String buildInboxRouteKey() => 'zen://inbox';
+
+/// The knocks at the flat's door (a knock's notification).
+String buildFlatKnocksRouteKey() => 'zen://knocks';
 
 /// The Tablica on [filter] (`zen://feed?f=pyramid`).
 String buildFeedRouteKey(String filter) => Uri(
@@ -284,6 +297,9 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
   }
   if (uri.host == 'inbox') {
     return RuntimeRouteIntent.inbox(id: id);
+  }
+  if (uri.host == 'knocks') {
+    return RuntimeRouteIntent.flatKnocks(id: id);
   }
   if (uri.host == 'feed') {
     return RuntimeRouteIntent.feed(

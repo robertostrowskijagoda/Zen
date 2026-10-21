@@ -1929,7 +1929,9 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         text: trimmed,
         sentAtMillis: timestamp,
         direction: ChatMessageDirection.outgoing,
-        deliveryState: ChatMessageDeliveryState.delivered,
+        // "Sent" once every member's copy is queued, "delivered" once all
+        // confirmed it (the relay layer's report).
+        deliveryState: ChatMessageDeliveryState.sending,
       ),
     );
     _bumpTimelineRevision();
@@ -1944,36 +1946,13 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     state = state.copyWith(groups: groups);
     await _persistState();
 
-    final String senderDisplayName = ref
-        .read(userProfileControllerProvider)
-        .displayName;
-    final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
-    final int seconds = state.disappearSecondsFor('group:$groupId');
-    final int? ttl = seconds > 0 ? seconds : null;
-    for (final String member in normalizedGroupMembers(group.memberAddresses)) {
-      if (localAddr.isNotEmpty &&
-          PeerShareCodec.addressesEqual(member, localAddr)) {
-        continue;
-      }
-      // Goes through the reliable transport (acked, retried, relayed to
-      // offline members); receivers drop repeat copies by message id.
-      unawaitedLogged(
-        _sendFriendLifecycleSignal(
-          peerAddress: member,
-          payload: <String, dynamic>{
-            'type': 'group_message',
-            'groupId': groupId,
-            'groupName': group.name,
-            'msgId': messageId,
-            'text': trimmed,
-            'senderName': senderDisplayName,
-            'timestamp': timestamp,
-            'ttl': ?ttl,
-          },
-        ),
-        context: 'send group message to $member',
-      );
-    }
+    await _sendGroupMessageToMembers(
+      group: group,
+      messageId: messageId,
+      text: trimmed,
+      timestamp: timestamp,
+      skip: const <String>{},
+    );
   }
 
   Future<void> _dismissRemovedAlerts(

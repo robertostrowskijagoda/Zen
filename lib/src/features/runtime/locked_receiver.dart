@@ -13,6 +13,7 @@ import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/meet/alarm_shortcut.dart';
 import 'package:zen/src/features/meet/locked_alarm.dart';
+import 'package:zen/src/features/neighbors/locked_knocks.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
@@ -31,6 +32,7 @@ const String kLockedAlarmSlot = 'locked-inbox-alarm';
 const String kLockedCallSlot = 'locked-inbox-call';
 const String kLockedMissedCallSlot = 'locked-inbox-missed-call';
 const String kLockedPowerAlarmSlot = 'locked-inbox-power-alarm';
+const String kLockedKnockSlot = 'locked-inbox-knock';
 
 const List<String> kLockedReceiverSlots = <String>[
   kLockedMessageSlot,
@@ -39,6 +41,7 @@ const List<String> kLockedReceiverSlots = <String>[
   kLockedCallSlot,
   kLockedMissedCallSlot,
   kLockedPowerAlarmSlot,
+  kLockedKnockSlot,
 ];
 
 /// Frames that only mean something the moment they arrive (a ring, a call's
@@ -126,8 +129,8 @@ const Duration kLockedMailboxPollInterval = Duration(minutes: 5);
 const int kLockedDoorFramesPerSender = 5;
 const int kLockedDoorFramesTotal = 50;
 
-/// One frame as the inbox keeps it (JSON: sender, time, payload, and `d`
-/// when it came to a door).
+/// One frame as the inbox keeps it (JSON: sender, time, payload, `d`
+/// when it came to a door, `k` the sender's device key fingerprint).
 Uint8List encodeInboxFrame(SignalTransportFrame frame) {
   return Uint8List.fromList(
     utf8.encode(
@@ -136,6 +139,7 @@ Uint8List encodeInboxFrame(SignalTransportFrame frame) {
         't': frame.receivedAtMillis,
         'p': frame.payload,
         if (frame.door) 'd': true,
+        if (frame.senderKey != null) 'k': frame.senderKey,
       }),
     ),
   );
@@ -159,6 +163,7 @@ SignalTransportFrame? decodeInboxFrame(Uint8List record) {
       payload: payload,
       receivedAtMillis: at,
       door: json['d'] == true,
+      senderKey: json['k'] is String ? json['k'] as String : null,
     );
   } on FormatException {
     return null;
@@ -236,13 +241,22 @@ final class BackgroundKitFile {
 final RegExp _doorSeedPattern = RegExp(r'^[0-9a-f]{64}$');
 
 /// What the locked service runs the doors with: the flat's door key and
-/// the keys of the mailbox doors this phone runs for friends. Sealed with
-/// the background key, like the alarm kit: a door key only lets one take
-/// frames at that door (the flat's own keys and the sealed knocks' key stay
-/// under the master key), and the doors answer nothing while locked.
+/// the keys of the mailbox doors this phone runs for friends; and what it
+/// tells a knock by ([LockedKnockWatch]): the household's public key, the
+/// door token and the household's sealing seed, which opens sealed knocks
+/// and nothing else. Sealed with the background key, like the alarm kit:
+/// none of it signs for the household or reads anything but knocks (the
+/// household's own key stays under the master key), and the doors answer
+/// nothing while locked.
 @immutable
 final class LockedDoorKit {
-  const LockedDoorKit({this.doorKey, this.mailboxDoorKeys = const <String>[]});
+  const LockedDoorKit({
+    this.doorKey,
+    this.mailboxDoorKeys = const <String>[],
+    this.flatKey,
+    this.doorToken,
+    this.sealSeed,
+  });
 
   /// The flat's door key (hex seed); `null` without a flat.
   final String? doorKey;
@@ -250,12 +264,31 @@ final class LockedDoorKit {
   /// Keys (hex seeds) of the mailbox doors run for friends.
   final List<String> mailboxDoorKeys;
 
+  /// The household's public key, the current door token and the
+  /// household's sealing seed (hex); `null` without a flat.
+  final String? flatKey;
+  final String? doorToken;
+  final String? sealSeed;
+
   bool get isEmpty => doorKey == null && mailboxDoorKeys.isEmpty;
+
+  /// What tells a knock while locked; `null` without a flat.
+  LockedKnockWatch? knockWatch() {
+    final String? key = flatKey;
+    final String? token = doorToken;
+    final String? seal = sealSeed;
+    return key == null || token == null || seal == null
+        ? null
+        : LockedKnockWatch(flatKey: key, doorToken: token, sealSeed: seal);
+  }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'v': 1,
     'dk': ?doorKey,
     'mb': mailboxDoorKeys,
+    'fk': ?flatKey,
+    'dt': ?doorToken,
+    'ss': ?sealSeed,
   };
 
   static LockedDoorKit? fromJson(Object? json) {
@@ -264,6 +297,9 @@ final class LockedDoorKit {
     }
     final Object? dk = json['dk'];
     final Object? mb = json['mb'];
+    final Object? fk = json['fk'];
+    final Object? dt = json['dt'];
+    final Object? ss = json['ss'];
     return LockedDoorKit(
       doorKey: dk is String && _doorSeedPattern.hasMatch(dk) ? dk : null,
       mailboxDoorKeys: <String>[
@@ -271,6 +307,9 @@ final class LockedDoorKit {
           for (final Object? seed in mb.take(16))
             if (seed is String && _doorSeedPattern.hasMatch(seed)) seed,
       ],
+      flatKey: fk is String && fk.isNotEmpty && fk.length <= 64 ? fk : null,
+      doorToken: dt is String && dt.isNotEmpty && dt.length <= 64 ? dt : null,
+      sealSeed: ss is String && _doorSeedPattern.hasMatch(ss) ? ss : null,
     );
   }
 }
@@ -385,7 +424,10 @@ String backgroundContactsSignature(SocialHubState state) {
 ///   flat's door, neighbour flats' frames and sealed knocks at the mailbox
 ///   doors run for friends are kept like strangers' frames (a budget of
 ///   their own) and never answered — a door never says who runs it, and
-///   the app handles them after unlock.
+///   the app handles them after unlock. A real knock for this household
+///   (checked with the kit, [LockedKnockWatch]: at the door, sealed, held
+///   by a friend or passed on by a housemate) rings "Ktoś puka do drzwi",
+///   which opens the knocks once Zen is unlocked.
 /// * Paused while locked: mailbox duties for friends, the ledger (posts and
 ///   photos for friends, its sync), outgoing retries, dating and pyramid
 ///   duties — they all need the master key.
@@ -399,6 +441,7 @@ final class LockedReceiver {
     required RuntimeSystemNotificationService notices,
     LockedAlarm? alarm,
     Stream<SignalTransportFrame>? doorFrames,
+    LockedKnockWatch? knocks,
     int Function()? now,
     this.ringTimeout = const Duration(seconds: 6),
     this.noticeThrottle = const Duration(minutes: 1),
@@ -409,6 +452,7 @@ final class LockedReceiver {
        _notices = notices,
        _alarm = alarm,
        _doorFrames = doorFrames,
+       _knocks = knocks,
        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final SignalTransport _transport;
@@ -419,6 +463,9 @@ final class LockedReceiver {
   /// What came to the doors the node runs (`RuntimeNodeRuntime.doorFrames`);
   /// `null`: no doors.
   final Stream<SignalTransportFrame>? _doorFrames;
+
+  /// Tells knocks for this household (`null`: no flat, or no kit yet).
+  final LockedKnockWatch? _knocks;
 
   /// This person's alarm from the alarm kit (`null`: the app never wrote
   /// one).
@@ -559,8 +606,11 @@ final class LockedReceiver {
       return;
     }
     _keptCount += 1;
-    if (type == kFlatKnockType || type == 'flat_msg') {
-      // Anyone with the sticker can knock, and nothing is checked here:
+    if (await _ringKnock(frame)) {
+      return;
+    }
+    if ((type == kFlatKnockType && _knocks == null) || type == 'flat_msg') {
+      // A neighbour's message, or a knock without a kit to check it with:
       // only that something came, at most once a minute.
       await _postThrottled(
         RuntimeSystemNotification(
@@ -575,6 +625,33 @@ final class LockedReceiver {
         ),
       );
     }
+  }
+
+  /// "Ktoś puka do drzwi" when [frame] is a knock for this household
+  /// ([LockedKnockWatch]); true when it was one.
+  Future<bool> _ringKnock(SignalTransportFrame frame) async {
+    final LockedKnockWatch? watch = _knocks;
+    final String? knocker = watch == null ? null : await watch.knocker(frame);
+    if (watch == null || knocker == null) {
+      return false;
+    }
+    if (watch.mayRing(knocker)) {
+      await _notices.dismissSlot(kLockedKnockSlot);
+      await _post(
+        RuntimeSystemNotification(
+          // `flat-`: the neighbours' knock sound.
+          id: 'flat-knock-locked-${_now()}',
+          title: t('Ktoś puka do drzwi'),
+          body: t('Odblokuj Zen, żeby wpuścić albo odmówić.'),
+          createdAtMillis: _now(),
+          category: RuntimeSystemNotificationCategory.social,
+          routeKey: buildFlatKnocksRouteKey(),
+          slotKey: kLockedKnockSlot,
+          contentRedacted: true,
+        ),
+      );
+    }
+    return true;
   }
 
   Future<void> _pollMailboxes() async {
@@ -705,6 +782,11 @@ final class LockedReceiver {
     _keptCount += 1;
     if (rid != null) {
       await _acknowledge(frame.from, rid);
+    }
+    // A knock a friend held for this phone, or one a housemate just got.
+    if ((type == 'flat_held' || type == 'flat_house') &&
+        await _ringKnock(frame)) {
+      return;
     }
     await _announce(type, frame.payload, kind);
   }

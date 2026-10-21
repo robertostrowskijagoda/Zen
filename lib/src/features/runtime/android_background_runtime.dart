@@ -1323,6 +1323,10 @@ final class _AndroidBackgroundRuntimeBridgeState
           final LockedDoorKit door = LockedDoorKit(
             doorKey: neighbors.doorKey,
             mailboxDoorKeys: neighbors.hostedDoorKeys,
+            // What tells a knock while locked (never the household's key).
+            flatKey: neighbors.doorKey == null ? null : neighbors.profile?.key,
+            doorToken: neighbors.doorKey == null ? null : neighbors.door,
+            sealSeed: neighbors.doorKey == null ? null : neighbors.sealSeed,
           );
           final String signature = jsonEncode(door.toJson());
           if (signature != _doorKitWritten) {
@@ -1722,6 +1726,7 @@ final class _LockedReceiverSession {
         inbox: inbox,
         notices: notices,
         doorFrames: runtime.doorFrames,
+        knocks: doorKit?.knockWatch(),
         alarm: kit == null
             ? null
             : LockedAlarm(

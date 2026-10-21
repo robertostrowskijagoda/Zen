@@ -185,6 +185,10 @@ final class _RuntimeRouteBridgeState extends ConsumerState<RuntimeRouteBridge> {
           ask: true,
         );
         break;
+      case RuntimeRouteTarget.flatKnocks:
+        // "Ktoś puka do drzwi": the knocks wait at the top of Sąsiedzi.
+        unawaited(NeighborsScreen.open(context));
+        break;
     }
     _handledIntentId = handledId;
     _scheduledIntentId = null;

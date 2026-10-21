@@ -102,7 +102,7 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
             end: Alignment.bottomCenter,
             stops: const <double>[0, 0.4],
           ),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          borderRadius: context.zenTopRadius(28),
           border: Border(top: BorderSide(color: zen.outlineSoft)),
         ),
         child: Padding(
@@ -118,7 +118,7 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
                     height: 4,
                     decoration: BoxDecoration(
                       color: zen.outlineStrong,
-                      borderRadius: BorderRadius.circular(2),
+                      borderRadius: context.zenRadius(2),
                     ),
                   ),
                 ),
@@ -192,11 +192,11 @@ class _CreateGroupSheetState extends ConsumerState<CreateGroupSheet> {
                     child: Material(
                       color: zen.surfaceRaised,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: context.zenRadius(20),
                         side: BorderSide(color: zen.outlineSoft),
                       ),
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: context.zenRadius(20),
                         child: ListView.builder(
                           shrinkWrap: true,
                           padding: const EdgeInsets.symmetric(vertical: 4),

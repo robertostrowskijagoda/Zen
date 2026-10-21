@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_code_dart_scan/qr_code_dart_scan.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/theme/zen_theme.dart';
 
 final Provider<PeerQrScanner> peerQrScannerProvider = Provider<PeerQrScanner>((
   Ref ref,
@@ -92,8 +93,12 @@ class _PeerQrScannerPageState extends State<_PeerQrScannerPage> {
                 width: 240,
                 height: 240,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(color: Colors.white, width: 3),
+                  borderRadius: context.zenRadius(28),
+                  // The viewfinder in the accent of the theme.
+                  border: Border.all(
+                    color: ZenColors.of(context).accent,
+                    width: 3,
+                  ),
                 ),
               ),
             ),
@@ -105,7 +110,7 @@ class _PeerQrScannerPageState extends State<_PeerQrScannerPage> {
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       color: Colors.black.withAlpha(180),
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: context.zenRadius(20),
                     ),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(

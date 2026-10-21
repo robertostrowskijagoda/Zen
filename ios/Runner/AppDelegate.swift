@@ -27,6 +27,14 @@ import UserNotifications
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenLocationBridge") {
       ZenLocationBridge.register(with: registrar.messenger())
     }
+    // Signs of a debugger, injected libraries or a jailbreak.
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenIntegrityBridge") {
+      ZenIntegrityBridge.register(with: registrar.messenger())
+    }
+    // Films of the "Filmy" section compressed and trimmed (AVFoundation).
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenVideoBridge") {
+      ZenVideoBridge.register(with: registrar.messenger())
+    }
   }
 }
 

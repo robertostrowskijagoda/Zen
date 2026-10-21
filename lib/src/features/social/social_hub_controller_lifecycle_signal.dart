@@ -62,7 +62,8 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
   /// Takes the mailbox layer's delivery news (`RelayEngine.takeDeliveryReports`)
   /// into the chats: a message that expired unacknowledged in the queue is
   /// marked failed, one too large for mailboxes goes back to "sending" (it
-  /// only arrives while both devices are online).
+  /// only arrives while both devices are online), and a group message is
+  /// delivered once every member confirmed it.
   void _watchRelayDeliveryReports() {
     if (_relayReportsWatched) {
       return;
@@ -94,10 +95,15 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
         return;
       }
       String peer = report.recipient;
-      for (final String address in state.friends.keys) {
-        if (PeerShareCodec.addressesEqual(address, report.recipient)) {
-          peer = address;
-          break;
+      final String? groupId = report.groupId;
+      if (groupId != null) {
+        peer = 'group:$groupId';
+      } else {
+        for (final String address in state.friends.keys) {
+          if (PeerShareCodec.addressesEqual(address, report.recipient)) {
+            peer = address;
+            break;
+          }
         }
       }
       final List<ChatMessage> thread = await _messageTimelineStore.load(peer);
@@ -116,6 +122,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       final ChatMessageDeliveryState next = switch (report.status) {
         RelayDeliveryStatus.expired => ChatMessageDeliveryState.failed,
         RelayDeliveryStatus.directOnly => ChatMessageDeliveryState.sending,
+        RelayDeliveryStatus.delivered => ChatMessageDeliveryState.delivered,
       };
       if (next == current) {
         continue;

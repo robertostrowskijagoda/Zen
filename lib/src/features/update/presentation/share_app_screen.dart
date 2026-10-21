@@ -514,7 +514,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: context.zenRadius(20),
       ),
       child: QrImageView(
         key: key,
@@ -533,7 +533,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: zen.surfaceSunk,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: context.zenRadius(14),
         border: Border.all(color: zen.outlineSoft),
       ),
       child: Column(
@@ -666,7 +666,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
   /// "Wyślij przez Quick Share / Bluetooth": the quickest way to hand Zen to
   /// someone standing next to you.
   Widget _shareSheetCard(ZenColors zen) {
-    final Color tone = zenTone(zen, 3);
+    final Color tone = zen.tone(ZenTone.communication);
     final String? note = _sendNote;
     return ZenCard(
       key: const Key('share-app-system-card'),
@@ -778,7 +778,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     final ShareAppServer? server = _server;
     final InternetAddress? first = _addresses.firstOrNull;
     final ZenColors zen = ZenColors.of(context);
-    final Color tone = zenTone(zen, 2);
+    final Color tone = zen.tone(ZenTone.people);
     return Scaffold(
       key: const Key('share-app-screen'),
       appBar: AppBar(title: Text(t('Podaj dalej'))),
@@ -1006,7 +1006,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
               decoration: BoxDecoration(
                 color: zen.accent.withValues(alpha: 0.09),
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: context.zenRadius(18),
                 border: Border.all(color: zen.accent.withValues(alpha: 0.24)),
               ),
               child: Row(

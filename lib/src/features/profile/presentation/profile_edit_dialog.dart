@@ -153,9 +153,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
       context: context,
       backgroundColor: zen.surfaceRaised,
       showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
+      shape: context.zenSheetShape(),
       builder: (BuildContext sheetContext) {
         return SafeArea(
           child: Column(
@@ -419,7 +417,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: zen.surfaceRaised,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          borderRadius: context.zenTopRadius(28),
           border: Border.all(color: zen.outlineSoft),
         ),
         child: SafeArea(
@@ -442,7 +440,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                       height: 4,
                       decoration: BoxDecoration(
                         color: zen.outline,
-                        borderRadius: BorderRadius.circular(2),
+                        borderRadius: context.zenRadius(2),
                       ),
                     ),
                   ),
@@ -483,7 +481,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: zen.surface,
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: context.zenRadius(20),
                       border: Border.all(color: zen.outlineSoft),
                     ),
                     child: Row(
@@ -575,7 +573,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                     title: t('Zdjęcie w tle'),
                   ),
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
+                    borderRadius: context.zenRadius(18),
                     child: AspectRatio(
                       aspectRatio: 3,
                       child: Stack(
@@ -656,7 +654,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                     margin: const EdgeInsets.only(bottom: 8),
                     decoration: BoxDecoration(
                       color: zen.surfaceMuted,
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: context.zenRadius(14),
                     ),
                     child: _BioToolbar(controller: _bioController),
                   ),
@@ -677,15 +675,15 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                       ),
                       alignLabelWithHint: true,
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: context.zenRadius(16),
                         borderSide: BorderSide(color: zen.outlineSoft),
                       ),
                       enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: context.zenRadius(16),
                         borderSide: BorderSide(color: zen.outlineSoft),
                       ),
                       focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: context.zenRadius(16),
                         borderSide: BorderSide(color: zen.accent, width: 1.5),
                       ),
                     ),
@@ -717,7 +715,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                     padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
                     decoration: BoxDecoration(
                       color: zen.surface,
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: context.zenRadius(20),
                       border: Border.all(color: zen.outlineSoft),
                     ),
                     child: Column(
@@ -744,7 +742,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                                         _visibility[field.name],
                                       ) ??
                                       kDefaultFieldVisibility[field],
-                                  borderRadius: BorderRadius.circular(16),
+                                  borderRadius: context.zenRadius(16),
                                   style: TextStyle(
                                     color: zen.textSecondary,
                                     fontSize: 13.5,

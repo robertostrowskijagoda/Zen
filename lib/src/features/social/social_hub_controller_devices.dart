@@ -3,6 +3,25 @@ part of 'social_hub_controller.dart';
 /// Several devices of one account: what another own device sent, and
 /// the backup of friends and groups the account's devices share.
 mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
+  /// The device key [address] signed is not the one its session uses (or
+  /// two signed sources name different keys): someone else may hold that
+  /// address's node key. Shown in the conversation with that friend.
+  Future<void> warnDeviceKeyMismatch(String address) async {
+    final FriendProfile? friend = state.friendByAddress(address);
+    if (friend == null) {
+      return;
+    }
+    await _appendSystemMessage(
+      peerAddress: friend.address,
+      text: t(
+        'Klucz urządzenia się nie zgadza. Ktoś inny może podszywać się '
+        'pod ten adres; jego wiadomości są odrzucane. Zanim przekażesz coś '
+        'ważnego, sprawdź to z tą osobą inną drogą.',
+      ),
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
   /// Another device of this account sent [payload] to [peerAddress]: show
   /// it in the conversation here too.
   Future<void> recordMirroredSend(

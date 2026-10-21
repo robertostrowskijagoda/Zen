@@ -42,6 +42,8 @@ dependencies:
   flutter_webrtc: ^1.5.2
   app_links: ^6.0.0
   image_picker: ^1.2.3
+  # The own camera of the "Filmy" section (hold to record).
+  camera: ^0.11.0
   image: ^4.8.0
 
 dev_dependencies:
@@ -77,9 +79,6 @@ flutter:
     - family: DM Sans
       fonts:
         - asset: assets/fonts/DMSans-Variable.ttf
-    - family: VT323
-      fonts:
-        - asset: assets/fonts/VT323-Regular.ttf
 
   assets:
     - assets/branding/
@@ -92,5 +91,8 @@ flutter:
     # the additional terms of Zen's licence.
     - assets/licenses/native/
     - NOTICE
+    # The terms and the privacy policy, read and accepted in the app.
+    - docs/TERMS.md
+    - docs/PRIVACY.md
     # Zen's own sounds (tool/sounds/generate_sounds.py).
     - assets/sounds/

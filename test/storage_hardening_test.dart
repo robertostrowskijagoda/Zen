@@ -320,25 +320,29 @@ void main() {
       expect(network.onUnmetered, isTrue);
     });
 
-    test('the setting is on by default', () {
-      expect(const AppSettings().mediaOnlyOnWifi, isTrue);
-      expect(AppSettings.fromJson(<String, dynamic>{}).mediaOnlyOnWifi, isTrue);
-      final AppSettings round = AppSettings.fromJson(
-        const AppSettings(mediaOnlyOnWifi: false).toJson(),
+    test('the setting is off by default: media come on mobile data too', () {
+      expect(const AppSettings().mediaOnlyOnWifi, isFalse);
+      expect(
+        AppSettings.fromJson(<String, dynamic>{}).mediaOnlyOnWifi,
+        isFalse,
       );
-      expect(round.mediaOnlyOnWifi, isFalse);
+      final AppSettings round = AppSettings.fromJson(
+        const AppSettings(mediaOnlyOnWifi: true).toJson(),
+      );
+      expect(round.mediaOnlyOnWifi, isTrue);
       expect(
         AppSettings.fromJson(const AppSettings().toJson()).mediaOnlyOnWifi,
-        isTrue,
+        isFalse,
       );
     });
 
     test('auto download needs the switch and, on Wi-Fi-only, Wi-Fi', () {
-      const AppSettings wifiOnly = AppSettings();
+      const AppSettings anywhere = AppSettings();
+      expect(anywhere.allowsAutoDownload(onUnmetered: true), isTrue);
+      expect(anywhere.allowsAutoDownload(onUnmetered: false), isTrue);
+      const AppSettings wifiOnly = AppSettings(mediaOnlyOnWifi: true);
       expect(wifiOnly.allowsAutoDownload(onUnmetered: true), isTrue);
       expect(wifiOnly.allowsAutoDownload(onUnmetered: false), isFalse);
-      const AppSettings anywhere = AppSettings(mediaOnlyOnWifi: false);
-      expect(anywhere.allowsAutoDownload(onUnmetered: false), isTrue);
       const AppSettings off = AppSettings(autoDownloadMedia: false);
       expect(off.allowsAutoDownload(onUnmetered: true), isFalse);
     });

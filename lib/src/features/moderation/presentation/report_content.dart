@@ -134,7 +134,7 @@ class HiddenContentPlaceholder extends StatelessWidget {
     if (compact) {
       return InkWell(
         onTap: onShow,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: context.zenRadius(12),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
           child: row,

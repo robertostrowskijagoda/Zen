@@ -1171,6 +1171,16 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     required Map<String, dynamic> payload,
   });
 
+  /// A group message to every other member through the reliable transport
+  /// (`social_hub_controller_messages.dart`).
+  Future<void> _sendGroupMessageToMembers({
+    required GroupProfile group,
+    required String messageId,
+    required String text,
+    required int timestamp,
+    required Set<String> skip,
+  });
+
   Future<void> _sendCallSignal({
     required String remoteAddress,
     required String type,

@@ -13,6 +13,6 @@ additional terms in NOTICE. NOTICE section 3 grants no rights to the name
 "Zen" or to the logo and icons as marks.
 
 The texts of the user interface use the fonts listed under "Fredoka",
-"Hanken Grotesk", "JetBrains Mono", "Space Mono", "DM Sans" and "VT323"
+"Hanken Grotesk", "JetBrains Mono", "Space Mono" and "DM Sans"
 (SIL Open Font License 1.1); its icons and the call icons of the Android
 notifications are Material Icons (Apache License 2.0).

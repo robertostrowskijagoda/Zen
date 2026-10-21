@@ -262,7 +262,7 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
                       ),
                       decoration: BoxDecoration(
                         color: zen.danger.withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: context.zenRadius(16),
                         border: Border.all(
                           color: zen.danger.withValues(alpha: 0.3),
                         ),
@@ -378,15 +378,9 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: zen.surface.withValues(alpha: 0.92),
-                        borderRadius: BorderRadius.circular(32),
+                        borderRadius: context.zenRadius(32),
                         border: Border.all(color: zen.outlineSoft),
-                        boxShadow: <BoxShadow>[
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.25),
-                            blurRadius: 24,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
+                        boxShadow: ZenLook.of(context).lift(zen, radius: 24),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
@@ -609,7 +603,7 @@ class _StatusPill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: zen.success.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: context.zenRadius(999),
         border: Border.all(color: zen.success.withValues(alpha: 0.35)),
       ),
       child: Row(
@@ -672,21 +666,18 @@ class _ParticipantTile extends StatelessWidget {
     };
     final Color tone = zenTone(zen, (name.hashCode & 0x7FFFFFFF) % 8);
     return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: context.zenRadius(22),
       child: DecoratedBox(
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: <Color>[
-              Color.alphaBlend(
-                tone.withValues(alpha: 0.16),
-                const Color(0xFF14141E),
-              ),
-              const Color(0xFF101017),
+              Color.alphaBlend(tone.withValues(alpha: 0.16), zen.surfaceRaised),
+              zen.surfaceSunk,
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: context.zenRadius(22),
           border: Border.all(
             color: isSelf
                 ? zen.accent.withValues(alpha: 0.4)
@@ -750,8 +741,8 @@ class _ParticipantTile extends StatelessWidget {
                     const SizedBox(height: 10),
                     Text(
                       stateLabel,
-                      style: const TextStyle(
-                        color: Colors.white70,
+                      style: TextStyle(
+                        color: zen.textSecondary,
                         fontSize: 12.5,
                         fontWeight: FontWeight.w500,
                       ),
@@ -764,7 +755,7 @@ class _ParticipantTile extends StatelessWidget {
                 right: 8,
                 top: 8,
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: context.zenRadius(12),
                   child: SizedBox(
                     width: 72,
                     height: 96,
@@ -792,7 +783,7 @@ class _ParticipantTile extends StatelessWidget {
                   ),
                   decoration: BoxDecoration(
                     color: zen.accent.withValues(alpha: 0.85),
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: context.zenRadius(999),
                   ),
                   child: Text(
                     isSelf ? t('Udostępniasz ekran') : t('Udostępnia ekran'),
@@ -818,7 +809,7 @@ class _ParticipantTile extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.55),
-                        borderRadius: BorderRadius.circular(999),
+                        borderRadius: context.zenRadius(999),
                       ),
                       child: Text(
                         name,
@@ -840,10 +831,10 @@ class _ParticipantTile extends StatelessWidget {
                         color: zen.danger,
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.mic_off_rounded,
                         size: 13,
-                        color: Colors.white,
+                        color: ZenColors.foregroundFor(zen.danger),
                       ),
                     ),
                 ],

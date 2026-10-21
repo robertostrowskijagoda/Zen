@@ -19,6 +19,10 @@ class MainFlutterWindow: NSWindow {
     ZenLocalLinksBridge.register(with: flutterViewController.engine.binaryMessenger)
     // Where the device is (the alarm), from Core Location.
     ZenLocationBridge.register(with: flutterViewController.engine.binaryMessenger)
+    // Signs of a debugger or injected libraries (device_integrity.dart).
+    ZenIntegrityBridge.register(with: flutterViewController.engine.binaryMessenger)
+    // Films of the "Filmy" section compressed and trimmed (AVFoundation).
+    ZenVideoBridge.register(with: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }

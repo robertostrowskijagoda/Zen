@@ -136,7 +136,7 @@ class _GroupBoardViewState extends State<GroupBoardView> {
           padding: const EdgeInsets.fromLTRB(14, 8, 4, 12),
           decoration: BoxDecoration(
             color: zen.surfaceRaised,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: context.zenRadius(18),
             border: Border.all(color: zen.outlineSoft),
           ),
           child: Column(

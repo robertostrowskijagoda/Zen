@@ -6,6 +6,7 @@
 #include "call_recorder.h"
 #include "location_bridge.h"
 #include "security_bridge.h"
+#include "video_bridge.h"
 #include "wifi_direct_bridge.h"
 #include "flutter/generated_plugin_registrant.h"
 
@@ -41,6 +42,8 @@ bool FlutterWindow::OnCreate() {
   wifi_direct_bridge::Register(flutter_controller_->engine()->messenger());
   // Where the computer is (the alarm), from Windows' location service.
   location_bridge::Register(flutter_controller_->engine()->messenger());
+  // Films of the "Filmy" section compressed and trimmed (Media Foundation).
+  video_bridge::Register(flutter_controller_->engine()->messenger());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {

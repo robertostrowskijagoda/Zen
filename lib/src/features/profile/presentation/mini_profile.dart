@@ -21,6 +21,7 @@ import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
 import 'package:zen/src/features/profile/presentation/profile_screen.dart';
 import 'package:zen/src/features/profile/profile_fields.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/pyramid/presentation/pyramid_court_view.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -253,6 +254,8 @@ class _MiniProfileSheetState extends ConsumerState<MiniProfileSheet> {
                 children: badges,
               ),
             ],
+            // Verdicts of the pyramid's court (nothing when none).
+            PyrProfileVerdicts(address: address),
             if (numbers.isNotEmpty) ...<Widget>[
               const SizedBox(height: 10),
               Text(

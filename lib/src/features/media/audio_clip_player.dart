@@ -195,7 +195,7 @@ class _AudioClipPlayerState extends State<AudioClipPlayer> {
       padding: const EdgeInsets.fromLTRB(8, 8, 14, 8),
       decoration: BoxDecoration(
         color: zen.surfaceSunk,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: context.zenRadius(18),
         border: Border.all(color: zen.outlineSoft),
       ),
       child: Row(
@@ -247,7 +247,7 @@ class _AudioClipPlayerState extends State<AudioClipPlayer> {
                 ),
                 const SizedBox(height: 6),
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: context.zenRadius(999),
                   child: LinearProgressIndicator(
                     minHeight: 5,
                     value: progress,
