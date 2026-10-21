@@ -160,6 +160,11 @@ One account can run on several devices. Everything is on
 
 ## How to install
 
+**The simplest way: [the install page](https://robertostrowskijagoda.github.io/Zen/install/)**
+picks your system by itself and shows the few steps for it (English and
+Polish). In Zen: **Invite → Friend doesn't have Zen? → How to install Zen on
+another phone / computer** shows the same steps and a QR code to that page.
+
 ### Android
 
 1. On your phone open this page and tap **Download for Android**.
@@ -171,7 +176,10 @@ One account can run on several devices. Everything is on
 5. Open Zen and set a password.
 
 One universal `Zen.apk` covers 64-bit phones (arm64-v8a), older 32-bit phones
-(armeabi-v7a) and x86_64 devices (Chromebooks, emulators).
+(armeabi-v7a) and x86_64 devices (Chromebooks, emulators). Zen updates
+itself from GitHub; if you use [Obtainium](https://obtainium.imranr.dev/),
+you can add `https://github.com/robertostrowskijagoda/Zen` there instead (one
+tap on the install page).
 
 **From 2027** Google requires apps from outside the store to come from verified
 developers. If your phone says the developer is not verified:
@@ -198,33 +206,35 @@ the x64 build runs there too, under emulation.
 
 ### iPhone
 
-Zen also runs on iPhone. It isn't in the App Store (that needs a paid Apple account), so you install it yourself — for free, with your own Apple ID.
+Apps from outside the App Store go through **SideStore**: once you need a
+computer (Windows, Mac or Linux), a USB cable and your Apple ID; after that
+SideStore keeps Zen up to date on the phone by itself. Step by step, with
+pictures: **[install page → iPhone](https://robertostrowskijagoda.github.io/Zen/install/#iphone)**.
 
-**1. Download** [Zen-unsigned.ipa](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-unsigned.ipa) from [Releases](https://github.com/robertostrowskijagoda/Zen/releases/latest). The file is not signed — the installer signs it.
+1. On the iPhone install the free **LocalDevVPN** app from the App Store.
+2. On the computer get **iloader** ([SideStore guide](https://docs.sidestore.io/docs/installation/install)), connect the iPhone by cable, sign in with your Apple ID and choose **Install SideStore**.
+3. On the iPhone: **Settings → Privacy & Security → Developer Mode** on, and **Settings → General → VPN & Device Management** → trust your Apple ID.
+4. Connect LocalDevVPN, open SideStore and sign in.
+5. Add the Zen source — one tap on the install page, or **Sources → +** and
+   `https://robertostrowskijagoda.github.io/Zen/apps.json` — then **Install** Zen.
 
-**2. Install in one of these ways:**
+**Good to know:** SideStore refreshes Zen every 7 days by itself (open it
+with LocalDevVPN on now and then; your data stays). A free Apple ID allows 3
+such apps at a time (SideStore counts) and 10 installs a week. The source
+always points to the latest release's
+[Zen-unsigned.ipa](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-unsigned.ipa),
+which SideStore signs with your own Apple ID; AltStore Classic and other
+signers take the same file.
 
-- **SideStore (recommended)** — with a free Apple ID, then everything on the phone.
-  1. Once, on a Windows computer: connect the iPhone with a cable and install SideStore with **iloader** (you sign in with your Apple ID).
-  2. On the iPhone install **LocalDevVPN** from the App Store and turn it on — SideStore needs it to install and refresh.
-  3. In SideStore: **My Apps → +** and choose `Zen-unsigned.ipa`.
-  4. If the iPhone asks: **Settings → General → VPN & Device Management** → trust your Apple ID, and from iOS 16 turn on **Developer Mode** (Settings → Privacy & Security).
-- **AltStore Classic** — with a computer: install **AltServer** on Windows (with iTunes and iCloud from Apple's site, not the Microsoft Store), use it to put AltStore on the iPhone, and then in AltStore: **My Apps → +** → `Zen-unsigned.ipa`.
+**What Zen can't do on iPhone** (iOS doesn't allow it): it doesn't run in
+the background (messages and calls arrive only while Zen is open, no push
+notifications); "People nearby" is Android-only (offline links with friends
+use Apple's Multipeer while Zen is open).
 
-**Remember:**
-- Apps from a free Apple ID work for **7 days** — once a week refresh Zen in SideStore/AltStore (**Refresh All**). Your data stays.
-- A free account allows at most **3** such apps at a time (SideStore or AltStore counts too).
-- New version: download the new `Zen-unsigned.ipa` and install it the same way — your data stays.
-
-**What Zen can't do on iPhone** (iOS doesn't allow it):
-- it doesn't run in the background — messages and calls arrive only while Zen is open; there are no push notifications,
-- "People nearby" (Bluetooth presence) is Android-only; offline links with friends use Apple's Multipeer while Zen is open,
-- it has to be refreshed every 7 days.
-
-**Won't work or not recommended:**
-- **TrollStore** — only iOS up to 17.0,
-- **AltStore PAL** and installing from a web page — they require a developer with a paid account,
-- "signers" using enterprise certificates — Apple revokes them regularly, and you hand your app to strangers. **Don't use them.**
+**Won't work:** AltStore PAL (EU) installs only apps notarized by Apple
+(Zen isn't there yet); TrollStore works only up to iOS 17.0; "signers" with
+enterprise certificates get revoked and hand your app to strangers —
+**don't use them**.
 
 ### Mac, Linux
 

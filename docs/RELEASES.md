@@ -454,6 +454,11 @@ section description in the store build.
 ### 6.3 iPhone and Mac
 
 - **No account** — as today: SideStore / AltStore with a free Apple ID.
+  `pages.yml` publishes the source `https://robertostrowskijagoda.github.io/Zen/apps.json`
+  (`tool/ci/release_source.py`) for the latest published release's
+  `Zen-unsigned.ipa`, and the install page `/install/`; publishing a release
+  refreshes both (the release event starts a run on `main`, since the
+  `github-pages` environment deploys only from it).
 - **Individual Apple Developer account — USD 99/year** (seller: the author's
   name). It gives:
   - **TestFlight** — public link, up to 10,000 testers, the first build gets a

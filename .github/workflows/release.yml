@@ -10,7 +10,9 @@
 # attaches them to a draft release of that tag. Every build job uploads its
 # files as an artifact; the checksums job gathers them and writes SHA256SUMS,
 # the sign job signs it, and the last job attaches everything. Publish the
-# draft by hand after checking it (docs/RELEASES.md, section 3).
+# draft by hand after checking it (docs/RELEASES.md, section 3). Publishing
+# it starts pages.yml, which rebuilds the install page data and the
+# SideStore / AltStore source (apps.json) for the new Zen-unsigned.ipa.
 #
 # The release key:
 # - Only a run of a tag v* ever touches it. The android job runs only for
@@ -478,6 +480,9 @@ jobs:
       - name: Licenses and SHA256SUMS
         run: |
           export LC_ALL=C
+          # The iPhone file must be there: the SideStore / AltStore source
+          # (apps.json on GitHub Pages, pages.yml) points to it.
+          test -s dist/Zen-unsigned.ipa || { echo "::error::Zen-unsigned.ipa is missing"; exit 1; }
           rm -f dist/*.sha256
           cp native/yggdrasil_bridge/LICENSES-GO.txt LICENSE NOTICE \
             THIRD_PARTY_NOTICES.md dist/

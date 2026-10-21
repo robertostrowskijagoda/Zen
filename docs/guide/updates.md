@@ -25,7 +25,8 @@ approval. Details: [RELEASES.md](../RELEASES.md).
   installed app. Then the system installer asks (Android), or a helper
   swaps the folders after Zen closes (Windows, Linux tarball, macOS). Where
   Zen's folder is not writable (Program Files, `/opt`, Flatpak) the file is
-  saved to Downloads. On iPhone there is only the bar.
+  saved to Downloads. On iPhone there is only the bar; SideStore installs
+  the update from the Zen source (below).
 - Once the maintainers' keys are pinned in the app, an update is installed
   only when `SHA256SUMS.sig` carries their hybrid signature (Ed25519 +
   ML-DSA-65) for this version and file. Until then the update screen says
@@ -33,12 +34,25 @@ approval. Details: [RELEASES.md](../RELEASES.md).
 - If github.com cannot be reached at all, Zen tells you, in case someone is
   blocking it.
 
+## The install page and the iPhone source
+
+GitHub Pages serves the **[install page](https://robertostrowskijagoda.github.io/Zen/install/)**
+(steps for every system, the downloads, the Android signing certificate
+fingerprint) and **`apps.json`**, a SideStore / AltStore source. Both are
+rebuilt by the *Pages* workflow every time a release is published (and once
+a day): the source names the latest release's `Zen-unsigned.ipa`, its
+version, date and size. SideStore checks the source, offers the update, and
+signs the file with the person's own Apple ID; it also refreshes the app
+every 7 days.
+
 ## Pass it on
 
 **Settings → Invite → Friend doesn't have Zen?** (or *Updates and Pass it
 on*) sends the app to a friend's phone over Quick Share, Bluetooth or Wi-Fi,
-even without internet. Zen also notices when friends have a newer version
-and shows a quiet hint.
+even without internet. **How to install Zen on another phone / computer**
+on the same screen shows a QR code to the install page and the steps for
+every system, with the SideStore source for an iPhone. Zen also notices when
+friends have a newer version and shows a quiet hint.
 
 ## Checking a download yourself
 
@@ -52,6 +66,7 @@ and shows a quiet hint.
 ## Limits
 
 - The store build (for Google Play and Galaxy Store) never updates itself.
+- On iPhone Zen updates through SideStore (the source above), not by itself.
 - `SHA256SUMS` from the same release protects against a damaged download,
   not against a forged release; that is what the signature is for, once it
   is pinned.

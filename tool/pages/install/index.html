@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Install Zen</title>
+<meta name="description" content="Install Zen on Android, iPhone, Windows, macOS or Linux.">
+<link rel="icon" href="../zen-icon.png">
+<style>
+  :root {
+    --bg: #f6f4fb; --card: #ffffff; --text: #17151f; --muted: #5d5970;
+    --accent: #7c4dff; --accent2: #c026d3; --line: #e4e0ef; --soft: #efeaff;
+    --warn: #9a5b00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0a10; --card: #16141f; --text: #f3f1fa; --muted: #a6a1ba;
+      --accent: #9d7bff; --accent2: #e15ee8; --line: #2a2738; --soft: #221d36;
+      --warn: #f0b45a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 16px;
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  header { text-align: center; margin: 8px 0 18px; }
+  .logo {
+    width: 64px; height: 64px; margin: 0 auto 10px; border-radius: 20px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff; font-weight: 800; font-size: 32px; line-height: 64px;
+  }
+  h1 { font-size: 24px; margin: 4px 0; }
+  h2 { font-size: 19px; margin: 0 0 4px; }
+  p { margin: 6px 0 12px; }
+  .muted { color: var(--muted); }
+  .lang { position: absolute; top: 12px; right: 16px; }
+  .lang button {
+    border: 1px solid var(--line); background: var(--card); color: var(--text);
+    border-radius: 10px; padding: 4px 10px; font: 600 13px/1.4 inherit; cursor: pointer;
+  }
+  .lang button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+  nav { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 0 0 16px; }
+  nav button {
+    border: 1px solid var(--line); background: var(--card); color: var(--text);
+    border-radius: 999px; padding: 9px 16px; font: 600 15px/1.2 inherit; cursor: pointer;
+  }
+  nav button[aria-selected="true"] {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff; border-color: transparent;
+  }
+  section {
+    background: var(--card); border: 1px solid var(--line); border-radius: 24px;
+    padding: 20px 18px; margin-bottom: 16px;
+  }
+  ol { list-style: none; padding: 0; margin: 12px 0 0; counter-reset: step; }
+  ol > li {
+    counter-increment: step; position: relative; padding: 0 0 16px 46px;
+    min-height: 40px;
+  }
+  ol > li::before {
+    content: counter(step); position: absolute; left: 0; top: 0;
+    width: 32px; height: 32px; border-radius: 50%; background: var(--soft);
+    color: var(--accent); font-weight: 800; text-align: center; line-height: 32px;
+  }
+  .step { display: flex; gap: 12px; align-items: flex-start; }
+  .step .txt { flex: 1; }
+  .pic { flex: 0 0 72px; width: 72px; height: 96px; color: var(--accent); }
+  .pic svg { width: 72px; height: 96px; display: block; }
+  a { color: var(--accent); }
+  a.btn {
+    display: inline-block; margin: 8px 8px 0 0; padding: 11px 16px; border-radius: 14px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff;
+    text-decoration: none; font-weight: 700;
+  }
+  a.btn.alt { background: var(--soft); color: var(--text); border: 1px solid var(--line); }
+  code {
+    font: 13.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 2px 6px; word-break: break-all;
+  }
+  .note {
+    background: var(--bg); border-radius: 16px; padding: 12px 14px; margin-top: 10px;
+    font-size: 14.5px; color: var(--muted);
+  }
+  .note b { color: var(--text); }
+  .warn { color: var(--warn); }
+  footer { text-align: center; font-size: 13.5px; color: var(--muted); margin: 18px 0 30px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="lang" role="group" aria-label="Language">
+  <button type="button" data-lang="en">EN</button>
+  <button type="button" data-lang="pl">PL</button>
+</div>
+<main>
+  <header>
+    <div class="logo">Z</div>
+    <h1 id="title"></h1>
+    <p id="lead" class="muted"></p>
+    <p id="version" class="muted"></p>
+  </header>
+  <nav id="systems" role="tablist"></nav>
+  <div id="guides"></div>
+  <footer id="footer"></footer>
+</main>
+<script>
+(function () {
+  "use strict";
+
+  var REPO = "https://github.com/robertostrowskijagoda/Zen";
+  var DL = REPO + "/releases/latest/download/";
+  var SOURCE = "https://robertostrowskijagoda.github.io/Zen/apps.json";
+  var LINKS = {
+    apk: DL + "Zen.apk",
+    obtainium: "obtainium://add/" + REPO,
+    obtainiumApp: "https://obtainium.imranr.dev/",
+    sidestore: "https://docs.sidestore.io/docs/installation/install",
+    addSideStore: "sidestore://source?url=" + encodeURIComponent(SOURCE),
+    addAltStore: "altstore://source?url=" + encodeURIComponent(SOURCE),
+    ipa: DL + "Zen-unsigned.ipa",
+    win: DL + "Zen-Windows.zip",
+    winArm: DL + "Zen-Windows-arm64.zip",
+    mac: DL + "Zen-macOS.zip",
+    deb: DL + "Zen-Linux-x64.deb",
+    debArm: DL + "Zen-Linux-arm64.deb",
+    flatpak: DL + "Zen-Linux-x64.flatpak",
+    tar: DL + "Zen-Linux-x64.tar.gz",
+    tarArm: DL + "Zen-Linux-arm64.tar.gz",
+    sums: DL + "SHA256SUMS",
+    releases: REPO + "/releases/latest",
+    repo: REPO,
+    android2027: REPO + "#android"
+  };
+  var SYSTEMS = ["android", "iphone", "windows", "macos", "linux"];
+
+  // Markup in the texts: **bold**, `code`, [label|link] for a link and
+  // {label|link} for a button, with link a key of LINKS; {source} is the
+  // source address.
+  var TEXTS = {
+    en: {
+      title: "Install Zen",
+      lead: "Pick your system. Zen is free, has no ads, and comes only from this project’s GitHub page or from a friend.",
+      version: "Latest version: {version} ({date})",
+      names: { android: "Android", iphone: "iPhone", windows: "Windows", macos: "Mac", linux: "Linux" },
+      android: {
+        intro: "Takes a minute. No store and no account needed.",
+        steps: [
+          "Download Zen on this phone. {⬇ Download Zen.apk|apk}",
+          "Open the downloaded file. If the phone asks, allow your browser to install apps (**Allow from this source**) and go back.",
+          "Tap **Install**. If Play Protect warns about an unknown app: **More details → Install anyway**."
+        ],
+        notes: [
+          "**Updates by themselves:** with the free [Obtainium|obtainiumApp] app, tap {Add Zen to Obtainium|obtainium} once.",
+          "**Signing certificate (SHA-256):** {fingerprint}. Android never installs a copy with another key over Zen.",
+          "Phone says the developer is not verified (from 2027)? See [this short guide|android2027]."
+        ]
+      },
+      iphone: {
+        intro: "Apps from outside the App Store go through **SideStore**. You need a computer once (Windows, Mac or Linux), a USB cable and your Apple ID. About 15 minutes; after that, everything happens on the phone.",
+        steps: [
+          "On the iPhone, install the free **LocalDevVPN** app from the App Store.",
+          "On a computer, download **iloader** from the [SideStore guide|sidestore] and connect the iPhone with a cable.",
+          "In iloader, sign in with your Apple ID and choose **Install SideStore**.",
+          "On the iPhone: **Settings → Privacy & Security → Developer Mode** → on. The phone restarts; confirm **Turn On**.",
+          "**Settings → General → VPN & Device Management** → your Apple ID → **Trust**.",
+          "Open **LocalDevVPN** and connect. Then open **SideStore** and sign in with your Apple ID.",
+          "Add the Zen source: {Add Zen to SideStore|addSideStore} or, in SideStore, **Sources → +** and paste `{source}`.",
+          "In SideStore, open **Zen** and tap **Install**. Done!"
+        ],
+        notes: [
+          "**Every 7 days** SideStore refreshes Zen by itself. Just open SideStore with LocalDevVPN on now and then. Your data stays.",
+          "A free Apple ID allows **3** such apps at a time (SideStore counts) and 10 installs a week.",
+          "**EU:** AltStore PAL installs only apps notarized by Apple, and Zen is not there yet. Use SideStore. AltStore Classic users: {Add Zen to AltStore|addAltStore}.",
+          "Prefer another signer? The file is [Zen-unsigned.ipa|ipa]."
+        ]
+      },
+      windows: {
+        intro: "Windows 10 or 11.",
+        steps: [
+          "Download Zen and unpack the zip. {⬇ Zen-Windows.zip|win} ARM computers: [Zen-Windows-arm64.zip|winArm].",
+          "Run **zen.exe**. If SmartScreen says *Windows protected your PC*: **More info → Run anyway**."
+        ],
+        notes: ["Zen updates itself: it checks GitHub and asks before updating."]
+      },
+      macos: {
+        intro: "macOS 12 or newer, Apple Silicon and Intel.",
+        steps: [
+          "Download Zen, open the zip and drag **Zen** into **Applications**. {⬇ Zen-macOS.zip|mac}",
+          "First start: **right-click Zen → Open → Open**. Or: **System Settings → Privacy & Security → Open Anyway**.",
+          "After an update macOS may ask for keychain access: **Always Allow**."
+        ],
+        notes: ["Zen updates itself: it checks GitHub and asks before updating."]
+      },
+      linux: {
+        intro: "x64 and arm64 (e.g. Raspberry Pi 4/5).",
+        steps: [
+          "Debian, Ubuntu, Mint: {⬇ Zen-Linux-x64.deb|deb} then `sudo apt install ./Zen-Linux-x64.deb`. ARM: [Zen-Linux-arm64.deb|debArm].",
+          "Other distributions: {⬇ Flatpak|flatpak} then `flatpak install --user ./Zen-Linux-x64.flatpak`. Or [Zen-Linux-x64.tar.gz|tar] ([arm64|tarArm]): unpack, run `Zen/zen`; `Zen/install-desktop-entry.sh` adds it to the menu."
+        ],
+        notes: ["Needs GNOME Keyring or KWallet (Zen keeps its key there); for videos and voice notes GStreamer with `gstreamer1.0-plugins-good` and `gstreamer1.0-libav`."]
+      },
+      footer: "Is it really Zen? Download only from [GitHub|releases] or from a friend, and compare the file with [SHA256SUMS|sums]. Source code: [github.com/robertostrowskijagoda/Zen|repo].",
+      unknown: "shown with each release on GitHub"
+    },
+    pl: {
+      title: "Zainstaluj Zen",
+      lead: "Wybierz system. Zen jest darmowy, bez reklam i pochodzi tylko ze strony projektu na GitHubie albo od znajomego.",
+      version: "Najnowsza wersja: {version} ({date})",
+      names: { android: "Android", iphone: "iPhone", windows: "Windows", macos: "Mac", linux: "Linux" },
+      android: {
+        intro: "Zajmie minutę. Bez sklepu i bez konta.",
+        steps: [
+          "Pobierz Zen na ten telefon. {⬇ Pobierz Zen.apk|apk}",
+          "Otwórz pobrany plik. Jeśli telefon zapyta, pozwól przeglądarce instalować aplikacje (**Zezwalaj z tego źródła**) i wróć.",
+          "Stuknij **Zainstaluj**. Jeśli Play Protect ostrzega o nieznanej aplikacji: **Więcej szczegółów → Zainstaluj mimo to**."
+        ],
+        notes: [
+          "**Aktualizacje same:** w darmowej aplikacji [Obtainium|obtainiumApp] stuknij raz {Dodaj Zen do Obtainium|obtainium}.",
+          "**Certyfikat podpisu (SHA-256):** {fingerprint}. Android nigdy nie zainstaluje kopii z innym kluczem w miejsce Zen.",
+          "Telefon mówi, że deweloper nie jest zweryfikowany (od 2027)? Zobacz [krótką instrukcję|android2027]."
+        ]
+      },
+      iphone: {
+        intro: "Aplikacje spoza App Store instaluje się przez **SideStore**. Raz potrzebny jest komputer (Windows, Mac albo Linux), kabel USB i Twoje Apple ID. Około 15 minut; potem wszystko dzieje się na telefonie.",
+        steps: [
+          "Na iPhonie zainstaluj z App Store darmową aplikację **LocalDevVPN**.",
+          "Na komputerze pobierz **iloader** z [instrukcji SideStore|sidestore] i podłącz iPhone’a kablem.",
+          "W iloader zaloguj się swoim Apple ID i wybierz **Install SideStore**.",
+          "Na iPhonie: **Ustawienia → Prywatność i ochrona → Tryb dewelopera** → włącz. Telefon uruchomi się ponownie; potwierdź **Włącz**.",
+          "**Ustawienia → Ogólne → VPN i zarządzanie urządzeniem** → Twoje Apple ID → **Ufaj**.",
+          "Otwórz **LocalDevVPN** i połącz. Potem otwórz **SideStore** i zaloguj się Apple ID.",
+          "Dodaj źródło Zen: {Dodaj Zen do SideStore|addSideStore} albo w SideStore **Sources → +** i wklej `{source}`.",
+          "W SideStore otwórz **Zen** i stuknij **Install**. Gotowe!"
+        ],
+        notes: [
+          "**Co 7 dni** SideStore sam odświeża Zen. Wystarczy czasem otworzyć SideStore z włączonym LocalDevVPN. Dane zostają.",
+          "Darmowe Apple ID pozwala na **3** takie aplikacje naraz (SideStore się liczy) i 10 instalacji w tygodniu.",
+          "**UE:** AltStore PAL instaluje tylko aplikacje poświadczone przez Apple, a Zen jeszcze tam nie ma. Użyj SideStore. Użytkownicy AltStore Classic: {Dodaj Zen do AltStore|addAltStore}.",
+          "Wolisz inne narzędzie do podpisu? Plik to [Zen-unsigned.ipa|ipa]."
+        ]
+      },
+      windows: {
+        intro: "Windows 10 albo 11.",
+        steps: [
+          "Pobierz Zen i rozpakuj plik zip. {⬇ Zen-Windows.zip|win} Komputery ARM: [Zen-Windows-arm64.zip|winArm].",
+          "Uruchom **zen.exe**. Jeśli SmartScreen pisze *System Windows ochronił ten komputer*: **Więcej informacji → Uruchom mimo to**."
+        ],
+        notes: ["Zen aktualizuje się sam: sprawdza GitHuba i pyta przed aktualizacją."]
+      },
+      macos: {
+        intro: "macOS 12 lub nowszy, Apple Silicon i Intel.",
+        steps: [
+          "Pobierz Zen, otwórz zip i przeciągnij **Zen** do **Aplikacji**. {⬇ Zen-macOS.zip|mac}",
+          "Pierwsze uruchomienie: **prawy klik na Zen → Otwórz → Otwórz**. Albo: **Ustawienia systemowe → Prywatność i ochrona → Otwórz mimo to**.",
+          "Po aktualizacji macOS może zapytać o pęk kluczy: **Zawsze pozwalaj**."
+        ],
+        notes: ["Zen aktualizuje się sam: sprawdza GitHuba i pyta przed aktualizacją."]
+      },
+      linux: {
+        intro: "x64 i arm64 (np. Raspberry Pi 4/5).",
+        steps: [
+          "Debian, Ubuntu, Mint: {⬇ Zen-Linux-x64.deb|deb}, potem `sudo apt install ./Zen-Linux-x64.deb`. ARM: [Zen-Linux-arm64.deb|debArm].",
+          "Inne dystrybucje: {⬇ Flatpak|flatpak}, potem `flatpak install --user ./Zen-Linux-x64.flatpak`. Albo [Zen-Linux-x64.tar.gz|tar] ([arm64|tarArm]): rozpakuj, uruchom `Zen/zen`; `Zen/install-desktop-entry.sh` doda Zen do menu."
+        ],
+        notes: ["Potrzebny GNOME Keyring albo KWallet (tam Zen trzyma klucz); do filmów i nagrań GStreamer z `gstreamer1.0-plugins-good` i `gstreamer1.0-libav`."]
+      },
+      footer: "Czy to na pewno Zen? Pobieraj tylko z [GitHuba|releases] albo od znajomego i porównaj plik z [SHA256SUMS|sums]. Kod źródłowy: [github.com/robertostrowskijagoda/Zen|repo].",
+      unknown: "podany przy każdym wydaniu na GitHubie"
+    }
+  };
+
+  // Simple pictures for the iPhone steps: a phone outline and one sign
+  // (no Apple artwork).
+  var GLYPHS = [
+    '<path d="M36 34l12 5v9c0 8-5 13-12 16-7-3-12-8-12-16v-9z" fill="none" stroke="currentColor" stroke-width="3"/><text x="36" y="54" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor">VPN</text>',
+    '<rect x="14" y="34" width="30" height="20" rx="2" fill="none" stroke="currentColor" stroke-width="3"/><path d="M10 58h38" stroke="currentColor" stroke-width="3"/><path d="M44 50c8 0 8 10 14 10" fill="none" stroke="currentColor" stroke-width="2.5"/><rect x="52" y="56" width="8" height="14" rx="2" fill="currentColor"/>',
+    '<circle cx="36" cy="40" r="8" fill="none" stroke="currentColor" stroke-width="3"/><path d="M22 64c2-9 8-13 14-13s12 4 14 13" fill="none" stroke="currentColor" stroke-width="3"/>',
+    '<rect x="18" y="40" width="36" height="18" rx="9" fill="currentColor" opacity=".25"/><rect x="18" y="40" width="36" height="18" rx="9" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="45" cy="49" r="6" fill="currentColor"/>',
+    '<circle cx="36" cy="48" r="14" fill="none" stroke="currentColor" stroke-width="3"/><path d="M29 48l5 5 9-10" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    '<rect x="20" y="32" width="32" height="32" rx="8" fill="currentColor" opacity=".25"/><path d="M28 48h16M36 40v16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M50 30l6-6" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>',
+    '<path d="M22 40h28M22 48h28M22 56h18" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><circle cx="50" cy="58" r="7" fill="currentColor"/><path d="M50 54v8M46 58h8" stroke="#fff" stroke-width="2"/>',
+    '<path d="M36 32v22M27 46l9 9 9-9" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 62h28" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>'
+  ];
+  function picture(i) {
+    return '<div class="pic" aria-hidden="true"><svg viewBox="0 0 72 96">' +
+      '<rect x="6" y="4" width="60" height="88" rx="12" fill="none" stroke="currentColor" stroke-width="2.5" opacity=".55"/>' +
+      '<rect x="28" y="9" width="16" height="4" rx="2" fill="currentColor" opacity=".55"/>' +
+      (GLYPHS[i] || "") + "</svg></div>";
+  }
+
+  var lang = "en";
+  var system = "android";
+  var release = null;
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+  function render(text) {
+    var fp = release && release.apkCertificateSha256
+      ? release.apkCertificateSha256.match(/../g).join(":").toUpperCase()
+      : TEXTS[lang].unknown;
+    var html = esc(text.replace("{fingerprint}", fp).replace("{source}", SOURCE));
+    html = html.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+    html = html.replace(/\*([^*]+)\*/g, "<i>$1</i>");
+    html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+    html = html.replace(/\{([^|{}]+)\|(\w+)\}/g, function (_, label, key) {
+      var cls = /^⬇/.test(label) ? "btn" : "btn alt";
+      return '<a class="' + cls + '" href="' + esc(LINKS[key] || "#") + '">' + label + "</a>";
+    });
+    html = html.replace(/\[([^|\]]+)\|(\w+)\]/g, function (_, label, key) {
+      return '<a href="' + esc(LINKS[key] || "#") + '">' + label + "</a>";
+    });
+    return html;
+  }
+
+  function draw() {
+    var T = TEXTS[lang];
+    document.documentElement.lang = lang;
+    document.title = T.title;
+    document.getElementById("title").textContent = T.title;
+    document.getElementById("lead").textContent = T.lead;
+    var v = document.getElementById("version");
+    v.textContent = release && release.version
+      ? T.version.replace("{version}", release.version).replace("{date}", release.date)
+      : "";
+    var nav = document.getElementById("systems");
+    nav.innerHTML = "";
+    SYSTEMS.forEach(function (s) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("role", "tab");
+      b.setAttribute("aria-selected", s === system ? "true" : "false");
+      b.textContent = T.names[s];
+      b.addEventListener("click", function () {
+        system = s;
+        history.replaceState(null, "", "#" + s);
+        draw();
+      });
+      nav.appendChild(b);
+    });
+    var g = T[system];
+    var html = '<section id="' + system + '"><h2>' + esc(T.names[system]) +
+      '</h2><p class="muted">' + render(g.intro) + "</p><ol>";
+    g.steps.forEach(function (step, i) {
+      html += "<li>" + (system === "iphone"
+        ? '<div class="step"><div class="txt">' + render(step) + "</div>" + picture(i) + "</div>"
+        : render(step)) + "</li>";
+    });
+    html += "</ol>";
+    g.notes.forEach(function (n) { html += '<div class="note">' + render(n) + "</div>"; });
+    html += "</section>";
+    document.getElementById("guides").innerHTML = html;
+    document.getElementById("footer").innerHTML = render(T.footer);
+    Array.prototype.forEach.call(document.querySelectorAll(".lang button"), function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-lang") === lang ? "true" : "false");
+    });
+  }
+
+  function detectSystem() {
+    var hash = location.hash.replace("#", "");
+    if (SYSTEMS.indexOf(hash) >= 0) { return hash; }
+    var ua = navigator.userAgent || "";
+    if (/android/i.test(ua)) { return "android"; }
+    if (/iphone|ipad|ipod/i.test(ua) ||
+        (/macintosh/i.test(ua) && navigator.maxTouchPoints > 1)) { return "iphone"; }
+    if (/windows/i.test(ua)) { return "windows"; }
+    if (/macintosh|mac os x/i.test(ua)) { return "macos"; }
+    if (/linux|x11|cros/i.test(ua)) { return "linux"; }
+    return "android";
+  }
+  function detectLang() {
+    var asked = new URLSearchParams(location.search).get("lang");
+    if (asked && TEXTS[asked]) { return asked; }
+    var langs = navigator.languages || [navigator.language || "en"];
+    for (var i = 0; i < langs.length; i++) {
+      var code = String(langs[i]).slice(0, 2).toLowerCase();
+      if (TEXTS[code]) { return code; }
+    }
+    return "en";
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll(".lang button"), function (b) {
+    b.addEventListener("click", function () { lang = b.getAttribute("data-lang"); draw(); });
+  });
+  window.addEventListener("hashchange", function () { system = detectSystem(); draw(); });
+  system = detectSystem();
+  lang = detectLang();
+  draw();
+  // The version and the fingerprint of the latest release (pages.yml).
+  fetch("../release.json", { cache: "no-cache" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (data) { if (data && data.version) { release = data; draw(); } })
+    .catch(function () {});
+})();
+</script>
+</body>
+</html>

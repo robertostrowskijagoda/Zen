@@ -5,20 +5,35 @@
 
 ## Install
 
-Zen is not in the app stores. Download it from
+The easiest way is the **[install page](https://robertostrowskijagoda.github.io/Zen/install/)**:
+it recognises your system and shows only its few steps (English and Polish).
+Zen is not in the app stores; everything comes from
 [GitHub Releases](https://github.com/robertostrowskijagoda/Zen/releases/latest)
-or get it from a friend who has it (**Invite → Friend doesn't have Zen?**
-sends the app over Quick Share, Bluetooth or Wi-Fi, even without internet).
-Step-by-step instructions for every system are in the
-[README](../../README.md#how-to-install).
+or from a friend.
 
-| System | File |
-|---|---|
-| Android (arm64, armv7, x86_64) | `Zen.apk` |
-| iPhone (iOS 15+, sideloaded) | `Zen-unsigned.ipa` |
-| Windows x64 / ARM64 | `Zen-Windows.zip` / `Zen-Windows-arm64.zip` |
-| Linux x64 / arm64 | `.tar.gz`, `.deb`, `.flatpak` (x64) |
-| macOS 12+ | `Zen-macOS.zip` |
+| System | How | Steps |
+|---|---|---|
+| Android (arm64, armv7, x86_64) | `Zen.apk`, straight from the page | download, open, **Install** |
+| iPhone (iOS 15+) | **SideStore**, with the "Add Zen source" link | 8 short steps, a computer once |
+| Windows x64 / ARM64 | `Zen-Windows.zip` / `Zen-Windows-arm64.zip` | unpack, run `zen.exe` |
+| macOS 12+ | `Zen-macOS.zip` | drag to Applications, right-click → **Open** |
+| Linux x64 / arm64 | `.deb`, Flatpak (x64), `.tar.gz` | one command |
+
+**iPhone in short.** An iPhone app cannot install other apps, so Zen goes
+through SideStore. Once, with a computer and a cable: install
+**LocalDevVPN** from the App Store, run **iloader** on the computer to put
+SideStore on the phone, turn on **Developer Mode** and trust your Apple ID.
+Then, on the phone, add the Zen source
+(`https://robertostrowskijagoda.github.io/Zen/apps.json`, one tap on the
+install page) and tap **Install**. SideStore refreshes Zen every 7 days by
+itself. A free Apple ID allows 3 such apps at a time (SideStore counts).
+AltStore PAL (EU) takes only apps notarized by Apple, so it can't install
+Zen yet.
+
+**Helping a friend.** In Zen: **Invite → Friend doesn't have Zen?** — on
+Android it sends the app over Quick Share, Bluetooth or Wi-Fi, even without
+internet; **How to install Zen on another phone / computer** shows a QR code
+to the install page and the same steps for every system.
 
 ## First start
 

@@ -1,7 +1,20 @@
-# The invitation page (tool/pages) on GitHub Pages:
-# https://robertostrowskijagoda.github.io/Zen/#KOD opens Zen with that code.
-# Needs Settings -> Pages -> Source: GitHub Actions (once). Actions are
-# pinned to commit SHAs (Dependabot updates them).
+# GitHub Pages (tool/pages): the invitation page
+# (https://robertostrowskijagoda.github.io/Zen/#KOD opens Zen with that
+# code), the install page (/install/) and, made here from the latest
+# published release:
+#   /apps.json     an AltStore / SideStore source: "Add Zen source" in
+#                  SideStore installs the release's Zen-unsigned.ipa and
+#                  keeps it up to date (tool/ci/release_source.py);
+#   /release.json  version, files and sizes, and the Android signing
+#                  certificate fingerprint, for the install page;
+#   /zen-icon.png  the app icon the source names.
+# Runs on a push to main that changes them, by hand, once a day, and when
+# a release is published: that event only asks for a run on main (the
+# github-pages environment deploys from main only), so the source follows
+# every release. Needs Settings -> Pages -> Source: GitHub Actions (once).
+# No secret is used; the token reads the repository and, for the release
+# event, may start this workflow. Actions are pinned to commit SHAs
+# (Dependabot updates them).
 name: Pages
 
 on:
@@ -9,20 +22,41 @@ on:
     branches: [main]
     paths:
       - 'tool/pages/**'
+      - 'tool/ci/release_source.py'
+      - 'ios/Runner/Info.plist'
       - '.github/workflows/pages.yml'
+  release:
+    types: [published]
+  schedule:
+    - cron: '17 4 * * *'
   workflow_dispatch:
 
 permissions: {}
 
 concurrency:
-  group: pages
+  group: pages-${{ github.event_name == 'release' && 'kick' || 'deploy' }}
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    name: Invitation page
+  kick:
+    name: Refresh after a release
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Run this workflow on the default branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+
+  deploy:
+    name: Pages and the iPhone source
+    if: github.event_name != 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pages: write
@@ -37,9 +71,36 @@ jobs:
 
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
 
+      - name: Site
+        run: |
+          rm -rf _site
+          cp -R tool/pages _site
+          cp ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png _site/zen-icon.png
+
+      # Best effort: the fingerprint shown on the install page comes from
+      # the APK of the latest release (apksigner of the runner's SDK).
+      - name: Android signing certificate of the latest release
+        continue-on-error: true
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/Zen.apk" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/Zen.apk"
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          "$apksigner" verify --print-certs "$RUNNER_TEMP/Zen.apk" \
+            | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1 \
+            > "$RUNNER_TEMP/fingerprint.txt"
+          cat "$RUNNER_TEMP/fingerprint.txt"
+
+      - name: SideStore / AltStore source and release data
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 tool/ci/release_source.py
+          --repo "$GITHUB_REPOSITORY" --site _site
+          --fingerprint "$RUNNER_TEMP/fingerprint.txt"
+
       - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
         with:
-          path: tool/pages
+          path: _site
 
       - id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
