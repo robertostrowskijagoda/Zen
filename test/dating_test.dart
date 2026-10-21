@@ -127,6 +127,8 @@ final class _Phone implements EventHost {
     required DatingGender gender,
     Set<DatingGender>? wants,
     int hops = kDatingMaxHops,
+    DatingIntent intent = DatingIntent.dates,
+    Set<DatingGender> friendGenders = kDatingAllGenders,
   }) async {
     await service.load();
     await service.saveMine((MyDating m) {
@@ -137,6 +139,8 @@ final class _Phone implements EventHost {
         ..wants = DatingWants(
           genders: wants ?? DatingGender.values.toSet(),
           hops: hops,
+          intent: intent,
+          friendGenders: friendGenders,
         );
     });
     await service.maybePublish(force: true);
@@ -1543,5 +1547,510 @@ void main() {
     expect(ewa.profilesIn(), 0);
     expect(ewa.service.profile(ania.service.myKey!), isNull);
     expect(ola.profilesIn(), greaterThan(0));
+  });
+
+  test(
+    'the intention is one more private wish in the match test: two fit '
+    'only when both look for the same way of meeting and fit in it',
+    () async {
+      const DatingGender woman = DatingGender.woman;
+      const DatingGender man = DatingGender.man;
+
+      // Runs the private match test of [owner]'s lantern as [asker].
+      Future<bool> psi(
+        DatingWants asker,
+        DatingGender askerGender,
+        DatingWants owner,
+        DatingGender ownerGender,
+      ) async {
+        final Set<String> offer = owner.offerTags(ownerGender);
+        final (RelayIdentity, List<String>) q = await DatingMatch.ask(
+          asker.seekTags(askerGender),
+          Random(1),
+        );
+        final (List<String>, List<String>)? a = await DatingMatch.answer(
+          jsonDecode(jsonEncode(q.$2)),
+          offer,
+          Random(2),
+        );
+        expect(q.$2, hasLength(DatingMatch.slots));
+        expect(a!.$1, hasLength(DatingMatch.slots));
+        expect(a.$2, hasLength(DatingMatch.slots));
+        final bool fit = await DatingMatch.fits(q.$1, a.$1, a.$2);
+        expect(await DatingMatch.proves(q.$1, q.$2, offer), fit);
+        return fit;
+      }
+
+      const DatingIntent d = DatingIntent.dates;
+      const DatingIntent f = DatingIntent.friends;
+      const DatingIntent b = DatingIntent.both;
+      // A woman and a man who want each other's gender for dates, and anyone
+      // for friends (the default).
+      final Map<(DatingIntent, DatingIntent), Set<DatingIntent>> matrix =
+          <(DatingIntent, DatingIntent), Set<DatingIntent>>{
+            (d, d): <DatingIntent>{d},
+            (d, f): <DatingIntent>{},
+            (d, b): <DatingIntent>{d},
+            (f, d): <DatingIntent>{},
+            (f, f): <DatingIntent>{f},
+            (f, b): <DatingIntent>{f},
+            (b, d): <DatingIntent>{d},
+            (b, f): <DatingIntent>{f},
+            (b, b): <DatingIntent>{d, f},
+          };
+      for (final MapEntry<(DatingIntent, DatingIntent), Set<DatingIntent>> e
+          in matrix.entries) {
+        final DatingWants her = DatingWants(
+          genders: const <DatingGender>{man},
+          intent: e.key.$1,
+        );
+        final DatingWants his = DatingWants(
+          genders: const <DatingGender>{woman},
+          intent: e.key.$2,
+        );
+        final String what = '${e.key.$1.name} × ${e.key.$2.name}';
+        expect(
+          her.sharedWith(own: woman, other: man, theirs: his),
+          e.value,
+          reason: what,
+        );
+        expect(
+          his.sharedWith(own: man, other: woman, theirs: her),
+          e.value,
+          reason: what,
+        );
+        expect(
+          await psi(his, man, her, woman),
+          e.value.isNotEmpty,
+          reason: what,
+        );
+        expect(
+          await psi(her, woman, his, man),
+          e.value.isNotEmpty,
+          reason: what,
+        );
+        expect(
+          DatingWants.fromJson(jsonDecode(jsonEncode(her.toJson()))).intent,
+          e.key.$1,
+        );
+      }
+
+      // Two women who want men for dates still fit as new friends (any gender
+      // by default), and only as that.
+      const DatingWants ola = DatingWants(
+        genders: <DatingGender>{man},
+        intent: DatingIntent.both,
+      );
+      expect(
+        ola.sharedWith(own: woman, other: woman, theirs: ola),
+        <DatingIntent>{DatingIntent.friends},
+      );
+      expect(await psi(ola, woman, ola, woman), isTrue);
+      // Genders narrowed for friends count both ways.
+      const DatingWants menOnly = DatingWants(
+        intent: DatingIntent.friends,
+        friendGenders: <DatingGender>{man},
+      );
+      expect(
+        menOnly.sharedWith(own: woman, other: woman, theirs: ola),
+        isEmpty,
+      );
+      expect(await psi(menOnly, woman, ola, woman), isFalse);
+      expect(await psi(ola, woman, menOnly, woman), isFalse);
+      // The distance still counts.
+      expect(
+        const DatingWants(hops: 1).sharedWith(
+          own: woman,
+          other: man,
+          theirs: const DatingWants(),
+          distance: 2,
+        ),
+        isEmpty,
+      );
+
+      // Every wish fits in the slots, and whatever the wishes — dates,
+      // friends, both, or none (dating off) — a question and an answer are the
+      // same number of points and seal to the same size: a decoy still looks
+      // like anything else.
+      const List<DatingWants> kinds = <DatingWants>[
+        DatingWants(),
+        DatingWants(intent: DatingIntent.friends),
+        DatingWants(intent: DatingIntent.both),
+      ];
+      expect(
+        const DatingWants(intent: DatingIntent.both).offerTags(woman),
+        hasLength(DatingMatch.slots),
+      );
+      final RelayIdentity asker = await RelayIdentity.generate();
+      final RelayIdentity lantern = await RelayIdentity.generate();
+      final Set<int> questions = <int>{};
+      final Set<int> answers = <int>{};
+      for (final Set<String> seek in <Set<String>>[
+        const <String>{},
+        for (final DatingWants k in kinds) k.seekTags(man),
+      ]) {
+        final (RelayIdentity, List<String>) q = await DatingMatch.ask(
+          seek,
+          Random(8),
+        );
+        final Map<String, String> box = await DatingBox.seal(
+          me: asker,
+          recipient: lantern.publicKey,
+          payload: <String, dynamic>{
+            'k': 'match',
+            'id': 'l' * 16,
+            'd': 2,
+            'q': q.$2,
+          },
+        );
+        questions.add(box['c']!.length);
+        for (final Set<String> offer in <Set<String>>[
+          const <String>{},
+          for (final DatingWants k in kinds) k.offerTags(woman),
+        ]) {
+          final (List<String>, List<String>)? a = await DatingMatch.answer(
+            q.$2,
+            offer,
+            Random(9),
+          );
+          final Map<String, String> back = await DatingBox.seal(
+            me: lantern,
+            recipient: asker.publicKey,
+            payload: <String, dynamic>{
+              'k': 'match_re',
+              'id': 'l' * 16,
+              'a': 'a' * 16,
+              'r': a!.$1,
+              'o': a.$2,
+            },
+          );
+          answers.add(back['c']!.length);
+        }
+      }
+      expect(questions, hasLength(1));
+      expect(answers, hasLength(1));
+    },
+  );
+
+  test('"Nowi znajomi": a person looking only for friends meets only people '
+      'open to friends, and nothing then speaks of dating', () async {
+    final _Net net = _Net();
+    final _Phone bob = _Phone(net, 'bob');
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone darek = _Phone(net, 'darek');
+    final _Phone ola = _Phone(net, 'ola');
+    final _Phone piotr = _Phone(net, 'piotr');
+    final List<_Phone> daters = <_Phone>[ania, darek, ola, piotr];
+    for (final _Phone p in daters) {
+      net.link(p, bob);
+    }
+    await bob.service.load();
+    await ania.date(
+      name: 'Ania',
+      gender: DatingGender.woman,
+      intent: DatingIntent.friends,
+    );
+    await darek.date(
+      name: 'Darek',
+      gender: DatingGender.man,
+      wants: <DatingGender>{DatingGender.woman},
+    );
+    await ola.date(
+      name: 'Ola',
+      gender: DatingGender.woman,
+      wants: <DatingGender>{DatingGender.man},
+      intent: DatingIntent.both,
+    );
+    await piotr.date(
+      name: 'Piotr',
+      gender: DatingGender.man,
+      intent: DatingIntent.friends,
+    );
+    // Everyone's lantern once more, now that all of them date.
+    for (final _Phone p in daters) {
+      await p.service.maybePublish(force: true);
+    }
+    Set<String> names(_Phone p) => <String>{
+      for (final SeenProfile s in p.service.toDecide) s.profile.name,
+    };
+    expect(names(ania), <String>{'Ola', 'Piotr'});
+    expect(names(darek), <String>{'Ola'});
+    expect(names(ola), <String>{'Ania', 'Darek', 'Piotr'});
+    expect(names(piotr), <String>{'Ania', 'Ola'});
+    final String aniaKey = ania.service.myKey!;
+    final String darekKey = darek.service.myKey!;
+    final String olaKey = ola.service.myKey!;
+    final String piotrKey = piotr.service.myKey!;
+    // Darek's phone never even got a profile of someone looking for friends
+    // only, nor theirs his.
+    expect(darek.service.profile(aniaKey), isNull);
+    expect(darek.service.profile(piotrKey), isNull);
+    expect(ania.service.profile(darekKey), isNull);
+    expect(bob.service.toDecide, isEmpty);
+
+    expect(ania.service.friendsOnly(olaKey), isTrue);
+    expect(ola.service.friendsOnly(aniaKey), isTrue);
+    expect(ola.service.friendsOnly(darekKey), isFalse);
+    expect(darek.service.friendsOnly(olaKey), isFalse);
+    expect(
+      ola.service.modesWith(ola.service.profile(darekKey)!),
+      <DatingIntent>{DatingIntent.dates},
+    );
+    expect(
+      ola.service.profile(aniaKey)!.profile.wants.intent,
+      DatingIntent.friends,
+    );
+    List<String> titles(_Phone p) => <String>[
+      for (final RuntimeSystemNotification n in p.shown) n.title,
+    ];
+    expect(titles(ania), contains('Nowa osoba do poznania'));
+    expect(titles(ania), isNot(contains('Nowe dopasowanie')));
+    expect(titles(darek), contains('Nowe dopasowanie'));
+    expect(titles(darek), isNot(contains('Nowa osoba do poznania')));
+
+    // Someone who stops looking for dates no longer gets dating profiles in
+    // the stack (and gets them back with the wish).
+    await ola.service.saveMine(
+      (MyDating m) => m.wants = const DatingWants(
+        genders: <DatingGender>{DatingGender.man},
+        intent: DatingIntent.friends,
+      ),
+    );
+    expect(names(ola), <String>{'Ania', 'Piotr'});
+    await ola.service.saveMine(
+      (MyDating m) => m.wants = const DatingWants(
+        genders: <DatingGender>{DatingGender.man},
+        intent: DatingIntent.both,
+      ),
+    );
+    expect(names(ola), <String>{'Ania', 'Darek', 'Piotr'});
+
+    // "Tak" both ways: a new acquaintance, not a couple.
+    await ania.service.decide(piotrKey, true);
+    await piotr.service.decide(aniaKey, true);
+    expect(ania.service.isMatch(piotrKey), isTrue);
+    expect(ania.shown.last.title, 'Nowa znajomość! 👋');
+    await ola.service.decide(darekKey, true);
+    await darek.service.decide(olaKey, true);
+    expect(darek.shown.last.title, 'Para! ❤️');
+  });
+
+  test('a filter passes a profile by the kind of meeting, distance, gender, '
+      'interests, a photo and mutual friends', () {
+    SeenProfile seen({
+      DatingGender gender = DatingGender.woman,
+      int distance = 2,
+      List<String> interests = const <String>[],
+      List<String> photos = const <String>[],
+      List<String>? mutual,
+    }) => SeenProfile(
+      profile: DatingProfile(
+        key: 'k',
+        name: 'Ola',
+        gender: gender,
+        at: 1,
+        interests: interests,
+        photos: photos,
+      ),
+      replyTo: 'r',
+      at: 1,
+      distance: distance,
+      mutual: mutual,
+    );
+    const Set<DatingIntent> dates = <DatingIntent>{DatingIntent.dates};
+    const Set<DatingIntent> either = <DatingIntent>{
+      DatingIntent.dates,
+      DatingIntent.friends,
+    };
+    const DatingFilter none = DatingFilter();
+    expect(none.active, 0);
+    expect(none.passes(seen(), modes: dates), isTrue);
+
+    const DatingFilter friends = DatingFilter(intent: DatingIntent.friends);
+    expect(friends.passes(seen(), modes: dates), isFalse);
+    expect(friends.passes(seen(), modes: either), isTrue);
+
+    const DatingFilter near = DatingFilter(hops: 1);
+    expect(near.passes(seen(), modes: dates), isFalse);
+    expect(near.passes(seen(distance: 1), modes: dates), isTrue);
+    expect(
+      near.passes(seen(distance: 0), modes: dates),
+      isTrue,
+      reason: 'introduced by a friend',
+    );
+
+    const DatingFilter men = DatingFilter(
+      genders: <DatingGender>{DatingGender.man},
+    );
+    expect(men.passes(seen(), modes: dates), isFalse);
+    expect(men.passes(seen(gender: DatingGender.man), modes: dates), isTrue);
+
+    const DatingFilter hills = DatingFilter(interests: <String>{'mountains'});
+    expect(
+      hills.passes(seen(interests: <String>['books']), modes: dates),
+      isFalse,
+    );
+    expect(
+      hills.passes(
+        seen(interests: <String>['books', 'mountains']),
+        modes: dates,
+      ),
+      isTrue,
+    );
+
+    const DatingFilter photo = DatingFilter(withPhoto: true);
+    expect(photo.passes(seen(), modes: dates), isFalse);
+    expect(photo.passes(seen(photos: <String>['x']), modes: dates), isTrue);
+
+    const DatingFilter mutual = DatingFilter(minMutual: 2);
+    expect(mutual.passes(seen(mutual: <String>['a']), modes: dates), isFalse);
+    expect(
+      mutual.passes(seen(mutual: <String>['a', 'b']), modes: dates),
+      isTrue,
+    );
+
+    const DatingFilter all = DatingFilter(
+      intent: DatingIntent.friends,
+      hops: 1,
+      genders: <DatingGender>{DatingGender.man},
+      interests: <String>{'sea'},
+      withPhoto: true,
+      minMutual: 1,
+    );
+    expect(all.active, 6);
+    final DatingFilter back = DatingFilter.fromJson(
+      jsonDecode(jsonEncode(all.toJson())),
+    );
+    expect(back.intent, DatingIntent.friends);
+    expect(back.hops, 1);
+    expect(back.genders, <DatingGender>{DatingGender.man});
+    expect(back.interests, <String>{'sea'});
+    expect(back.withPhoto, isTrue);
+    expect(back.minMutual, 1);
+
+    // Only known interests, in a fixed order, at most a few.
+    expect(
+      datingInterestsFromJson(<Object?>['sea', 'x', 'mountains', 5]),
+      <String>['mountains', 'sea'],
+    );
+    expect(
+      datingInterestsFromJson(kDatingInterests),
+      hasLength(kDatingMaxInterests),
+    );
+    const DatingProfile p = DatingProfile(
+      key: 'k',
+      name: 'Ola',
+      gender: DatingGender.woman,
+      at: 1,
+      interests: <String>['boardgames', 'music'],
+    );
+    // Read back in the order of kDatingInterests.
+    expect(DatingProfile.fromJson(p.toJson())!.interests, <String>[
+      'music',
+      'boardgames',
+    ]);
+  });
+
+  test('filters stay on the phone: the distance works in the match test as '
+      'fillers only (like not fitting), the rest on the profiles that came; '
+      'the asked wishes never change, so nobody can tell', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone bob = _Phone(net, 'bob');
+    final _Phone cyryl = _Phone(net, 'cyryl');
+    final _Phone darek = _Phone(net, 'darek');
+    final _Phone ewa = _Phone(net, 'ewa');
+    for (final _Phone p in <_Phone>[ania, darek, ewa]) {
+      net
+        ..link(p, bob)
+        ..link(p, cyryl);
+    }
+    await bob.service.load();
+    await cyryl.service.load();
+    await darek.date(
+      name: 'Darek',
+      gender: DatingGender.man,
+      intent: DatingIntent.both,
+    );
+    // Darek wants to see only people to meet as friends.
+    await darek.service.setFilter(
+      const DatingFilter(intent: DatingIntent.friends),
+    );
+    await ania.date(
+      name: 'Ania',
+      gender: DatingGender.woman,
+      wants: <DatingGender>{DatingGender.man},
+    );
+    // Ewa does not fit Ania (Ania looks for men).
+    await ewa.date(name: 'Ewa', gender: DatingGender.woman);
+    final String aniaKey = ania.service.myKey!;
+
+    String lantern() =>
+        ania.sent.lastWhere(
+              (Map<String, dynamic> m) => m['type'] == DatingTypes.lantern,
+            )['id']
+            as String;
+    // The sizes of what [p] sent back for the lantern [id]: its match test,
+    // and its request for the profile.
+    List<int> asked(_Phone p, String id) => <int>[
+      for (final Map<String, dynamic> m in p.sent)
+        if (m['type'] == DatingTypes.back && m['to'] == id)
+          ((m['box'] as Map)['c'] as String).length,
+    ];
+    Set<String> names(DatingService s) => <String>{
+      for (final SeenProfile p in s.toDecide) p.profile.name,
+    };
+
+    // Ania and Darek fit (dates): his phone asked with all his wishes, proved
+    // the fit and got her profile, as without a filter; it only stays out of
+    // his stack, without a notification.
+    final List<int> filtered = asked(darek, lantern());
+    expect(filtered, hasLength(2));
+    expect(darek.service.profile(aniaKey), isNotNull);
+    expect(darek.service.toDecide, isEmpty);
+    expect(darek.service.filteredOut, 2, reason: 'Ania and Ewa');
+    expect(
+      darek.shown.where(
+        (RuntimeSystemNotification n) => n.id.startsWith('date-new'),
+      ),
+      isEmpty,
+    );
+
+    // Clearing the filter shows them at once, with nothing sent.
+    final int sentBefore = darek.sent.length;
+    await darek.service.setFilter(const DatingFilter());
+    expect(names(darek.service), <String>{'Ania', 'Ewa'});
+    expect(darek.sent, hasLength(sentBefore));
+
+    // Without the filter, the next lantern is asked exactly alike.
+    await ania.service.maybePublish(force: true);
+    expect(asked(darek, lantern()), filtered);
+
+    // Both friends in common passed the lanterns on: two mutual friends.
+    expect(darek.service.profile(aniaKey)!.mutual, hasLength(2));
+    await darek.service.setFilter(const DatingFilter(minMutual: 3));
+    expect(darek.service.toDecide, isEmpty);
+    await darek.service.setFilter(const DatingFilter(minMutual: 2));
+    expect(names(darek.service), <String>{'Ania', 'Ewa'});
+
+    // The filter and the mutual friends survive a restart.
+    final DatingService again = DatingService(
+      host: darek,
+      disk: darek.disk,
+      now: () => net.clock,
+    );
+    await again.load();
+    expect(again.filter.minMutual, 2);
+    expect(names(again), <String>{'Ania', 'Ewa'});
+
+    // Only friends of friends one step away: Ania's next lantern (two steps
+    // away) is asked with fillers only — the same size as Ewa's question,
+    // who does not fit — and no profile is asked for.
+    await darek.service.setFilter(const DatingFilter(hops: 1));
+    await ania.service.maybePublish(force: true);
+    final String id = lantern();
+    expect(asked(darek, id), hasLength(1));
+    expect(asked(darek, id), asked(ewa, id));
+    expect(darek.service.toDecide, isEmpty, reason: 'both are two steps away');
   });
 }

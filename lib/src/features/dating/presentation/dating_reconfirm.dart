@@ -7,7 +7,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 
 /// How long the app may be out of sight before the dating screens ask
-/// again (§14.1 point 4: re-confirmation for dating).
+/// again (point 4: re-confirmation for dating).
 const Duration kDatingReconfirmAfter = Duration(seconds: 10);
 
 /// Keeps [child] (a dating screen) shut until the person proves who they

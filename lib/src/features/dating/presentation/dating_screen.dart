@@ -13,6 +13,7 @@ import 'package:zen/src/features/dating/dating_model.dart';
 import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/dating/dating_service.dart';
 import 'package:zen/src/features/dating/presentation/dating_deck.dart';
+import 'package:zen/src/features/dating/presentation/dating_filter_sheet.dart';
 import 'package:zen/src/features/dating/presentation/dating_profile_editor.dart';
 import 'package:zen/src/features/dating/presentation/dating_reconfirm.dart';
 import 'package:zen/src/features/meet/location.dart';
@@ -35,7 +36,7 @@ Color datingTone(ZenColors zen) => zenTone(zen, 4);
 Widget datingPhoto(String? photo, {double size = 72}) {
   final BorderRadius radius = BorderRadius.circular(size * 0.3);
   if (photo != null) {
-    // Someone else's photo: made again here before it is shown (§19).
+    // Someone else's photo: made again here before it is shown.
     return ClipRRect(
       borderRadius: radius,
       child: SizedBox.square(
@@ -101,7 +102,7 @@ Widget datingCover(String? photo, ZenColors zen, Color tone) {
   );
 }
 
-/// The photos of a profile (up to four, §19.1) to swipe through, with dots
+/// The photos of a profile (up to four) to swipe through, with dots
 /// when there is more than one.
 class DatingPhotoPager extends StatefulWidget {
   const DatingPhotoPager({required this.photos, super.key});
@@ -175,7 +176,7 @@ class _DatingPhotoPagerState extends State<DatingPhotoPager> {
   }
 }
 
-/// "Znacie się przez: Bob → Kasia" (§19.3).
+/// "Znacie się przez: Bob → Kasia".
 String datingWay(SeenProfile s) {
   if (s.introBy != null) {
     return t('Przedstawia: {name}', {'name': s.introBy});
@@ -186,7 +187,15 @@ String datingWay(SeenProfile s) {
   return t('Znacie się przez: {path}', {'path': s.path.join(' → ')});
 }
 
-/// "Randki przez znajomych" (§19).
+/// "3 wspólnych znajomych".
+String datingMutual(SeenProfile s) => tn(
+  s.mutual.length,
+  one: '{n} wspólny znajomy',
+  few: '{n} wspólnych znajomych',
+  many: '{n} wspólnych znajomych',
+);
+
+/// "Randki przez znajomych".
 class DatingScreen extends ConsumerStatefulWidget {
   const DatingScreen({super.key});
 
@@ -209,14 +218,14 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
   }
 
   // Shut until the person confirms (and again after the app was away):
-  // dating is one of the sensitive places (§14.1).
+  // dating is one of the sensitive places.
   @override
   Widget build(BuildContext context) =>
       DatingReconfirm(child: Builder(builder: _buildContent));
 
   Widget _buildContent(BuildContext context) {
     final DatingService dating = ref.watch(datingServiceProvider);
-    // Profiles the person reported are left out of the lists (§21.4); the
+    // Profiles the person reported are left out of the lists; the
     // lists change when they are hidden or shown anyway.
     ref.watch(hiddenByMeProvider);
     final ZenColors zen = ZenColors.of(context);
@@ -238,6 +247,16 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
                   text: t(
                     'Tylko z ludźmi oddalonymi o 1–2 kroki znajomości — '
                     'zawsze jest ktoś wspólny, kogo można zapytać.',
+                  ),
+                ),
+                ZenInfo(
+                  icon: Icons.waving_hand_rounded,
+                  tone: tone,
+                  title: t('Albo po prostu nowi znajomi'),
+                  text: t(
+                    'W profilu wybierasz, czego szukasz: randek, nowych '
+                    'znajomych bez intencji związkowej, albo jednego '
+                    'i drugiego.',
                   ),
                 ),
                 ZenInfo(
@@ -278,6 +297,16 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
             appBar: ZenSectionBar(
               title: t('Randki'),
               actions: <Widget>[
+                IconButton(
+                  key: const Key('dating-filter'),
+                  tooltip: t('Filtry'),
+                  icon: Badge(
+                    isLabelVisible: dating.filter.active > 0,
+                    label: Text('${dating.filter.active}'),
+                    child: const Icon(Icons.tune_rounded),
+                  ),
+                  onPressed: () => unawaited(showDatingFilter(context, dating)),
+                ),
                 IconButton(
                   tooltip: t('Mój profil randkowy'),
                   icon: const Icon(Icons.account_circle_rounded),
@@ -496,7 +525,7 @@ class DatingQuote extends StatelessWidget {
   }
 }
 
-/// "Nowe": the profiles to decide on, as a stack of cards (§19.5).
+/// "Nowe": the profiles to decide on, as a stack of cards.
 class _NewProfiles extends StatelessWidget {
   const _NewProfiles({required this.dating});
 
@@ -507,16 +536,33 @@ class _NewProfiles extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final List<SeenProfile> list = dating.toDecide;
     if (list.isEmpty) {
+      final int hidden = dating.filteredOut;
       return Center(
         child: SingleChildScrollView(
           child: ZenEmpty(
             icon: Icons.favorite_border_rounded,
             tone: datingTone(zen),
             title: t('Na razie nikogo nowego'),
-            text: t(
-              'Profile przychodzą od znajomych i ich znajomych — zwykle '
-              'w ciągu tygodnia.',
-            ),
+            text: hidden > 0
+                ? tn(
+                    hidden,
+                    one: 'Filtry ukrywają {n} osobę.',
+                    few: 'Filtry ukrywają {n} osoby.',
+                    many: 'Filtry ukrywają {n} osób.',
+                  )
+                : t(
+                    'Profile przychodzą od znajomych i ich znajomych — '
+                    'zwykle w ciągu tygodnia.',
+                  ),
+            action: hidden > 0
+                ? OutlinedButton.icon(
+                    key: const Key('dating-filter-reset'),
+                    onPressed: () =>
+                        unawaited(dating.setFilter(const DatingFilter())),
+                    icon: const Icon(Icons.filter_alt_off_rounded),
+                    label: Text(t('Wyczyść filtry')),
+                  )
+                : null,
           ),
         ),
       );
@@ -524,6 +570,7 @@ class _NewProfiles extends StatelessWidget {
     return DatingSwipeDeck(
       key: const Key('dating-deck'),
       profiles: list,
+      friendsOnly: (SeenProfile s) => dating.friendsOnly(s.profile.key),
       onDecide: (SeenProfile s, bool yes) => dating.decide(s.profile.key, yes),
       onOpen: (SeenProfile s) =>
           unawaited(DatingProfileScreen.open(context, s.profile.key)),
@@ -534,7 +581,7 @@ class _NewProfiles extends StatelessWidget {
   }
 }
 
-/// "Zapytaj o opinię" (§19.3): a question to the friend the profile came
+/// "Zapytaj o opinię": a question to the friend the profile came
 /// through (they learn that this person dates).
 Future<void> askDatingOpinion(
   BuildContext context,
@@ -607,7 +654,7 @@ Future<void> askDatingOpinion(
   }
 }
 
-/// "Swatuj" (§19.3): introduces [s] to another person this phone knows from
+/// "Swatuj": introduces [s] to another person this phone knows from
 /// dating; both get the other's profile and the note.
 Future<void> introduceDatingProfile(
   BuildContext context,
@@ -780,7 +827,7 @@ class DatingProfileScreen extends ConsumerWidget {
         ),
       );
 
-  /// "Podziękuj swatowi" (§19.3): a payment in the pyramid's currency to
+  /// "Podziękuj swatowi": a payment in the pyramid's currency to
   /// the friend who introduced the pair.
   Future<void> _thank(
     BuildContext context,
@@ -847,7 +894,7 @@ class DatingProfileScreen extends ConsumerWidget {
     if (ok != true) {
       return;
     }
-    // Money leaves: asked again who this is (§14.1).
+    // Money leaves: asked again who this is.
     if (value > 0 &&
         value <= balance &&
         (!context.mounted || !await confirmPayment(context))) {
@@ -890,6 +937,7 @@ class DatingProfileScreen extends ConsumerWidget {
         final Color tone = datingTone(zen);
         final bool? decided = dating.decision(p.key);
         final bool match = dating.isMatch(p.key);
+        final bool friends = dating.friendsOnly(p.key);
         final String? note = s.introNote;
         return Scaffold(
           appBar: AppBar(
@@ -917,7 +965,7 @@ class DatingProfileScreen extends ConsumerWidget {
                   if (v == 'minor') {
                     // Switched off here at once; the pyramid (if any) hears
                     // about it, and so do the people around, in the profiles
-                    // this phone sends (§19.6).
+                    // this phone sends.
                     await dating.reportMinor(p.key);
                     if (!context.mounted) {
                       return;
@@ -1001,11 +1049,20 @@ class DatingProfileScreen extends ConsumerWidget {
                     tone: tone,
                     icon: Icons.person_rounded,
                   ),
+                  ZenPill(
+                    text: p.wants.intent.label,
+                    tone: tone,
+                    icon: p.wants.intent == DatingIntent.friends
+                        ? Icons.waving_hand_rounded
+                        : Icons.favorite_border_rounded,
+                  ),
                   if (match)
                     ZenPill(
-                      text: t('Para'),
+                      text: friends ? t('Znajomość') : t('Para'),
                       tone: zen.success,
-                      icon: Icons.favorite_rounded,
+                      icon: friends
+                          ? Icons.waving_hand_rounded
+                          : Icons.favorite_rounded,
                       filled: true,
                     ),
                 ],
@@ -1014,7 +1071,9 @@ class DatingProfileScreen extends ConsumerWidget {
               ZenInfo(
                 icon: Icons.people_alt_rounded,
                 tone: tone,
-                text: datingWay(s),
+                text: s.mutual.isEmpty
+                    ? datingWay(s)
+                    : '${datingWay(s)} · ${datingMutual(s)}',
               ),
               if (note != null && note.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 6),
@@ -1040,6 +1099,17 @@ class DatingProfileScreen extends ConsumerWidget {
                     fontSize: 15,
                     height: 1.45,
                   ),
+                ),
+              ],
+              if (p.interests.isNotEmpty) ...<Widget>[
+                ZenSection(t('Zainteresowania')),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: <Widget>[
+                    for (final String i in p.interests)
+                      ZenPill(text: datingInterestLabel(i), tone: tone),
+                  ],
                 ),
               ],
               if (p.vouches.isNotEmpty) ...<Widget>[
@@ -1101,7 +1171,11 @@ class DatingProfileScreen extends ConsumerWidget {
                         onPressed: decided == true
                             ? null
                             : () => unawaited(dating.decide(p.key, true)),
-                        icon: const Icon(Icons.favorite_rounded),
+                        icon: Icon(
+                          friends
+                              ? Icons.waving_hand_rounded
+                              : Icons.favorite_rounded,
+                        ),
                         label: Text(
                           decided == true
                               ? t('Powiedziałeś(-aś) „Tak”')
@@ -1155,7 +1229,7 @@ class DatingProfileScreen extends ConsumerWidget {
                     onPressed: () =>
                         unawaited(introduceDatingProfile(context, dating, s)),
                     icon: const Icon(Icons.people_alt_rounded),
-                    label: Text(t('Swatuj')),
+                    label: Text(friends ? t('Przedstaw') : t('Swatuj')),
                   ),
                 ],
               ),
@@ -1614,7 +1688,7 @@ String _clock(int millis) {
   return ZenFormat.time(DateTime.fromMillisecondsSinceEpoch(millis));
 }
 
-/// "Idę na randkę" (§19.4).
+/// "Idę na randkę".
 class _SafeDateCard extends ConsumerWidget {
   const _SafeDateCard({required this.dating});
 

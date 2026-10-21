@@ -12,7 +12,7 @@ import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
-/// "Randki przez znajomych" (§19).
+/// "Randki przez znajomych".
 final Provider<DatingService> datingServiceProvider = Provider<DatingService>((
   Ref ref,
 ) {
@@ -31,10 +31,10 @@ final Provider<DatingService> datingServiceProvider = Provider<DatingService>((
               .bannedDatingKeys(DateTime.now().millisecondsSinceEpoch)
               .contains(key);
     },
-    // Profiles this person reported are hidden from them (§21.4).
+    // Profiles this person reported are hidden from them.
     isHiddenByMe: (String key) =>
         ref.read(hiddenByMeProvider).hides(datingKey: key),
-    // "Podziękuj swatowi" (§19.3): only inside one pyramid.
+    // "Podziękuj swatowi": only inside one pyramid.
     pyramidKey: () {
       final PyramidService pyramid = ref.read(pyramidServiceProvider);
       final String? mine = pyramid.myKey;
@@ -55,7 +55,7 @@ final Provider<DatingService> datingServiceProvider = Provider<DatingService>((
         await ref.read(pyramidServiceProvider).pay(to, amount, memo: memo) !=
         null,
     // A friend's request for the location of a date, when the person agreed
-    // beforehand (§19.4).
+    // beforehand.
     currentPosition: () async {
       final GeoFix? fix = await currentFix();
       return fix == null ? null : (fix.lat, fix.lon);

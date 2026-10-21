@@ -16,6 +16,8 @@ import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/dating/dating_service.dart';
 import 'package:zen/src/features/dating/presentation/dating_reconfirm.dart';
 import 'package:zen/src/features/dating/presentation/dating_screen.dart';
+import 'package:zen/src/features/meet/graph/graph_providers.dart';
+import 'package:zen/src/features/meet/graph/open_to_meet.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
@@ -26,7 +28,7 @@ import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
-/// The dating profile (§19.1): built from the main profile with one tap,
+/// The dating profile: built from the main profile with one tap,
 /// separate from it, off by default.
 class DatingProfileEditor extends ConsumerStatefulWidget {
   const DatingProfileEditor({super.key});
@@ -60,9 +62,32 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
   late DatingGender _gender = _me.gender;
   late Set<DatingGender> _wantGenders = <DatingGender>{..._me.wants.genders};
   late int _hops = _me.wants.hops;
+  late DatingIntent _intent = _me.wants.intent;
+  late bool _friendsAnyGender =
+      _me.wants.friendGenders.length == kDatingAllGenders.length;
+  late Set<DatingGender> _friendGenders = <DatingGender>{
+    ..._me.wants.friendGenders,
+  };
+  late final Set<String> _interests = <String>{..._me.interests};
   late final List<String> _photos = List<String>.of(_me.photos);
   late final Set<String> _hiddenFriends = <String>{..._me.hiddenFriends};
   late final Set<String> _hiddenGroups = <String>{..._me.hiddenGroups};
+
+  /// "Pokazać Cię na grafie…?" (`null` until the saved answer is read).
+  bool? _showOnGraph;
+
+  @override
+  void initState() {
+    super.initState();
+    final OpenToMeetService graph = ref.read(openToMeetServiceProvider);
+    unawaited(
+      graph.load().then((_) {
+        if (mounted && _showOnGraph == null) {
+          setState(() => _showOnGraph = graph.mine != null);
+        }
+      }),
+    );
+  }
 
   @override
   void dispose() {
@@ -73,7 +98,7 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
   }
 
   Future<String?> _thumbnail(String path) async {
-    // The main profile photo is kept encrypted (§14.1): read through the
+    // The main profile photo is kept encrypted: read through the
     // vault; a freshly picked file is read as it is.
     final Uint8List? bytes = await readOwnProfileImage(path);
     if (bytes == null) {
@@ -148,7 +173,10 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
       String? problem;
       if (_name.text.trim().isEmpty) {
         problem = t('Wpisz imię.');
-      } else if (_wantGenders.isEmpty) {
+      } else if ((_intent != DatingIntent.friends && _wantGenders.isEmpty) ||
+          (_intent != DatingIntent.dates &&
+              !_friendsAnyGender &&
+              _friendGenders.isEmpty)) {
         problem = t('Zaznacz, kogo szukasz.');
       }
       if (problem != null) {
@@ -165,9 +193,19 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
         ..gender = _gender
         ..about = _about.text.trim()
         ..lookingFor = _look.text.trim()
-        ..wants = DatingWants(genders: _wantGenders, hops: _hops)
+        ..wants = DatingWants(
+          genders: _wantGenders.isEmpty ? kDatingAllGenders : _wantGenders,
+          hops: _hops,
+          intent: _intent,
+          friendGenders: _friendsAnyGender || _friendGenders.isEmpty
+              ? kDatingAllGenders
+              : _friendGenders,
+        )
         ..photos.clear()
         ..photos.addAll(_photos);
+      m.interests
+        ..clear()
+        ..addAll(datingInterestsFromJson(_interests.toList()));
       m.hiddenFriends
         ..clear()
         ..addAll(_hiddenFriends);
@@ -175,7 +213,16 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
         ..clear()
         ..addAll(_hiddenGroups);
     });
-    // „Randkuję” (§16.2) goes out with dating; with new hiding it is sent
+    // On the graph: only the intention, only while dating is on, never to
+    // the people it is hidden from.
+    final OpenToMeetService graph = ref.read(openToMeetServiceProvider);
+    await graph.load();
+    final bool onGraph = _enabled && (_showOnGraph ?? graph.mine != null);
+    await graph.setMine(
+      onGraph ? OpenToMeet.forIntent(_intent) : null,
+      hiddenFrom: _dating.hiddenAddresses(),
+    );
+    // „Randkuję” goes out with dating; with new hiding it is sent
     // again, so newly hidden people stop seeing it.
     final IntentStatus? status = meet.book.myIntent;
     if (status != null && status.kind == IntentKind.dating) {
@@ -473,26 +520,113 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
               hintText: t('np. kogoś na długie spacery i dłużej'),
             ),
           ),
-          ZenSection(t('Kogo szukasz')),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
+          ZenSection(t('Szukam')),
+          ZenGroup(
             children: <Widget>[
-              for (final DatingGender g in DatingGender.values)
-                FilterChip(
-                  label: Text(g.label),
-                  selected: _wantGenders.contains(g),
-                  onSelected: (bool v) => setState(() {
-                    _wantGenders = <DatingGender>{..._wantGenders};
-                    if (v) {
-                      _wantGenders.add(g);
-                    } else {
-                      _wantGenders.remove(g);
-                    }
+              for (final DatingIntent i in DatingIntent.values)
+                ListTile(
+                  key: Key('dating-intent-${i.code}'),
+                  selected: _intent == i,
+                  selectedColor: tone,
+                  leading: Icon(switch (i) {
+                    DatingIntent.dates => Icons.favorite_rounded,
+                    DatingIntent.friends => Icons.waving_hand_rounded,
+                    DatingIntent.both => Icons.diversity_3_rounded,
                   }),
+                  title: Text(i.label),
+                  subtitle: Text(i.hint),
+                  trailing: _intent == i
+                      ? Icon(Icons.check_circle_rounded, color: tone)
+                      : null,
+                  onTap: () => setState(() => _intent = i),
                 ),
             ],
           ),
+          const SizedBox(height: 8),
+          ZenGroup(
+            children: <Widget>[
+              SwitchListTile(
+                key: const Key('dating-show-on-graph'),
+                value: _enabled && (_showOnGraph ?? false),
+                secondary: Icon(Icons.hub_rounded, color: tone),
+                title: Text(
+                  t('Pokazać Cię na grafie jako osobę otwartą na poznanie?'),
+                ),
+                subtitle: Text(
+                  t(
+                    'Znajomi i znajomi znajomych, którzy już widzą Cię na '
+                    'grafie, zobaczą przy Tobie „randki” albo „znajomości”. '
+                    'Nic więcej z profilu randkowego; osoby z „Ukryj przed” '
+                    'nie zobaczą nic.',
+                  ),
+                ),
+                onChanged: _enabled
+                    ? (bool v) => setState(() => _showOnGraph = v)
+                    : null,
+              ),
+            ],
+          ),
+          if (_intent != DatingIntent.friends) ...<Widget>[
+            ZenSection(
+              _intent == DatingIntent.both
+                  ? t('Kogo szukasz na randki')
+                  : t('Kogo szukasz'),
+            ),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: <Widget>[
+                for (final DatingGender g in DatingGender.values)
+                  FilterChip(
+                    label: Text(g.label),
+                    selected: _wantGenders.contains(g),
+                    onSelected: (bool v) => setState(() {
+                      _wantGenders = <DatingGender>{..._wantGenders};
+                      if (v) {
+                        _wantGenders.add(g);
+                      } else {
+                        _wantGenders.remove(g);
+                      }
+                    }),
+                  ),
+              ],
+            ),
+          ],
+          if (_intent != DatingIntent.dates) ...<Widget>[
+            ZenSection(t('Nowi znajomi')),
+            ZenGroup(
+              children: <Widget>[
+                SwitchListTile(
+                  key: const Key('dating-friends-any-gender'),
+                  value: _friendsAnyGender,
+                  title: Text(t('Dowolna płeć')),
+                  onChanged: (bool v) => setState(() => _friendsAnyGender = v),
+                ),
+              ],
+            ),
+            if (!_friendsAnyGender) ...<Widget>[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: <Widget>[
+                  for (final DatingGender g in DatingGender.values)
+                    FilterChip(
+                      label: Text(g.label),
+                      selected: _friendGenders.contains(g),
+                      onSelected: (bool v) => setState(() {
+                        _friendGenders = <DatingGender>{..._friendGenders};
+                        if (v) {
+                          _friendGenders.add(g);
+                        } else {
+                          _friendGenders.remove(g);
+                        }
+                      }),
+                    ),
+                ],
+              ),
+            ],
+          ],
           const SizedBox(height: 8),
           ZenCard(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
@@ -531,6 +665,33 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                 ),
               ],
             ),
+          ),
+          ZenSection(t('Zainteresowania')),
+          Text(
+            t('Do {count} — pomagają innym trafić na Ciebie w filtrach.', {
+              'count': kDatingMaxInterests,
+            }),
+            style: note,
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: <Widget>[
+              for (final String code in kDatingInterests)
+                FilterChip(
+                  key: Key('dating-interest-$code'),
+                  label: Text(datingInterestLabel(code)),
+                  selected: _interests.contains(code),
+                  onSelected:
+                      !_interests.contains(code) &&
+                          _interests.length >= kDatingMaxInterests
+                      ? null
+                      : (bool v) => setState(
+                          () => _toggle<String>(_interests, code, v),
+                        ),
+                ),
+            ],
           ),
           ZenSection(t('Ukryj przed')),
           ZenInfo(

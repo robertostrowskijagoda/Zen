@@ -7,7 +7,7 @@ import 'package:zen/src/features/relay/relay_crypto.dart';
 
 const String _kDatingAad = 'zen.date.v1';
 
-/// A sealed message between two dating keys (§19): it travels through
+/// A sealed message between two dating keys: it travels through
 /// friends' phones, which can neither read it nor tell who sent it.
 ///
 /// Two layers: the inner box is sealed by the sender's dating key (so the
@@ -122,7 +122,7 @@ Future<Uint8List> _x25519(RelayIdentity me, Uint8List point) async {
   return Uint8List.fromList(await shared.extractBytes());
 }
 
-/// The "Tak" token for the pair ([me], [them]) (§19.2): both sides compute
+/// The "Tak" token for the pair ([me], [them]): both sides compute
 /// the same value from their dating keys, nobody else can. It is sent only
 /// for "Tak"; "Nie" sends nothing, so it looks exactly like no decision.
 Future<String> datingLikeToken(RelayIdentity me, Uint8List them) async {
@@ -137,14 +137,14 @@ Future<String> datingLikeToken(RelayIdentity me, Uint8List them) async {
   return base64Url.encode(mac.bytes);
 }
 
-/// Size steps of a profile sent on request, in bytes (§19.7).
+/// Size steps of a profile sent on request, in bytes.
 const int kDatingBucket = 4096;
 
 /// [content] with a filler field `z`, so that its JSON is a whole number of
 /// [kDatingBucket]s long, at least [minBuckets]. A real profile and a cover
 /// (what a phone with dating off answers a request with) then look alike to
 /// the phones the sealed answer passes through: they see a size, nothing
-/// else, and a cover is drawn from the range of real profiles (§19.1).
+/// else, and a cover is drawn from the range of real profiles.
 Map<String, dynamic> datingPadded(
   Map<String, dynamic> content, {
   int minBuckets = 1,
@@ -160,7 +160,7 @@ Map<String, dynamic> datingPadded(
 
 /// Proof that the answer to a profile request for the lantern [lanternId]
 /// comes from the one who sent that lantern and names the dating key
-/// [datingKey] (§19.7). The owner computes it with the lantern's one-off
+/// [datingKey]. The owner computes it with the lantern's one-off
 /// key ([me]) and the asker's dating key ([them]); the asker with its dating
 /// key and the lantern's key — both get the same value, nobody else can.
 Future<String> datingLanternProof(
@@ -176,8 +176,9 @@ Future<String> datingLanternProof(
   return base64Url.encode(mac.bytes);
 }
 
-/// The private match test behind a lantern (§19.7): whether two people fit
-/// (gender and wanted genders, both ways), and nothing else.
+/// The private match test behind a lantern: whether two people fit
+/// (intention — dates or new friends — and wanted genders, both ways), and
+/// nothing else.
 ///
 /// Every wish is a tag ([DatingMatch.slots] at most, see `DatingWants`
 /// `offerTags` / `seekTags`); two people fit when they share a tag. Each
@@ -203,8 +204,9 @@ Future<String> datingLanternProof(
 /// friend the question came through (`kDatingMatchNearPerFriend`,
 /// `kDatingMatchFarPerFriend` in the service), not the asker's key.
 abstract final class DatingMatch {
-  /// Points on each side (one per gender).
-  static const int slots = 3;
+  /// Points on each side: one per way of meeting (dates, new friends) and
+  /// gender. Every question and answer carries all of them, real or filler.
+  static const int slots = 6;
 
   static final BigInt _p = (BigInt.one << 255) - BigInt.from(19);
   static final Map<String, Uint8List> _points = <String, Uint8List>{};

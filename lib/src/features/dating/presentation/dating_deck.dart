@@ -3,13 +3,14 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/dating/dating_model.dart';
 import 'package:zen/src/features/dating/presentation/dating_screen.dart';
 
-/// Profiles to decide on as a stack of cards (§19.5): swipe right = „Tak”,
+/// Profiles to decide on as a stack of cards: swipe right = „Tak”,
 /// left = „Nie”, or the buttons under the stack. Deciding goes through
-/// [onDecide] (the same „Tak” / „Nie” as before, §19.2).
+/// [onDecide] (the same „Tak” / „Nie” as before).
 class DatingSwipeDeck extends StatefulWidget {
   const DatingSwipeDeck({
     required this.profiles,
@@ -17,6 +18,7 @@ class DatingSwipeDeck extends StatefulWidget {
     this.onOpen,
     this.onMatchmake,
     this.onAsk,
+    this.friendsOnly,
     super.key,
   });
 
@@ -27,12 +29,16 @@ class DatingSwipeDeck extends StatefulWidget {
   /// The whole profile.
   final void Function(SeenProfile seen)? onOpen;
 
-  /// "Swatuj": introduce this person to someone else (§19.3).
+  /// "Swatuj": introduce this person to someone else.
   final void Function(SeenProfile seen)? onMatchmake;
 
-  /// "Zapytaj o opinię" the friend the profile came through (§19.3); off
+  /// "Zapytaj o opinię" the friend the profile came through; off
   /// for profiles that came with no friend (an introduction).
   final void Function(SeenProfile seen)? onAsk;
+
+  /// Whether the two would meet only as new friends (no dates): the card
+  /// then does not speak of dating.
+  final bool Function(SeenProfile seen)? friendsOnly;
 
   @override
   State<DatingSwipeDeck> createState() => _DatingSwipeDeckState();
@@ -173,6 +179,8 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
       return const SizedBox.shrink();
     }
     final SeenProfile top = list.first;
+    bool friendly(SeenProfile s) => widget.friendsOnly?.call(s) ?? false;
+    final bool topFriends = friendly(top);
     return Column(
       children: <Widget>[
         Expanded(
@@ -206,6 +214,7 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
                                   child: DatingSwipeCard(
                                     key: ValueKey<String>(list[i].profile.key),
                                     seen: list[i],
+                                    friendsOnly: friendly(list[i]),
                                   ),
                                 ),
                               ),
@@ -231,6 +240,7 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
                                     key: ValueKey<String>(top.profile.key),
                                     seen: top,
                                     stamp: stamp,
+                                    friendsOnly: topFriends,
                                     onOpen: widget.onOpen == null
                                         ? null
                                         : () => widget.onOpen!(top),
@@ -269,7 +279,7 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
                   child: _RoundAction(
                     buttonKey: const Key('dating-deck-match'),
                     icon: Icons.people_alt_rounded,
-                    label: t('Swatuj'),
+                    label: topFriends ? t('Przedstaw') : t('Swatuj'),
                     color: zen.accent,
                     size: 46,
                     onTap: widget.onMatchmake == null
@@ -292,7 +302,9 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
                 Expanded(
                   child: _RoundAction(
                     buttonKey: const Key('dating-deck-yes'),
-                    icon: Icons.favorite_rounded,
+                    icon: topFriends
+                        ? Icons.waving_hand_rounded
+                        : Icons.favorite_rounded,
                     label: t('Tak'),
                     color: tone,
                     size: 60,
@@ -381,18 +393,22 @@ class _RoundAction extends StatelessWidget {
   }
 }
 
-/// One profile as a card: first its description as a "photo" of its own
-/// (§19.5), then the photos; a tap on the right half shows the next one,
+/// One profile as a card: first its description as a "photo" of its own,
+/// then the photos; a tap on the right half shows the next one,
 /// on the left half the one before.
 class DatingSwipeCard extends StatefulWidget {
   const DatingSwipeCard({
     required this.seen,
     this.stamp = 0,
     this.onOpen,
+    this.friendsOnly = false,
     super.key,
   });
 
   final SeenProfile seen;
+
+  /// The two would meet only as new friends.
+  final bool friendsOnly;
 
   /// How far a swipe went: above 0 towards „Tak”, below towards „Nie” (±1
   /// shows the stamp in full).
@@ -451,7 +467,11 @@ class _DatingSwipeCardState extends State<DatingSwipeCard> {
                 child: KeyedSubtree(
                   key: ValueKey<int>(page),
                   child: onText
-                      ? _DescriptionPage(seen: widget.seen, tone: tone)
+                      ? _DescriptionPage(
+                          seen: widget.seen,
+                          tone: tone,
+                          friendsOnly: widget.friendsOnly,
+                        )
                       : _PhotoPage(
                           seen: widget.seen,
                           photo: p.photos[page - 1],
@@ -586,10 +606,15 @@ class _Stamp extends StatelessWidget {
 /// The description as the first "photo": name, the way you know each
 /// other, what they write, and what friends say.
 class _DescriptionPage extends StatelessWidget {
-  const _DescriptionPage({required this.seen, required this.tone});
+  const _DescriptionPage({
+    required this.seen,
+    required this.tone,
+    required this.friendsOnly,
+  });
 
   final SeenProfile seen;
   final Color tone;
+  final bool friendsOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -660,6 +685,29 @@ class _DescriptionPage extends StatelessWidget {
                         ),
                       ),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: <Widget>[
+                    if (friendsOnly)
+                      ZenPill(
+                        key: const Key('dating-card-friends'),
+                        text: t('Nowi znajomi — bez randek'),
+                        tone: tone,
+                        icon: Icons.waving_hand_rounded,
+                        filled: true,
+                      ),
+                    if (seen.mutual.isNotEmpty)
+                      ZenPill(
+                        text: datingMutual(seen),
+                        tone: tone,
+                        icon: Icons.group_rounded,
+                      ),
+                    for (final String i in p.interests)
+                      ZenPill(text: datingInterestLabel(i), tone: tone),
                   ],
                 ),
                 const SizedBox(height: 18),

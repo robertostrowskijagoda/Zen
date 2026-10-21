@@ -2,11 +2,12 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/relay/relay_crypto.dart';
 
-/// Gender on a dating profile (§19.1).
+/// Gender on a dating profile.
 enum DatingGender {
   woman('k'),
   man('m'),
@@ -33,67 +34,314 @@ enum DatingGender {
 }
 
 /// Steps of friendship a lantern travels, and the farthest a person can ask
-/// for (§19.7).
+/// for.
 const int kDatingMaxHops = 2;
+
+/// Every gender (the default wish, and "any gender" for new friends).
+const Set<DatingGender> kDatingAllGenders = <DatingGender>{
+  DatingGender.woman,
+  DatingGender.man,
+  DatingGender.other,
+};
+
+/// What a person is in Dating for: dates, new friends with no romantic
+/// intention, or either. A plain status on the dating profile; it is one
+/// more private wish in the match test, so a person looking only for
+/// friends fits only people open to friends.
+enum DatingIntent {
+  dates('d'),
+  friends('f'),
+  both('b');
+
+  const DatingIntent(this.code);
+
+  final String code;
+
+  String get label => switch (this) {
+    DatingIntent.dates => t('Randki'),
+    DatingIntent.friends => t('Nowi znajomi'),
+    DatingIntent.both => t('Randki i znajomi'),
+  };
+
+  /// A line under [label].
+  String get hint => switch (this) {
+    DatingIntent.dates => t('Szukam kogoś na randkę'),
+    DatingIntent.friends => t('Bez intencji związkowej'),
+    DatingIntent.both => t('Otwarta(-y) na jedno i drugie'),
+  };
+
+  /// The ways of meeting this covers: [dates], [friends], or both.
+  Set<DatingIntent> get modes => this == DatingIntent.both
+      ? const <DatingIntent>{DatingIntent.dates, DatingIntent.friends}
+      : <DatingIntent>{this};
+
+  static DatingIntent? byCode(Object? code) {
+    for (final DatingIntent i in values) {
+      if (i.code == code) {
+        return i;
+      }
+    }
+    return null;
+  }
+}
 
 /// Whom one is looking for.
 @immutable
 final class DatingWants {
   const DatingWants({
-    this.genders = const <DatingGender>{
-      DatingGender.woman,
-      DatingGender.man,
-      DatingGender.other,
-    },
+    this.genders = kDatingAllGenders,
     this.hops = kDatingMaxHops,
+    this.intent = DatingIntent.dates,
+    this.friendGenders = kDatingAllGenders,
   });
 
+  /// Wanted genders for dates.
   final Set<DatingGender> genders;
 
   /// How far in the friendship graph (1–[kDatingMaxHops] steps).
   final int hops;
 
-  bool accepts({required DatingGender gender, required int distance}) =>
-      genders.contains(gender) && distance <= hops;
+  /// Dates, new friends, or both.
+  final DatingIntent intent;
 
-  /// What the owner of a lantern puts into the private match test (§19.7):
-  /// "a person of gender [own] looking for gender g", for every wanted g.
+  /// Wanted genders for new friends (any, unless the person narrows it).
+  final Set<DatingGender> friendGenders;
+
+  /// The wanted genders for one way of meeting ([DatingIntent.dates] or
+  /// [DatingIntent.friends]).
+  Set<DatingGender> gendersFor(DatingIntent mode) =>
+      mode == DatingIntent.friends ? friendGenders : genders;
+
+  /// Whether this person looks for someone of [gender] in [mode].
+  bool acceptsIn(DatingIntent mode, DatingGender gender) =>
+      intent.modes.contains(mode) && gendersFor(mode).contains(gender);
+
+  /// Whether this person looks for someone of [gender] at [distance] in any
+  /// way.
+  bool accepts({required DatingGender gender, required int distance}) =>
+      distance <= hops &&
+      intent.modes.any((DatingIntent m) => acceptsIn(m, gender));
+
+  /// The ways ([DatingIntent.dates], [DatingIntent.friends]) in which this
+  /// person (of gender [own]) and someone of gender [other] who wants
+  /// [theirs] fit each other: both look for it and each is someone the other
+  /// wants for it. Empty: they do not fit. [distance] (when given) must be
+  /// within both people's reach.
+  Set<DatingIntent> sharedWith({
+    required DatingGender own,
+    required DatingGender other,
+    required DatingWants theirs,
+    int? distance,
+  }) {
+    if (distance != null && (distance > hops || distance > theirs.hops)) {
+      return const <DatingIntent>{};
+    }
+    return <DatingIntent>{
+      for (final DatingIntent m in intent.modes)
+        if (acceptsIn(m, other) && theirs.acceptsIn(m, own)) m,
+    };
+  }
+
+  /// What the owner of a lantern puts into the private match test: "a
+  /// person of gender [own] looking, in mode m, for gender g", for every
+  /// mode of [intent] and every gender wanted in it (at most 2 × 3 tags, the
+  /// match test's slots).
   Set<String> offerTags(DatingGender own) => <String>{
-    for (final DatingGender g in genders) '${own.code}>${g.code}',
+    for (final DatingIntent m in intent.modes)
+      for (final DatingGender g in gendersFor(m))
+        '${m.code}:${own.code}>${g.code}',
   };
 
   /// What a person of gender [own] asks the match test with: "a person of
-  /// gender g looking for [own]", for every wanted g. A tag is common to
-  /// [offerTags] of the other side exactly when both fit each other.
+  /// gender g looking, in mode m, for [own]", for every mode and wanted g.
+  /// A tag is common to [offerTags] of the other side exactly when both look
+  /// for the same mode and fit each other in it.
   Set<String> seekTags(DatingGender own) => <String>{
-    for (final DatingGender g in genders) '${g.code}>${own.code}',
+    for (final DatingIntent m in intent.modes)
+      for (final DatingGender g in gendersFor(m))
+        '${m.code}:${g.code}>${own.code}',
   };
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'g': <String>[for (final DatingGender g in genders) g.code],
     'hops': hops,
+    'i': intent.code,
+    'fg': <String>[for (final DatingGender g in friendGenders) g.code],
+  };
+
+  static Set<DatingGender> _gendersFromJson(Object? g) => <DatingGender>{
+    if (g is List)
+      for (final Object? c in g)
+        if (DatingGender.byCode(c) != null) DatingGender.byCode(c)!,
   };
 
   static DatingWants fromJson(Object? json) {
     if (json is! Map) {
       return const DatingWants();
     }
-    final Object? g = json['g'];
-    final Set<DatingGender> genders = <DatingGender>{
-      if (g is List)
-        for (final Object? c in g)
-          if (DatingGender.byCode(c) != null) DatingGender.byCode(c)!,
-    };
+    final Set<DatingGender> genders = _gendersFromJson(json['g']);
+    final Set<DatingGender> friendGenders = _gendersFromJson(json['fg']);
     return DatingWants(
-      genders: genders.isEmpty ? const DatingWants().genders : genders,
+      genders: genders.isEmpty ? kDatingAllGenders : genders,
       hops: json['hops'] is int
           ? (json['hops'] as int).clamp(1, kDatingMaxHops)
           : kDatingMaxHops,
+      intent: DatingIntent.byCode(json['i']) ?? DatingIntent.dates,
+      friendGenders: friendGenders.isEmpty ? kDatingAllGenders : friendGenders,
     );
   }
 }
 
-/// A lantern (§19.7): the small thing every phone sends its friends every
+/// Interests a person can mark on the dating profile (codes; the labels
+/// are [datingInterestLabel]).
+const List<String> kDatingInterests = <String>[
+  'mountains',
+  'sea',
+  'bike',
+  'running',
+  'gym',
+  'dance',
+  'music',
+  'concerts',
+  'films',
+  'series',
+  'books',
+  'boardgames',
+  'videogames',
+  'cooking',
+  'travel',
+  'photo',
+  'art',
+  'animals',
+  'volunteering',
+  'tech',
+];
+
+/// Interests on one profile, at most.
+const int kDatingMaxInterests = 8;
+
+String datingInterestLabel(String code) => switch (code) {
+  'mountains' => t('góry'),
+  'sea' => t('morze'),
+  'bike' => t('rower'),
+  'running' => t('bieganie'),
+  'gym' => t('siłownia'),
+  'dance' => t('taniec'),
+  'music' => t('muzyka'),
+  'concerts' => t('koncerty'),
+  'films' => t('kino'),
+  'series' => t('seriale'),
+  'books' => t('książki'),
+  'boardgames' => t('planszówki'),
+  'videogames' => t('gry wideo'),
+  'cooking' => t('gotowanie'),
+  'travel' => t('podróże'),
+  'photo' => t('fotografia'),
+  'art' => t('sztuka'),
+  'animals' => t('zwierzęta'),
+  'volunteering' => t('wolontariat'),
+  'tech' => t('technologia'),
+  _ => code,
+};
+
+/// Known interest codes out of [json], in the order of [kDatingInterests],
+/// at most [kDatingMaxInterests].
+List<String> datingInterestsFromJson(Object? json) {
+  final Set<Object?> got = json is List ? json.toSet() : const <Object?>{};
+  return <String>[
+    for (final String c in kDatingInterests)
+      if (got.contains(c)) c,
+  ].take(kDatingMaxInterests).toList();
+}
+
+/// What this person wants to see among the new profiles. Kept on this
+/// phone only and never sent: the distance is applied in the match test by
+/// asking with fillers only (which looks exactly like not fitting), the rest
+/// to the profiles this phone receives. Narrowing the asked wishes instead
+/// would tell the owner of a fitting lantern the filter, since the proof of
+/// fit reveals the question's blinding secret.
+@immutable
+final class DatingFilter {
+  const DatingFilter({
+    this.intent,
+    this.hops = kDatingMaxHops,
+    this.genders = kDatingAllGenders,
+    this.interests = const <String>{},
+    this.withPhoto = false,
+    this.minMutual = 0,
+  });
+
+  /// Only people one fits in this way ([DatingIntent.dates] or
+  /// [DatingIntent.friends]); `null`: any.
+  final DatingIntent? intent;
+
+  /// Only people this many steps away at most (1–[kDatingMaxHops]).
+  final int hops;
+
+  /// Only people of these genders.
+  final Set<DatingGender> genders;
+
+  /// Only people with at least one of these interests (empty: any).
+  final Set<String> interests;
+
+  /// Only profiles with a photo.
+  final bool withPhoto;
+
+  /// Only people with at least this many mutual friends.
+  final int minMutual;
+
+  /// How many of the criteria narrow anything.
+  int get active =>
+      (intent == null ? 0 : 1) +
+      (hops < kDatingMaxHops ? 1 : 0) +
+      (genders.length < kDatingAllGenders.length ? 1 : 0) +
+      (interests.isEmpty ? 0 : 1) +
+      (withPhoto ? 1 : 0) +
+      (minMutual > 0 ? 1 : 0);
+
+  /// Whether a profile passes. [modes] are the ways the two fit each other
+  /// ([DatingWants.sharedWith]), [mutual] the number of mutual friends.
+  bool passes(SeenProfile s, {required Set<DatingIntent> modes}) {
+    final DatingProfile p = s.profile;
+    return (intent == null || modes.contains(intent)) &&
+        // An introduced person (distance unknown) came through a friend.
+        (s.distance == 0 || s.distance <= hops) &&
+        genders.contains(p.gender) &&
+        (interests.isEmpty || p.interests.any(interests.contains)) &&
+        (!withPhoto || p.photos.isNotEmpty) &&
+        s.mutual.length >= minMutual;
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (intent != null) 'i': intent!.code,
+    'hops': hops,
+    'g': <String>[for (final DatingGender g in genders) g.code],
+    'it': interests.toList(),
+    if (withPhoto) 'ph': true,
+    if (minMutual > 0) 'mm': minMutual,
+  };
+
+  static DatingFilter fromJson(Object? json) {
+    if (json is! Map) {
+      return const DatingFilter();
+    }
+    final DatingIntent? intent = DatingIntent.byCode(json['i']);
+    final Set<DatingGender> genders = DatingWants._gendersFromJson(json['g']);
+    final Object? mm = json['mm'];
+    return DatingFilter(
+      intent: intent == DatingIntent.both ? null : intent,
+      hops: json['hops'] is int
+          ? (json['hops'] as int).clamp(1, kDatingMaxHops)
+          : kDatingMaxHops,
+      genders: genders.isEmpty ? kDatingAllGenders : genders,
+      interests: datingInterestsFromJson(json['it']).toSet(),
+      withPhoto: json['ph'] == true,
+      minMutual: mm is int ? mm.clamp(0, 50) : 0,
+    );
+  }
+}
+
+/// A lantern: the small thing every phone sends its friends every
 /// week, with dating on or off, passed on up to [kDatingMaxHops] steps. It
 /// carries only a one-off key (X25519), new with every lantern: no dating
 /// key, nothing about the person, nothing that links it to the lantern of
@@ -122,10 +370,10 @@ final class DatingLantern {
   }
 }
 
-/// A word from a friend on someone's dating profile (§19.3).
+/// A word from a friend on someone's dating profile.
 ///
-/// A vouch is **signed** by the friend's vouch key (Ed25519, kept by their
-/// dating service): the signature covers the profile's dating key, the
+/// A vouch is **signed** by the friend's vouch key (hybrid Ed25519 +
+/// ML-DSA-65, kept by their dating service): the signature covers the profile's dating key, the
 /// friend's name, the text and the time. So the owner of the profile cannot
 /// change the words, and cannot copy them onto another profile. What a
 /// signature cannot prove to a stranger three steps away is that the key
@@ -150,7 +398,8 @@ final class DatingVouch {
   /// Shown on the profile (the owner accepted it).
   final bool approved;
 
-  /// The friend's vouch key (Ed25519, base64url) and signature.
+  /// The friend's vouch key (its Ed25519 id, base64url) and hybrid
+  /// signature.
   final String signer;
   final String sig;
 
@@ -190,7 +439,8 @@ final class DatingVouch {
     required String text,
     required int at,
   }) async {
-    final Uint8List sig = await signer.sign(
+    // Keyed: whoever reads the profile may never have met the signer.
+    final Uint8List sig = await signer.signWithKey(
       signedBytes(forKey: forKey, by: by, text: text, at: at),
     );
     return DatingVouch(
@@ -239,7 +489,7 @@ final class DatingVouch {
         vk is! String ||
         vk.length > 64 ||
         sig is! String ||
-        sig.length > 128 ||
+        !isHybridSignatureText(sig) ||
         at is! int) {
       return null;
     }
@@ -267,7 +517,7 @@ List<String> _photosFromJson(Object? photos) => <String>[
       if (p is String && p.length <= 48 * 1024) p,
 ].take(kDatingMaxPhotos).toList();
 
-/// A dating profile as it travels (§19.1). It names the dating key, not
+/// A dating profile as it travels. It names the dating key, not
 /// the account.
 @immutable
 final class DatingProfile {
@@ -280,6 +530,7 @@ final class DatingProfile {
     this.lookingFor = '',
     this.wants = const DatingWants(),
     this.photos = const <String>[],
+    this.interests = const <String>[],
     this.salt = '',
     this.hidden = const <String>[],
     this.vouches = const <DatingVouch>[],
@@ -301,7 +552,10 @@ final class DatingProfile {
 
   String? get photo => photos.isEmpty ? null : photos.first;
 
-  /// Salt and hashes of the people it must not be shown to (§19.1).
+  /// Interest codes ([kDatingInterests]).
+  final List<String> interests;
+
+  /// Salt and hashes of the people it must not be shown to.
   final String salt;
   final List<String> hidden;
   final List<DatingVouch> vouches;
@@ -317,6 +571,7 @@ final class DatingProfile {
         lookingFor: lookingFor,
         wants: wants,
         photos: photos ?? this.photos,
+        interests: interests,
         salt: salt,
         hidden: hidden,
         vouches: vouches ?? this.vouches,
@@ -331,6 +586,7 @@ final class DatingProfile {
     'look': lookingFor,
     'want': wants.toJson(),
     if (photos.isNotEmpty) 'ph': photos,
+    if (interests.isNotEmpty) 'it': interests,
     'xs': salt,
     'ex': hidden,
     'vo': <Map<String, dynamic>>[
@@ -369,6 +625,7 @@ final class DatingProfile {
       lookingFor: _clip(json['look'], 300),
       wants: DatingWants.fromJson(json['want']),
       photos: _photosFromJson(json['ph']),
+      interests: datingInterestsFromJson(json['it']),
       salt: _clip(json['xs'], 40),
       hidden: ex is List
           ? ex.whereType<String>().take(kDatingMaxHidden).toList()
@@ -396,7 +653,9 @@ final class SeenProfile {
     this.introNote,
     this.introPyr,
     this.thankedAt,
-  });
+    this.lantern,
+    List<String>? mutual,
+  }) : mutual = mutual ?? <String>[];
 
   DatingProfile profile;
 
@@ -413,16 +672,24 @@ final class SeenProfile {
   /// Steps of friendship between us (0 = unknown, e.g. introduced).
   int distance;
 
-  /// Introduced by a friend (§19.3).
+  /// Introduced by a friend.
   String? introBy;
   String? introNote;
 
   /// The matchmaker's pyramid key, when they are in a pyramid (for "Podziękuj
-  /// swatowi", §19.3 / §23).
+  /// swatowi").
   String? introPyr;
 
   /// When this person thanked the matchmaker with currency.
   int? thankedAt;
+
+  /// The lantern the profile last came with (copies of it passed on by
+  /// friends count as [mutual]).
+  String? lantern;
+
+  /// Mutual friends (addresses): friends who passed this person's lantern
+  /// on to this phone. Counted here only.
+  final List<String> mutual;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'p': profile.toJson(),
@@ -435,6 +702,8 @@ final class SeenProfile {
     if (introNote != null) 'in': introNote,
     if (introPyr != null) 'ip': introPyr,
     if (thankedAt != null) 'ty': thankedAt,
+    if (lantern != null) 'l': lantern,
+    if (mutual.isNotEmpty) 'mu': mutual,
   };
 
   static SeenProfile? fromJson(Object? json) {
@@ -446,6 +715,7 @@ final class SeenProfile {
       return null;
     }
     final Object? path = json['path'];
+    final Object? mutual = json['mu'];
     return SeenProfile(
       profile: p,
       replyTo: json['to'] as String,
@@ -457,6 +727,8 @@ final class SeenProfile {
       introNote: json['in'] is String ? json['in'] as String : null,
       introPyr: json['ip'] is String ? json['ip'] as String : null,
       thankedAt: json['ty'] is int ? json['ty'] as int : null,
+      lantern: json['l'] is String ? json['l'] as String : null,
+      mutual: mutual is List ? mutual.whereType<String>().toList() : null,
     );
   }
 }
@@ -499,7 +771,7 @@ final class DatingLine {
   }
 }
 
-/// "Co sądzisz o …?" between friends (§19.3).
+/// "Co sądzisz o …?" between friends.
 final class OpinionAsk {
   OpinionAsk({
     required this.id,
@@ -558,7 +830,7 @@ final class OpinionAsk {
   }
 }
 
-/// "Idę na randkę" (§19.4): one side shares, the other watches.
+/// "Idę na randkę": one side shares, the other watches.
 final class SafeDate {
   SafeDate({
     required this.id,
@@ -673,10 +945,12 @@ final class MyDating {
     this.lookingFor = '',
     this.wants = const DatingWants(),
     List<String>? photos,
+    List<String>? interests,
     List<String>? hiddenFriends,
     List<String>? hiddenGroups,
     List<DatingVouch>? vouches,
   }) : photos = photos ?? <String>[],
+       interests = interests ?? <String>[],
        hiddenFriends = hiddenFriends ?? <String>[],
        hiddenGroups = hiddenGroups ?? <String>[],
        vouches = vouches ?? <DatingVouch>[];
@@ -704,6 +978,9 @@ final class MyDating {
     }
   }
 
+  /// Interest codes ([kDatingInterests], up to [kDatingMaxInterests]).
+  final List<String> interests;
+
   /// Friends (addresses) and chat groups (ids) it is hidden from.
   final List<String> hiddenFriends;
   final List<String> hiddenGroups;
@@ -719,6 +996,7 @@ final class MyDating {
     'look': lookingFor,
     'want': wants.toJson(),
     if (photos.isNotEmpty) 'ph': photos,
+    if (interests.isNotEmpty) 'it': interests,
     'hf': hiddenFriends,
     'hg': hiddenGroups,
     'vo': <Map<String, dynamic>>[
@@ -743,6 +1021,7 @@ final class MyDating {
       photos: <String>[
         if (json['ph'] is List) ...(json['ph'] as List).whereType<String>(),
       ].take(kDatingMaxPhotos).toList(),
+      interests: datingInterestsFromJson(json['it']),
       hiddenFriends: hf is List ? hf.whereType<String>().toList() : null,
       hiddenGroups: hg is List ? hg.whereType<String>().toList() : null,
       vouches: <DatingVouch>[
