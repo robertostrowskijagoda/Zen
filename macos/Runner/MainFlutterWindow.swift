@@ -17,6 +17,9 @@ class MainFlutterWindow: NSWindow {
       with: flutterViewController.engine.binaryMessenger, window: self)
     // Bluetooth and Multipeer links with friends nearby.
     ZenLocalLinksBridge.register(with: flutterViewController.engine.binaryMessenger)
+    // "W pobliżu": a Mac looks around for Zen's nearby advert (it cannot
+    // show one: CoreBluetooth shows no manufacturer data).
+    ZenNearbyRadioBridge.register(with: flutterViewController.engine.binaryMessenger)
     // Where the device is (the alarm), from Core Location.
     ZenLocationBridge.register(with: flutterViewController.engine.binaryMessenger)
     // Signs of a debugger or injected libraries (device_integrity.dart).

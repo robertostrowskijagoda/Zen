@@ -305,9 +305,53 @@ final class ZenVideoBridge {
       case "close":
         close()
         result(nil)
+      case "luma":
+        result(luma())
       default:
         result(FlutterMethodNotImplemented)
       }
+    }
+
+    /// The newest picture in shades of grey, at most 640 pixels wide (a QR
+    /// scanner reads it): {width, height, bytes}, or nil.
+    private func luma() -> [String: Any]? {
+      lock.lock()
+      let frame = latest
+      lock.unlock()
+      guard let buffer = frame,
+        CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_32BGRA
+      else {
+        return nil
+      }
+      CVPixelBufferLockBaseAddress(buffer, .readOnly)
+      defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+      guard let base = CVPixelBufferGetBaseAddress(buffer) else {
+        return nil
+      }
+      let width = CVPixelBufferGetWidth(buffer)
+      let height = CVPixelBufferGetHeight(buffer)
+      let stride = CVPixelBufferGetBytesPerRow(buffer)
+      let step = max(1, (width + 639) / 640)
+      let outWidth = width / step
+      let outHeight = height / step
+      guard outWidth > 0, outHeight > 0 else {
+        return nil
+      }
+      let pixels = base.assumingMemoryBound(to: UInt8.self)
+      var gray = [UInt8](repeating: 0, count: outWidth * outHeight)
+      for y in 0..<outHeight {
+        let row = pixels + (y * step) * stride
+        for x in 0..<outWidth {
+          let p = row + (x * step) * 4
+          // BGRA
+          let value = (Int(p[2]) * 77 + Int(p[1]) * 150 + Int(p[0]) * 29) >> 8
+          gray[y * outWidth + x] = UInt8(value)
+        }
+      }
+      return [
+        "width": outWidth, "height": outHeight,
+        "bytes": FlutterStandardTypedData(bytes: Data(gray)),
+      ]
     }
 
     private func open(lens: String, result: @escaping FlutterResult) {

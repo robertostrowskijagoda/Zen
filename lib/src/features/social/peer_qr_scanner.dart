@@ -5,6 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_code_dart_scan/qr_code_dart_scan.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/features/films/presentation/film_camera.dart';
+import 'package:zen/src/features/films/presentation/film_camera_plugin.dart';
+import 'package:zen/src/features/social/desktop_qr_scanner.dart';
 
 final Provider<PeerQrScanner> peerQrScannerProvider = Provider<PeerQrScanner>((
   Ref ref,
@@ -18,11 +21,20 @@ abstract class PeerQrScanner {
   Future<String?> scan(BuildContext context);
 }
 
+/// Phones scan with qr_code_dart_scan's own camera view; computers
+/// (Windows, macOS, Linux) with the camera of the "Filmy" recorder and the
+/// same decoder ([DesktopQrScannerPage]).
 final class PlatformPeerQrScanner implements PeerQrScanner {
-  const PlatformPeerQrScanner();
+  const PlatformPeerQrScanner({this.camera});
+
+  /// The camera on computers (tests); the platform's when null.
+  final FilmCameraFactory? camera;
+
+  bool get _phone => Platform.isAndroid || Platform.isIOS;
 
   @override
-  bool get isSupported => Platform.isAndroid || Platform.isIOS;
+  bool get isSupported =>
+      _phone || Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 
   @override
   Future<String?> scan(BuildContext context) {
@@ -30,7 +42,11 @@ final class PlatformPeerQrScanner implements PeerQrScanner {
       return Future<String?>.value();
     }
     return Navigator.of(context).push<String>(
-      MaterialPageRoute<String>(builder: (_) => const _PeerQrScannerPage()),
+      MaterialPageRoute<String>(
+        builder: (_) => _phone
+            ? const _PeerQrScannerPage()
+            : DesktopQrScannerPage(camera: (camera ?? defaultFilmCamera)()),
+      ),
     );
   }
 }

@@ -79,3 +79,35 @@ add_dependencies(${BINARY_NAME} zen_openh264)
 target_include_directories(${BINARY_NAME} SYSTEM PRIVATE "${SOURCE_DIR}/codec/api")
 target_link_libraries(${BINARY_NAME} PRIVATE
   "${SOURCE_DIR}/libopenh264.a" Threads::Threads m)
+
+# Zen's own AAC encoder for films' sound (zen_film_codec.cc): VisualOn's
+# vo-aacenc (Apache-2.0), built from its release tarball the same way
+# (static, position-independent), so a film's sound and the recorder's
+# microphone never depend on the system having an AAC encoder. Its SHA-256
+# is checked when ZEN_VOAAC_SHA256 (cache entry or environment) holds it.
+set(ZEN_VOAAC_VERSION "0.1.3" CACHE STRING "vo-aacenc release built into Zen")
+set(ZEN_VOAAC_SHA256 "$ENV{ZEN_VOAAC_SHA256}" CACHE STRING
+  "SHA-256 of the vo-aacenc release tarball (checked when set)")
+if(ZEN_VOAAC_SHA256)
+  set(ZEN_VOAAC_HASH URL_HASH "SHA256=${ZEN_VOAAC_SHA256}")
+else()
+  set(ZEN_VOAAC_HASH "")
+  message(WARNING "ZEN_VOAAC_SHA256 is not set: vo-aacenc "
+    "${ZEN_VOAAC_VERSION} is downloaded without checking its hash.")
+endif()
+ExternalProject_Add(zen_voaacenc
+  URL "https://downloads.sourceforge.net/project/opencore-amr/vo-aacenc/vo-aacenc-${ZEN_VOAAC_VERSION}.tar.gz"
+  ${ZEN_VOAAC_HASH}
+  CONFIGURE_COMMAND <SOURCE_DIR>/configure --prefix=<INSTALL_DIR>
+    --libdir=<INSTALL_DIR>/lib --disable-shared --enable-static --with-pic
+  BUILD_COMMAND ${ZEN_MAKE} -j4
+  INSTALL_COMMAND ${ZEN_MAKE} install
+  BUILD_BYPRODUCTS "<INSTALL_DIR>/lib/libvo-aacenc.a"
+  LOG_CONFIGURE TRUE
+  LOG_BUILD TRUE
+)
+ExternalProject_Get_Property(zen_voaacenc INSTALL_DIR)
+add_dependencies(${BINARY_NAME} zen_voaacenc)
+target_compile_definitions(${BINARY_NAME} PRIVATE ZEN_HAVE_VOAAC=1)
+target_include_directories(${BINARY_NAME} SYSTEM PRIVATE "${INSTALL_DIR}/include")
+target_link_libraries(${BINARY_NAME} PRIVATE "${INSTALL_DIR}/lib/libvo-aacenc.a")

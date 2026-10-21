@@ -29,7 +29,7 @@ Flutter itself. The direct dependencies:
 | flutter_local_notifications, qr_flutter, video_player_win | BSD-3-Clause |
 | record | BSD-3-Clause |
 | flutter_riverpod (riverpod), file_picker, flutter_foreground_task, system_tray, window_manager (screen_retriever), flutter_webrtc (dart_webrtc, webrtc_interface), image, qr_code_dart_scan | MIT |
-| cryptography, app_links, zxing_lib (via qr_code_dart_scan) | Apache-2.0 |
+| cryptography, app_links, zxing_lib (also via qr_code_dart_scan) | Apache-2.0 |
 | dbus, gtk (Linux) | MPL-2.0 |
 | zstandard | to be confirmed by `tool/check_licenses.dart` |
 
@@ -59,6 +59,7 @@ Apache-2.0, MPL-2.0 or Zlib (vector_math).
 | DKImagePickerController, DKPhotoGallery, SDWebImage, SwiftyGif (via file_picker) | iOS | MIT |
 | GTK, GLib, GStreamer, libsecret (system libraries) | Linux | LGPL-2.1+ |
 | OpenH264 2.4.1 (Zen's H.264 encoder for films, built from source into the app) | Linux | BSD-2-Clause (`assets/licenses/native/openh264.txt`); Cisco's H.264 patent licence covers only Cisco's own binaries, not this build |
+| vo-aacenc 0.1.3 (VisualOn; Zen's AAC encoder for films' sound, built from source into the app) | Linux | Apache-2.0 (`assets/licenses/native/vo_aacenc.txt`) |
 | ffmpeg (not shipped: run as a separate program when the computer has it, to decode a film GStreamer cannot) | Linux | LGPL-2.1+ / GPL-2.0+ (the system's copy) |
 | libayatana-appindicator3, libdbusmenu (copied into the Flatpak) | Linux Flatpak | LGPL-2.1 / LGPL-3.0; source: the Ubuntu packages of the same version |
 | libayatana-indicator3 (copied into the Flatpak) | Linux Flatpak | GPL-3.0; source: the Ubuntu package of the same version |

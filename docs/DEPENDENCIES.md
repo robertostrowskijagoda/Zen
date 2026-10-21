@@ -45,7 +45,7 @@ so every platform uses the same code.
 | `video_player`, `video_player_platform_interface`, `video_player_win` | playing videos (Linux has Zen's own GStreamer backend) | BSD-3-Clause |
 | `record` | voice notes, alarm clips | BSD-3-Clause |
 | `qr_flutter` | drawing QR codes | BSD-3-Clause |
-| `qr_code_dart_scan` | scanning QR codes | MIT (zxing_lib: Apache-2.0) |
+| `qr_code_dart_scan`, `zxing_lib` | scanning QR codes (phones: its camera view; computers: the films' camera with the same decoder) | MIT, Apache-2.0 |
 | `zstandard` | compressing signals and attachments | BSD-3-Clause (libzstd) |
 | `mime` | recognising file types | BSD-3-Clause |
 | `dbus` | BlueZ on Linux, for Bluetooth links | MPL-2.0 |
@@ -85,21 +85,22 @@ Development only: `flutter_test`, `integration_test`, `flutter_lints`.
 | iOS | Multipeer Connectivity (offline links); Keychain; LocalAuthentication; AVAssetExportSession; Core Location; process integrity checks |
 | macOS | Multipeer Connectivity; the Secure Enclave with Touch ID; Keychain; AVAssetExportSession; AVCaptureSession (the films' camera); Core Location; window capture protection |
 | Windows | Media Foundation (video); WinRT Wi-Fi Direct and Bluetooth (RFCOMM); the TPM (Platform Crypto Provider) with Windows Hello; `WDA_EXCLUDEFROMCAPTURE`; the location API; heap and DLL-loading hardening |
-| Linux | BlueZ over D-Bus; GStreamer (playback; decoding films, the camera and the microphone for the Videos section; a system AAC encoder when one is installed); OpenH264 (Zen's own H.264 encoder, built from source with the app); ffmpeg when installed (a fallback decoder); libsecret (GNOME Keyring or KWallet); libayatana-appindicator (tray); GTK |
+| Linux | BlueZ over D-Bus; GStreamer (playback; decoding films, the camera and the microphone for the Videos section; a system AAC encoder when one is installed); OpenH264 and vo-aacenc (Zen's own H.264 and AAC encoders, built from source with the app); ffmpeg when installed (a fallback decoder); libsecret (GNOME Keyring or KWallet); libayatana-appindicator (tray); GTK |
 
 System libraries keep their own licences (LGPL-2.1+ for GTK, GLib,
 GStreamer and libsecret; see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)).
 
-OpenH264 (BSD-2-Clause) is the one native library Zen builds from source
-for Linux (`linux/runner/CMakeLists.txt`): the release tarball of the tag
-in `ZEN_OPENH264_VERSION`, compiled without assembly and linked statically.
-Its SHA-256 is checked when `ZEN_OPENH264_SHA256` is set (a CMake cache
-entry, or the environment variable of that name for `flutter build`); record
-it once with `curl -sL https://github.com/cisco/openh264/archive/refs/tags/v2.4.1.tar.gz | sha256sum`.
+OpenH264 (BSD-2-Clause) and vo-aacenc (Apache-2.0) are the native libraries
+Zen builds from source for Linux (`linux/runner/CMakeLists.txt`): the release
+tarballs of `ZEN_OPENH264_VERSION` and `ZEN_VOAAC_VERSION`, compiled without
+assembly and linked statically. Their SHA-256 is checked when
+`ZEN_OPENH264_SHA256` / `ZEN_VOAAC_SHA256` are set (CMake cache entries, or
+environment variables of those names for `flutter build`); record them once
+with `curl -sL <url> | sha256sum` (the URLs are in the CMake file).
 Films on Linux are written by Zen's own MP4 writer (`zen_film_codec.cc`);
-sound is copied when it is AAC, else encoded by a GStreamer AAC encoder
-(avenc_aac, fdkaacenc, voaacenc or faac) or ffmpeg when one is installed,
-and only without any of them does a film go without sound (the app says so).
+sound is copied when it is AAC and otherwise encoded by vo-aacenc (ffmpeg's
+own encoder on the ffmpeg path), so it is lost only when it cannot even be
+decoded (the app says so).
 
 ## Fonts, icons and sounds
 

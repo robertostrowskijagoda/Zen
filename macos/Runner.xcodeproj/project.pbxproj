@@ -28,6 +28,7 @@
 		33CC10F62044A3C60003C045 /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F42044A3C60003C045 /* MainMenu.xib */; };
 		33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC11122044BFA00003C045 /* MainFlutterWindow.swift */; };
 		7C1D2E3F405162738495A6B9 /* SecurityBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C1D2E3F405162738495A6B8 /* SecurityBridge.swift */; };
+		5A454E4E0000000000000012 /* ZenNearbyRadioBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A454E4E0000000000000011 /* ZenNearbyRadioBridge.swift */; };
 		5A454E4C0000000000000004 /* ZenLocalLinksBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A454E4C0000000000000003 /* ZenLocalLinksBridge.swift */; };
 		5A454E4D0000000000000004 /* ZenLocationBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A454E4D0000000000000003 /* ZenLocationBridge.swift */; };
 		5A454E4E0000000000000004 /* ZenIntegrityBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A454E4E0000000000000003 /* ZenIntegrityBridge.swift */; };
@@ -90,6 +91,7 @@
 		33E5194F232828860026EE4D /* AppInfo.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = AppInfo.xcconfig; sourceTree = "<group>"; };
 		78E0A7A72DC9AD7400C4905E /* FlutterGeneratedPluginSwiftPackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = FlutterGeneratedPluginSwiftPackage; path = ephemeral/Packages/FlutterGeneratedPluginSwiftPackage; sourceTree = "<group>"; };
 		7C1D2E3F405162738495A6B8 /* SecurityBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityBridge.swift; sourceTree = "<group>"; };
+		5A454E4E0000000000000011 /* ZenNearbyRadioBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZenNearbyRadioBridge.swift; sourceTree = "<group>"; };
 		5A454E4C0000000000000003 /* ZenLocalLinksBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../../ios/Runner/ZenLocalLinksBridge.swift"; sourceTree = "<group>"; };
 		5A454E4D0000000000000003 /* ZenLocationBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../../ios/Runner/ZenLocationBridge.swift"; sourceTree = "<group>"; };
 		5A454E4E0000000000000003 /* ZenIntegrityBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../../ios/Runner/ZenIntegrityBridge.swift"; sourceTree = "<group>"; };
@@ -212,6 +214,7 @@
 				33CC10F02044A3C60003C045 /* AppDelegate.swift */,
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
 				7C1D2E3F405162738495A6B8 /* SecurityBridge.swift */,
+				5A454E4E0000000000000011 /* ZenNearbyRadioBridge.swift */,
 				5A454E4C0000000000000003 /* ZenLocalLinksBridge.swift */,
 				5A454E4D0000000000000003 /* ZenLocationBridge.swift */,
 				5A454E4E0000000000000003 /* ZenIntegrityBridge.swift */,
@@ -459,6 +462,7 @@
 			files = (
 				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
 				7C1D2E3F405162738495A6B9 /* SecurityBridge.swift in Sources */,
+				5A454E4E0000000000000012 /* ZenNearbyRadioBridge.swift in Sources */,
 				5A454E4C0000000000000004 /* ZenLocalLinksBridge.swift in Sources */,
 				5A454E4D0000000000000004 /* ZenLocationBridge.swift in Sources */,
 				5A454E4E0000000000000004 /* ZenIntegrityBridge.swift in Sources */,

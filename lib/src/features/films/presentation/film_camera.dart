@@ -1,4 +1,25 @@
+import 'dart:typed_data';
+
 import 'package:flutter/widgets.dart';
+
+/// A camera picture in shades of grey: one byte a pixel, row after row
+/// (what a QR code is read from).
+@immutable
+final class LumaFrame {
+  const LumaFrame({
+    required this.width,
+    required this.height,
+    required this.bytes,
+  });
+
+  final int width;
+  final int height;
+  final Uint8List bytes;
+
+  /// Whether [bytes] holds the whole picture.
+  bool get isComplete =>
+      width > 0 && height > 0 && bytes.length >= width * height;
+}
 
 /// Which way a camera looks.
 enum FilmLens { front, back }
@@ -24,6 +45,10 @@ abstract interface class FilmCamera {
 
   /// Stops and gives the recorded file's path.
   Future<String> stopRecording();
+
+  /// The newest picture of the open camera in shades of grey (a QR
+  /// scanner reads it), or null while there is none.
+  Future<LumaFrame?> lumaFrame();
 
   /// Lets the camera go (leaving the recorder, switching lenses).
   Future<void> close();

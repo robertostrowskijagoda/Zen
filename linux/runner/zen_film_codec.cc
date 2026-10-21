@@ -2,6 +2,13 @@
 
 #include <wels/codec_api.h>
 
+#ifdef ZEN_HAVE_VOAAC
+extern "C" {
+#include <vo-aacenc/cmnMemory.h>
+#include <vo-aacenc/voAAC.h>
+}
+#endif
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -173,11 +180,154 @@ bool H264Encoder::Encode(const uint8_t* y, int stride_y, const uint8_t* u,
 }
 
 // ---------------------------------------------------------------------------
+// AAC (vo-aacenc).
+
+namespace {
+
+constexpr int kAacRates[] = {96000, 88200, 64000, 48000, 44100, 32000,
+                             24000, 22050, 16000, 12000, 11025, 8000, 7350};
+
+}  // namespace
+
+#ifdef ZEN_HAVE_VOAAC
+
+struct AacEncoder::Impl {
+  VO_AUDIO_CODECAPI api;
+  VO_MEM_OPERATOR memory;
+  VO_CODEC_INIT_USERDATA user;
+  VO_HANDLE handle = nullptr;
+  int channels = 0;
+  int sample_rate = 0;
+  int64_t first_us = -1;
+  int64_t frames = 0;
+  std::vector<int16_t> pending;
+
+  ~Impl() {
+    if (handle != nullptr) {
+      api.Uninit(handle);
+    }
+  }
+};
+
+AacEncoder::AacEncoder() : impl_(new Impl()) {}
+
+AacEncoder::~AacEncoder() = default;
+
+bool AacEncoder::Open(int sample_rate, int channels, int bitrate) {
+  int rate_index = -1;
+  for (int i = 0; i < 13; i++) {
+    if (kAacRates[i] == sample_rate) {
+      rate_index = i;
+    }
+  }
+  if (rate_index < 0 || channels < 1 || channels > 2) {
+    return false;
+  }
+  Impl& e = *impl_;
+  memset(&e.api, 0, sizeof(e.api));
+  memset(&e.memory, 0, sizeof(e.memory));
+  memset(&e.user, 0, sizeof(e.user));
+  if (voGetAACEncAPI(&e.api) != VO_ERR_NONE) {
+    return false;
+  }
+  e.memory.Alloc = cmnMemAlloc;
+  e.memory.Copy = cmnMemCopy;
+  e.memory.Free = cmnMemFree;
+  e.memory.Set = cmnMemSet;
+  e.memory.Check = cmnMemCheck;
+  e.user.memflag = VO_IMF_USERMEMOPERATOR;
+  e.user.memData = &e.memory;
+  if (e.api.Init(&e.handle, VO_AUDIO_CodingAAC, &e.user) != VO_ERR_NONE) {
+    e.handle = nullptr;
+    return false;
+  }
+  AACENC_PARAM params;
+  memset(&params, 0, sizeof(params));
+  params.sampleRate = sample_rate;
+  params.bitRate = bitrate;
+  params.nChannels = static_cast<short>(channels);
+  params.adtsUsed = 0;  // raw frames: the MP4 index carries the config
+  if (e.api.SetParam(e.handle, VO_PID_AAC_ENCPARAM, &params) != VO_ERR_NONE) {
+    return false;
+  }
+  e.channels = channels;
+  e.sample_rate = sample_rate;
+  // AudioSpecificConfig: AAC-LC (2), the rate's index, the channels.
+  track_.config = {
+      static_cast<uint8_t>((2 << 3) | (rate_index >> 1)),
+      static_cast<uint8_t>(((rate_index & 1) << 7) | (channels << 3))};
+  track_.sample_rate = sample_rate;
+  track_.channels = channels;
+  return true;
+}
+
+bool AacEncoder::Encode(const int16_t* pcm, size_t frames, int64_t pts_us) {
+  Impl& e = *impl_;
+  if (e.handle == nullptr) {
+    return false;
+  }
+  if (e.first_us < 0) {
+    e.first_us = pts_us;
+  }
+  e.pending.insert(e.pending.end(), pcm,
+                   pcm + frames * static_cast<size_t>(e.channels));
+  const size_t block = 1024 * static_cast<size_t>(e.channels);
+  size_t used = 0;
+  uint8_t out[8192];
+  while (e.pending.size() - used >= block) {
+    VO_CODECBUFFER input;
+    memset(&input, 0, sizeof(input));
+    input.Buffer = reinterpret_cast<VO_PBYTE>(e.pending.data() + used);
+    input.Length = static_cast<VO_U32>(block * sizeof(int16_t));
+    e.api.SetInputData(e.handle, &input);
+    VO_CODECBUFFER output;
+    memset(&output, 0, sizeof(output));
+    output.Buffer = out;
+    output.Length = sizeof(out);
+    VO_AUDIO_OUTPUTINFO info;
+    memset(&info, 0, sizeof(info));
+    if (e.api.GetOutputData(e.handle, &output, &info) != VO_ERR_NONE) {
+      return false;
+    }
+    used += block;
+    if (output.Length == 0) {
+      continue;
+    }
+    Sample sample;
+    sample.data.assign(out, out + output.Length);
+    sample.pts_us =
+        e.first_us + e.frames * 1024 * 1000000 / e.sample_rate;
+    sample.key = true;
+    track_.samples.push_back(std::move(sample));
+    e.frames++;
+  }
+  e.pending.erase(e.pending.begin(),
+                  e.pending.begin() + static_cast<std::ptrdiff_t>(used));
+  return true;
+}
+
+#else  // ZEN_HAVE_VOAAC
+
+struct AacEncoder::Impl {};
+
+AacEncoder::AacEncoder() : impl_(new Impl()) {}
+
+AacEncoder::~AacEncoder() = default;
+
+bool AacEncoder::Open(int sample_rate, int channels, int bitrate) {
+  return false;
+}
+
+bool AacEncoder::Encode(const int16_t* pcm, size_t frames, int64_t pts_us) {
+  return false;
+}
+
+#endif  // ZEN_HAVE_VOAAC
+
+// ---------------------------------------------------------------------------
 // ADTS.
 
 bool ReadAdts(const std::vector<uint8_t>& stream, AudioTrack* out) {
-  static const int kRates[] = {96000, 88200, 64000, 48000, 44100, 32000,
-                               24000, 22050, 16000, 12000, 11025, 8000, 7350};
   size_t at = 0;
   int64_t frames = 0;
   while (at + 7 <= stream.size()) {
@@ -201,7 +351,7 @@ bool ReadAdts(const std::vector<uint8_t>& stream, AudioTrack* out) {
       out->config = {
           static_cast<uint8_t>((object << 3) | (rate_index >> 1)),
           static_cast<uint8_t>(((rate_index & 1) << 7) | (channels << 3))};
-      out->sample_rate = kRates[rate_index];
+      out->sample_rate = kAacRates[rate_index];
       out->channels = channels;
     }
     Sample sample;

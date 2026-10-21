@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:camera/camera.dart';
 import 'package:file_picker/file_picker.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/films/presentation/film_camera.dart';
 import 'package:zen/src/features/films/presentation/film_camera_channel.dart';
+import 'package:zen/src/features/social/qr_frame_decoder.dart';
 
 /// The camera of the recorder on this platform: the `camera` plugin on
 /// Android, iOS and Windows (`camera_windows`), Zen's own bridge on macOS
@@ -143,6 +145,27 @@ final class PluginFilmCamera implements FilmCamera {
     }
     final XFile file = await c.stopVideoRecording();
     return file.path;
+  }
+
+  /// A photo taken now, in shades of grey (camera_windows streams no
+  /// pictures, so a QR scanner takes one now and then).
+  @override
+  Future<LumaFrame?> lumaFrame() async {
+    final CameraController? c = _controller;
+    if (c == null ||
+        !c.value.isInitialized ||
+        c.value.isTakingPicture ||
+        c.value.isRecordingVideo) {
+      return null;
+    }
+    final XFile shot = await c.takePicture();
+    final Uint8List bytes = await shot.readAsBytes();
+    try {
+      await File(shot.path).delete();
+    } on FileSystemException {
+      // The camera's temporary photo; the system cleans it up anyway.
+    }
+    return Isolate.run(() => lumaFromImage(bytes));
   }
 
   @override

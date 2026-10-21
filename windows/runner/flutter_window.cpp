@@ -5,6 +5,7 @@
 #include "bluetooth_le_bridge.h"
 #include "call_recorder.h"
 #include "location_bridge.h"
+#include "nearby_radio_bridge.h"
 #include "security_bridge.h"
 #include "video_bridge.h"
 #include "wifi_direct_bridge.h"
@@ -40,6 +41,8 @@ bool FlutterWindow::OnCreate() {
   // and Wi-Fi Direct between Windows computers.
   bluetooth_le_bridge::Register(flutter_controller_->engine()->messenger());
   wifi_direct_bridge::Register(flutter_controller_->engine()->messenger());
+  // "W pobliżu": Zen's nearby advert shown and looked for (BLE).
+  nearby_radio_bridge::Register(flutter_controller_->engine()->messenger());
   // Where the computer is (the alarm), from Windows' location service.
   location_bridge::Register(flutter_controller_->engine()->messenger());
   // Films of the "Filmy" section compressed and trimmed (Media Foundation).

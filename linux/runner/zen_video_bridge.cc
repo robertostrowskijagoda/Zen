@@ -391,8 +391,10 @@ bool HasFactory(const char* name) {
   return true;
 }
 
-// An AAC encoder of the system's GStreamer, or null.
-const char* AacEncoder() {
+// An AAC encoder of the system's GStreamer, or null (Zen's own bundled
+// encoder, zen_film::AacEncoder, comes first; this is for a build without
+// it).
+const char* SystemAacEncoder() {
   for (const char* name : {"avenc_aac", "fdkaacenc", "voaacenc", "faac"}) {
     if (HasFactory(name)) {
       return name;
@@ -483,6 +485,9 @@ struct GstRun {
   bool flip = false;
   const char* aac = nullptr;
   int audio_bitrate = 128000;
+  // Zen's own AAC encoder for sound that is not AAC already; null when the
+  // build has none.
+  std::unique_ptr<zen_film::AacEncoder> pcm;
   std::atomic<bool> failed{false};
   bool video_linked = false;
   bool audio_linked = false;
@@ -573,6 +578,27 @@ GstFlowReturn OnAudio(GstAppSink* sink, gpointer data) {
   return GST_FLOW_OK;
 }
 
+// Decoded sound (16-bit, 48 kHz, stereo) into Zen's own AAC encoder.
+GstFlowReturn OnPcm(GstAppSink* sink, gpointer data) {
+  GstRun* run = static_cast<GstRun*>(data);
+  GstSample* sample = gst_app_sink_pull_sample(sink);
+  if (sample == nullptr) {
+    return GST_FLOW_OK;
+  }
+  GstBuffer* buffer = gst_sample_get_buffer(sample);
+  const GstClockTime pts =
+      buffer != nullptr ? GST_BUFFER_PTS(buffer) : GST_CLOCK_TIME_NONE;
+  GstMapInfo map;
+  if (run->pcm != nullptr && InRange(pts, run->start, run->end) &&
+      gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+    run->pcm->Encode(reinterpret_cast<const int16_t*>(map.data), map.size / 4,
+                     static_cast<int64_t>((pts - run->start) / 1000));
+    gst_buffer_unmap(buffer, &map);
+  }
+  gst_sample_unref(sample);
+  return GST_FLOW_OK;
+}
+
 void OnPadAdded(GstElement* decodebin, GstPad* pad, gpointer data) {
   GstRun* run = static_cast<GstRun*>(data);
   GstCaps* caps = gst_pad_get_current_caps(pad);
@@ -601,7 +627,13 @@ void OnPadAdded(GstElement* decodebin, GstPad* pad, gpointer data) {
         "sync=false";
     kind = 2;
   } else if (g_str_has_prefix(name, "audio/x-raw") && !run->audio_linked) {
-    if (run->aac != nullptr) {
+    if (run->pcm != nullptr) {
+      description =
+          "audioconvert ! audioresample ! "
+          "audio/x-raw,format=S16LE,layout=interleaved,rate=48000,"
+          "channels=2 ! appsink name=sink sync=false";
+      kind = 3;
+    } else if (run->aac != nullptr) {
       // The encoder picks its own sample format (avenc_aac takes planar
       // floats, others 16-bit integers): audioconvert follows it.
       description = std::string(
@@ -626,7 +658,7 @@ void OnPadAdded(GstElement* decodebin, GstPad* pad, gpointer data) {
     g_clear_error(&error);
     if (kind == 1) {
       run->failed = true;
-    } else if (kind == 2) {
+    } else if (kind != 0) {
       run->audio_lost = true;
     }
     bin = gst_parse_bin_from_description("fakesink sync=false", TRUE, nullptr);
@@ -645,7 +677,8 @@ void OnPadAdded(GstElement* decodebin, GstPad* pad, gpointer data) {
     GstElement* sink = gst_bin_get_by_name(GST_BIN(bin), "sink");
     if (sink != nullptr) {
       GstAppSinkCallbacks callbacks = {};
-      callbacks.new_sample = kind == 1 ? OnVideo : OnAudio;
+      callbacks.new_sample =
+          kind == 1 ? OnVideo : (kind == 3 ? OnPcm : OnAudio);
       gst_app_sink_set_callbacks(GST_APP_SINK(sink), &callbacks, run, nullptr);
       gst_object_unref(sink);
     }
@@ -681,7 +714,13 @@ bool GstCompress(const Job& job, Outcome* outcome, std::string* code,
   const std::pair<int, int> size = ScaledSize(shown_w, shown_h, job.max_short);
   run.width = size.first;
   run.height = size.second;
-  run.aac = AacEncoder();
+  run.aac = SystemAacEncoder();
+  {
+    auto own = std::make_unique<zen_film::AacEncoder>();
+    if (own->Open(48000, 2, job.audio_bitrate)) {
+      run.pcm = std::move(own);
+    }
+  }
   run.audio_bitrate = job.audio_bitrate;
   run.start = static_cast<GstClockTime>(std::max<int64_t>(0, job.start_ms)) *
               GST_MSECOND;
@@ -789,7 +828,10 @@ bool GstCompress(const Job& job, Outcome* outcome, std::string* code,
   }
   // Without videoflip the picture stays as stored: the turn goes into
   // the index.
-  if (!zen_film::WriteMp4(job.output, run.encoder.track(), &run.audio,
+  const zen_film::AudioTrack& sound =
+      run.audio.samples.empty() && run.pcm != nullptr ? run.pcm->track()
+                                                      : run.audio;
+  if (!zen_film::WriteMp4(job.output, run.encoder.track(), &sound,
                           run.flip ? 0 : job.rotation, error)) {
     *code = "failed";
     return false;
@@ -799,7 +841,7 @@ bool GstCompress(const Job& job, Outcome* outcome, std::string* code,
   outcome->height = turned ? run.width : run.height;
   outcome->duration_ms = run.last_us / 1000;
   outcome->bytes = FileSize(job.output);
-  outcome->audio = !(run.audio_lost && run.audio.samples.empty());
+  outcome->audio = !(run.audio_lost && sound.samples.empty());
   Progress(1.0);
   return true;
 }
@@ -1123,6 +1165,10 @@ struct Camera {
   std::mutex lock;
   std::unique_ptr<zen_film::H264Encoder> encoder;
   zen_film::AudioTrack audio;
+  // The microphone through Zen's own AAC encoder (raw sound in), or a
+  // system GStreamer encoder (AAC in [audio]).
+  bool own_aac = false;
+  std::unique_ptr<zen_film::AacEncoder> aac;
   bool recording = false;
   GstClockTime base = GST_CLOCK_TIME_NONE;
 };
@@ -1253,6 +1299,30 @@ GstFlowReturn OnMicrophone(GstAppSink* sink, gpointer data) {
   return GST_FLOW_OK;
 }
 
+// The microphone's raw sound into Zen's own AAC encoder while recording.
+GstFlowReturn OnMicrophonePcm(GstAppSink* sink, gpointer data) {
+  Camera* camera = static_cast<Camera*>(data);
+  GstSample* sample = gst_app_sink_pull_sample(sink);
+  if (sample == nullptr) {
+    return GST_FLOW_OK;
+  }
+  std::lock_guard<std::mutex> hold(camera->lock);
+  GstBuffer* buffer = gst_sample_get_buffer(sample);
+  GstMapInfo map;
+  if (camera->recording && camera->aac != nullptr && buffer != nullptr &&
+      GST_BUFFER_PTS_IS_VALID(buffer) &&
+      GST_CLOCK_TIME_IS_VALID(camera->base) &&
+      GST_BUFFER_PTS(buffer) >= camera->base &&
+      gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+    camera->aac->Encode(
+        reinterpret_cast<const int16_t*>(map.data), map.size / 4,
+        static_cast<int64_t>((GST_BUFFER_PTS(buffer) - camera->base) / 1000));
+    gst_buffer_unmap(buffer, &map);
+  }
+  gst_sample_unref(sample);
+  return GST_FLOW_OK;
+}
+
 // The cameras GStreamer finds (v4l2, libcamera, PipeWire).
 GList* CameraDevices() {
   GstDeviceMonitor* monitor = gst_device_monitor_new();
@@ -1349,9 +1419,20 @@ void OpenCamera(FlMethodCall* call) {
                                         FL_TEXTURE(camera->texture));
   SetCallbacks(video_bin, "preview", OnPreview, camera->texture);
   SetCallbacks(video_bin, "frames", OnFrames, camera);
-  // The microphone, when there is an AAC encoder for it.
-  const char* aac = AacEncoder();
-  if (aac != nullptr && HasFactory("autoaudiosrc")) {
+  // The microphone: Zen's own AAC encoder, else a system one.
+  const char* aac = SystemAacEncoder();
+  camera->own_aac = zen_film::AacEncoder().Open(48000, 2, 128000);
+  if (camera->own_aac && HasFactory("autoaudiosrc")) {
+    GstElement* sound_bin = gst_parse_bin_from_description(
+        "autoaudiosrc ! queue ! audioconvert ! audioresample ! "
+        "audio/x-raw,format=S16LE,layout=interleaved,rate=48000,channels=2 ! "
+        "appsink name=mic sync=false",
+        FALSE, nullptr);
+    if (sound_bin != nullptr) {
+      gst_bin_add(GST_BIN(camera->pipeline), sound_bin);
+      SetCallbacks(sound_bin, "mic", OnMicrophonePcm, camera);
+    }
+  } else if (aac != nullptr && HasFactory("autoaudiosrc")) {
     const std::string sound =
         std::string(
             "autoaudiosrc ! queue ! audioconvert ! audioresample ! "
@@ -1379,6 +1460,41 @@ void OpenCamera(FlMethodCall* call) {
   fl_value_set_string_take(result, "width", fl_value_new_int(kCameraWidth));
   fl_value_set_string_take(result, "height", fl_value_new_int(kCameraHeight));
   Respond(call, result);
+}
+
+// The newest preview picture in shades of grey, at most 640 pixels wide
+// (a QR scanner reads it): {width, height, bytes}, or null.
+FlValue* Luma(ZenCameraTexture* texture) {
+  if (texture == nullptr) {
+    return nullptr;
+  }
+  g_mutex_lock(&texture->lock);
+  const guint32 width = texture->pending_width;
+  const guint32 height = texture->pending_height;
+  if (texture->pending == nullptr || width == 0 || height == 0) {
+    g_mutex_unlock(&texture->lock);
+    return nullptr;
+  }
+  const guint32 step = std::max<guint32>(1, (width + 639) / 640);
+  const guint32 out_w = width / step;
+  const guint32 out_h = height / step;
+  std::vector<uint8_t> gray(static_cast<size_t>(out_w) * out_h);
+  const gsize row = static_cast<gsize>(width) * 4;
+  for (guint32 y = 0; y < out_h; y++) {
+    const guint8* line = texture->pending + (y * step) * row;
+    for (guint32 x = 0; x < out_w; x++) {
+      const guint8* p = line + (x * step) * 4;  // RGBA
+      gray[static_cast<size_t>(y) * out_w + x] =
+          static_cast<uint8_t>((p[0] * 77 + p[1] * 150 + p[2] * 29) >> 8);
+    }
+  }
+  g_mutex_unlock(&texture->lock);
+  FlValue* result = fl_value_new_map();
+  fl_value_set_string_take(result, "width", fl_value_new_int(out_w));
+  fl_value_set_string_take(result, "height", fl_value_new_int(out_h));
+  fl_value_set_string_take(result, "bytes",
+                           fl_value_new_uint8_list(gray.data(), gray.size()));
+  return result;
 }
 
 void OnCameraCall(FlMethodChannel* channel, FlMethodCall* call,
@@ -1413,8 +1529,16 @@ void OnCameraCall(FlMethodChannel* channel, FlMethodCall* call,
       Fail(call, "failed", "the H.264 encoder did not start");
       return;
     }
+    std::unique_ptr<zen_film::AacEncoder> aac;
+    if (camera->own_aac) {
+      aac = std::make_unique<zen_film::AacEncoder>();
+      if (!aac->Open(48000, 2, 128000)) {
+        aac.reset();
+      }
+    }
     std::lock_guard<std::mutex> hold(camera->lock);
     camera->encoder = std::move(encoder);
+    camera->aac = std::move(aac);
     camera->audio = zen_film::AudioTrack();
     camera->base = GST_CLOCK_TIME_NONE;
     camera->recording = true;
@@ -1431,7 +1555,9 @@ void OnCameraCall(FlMethodChannel* channel, FlMethodCall* call,
       std::lock_guard<std::mutex> hold(camera->lock);
       camera->recording = false;
       encoder = std::move(camera->encoder);
-      audio = std::move(camera->audio);
+      audio = camera->aac != nullptr ? std::move(camera->aac->track())
+                                     : std::move(camera->audio);
+      camera->aac.reset();
       camera->audio = zen_film::AudioTrack();
     }
     gchar* name = g_strdup_printf("zen-film-%08x%08x.mp4", g_random_int(),
@@ -1451,6 +1577,8 @@ void OnCameraCall(FlMethodChannel* channel, FlMethodCall* call,
   } else if (strcmp(method, "close") == 0) {
     CloseCamera();
     Respond(call, nullptr);
+  } else if (strcmp(method, "luma") == 0) {
+    Respond(call, g_camera != nullptr ? Luma(g_camera->texture) : nullptr);
   } else {
     g_autoptr(FlMethodResponse) response =
         FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());

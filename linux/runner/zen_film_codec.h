@@ -61,6 +61,31 @@ class H264Encoder {
   VideoTrack track_;
 };
 
+// Zen's own AAC-LC encoder (VisualOn's vo-aacenc, Apache-2.0, built from
+// source with the app): 16-bit interleaved PCM in, raw AAC frames of 1024
+// samples into an AudioTrack. Without it (a build that left it out) Open
+// says false.
+class AacEncoder {
+ public:
+  AacEncoder();
+  ~AacEncoder();
+  AacEncoder(const AacEncoder&) = delete;
+  AacEncoder& operator=(const AacEncoder&) = delete;
+
+  bool Open(int sample_rate, int channels, int bitrate);
+
+  // [frames] samples per channel from [pcm]; [pts_us] of the first of them
+  // (only the first call's counts: the rest follow on without gaps).
+  bool Encode(const int16_t* pcm, size_t frames, int64_t pts_us);
+
+  AudioTrack& track() { return track_; }
+
+ private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+  AudioTrack track_;
+};
+
 // Splits an ADTS stream into raw AAC frames; [pts_us] of each frame is
 // counted from the first. False when it is not ADTS.
 bool ReadAdts(const std::vector<uint8_t>& stream, AudioTrack* out);

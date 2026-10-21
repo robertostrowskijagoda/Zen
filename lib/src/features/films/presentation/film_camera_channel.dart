@@ -13,6 +13,8 @@ import 'package:zen/src/features/films/presentation/film_camera.dart';
 //  - `setTorch` {on}: ignored where there is no light;
 //  - `start`: records picture and sound into a temporary MP4;
 //  - `stop` → the recording's path;
+//  - `luma` → {width, height, bytes}: the newest picture in shades of grey,
+//    at most 640 pixels wide (for reading QR codes), or null;
 //  - `close`: lets the camera and microphone go.
 
 /// [FilmCamera] over the `zen/camera` channel.
@@ -101,6 +103,23 @@ final class ChannelFilmCamera implements FilmCamera {
       throw StateError('nothing recorded');
     }
     return path;
+  }
+
+  @override
+  Future<LumaFrame?> lumaFrame() async {
+    if (_texture == null) {
+      return null;
+    }
+    final Map<Object?, Object?>? frame = await _channel
+        .invokeMapMethod<Object?, Object?>('luma');
+    final Object? w = frame?['width'];
+    final Object? h = frame?['height'];
+    final Object? bytes = frame?['bytes'];
+    if (w is! int || h is! int || bytes is! Uint8List) {
+      return null;
+    }
+    final LumaFrame luma = LumaFrame(width: w, height: h, bytes: bytes);
+    return luma.isComplete ? luma : null;
   }
 
   @override

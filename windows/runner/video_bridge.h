@@ -14,7 +14,8 @@
 //    {durationMs, width, height, bytes}; "progress" {fraction} is called
 //    back meanwhile;
 //  - "cancel": the running compression fails with "cancelled";
-//  - "thumbnail": null (no poster frames on Windows yet).
+//  - "thumbnail" {input, atMs, maxSide}: one frame as JPEG bytes (turned
+//    upright, through the Windows Imaging Component), or null.
 namespace video_bridge {
 
 void Register(flutter::BinaryMessenger* messenger);

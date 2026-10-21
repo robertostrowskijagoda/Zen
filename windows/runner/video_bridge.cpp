@@ -10,6 +10,8 @@
 #include <mferror.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
+#include <objbase.h>
+#include <wincodec.h>
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -24,6 +26,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "local_links_common.h"
 
@@ -343,6 +346,178 @@ HRESULT Transcode(const Job& job, Outcome* outcome) {
   return S_OK;
 }
 
+// The picture [pixels] (BGRA, [w] × [h]) turned [rotation] degrees
+// clockwise.
+std::vector<uint8_t> Turn(const std::vector<uint8_t>& pixels, UINT32 w,
+                          UINT32 h, UINT32 rotation, UINT32* out_w,
+                          UINT32* out_h) {
+  const bool sideways = rotation == 90 || rotation == 270;
+  *out_w = sideways ? h : w;
+  *out_h = sideways ? w : h;
+  if (rotation != 90 && rotation != 180 && rotation != 270) {
+    return pixels;
+  }
+  std::vector<uint8_t> out(pixels.size());
+  for (UINT32 y = 0; y < h; y++) {
+    for (UINT32 x = 0; x < w; x++) {
+      UINT32 tx = x;
+      UINT32 ty = y;
+      if (rotation == 90) {
+        tx = h - 1 - y;
+        ty = x;
+      } else if (rotation == 180) {
+        tx = w - 1 - x;
+        ty = h - 1 - y;
+      } else {
+        tx = y;
+        ty = w - 1 - x;
+      }
+      const size_t from = (static_cast<size_t>(y) * w + x) * 4;
+      const size_t to = (static_cast<size_t>(ty) * *out_w + tx) * 4;
+      std::copy(pixels.begin() + from, pixels.begin() + from + 4,
+                out.begin() + to);
+    }
+  }
+  return out;
+}
+
+// [pixels] (BGRA) as a JPEG, through the Windows Imaging Component.
+HRESULT EncodeJpeg(const std::vector<uint8_t>& pixels, UINT32 w, UINT32 h,
+                   std::vector<uint8_t>* jpeg) {
+  ComPtr<IWICImagingFactory> factory;
+  VB_CHECK(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                            CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)));
+  ComPtr<IStream> stream;
+  VB_CHECK(CreateStreamOnHGlobal(nullptr, TRUE, &stream));
+  ComPtr<IWICBitmapEncoder> encoder;
+  VB_CHECK(factory->CreateEncoder(GUID_ContainerFormatJpeg, nullptr,
+                                  &encoder));
+  VB_CHECK(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache));
+  ComPtr<IWICBitmapFrameEncode> frame;
+  ComPtr<IPropertyBag2> options;
+  VB_CHECK(encoder->CreateNewFrame(&frame, &options));
+  VB_CHECK(frame->Initialize(options.Get()));
+  VB_CHECK(frame->SetSize(w, h));
+  WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;
+  VB_CHECK(frame->SetPixelFormat(&format));
+  if (format != GUID_WICPixelFormat24bppBGR) {
+    return E_FAIL;
+  }
+  std::vector<uint8_t> bgr(static_cast<size_t>(w) * h * 3);
+  for (size_t i = 0, n = static_cast<size_t>(w) * h; i < n; i++) {
+    bgr[3 * i] = pixels[4 * i];
+    bgr[3 * i + 1] = pixels[4 * i + 1];
+    bgr[3 * i + 2] = pixels[4 * i + 2];
+  }
+  VB_CHECK(frame->WritePixels(h, w * 3, static_cast<UINT>(bgr.size()),
+                              bgr.data()));
+  VB_CHECK(frame->Commit());
+  VB_CHECK(encoder->Commit());
+  STATSTG stat{};
+  VB_CHECK(stream->Stat(&stat, STATFLAG_NONAME));
+  LARGE_INTEGER start{};
+  VB_CHECK(stream->Seek(start, STREAM_SEEK_SET, nullptr));
+  jpeg->resize(static_cast<size_t>(stat.cbSize.QuadPart));
+  ULONG read = 0;
+  VB_CHECK(stream->Read(jpeg->data(), static_cast<ULONG>(jpeg->size()),
+                        &read));
+  jpeg->resize(read);
+  return S_OK;
+}
+
+// One frame of [input] at [at_ms] as a JPEG, its long side at most
+// [max_side], turned upright: the poster of a film.
+HRESULT Thumbnail(const std::wstring& input, int64_t at_ms, UINT32 max_side,
+                  std::vector<uint8_t>* jpeg) {
+  ComPtr<IMFAttributes> attributes;
+  VB_CHECK(MFCreateAttributes(&attributes, 1));
+  attributes->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING,
+                        TRUE);
+  ComPtr<IMFSourceReader> reader;
+  VB_CHECK(MFCreateSourceReaderFromURL(input.c_str(), attributes.Get(),
+                                       &reader));
+  const DWORD video = static_cast<DWORD>(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
+  VB_CHECK(reader->SetStreamSelection(
+      static_cast<DWORD>(MF_SOURCE_READER_ALL_STREAMS), FALSE));
+  VB_CHECK(reader->SetStreamSelection(video, TRUE));
+  ComPtr<IMFMediaType> native;
+  VB_CHECK(reader->GetNativeMediaType(video, 0, &native));
+  UINT32 width = 0;
+  UINT32 height = 0;
+  VB_CHECK(MFGetAttributeSize(native.Get(), MF_MT_FRAME_SIZE, &width, &height));
+  const UINT32 rotation =
+      MFGetAttributeUINT32(native.Get(), MF_MT_VIDEO_ROTATION, 0);
+  const UINT32 longest = std::max(width, height);
+  const double scale =
+      longest > max_side ? static_cast<double>(max_side) / longest : 1.0;
+  ComPtr<IMFMediaType> rgb;
+  VB_CHECK(MFCreateMediaType(&rgb));
+  rgb->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+  rgb->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+  MFSetAttributeSize(rgb.Get(), MF_MT_FRAME_SIZE,
+                     std::max<UINT32>(2, static_cast<UINT32>(width * scale)) & ~1u,
+                     std::max<UINT32>(2, static_cast<UINT32>(height * scale)) & ~1u);
+  if (FAILED(reader->SetCurrentMediaType(video, nullptr, rgb.Get()))) {
+    MFSetAttributeSize(rgb.Get(), MF_MT_FRAME_SIZE, width, height);
+    VB_CHECK(reader->SetCurrentMediaType(video, nullptr, rgb.Get()));
+  }
+  ComPtr<IMFMediaType> current;
+  VB_CHECK(reader->GetCurrentMediaType(video, &current));
+  UINT32 w = 0;
+  UINT32 h = 0;
+  VB_CHECK(MFGetAttributeSize(current.Get(), MF_MT_FRAME_SIZE, &w, &h));
+  if (at_ms > 0) {
+    PROPVARIANT position;
+    PropVariantInit(&position);
+    position.vt = VT_I8;
+    position.hVal.QuadPart = at_ms * kPerMs;
+    reader->SetCurrentPosition(GUID_NULL, position);
+  }
+  ComPtr<IMFSample> sample;
+  for (int tries = 0; tries < 64 && !sample; tries++) {
+    DWORD index = 0;
+    DWORD flags = 0;
+    LONGLONG at = 0;
+    VB_CHECK(reader->ReadSample(video, 0, &index, &flags, &at, &sample));
+    if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
+      break;
+    }
+  }
+  if (!sample) {
+    return MF_E_END_OF_STREAM;
+  }
+  ComPtr<IMFMediaBuffer> buffer;
+  VB_CHECK(sample->ConvertToContiguousBuffer(&buffer));
+  std::vector<uint8_t> pixels(static_cast<size_t>(w) * h * 4);
+  ComPtr<IMF2DBuffer> planar;
+  BYTE* scan0 = nullptr;
+  LONG pitch = 0;
+  if (SUCCEEDED(buffer.As(&planar)) &&
+      SUCCEEDED(planar->Lock2D(&scan0, &pitch))) {
+    for (UINT32 y = 0; y < h; y++) {
+      std::copy(scan0 + static_cast<LONG>(y) * pitch,
+                scan0 + static_cast<LONG>(y) * pitch + w * 4,
+                pixels.begin() + static_cast<size_t>(y) * w * 4);
+    }
+    planar->Unlock2D();
+  } else {
+    BYTE* data = nullptr;
+    DWORD length = 0;
+    VB_CHECK(buffer->Lock(&data, nullptr, &length));
+    const size_t row = static_cast<size_t>(w) * 4;
+    for (UINT32 y = 0; y < h && (y + 1) * row <= length; y++) {
+      std::copy(data + y * row, data + (y + 1) * row,
+                pixels.begin() + y * row);
+    }
+    buffer->Unlock();
+  }
+  UINT32 shown_w = 0;
+  UINT32 shown_h = 0;
+  const std::vector<uint8_t> upright =
+      Turn(pixels, w, h, rotation, &shown_w, &shown_h);
+  return EncodeJpeg(upright, shown_w, shown_h, jpeg);
+}
+
 void Reply(std::shared_ptr<MethodResult> result, EncodableValue value) {
   local_links::RunOnPlatformThread(
       [result, value = std::move(value)]() { result->Success(value); });
@@ -375,7 +550,26 @@ void Handle(const flutter::MethodCall<EncodableValue>& call,
     return;
   }
   if (method == "thumbnail") {
-    result->Success();
+    const EncodableValue* args = call.arguments();
+    const std::wstring input = Wide(local_links::ArgString(args, "input"));
+    const int64_t at_ms = local_links::ArgInt(args, "atMs", 0);
+    const UINT32 max_side =
+        static_cast<UINT32>(local_links::ArgInt(args, "maxSide", 480));
+    if (input.empty()) {
+      result->Success();
+      return;
+    }
+    local_links::RunDetached([result, input, at_ms, max_side]() {
+      std::vector<uint8_t> jpeg;
+      if (SUCCEEDED(MFStartup(MF_VERSION))) {
+        if (FAILED(Thumbnail(input, at_ms, std::max<UINT32>(16, max_side),
+                             &jpeg))) {
+          jpeg.clear();
+        }
+        MFShutdown();
+      }
+      Reply(result, jpeg.empty() ? EncodableValue() : EncodableValue(jpeg));
+    });
     return;
   }
   if (method == "compress") {
