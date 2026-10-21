@@ -29,7 +29,7 @@ tapped. The first button hides or shows the rail.
 | Section | What's inside |
 |---|---|
 | Invite | your QR code, scanning someone's code, sending Zen to a friend |
-| About | version, what Zen is, security and privacy, licences, documents (with the date you accepted them), contact, support |
+| About | version, about how many people use Zen and how many are in the pyramid, what Zen is, security and privacy, licences, documents (with the date you accepted them), contact, support |
 | Privacy and security | password and app lock, notifications without content (on by default), account and recovery, accounts on this device, devices, blocked people, group invitations, messages from non-friends, call recordings, GIFs |
 | Messages and calls | downloading photos and videos (also over mobile data by default; *Media over Wi-Fi only* turns that off), in-app sounds, storage limits |
 | App | notifications and background operation, permissions and Bluetooth, *Why isn't it working?*, appearance, language, data and storage, updates and Pass it on |
@@ -66,6 +66,19 @@ cannot read it.
 **Your own bridge.** Zen on a computer helps others connect when the router
 allows it. You can also run a permanent Yggdrasil node yourself; see the
 [README](../../README.md#your-own-bridge-for-advanced-users).
+
+## How many people use Zen
+
+**About** shows *About N people in the Zen network (estimate)* and, when
+you keep a pyramid, the exact number of its members. Nobody counts people
+centrally: every account adds one anonymous number a month to a small
+sketch (1.5 KB), friends swap sketches at most once an hour and merge
+them, and after a while every phone sees about the same total (give or
+take a few percent). The number cannot be traced back to anyone, last
+month's count still shows at the start of a month, and people who stopped
+using Zen drop out after two months. One friend alone cannot blow the
+number up once you have two or more friends; it is still only a rough
+guide.
 
 ## Privacy
 

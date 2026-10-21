@@ -495,6 +495,27 @@ Not Yggdrasil. Implementation: `ZenNearbyBridge.kt`, `nearby.dart`,
 Unknown `type`, or a type the parser does not map, yields no signal
 (`zenSignalFromTransportPayload` returns `null`; relay engine returns `false`).
 
+### 2.14 Network census (`census`) [V]
+
+`census` {`e` month (months since January 2024), `c` sketch of that month,
+`p` sketch of the month before (optional)}, friends only, not reliable, at
+most once an hour per friend and only when the sketch changed (sent when a
+friend shows up: `ping`, `pong`, `lg_hello`); a friend's sketch is taken at
+most every 30 minutes (`network_census.dart`). A sketch is a HyperLogLog of
+2048 registers (6 bits each, base64url, 2048 characters, ~2.3% error).
+Each account adds one identifier a month: `HMAC-SHA256(censusKey,
+"zen.census.v1|" + month)`, `censusKey = HMAC-SHA256(selfKey,
+"zen.census.key.v1")`; the self key is held by the account's own devices
+only, so the identifier is the same on all of them, unlinkable between
+months and unknown to anyone else. Register = top 11 bits of SHA-256 of the
+identifier, value = leading zeros of the next 53 bits + 1 (at most 40).
+Every source (this account, each friend) is kept apart; with three or more
+sources each register is the second-largest value among them (one forged
+sketch cannot raise it), with fewer the maximum. The number shown is the
+larger estimate of the current and the previous month. Limits: two
+colluding friends, or a friend of a phone with a single other friend, can
+still inflate it; it is a rough guide only.
+
 ## 3. Layers above the frames
 
 ### 3.1 Reliable delivery (`relay_engine.dart`, `reliable_signal_transport.dart`) [V]

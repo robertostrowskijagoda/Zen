@@ -8,6 +8,11 @@
 - **README** rewritten: badges (CI, release build, latest release, licence, platforms, Flutter, Go, post-quantum, last commit), a Post-quantum section, a feature list linking to the guide, platforms.
 - **CI summaries:** the test jobs write format, analyzer, test counts and failed tests (and the Go tests) to the run's summary page (`tool/ci/ci_summary.py`); the release run lists every file with its size and SHA-256.
 
+### Installing
+- **Install page** on GitHub Pages (`/install/`, English and Polish): recognises the visitor's system, with a picker for Android (APK, signing certificate fingerprint, one-tap Obtainium), iPhone (SideStore in 8 short steps with pictures and a one-tap "Add Zen source"), Windows, macOS and Linux.
+- **SideStore / AltStore source** (`apps.json`) made from the latest published release by the Pages workflow (version, date, size, `Zen-unsigned.ipa`, permissions from `Info.plist`); publishing a release refreshes it. The release run now fails without the iPhone file.
+- In the app: **Invite → Friend doesn't have Zen? → How to install Zen on another phone / computer**: a QR code to the install page and the steps per system, with the SideStore source.
+
 ### Post-quantum, all the way
 - **Device identity:** sessions are authenticated post-quantum (a challenge encapsulated to the sender's device key); device keys are pinned per address, the ledger hello signs the address together with the device key (hybrid), device entries and friend lists carry the keys, and a mismatch shows a warning in the chat.
 - **Calls:** every media packet (RTP, RTCP, ICE, DTLS) is sealed again in the relay with ChaCha20-Poly1305 under a 256-bit key of the two devices' hybrid session, around the AES-128-GCM frame encryption and DTLS-SRTP.
