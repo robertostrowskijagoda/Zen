@@ -186,6 +186,38 @@ void main() {
       );
     });
 
+    test('what is too large for the mailboxes waits for both to be online', () {
+      expect(
+        _stage(
+          _out(ChatMessageDeliveryState.sent),
+          progress: const MessageDeliveryProgress(
+            recipients: 1,
+            waitingForBoth: 1,
+          ),
+        ),
+        MessageDeliveryStage.waitingForBoth,
+      );
+      expect(
+        _stage(
+          _out(ChatMessageDeliveryState.none, type: ChatMessageType.video),
+        ),
+        MessageDeliveryStage.waitingForBoth,
+        reason: 'a big attachment waiting for a transfer',
+      );
+      expect(
+        _stage(
+          _out(ChatMessageDeliveryState.sent),
+          isGroup: true,
+          progress: const MessageDeliveryProgress(
+            recipients: 2,
+            delivered: 1,
+            waitingForBoth: 1,
+          ),
+        ),
+        MessageDeliveryStage.waitingForBoth,
+      );
+    });
+
     test('nothing for messages that are not outgoing', () {
       const ChatMessage incoming = ChatMessage(
         id: 'in',
@@ -215,6 +247,7 @@ void main() {
     for (final String label in <String>[
       'Wysyłanie…',
       'Czeka u Ciebie — odbiorca offline',
+      'Czeka u Ciebie — dojdzie, gdy oboje będziecie online',
       'Czeka na odbiór u zaufanych znajomych odbiorcy (N)',
       'Wysłano',
       'Dostarczono',

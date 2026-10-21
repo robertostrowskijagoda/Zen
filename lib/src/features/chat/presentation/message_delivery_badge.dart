@@ -43,6 +43,7 @@ IconData messageDeliveryIcon(MessageDeliveryStage stage) {
     MessageDeliveryStage.sending => Icons.schedule_rounded,
     MessageDeliveryStage.waitingHere => Icons.outbox_rounded,
     MessageDeliveryStage.inMailboxes => Icons.markunread_mailbox_outlined,
+    MessageDeliveryStage.waitingForBoth => Icons.sync_alt_rounded,
     MessageDeliveryStage.sent => Icons.done_rounded,
     MessageDeliveryStage.delivered => Icons.done_all_rounded,
     MessageDeliveryStage.read => Icons.done_all_rounded,
@@ -108,6 +109,9 @@ String messageDeliveryStageLabel(
       'Czeka na odbiór u zaufanych znajomych odbiorcy ({n})',
       <String, Object?>{'n': mailboxes ?? 'N'},
     ),
+    MessageDeliveryStage.waitingForBoth => t(
+      'Czeka u Ciebie — dojdzie, gdy oboje będziecie online',
+    ),
     MessageDeliveryStage.sent => t('Wysłano'),
     MessageDeliveryStage.delivered => t('Dostarczono'),
     MessageDeliveryStage.read => t('Przeczytano'),
@@ -128,6 +132,11 @@ String messageDeliveryExplanation(MessageDeliveryStage stage) {
     MessageDeliveryStage.inMailboxes => t(
       'Odbiorca jest offline. Zaszyfrowane kopie trzymają jego zaufani '
       'znajomi i oddadzą je, gdy wróci. To urządzenie też ponawia wysyłkę.',
+    ),
+    MessageDeliveryStage.waitingForBoth => t(
+      'Za duża dla skrzynek u zaufanych znajomych odbiorcy. Plik czeka na '
+      'tym urządzeniu i przejdzie, gdy oba telefony będą online w tym samym '
+      'czasie.',
     ),
     MessageDeliveryStage.sent => t(
       'Wiadomość jest w kolejce i będzie ponawiana, aż dotrze.',
@@ -340,6 +349,13 @@ class _GroupCounts extends StatelessWidget {
                 'n': status.inMailboxes,
               }),
             ),
+          if (status.waitingForBoth > 0)
+            (
+              MessageDeliveryStage.waitingForBoth,
+              t('Czeka, aż oboje będziecie online: {n}', <String, Object?>{
+                'n': status.waitingForBoth,
+              }),
+            ),
           if (status.waitingHere > 0)
             (
               MessageDeliveryStage.waitingHere,
@@ -384,6 +400,7 @@ class MessageDeliveryLegend extends StatelessWidget {
     MessageDeliveryStage.sending,
     MessageDeliveryStage.waitingHere,
     MessageDeliveryStage.inMailboxes,
+    MessageDeliveryStage.waitingForBoth,
     MessageDeliveryStage.sent,
     MessageDeliveryStage.delivered,
     MessageDeliveryStage.read,

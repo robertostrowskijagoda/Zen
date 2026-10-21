@@ -76,6 +76,11 @@ const String kChatCopyKind = 'chat';
 /// `{f}` (an encrypted file) in the `own` space.
 const String kChatHistoryKind = 'chat_history';
 
+/// A friend's new entries handed over through the reliable queue (they may
+/// have waited in this device's mailboxes): `{type, entries}`, taken like
+/// those of a sync (`ledger_mail_push.dart`).
+const String kLedgerPushType = 'lg_push';
+
 /// Own devices share their audience keys and friend levels:
 /// `{type, own, levels}`.
 const String kLedgerSiblingType = 'lg_sibling';
@@ -2073,6 +2078,13 @@ final class LedgerNode {
     // sync with us.
     _hello(frame.from);
     final Object? type = frame.payload['type'];
+    if (type == kLedgerPushType) {
+      await replicator.handle(frame.from, <String, dynamic>{
+        'type': LedgerMessages.entries,
+        'entries': frame.payload['entries'],
+      });
+      return;
+    }
     if (type != kLedgerHelloType &&
         type != kLedgerBridgesType &&
         type != kLedgerReachType &&

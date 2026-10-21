@@ -15,6 +15,11 @@ enum MessageDeliveryStage {
   /// recipient collects it; this device keeps retrying too.
   inMailboxes,
 
+  /// Too large for the recipient's mailboxes (a big attachment where they
+  /// hold none): it waits on this device and goes over while both are
+  /// online at the same time.
+  waitingForBoth,
+
   /// Handed to the network; nothing more is known.
   sent,
 
@@ -42,6 +47,7 @@ final class MessageDeliveryProgress {
     this.inMailboxes = 0,
     this.mailboxCopies = 0,
     this.heldBySelf = false,
+    this.waitingForBoth = 0,
   });
 
   final int recipients;
@@ -68,7 +74,11 @@ final class MessageDeliveryProgress {
   /// This device holds a copy as one of the recipient's mailboxes.
   final bool heldBySelf;
 
-  int get pending => sending + waitingHere + inMailboxes;
+  /// Recipients it can only reach while both devices are online (too
+  /// large for their mailboxes).
+  final int waitingForBoth;
+
+  int get pending => sending + waitingHere + inMailboxes + waitingForBoth;
 
   @override
   bool operator ==(Object other) =>
@@ -80,7 +90,8 @@ final class MessageDeliveryProgress {
       other.waitingHere == waitingHere &&
       other.inMailboxes == inMailboxes &&
       other.mailboxCopies == mailboxCopies &&
-      other.heldBySelf == heldBySelf;
+      other.heldBySelf == heldBySelf &&
+      other.waitingForBoth == waitingForBoth;
 
   @override
   int get hashCode => Object.hash(
@@ -92,6 +103,7 @@ final class MessageDeliveryProgress {
     inMailboxes,
     mailboxCopies,
     heldBySelf,
+    waitingForBoth,
   );
 }
 
@@ -113,6 +125,7 @@ final class MessageDeliveryStatus {
     this.inMailboxes = 0,
     this.mailboxCopies = 0,
     this.heldBySelf = false,
+    this.waitingForBoth = 0,
   });
 
   final MessageDeliveryStage stage;
@@ -126,6 +139,7 @@ final class MessageDeliveryStatus {
   final int inMailboxes;
   final int mailboxCopies;
   final bool heldBySelf;
+  final int waitingForBoth;
 
   bool get canRetry => stage == MessageDeliveryStage.failed;
 
@@ -144,7 +158,8 @@ final class MessageDeliveryStatus {
       other.waitingHere == waitingHere &&
       other.inMailboxes == inMailboxes &&
       other.mailboxCopies == mailboxCopies &&
-      other.heldBySelf == heldBySelf;
+      other.heldBySelf == heldBySelf &&
+      other.waitingForBoth == waitingForBoth;
 
   @override
   int get hashCode => Object.hash(
@@ -157,6 +172,7 @@ final class MessageDeliveryStatus {
     inMailboxes,
     mailboxCopies,
     heldBySelf,
+    waitingForBoth,
   );
 
   /// The status of [message] (`null` for anything that is not outgoing).
@@ -187,6 +203,7 @@ final class MessageDeliveryStatus {
           inMailboxes: p?.inMailboxes ?? 0,
           mailboxCopies: p?.mailboxCopies ?? 0,
           heldBySelf: p?.heldBySelf ?? false,
+          waitingForBoth: p?.waitingForBoth ?? 0,
         );
     // Read receipts exist for chats only; a group never says who read what.
     final bool read = !isGroup && message.isRead;
@@ -221,13 +238,19 @@ final class MessageDeliveryStatus {
         if (p.inMailboxes > 0) {
           return make(MessageDeliveryStage.inMailboxes);
         }
+        if (p.waitingHere > 0) {
+          return make(MessageDeliveryStage.waitingHere);
+        }
         return make(
-          p.waitingHere > 0
-              ? MessageDeliveryStage.waitingHere
+          p.waitingForBoth > 0
+              ? MessageDeliveryStage.waitingForBoth
               : MessageDeliveryStage.sending,
         );
       }
       // A group: whoever is furthest behind sets the icon.
+      if (p.waitingForBoth > 0) {
+        return make(MessageDeliveryStage.waitingForBoth);
+      }
       if (p.waitingHere > 0) {
         return make(MessageDeliveryStage.waitingHere);
       }
@@ -248,8 +271,9 @@ final class MessageDeliveryStatus {
       case ChatMessageDeliveryState.sent:
         return make(MessageDeliveryStage.sent);
       case ChatMessageDeliveryState.none:
-        // An attachment waiting here for a transfer while both are online.
-        return make(MessageDeliveryStage.waitingHere);
+        // An attachment waiting here for a transfer while both are online
+        // (the recipient's mailboxes hold no files, or it is too large).
+        return make(MessageDeliveryStage.waitingForBoth);
       case ChatMessageDeliveryState.delivered:
         return make(MessageDeliveryStage.delivered);
       case ChatMessageDeliveryState.failed:

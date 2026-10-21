@@ -379,7 +379,7 @@ void main() {
   });
 
   test('a recipient without attachment mailboxes gets large payloads '
-      'direct only', () async {
+      'in parts through its mailboxes', () async {
     final _SimMesh mesh = await _mesh(bobHasBlobs: false);
     final RelayEngine engine = mesh.nodes[alice]!.engine;
     expect(
@@ -394,11 +394,31 @@ void main() {
       'text': 'x' * (60 * 1024),
     });
     await mesh.advance(const Duration(seconds: 6));
-    final List<RelayDeliveryReport> reports = await engine
-        .takeDeliveryReports();
-    expect(reports.single.status, RelayDeliveryStatus.directOnly);
-    expect((await mesh.nodes[alice]!.state()).outBlobs, isEmpty);
+    // Not direct-only: cut into envelope-sized parts for its mailboxes.
+    expect(await engine.takeDeliveryReports(), isEmpty);
+    final RelayState state = await mesh.nodes[alice]!.state();
+    expect(state.outBlobs, isEmpty);
     expect(await _heldChunkCount(mesh), 0);
+    final RelayOutboxEntry parent = state.outbox.values.singleWhere(
+      (RelayOutboxEntry e) => e.payload['type'] == 'message',
+    );
+    expect(parent.partRids, hasLength(3));
+    expect(
+      state.outbox.values.where(
+        (RelayOutboxEntry e) => e.payload['type'] == kRelayPartType,
+      ),
+      hasLength(3),
+    );
+
+    await mesh.advance(const Duration(seconds: 6));
+    await mesh.goOffline(alice);
+    await mesh.goOnline(bob);
+    await mesh.advance(const Duration(seconds: 6));
+    final List<Map<String, dynamic>> messages = mesh.nodes[bob]!.framesOfType(
+      'message',
+    );
+    expect(messages, hasLength(1));
+    expect(messages.single['text'], 'x' * (60 * 1024));
   });
 
   test('mailboxes keep within the per-sender quota', () async {

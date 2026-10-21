@@ -225,6 +225,7 @@ final class RelayOutboxEntry {
     this.depositAttemptAtMillis = const <String, int>{},
     this.blobId,
     this.blobHeldBy = const <String>[],
+    this.partRids = const <String>[],
   });
 
   final String rid;
@@ -256,6 +257,11 @@ final class RelayOutboxEntry {
   /// the chat counts as copies waiting with the recipient's friends.
   final List<String> blobHeldBy;
 
+  /// For a payload too large for one envelope whose recipient's mailboxes
+  /// hold no attachments: the reliable ids of the parts its copy for the
+  /// mailboxes was cut into (`kRelayPartType`).
+  final List<String> partRids;
+
   RelayOutboxEntry copyWith({
     int? directAttempts,
     int? nextDirectAttemptAtMillis,
@@ -263,6 +269,7 @@ final class RelayOutboxEntry {
     Map<String, int>? depositAttemptAtMillis,
     String? blobId,
     List<String>? blobHeldBy,
+    List<String>? partRids,
   }) {
     return RelayOutboxEntry(
       rid: rid,
@@ -279,6 +286,7 @@ final class RelayOutboxEntry {
           depositAttemptAtMillis ?? this.depositAttemptAtMillis,
       blobId: blobId ?? this.blobId,
       blobHeldBy: blobHeldBy ?? this.blobHeldBy,
+      partRids: partRids ?? this.partRids,
     );
   }
 
@@ -295,6 +303,7 @@ final class RelayOutboxEntry {
     'dat': depositAttemptAtMillis,
     if (blobId != null) 'blob': blobId,
     if (blobHeldBy.isNotEmpty) 'bh': blobHeldBy,
+    if (partRids.isNotEmpty) 'pr': partRids,
   };
 
   static RelayOutboxEntry? fromJson(Object? json) {
@@ -326,6 +335,7 @@ final class RelayOutboxEntry {
       depositAttemptAtMillis: attempts,
       blobId: json['blob'] is String ? json['blob'] as String : null,
       blobHeldBy: _stringList(json['bh']),
+      partRids: _stringList(json['pr']),
     );
   }
 }
@@ -540,8 +550,10 @@ final class RelayState {
     Map<String, Map<String, RelayHeldBlob>>? heldBlobs,
     Map<String, RelayBlobIn>? inBlobs,
     Map<String, RelayTrackedMessage>? tracked,
+    Map<String, RelayPartsIn>? inParts,
   }) : peers = peers ?? <String, RelayPeerInfo>{},
        tracked = tracked ?? <String, RelayTrackedMessage>{},
+       inParts = inParts ?? <String, RelayPartsIn>{},
        outBlobs = outBlobs ?? <String, RelayBlobOut>{},
        heldBlobs = heldBlobs ?? <String, Map<String, RelayHeldBlob>>{},
        inBlobs = inBlobs ?? <String, RelayBlobIn>{},
@@ -621,6 +633,10 @@ final class RelayState {
   /// Outgoing chat messages and where they are, by chat message id.
   final Map<String, RelayTrackedMessage> tracked;
 
+  /// Parts of payloads for this device being collected: `sender|rid` ->
+  /// what arrived so far.
+  final Map<String, RelayPartsIn> inParts;
+
   String toJsonString({
     bool includeMailbox = true,
   }) => jsonEncode(<String, dynamic>{
@@ -656,6 +672,8 @@ final class RelayState {
       'bi': inBlobs.values.map((RelayBlobIn b) => b.toJson()).toList(),
     if (tracked.isNotEmpty)
       'trk': tracked.values.map((RelayTrackedMessage m) => m.toJson()).toList(),
+    if (inParts.isNotEmpty)
+      'pin': inParts.values.map((RelayPartsIn p) => p.toJson()).toList(),
   });
 
   static RelayState fromJsonString(String raw) {
@@ -739,6 +757,13 @@ final class RelayState {
                 .map(RelayBlobIn.fromJson)
                 .whereType<RelayBlobIn>())
           blob.scope: blob,
+      },
+      inParts: <String, RelayPartsIn>{
+        for (final RelayPartsIn parts
+            in ((decoded['pin'] as List?) ?? const <Object?>[])
+                .map(RelayPartsIn.fromJson)
+                .whereType<RelayPartsIn>())
+          parts.scope: parts,
       },
       tracked: <String, RelayTrackedMessage>{
         for (final RelayTrackedMessage message
@@ -1086,6 +1111,86 @@ final class RelayBlobIn {
       messageId: json['mid'] is String ? json['mid'] as String : null,
       meta: meta is Map ? Map<String, dynamic>.from(meta) : null,
       received: _intList(json['i']).toSet(),
+    );
+  }
+}
+
+/// A payload for this device arriving in parts (`kRelayPartType`), from
+/// mailboxes that hold no attachments: the pieces of its JSON, kept until
+/// all are here.
+final class RelayPartsIn {
+  RelayPartsIn({
+    required this.sender,
+    required this.parent,
+    required this.count,
+    required this.digest,
+    required this.expiresAtMillis,
+    Map<int, String>? inline,
+    Set<int>? stored,
+  }) : inline = inline ?? <int, String>{},
+       stored = stored ?? <int>{};
+
+  final String sender;
+
+  /// Reliable id of the whole payload.
+  final String parent;
+  final int count;
+
+  /// SHA-256 (base64url) of the whole payload's JSON.
+  final String digest;
+  final int expiresAtMillis;
+
+  /// Pieces kept in the state itself (no blob store): index -> text.
+  final Map<int, String> inline;
+
+  /// Pieces written to the blob store.
+  final Set<int> stored;
+
+  String get scope => '$sender|$parent';
+
+  bool has(int index) => inline.containsKey(index) || stored.contains(index);
+
+  bool get isComplete => inline.length + stored.length >= count;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    's': sender,
+    'p': parent,
+    'n': count,
+    'h': digest,
+    'x': expiresAtMillis,
+    if (inline.isNotEmpty)
+      'in': <String, String>{
+        for (final MapEntry<int, String> e in inline.entries)
+          '${e.key}': e.value,
+      },
+    if (stored.isNotEmpty) 'st': stored.toList()..sort(),
+  };
+
+  static RelayPartsIn? fromJson(Object? json) {
+    if (json is! Map ||
+        json['s'] is! String ||
+        json['p'] is! String ||
+        json['h'] is! String) {
+      return null;
+    }
+    final Map<int, String> inline = <int, String>{};
+    final Object? raw = json['in'];
+    if (raw is Map) {
+      raw.forEach((Object? key, Object? value) {
+        final int? index = key is String ? int.tryParse(key) : null;
+        if (index != null && value is String) {
+          inline[index] = value;
+        }
+      });
+    }
+    return RelayPartsIn(
+      sender: json['s'] as String,
+      parent: json['p'] as String,
+      count: (json['n'] as num?)?.toInt() ?? 0,
+      digest: json['h'] as String,
+      expiresAtMillis: (json['x'] as num?)?.toInt() ?? 0,
+      inline: inline,
+      stored: _intList(json['st']).toSet(),
     );
   }
 }

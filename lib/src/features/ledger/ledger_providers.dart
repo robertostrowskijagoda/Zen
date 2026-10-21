@@ -22,6 +22,7 @@ import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/reaction_relay.dart';
 import 'package:zen/src/features/ledger/bridge_host.dart';
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
+import 'package:zen/src/features/ledger/ledger_mail_push.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/profile/follows.dart';
@@ -215,6 +216,22 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
       .listen(warnKeyMismatch);
   ref.onDispose(keyConflicts.cancel);
   unawaitedLogged(node.start(), context: 'Start dziennika nie udał się');
+  // Posts, comments and likes reach friends who are offline through the
+  // reliable queue (their mailboxes hold them while this phone is away).
+  final LedgerMailPush mailPush = LedgerMailPush(
+    node: node,
+    isOnline: (String address) =>
+        ref
+            .read(socialHubControllerProvider)
+            .friendByAddress(address)
+            ?.isOnline ??
+        false,
+    send: (String address, Map<String, dynamic> payload) =>
+        node.transport.send(remoteAddress: address, payload: payload),
+  )..start();
+  ref.onDispose(
+    () => unawaitedLogged(mailPush.stop(), context: 'Stopping entry pushes'),
+  );
   // Follows are signed entries; followers learn of them from hellos.
   final FollowLedger follows = FollowLedger.of(node);
   ref.onDispose(

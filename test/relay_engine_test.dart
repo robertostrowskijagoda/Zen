@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/domain/messages/message_delivery_status.dart';
+import 'package:zen/src/features/relay/locked_outbox.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
@@ -159,7 +160,20 @@ final class _SimNode implements RelayPeerSource {
       )
       .toList();
 
+  /// While set, the device is locked: what reaches it goes to this
+  /// transport (the locked service's node) instead of the engine.
+  _LockedNode? locked;
+
   Future<void> receive(String from, Map<String, dynamic> payload) async {
+    final _LockedNode? node = locked;
+    if (node != null) {
+      await node.injectIncoming(
+        from: from,
+        payload: payload,
+        receivedAtMillis: mesh.now,
+      );
+      return;
+    }
     appFrames.addAll(
       await engine.handleIncoming(
         SignalTransportFrame(
@@ -1359,10 +1373,13 @@ void main() {
       expect(await engine.takeDeliveryReports(), isEmpty);
     });
 
-    test('a message too large for the mailboxes is reported as direct-only '
-        'once they would have had a copy, not as failed', () async {
+    test('a message too large for one envelope, to someone without '
+        'mailboxes, is reported as direct-only once they would have had a '
+        'copy, not as failed', () async {
       final _SimMesh mesh = await _meshWithRelays();
       final RelayEngine engine = mesh.nodes[alice]!.engine;
+      await mesh.nodes[bob]!.engine.setManualRelays(<String>[]);
+      await mesh.settle();
       await mesh.goOffline(bob);
       await engine.submit(bob, bigMessage('big-1'));
       await mesh.advance(const Duration(seconds: 1));
@@ -1406,6 +1423,9 @@ void main() {
       expect(mesh.nodes[bob]!.receivedTexts, hasLength(1));
       expect(await engine.takeDeliveryReports(), isEmpty);
 
+      // Without mailboxes it can only go directly.
+      await mesh.nodes[bob]!.engine.setManualRelays(<String>[]);
+      await mesh.settle();
       await mesh.goOffline(bob);
       await engine.submit(bob, bigMessage('big-3'));
       await mesh.advance(const Duration(seconds: 6));
@@ -1416,6 +1436,50 @@ void main() {
       expect(mesh.nodes[bob]!.receivedTexts, hasLength(2));
       expect(engine.deliveryReportCount.value, 0);
       expect(await engine.takeDeliveryReports(), isEmpty);
+    });
+
+    test('a message too large for one envelope waits in the mailboxes in '
+        'parts and arrives whole, once', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final RelayEngine engine = mesh.nodes[alice]!.engine;
+      await mesh.goOffline(bob);
+      await engine.submit(bob, bigMessage('big-parts'));
+      await mesh.advance(const Duration(seconds: 5)); // cut into parts
+      await mesh.advance(const Duration(seconds: 5)); // parts deposited
+      expect(await engine.takeDeliveryReports(), isEmpty);
+
+      final RelayState aliceState = await mesh.nodes[alice]!.state();
+      final RelayOutboxEntry parent = aliceState.outbox.values.singleWhere(
+        (RelayOutboxEntry e) => e.payload['type'] == 'message',
+      );
+      expect(parent.partRids, hasLength(2));
+      int holding = 0;
+      for (final String helper in helpers) {
+        final int held =
+            (await mesh.nodes[helper]!.state()).mailbox[bob]?.length ?? 0;
+        expect(held, anyOf(0, 2), reason: helper);
+        if (held == 2) {
+          holding++;
+        }
+      }
+      expect(holding, const RelayConfig().maxBlobCopies);
+      final MessageDeliveryProgress? progress =
+          engine.progress.value.messages['big-parts'];
+      expect(progress?.inMailboxes, 1);
+      expect(progress?.mailboxCopies, const RelayConfig().maxBlobCopies);
+
+      // Only the mailboxes can deliver it now.
+      await mesh.goOffline(alice);
+      await mesh.goOnline(bob);
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['x' * (49 * 1024)]);
+
+      // Alice's own retry finds it delivered: everything is dropped, and
+      // bob does not take it twice.
+      await mesh.goOnline(alice);
+      await mesh.advance(const Duration(minutes: 3));
+      expect(mesh.nodes[bob]!.receivedTexts, hasLength(1));
+      expect((await mesh.nodes[alice]!.state()).outbox, isEmpty);
+      expect((await mesh.nodes[bob]!.state()).inParts, isEmpty);
     });
 
     test('the chat is told about the newest expiries when there are too '
@@ -1474,6 +1538,88 @@ void main() {
     await mesh.advance(const Duration(hours: 3));
     state = await mesh.nodes[alice]!.state();
     expect(state.outbox, isEmpty);
+  });
+
+  group('while the sender is locked', () {
+    test('the queue goes out from the outbox kit: sealed, into the '
+        'mailboxes, and ends with the recipient\'s confirmation', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      await mesh.goOffline(bob);
+      final RelayEngine engine = mesh.nodes[alice]!.engine;
+      await engine.submit(bob, _text('z zablokowanego'));
+      await mesh.settle(); // not in the mailboxes yet
+
+      final LockedOutboxKit kit = await engine.lockedOutboxKit();
+      expect(kit.items, hasLength(1));
+      final LockedOutboxItem item = kit.items.single;
+      expect(item.recipient, bob);
+      expect(
+        item.mailboxes.toSet(),
+        (await mesh.nodes[bob]!.state()).currentRelays.toSet(),
+      );
+      // Only ciphertext and where it goes: nothing the service could read.
+      final String stored = jsonEncode(kit.toJson());
+      expect(stored, isNot(contains('z zablokowanego')));
+      final LockedOutboxKit? read = LockedOutboxKit.fromJson(
+        jsonDecode(stored),
+      );
+      expect(read?.signature, kit.signature);
+
+      final _LockedNode node = await _lock(mesh, alice);
+      final LockedOutbox outbox = LockedOutbox(
+        transport: node,
+        kit: read!,
+        now: () => mesh.now,
+      );
+      await outbox.start();
+      addTearDown(outbox.stop);
+      await outbox.runRound();
+      await mesh.settle();
+      for (final String relay in item.mailboxes) {
+        expect(
+          (await mesh.nodes[relay]!.state()).mailbox[bob],
+          hasLength(1),
+          reason: relay,
+        );
+      }
+
+      await mesh.goOnline(bob);
+      await Future<void>.delayed(Duration.zero);
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['z zablokowanego']);
+      expect(outbox.pendingCount, 0, reason: 'bob confirmed it');
+    });
+
+    test('a recipient who is online gets the queue straight from the locked '
+        'service, once', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      await mesh.goOffline(bob);
+      final RelayEngine engine = mesh.nodes[alice]!.engine;
+      await engine.submit(bob, _text('pierwsza'));
+      await engine.submit(bob, _text('druga'));
+      await mesh.settle();
+      final LockedOutboxKit kit = await engine.lockedOutboxKit();
+      final _LockedNode node = await _lock(mesh, alice);
+      final LockedOutbox outbox = LockedOutbox(
+        transport: node,
+        kit: kit,
+        now: () => mesh.now,
+      );
+      await outbox.start();
+      addTearDown(outbox.stop);
+
+      await mesh.goOnline(bob);
+      await outbox.runRound();
+      await mesh.settle();
+      await outbox.runRound(); // a repeat is taken once
+      await mesh.settle();
+      await Future<void>.delayed(Duration.zero);
+      expect(mesh.nodes[bob]!.receivedTexts.toSet(), <String>{
+        'pierwsza',
+        'druga',
+      });
+      expect(mesh.nodes[bob]!.receivedTexts, hasLength(2));
+      expect(outbox.pendingCount, 0);
+    });
   });
 
   group('queueing rules', () {
@@ -1771,4 +1917,29 @@ final class _LonePeers implements RelayPeerSource {
 
   @override
   List<RelayFriend> groupContacts() => const <RelayFriend>[];
+}
+
+/// The locked Android service's node in the simulated mesh: it sends as the
+/// device and receives what reaches the device.
+final class _LockedNode extends MemorySignalTransport {
+  _LockedNode(this.mesh, this.address);
+
+  final _SimMesh mesh;
+  final String address;
+
+  @override
+  Future<void> send({
+    required String remoteAddress,
+    required Map<String, dynamic> payload,
+  }) => mesh.send(address, remoteAddress, payload);
+}
+
+/// Locks [address]: its engine stops, the service's node takes its frames.
+Future<_LockedNode> _lock(_SimMesh mesh, String address) async {
+  final _SimNode node = mesh.nodes[address]!;
+  node.engine.deactivate();
+  final _LockedNode locked = _LockedNode(mesh, address);
+  await locked.start();
+  node.locked = locked;
+  return locked;
 }

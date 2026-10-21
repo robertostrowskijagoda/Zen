@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/messages/message_delivery_status.dart';
+import 'package:zen/src/features/relay/locked_outbox.dart';
 import 'package:zen/src/features/relay/relay_crypto.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
@@ -80,7 +81,7 @@ final class RelayConfig {
     this.peerSeenThrottle = const Duration(seconds: 5),
     this.maxHeldPerRecipient = 300,
     this.maxHeldPerSender = 100,
-    this.maxHeldBytesPerRecipient = 2 * 1024 * 1024,
+    this.maxHeldBytesPerRecipient = 4 * 1024 * 1024,
     this.maxRelayablePayloadBytes = 48 * 1024,
     this.maxMailBatchBytes = 6 * 1024,
     this.maxSeenEntries = 5000,
@@ -103,6 +104,8 @@ final class RelayConfig {
     this.maxIncomingBlobs = 32,
     this.maxOutgoingBlobs = 64,
     this.maxBlobCopies = 3,
+    this.maxSplitPayloadBytes = 1536 * 1024,
+    this.splitPartChars = 30000,
   });
 
   /// How many friends hold this device's mail.
@@ -218,6 +221,14 @@ final class RelayConfig {
   /// Mailboxes that get a copy of each blob: every copy is uploaded from the
   /// sender's phone, so not all six.
   final int maxBlobCopies;
+
+  /// Largest payload cut into parts for mailboxes that hold no attachments
+  /// (an inline photo or voice message of up to about 1 MB); larger ones
+  /// wait for both devices to be online.
+  final int maxSplitPayloadBytes;
+
+  /// Characters of the payload's JSON per part (one envelope each).
+  final int splitPartChars;
 }
 
 /// Snapshot for the settings screen.
@@ -281,6 +292,9 @@ const Set<String> kReliablePayloadTypes = <String>{
   'group_message',
   // Group board posts; the sync between members is real-time.
   'group_post',
+  // Posts, comments and likes for friends who are offline
+  // (ledger_mail_push.dart).
+  'lg_push',
   'profile_update',
   'disappear_timer',
   // Meeting features: a friend offline now still gets them.
@@ -327,8 +341,7 @@ const Set<String> kReliablePayloadTypes = <String>{
   'pyr_prop',
   'pyr_sig',
   'pyr_vote',
-  'pyr_pay',
-  'pyr_paysig',
+  'pyr_priv',
   'pyr_report',
   'pyr_anon',
   'pyr_nat',
@@ -408,6 +421,51 @@ const String kReliableTtlKey = '_ttl';
 
 /// Longest reliable id accepted; the app's own are about 25 characters.
 const int _maxReliableIdLength = 128;
+
+/// One part of a payload too large for one envelope, for mailboxes that
+/// hold no attachments: `{p: rid of the whole, i, n, h: sha-256 of its JSON,
+/// x: expiry, d: piece of its JSON}`. Only ever deposited, never sent
+/// directly (the whole payload is).
+const String kRelayPartType = 'zpart';
+
+/// Most parts one payload is cut into.
+const int kMaxRelayParts = 64;
+
+/// Payloads being put together from parts at once.
+const int kMaxPartsInFlight = 4;
+
+/// [text] cut into pieces of at most [maxChars] UTF-16 code units, never
+/// inside a surrogate pair, each of which takes at most [maxBytes] of UTF-8
+/// as a JSON string.
+List<String> splitRelayText(
+  String text, {
+  required int maxChars,
+  required int maxBytes,
+}) {
+  final List<String> pieces = <String>[];
+  int start = 0;
+  while (start < text.length) {
+    int end = min(text.length, start + maxChars);
+    while (true) {
+      final int unit = text.codeUnitAt(end - 1);
+      if (end < text.length &&
+          end - start > 1 &&
+          unit >= 0xD800 &&
+          unit <= 0xDBFF) {
+        end--;
+      }
+      final String piece = text.substring(start, end);
+      if (end - start <= 2 ||
+          utf8.encode(jsonEncode(piece)).length <= maxBytes) {
+        pieces.add(piece);
+        break;
+      }
+      end = start + (end - start) ~/ 2;
+    }
+    start = end;
+  }
+  return pieces;
+}
 
 /// The one payload type whose delivery the chat shows per message (its `msgId`
 /// is the chat message's id), and so the only one reported through
@@ -494,6 +552,11 @@ final class RelayEngine {
   final ValueNotifier<RelayProgressSnapshot> progress =
       ValueNotifier<RelayProgressSnapshot>(const RelayProgressSnapshot());
 
+  /// Changes whenever what waits in the outbox changes (queued, delivered,
+  /// handed to a mailbox): the kit for the locked service is written anew.
+  final ValueNotifier<int> outboxRevision = ValueNotifier<int>(0);
+  int _outboxSignature = 0;
+
   /// Outbox ids already reported as [RelayDeliveryStatus.directOnly]. Memory
   /// only: after a restart the repeat is harmless (the chat applies it once).
   final Set<String> _reportedDirectOnly = <String>{};
@@ -510,6 +573,9 @@ final class RelayEngine {
 
   /// When the last frame of any kind arrived (0: none yet).
   int _lastFrameAtMillis = 0;
+
+  /// Outbox ids too large even to be cut into parts.
+  final Set<String> _tooLargeToSplit = <String>{};
 
   /// Deposits ignore their spacing once (after a network change).
   bool _depositsDueNow = false;
@@ -700,22 +766,30 @@ final class RelayEngine {
     final bool relayable =
         !_directOnlyPayloadTypes.contains(wire['type']) &&
         utf8.encode(jsonEncode(wire)).length <= config.maxRelayablePayloadBytes;
-    final RelayOutboxEntry entry = _scheduleNextDirect(
-      RelayOutboxEntry(
-        rid: rid,
-        recipient: to,
-        payload: wire,
-        createdAtMillis: now,
-        expiresAtMillis: now + life,
-        relayable: relayable,
-      ),
-      now,
+    final RelayOutboxEntry fresh = RelayOutboxEntry(
+      rid: rid,
+      recipient: to,
+      payload: wire,
+      createdAtMillis: now,
+      expiresAtMillis: now + life,
+      relayable: relayable,
     );
+    if (_isPart(fresh)) {
+      // A part is only for the mailboxes: the whole payload goes directly.
+      state.outbox[rid] = fresh.copyWith(
+        nextDirectAttemptAtMillis: fresh.expiresAtMillis,
+      );
+      return rid;
+    }
+    final RelayOutboxEntry entry = _scheduleNextDirect(fresh, now);
     state.outbox[rid] = entry;
     _unsent.add(entry);
     _track(state, entry, now);
     return rid;
   }
+
+  static bool _isPart(RelayOutboxEntry entry) =>
+      entry.payload['type'] == kRelayPartType;
 
   // ---------------------------------------------------------------------------
   // Delivery of chat messages, for the chat's status
@@ -838,6 +912,74 @@ final class RelayEngine {
     });
   }
 
+  /// The kit the Android background service delivers this device's queue
+  /// from while Zen is locked (it holds none of the keys): every pending
+  /// payload that can wait in mailboxes, sealed now for its recipient, with
+  /// the mailboxes that do not hold it yet. Oldest first, within
+  /// [kLockedOutboxMaxItems] and [kLockedOutboxMaxBytes]. Payloads only
+  /// ever sent directly (to someone whose key is not known) wait for the
+  /// unlock.
+  Future<LockedOutboxKit> lockedOutboxKit() {
+    return _locked(() async {
+      final RelayState state = await _load();
+      final int now = _now();
+      final RelayIdentity? identity = state.identity;
+      final List<LockedOutboxItem> items = <LockedOutboxItem>[];
+      if (identity == null) {
+        return LockedOutboxKit(writtenAtMillis: now);
+      }
+      final List<RelayOutboxEntry> pending =
+          state.outbox.values
+              .where(
+                (RelayOutboxEntry e) => e.relayable && e.expiresAtMillis > now,
+              )
+              .toList()
+            ..sort(
+              (RelayOutboxEntry a, RelayOutboxEntry b) =>
+                  a.createdAtMillis.compareTo(b.createdAtMillis),
+            );
+      int bytes = 0;
+      for (final RelayOutboxEntry entry in pending) {
+        final RelayPeerInfo? info = state.peers[entry.recipient];
+        final RelayPublicKeys? keys = info?.keys;
+        if (info == null || keys == null) {
+          continue;
+        }
+        final Map<String, dynamic> envelope = await _sealedEnvelope(
+          identity,
+          keys,
+          entry,
+        );
+        final int size = utf8.encode(jsonEncode(envelope)).length;
+        if (items.length >= kLockedOutboxMaxItems ||
+            bytes + size > kLockedOutboxMaxBytes) {
+          break;
+        }
+        bytes += size;
+        final Iterable<String> mailboxes = info.relays.where(
+          (String r) => r != _self && r != entry.recipient,
+        );
+        items.add(
+          LockedOutboxItem(
+            id: entry.rid,
+            recipient: entry.recipient,
+            envelope: envelope,
+            expiresAtMillis: entry.expiresAtMillis,
+            mailboxes:
+                (_isPart(entry)
+                        ? mailboxes.take(config.maxBlobCopies)
+                        : mailboxes)
+                    .where((String r) => !entry.depositedTo.contains(r))
+                    .toList(growable: false),
+            token: info.depositToken,
+            direct: !_isPart(entry),
+          ),
+        );
+      }
+      return LockedOutboxKit(items: items, writtenAtMillis: now);
+    });
+  }
+
   /// Who confirmed the chat message [messageId] (canonical addresses); for
   /// sending it again only to whoever is still missing it.
   Future<Set<String>> deliveredRecipientsOf(String messageId) {
@@ -857,6 +999,7 @@ final class RelayEngine {
       int waiting = 0;
       int inMailboxes = 0;
       int copies = 0;
+      int bothOnline = 0;
       bool heldBySelf = false;
       tracked.pending.forEach((String recipient, String rid) {
         final RelayOutboxEntry? entry = state.outbox[rid];
@@ -864,16 +1007,20 @@ final class RelayEngine {
           sending++;
           return;
         }
-        final bool own = _holdsOwnCopy(state, entry);
-        final int held = _mailboxCopiesOf(entry) + (own ? 1 : 0);
-        if (held > 0) {
+        final Set<String> holders = _holdersOf(state, entry);
+        if (holders.isNotEmpty) {
           inMailboxes++;
-          copies += held;
-          heldBySelf = heldBySelf || own;
+          copies += holders.length;
+          heldBySelf = heldBySelf || holders.contains(_self);
         } else if (entry.directAttempts <= 1 &&
             now - entry.createdAtMillis <
                 config.depositAfter.inMilliseconds * 2) {
           sending++;
+        } else if (!entry.relayable &&
+            entry.blobId == null &&
+            entry.partRids.isEmpty) {
+          // Too large for the mailboxes it has: only while both are online.
+          bothOnline++;
         } else {
           waiting++;
         }
@@ -890,6 +1037,7 @@ final class RelayEngine {
         inMailboxes: inMailboxes,
         mailboxCopies: copies,
         heldBySelf: heldBySelf,
+        waitingForBoth: bothOnline,
       );
     }
     return RelayProgressSnapshot(
@@ -898,13 +1046,33 @@ final class RelayEngine {
     );
   }
 
-  /// Copies of [entry] that the recipient's other mailboxes confirmed.
-  static int _mailboxCopiesOf(RelayOutboxEntry entry) {
-    if (entry.blobId != null || entry.payload['type'] == kBlobManifestType) {
-      // Only useful where the whole blob is held too.
-      return entry.blobHeldBy.length;
+  /// The mailboxes holding a whole copy of [entry] for its recipient
+  /// (this device's address among them for its own copy).
+  Set<String> _holdersOf(RelayState state, RelayOutboxEntry entry) {
+    if (entry.partRids.isNotEmpty) {
+      // Cut into parts: only a mailbox holding every part counts.
+      Set<String>? common;
+      for (final String rid in entry.partRids) {
+        final RelayOutboxEntry? part = state.outbox[rid];
+        if (part == null) {
+          continue; // collected by the recipient already
+        }
+        final Set<String> holders = <String>{
+          ...part.depositedTo,
+          if (_holdsOwnCopy(state, part)) _self,
+        };
+        common = common == null ? holders : common.intersection(holders);
+      }
+      return common ?? const <String>{};
     }
-    return entry.depositedTo.length;
+    return <String>{
+      // A blob only counts where the whole blob is held too.
+      if (entry.blobId != null || entry.payload['type'] == kBlobManifestType)
+        ...entry.blobHeldBy
+      else
+        ...entry.depositedTo,
+      if (_holdsOwnCopy(state, entry)) _self,
+    };
   }
 
   /// Whether this device holds [entry] for its recipient as one of the
@@ -961,7 +1129,7 @@ final class RelayEngine {
   /// directly and each mailbox that has not confirmed gets its copy.
   void _retryAllSoon(RelayState state, int now) {
     for (final RelayOutboxEntry entry in state.outbox.values.toList()) {
-      if (entry.nextDirectAttemptAtMillis > now) {
+      if (entry.nextDirectAttemptAtMillis > now && !_isPart(entry)) {
         state.outbox[entry.rid] = entry.copyWith(
           nextDirectAttemptAtMillis: now,
         );
@@ -1094,6 +1262,23 @@ final class RelayEngine {
         forward.add(frame);
       }
       if (forward.any(
+        (SignalTransportFrame f) => f.payload['type'] == kRelayPartType,
+      )) {
+        // Parts of a payload too large for one envelope: put together here,
+        // the app only ever sees the whole payload.
+        final List<SignalTransportFrame> kept = <SignalTransportFrame>[];
+        for (final SignalTransportFrame f in forward) {
+          if (f.payload['type'] == kRelayPartType) {
+            changed = await _acceptPart(state, f, kept) || changed;
+          } else {
+            kept.add(f);
+          }
+        }
+        forward
+          ..clear()
+          ..addAll(kept);
+      }
+      if (forward.any(
         (SignalTransportFrame f) => f.payload['type'] == kBlobManifestType,
       )) {
         // Blob manifests are the relay layer's own: they become the blob's
@@ -1188,6 +1373,18 @@ final class RelayEngine {
               state.outbox.remove(blob.manifestRid);
               await _dropOutBlob(state, blob);
             }
+          }
+          if (entry.partRids.isNotEmpty) {
+            // Nor are its parts, here or in our own mailbox for it.
+            for (final String part in entry.partRids) {
+              state.outbox.remove(part);
+              _sealed.remove(part);
+            }
+            _dropDelivered(
+              state,
+              recipient: entry.recipient,
+              ids: entry.partRids,
+            );
           }
           return true;
         }
@@ -2125,7 +2322,7 @@ final class RelayEngine {
     bool changed = false;
     // 1. Our own undelivered payloads for it: straight away, backoff reset.
     for (final RelayOutboxEntry entry in state.outbox.values.toList()) {
-      if (entry.recipient == address) {
+      if (entry.recipient == address && !_isPart(entry)) {
         state.outbox[entry.rid] = await _attemptDirect(
           entry.copyWith(directAttempts: 0),
           now,
@@ -2171,6 +2368,12 @@ final class RelayEngine {
       final RelayState state = await _load();
       final int now = _now();
       bool changed = _expire(state, now);
+      for (final RelayPartsIn parts in state.inParts.values.toList()) {
+        if (parts.expiresAtMillis <= now) {
+          await _dropParts(state, parts);
+          changed = true;
+        }
+      }
       if (_forgetFormerContacts(state)) {
         changed = true;
       }
@@ -2377,10 +2580,14 @@ final class RelayEngine {
         continue;
       }
       if (!entry.relayable) {
-        if (entry.blobId != null) {
-          continue; // its copy travels to the mailboxes as a blob
+        if (entry.blobId != null || entry.partRids.isNotEmpty) {
+          continue; // its copy travels to the mailboxes as a blob / parts
         }
         if (await _cutIntoBlob(state, entry, now)) {
+          changed = true;
+          continue;
+        }
+        if (await _splitIntoParts(state, entry, now)) {
           changed = true;
           continue;
         }
@@ -2421,11 +2628,20 @@ final class RelayEngine {
         changed = true;
       }
       final int spacing = _depositSpacingOf(entry, now);
+      // Parts of a large payload are uploaded from this phone: like blobs,
+      // to a few of the mailboxes only (always the same ones).
+      final Set<String>? partMailboxes = _isPart(entry)
+          ? info.relays
+                .where((String r) => r != _self && r != entry.recipient)
+                .take(config.maxBlobCopies)
+                .toSet()
+          : null;
       final List<String> targets = info.relays
           .where(
             (String relay) =>
                 relay != _self &&
                 relay != entry.recipient &&
+                (partMailboxes?.contains(relay) ?? true) &&
                 !entry.depositedTo.contains(relay) &&
                 (onlyRelay == null || relay == onlyRelay) &&
                 (onlyRelay != null ||
@@ -2459,6 +2675,217 @@ final class RelayEngine {
     }
     return changed;
   }
+
+  /// Cuts [entry] — too large for one envelope, with no mailbox of its
+  /// recipient holding attachments — into parts that each fit one
+  /// (`kRelayPartType`), queued for the mailboxes only. The recipient puts
+  /// them together and takes the payload as if it had come directly. False
+  /// when that is not possible (no mailboxes, key unknown, larger than
+  /// [RelayConfig.maxSplitPayloadBytes]): it then waits for both devices to
+  /// be online.
+  Future<bool> _splitIntoParts(
+    RelayState state,
+    RelayOutboxEntry entry,
+    int now,
+  ) async {
+    if (_directOnlyPayloadTypes.contains(entry.payload['type']) ||
+        _isPart(entry) ||
+        entry.expiresAtMillis <= now) {
+      return false;
+    }
+    final RelayPeerInfo? info = state.peers[entry.recipient];
+    if (info == null || info.keys == null) {
+      return false;
+    }
+    final bool hasMailbox =
+        info.relays.any((String r) => r != _self && r != entry.recipient) ||
+        (info.relays.contains(_self) &&
+            _servesRecipient(state, entry.recipient));
+    if (!hasMailbox) {
+      return false;
+    }
+    if (_tooLargeToSplit.contains(entry.rid)) {
+      return false;
+    }
+    final String json = jsonEncode(entry.payload);
+    final List<int> bytes = utf8.encode(json);
+    if (bytes.length > config.maxSplitPayloadBytes) {
+      // Not looked at again on every tick (memory only).
+      _tooLargeToSplit.add(entry.rid);
+      return false;
+    }
+    final List<String> pieces = splitRelayText(
+      json,
+      maxChars: config.splitPartChars,
+      maxBytes: config.maxRelayablePayloadBytes - 2048,
+    );
+    if (pieces.length > kMaxRelayParts) {
+      return false;
+    }
+    final String digest = base64Url.encode(crypto.sha256.convert(bytes).bytes);
+    final List<String> rids = <String>[];
+    for (int i = 0; i < pieces.length; i++) {
+      rids.add(
+        await _enqueue(state, entry.recipient, <String, dynamic>{
+          'type': kRelayPartType,
+          'p': entry.rid,
+          'i': i,
+          'n': pieces.length,
+          'h': digest,
+          'x': entry.expiresAtMillis,
+          'd': pieces[i],
+          kReliableTtlKey: max(1, entry.expiresAtMillis - now),
+        }, now),
+      );
+    }
+    state.outbox[entry.rid] = entry.copyWith(partRids: rids);
+    return true;
+  }
+
+  /// One part of a payload for this device (see [_splitIntoParts]), from
+  /// [part]'s sender: kept until all are here, then the whole payload goes
+  /// through like any reliable frame (acknowledged to the sender,
+  /// de-duplicated, handed to the app via [forward]).
+  Future<bool> _acceptPart(
+    RelayState state,
+    SignalTransportFrame part,
+    List<SignalTransportFrame> forward,
+  ) async {
+    final String sender = PeerShareCodec.normalizeAddress(part.from);
+    final Map<String, dynamic> p = part.payload;
+    final Object? parent = p['p'];
+    final Object? index = p['i'];
+    final Object? count = p['n'];
+    final Object? digest = p['h'];
+    final Object? data = p['d'];
+    final Object? expires = p['x'];
+    final int now = _now();
+    if (parent is! String ||
+        parent.isEmpty ||
+        parent.length > _maxReliableIdLength ||
+        count is! int ||
+        count < 1 ||
+        count > kMaxRelayParts ||
+        index is! int ||
+        index < 0 ||
+        index >= count ||
+        digest is! String ||
+        digest.length > 64 ||
+        data is! String ||
+        data.length > config.splitPartChars ||
+        expires is! int ||
+        expires <= now ||
+        expires > now + config.messageTtl.inMilliseconds * 2 ||
+        !_isContact(sender) ||
+        state.seen.containsKey('$sender|$parent')) {
+      return false;
+    }
+    final String scope = '$sender|$parent';
+    RelayPartsIn? parts = state.inParts[scope];
+    if (parts == null) {
+      while (state.inParts.length >= kMaxPartsInFlight) {
+        // The one closest to expiring goes: it would be the first to lapse.
+        final RelayPartsIn oldest = state.inParts.values.reduce(
+          (RelayPartsIn a, RelayPartsIn b) =>
+              a.expiresAtMillis <= b.expiresAtMillis ? a : b,
+        );
+        await _dropParts(state, oldest);
+      }
+      parts = state.inParts[scope] = RelayPartsIn(
+        sender: sender,
+        parent: parent,
+        count: count,
+        digest: digest,
+        expiresAtMillis: expires,
+      );
+    }
+    if (parts.count != count || parts.digest != digest || parts.has(index)) {
+      return false;
+    }
+    final RelayBlobStore? store = _blobs;
+    if (store != null) {
+      await store.writeBlobChunk(
+        _partKey(scope, index),
+        Uint8List.fromList(utf8.encode(data)),
+      );
+      parts.stored.add(index);
+    } else {
+      parts.inline[index] = data;
+    }
+    if (!parts.isComplete) {
+      return true;
+    }
+    final StringBuffer whole = StringBuffer();
+    for (int i = 0; i < parts.count; i++) {
+      final String? piece = parts.inline[i] ?? await _readPart(scope, i);
+      if (piece == null) {
+        await _dropParts(state, parts);
+        return true;
+      }
+      whole.write(piece);
+    }
+    await _dropParts(state, parts);
+    final List<int> bytes = utf8.encode(whole.toString());
+    if (base64Url.encode(crypto.sha256.convert(bytes).bytes) != digest) {
+      return true; // not what the sender cut: dropped
+    }
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(whole.toString());
+    } on FormatException {
+      return true;
+    }
+    if (decoded is! Map || decoded[kReliableIdKey] != parent) {
+      return true;
+    }
+    await _acceptReliable(
+      state,
+      sender,
+      SignalTransportFrame(
+        from: sender,
+        payload: Map<String, dynamic>.from(decoded),
+        receivedAtMillis: part.receivedAtMillis,
+      ),
+      forward,
+    );
+    return true;
+  }
+
+  Future<String?> _readPart(String scope, int index) async {
+    final RelayBlobStore? store = _blobs;
+    if (store == null) {
+      return null;
+    }
+    try {
+      final Uint8List? bytes = await store.readBlobChunk(
+        _partKey(scope, index),
+      );
+      return bytes == null ? null : utf8.decode(bytes);
+    } catch (error) {
+      logZenWarning('Reading a part failed: $error');
+      return null;
+    }
+  }
+
+  Future<void> _dropParts(RelayState state, RelayPartsIn parts) async {
+    state.inParts.remove(parts.scope);
+    final RelayBlobStore? store = _blobs;
+    if (store == null) {
+      return;
+    }
+    for (final int index in parts.stored) {
+      try {
+        await store.deleteBlobChunk(_partKey(parts.scope, index));
+      } catch (error) {
+        logZenWarning('Deleting a part failed: $error');
+      }
+    }
+  }
+
+  /// Where piece [index] of the parts of [scope] is kept (like the blob
+  /// chunks next to it).
+  static String _partKey(String scope, int index) =>
+      'p/${_hexKey('p|$scope')}/$index';
 
   /// How long to wait before handing [entry] again to a mailbox that did
   /// not confirm: [RelayConfig.depositRetryInterval] while it is young, then
@@ -2829,6 +3256,14 @@ final class RelayEngine {
           await _sendQuietly(entry.recipient, entry.payload);
         }
       }
+    }
+    final int signature = Object.hashAll(<Object>[
+      for (final RelayOutboxEntry e in state.outbox.values)
+        Object.hash(e.rid, e.depositedTo.length),
+    ]);
+    if (signature != _outboxSignature) {
+      _outboxSignature = signature;
+      outboxRevision.value++;
     }
     _publishProgress(state);
     overview.value = RelayOverview(
