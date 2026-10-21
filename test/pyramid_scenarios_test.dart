@@ -6,6 +6,7 @@ import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
+import 'package:zen/src/features/pyramid/pyramid_cell_chat.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
@@ -14,8 +15,9 @@ import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'support/pyramid_world.dart';
 
 /// More situations of the pyramid on the simulated network: power and its
-/// limits, the structure changing, the constitution, money between people,
-/// joining two pyramids.
+/// limits, the structure changing, advisory referenda and new rules signed
+/// by the top, money between people,
+/// "Polecenie", the power key, the cells' chats.
 void main() {
   const int day = 24 * 3600 * 1000;
 
@@ -58,7 +60,7 @@ void main() {
         reason: 'a paused person does not post',
       );
 
-      // Outside its scope the delegation is worth nothing: A2's cell (A1)
+      // Outside its scope the delegation is worth nothing: A2's cell
       // agrees, A says no — and B alone is not the top.
       await w['B'].ban(
         target: a2,
@@ -98,7 +100,7 @@ void main() {
       expect(w['A2'].state!.silencedAt(a, now()), isTrue);
 
       // Revoked, the delegation stops working from now on; what B already
-      // did with it stays: B1's pause holds (§21.2).
+      // did with it stays: B1's pause holds.
       final int bansBefore = w['S'].state!.bans.length;
       await s.revokeDelegation(d.id);
       await w.net.run();
@@ -115,7 +117,7 @@ void main() {
       await w.net.run();
       expect(w['S'].state!.bans, hasLength(bansBefore));
 
-      // A dating report ends in a dating ban the app applies (§19.6).
+      // A dating report ends in a dating ban the app applies.
       await w['A2'].report(
         reason: 'harass',
         target: b1,
@@ -159,7 +161,7 @@ void main() {
       await w.approve('A2', PyrT.fill);
       expect(path('A1'), '0');
       expect(w['S'].state!.vacant, contains('00'), reason: 'B1 is still below');
-      // The only one below (B1) moves up with the head above (A1).
+      // The only one below (B1) moves up with the head above.
       await w['B1'].proposeFill('00', w['B1'].myKey!);
       await w.net.run();
       await w.approve('A1', PyrT.fill);
@@ -186,104 +188,74 @@ void main() {
     },
   );
 
-  test(
-    'constitution by referendum, then a national section leads itself',
-    () async {
-      final PyramidWorld w = await PyramidWorld.six();
-      final SimPhone b2 = w.add('B2');
-      await w.join(w.net['B'], b2, nat: 'DE');
-      await w.sync();
-      // Votes count from members met in person by 2 others (§20.6).
-      await w.meetAll();
-      final PyramidService s = w['S'];
+  test('an advisory referendum, the top changes the rules, then a national '
+      'section leads itself', () async {
+    final PyramidWorld w = await PyramidWorld.six();
+    final SimPhone b2 = w.add('B2');
+    await w.join(w.net['B'], b2, nat: 'DE');
+    await w.sync();
+    // Everybody votes (admitted straight by a member who votes).
+    await w.knowAll();
+    final PyramidService s = w['S'];
 
-      // New rules need at least 72 h of voting (§21.7); asked for 1 h, the
-      // app makes it 4 days.
-      final int asked = w.net.now;
-      await s.referendum(
-        question: 'Sekcje narodowe od 1 osoby?',
-        options: <String>['Tak', 'Nie'],
-        end: w.net.now + 3600 * 1000,
-        kind: 'constitution',
-        params: <String, dynamic>{'version': 2, 'nationalMin': 1},
+    // Any question, asked by the top (2 of 3).
+    await s.referendum(
+      question: 'Sekcje narodowe od 1 osoby?',
+      options: <String>['Tak', 'Nie'],
+      end: w.net.now + 3600 * 1000,
+    );
+    await w.net.run();
+    await w.approve('A', PyrT.referendum);
+    final PyrReferendum ref = w['B2'].state!.referenda.values.single;
+    for (final String who in <String>['S', 'A', 'B', 'A1', 'A2', 'B1', 'B2']) {
+      expect(
+        await w[who].voteReferendum(ref.id, who == 'A2' ? 1 : 0),
+        isTrue,
+        reason: who,
       );
-      await w.net.run();
-      await w.approve('A', PyrT.referendum);
-      final PyrReferendum ref = w['B2'].state!.referenda.values.single;
-      expect(ref.end - asked, greaterThanOrEqualTo(kPyrMinConstitutionMs));
-      for (final String who in <String>[
-        'S',
-        'A',
-        'B',
-        'A1',
-        'A2',
-        'B1',
-        'B2',
-      ]) {
-        expect(
-          await w[who].voteReferendum(ref.id, who == 'A2' ? 1 : 0),
-          isTrue,
-          reason: who,
-        );
-      }
-      await w.net.run();
-      await w.net.advance(
-        Duration(milliseconds: ref.end - w.net.now + 60 * 1000),
-      );
-      await w.duties();
-      expect(w['B1'].state!.resultOf(ref.id), <int>[6, 1]);
-      // Too early: the new rules wait until the sums had time to come up.
-      await s.topDecision(<String, dynamic>{
-        't': PyrT.constitution,
-        'ref': ref.id,
-      });
-      await w.net.run();
-      await w.approve('B', PyrT.constitution);
-      expect(w['B2'].state!.params.version, 1);
-      await w.net.advance(const Duration(milliseconds: kPyrTallyGraceMs));
-      await s.topDecision(<String, dynamic>{
-        't': PyrT.constitution,
-        'ref': ref.id,
-      });
-      await w.net.run();
-      await w.approve('B', PyrT.constitution);
-      final PyramidState st = w['B2'].state!;
-      expect(st.params.version, 2);
-      expect(st.params.nationalMin, 1);
+    }
+    await w.net.run();
+    await w.net.advance(
+      Duration(milliseconds: ref.end - w.net.now + 60 * 1000),
+    );
+    await w.duties();
+    // Published to everybody; it changes nothing by itself.
+    expect(w['B1'].state!.resultOf(ref.id), <int>[6, 1]);
+    expect(w['B2'].state!.params.version, 1);
 
-      // DE: B1 and B2 are on the same level; the earlier place leads.
-      expect(st.nationalLead('DE'), w['B1'].myKey);
-      expect(st.nationalLead('PL'), w['S'].myKey);
-      final PyramidRecord? np = await w['B1'].natPost('Hallo zusammen');
-      await w.net.run();
-      expect(w['A1'].state!.natPosts.keys, contains(np!.id));
-      await w['B2'].comment(np.id, 'Gerne');
-      await w['A1'].comment(np.id, 'Ja też');
-      await w.net.run();
-      expect(
-        w['S'].state!.natPosts[np.id]!.comments.map((PyrComment c) => c.text),
-        <String>['Gerne'],
-      );
-      // The section's own referendum and alarm, without the top.
-      await w['B1'].referendum(
-        question: 'Treffen in Berlin?',
-        options: <String>['Ja', 'Nein'],
-        end: w.net.now + day,
-        scopeKind: 'nat',
-        scopeNat: 'DE',
-      );
-      await w['B1'].alarm('Hochwasser', scopeKind: 'nat', scopeNat: 'DE');
-      await w.net.run();
-      expect(
-        w['S'].state!.referenda.values.where(
-          (PyrReferendum r) => r.scopeNat == 'DE',
-        ),
-        hasLength(1),
-      );
-      expect(w['S'].state!.alarms.single.scopeNat, 'DE');
-      expect(w.views().values.toSet(), hasLength(1));
-    },
-  );
+    // The top decides: new rules, 2 of 3, public at once, in force a day
+    // later.
+    await s.changeRules(<String, dynamic>{'nationalMin': 1});
+    await w.net.run();
+    await w.approve('B', PyrT.constitution);
+    expect(w['B2'].state!.paramsChanges.values.single.done, isFalse);
+    expect(w['B2'].state!.params.nationalMin, 100);
+    await w.net.advance(const Duration(milliseconds: kPyrParamsDelayMs));
+    await w.net.advance(const Duration(minutes: 2));
+    final PyramidState st = w['B2'].state!;
+    expect(st.params.version, 2);
+    expect(st.params.nationalMin, 1);
+
+    // DE: B1 and B2 are on the same level; the earlier place leads.
+    expect(st.nationalLead('DE'), w['B1'].myKey);
+    expect(st.nationalLead('PL'), w['S'].myKey);
+    final PyramidRecord? np = await w['B1'].natPost('Hallo zusammen');
+    await w.net.run();
+    expect(w['A1'].state!.natPosts.keys, contains(np!.id));
+    await w['B2'].comment(np.id, 'Gerne');
+    await w['A1'].comment(np.id, 'Ja też');
+    await w.net.run();
+    expect(
+      w['S'].state!.natPosts[np.id]!.comments.map((PyrComment c) => c.text),
+      <String>['Gerne'],
+    );
+    // The section's own alarm, without the top (a referendum is the
+    // top's alone).
+    await w['B1'].alarm('Hochwasser', scopeKind: 'nat', scopeNat: 'DE');
+    await w.net.run();
+    expect(w['S'].state!.alarms.single.scopeNat, 'DE');
+    expect(w.views().values.toSet(), hasLength(1));
+  });
 
   test('the paid inbox and a free reshare between members', () async {
     final PyramidWorld w = await PyramidWorld.six();
@@ -309,7 +281,7 @@ void main() {
     expect(w['S'].state!.balanceOf(b1), 500);
     expect(w['S'].state!.balanceOf(a1), 99500);
 
-    // A reshare on order (§24): A1's own signed public post, which B1
+    // A reshare on order: A1's own signed public post, which B1
     // sees before deciding and shares with B1's friends; paid after.
     final MemorySignalTransport transport = MemorySignalTransport();
     await transport.start();
@@ -330,14 +302,19 @@ void main() {
       newPostBody('Tylko dla znajomych', audience: Audience.all),
     );
     expect(
-      await w['A1'].sendMarket(b1, 'reshare', '', post: secret.toJson()),
+      await w['A1'].sendMarket(
+        b1,
+        'reshare',
+        '',
+        post: secret.toCertifiedJson(),
+      ),
       isFalse,
       reason: 'only a public post can be reshared',
     );
     await w['B1'].setOffers(<String, int>{'inbox': 500, 'reshare': 300});
     await w.net.run();
     expect(
-      await w['A1'].sendMarket(b1, 'reshare', '', post: post.toJson()),
+      await w['A1'].sendMarket(b1, 'reshare', '', post: post.toCertifiedJson()),
       isTrue,
     );
     await w.net.run();
@@ -358,60 +335,115 @@ void main() {
     expect(w.views().values.toSet(), hasLength(1));
   });
 
-  test(
-    'a small pyramid joins a bigger one as a branch, the old one closes',
-    () async {
-      final PyramidWorld w = await PyramidWorld.six();
-      final String ruch = w['S'].current!;
-      final SimPhone t = w.add('T');
-      final SimPhone t1 = w.add('T1');
-      final SimPhone t2 = w.add('T2');
-      await w.pyr(t).load();
-      final String small = await w
-          .pyr(t)
-          .createPyramid(
-            name: 'Mała',
-            myName: 'T',
-            nat: 'PL',
-            birthYear: 1985,
-            gender: 'k',
-          );
-      await w.join(t, t1);
-      await w.join(t, t2);
-      // T knows A1, and gets the bigger pyramid from A1 to look at.
-      w.net.befriend(t, w.net['A1']);
-      await w.sync();
-      expect(await w['T'].fetchFriendsPyramids(), 1);
-      await w.net.run();
-      expect(w['T'].knownPyramids, containsAll(<String>[ruch, small]));
+  test('"Polecenie": a full head still brings people in, to a place it picks; '
+      'the newcomer votes once known in the cell or after 14 days', () async {
+    final PyramidWorld w = await PyramidWorld.six();
+    final PyramidService s = w['S'];
+    // S has A and B right under it, and no limit: nearest the top first.
+    expect(s.freePlaces().take(3), <String>['11', '000', '001']);
+    final SimPhone ola = w.add('Ola');
+    await w.recommend(w.net['S'], ola, slot: '000');
+    await w.sync();
+    final String o = w['Ola'].myKey!;
+    PyramidState st = w['B1'].state!;
+    expect(st.pathOf(o), '000', reason: 'under A1, the place S picked');
+    expect(st.members[o]!.admittedBy, s.myKey, reason: 'S vouches');
+    expect(w['Ola'].isMember, isTrue);
+    expect(st.canVote(o, w.net.now), isFalse, reason: 'nobody knows her');
+    // Her cell's head confirms they know each other: she votes.
+    expect(await w['A2'].confirmKnown(o), isNull, reason: 'another cell');
+    await w['A1'].confirmKnown(o);
+    await w.net.run();
+    await w.sync();
+    st = w['B1'].state!;
+    expect(st.canVote(o, w.net.now), isTrue);
+    expect(st.knownByOf(o), <String>[w['A1'].myKey!]);
 
-      final String a1 = w['A1'].myKey!;
-      await w['T'].proposeMerge(ruch, a1, w['S'].state!.members[a1]!.addr);
-      await w.net.run();
-      await w.approve('T1', PyrT.merge);
-      expect(
-        w['S'].state!.members,
-        hasLength(6),
-        reason: 'A1 has not agreed yet',
-      );
-      await w.approve('A1', PyrT.merge);
-      await w.sync();
-      final PyramidState big = w['S'].state!;
-      expect(big.members, hasLength(9));
-      expect(big.pathOf(w['T'].myKey!), '000');
-      expect(
-        <String?>{big.pathOf(w['T1'].myKey!), big.pathOf(w['T2'].myKey!)},
-        <String>{'0000', '0001'},
-      );
+    // Jan, by default nearest the top (under B): votes after 14 days.
+    final SimPhone jan = w.add('Jan');
+    await w.recommend(w.net['S'], jan);
+    await w.sync();
+    final String j = w['Jan'].myKey!;
+    expect(w['S'].state!.pathOf(j), '11');
+    expect(w['S'].state!.canVote(j, w.net.now), isFalse);
+    await w.net.advance(const Duration(days: 15));
+    expect(w['S'].state!.canVote(j, w.net.now), isTrue);
+    expect(w.views().values.toSet(), hasLength(1));
+  });
 
-      // The old top closes the small pyramid; everybody lives in the big one.
-      await w.approve('T1', PyrT.merged);
-      await w.sync();
-      expect(w['T2'].stateOf(small)!.mergedInto, ruch);
-      for (final String who in <String>['T', 'T1', 'T2']) {
-        expect(w[who].current, ruch, reason: who);
-      }
-      expect(w.views().values.toSet(), hasLength(1));
-    },
-  );
+  test('the power key follows the head: the old key hands it over', () async {
+    final PyramidWorld w = await PyramidWorld.six();
+    final PyramidService s = w['S'];
+    final String first = s.state!.powerKey!;
+    expect(first, s.root!.powerKey);
+    expect(s.holdsPowerKey, isTrue);
+    // A and B make A the head of the pyramid: a swap at the top.
+    await w['A'].proposeSwap('', w['A'].myKey!);
+    await w.net.run();
+    await w.approve('B', PyrT.swap);
+    await w.sync();
+    expect(w['B'].state!.head, w['A'].myKey);
+    expect(w['B'].state!.handoverDue, isTrue);
+    // A's app makes a new key and asks; S's app signs with the old one.
+    await w.duties(rounds: 2);
+    await w.sync();
+    final PyramidState st = w['B1'].state!;
+    expect(st.handoverDue, isFalse);
+    expect(st.powerHead, w['A'].myKey);
+    expect(st.powerKey, isNot(first));
+    expect(w['A'].holdsPowerKey, isTrue);
+    expect(w['S'].holdsPowerKey, isFalse);
+    expect(w.views().values.toSet(), hasLength(1));
+  });
+
+  test('the old head away: most of the top hands the power key over after '
+      '72 h, not sooner', () async {
+    final PyramidWorld w = await PyramidWorld.six();
+    final String first = w['S'].state!.powerKey!;
+    await w['A'].proposeSwap('', w['A'].myKey!);
+    await w.net.run();
+    await w.approve('B', PyrT.swap);
+    await w.sync();
+    // S is gone (its messages are lost).
+    w.net.holdForOffline = false;
+    w.net.setOnline(w.net['S'], false);
+    await w.duties(rounds: 2);
+    expect(w['B'].state!.powerKey, first, reason: 'B may not sign yet');
+    await w.net.advance(const Duration(hours: 73));
+    await w.duties(rounds: 2);
+    await w.sync();
+    final PyramidState st = w['B1'].state!;
+    expect(st.powerHead, w['A'].myKey);
+    expect(st.powerKey, isNot(first));
+    expect(w['A'].holdsPowerKey, isTrue);
+  });
+
+  test('each cell has a group chat: the same for its members, following '
+      'the cell', () async {
+    final PyramidWorld w = await PyramidWorld.six();
+    Map<String, PyrCellChat> chats(String who) =>
+        pyramidCellChats(w[who].state!, w[who].myKey!, w.net[who].address);
+    expect(chats('S'), hasLength(1), reason: 'the top cell');
+    expect(chats('A'), hasLength(2), reason: 'the top and its own');
+    expect(chats('A1'), hasLength(1));
+    final String cellA = chats('A1').keys.single;
+    expect(chats('A').keys, contains(cellA));
+    expect(chats('A2').keys, <String>[cellA]);
+    final PyramidState st = w['A1'].state!;
+    expect(
+      chats('A1')[cellA]!.members,
+      containsAll(<String>[
+        st.members[w['A'].myKey]!.addr,
+        st.members[w['A2'].myKey]!.addr,
+      ]),
+    );
+    expect(chats('B1').keys.single, isNot(cellA));
+    // A1 becomes the head of A's cell: the same chat, new name.
+    await w['A1'].proposeSwap('0', w['A1'].myKey!);
+    await w.net.run();
+    await w.approve('A2', PyrT.swap);
+    await w.sync();
+    expect(chats('A2').keys, <String>[cellA]);
+    expect(chats('A2')[cellA]!.name, contains('A1'));
+  });
 }

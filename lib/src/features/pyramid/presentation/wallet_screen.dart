@@ -9,7 +9,7 @@ import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
-/// The points wallet as its own rail destination (§23). The money lives in
+/// The points wallet as its own rail destination. The money lives in
 /// the pyramid a person belongs to, so this shows that wallet when they
 /// are in one, and otherwise says plainly what points are for today.
 class WalletScreen extends ConsumerWidget {

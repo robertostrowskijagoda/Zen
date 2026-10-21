@@ -5,6 +5,7 @@ import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/dev/sim/sim_network.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/meet/ask/ask_service.dart';
+import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_record_log.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
@@ -17,7 +18,7 @@ final class PyramidWorld {
     this.recordSegmentEntries = kPyrLogSegmentEntries,
   }) : net = SimNetwork(seed: seed, dropRate: dropRate);
 
-  /// Builds S on top, A and B under S, A1 and A2 under A, B1 under B.
+  /// Builds S on top, A and B under S and A2 under A, B1 under B.
   static Future<PyramidWorld> six({
     int seed = 1,
     int recordSegmentEntries = kPyrLogSegmentEntries,
@@ -33,15 +34,7 @@ final class PyramidWorld {
     final SimPhone a2 = w.add('A2');
     final SimPhone b1 = w.add('B1');
     await w.pyr(s).load();
-    await w
-        .pyr(s)
-        .createPyramid(
-          name: 'Ruch',
-          myName: 'S',
-          nat: 'PL',
-          birthYear: 1980,
-          gender: 'm',
-        );
+    await w.pyr(s).found(myName: 'S', nat: 'PL', birthYear: 1980, gender: 'm');
     await w.join(s, a);
     await w.join(s, b);
     await w.join(a, a1);
@@ -57,7 +50,7 @@ final class PyramidWorld {
 
   final SimNetwork net;
 
-  /// Each phone's pyramid key seed (from its account, §6.1), by its disk:
+  /// Each phone's pyramid key seed (from its account), by its disk:
   /// a phone started again on the same disk is the same person.
   final Map<LedgerDisk, Uint8List> _seeds = <LedgerDisk, Uint8List>{};
   final Random _seedRandom = Random(7);
@@ -69,7 +62,7 @@ final class PyramidWorld {
       );
 
   /// The phone on [linked] is another device of the account on [of]: the
-  /// same pyramid key (§6.1).
+  /// same pyramid key.
   void linkDevice(LedgerDisk of, LedgerDisk linked) {
     _seeds[linked] = _seeds[of] ??= Uint8List.fromList(
       List<int>.generate(32, (_) => _seedRandom.nextInt(256)),
@@ -79,14 +72,14 @@ final class PyramidWorld {
   final Map<String, List<Map<String, dynamic>>> waves =
       <String, List<Map<String, dynamic>>>{};
 
-  /// Posts each phone shared with its friends on order (§24), by name.
+  /// Posts each phone shared with its friends on order, by name.
   final Map<String, List<Map<String, dynamic>>> reshared =
       <String, List<Map<String, dynamic>>>{};
 
   /// Records per segment of each phone's record log.
   final int recordSegmentEntries;
 
-  /// The nationalities in each phone's profile (§9), by name: what the
+  /// The nationalities in each phone's profile, by name: what the
   /// phone itself and its friends see.
   final Map<String, List<String>> profileNationalities =
       <String, List<String>>{};
@@ -152,7 +145,9 @@ final class PyramidWorld {
     int year = 1990,
   }) async {
     net.befriend(head, newcomer);
-    final String? code = pyr(head).inviteCode();
+    final String? p = pyr(head).state?.pathOf(pyr(head).myKey ?? '');
+    final String? slot = p == null ? null : pyr(head).state!.freeSlot(p);
+    final String? code = slot == null ? null : pyr(head).inviteCode(slot: slot);
     if (code == null) {
       throw StateError('${head.name} nie ma wolnego miejsca');
     }
@@ -171,17 +166,55 @@ final class PyramidWorld {
     await net.run();
   }
 
-  /// Every member met every other in person (§6.2): each says so in the
-  /// pyramid, so all may vote in referenda (§20.6).
-  Future<void> meetAll() async {
+  /// "Polecenie": [sponsor] brings [newcomer] (a friend met in person) to
+  /// the free place [slot] of its branch (by default the one nearest the
+  /// top); the sponsor vouches, then the head of the cell there co-signs.
+  Future<void> recommend(
+    SimPhone sponsor,
+    SimPhone newcomer, {
+    String? slot,
+    String nat = 'PL',
+    int year = 1990,
+  }) async {
+    net.befriend(sponsor, newcomer);
+    final String? code = pyr(sponsor).inviteCode(slot: slot);
+    if (code == null) {
+      throw StateError('${sponsor.name}: to miejsce nie jest wolne');
+    }
+    await pyr(newcomer).load();
+    await pyr(newcomer).askToJoin(
+      invite: code,
+      myName: newcomer.name,
+      nat: nat,
+      birthYear: year,
+      gender: 'k',
+    );
+    await net.run();
+    await approveAll(sponsor.name, PyrT.admit);
     for (final SimPhone p in net.phones) {
-      for (final SimPhone q in net.phones) {
-        if (p != q && pyr(p).isMember) {
-          await pyr(p).attestMet(q.address);
-        }
+      if (p != sponsor && pyr(p).isMember) {
+        await approveAll(p.name, PyrT.admit);
       }
     }
-    await net.run();
+  }
+
+  /// Everybody without a vote yet gets it from somebody of their cell who
+  /// has one ("poznaliśmy się"), until nothing changes.
+  Future<void> knowAll() async {
+    for (int round = 0; round < 4; round++) {
+      for (final SimPhone p in net.phones) {
+        final PyramidService me = pyr(p);
+        final PyramidState? s = me.state;
+        final String? k = me.myKey;
+        if (s == null || k == null || !s.isMember(k)) {
+          continue;
+        }
+        for (final String other in s.cellmates(k)) {
+          await me.confirmKnown(other);
+        }
+      }
+      await net.run();
+    }
   }
 
   /// [who] signs the proposal of kind [type] waiting for them.
@@ -232,10 +265,12 @@ final class PyramidWorld {
     }
   }
 
-  /// What everybody in the pyramid sees, to compare.
+  /// What everybody who keeps the pyramid sees (more than its pinned
+  /// genesis), to compare.
   Map<String, String> views() => <String, String>{
     for (final SimPhone p in net.phones)
-      if (pyr(p).state != null) p.name: _fingerprint(pyr(p).state!),
+      if (pyr(p).state != null && pyr(p).recordIds.length > 1)
+        p.name: _fingerprint(pyr(p).state!),
   };
 
   /// What one phone sees of [s], to compare.

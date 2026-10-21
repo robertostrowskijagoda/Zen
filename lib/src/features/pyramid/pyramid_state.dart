@@ -9,20 +9,22 @@ import 'package:zen/src/core/crypto/ring_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 
-/// A constitutional referendum lasts at least this long (§21.7), whatever
-/// the rules say: the rules cannot shorten the vote that changes them.
-const int kPyrMinConstitutionMs = 72 * 3600 * 1000;
-
-/// Any other referendum or poll binds nothing (§21.3), so it may be short —
-/// but never so short that it closes before anyone could see it.
+/// A referendum only advises the top (which decides), so it may be
+/// short — but never so short that it closes before anyone could see it.
 const int kPyrMinReferendumMs = 2 * 60 * 1000;
 
+/// A referendum asks 2 to this many options.
+const int kPyrMaxReferendumOptions = 6;
+
 /// After a referendum ends, a cell head waits this long for the sum of a
-/// branch below before counting without it; new rules are applied no
-/// sooner either (§21.3).
+/// branch below before counting without it.
 const int kPyrTallyGraceMs = 6 * 3600 * 1000;
 
-/// The emission limit counts the emissions of this rolling window (§23.4),
+/// New rules signed by the top ([PyrT.constitution]) apply this long after
+/// the record, so everybody sees them coming.
+const int kPyrParamsDelayMs = 24 * 3600 * 1000;
+
+/// The emission limit counts the emissions of this rolling window,
 /// whatever happens to terms in it.
 const int kPyrEmitWindowMs = 30 * 24 * 3600 * 1000;
 
@@ -47,18 +49,18 @@ int pyrAdd(int a, int b) {
 /// thousands grouped with a non-breaking space; "123.45" in English).
 String pyrMoney(int hundredths) => ZenFormat.money(hundredths);
 
-/// The public commitment to a member's birth year and gender (§20.2a):
+/// The public commitment to a member's birth year and gender:
 /// the year is published in the member data too, the gender only as this
 /// hash; the member may open it later (a gender badge).
 String pyrDataCommit(int birthYear, String gender, String salt) =>
     sha256Hex(utf8.encode('zen-pyr-data|$birthYear|$gender|$salt'));
 
-/// The earliest birth year the pyramid takes (§20.2a).
+/// The earliest birth year the pyramid takes.
 const int kPyrMinBirthYear = 1900;
 
 /// Whether [year] is a plausible birth year at [atMs]: from
 /// [kPyrMinBirthYear] to that year itself. Age is never a condition —
-/// minors of any age are admitted (§20.2a).
+/// minors of any age are admitted.
 bool pyrBirthYearValid(int year, int atMs) =>
     year >= kPyrMinBirthYear &&
     year <= DateTime.fromMillisecondsSinceEpoch(atMs, isUtc: true).year;
@@ -67,79 +69,19 @@ bool pyrBirthYearValid(int year, int atMs) =>
 int pyrAge(int birthYear, int atMs) =>
     DateTime.fromMillisecondsSinceEpoch(atMs).year - birthYear;
 
-/// The largest numerator or denominator of an exchange rate.
-const int kPyrMaxRate = 1000000000;
+/// A new member votes in their cell and in referenda this long after
+/// joining — or as soon as somebody of their cell confirms that they know
+/// each other ([PyrT.known]).
+const int kPyrVoteAfterMs = 14 * 24 * 3600 * 1000;
 
-/// [amount] at the rate [numer]/[denom], rounded down, at most
-/// [kPyrMaxAmount] (worked out in big integers, so nothing wraps).
-int pyrConvert(int amount, int numer, int denom) {
-  if (amount <= 0 || numer <= 0 || denom <= 0) {
-    return 0;
-  }
-  final BigInt v =
-      BigInt.from(amount) * BigInt.from(numer) ~/ BigInt.from(denom);
-  return v > BigInt.from(kPyrMaxAmount) ? kPyrMaxAmount : v.toInt();
-}
+/// After a new head takes the top, the old power key has this long to
+/// sign the handover; from then on most of the top cell may sign it
+/// instead ([PyrT.handover]).
+const int kPyrHandoverWaitMs = 72 * 3600 * 1000;
 
-/// What has to be paid at the rate [numer]/[denom] so that [pyrConvert]
-/// gives at least [target] (rounded up, at most [kPyrMaxAmount]).
-int pyrConvertUp(int target, int numer, int denom) {
-  if (target <= 0 || numer <= 0 || denom <= 0) {
-    return 0;
-  }
-  final BigInt v =
-      (BigInt.from(target) * BigInt.from(denom) + BigInt.from(numer - 1)) ~/
-      BigInt.from(numer);
-  return v > BigInt.from(kPyrMaxAmount) ? kPyrMaxAmount : v.toInt();
-}
-
-/// Whether [pre] opens the lock [lock] of an exchange payment: the lock is
-/// the SHA-256 (hex) of the key's UTF-8 bytes.
-bool pyrUnlocks(String lock, String pre) =>
-    pre.isNotEmpty && pre.length <= 128 && sha256Hex(utf8.encode(pre)) == lock;
-
-/// A lock as the payments carry it: 64 lowercase hex digits.
-bool pyrIsLock(Object? v) =>
-    v is String && RegExp(r'^[0-9a-f]{64}$').hasMatch(v);
-
-/// Why the condition [cond] of a payment is malformed, or null. A lock
-/// ('hl') makes it an exchange payment (§23.5): it is never passed on
-/// through intermediaries, and its 'fx' part says what the exchanger pays
-/// out in the other pyramid.
-String? pyrCondProblem(Object? cond) {
-  if (cond is! Map) {
-    return null;
-  }
-  final Object? lock = cond['hl'];
-  if (lock == null) {
-    return null;
-  }
-  if (!pyrIsLock(lock) || cond['by'] is! String) {
-    return 'zła blokada wymiany';
-  }
-  if (cond['share'] is int && (cond['share'] as int) > 0) {
-    return 'wymiana nie idzie przez pośredników';
-  }
-  final Object? fx = cond['fx'];
-  if (fx != null &&
-      (fx is! Map ||
-          fx['py'] is! String ||
-          (fx['py'] as String).length > 100 ||
-          !PyramidRecord.isCanonicalKey(fx['to']) ||
-          fx['a'] is! int ||
-          (fx['a'] as int) <= 0 ||
-          (fx['a'] as int) > kPyrMaxAmount)) {
-    return 'zła wymiana';
-  }
-  return null;
-}
-
-/// Members who must have met someone in person (§6.2) before that
-/// person's votes in referenda count (§20.6).
-const int kPyrMetToVote = 2;
-
-/// The rules in numbers (§21.7). Changed only by a referendum of the whole
-/// pyramid ([PyrT.constitution]).
+/// The rules in numbers. Changed by the top, 2 of 3, with a signed
+/// record ([PyrT.constitution]) that applies [kPyrParamsDelayMs] later —
+/// never past the hard limits in [apply].
 final class PyrParams {
   PyrParams({
     this.version = 1,
@@ -157,20 +99,19 @@ final class PyrParams {
 
   int absenceDays;
 
-  /// Members above this depth need their own cell's consent to be banned
-  /// (§21.1a).
+  /// Members above this depth need their own cell's consent to be banned.
   int immunityDepth;
 
-  /// Positions up to this depth are the treasurers (§23.1): 3 → 15 people.
+  /// Positions up to this depth are the treasurers: 3 → 15 people.
   int treasurerDepth;
 
-  /// Emission allowed per 30 days ([kPyrEmitWindowMs]), in hundredths
-  /// (§23.4). Once per term before: a swap at the top started a new term
+  /// Emission allowed per 30 days ([kPyrEmitWindowMs]), in hundredths.
+  /// Once per term before: a swap at the top started a new term
   /// and with it a fresh limit.
   int emitLimit;
   int emitDelayHours;
 
-  /// People of a nationality needed in a branch to lead its section (§22.2).
+  /// People of a nationality needed in a branch to lead its section.
   int nationalMin;
   int electionHours;
   int reportEscalateHours;
@@ -187,13 +128,14 @@ final class PyrParams {
     'reportEscalateHours': reportEscalateHours,
   };
 
+  /// Takes the fields of [json] it knows, each clamped to its hard
+  /// limits, whatever the top signs ([version] only counts the changes).
   void apply(Object? json) {
     if (json is! Map) {
       return;
     }
     int v(String k, int old, int lo, int hi) =>
         json[k] is int ? (json[k] as int).clamp(lo, hi) : old;
-    version = v('version', version, 1, 1 << 30);
     absenceDays = v('absenceDays', absenceDays, 7, 3650);
     immunityDepth = v('immunityDepth', immunityDepth, 0, 30);
     treasurerDepth = v('treasurerDepth', treasurerDepth, 1, 6);
@@ -210,7 +152,7 @@ final class PyrParams {
   }
 }
 
-/// Someone in the pyramid, under their pyramid pseudonym (§6.4).
+/// Someone in the pyramid, under their pyramid pseudonym.
 final class PyrMember {
   PyrMember({
     required this.key,
@@ -219,24 +161,37 @@ final class PyrMember {
     required this.birthYear,
     required this.dataCommit,
     required this.joinedAt,
+    required this.pq,
     this.admittedBy,
     this.addr = '',
+    this.founder = false,
   });
 
   final String key;
+
+  /// Fingerprint of the ML-DSA half of [key], fixed at entry by the
+  /// admission everyone signed: a signature of this member that carries
+  /// another ML-DSA key does not count (a forged Ed25519 half).
+  final String pq;
   final String name;
 
-  /// Nationality, confirmed at entry by the one who admitted (§20.2a).
+  /// Nationality, confirmed at entry by the one who admitted.
   final String nat;
 
-  /// Birth year, confirmed at entry by the one who admitted (§20.2a):
+  /// Birth year, confirmed at entry by the one who admitted:
   /// public to the pyramid, so the age shows in the member's profile.
   final int birthYear;
 
   /// Hash of birth year + gender + salt: the gender itself is not public.
   final String dataCommit;
   final int joinedAt;
+
+  /// Who vouched for them (the sponsor of the admission).
   final String? admittedBy;
+
+  /// The first head, seated by the power key of the genesis: votes
+  /// from the start.
+  final bool founder;
 
   /// Device address for pyramid traffic (votes, payments, reports).
   String addr;
@@ -306,12 +261,12 @@ final class PyrDelegation {
   final List<int> uses = <int>[];
 
   /// Records done with it (id → time), so a revocation can say which of
-  /// them it knew about (§21.2).
+  /// them it knew about.
   final Map<String, int> acts = <String, int>{};
 
   /// Once revoked: the acts done with it (or with one passed on from it)
   /// that the revocation listed. Of the acts dated before the revocation
-  /// only these count (§21.2).
+  /// only these count.
   Set<String> knownAtRevocation = const <String>{};
 }
 
@@ -337,8 +292,8 @@ final class PyrBan {
   final String? datingKey;
   final String reason;
 
-  /// Id of the banned entry itself — a signed post, a comment, a message
-  /// (S36): the entry is banned whatever its text.
+  /// Id of the banned entry itself — a signed post, a comment, a message:
+  /// the entry is banned whatever its text.
   final String? entryId;
   bool lifted = false;
 
@@ -359,7 +314,7 @@ final class PyrPost {
   final String author;
   final String text;
 
-  /// The author's level when it was written (§22.1).
+  /// The author's level when it was written.
   final int level;
   final int at;
   final String? nat;
@@ -389,16 +344,13 @@ final class PyrReferendum {
     required this.scopePath,
     required this.scopeNat,
     required this.end,
-    required this.kind,
     required this.at,
-    this.params,
   });
 
   final String id;
-  final String question;
 
-  /// New rules a constitution referendum votes on (§21.7).
-  final Map<String, dynamic>? params;
+  /// Any question the top asks; the result only advises the top.
+  final String question;
   final List<String> options;
 
   /// all, branch, nat.
@@ -406,9 +358,6 @@ final class PyrReferendum {
   final String scopePath;
   final String scopeNat;
   final int end;
-
-  /// normal or constitution.
-  final String kind;
   final int at;
 
   /// Latest tally per publisher.
@@ -445,11 +394,10 @@ final class PyrEmission {
     required this.why,
     required this.term,
     required this.at,
+    required this.signedAt,
     required this.effectiveAt,
     required this.signers,
     this.vetoers = const <String>[],
-    this.group,
-    this.referendum,
   });
 
   final String id;
@@ -457,26 +405,47 @@ final class PyrEmission {
   final int amount;
   final String why;
   final int term;
+
+  /// When it counts from: its own time, or when this phone first saw it
+  /// when it came late ([kPyrLateMs]).
   final int at;
+
+  /// The time it is signed with.
+  final int signedAt;
   final int effectiveAt;
   final List<String> signers;
 
-  /// Who may veto it: the rest of the top when it was signed (§23.4). They
+  /// The veto time as its own time sets it: a veto dated in it counts on
+  /// every phone, also on one that saw the emission late.
+  int get signedEnd => signedAt + (effectiveAt - at);
+
+  /// Who may veto it: the rest of the top when it was signed. They
   /// keep the right for the whole wait, even if moved away meanwhile.
   final List<String> vetoers;
-
-  /// The merge record this is a part of: money of a joining pyramid,
-  /// converted (§20.5). One veto stops every part.
-  final String? group;
-
-  /// The referendum that allowed it above the limit (§23.4): it is not
-  /// counted in the rolling limit.
-  final String? referendum;
   bool vetoed = false;
   bool done = false;
 }
 
-/// Money of one account, by term (§23.3): spent oldest first.
+/// New rules the top signed ([PyrT.constitution]): public at once,
+/// applied at [effectiveAt].
+final class PyrParamsChange {
+  PyrParamsChange({
+    required this.id,
+    required this.params,
+    required this.at,
+    required this.effectiveAt,
+  });
+
+  final String id;
+
+  /// The fields that change (the rest stays).
+  final Map<String, dynamic> params;
+  final int at;
+  final int effectiveAt;
+  bool done = false;
+}
+
+/// Money of one account, by term: spent oldest first.
 final class PyrAccount {
   final List<List<int>> buckets = <List<int>>[];
   int seq = 0;
@@ -539,30 +508,12 @@ final class PyrEscrow {
     this.hash,
     this.parent,
     this.at = 0,
-    this.lock,
-    this.fxPy,
-    this.fxTo,
-    this.fxAmount = 0,
   });
 
   final String id;
 
   /// When the money was put aside (no settlement may be dated before).
   final int at;
-
-  /// An exchange payment (§23.5): accepted only with the key whose hash
-  /// this is. The same lock holds the payout in the other pyramid, so
-  /// whoever takes that one shows the key that opens this one.
-  final String? lock;
-
-  /// What the exchanger is asked to pay out: in pyramid [fxPy], to
-  /// [fxTo], [fxAmount] hundredths.
-  final String? fxPy;
-  final String? fxTo;
-  final int fxAmount;
-
-  /// The key that opened [lock] (once accepted).
-  String? pre;
 
   /// Who paid (also for every later hop of an announcement: the money is
   /// still theirs until somebody keeps it, and comes back to them).
@@ -574,7 +525,7 @@ final class PyrEscrow {
   final int until;
   final String memo;
 
-  /// An announcement passed on through intermediaries (§24): each one who
+  /// An announcement passed on through intermediaries: each one who
   /// accepts keeps [share] and may pass the rest on to one next person
   /// while [hops] > 0; 0 = an ordinary conditional payment.
   final int share;
@@ -614,30 +565,10 @@ final class PyrTransferInfo {
   final bool conditional;
 }
 
-/// A member's standing offer to exchange money of another pyramid: for
-/// every [denom] hundredths received there, [numer] hundredths paid out
-/// here, at most [max] per exchange (0 = no limit).
-final class PyrFxRate {
-  PyrFxRate({
-    required this.numer,
-    required this.denom,
-    required this.max,
-    required this.at,
-  });
-
-  final int numer;
-  final int denom;
-  final int max;
-  final int at;
-
-  /// What is paid out here for [amount] received there.
-  int payout(int amount) => pyrConvert(amount, numer, denom);
-}
-
-/// At most this many intermediaries pass one announcement on (§24).
+/// At most this many intermediaries pass one announcement on.
 const int kMaxAdHops = 5;
 
-/// Levels of acquaintance a price can depend on (§24), from the receiver's
+/// Levels of acquaintance a price can depend on, from the receiver's
 /// point of view.
 Map<String, String> get kPriceLevels => <String, String>{
   'friend': t('Znajomi'),
@@ -667,7 +598,7 @@ final class PyrAlarm {
   final String by;
 }
 
-/// One structural change, for the public history (§20.3).
+/// One structural change, for the public history.
 final class PyrHistory {
   PyrHistory(this.at, this.text, this.recordId);
 
@@ -676,7 +607,7 @@ final class PyrHistory {
   final String recordId;
 }
 
-/// The pyramid as it follows from its records (§20.5): every client folds
+/// The pyramid as it follows from its records: every client folds
 /// the same records into the same state, so nothing has to be trusted but
 /// signatures.
 final class PyramidState {
@@ -714,17 +645,41 @@ final class PyramidState {
   /// nationality → (key → until): who may post with priority.
   final Map<String, Map<String, int>> natGrants = <String, Map<String, int>>{};
 
-  /// nationality → pinned post → when pinned (§22.2): the section's lead
+  /// nationality → pinned post → when pinned: the section's lead
   /// pins at most [maxNatPins]; the oldest pin goes first.
   final Map<String, Map<String, int>> natPins = <String, Map<String, int>>{};
 
-  /// Gender badges members show themselves (§20.2a): key → gender,
+  /// Gender badges members show themselves: key → gender,
   /// checked against the data they were admitted with.
   final Map<String, String> badges = <String, String>{};
   final Map<String, PyrReferendum> referenda = <String, PyrReferendum>{};
 
-  /// Member → the members who said they met them in person ([PyrT.met]).
-  final Map<String, Set<String>> metBy = <String, Set<String>>{};
+  /// Changes of the rules, waiting or applied ([PyrParamsChange]).
+  final Map<String, PyrParamsChange> paramsChanges =
+      <String, PyrParamsChange>{};
+
+  /// Member → the members of their cell who confirmed knowing them
+  /// ([PyrT.known]) → when.
+  final Map<String, Map<String, int>> knownBy = <String, Map<String, int>>{};
+
+  /// The power key now (public), from the genesis on: it certifies that
+  /// this is the original pyramid and who its heads were — nothing more.
+  String? powerKey;
+
+  /// Fingerprint of the power key's ML-DSA half: from the genesis (`pq`;
+  /// the test pyramid's genesis has none) and from each handover (`tpq`).
+  String? powerKeyPq;
+
+  /// The head the power key was last given to ([PyrT.found],
+  /// [PyrT.handover]); a new head at the top waits for a handover.
+  String? powerHead;
+
+  /// Every power key there was (none comes back).
+  final Set<String> usedPowerKeys = <String>{};
+
+  /// Since when the head of the pyramid holds the top.
+  int headSince = 0;
+  String? _headKey;
   int term = 1;
   final Map<int, int> termStart = <int, int>{1: 0};
   final Map<int, int> emittedInTerm = <int, int>{};
@@ -737,7 +692,7 @@ final class PyramidState {
   final Map<String, Map<String, Set<String>>> _ordersSigned =
       <String, Map<String, Set<String>>>{};
 
-  /// Treasurers caught signing two orders with the same number (§23.4).
+  /// Treasurers caught signing two orders with the same number.
   final Map<String, List<String>> cheaters = <String, List<String>>{};
   final List<PyrAlarm> alarms = <PyrAlarm>[];
 
@@ -746,20 +701,11 @@ final class PyramidState {
   final Map<String, Map<String, int>> offers = <String, Map<String, int>>{};
 
   /// Member → kind → level ([kPriceLevels]) → price, for the kinds priced
-  /// by acquaintance (§24).
+  /// by acquaintance.
   final Map<String, Map<String, Map<String, int>>> offerLevels =
       <String, Map<String, Map<String, int>>>{};
 
-  /// Member → other pyramid → the rate it pays out here for that
-  /// pyramid's money ([PyrT.fxRate]).
-  final Map<String, Map<String, PyrFxRate>> fxRates =
-      <String, Map<String, PyrFxRate>>{};
   final List<PyrHistory> history = <PyrHistory>[];
-  String? mergedInto;
-
-  /// When this pyramid's money was counted for the pyramid it joined
-  /// (§20.5): money records dated later do not count.
-  int? mergeCut;
 
   /// Records that did not count, with the reason (for the curious and the
   /// simulator).
@@ -768,7 +714,7 @@ final class PyramidState {
 
   /// Delegations revoked in the first pass of [fold] → the acts their
   /// revocation listed. A revocation works from its own time on: what the
-  /// delegate did before it stays (§21.2), but an act dated before it and
+  /// delegate did before it stays, but an act dated before it and
   /// not on its list was made up later and does not count (the second
   /// pass runs without it).
   Map<String, Set<String>> _witnessed = const <String, Set<String>>{};
@@ -778,25 +724,13 @@ final class PyramidState {
   final Set<String> _lateHit = <String>{};
 
   /// Records refused up front because their rule threw in an earlier round
-  /// of the fold (rules 2, S18), and those that threw in this round.
+  /// of the fold (rules 2), and those that threw in this round.
   Set<String> _poison = const <String>{};
   final Set<String> _threw = <String>{};
-
-  /// The top as it stands with every record but the closing ones: a
-  /// pyramid is closed ([PyrT.merged]) only by 2 of that top, so a top
-  /// already replaced cannot close it with a back-dated record.
-  Set<String>? _finalTop;
 
   /// Who leads each national section, worked out once per shape of the
   /// tree (cleared on every move).
   final Map<String, String?> _natLead = <String, String?>{};
-
-  /// Kinds of records that move money.
-  static const Set<String> moneyKinds = <String>{
-    PyrT.transfer,
-    PyrT.settle,
-    PyrT.emit,
-  };
 
   // ---- reading ----
 
@@ -819,7 +753,7 @@ final class PyramidState {
   ];
 
   /// The cell [key] is a member of (with its head above), for removal and
-  /// immunity (§21.1a); for the head of the pyramid, the top cell.
+  /// immunity; for the head of the pyramid, the top cell.
   List<String> ownCellOf(String key) {
     final String? p = position[key];
     if (p == null) {
@@ -848,6 +782,35 @@ final class PyramidState {
       }
     }
     return null;
+  }
+
+  /// Free places in the branch of [root] a newcomer can be admitted to
+  /// ("Polecenie"): places under somebody, nearest the top first, then
+  /// left before right; at most [limit]. Places of a branch whose head is
+  /// gone are not among them (somebody below fills those). Walks the tree
+  /// level by level, so a huge branch costs only its upper levels.
+  List<String> freePlaces(String root, {int limit = 12}) {
+    final List<String> out = <String>[];
+    if (!_exists(root)) {
+      return out;
+    }
+    List<String> level = <String>[root];
+    while (level.isNotEmpty && out.length < limit) {
+      final List<String> next = <String>[];
+      for (final String p in level) {
+        for (final String c in PyrPath.children(p)) {
+          if (!_exists(c)) {
+            if (occupant[p] != null && out.length < limit) {
+              out.add(c);
+            }
+          } else {
+            next.add(c);
+          }
+        }
+      }
+      level = next;
+    }
+    return out;
   }
 
   /// People in the branch of [path] (with it).
@@ -879,7 +842,7 @@ final class PyramidState {
     return out;
   }
 
-  /// The treasurers now (§23.1).
+  /// The treasurers now.
   List<String> get treasurers => <String>[
     for (final MapEntry<String, String> e in occupant.entries)
       if (e.key.length <= params.treasurerDepth) e.value,
@@ -887,7 +850,7 @@ final class PyramidState {
 
   int get treasurerMajority => treasurers.length ~/ 2 + 1;
 
-  /// Who leads the national section of [nat] (§22.2), if anybody: the
+  /// Who leads the national section of [nat], if anybody: the
   /// highest member of [nat] whose branch has at least
   /// [PyrParams.nationalMin] of them, then the bigger branch, then the
   /// earlier place. One pass over the tree (not one per member).
@@ -940,7 +903,7 @@ final class PyramidState {
         (b.kind == kind || b.kind == 'perm'),
   );
 
-  /// Banned from social features (posts, comments) now (§21.1a).
+  /// Banned from social features (posts, comments) now.
   bool silencedAt(String key, int t) => bans.values.any(
     (PyrBan b) =>
         b.target == key &&
@@ -948,7 +911,7 @@ final class PyramidState {
         (b.kind == 'perm' || b.kind == 'pause'),
   );
 
-  /// Ids of entries (posts, comments, messages) banned now (S36).
+  /// Ids of entries (posts, comments, messages) banned now.
   Set<String> bannedEntries(int t) => <String>{
     for (final PyrBan b in bans.values)
       if (b.kind == 'content' && b.entryId != null && b.activeAt(t)) b.entryId!,
@@ -1007,7 +970,7 @@ final class PyramidState {
       return null;
     }
     if (strict) {
-      // §6 pt 11: a sum counted by the top once the branches had
+      // A sum counted by the top once the branches had
       // their time stands; a branch's sum dated after it cannot void it
       // (one slow or stubborn cell would block the count for good).
       final bool timeBound = best.at >= r.end + kPyrTallyGraceMs;
@@ -1023,63 +986,12 @@ final class PyramidState {
     return best.counts;
   }
 
-  /// Members who count towards the quorum of a vote that ended at [end]:
-  /// only those seen (a signed record; a sign of life goes
-  /// out every 7 days) within [PyrParams.absenceDays] before it — places
-  /// of the dead and of forgotten fake accounts do not block the pyramid
-  /// (§6 pt 11).
-  /// Only those who may vote count ([metInPerson], §20.6).
-  int quorumBase(int end) {
-    final int since = end - params.absenceDays * 24 * 3600 * 1000;
-    int n = 0;
-    for (final String k in position.keys) {
-      if (!metInPerson(k)) {
-        continue;
-      }
-      final int seen = max(lastSeen[k] ?? 0, members[k]?.joinedAt ?? 0);
-      if (seen >= since) {
-        n++;
-      }
-    }
-    return max(1, n);
-  }
-
-  /// Whether the referendum [refId] passed the way binding ones must
-  /// (§21.7, §23.4): a full count, more than half of the members (the
-  /// active ones) voted, and the first option ("Tak") got more
-  /// than all the others together.
-  bool referendumPasses(String refId) {
-    final PyrReferendum? ref = referenda[refId];
-    final List<int>? res = resultOf(refId, strict: true);
-    if (ref == null || res == null || res.length < 2) {
-      return false;
-    }
-    final int total = res.fold(0, (int a, int b) => a + b);
-    return total * 2 > quorumBase(ref.end) && res[0] * 2 > total;
-  }
-
-  /// Whether the constitutional referendum [refId] passed (§21.7): a full
-  /// count, more than half of ALL members voted (silent seats too — the
-  /// constitution's floor), and "Tak" got more than all the others.
-  bool constitutionPasses(String refId) {
-    final PyrReferendum? ref = referenda[refId];
-    final List<int>? res = resultOf(refId, strict: true);
-    if (ref == null || res == null || res.length < 2) {
-      return false;
-    }
-    final int total = res.fold(0, (int a, int b) => a + b);
-    return total * 2 > max(1, position.length) && res[0] * 2 > total;
-  }
-
   /// Emission in the [kPyrEmitWindowMs] up to [t] (vetoed ones do not
   /// count).
   int emittedWithin(int t) {
     int sum = 0;
     for (final PyrEmission e in emissions.values) {
-      if (!e.vetoed &&
-          e.referendum == null &&
-          e.at <= t &&
-          e.at > t - kPyrEmitWindowMs) {
+      if (!e.vetoed && e.at <= t && e.at > t - kPyrEmitWindowMs) {
         sum = pyrAdd(sum, e.amount);
       }
     }
@@ -1087,8 +999,7 @@ final class PyramidState {
   }
 
   /// The applied acts done through delegation [delegationId] or anything
-  /// delegated from it: what its revocation lists as known, so they stay
-  /// (§21.2).
+  /// delegated from it: what its revocation lists as known, so they stay.
   Set<String> actsOf(String delegationId) {
     final Set<String> out = <String>{};
     for (final PyrDelegation d in delegations.values) {
@@ -1099,19 +1010,56 @@ final class PyramidState {
     return out;
   }
 
-  /// How many members now in the pyramid said they met [key] in person.
-  int metCount(String key) =>
-      metBy[key]?.where(position.containsKey).length ?? 0;
+  /// Whether [key] votes — in its cell and in referenda — at [at]: the
+  /// founder from the start, anybody else [kPyrVoteAfterMs] after joining
+  /// or once somebody of their cell confirmed knowing them ([PyrT.known]).
+  /// Fake accounts nobody knows wait two weeks and never outvote a cell
+  /// of real people by surprise.
+  bool canVote(String key, int at) {
+    final PyrMember? m = members[key];
+    if (m == null || !position.containsKey(key)) {
+      return false;
+    }
+    if (m.founder || at - m.joinedAt >= kPyrVoteAfterMs) {
+      return true;
+    }
+    return knownBy[key]?.values.any((int t) => t <= at) ?? false;
+  }
 
-  /// Whether [key] was met in person by at least [kPyrMetToVote] members
-  /// (§20.6): only their votes in referenda count, so accounts nobody met
-  /// cannot outvote real people.
-  bool metInPerson(String key) => metCount(key) >= kPyrMetToVote;
+  /// Who of the pyramid confirmed knowing [key], the earliest first.
+  List<String> knownByOf(String key) {
+    final Map<String, int> by = knownBy[key] ?? const <String, int>{};
+    return by.keys.where(position.containsKey).toList()
+      ..sort((String a, String b) => by[a]!.compareTo(by[b]!));
+  }
 
-  /// Whether [key] votes in [r]: in its scope ([inScope]) and met in person
-  /// ([metInPerson]).
+  /// The people [key] shares a cell with: the cell it is a member of (its
+  /// head and the other member) and its own cell below.
+  List<String> cellmates(String key) {
+    final String? p = position[key];
+    if (p == null) {
+      return const <String>[];
+    }
+    return <String>{
+      ...ownCellOf(key),
+      ...cellOf(p),
+    }.where((String k) => k != key).toList();
+  }
+
+  /// The members of the cell at [cell] who vote at [at] ([canVote]): who
+  /// swaps its head and who is in the ring of its vote.
+  List<String> cellVoters(String cell, int at) => <String>[
+    for (final String k in cellOf(cell))
+      if (canVote(k, at)) k,
+  ];
+
+  /// Whether the head at the top still waits for the power key.
+  bool get handoverDue => head != null && head != powerHead;
+
+  /// Whether [key] votes in [r]: in its scope ([inScope]) and with a vote
+  /// at the end of it ([canVote]).
   bool eligible(PyrReferendum r, String key) =>
-      inScope(r, key) && metInPerson(key);
+      inScope(r, key) && canVote(key, r.end);
 
   /// Whether [r] is for [key] (the whole pyramid, their branch or their
   /// nationality).
@@ -1135,85 +1083,96 @@ final class PyramidState {
   /// Records are applied in the order of their own time. Nothing can make
   /// a phone's clock the judge of somebody else's record (that would split
   /// the phones), so the fold adds witnesses where the time matters:
-  /// - a closing record ([PyrT.merged]) counts only when signed by 2 of the
-  ///   top as it stands with every other record (a top already replaced
-  ///   cannot close the pyramid by dating the closing before its fall);
   /// - a revocation works from its time on and lists the acts of the
   ///   delegate it knew about; an act dated before the revocation but not
   ///   on its list was made up later and does not count (a second pass);
   /// - money waits for most treasurers, who sign only fresh orders and one
-  ///   settlement per payment (§23.2, §23.5);
-  /// - a pyramid that joined another with its money closes with the time
-  ///   its money was counted: money records dated later do not count, so
-  ///   nothing is spent twice, here and converted there (a second pass).
+  ///   settlement per payment;
+  /// - a record of [PyrT.timed] that reached this phone late ([late]: id →
+  ///   when this phone first saw it, [kPyrLateMs]) counts from then: new
+  ///   rules a day after that, an emission's veto time and its 30-day limit
+  ///   from then (a back-dated one skips nothing). A veto of it folds after
+  ///   it. A phone that first sees such a record in a full sync (it kept
+  ///   nothing newer) takes the record's own time.
   /// A record whose rule throws is skipped, never the whole pyramid; with
-  /// rules 2 it leaves no trace either (S18): the fold runs again with it
+  /// rules 2 it leaves no trace either: the fold runs again with it
   /// refused before anything of it was applied.
   static PyramidState fold(
     String pyramidId,
     Iterable<PyramidRecord> records, {
     required int now,
     Map<String, Set<String>> treasurerSigs = const <String, Set<String>>{},
+    Map<String, int> late = const <String, int>{},
   }) {
     final List<PyramidRecord> list = <PyramidRecord>[
       for (final PyramidRecord r in records)
         if ((r.id == pyramidId || r.pyramid == pyramidId) &&
             r.at <= now + kPyrMaxSkewMs)
           r,
-    ]..sort(_order);
-    Set<String>? finalTop;
-    Set<String> poison = const <String>{};
-    if (list.any((PyramidRecord r) => r.type == PyrT.merged)) {
-      final PyramidState open = _runClean(
-        pyramidId,
-        <PyramidRecord>[
-          for (final PyramidRecord r in list)
-            if (r.type != PyrT.merged) r,
-        ],
-        now,
-        treasurerSigs,
-        const <String, Set<String>>{},
-        null,
-        const <String>{},
-        poison,
-      );
-      finalTop = open.topCell.toSet();
-      poison = open._poison;
-    }
+    ];
+    final Map<String, int> times = _foldTimes(list, late);
+    list.sort(
+      times.isEmpty
+          ? _order
+          : (PyramidRecord a, PyramidRecord b) =>
+                _orderAt(a, times[a.id] ?? a.at, b, times[b.id] ?? b.at),
+    );
     PyramidState s = _runClean(
       pyramidId,
       list,
       now,
       treasurerSigs,
       const <String, Set<String>>{},
-      finalTop,
       const <String>{},
-      poison,
+      times,
     );
     final Map<String, Set<String>> witnessed = s._witnessIfLate();
-    final int? cut = s.mergedInto == null ? null : s.mergeCut;
-    final Set<String> cutOff = <String>{
-      if (cut != null)
-        for (final PyramidRecord r in list)
-          if (moneyKinds.contains(r.type) && r.at > cut) r.id,
-    };
-    if (witnessed.isNotEmpty || cutOff.isNotEmpty) {
+    if (witnessed.isNotEmpty) {
       s = _runClean(
         pyramidId,
         list,
         now,
         treasurerSigs,
         witnessed,
-        finalTop,
-        cutOff,
         s._poison,
+        times,
       );
     }
     return s;
   }
 
+  /// The records that fold at another time than their own: those of
+  /// [PyrT.timed] seen late ([late]), at when they were seen, and the
+  /// vetoes of such an emission, not before it.
+  static Map<String, int> _foldTimes(
+    List<PyramidRecord> list,
+    Map<String, int> late,
+  ) {
+    if (late.isEmpty) {
+      return const <String, int>{};
+    }
+    final Map<String, int> times = <String, int>{
+      for (final PyramidRecord r in list)
+        if (late[r.id] case final int seen
+            when seen > r.at && PyrT.timed.contains(r.type))
+          r.id: seen,
+    };
+    if (times.isEmpty) {
+      return times;
+    }
+    for (final PyramidRecord r in list) {
+      if (r.type == PyrT.veto) {
+        final int? of = times[r.str('emit')];
+        if (of != null && of > r.at) {
+          times[r.id] = of;
+        }
+      }
+    }
+    return times;
+  }
+
   /// [_run] until no record throws that was not already refused up front
-  /// (rules 2, S18): a record whose rule threw halfway may have changed the
+  /// (rules 2): a record whose rule threw halfway may have changed the
   /// state before throwing, so the fold starts again without it. Every
   /// phone finds the same records, so every phone gets the same state. A
   /// few rounds at most (each round adds at least one record).
@@ -1223,9 +1182,8 @@ final class PyramidState {
     int now,
     Map<String, Set<String>> treasurerSigs,
     Map<String, Set<String>> witnessed,
-    Set<String>? finalTop,
-    Set<String> cutOff,
     Set<String> poison,
+    Map<String, int> times,
   ) {
     Set<String> bad = poison;
     int round = 0;
@@ -1236,9 +1194,8 @@ final class PyramidState {
         now,
         treasurerSigs,
         witnessed,
-        finalTop,
-        cutOff,
         bad,
+        times,
       );
       if (s._threw.isEmpty || ++round > 8) {
         return s;
@@ -1248,23 +1205,37 @@ final class PyramidState {
   }
 
   /// Tests: runs after each record's rule, inside its guard — throwing
-  /// here is a rule that failed halfway, after changing the state (S18).
+  /// here is a rule that failed halfway, after changing the state.
   @visibleForTesting
   static void Function(PyramidRecord r)? debugAfterApply;
 
-  /// Time, then the genesis, then the id (ids are worked out once).
-  static int _order(PyramidRecord a, PyramidRecord b) {
-    final int c = a.at.compareTo(b.at);
+  /// Time, then the genesis, then the founding (an admission made in the
+  /// same millisecond needs the founder seated), then the id (ids are
+  /// worked out once).
+  static int _order(PyramidRecord a, PyramidRecord b) =>
+      _orderAt(a, a.at, b, b.at);
+
+  /// [_order] with the times the records fold at ([_foldTimes]); a veto
+  /// after anything else of the same time (its emission).
+  static int _orderAt(PyramidRecord a, int ta, PyramidRecord b, int tb) {
+    final int c = ta.compareTo(tb);
     if (c != 0) {
       return c;
     }
-    final bool ga = a.type == PyrT.genesis;
-    final bool gb = b.type == PyrT.genesis;
-    if (ga != gb) {
-      return ga ? -1 : 1;
+    final int ra = _rank(a.type);
+    final int rb = _rank(b.type);
+    if (ra != rb) {
+      return ra.compareTo(rb);
     }
     return a.id.compareTo(b.id);
   }
+
+  static int _rank(String type) => switch (type) {
+    PyrT.genesis => 0,
+    PyrT.found => 1,
+    PyrT.veto => 3,
+    _ => 2,
+  };
 
   static PyramidState _run(
     String pyramidId,
@@ -1272,28 +1243,20 @@ final class PyramidState {
     int now,
     Map<String, Set<String>> treasurerSigs,
     Map<String, Set<String>> witnessed,
-    Set<String>? finalTop,
-    Set<String> cutOff, [
-    Set<String> poison = const <String>{},
-  ]) {
+    Set<String> poison,
+    Map<String, int> times,
+  ) {
     final PyramidState s = PyramidState._(pyramidId)
       .._witnessed = witnessed
-      .._finalTop = finalTop
-      .._poison = poison;
+      .._poison = poison
+      .._times = times;
     // Proposals already counted (content without the time): a fresh copy
-    // of one, signed again late (§20.5), counts once.
+    // of one, signed again late, counts once.
     final Set<String> proposalsDone = <String>{};
     for (final PyramidRecord r in list) {
-      s._clock = r.at;
-      s._timedUpTo(r.at);
-      if (s.mergedInto != null) {
-        s.rejected[r.id] = 'piramida połączona z inną';
-        continue;
-      }
-      if (cutOff.contains(r.id)) {
-        s.rejected[r.id] = 'po przeliczeniu pieniędzy przy połączeniu';
-        continue;
-      }
+      final int at = times[r.id] ?? r.at;
+      s._clock = at;
+      s._timedUpTo(at);
       final String? proposal = r.body['pn'] is String ? r.contentKey : null;
       if (proposal != null && proposalsDone.contains(proposal)) {
         s.rejected[r.id] = 'ta propozycja już weszła (inna kopia)';
@@ -1315,6 +1278,7 @@ final class PyramidState {
         why = 'błędny rekord';
         s._threw.add(r.id);
       }
+      s._noteHead(at);
       if (why == null) {
         if (proposal != null) {
           proposalsDone.add(proposal);
@@ -1336,7 +1300,7 @@ final class PyramidState {
   /// The revoked delegations → the acts their revocation listed, when an
   /// act through one of them (or through one passed on from it) counted
   /// without being on that list: it was dated back past the revocation,
-  /// and the second pass of [fold] runs without it (§21.2). Empty when
+  /// and the second pass of [fold] runs without it. Empty when
   /// every act that counted was listed.
   Map<String, Set<String>> _witnessIfLate() {
     final Map<String, Set<String>> witnessed = <String, Set<String>>{
@@ -1358,7 +1322,8 @@ final class PyramidState {
     return late ? witnessed : const <String, Set<String>>{};
   }
 
-  /// Things that happen by time: elections end, emissions take effect.
+  /// Things that happen by time: elections end, emissions and new rules
+  /// take effect.
   void _timedUpTo(int upTo) {
     final List<PyrElection> due =
         elections.values
@@ -1386,16 +1351,35 @@ final class PyramidState {
       history.add(
         PyrHistory(
           e.effectiveAt,
-          e.group == null
-              ? t('Emisja {amount} dla {name}', {
-                  'amount': pyrMoney(e.amount),
-                  'name': _name(e.to),
-                })
-              : t('Przeliczenie po połączeniu: {amount} dla {name}', {
-                  'amount': pyrMoney(e.amount),
-                  'name': _name(e.to),
-                }),
+          t('Emisja {amount} dla {name}', {
+            'amount': pyrMoney(e.amount),
+            'name': _name(e.to),
+          }),
           e.id,
+        ),
+      );
+    }
+    final List<PyrParamsChange> rules =
+        paramsChanges.values
+            .where((PyrParamsChange c) => !c.done && c.effectiveAt <= upTo)
+            .toList()
+          ..sort(
+            (PyrParamsChange a, PyrParamsChange b) =>
+                a.effectiveAt != b.effectiveAt
+                ? a.effectiveAt.compareTo(b.effectiveAt)
+                : a.id.compareTo(b.id),
+          );
+    for (final PyrParamsChange c in rules) {
+      c.done = true;
+      params
+        ..apply(c.params)
+        ..version += 1;
+      _natLead.clear();
+      history.add(
+        PyrHistory(
+          c.effectiveAt,
+          t('Nowe zasady (wersja {version})', {'version': params.version}),
+          c.id,
         ),
       );
     }
@@ -1412,6 +1396,23 @@ final class PyramidState {
   bool _twoOfTop(PyramidRecord r) => _countOf(r.signers, topCell) >= 2;
 
   int _clock = 0;
+
+  /// The records that fold at another time than their own ([_foldTimes]).
+  Map<String, int> _times = const <String, int>{};
+
+  /// The time [r] counts from here: its own, or when this phone first saw
+  /// it late ([PyramidState.fold]).
+  int _timeOf(PyramidRecord r) => _times[r.id] ?? r.at;
+
+  /// Notes since when the head of the pyramid holds the top (a handover
+  /// of the power key may be signed by the top only 72 h later).
+  void _noteHead(int at) {
+    final String? h = occupant[''];
+    if (h != _headKey) {
+      _headKey = h;
+      headSince = at;
+    }
+  }
 
   void _place(String key, String path, String recordId) {
     occupant[path] = key;
@@ -1507,23 +1508,58 @@ final class PyramidState {
     termStart[term] = at;
   }
 
+  /// The ML-DSA fingerprint [key] signs with, as the records fixed it.
+  String? _pqOf(String key) => key == powerKey ? powerKeyPq : members[key]?.pq;
+
+  /// Why a signature of [r] does not count: it carries another ML-DSA key
+  /// than its signer's (a forged Ed25519 half paired with the forger's own
+  /// ML-DSA key). Null when every known signer's key matches.
+  String? _pqMismatch(PyramidRecord r, Set<String> tsigs) {
+    for (final String k in r.sigs.keys) {
+      final String? want = _pqOf(k);
+      if (want != null && r.pqIdOf(k) != want) {
+        return 'podpis innym kluczem ML-DSA niż klucz osoby';
+      }
+    }
+    for (final String k in tsigs) {
+      final String? want = _pqOf(k);
+      if (want != null && r.pqIdOf(k, treasurer: true) != want) {
+        return 'podpis skarbnika innym kluczem ML-DSA';
+      }
+    }
+    return null;
+  }
+
   /// Applies one record; returns why it does not count, or null.
   String? _apply(PyramidRecord r, Set<String> tsigs) {
     final Map<String, dynamic> b = r.body;
     final List<String> by = r.signers;
+    final String? keyMismatch = _pqMismatch(r, tsigs);
+    if (keyMismatch != null) {
+      return keyMismatch;
+    }
     switch (r.type) {
       case PyrT.genesis:
-        if (r.id != id || occupant.isNotEmpty) {
+        // The pinned record itself: its power key signs it, nobody sits
+        // in the pyramid yet.
+        final String pk = r.str('pk');
+        if (r.id != id || powerKey != null) {
           return 'zły początek';
         }
-        final PyrMember? m = _memberFrom(b['founder'], r.at, null);
-        if (m == null || by.length != 1 || by.first != m.key) {
-          return 'zły założyciel';
+        if (!PyramidRecord.isCanonicalKey(pk) ||
+            by.length != 1 ||
+            by.first != pk) {
+          return 'genesis podpisuje klucz władzy';
+        }
+        final Object? pq = b['pq'];
+        if (pq != null && !PyramidRecord.isCanonicalKey(pq)) {
+          return 'zły odcisk klucza władzy';
         }
         name = r.str('name');
         params.apply(b['params']);
-        members[m.key] = m;
-        _place(m.key, '', r.id);
+        powerKey = pk;
+        powerKeyPq = pq as String?;
+        usedPowerKeys.add(pk);
         termStart[1] = r.at;
         history.add(
           PyrHistory(
@@ -1533,18 +1569,62 @@ final class PyramidState {
           ),
         );
         return null;
+      case PyrT.found:
+        // The first head, seated by the holder of the power key while the
+        // pyramid is empty.
+        final PyrMember? m = _memberFrom(b['m'], r.at, null, founder: true);
+        final String? pk = powerKey;
+        if (pk == null || m == null) {
+          return 'zły założyciel';
+        }
+        if (position.isNotEmpty) {
+          return 'piramida ma już szefa';
+        }
+        if (!by.contains(pk) || !by.contains(m.key)) {
+          return 'podpisują klucz władzy i założyciel';
+        }
+        if (r.pqIdOf(m.key) != m.pq) {
+          return 'założyciel podpisuje innym kluczem ML-DSA';
+        }
+        if (bannedAt(m.key, 'perm', r.at)) {
+          return 'ban stały';
+        }
+        members[m.key] = m;
+        knownBy.remove(m.key);
+        _place(m.key, '', r.id);
+        powerHead = m.key;
+        history.add(
+          PyrHistory(
+            r.at,
+            t('{name} zakłada piramidę jako pierwszy szef', {'name': m.name}),
+            r.id,
+          ),
+        );
+        return null;
+      case PyrT.handover:
+        return _handover(r);
       case PyrT.admit:
+        // "Polecenie": the sponsor (any member) vouches for the newcomer
+        // and picks a free place in their own branch; the head of the cell
+        // there co-signs (the sponsor itself for a place right under it).
+        final String sponsor = r.str('sp');
         final String headKey = r.str('head');
-        final String? headPath = position[headKey];
-        final PyrMember? m = _memberFrom(b['m'], r.at, headKey);
+        final String slot = r.str('slot');
+        final String? sponsorPath = position[sponsor];
+        final PyrMember? m = _memberFrom(b['m'], r.at, sponsor);
         if (m == null) {
           return 'złe dane przyjmowanego (rok urodzenia)';
         }
-        if (headPath == null) {
-          return 'przyjmujący nie jest w piramidzie';
+        if (sponsorPath == null) {
+          return 'polecający nie jest w piramidzie';
         }
-        if (!(by.length == 2 && by.contains(headKey) && by.contains(m.key))) {
-          return 'potrzebne podpisy obu osób';
+        if (!by.contains(sponsor) ||
+            !by.contains(headKey) ||
+            !by.contains(m.key)) {
+          return 'podpisują polecający, nowa osoba i szef komórki';
+        }
+        if (r.pqIdOf(m.key) != m.pq) {
+          return 'nowa osoba podpisuje innym kluczem ML-DSA';
         }
         if (position.containsKey(m.key)) {
           return 'już jest w piramidzie';
@@ -1552,22 +1632,41 @@ final class PyramidState {
         if (bannedAt(m.key, 'perm', r.at)) {
           return 'ban stały';
         }
-        if (bannedAt(headKey, 'noadmit', r.at)) {
-          return 'przyjmujący ma zakaz przyjmowania';
+        if (bannedAt(sponsor, 'noadmit', r.at)) {
+          return 'polecający ma zakaz przyjmowania';
         }
-        final String? slot = freeSlot(headPath);
-        if (slot == null) {
-          return 'brak wolnego miejsca';
+        if (slot.isEmpty ||
+            !PyrPath.valid(slot) ||
+            !PyrPath.within(slot, sponsorPath)) {
+          return 'miejsce spoza gałęzi polecającego';
+        }
+        if (_exists(slot) || occupant[PyrPath.parent(slot)] == null) {
+          return 'to miejsce nie jest wolne';
+        }
+        if (occupant[PyrPath.parent(slot)] != headKey) {
+          return 'szef komórki już inny';
         }
         members[m.key] = m;
+        knownBy.remove(m.key);
         _place(m.key, slot, r.id);
+        // Right into the sponsor's own cell: the sponsor knows them (met
+        // in person, QR) — that is the cell's confirmation.
+        if (headKey == sponsor && canVote(sponsor, r.at)) {
+          knownBy[m.key] = <String, int>{sponsor: r.at};
+        }
         history.add(
           PyrHistory(
             r.at,
-            t('{head} przyjął(-ęła) {name}', {
-              'head': _name(headKey),
-              'name': m.name,
-            }),
+            headKey == sponsor
+                ? t('{head} przyjął(-ęła) {name}', {
+                    'head': _name(headKey),
+                    'name': m.name,
+                  })
+                : t('{sponsor} polecił(a) {name} do komórki {head}', {
+                    'sponsor': _name(sponsor),
+                    'name': m.name,
+                    'head': _name(headKey),
+                  }),
             r.id,
           ),
         );
@@ -1584,8 +1683,9 @@ final class PyramidState {
             upPath == cell) {
           return 'nowy szef nie jest członkiem tej komórki';
         }
-        if (_countOf(by, cellOf(cell)) < 2) {
-          return 'potrzeba 2 z 3 w komórce';
+        // Only those with a vote in the cell count ([canVote]).
+        if (_countOf(by, cellVoters(cell, r.at)) < 2) {
+          return 'potrzeba 2 z 3 w komórce (z prawem głosu)';
         }
         _swap(cell, upPath, r);
         return null;
@@ -1735,7 +1835,7 @@ final class PyramidState {
             if (occupant[c] != null) occupant[c]!,
         ];
         if (b['branch'] == true && below.isNotEmpty) {
-          // With the whole branch (§20.4): the whole own cell agrees.
+          // With the whole branch: the whole own cell agrees.
           if (!below.every(by.contains)) {
             return 'przejście z gałęzią: zgoda całej komórki';
           }
@@ -1800,7 +1900,7 @@ final class PyramidState {
           return 'cofnąć może szczyt albo wystawca';
         }
         // From now on it (and every delegation passed on from it) is worth
-        // nothing; the acts done before stay, those it lists (§21.2).
+        // nothing; the acts done before stay, those it lists.
         d
           ..revoked = true
           ..knownAtRevocation = known.whereType<String>().toSet();
@@ -1924,25 +2024,28 @@ final class PyramidState {
       case PyrT.tally:
         return _tally(r);
       case PyrT.constitution:
-        final PyrReferendum? ref = referenda[r.str('ref')];
-        if (ref == null || ref.kind != 'constitution' || !_twoOfTop(r)) {
-          return 'zmiana zasad tylko po referendum';
+        // The top changes the rules itself (2 of 3); a referendum before
+        // only advises it. They apply a day later, within the hard limits.
+        if (!_twoOfTop(r)) {
+          return 'zasady zmienia szczyt (2 z 3)';
         }
-        // Not before the sums of the branches had their time to come up.
-        if (r.at < ref.end + kPyrTallyGraceMs) {
-          return 'za wcześnie: sumy gałęzi jeszcze spływają';
+        final Object? p = b['params'];
+        final Map<String, dynamic> changed = <String, dynamic>{
+          if (p is Map)
+            for (final MapEntry<dynamic, dynamic> e in p.entries)
+              if (e.key is String && e.value is int) e.key as String: e.value,
+        };
+        if (changed.isEmpty) {
+          return 'złe zasady';
         }
-        if (!constitutionPasses(ref.id)) {
-          return 'referendum nie przeszło';
-        }
-        params.apply(ref.params);
-        _natLead.clear();
-        history.add(
-          PyrHistory(
-            r.at,
-            t('Nowe zasady (wersja {version})', {'version': params.version}),
-            r.id,
-          ),
+        // A day from when it came, when it came late (back-dated past
+        // the day's wait, or held back).
+        final int since = _timeOf(r);
+        paramsChanges[r.id] = PyrParamsChange(
+          id: r.id,
+          params: changed,
+          at: r.at,
+          effectiveAt: since + kPyrParamsDelayMs,
         );
         return null;
       case PyrT.emit:
@@ -1954,18 +2057,11 @@ final class PyramidState {
         if (amount > kPyrMaxAmount) {
           return 'za duża kwota';
         }
-        // Above the limit only what a referendum of the whole pyramid
-        // allowed, once (§23.4).
-        final String? byRef = r.body['ref'] is String
-            ? r.body['ref'] as String
-            : null;
-        if (byRef != null) {
-          final String? why = _emitReferendumProblem(byRef, to, amount, r.at);
-          if (why != null) {
-            return why;
-          }
-        } else if (amount > params.emitLimit ||
-            pyrAdd(emittedWithin(r.at), amount) > params.emitLimit) {
+        // Counted from when it came, when it came late: dated back into
+        // old 30-day windows it finds no fresh limit there.
+        final int since = _timeOf(r);
+        if (amount > params.emitLimit ||
+            pyrAdd(emittedWithin(since), amount) > params.emitLimit) {
           // A rolling 30-day limit: a new head (a new term) does not bring
           // a fresh one.
           return 'przekroczony limit emisji (30 dni)';
@@ -1978,58 +2074,37 @@ final class PyramidState {
           amount: amount,
           why: _clip(r.str('why'), 500),
           term: term,
-          at: r.at,
-          effectiveAt: r.at + params.emitDelayHours * 3600 * 1000,
+          at: since,
+          signedAt: r.at,
+          effectiveAt: since + params.emitDelayHours * 3600 * 1000,
           signers: signers,
           vetoers: <String>[
             for (final String k in topCell)
               if (!signers.contains(k)) k,
           ],
-          referendum: byRef,
         );
         return null;
       case PyrT.veto:
-        final String target = r.str('emit');
-        // An emission, or (by any part or the merge itself) the money a
-        // merge converted: one veto stops all of it.
-        final PyrEmission? e =
-            emissions[target] ??
-            emissions.values
-                .where((PyrEmission x) => x.group == target)
-                .firstOrNull;
+        final PyrEmission? e = emissions[r.str('emit')];
         if (e == null || e.vetoed || e.done) {
           return 'nie ma czego zawetować';
         }
-        if (r.at < e.at || r.at >= e.effectiveAt) {
+        // Within the wait as its own time sets it (the same on every
+        // phone), or as it runs here from when it came late.
+        final bool inSigned = r.at >= e.signedAt && r.at < e.signedEnd;
+        final bool inHere = r.at >= e.at && r.at < e.effectiveAt;
+        if (!inSigned && !inHere) {
           return 'za późno na weto';
         }
         if (!by.any(e.vetoers.contains)) {
           return 'weto: trzeci członek szczytu';
         }
-        final List<PyrEmission> parts = e.group == null
-            ? <PyrEmission>[e]
-            : emissions.values
-                  .where((PyrEmission x) => x.group == e.group && !x.done)
-                  .toList();
-        int stopped = 0;
-        for (final PyrEmission x in parts) {
-          x.vetoed = true;
-          stopped = pyrAdd(stopped, x.amount);
-          emittedInTerm[x.term] = max(
-            0,
-            (emittedInTerm[x.term] ?? 0) - x.amount,
-          );
-        }
+        e.vetoed = true;
+        emittedInTerm[e.term] = max(0, (emittedInTerm[e.term] ?? 0) - e.amount);
         history.add(
           PyrHistory(
             r.at,
-            e.group == null
-                ? t('Weto wobec emisji {amount}', {
-                    'amount': pyrMoney(e.amount),
-                  })
-                : t('Weto wobec przeliczenia po połączeniu ({amount})', {
-                    'amount': pyrMoney(stopped),
-                  }),
+            t('Weto wobec emisji {amount}', {'amount': pyrMoney(e.amount)}),
             r.id,
           ),
         );
@@ -2051,14 +2126,9 @@ final class PyramidState {
         if (!byCond && !refundByPayer) {
           return 'rozlicza odbiorca warunku albo płacący po terminie';
         }
-        // An exchange payment is taken only with the key of its lock.
-        final String? lock = e.lock;
-        if (ok && lock != null && !pyrUnlocks(lock, r.str('pre'))) {
-          return 'zły klucz wymiany';
-        }
         // Like a transfer: most treasurers sign it, and an honest one signs
         // one settlement per payment — so a late acceptance dated before a
-        // refund (or the other way round) cannot get in (§23.5).
+        // refund (or the other way round) cannot get in.
         _evidence('x|${e.id}', r.id, tsigs);
         final int validT = tsigs.where(treasurers.contains).length;
         if (validT < treasurerMajority) {
@@ -2068,9 +2138,6 @@ final class PyramidState {
         if (!ok) {
           account(e.from).creditAll(e.parts);
           return null;
-        }
-        if (lock != null) {
-          e.pre = r.str('pre');
         }
         if (!e.isChain) {
           account(e.to).creditAll(e.parts);
@@ -2119,35 +2186,13 @@ final class PyramidState {
           ),
         );
         return null;
-      case PyrT.merge:
-        return _merge(r);
-      case PyrT.merged:
-        if (!_twoOfTop(r) || r.str('into').isEmpty) {
-          return 'połączyć może szczyt (2 z 3)';
-        }
-        // Also 2 of the top as it stands today (without closing records):
-        // a top replaced since cannot close the pyramid by back-dating.
-        final Set<String>? today = _finalTop;
-        if (today != null && _countOf(by, today) < 2) {
-          return 'zamknąć może tylko obecny szczyt';
-        }
-        mergedInto = r.str('into');
-        // Its money went over as counted at the cut (§20.5); later money
-        // records do not count here (second pass of [fold]).
-        if (b['cut'] is int) {
-          mergeCut = min(b['cut'] as int, r.at);
-        }
-        history.add(
-          PyrHistory(r.at, t('Piramida dołączona jako gałąź innej'), r.id),
-        );
-        return null;
       case PyrT.offer:
         final String k = by.firstOrNull ?? '';
         if (!members.containsKey(k)) {
           return 'nie członek';
         }
-        // A kind's price by level of acquaintance, {friend, fof, stranger}
-        // (§24); [offers] keeps the highest.
+        // A kind's price by level of acquaintance, {friend, fof, stranger};
+        // [offers] keeps the highest.
         final Map<String, int> flat = <String, int>{};
         final Map<String, Map<String, int>> levels =
             <String, Map<String, int>>{};
@@ -2176,47 +2221,17 @@ final class PyramidState {
         offers[k] = flat;
         offerLevels[k] = levels;
         return null;
-      case PyrT.fxRate:
-        return _fxRate(r);
       case PyrT.natPin:
         return _natPin(r);
       case PyrT.badge:
         return _badge(r);
-      case PyrT.met:
-        return _met(r);
+      case PyrT.known:
+        return _known(r);
     }
     return 'nieznany rodzaj';
   }
 
-  /// Why the referendum [refId] does not allow emitting [amount] to [to]
-  /// at [at] (§23.4), or null: a referendum of the whole pyramid about
-  /// exactly this emission, passed like new rules (full count, more than
-  /// half of the active members, "Tak" above the rest), counted, and not
-  /// used before.
-  String? _emitReferendumProblem(String refId, String to, int amount, int at) {
-    final PyrReferendum? ref = referenda[refId];
-    final Map<String, dynamic>? p = ref?.params;
-    if (ref == null || ref.kind != 'emit' || p == null) {
-      return 'emisja ponad limit tylko po referendum';
-    }
-    if (p['to'] != to || p['amount'] != amount) {
-      return 'emisja inna niż w referendum';
-    }
-    if (at < ref.end + kPyrTallyGraceMs) {
-      return 'za wcześnie: sumy gałęzi jeszcze spływają';
-    }
-    if (emissions.values.any(
-      (PyrEmission e) => e.referendum == refId && !e.vetoed,
-    )) {
-      return 'to referendum już wykorzystano';
-    }
-    if (!referendumPasses(refId)) {
-      return 'referendum nie przeszło';
-    }
-    return null;
-  }
-
-  /// The most posts one national section keeps pinned (§22.2).
+  /// The most posts one national section keeps pinned.
   static const int maxNatPins = 3;
 
   /// The section's lead pins a post of the section ('on' false unpins).
@@ -2250,7 +2265,7 @@ final class PyramidState {
     return null;
   }
 
-  /// A member shows their gender badge (§20.2a): the gender and salt, with
+  /// A member shows their gender badge: the gender and salt, with
   /// the published birth year, must open the commitment their admission
   /// confirmed; 'off' hides it.
   String? _badge(PyramidRecord r) {
@@ -2276,62 +2291,100 @@ final class PyramidState {
     return null;
   }
 
-  /// A member met another one in person (§6.2): counted once per pair.
-  String? _met(PyramidRecord r) {
+  /// [r]'s signer confirms knowing 'k', somebody of their own cell: from
+  /// then on 'k' votes ([canVote]). Only a member who votes confirms, so two
+  /// newcomers cannot give each other the vote.
+  String? _known(PyramidRecord r) {
     final String k = r.signers.length == 1 ? r.signers.first : '';
     final String about = r.str('k');
-    if (!position.containsKey(k)) {
+    if (!position.containsKey(k) ||
+        about == k ||
+        !position.containsKey(about)) {
       return 'nie członek';
     }
-    if (about == k || !position.containsKey(about)) {
-      return 'nie członek';
+    if (!cellmates(about).contains(k)) {
+      return 'potwierdza ktoś z tej samej komórki';
     }
-    if (!(metBy[about] ??= <String>{}).add(k)) {
+    if (!canVote(k, r.at)) {
+      return 'potwierdza ktoś, kto już głosuje';
+    }
+    final Map<String, int> by = knownBy[about] ??= <String, int>{};
+    if (by.containsKey(k)) {
       return 'już potwierdzone';
     }
+    by[k] = r.at;
+    history.add(
+      PyrHistory(
+        r.at,
+        t('{name} potwierdza: zna {other}', {
+          'name': _name(k),
+          'other': _name(about),
+        }),
+        r.id,
+      ),
+    );
     return null;
   }
 
-  /// The most other pyramids one member exchanges with.
-  static const int maxFxRates = 20;
-
-  /// A member's exchange rate for money of pyramid 'from' (paid out here;
-  /// 'n' = 0 withdraws it).
-  String? _fxRate(PyramidRecord r) {
-    final String k = r.signers.length == 1 ? r.signers.first : '';
+  /// The power key passes to the head now at the top. It only certifies the
+  /// line of heads: the old key signs (or, [kPyrHandoverWaitMs] after the
+  /// head took the top, most of the top cell), and so do the new key and
+  /// the new head. A key never comes back, and no member key is one.
+  String? _handover(PyramidRecord r) {
+    final List<String> by = r.signers;
     final String from = r.str('from');
-    if (!isMember(k) || r.str('k') != k) {
-      return 'nie członek';
+    final String to = r.str('to');
+    final String head = r.str('head');
+    final String? pk = powerKey;
+    if (pk == null || from != pk) {
+      return 'to nie jest obecny klucz władzy';
     }
-    if (from.isEmpty || from.length > 100 || from == id) {
-      return 'zła piramida';
+    if (head.isEmpty || occupant[''] != head) {
+      return 'klucz władzy dostaje obecny szef piramidy';
     }
-    final int numer = r.integer('n');
-    final int denom = r.integer('d');
-    final int most = r.integer('max');
-    if (numer < 0 ||
-        numer > kPyrMaxRate ||
-        denom < 1 ||
-        denom > kPyrMaxRate ||
-        most < 0 ||
-        most > kPyrMaxAmount) {
-      return 'zły kurs';
+    if (!PyramidRecord.isCanonicalKey(to) ||
+        usedPowerKeys.contains(to) ||
+        members.containsKey(to)) {
+      return 'zły nowy klucz władzy';
     }
-    final Map<String, PyrFxRate> mine = fxRates[k] ??= <String, PyrFxRate>{};
-    if (numer == 0) {
-      mine.remove(from);
-      return null;
+    if (!by.contains(to) || !by.contains(head)) {
+      return 'podpisują nowy klucz i szef piramidy';
     }
-    if (!mine.containsKey(from) && mine.length >= maxFxRates) {
-      return 'za dużo kursów';
+    // The new key's ML-DSA half, named under the old key's (or the top
+    // cell's) signatures and carried by its own.
+    final String tpq = r.str('tpq');
+    if (!PyramidRecord.isCanonicalKey(tpq) || r.pqIdOf(to) != tpq) {
+      return 'zły odcisk nowego klucza władzy';
     }
-    mine[from] = PyrFxRate(numer: numer, denom: denom, max: most, at: r.at);
+    final List<String> top = topCell;
+    final bool byOld = by.contains(from);
+    final bool byTop =
+        r.at >= headSince + kPyrHandoverWaitMs &&
+        _countOf(by, top) >= top.length ~/ 2 + 1;
+    if (!byOld && !byTop) {
+      return 'podpisuje dawny klucz władzy (po 72 h: większość szczytu)';
+    }
+    powerKey = to;
+    powerKeyPq = tpq;
+    powerHead = head;
+    usedPowerKeys.add(to);
+    history.add(
+      PyrHistory(
+        r.at,
+        byOld
+            ? t('Klucz władzy przekazany: {name}', {'name': _name(head)})
+            : t('Klucz władzy przekazany przez szczyt: {name}', {
+                'name': _name(head),
+              }),
+        r.id,
+      ),
+    );
     return null;
   }
 
   static String _clip(String s, int n) => s.length > n ? s.substring(0, n) : s;
 
-  /// One intermediary of an announcement accepted (§24): it keeps its
+  /// One intermediary of an announcement accepted: it keeps its
   /// share; the rest waits for the next person it names (who accepts or
   /// returns it), or goes back to the payer when there is nobody next.
   void _settleHop(PyrEscrow e, PyramidRecord r) {
@@ -2398,11 +2451,16 @@ final class PyramidState {
 
   /// A member from a record: the key in its one canonical spelling (an
   /// alias would make a second identity of the same person, e.g. a banned
-  /// one coming back), and the birth year, required and plausible
-  /// (§20.2a).
-  PyrMember? _memberFrom(Object? json, int at, String? admittedBy) {
+  /// one coming back), and the birth year, required and plausible.
+  PyrMember? _memberFrom(
+    Object? json,
+    int at,
+    String? admittedBy, {
+    bool founder = false,
+  }) {
     if (json is! Map ||
         !PyramidRecord.isCanonicalKey(json['k']) ||
+        !PyramidRecord.isCanonicalKey(json['pq']) ||
         json['n'] is! String) {
       return null;
     }
@@ -2412,6 +2470,7 @@ final class PyramidState {
     }
     return PyrMember(
       key: json['k'] as String,
+      pq: json['pq'] as String,
       name: _clip(json['n'] as String, 40),
       nat: json['nat'] is String
           ? _clip(json['nat'] as String, 8).toUpperCase()
@@ -2421,6 +2480,7 @@ final class PyramidState {
       joinedAt: at,
       admittedBy: admittedBy,
       addr: json['addr'] is String ? _clip(json['addr'] as String, 300) : '',
+      founder: founder,
     );
   }
 
@@ -2460,7 +2520,8 @@ final class PyramidState {
     final String cell = r.str('cell');
     final String head = r.str('head');
     final RingSignature? ring = r.ring;
-    final List<String> members = cellOf(cell);
+    // The ring is the cell's members who vote ([canVote]).
+    final List<String> members = cellVoters(cell, r.at);
     final List<String> claimed = r.body['ring'] is List
         ? (r.body['ring'] as List).whereType<String>().toList()
         : const <String>[];
@@ -2469,7 +2530,7 @@ final class PyramidState {
     }
     if (!(claimed.length == members.length &&
         claimed.toSet().containsAll(members))) {
-      return 'pierścień to nie ta komórka';
+      return 'pierścień to nie głosujący tej komórki';
     }
     if (!ring.verify(
       ring: claimed.map(_key).toList(),
@@ -2562,6 +2623,7 @@ final class PyramidState {
     if (e.cell.isEmpty) {
       _termChange(at);
     }
+    _noteHead(at);
     history.add(
       PyrHistory(
         at,
@@ -2583,11 +2645,11 @@ final class PyramidState {
   }
 
   /// Whether the signers of [r] can act with [power] on [targetPath]
-  /// through delegation [via] (§21.2): the holder signed, the whole chain
+  /// through delegation [via]: the holder signed, the whole chain
   /// is in force (not revoked, not expired, every holder still in the
   /// pyramid), the target is in scope, and no limit on the way up is used
   /// up. An act dated before a revocation on the way up counts only when
-  /// that revocation listed it (otherwise it was made up later, §21.2).
+  /// that revocation listed it (otherwise it was made up later).
   /// Records no use; [_use] does once the act counts.
   bool _canUse(String via, String power, String targetPath, PyramidRecord r) {
     final PyrDelegation? d = delegations[via];
@@ -2653,7 +2715,6 @@ final class PyramidState {
     'pause',
     'content',
     'reports',
-    'referendum',
     'alarm',
   };
 
@@ -2754,7 +2815,7 @@ final class PyramidState {
     if (!allowed) {
       return 'banuje szczyt albo delegat w swoim zakresie';
     }
-    // Immunity: the higher levels need their own cell (§21.1a).
+    // Immunity: the higher levels need their own cell.
     final String? p = position[target];
     if (p != null &&
         p.length < params.immunityDepth &&
@@ -2797,6 +2858,9 @@ final class PyramidState {
     return null;
   }
 
+  /// A referendum on any question, asked only by the top (2 of 3), to the
+  /// whole pyramid, a branch or a nationality. It binds nothing: its
+  /// result is published and the top decides.
   String? _referendum(PyramidRecord r) {
     final Map<dynamic, dynamic> scope = r.body['scope'] is Map
         ? r.body['scope'] as Map
@@ -2804,60 +2868,22 @@ final class PyramidState {
     final String kind = scope['k'] is String ? scope['k'] as String : 'all';
     final String path = scope['p'] is String ? scope['p'] as String : '';
     final String nat = scope['nat'] is String ? scope['nat'] as String : '';
-    final String refKind = r.str('kind').isEmpty ? 'normal' : r.str('kind');
     final List<String> opts = r.body['opts'] is List
         ? (r.body['opts'] as List)
               .whereType<String>()
               .map((String o) => _clip(o, 200))
-              .take(20)
               .toList()
         : const <String>[];
-    // A minimum length nobody can lower (not even by new rules): new rules
-    // need 72 h of voting, anything else two minutes.
-    // Money above the limit (§23.4) is voted on like new rules.
-    final bool emitVote = refKind == 'emit';
-    final int minLength = refKind == 'constitution' || emitVote
-        ? kPyrMinConstitutionMs
-        : kPyrMinReferendumMs;
-    if (opts.length < 2 || r.integer('end') < r.at + minLength) {
-      return 'złe referendum (za mało opcji albo za krótkie)';
+    if (opts.length < 2 ||
+        opts.length > kPyrMaxReferendumOptions ||
+        r.integer('end') < r.at + kPyrMinReferendumMs) {
+      return 'złe referendum (2–6 opcji, co najmniej 2 min)';
     }
     if (kind == 'branch' && !PyrPath.valid(path)) {
       return 'zły zasięg';
     }
-    final String? via = r.body['via'] is String
-        ? r.body['via'] as String
-        : null;
-    bool ok;
-    if (refKind == 'constitution') {
-      ok = _twoOfTop(r) && kind == 'all';
-    } else if (emitVote) {
-      final Object? p = r.body['params'];
-      if (p is! Map ||
-          !PyramidRecord.isCanonicalKey(p['to']) ||
-          p['amount'] is! int ||
-          (p['amount'] as int) <= 0 ||
-          (p['amount'] as int) > kPyrMaxAmount) {
-        return 'złe referendum o emisji';
-      }
-      ok = _twoOfTop(r) && kind == 'all';
-    } else {
-      ok =
-          _twoOfTop(r) ||
-          (kind == 'nat' &&
-              nat.isNotEmpty &&
-              r.signers.contains(nationalLead(nat)));
-      // A delegate asks only its branch: a question to everybody (or to a
-      // nationality) needs a whole-pyramid delegation.
-      if (!ok &&
-          via != null &&
-          _canUse(via, 'referendum', kind == 'branch' ? path : '', r)) {
-        ok = true;
-        _use(via, r);
-      }
-    }
-    if (!ok) {
-      return 'referendum ogłasza szczyt, delegat albo prowadzący sekcję';
+    if (!_twoOfTop(r)) {
+      return 'referendum ogłasza szczyt (2 z 3)';
     }
     referenda[r.id] = PyrReferendum(
       id: r.id,
@@ -2867,11 +2893,7 @@ final class PyramidState {
       scopePath: path,
       scopeNat: nat,
       end: r.integer('end'),
-      kind: refKind,
       at: r.at,
-      params: r.body['params'] is Map
-          ? Map<String, dynamic>.from(r.body['params'] as Map)
-          : null,
     );
     return null;
   }
@@ -2887,12 +2909,12 @@ final class PyramidState {
     return kids.isEmpty ? p == root : p == kids.first;
   }
 
-  /// A cell head's sum of its branch (§21.3). Checkable against the sums
+  /// A cell head's sum of its branch. Checkable against the sums
   /// below: only after the end; whole numbers, none above the branch; the
   /// newest sum of every branch right below (a branch with people under it
   /// may be missing only after [kPyrTallyGraceMs]); each counted once; at
-  /// most one vote more per direct member met in person by 2 others
-  /// ([metInPerson], §20.6), and the root's own vote where it was passed.
+  /// most one vote more per direct member with a vote at the end
+  /// ([canVote]), and the root's own vote where it was passed.
   String? _tally(PyramidRecord r) {
     final PyrReferendum? ref = referenda[r.str('ref')];
     final String k = r.signers.length == 1 ? r.signers.first : '';
@@ -2956,8 +2978,8 @@ final class PyramidState {
         return 'czeka na sumę gałęzi niżej';
       }
     }
-    // Only members met in person by 2 others vote (§20.6).
-    bool votes(String? key) => key != null && metInPerson(key);
+    // Only members met in person by 2 others vote.
+    bool votes(String? key) => key != null && canVote(key, ref.end);
     final int directs = PyrPath.children(
       p,
     ).where((String c) => votes(occupant[c])).length;
@@ -2994,7 +3016,7 @@ final class PyramidState {
     return null;
   }
 
-  /// Evidence of a treasurer signing two orders for one [slot] (§23.4).
+  /// Evidence of a treasurer signing two orders for one [slot].
   void _evidence(String slot, String recordId, Set<String> tsigs) {
     final Map<String, Set<String>> signed = _ordersSigned[slot] ??=
         <String, Set<String>>{};
@@ -3025,10 +3047,6 @@ final class PyramidState {
     if (!r.signers.contains(from)) {
       return 'brak podpisu płacącego';
     }
-    final String? condProblem = pyrCondProblem(r.body['cond']);
-    if (condProblem != null) {
-      return condProblem;
-    }
     // Evidence of a treasurer signing two orders with one number.
     _evidence('$from|$seq', r.id, tsigs);
     final List<String> current = treasurers;
@@ -3058,9 +3076,6 @@ final class PyramidState {
       final int hops = cond['hops'] is int
           ? (cond['hops'] as int).clamp(0, kMaxAdHops - 1)
           : 0;
-      // An exchange: what the exchanger is asked to pay out elsewhere.
-      final Map<dynamic, dynamic>? fx =
-          cond['hl'] is String && cond['fx'] is Map ? cond['fx'] as Map : null;
       escrows[r.id] = PyrEscrow(
         id: r.id,
         at: r.at,
@@ -3076,10 +3091,6 @@ final class PyramidState {
         share: share,
         hops: share > 0 ? hops : 0,
         hash: cond['h'] is String ? cond['h'] as String : null,
-        lock: cond['hl'] is String ? cond['hl'] as String : null,
-        fxPy: fx?['py'] as String?,
-        fxTo: fx?['to'] as String?,
-        fxAmount: fx?['a'] as int? ?? 0,
       );
     } else {
       account(to).creditAll(parts);
@@ -3096,158 +3107,6 @@ final class PyramidState {
       ),
     );
     return null;
-  }
-
-  /// The most people one merge may bring (a big branch; the record size
-  /// limit is the real bound).
-  static const int maxMergeSize = 20000;
-
-  String? _merge(PyramidRecord r) {
-    final String under = r.str('under');
-    final String? underPath = position[under];
-    final List<Map<dynamic, dynamic>> snap = r.body['snap'] is List
-        ? (r.body['snap'] as List).whereType<Map<dynamic, dynamic>>().toList()
-        : const <Map<dynamic, dynamic>>[];
-    if (underPath == null || !r.signers.contains(under) || snap.isEmpty) {
-      return 'złe połączenie';
-    }
-    if (snap.length > maxMergeSize) {
-      return 'połączenie za duże';
-    }
-    if (bannedAt(under, 'noadmit', r.at)) {
-      return 'przyjmujący ma zakaz przyjmowania';
-    }
-    // Every entry well formed, each place and each person once, nobody
-    // banned for good and nobody already here.
-    final Map<String, Map<dynamic, dynamic>> byRel =
-        <String, Map<dynamic, dynamic>>{};
-    final Set<String> keys = <String>{};
-    for (final Map<dynamic, dynamic> e in snap) {
-      final Object? rel = e['p'];
-      final Object? k = e['k'];
-      final Object? bal = e['bal'];
-      if (rel is! String ||
-          k is! String ||
-          rel.length > 48 ||
-          !PyrPath.valid(rel) ||
-          !PyramidRecord.isCanonicalKey(k) ||
-          e['n'] is! String ||
-          (bal != null && (bal is! int || bal < 0 || bal > kPyrMaxBalance))) {
-        return 'zły wpis połączenia';
-      }
-      if (byRel.containsKey(rel) || !keys.add(k)) {
-        return 'powtórzony wpis połączenia';
-      }
-      if (position.containsKey(k)) {
-        return 'ktoś już jest w tej piramidzie';
-      }
-      if (bannedAt(k, 'perm', r.at)) {
-        return 'ban stały';
-      }
-      byRel[rel] = e;
-    }
-    final List<String> theirTop = <String>[
-      for (final String p in <String>['', '0', '1'])
-        if (byRel[p] != null) byRel[p]!['k'] as String,
-    ];
-    if (byRel[''] == null ||
-        _countOf(r.signers, theirTop) < min(2, theirTop.length)) {
-      return 'połączenie: 2 z 3 szczytu dołączanej piramidy';
-    }
-    for (final String rel in byRel.keys) {
-      if (rel.isNotEmpty && !byRel.containsKey(PyrPath.parent(rel))) {
-        return 'dziura w strukturze';
-      }
-    }
-    final String? slot = freeSlot(underPath);
-    if (slot == null) {
-      return 'brak wolnego miejsca';
-    }
-    // Their money, converted into this pyramid's at the agreed rate
-    // (§20.5). New money here, so like an emission: 2 of this top agree,
-    // it fits the 30-day limit, waits and can be vetoed.
-    final ({int numer, int denom})? rate = _mergeRate(r.body['rate']);
-    if (rate == null) {
-      return 'zły kurs';
-    }
-    final Map<String, int> converted = <String, int>{};
-    int total = 0;
-    for (final Map<dynamic, dynamic> e in byRel.values) {
-      final Object? bal = e['bal'];
-      final int c = bal is int ? pyrConvert(bal, rate.numer, rate.denom) : 0;
-      if (c > 0) {
-        converted[e['k'] as String] = c;
-        total = pyrAdd(total, c);
-      }
-    }
-    final List<String> ourSigners = r.signers.where(topCell.contains).toList();
-    if (converted.isNotEmpty) {
-      if (!_twoOfTop(r)) {
-        return 'przeliczenie pieniędzy: zgoda 2 z 3 szczytu tej piramidy';
-      }
-      if (total > params.emitLimit ||
-          pyrAdd(emittedWithin(r.at), total) > params.emitLimit) {
-        return 'przeliczenie przekracza limit emisji (30 dni)';
-      }
-    }
-    final List<String> vetoers = <String>[
-      for (final String k in topCell)
-        if (!ourSigners.contains(k)) k,
-    ];
-    for (final MapEntry<String, Map<dynamic, dynamic>> e in byRel.entries) {
-      final PyrMember? m = _memberFrom(e.value, r.at, under);
-      if (m == null) {
-        continue;
-      }
-      members[m.key] = m;
-      _place(m.key, '$slot${e.key}', r.id);
-    }
-    for (final MapEntry<String, int> c in converted.entries) {
-      final String partId = '${r.id}|${c.key}';
-      emissions[partId] = PyrEmission(
-        id: partId,
-        to: c.key,
-        amount: c.value,
-        why: t('Przeliczenie po połączeniu (kurs {numer}:{denom})', {
-          'numer': rate.numer,
-          'denom': rate.denom,
-        }),
-        term: term,
-        at: r.at,
-        effectiveAt: r.at + params.emitDelayHours * 3600 * 1000,
-        signers: ourSigners,
-        vetoers: vetoers,
-        group: r.id,
-      );
-    }
-    if (total > 0) {
-      emittedInTerm[term] = pyrAdd(emittedInTerm[term] ?? 0, total);
-    }
-    history.add(
-      PyrHistory(
-        r.at,
-        t('Dołączono piramidę jako gałąź pod {name}', {'name': _name(under)}),
-        r.id,
-      ),
-    );
-    return null;
-  }
-
-  /// The rate of a merge: 1:1 when the record has none, null when it is
-  /// malformed.
-  static ({int numer, int denom})? _mergeRate(Object? json) {
-    if (json == null) {
-      return (numer: 1, denom: 1);
-    }
-    if (json is! Map || json['n'] is! int || json['d'] is! int) {
-      return null;
-    }
-    final int numer = json['n'] as int;
-    final int denom = json['d'] as int;
-    if (numer < 1 || numer > kPyrMaxRate || denom < 1 || denom > kPyrMaxRate) {
-      return null;
-    }
-    return (numer: numer, denom: denom);
   }
 
   /// A short, readable summary (simulator and debugging).

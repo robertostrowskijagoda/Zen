@@ -33,7 +33,7 @@ List<PyrBan> bansAgainst(PyramidService pyr, PyramidState s, String me) {
   ]..sort((PyrBan a, PyrBan b) => b.at.compareTo(a.at));
 }
 
-/// "Decyzje wobec Ciebie" (§21.4): the bans the pyramid put on this
+/// "Decyzje wobec Ciebie": the bans the pyramid put on this
 /// person, each with "Odwołaj się" (once, with a short reason, to the
 /// top) and, after that, where the appeal stands.
 class DecisionsAgainstMe extends StatelessWidget {

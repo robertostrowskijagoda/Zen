@@ -47,22 +47,12 @@ String marketPostPreview(Map<String, dynamic> entry) {
   return line.length > 90 ? '${line.substring(0, 90)}…' : line;
 }
 
-/// Asks again who this is before money leaves (§14.1 point 4): the app
+/// Asks again who this is before money leaves: the app
 /// password or biometrics, when the app has a password (otherwise yes).
 Future<bool> confirmPayment(BuildContext context) => confirmSensitiveAccess(
   context,
   reason: t('Wysyłasz pieniądze. Potwierdź, że to Ty.'),
 );
-
-/// "Za 100,00 → 95,00": a rate as people read it.
-String fxRateText(PyrFxRate r) => r.max > 0
-    ? t('za 100,00 → {amount} (najwyżej {max} naraz)', <String, Object?>{
-        'amount': formatMoney(r.payout(10000)),
-        'max': formatMoney(r.max),
-      })
-    : t('za 100,00 → {amount}', <String, Object?>{
-        'amount': formatMoney(r.payout(10000)),
-      });
 
 /// Picks a member of the pyramid.
 Future<String?> pickMember(
@@ -184,7 +174,7 @@ Future<(int, String)?> askAmount(
   return (value, m);
 }
 
-/// Money (§23) and the access market (§24).
+/// Money and the access market.
 class PyramidWallet extends StatelessWidget {
   const PyramidWallet({
     required this.pyr,
@@ -318,9 +308,7 @@ class PyramidWallet extends StatelessWidget {
     }
     String kind = 'inbox';
     int steps = 1;
-    // A paid introduction (§24): to whom; that person decides on the money.
-    String? introduce;
-    // A reshare on order (§24): which of my public posts.
+    // A reshare on order: which of my public posts.
     final List<Map<String, dynamic>> myPosts =
         pyr.ownPublicPosts?.call() ?? const <Map<String, dynamic>>[];
     Map<String, dynamic>? sharedPost;
@@ -403,50 +391,6 @@ class PyramidWallet extends StatelessWidget {
                         alignLabelWithHint: true,
                       ),
                     ),
-                  if (kind == 'intro') ...<Widget>[
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      key: const Key('pyr-intro-target'),
-                      onPressed: () => unawaited(() async {
-                        final String? who = await pickMember(
-                          context,
-                          s,
-                          except: me,
-                          title: t('Komu ma Cię przedstawić?'),
-                        );
-                        if (who != null && who != to && context.mounted) {
-                          set(() => introduce = who);
-                        }
-                      }()),
-                      icon: const Icon(Icons.handshake_outlined),
-                      label: Text(
-                        introduce == null
-                            ? t('Komu ma Cię przedstawić?')
-                            : t('Przedstawienie: {name}', <String, Object?>{
-                                'name': s.members[introduce]?.name,
-                              }),
-                      ),
-                    ),
-                    if (introduce != null && price > 0)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Text(
-                          t(
-                            'Pośrednik dostanie zapłatę dopiero, gdy {name} '
-                            'przyjmie przedstawienie; odmowa albo brak '
-                            'odpowiedzi w tydzień — pieniądze wracają do Ciebie.',
-                            <String, Object?>{
-                              'name': s.members[introduce]?.name,
-                            },
-                          ),
-                          style: TextStyle(
-                            color: ZenColors.of(context).textSecondary,
-                            fontSize: 12.5,
-                            height: 1.35,
-                          ),
-                        ),
-                      ),
-                  ],
                   if (kind == 'ad') ...<Widget>[
                     const SizedBox(height: 12),
                     Text(
@@ -537,7 +481,6 @@ class PyramidWallet extends StatelessWidget {
         kind,
         body,
         steps: kind == 'ad' ? steps : 1,
-        introduce: kind == 'intro' ? introduce : null,
         post: kind == 'reshare' ? sharedPost : null,
       );
       if (context.mounted) {
@@ -554,15 +497,21 @@ class PyramidWallet extends StatelessWidget {
     final Map<String, Map<String, int>> currentLevels =
         s.offerLevels[me] ?? const <String, Map<String, int>>{};
     String money(int? v) => v == null || v == 0 ? '' : formatMoney(v);
+    // The first-message price is set with the conversations outside
+    // friends (and kept here as it is); gates are priced in the graph.
+    final Map<String, String> kinds = <String, String>{
+      for (final MapEntry<String, String> k in kMarketKinds.entries)
+        if (k.key != 'inbox') k.key: k.value,
+    };
     final Map<String, TextEditingController> c =
         <String, TextEditingController>{
-          for (final String k in kMarketKinds.keys)
+          for (final String k in kinds.keys)
             k: TextEditingController(text: money(current[k])),
         };
-    // kind → level → field, for prices by acquaintance (§24).
+    // kind → level → field, for prices by acquaintance.
     final Map<String, Map<String, TextEditingController>> lc =
         <String, Map<String, TextEditingController>>{
-          for (final String k in kMarketKinds.keys)
+          for (final String k in kinds.keys)
             k: <String, TextEditingController>{
               for (final String l in kPriceLevels.keys)
                 l: TextEditingController(
@@ -599,8 +548,18 @@ class PyramidWallet extends StatelessWidget {
                     'telefon, gdy wiadomość przychodzi.',
                   ),
                 ),
+                const SizedBox(height: 8),
+                ZenInfo(
+                  key: const Key('pyr-price-elsewhere'),
+                  icon: Icons.toll_outlined,
+                  text: t(
+                    'Cenę pierwszej wiadomości od osób spoza znajomych '
+                    'ustawiasz w: Ustawienia → Wiadomości spoza znajomych. '
+                    'Bramy do Twoich znajomych (przedstawienia) — w Grafie.',
+                  ),
+                ),
                 for (final MapEntry<String, String> k
-                    in kMarketKinds.entries) ...<Widget>[
+                    in kinds.entries) ...<Widget>[
                   const SizedBox(height: 14),
                   if (byLevel.contains(k.key)) ...<Widget>[
                     for (final MapEntry<String, String> l
@@ -681,11 +640,14 @@ class PyramidWallet extends StatelessWidget {
     };
     final Map<String, Map<String, int>> levels = <String, Map<String, int>>{
       for (final String k in byLevel)
-        k: <String, int>{
-          for (final MapEntry<String, TextEditingController> l
-              in lc[k]!.entries)
-            l.key: read(l.value) ?? 0,
-        },
+        if (kinds.containsKey(k))
+          k: <String, int>{
+            for (final MapEntry<String, TextEditingController> l
+                in lc[k]!.entries)
+              l.key: read(l.value) ?? 0,
+          },
+      // Kept as the conversations' settings published it.
+      if (currentLevels['inbox'] != null) 'inbox': currentLevels['inbox']!,
     };
     for (final TextEditingController x in <TextEditingController>[
       ...c.values,
@@ -696,367 +658,6 @@ class PyramidWallet extends StatelessWidget {
     if (ok == true) {
       await pyr.setOffers(prices, levels: levels);
     }
-  }
-
-  /// "Zapłać komuś z innej piramidy" (§23.5): someone in another pyramid
-  /// gets the money there, through an exchanger who is in both.
-  Future<void> _payAcross(BuildContext context) async {
-    final List<String> others = pyr.knownPyramids
-        .where((String p) => p != s.id)
-        .toList();
-    if (others.isEmpty) {
-      final int asked = await pyr.fetchFriendsPyramids();
-      if (context.mounted) {
-        snack(
-          context,
-          asked == 0
-              ? t(
-                  'Nie znasz innej piramidy (nikt ze znajomych jej nie ma '
-                  'albo jeszcze się nie odezwał).',
-                )
-              : tn(
-                  asked,
-                  one:
-                      'Poprosiłem znajomych o {n} piramidę — spróbuj za chwilę.',
-                  few:
-                      'Poprosiłem znajomych o {n} piramidy — spróbuj za chwilę.',
-                  many:
-                      'Poprosiłem znajomych o {n} piramid — spróbuj za chwilę.',
-                ),
-        );
-      }
-      return;
-    }
-    final String? other = others.length == 1
-        ? others.single
-        : await showDialog<String>(
-            context: context,
-            builder: (BuildContext context) => SimpleDialog(
-              title: Text(t('Do której piramidy?')),
-              children: <Widget>[
-                for (final String p in others)
-                  SimpleDialogOption(
-                    onPressed: () => Navigator.of(context).pop(p),
-                    child: Text(pyr.pyramidState(p)?.name ?? p.substring(0, 8)),
-                  ),
-              ],
-            ),
-          );
-    final PyramidState? q = other == null ? null : pyr.pyramidState(other);
-    if (other == null || q == null || q.members.isEmpty || !context.mounted) {
-      return;
-    }
-    final String? to = await pickMember(
-      context,
-      q,
-      except: me,
-      title: t('Komu w „{name}”?', <String, Object?>{'name': q.name}),
-    );
-    if (to == null || !context.mounted) {
-      return;
-    }
-    final String toName = q.members[to]?.name ?? '?';
-    if (s.isMember(to)) {
-      snack(
-        context,
-        t(
-          '{name} jest też w Twojej piramidzie — zapłać zwyczajnie.',
-          <String, Object?>{'name': toName},
-        ),
-      );
-      return;
-    }
-    final List<({String key, String name, PyrFxRate? rate})> ex = pyr
-        .exchangers(other)
-        .where(
-          (({String key, String name, PyrFxRate? rate}) x) =>
-              x.rate != null && x.key != to,
-        )
-        .toList();
-    if (ex.isEmpty) {
-      snack(
-        context,
-        t(
-          'Nikt, kto jest w obu piramidach, nie ogłosił jeszcze kursu wymiany.',
-        ),
-      );
-      return;
-    }
-    final String? via = await showDialog<String>(
-      context: context,
-      builder: (BuildContext context) => SimpleDialog(
-        title: Text(t('Kto wymieni pieniądze?')),
-        children: <Widget>[
-          for (final ({String key, String name, PyrFxRate? rate}) x in ex)
-            SimpleDialogOption(
-              key: Key('pyr-fx-via-${x.key}'),
-              onPressed: () => Navigator.of(context).pop(x.key),
-              child: Text(
-                t('{name}: {rate} w „{pyramid}”', <String, Object?>{
-                  'name': x.name,
-                  'rate': fxRateText(x.rate!),
-                  'pyramid': q.name,
-                }),
-              ),
-            ),
-        ],
-      ),
-    );
-    final PyrFxRate? rate = via == null
-        ? null
-        : ex
-              .firstWhere(
-                (({String key, String name, PyrFxRate? rate}) x) =>
-                    x.key == via,
-              )
-              .rate;
-    if (via == null || rate == null || !context.mounted) {
-      return;
-    }
-    final (int, String)? asked = await askAmount(
-      context,
-      title: t('Ile ma dostać {name}?', <String, Object?>{'name': toName}),
-      info: t('Kwota w „{pyramid}”. Kurs: {rate}.', <String, Object?>{
-        'pyramid': q.name,
-        'rate': fxRateText(rate),
-      }),
-      fieldKey: const Key('pyr-fx-amount'),
-      confirmSend: false,
-    );
-    if (asked == null || !context.mounted) {
-      return;
-    }
-    final int amount = asked.$1;
-    final int cost = pyrConvertUp(amount, rate.numer, rate.denom);
-    if (rate.max > 0 && amount > rate.max) {
-      snack(
-        context,
-        t('Ta osoba wymienia najwyżej {max} naraz.', <String, Object?>{
-          'max': formatMoney(rate.max),
-        }),
-      );
-      return;
-    }
-    if (cost > s.balanceOf(me)) {
-      snack(
-        context,
-        t('Za mało środków: potrzeba {amount}.', <String, Object?>{
-          'amount': formatMoney(cost),
-        }),
-      );
-      return;
-    }
-    final bool go = await confirm(
-      context,
-      t('Wymiana między piramidami'),
-      t(
-        'Zapłacisz {cost} stąd, {name} dostanie {amount} w „{pyramid}”.\n\n'
-        'Twoje pieniądze czekają zablokowane. Osoba wymieniająca dostanie je '
-        'dopiero wtedy, gdy {name} odbierze wypłatę. Jeśli wymiana się nie '
-        'uda, wrócą do Ciebie najpóźniej po 3 dniach.',
-        <String, Object?>{
-          'cost': formatMoney(cost),
-          'name': toName,
-          'amount': formatMoney(amount),
-          'pyramid': q.name,
-        },
-      ),
-    );
-    if (!go || !context.mounted || !await confirmPayment(context)) {
-      return;
-    }
-    final ({PyramidRecord order, int cost})? done = await pyr.payAcross(
-      other: other,
-      to: to,
-      via: via,
-      amount: amount,
-    );
-    if (context.mounted) {
-      snack(
-        context,
-        done == null
-            ? t(
-                'Nie można teraz (poprzedni przelew jeszcze czeka albo kurs '
-                'się zmienił).',
-              )
-            : t('Zlecenie poszło do skarbników. Resztę telefony zrobią same.'),
-      );
-    }
-  }
-
-  /// Sets this person's exchange rate: paid out in [payout] for money of
-  /// [from] (§23.5).
-  Future<void> _setRate(
-    BuildContext context,
-    PyramidState payout,
-    PyramidState from,
-  ) async {
-    final PyrFxRate? now = payout.fxRates[me]?[from.id];
-    final TextEditingController value = TextEditingController(
-      text: now == null ? '' : formatMoney(now.payout(10000)),
-    );
-    final TextEditingController most = TextEditingController(
-      text: now == null || now.max == 0 ? '' : formatMoney(now.max),
-    );
-    final String? action = await showDialog<String>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: Text(t('Mój kurs wymiany')),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              ZenInfo(
-                icon: Icons.currency_exchange_rounded,
-                text: t(
-                  'Ktoś płaci Ci w „{from}”, a Ty wypłacasz w „{payout}” '
-                  'osobie, którą wskaże. Telefon robi to sam według kursu. '
-                  'Pieniądze dostajesz dopiero wtedy, gdy ta osoba odbierze '
-                  'wypłatę.',
-                  <String, Object?>{'from': from.name, 'payout': payout.name},
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('pyr-fx-rate'),
-                controller: value,
-                autofocus: true,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: InputDecoration(
-                  labelText: t(
-                    'Za 100,00 z „{name}” wypłacam',
-                    <String, Object?>{'name': from.name},
-                  ),
-                  hintText: '100,00',
-                  prefixIcon: const Icon(Icons.payments_outlined),
-                ),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: most,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: InputDecoration(
-                  labelText: t('Najwięcej naraz'),
-                  hintText: t('bez limitu'),
-                  prefixIcon: const Icon(Icons.vertical_align_top_rounded),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: <Widget>[
-          if (now != null)
-            TextButton(
-              onPressed: () => Navigator.of(context).pop('off'),
-              child: Text(t('Wycofaj')),
-            ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(t('Anuluj')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop('save'),
-            child: Text(t('Zapisz')),
-          ),
-        ],
-      ),
-    );
-    final int? numer = parseMoney(value.text);
-    final int limit = parseMoney(most.text) ?? 0;
-    disposeLater(value);
-    disposeLater(most);
-    if (action == 'off') {
-      await pyr.setFxRate(payoutPy: payout.id, fromPy: from.id, numer: 0);
-      return;
-    }
-    if (action != 'save') {
-      return;
-    }
-    if (numer == null || numer <= 0) {
-      if (context.mounted) {
-        snack(context, t('Podaj kwotę większą od zera.'));
-      }
-      return;
-    }
-    await pyr.setFxRate(
-      payoutPy: payout.id,
-      fromPy: from.id,
-      numer: numer,
-      most: limit,
-    );
-  }
-
-  /// What an exchange payment [e] here is, for this person.
-  String _exchangeTitle(PyrEscrow e) {
-    final PyramidState? q = e.fxPy == null ? null : pyr.pyramidState(e.fxPy!);
-    final String where = q == null ? t('innej piramidzie') : '„${q.name}”';
-    final String toName = q?.members[e.fxTo]?.name ?? '?';
-    if (e.from == me) {
-      return e.fxPy == null
-          ? t('{amount} dla {name} (wymiana)', <String, Object?>{
-              'amount': formatMoney(e.amount),
-              'name': pyrAccountName(s, e.to),
-            })
-          : t(
-              '{amount} przez {via} → {name}: {fxAmount} w {where}',
-              <String, Object?>{
-                'amount': formatMoney(e.amount),
-                'via': pyrAccountName(s, e.to),
-                'name': toName,
-                'fxAmount': formatMoney(e.fxAmount),
-                'where': where,
-              },
-            );
-    }
-    if (e.fxPy != null) {
-      return t(
-        'Od {name}: wypłacasz {amount} w {where} ({toName})',
-        <String, Object?>{
-          'name': pyrAccountName(s, e.from),
-          'amount': formatMoney(e.fxAmount),
-          'where': where,
-          'toName': toName,
-        },
-      );
-    }
-    return t('Wypłata {amount} z wymiany od {name}', <String, Object?>{
-      'amount': formatMoney(e.amount),
-      'name': pyrAccountName(s, e.from),
-    });
-  }
-
-  /// Where an exchange payment [e] stands.
-  String _exchangeStatus(PyrEscrow e, int now) {
-    if (e.from == me) {
-      if (now >= e.until) {
-        return t('Nie wyszło — pieniądze wracają do Ciebie.');
-      }
-      return e.fxPy == null
-          ? t('Czeka, aż odbiorca weźmie; wróci po {date}.', <String, Object?>{
-              'date': pyrDate(e.until),
-            })
-          : t(
-              'Czeka na wypłatę po drugiej stronie; wróci po {date}.',
-              <String, Object?>{'date': pyrDate(e.until)},
-            );
-    }
-    if (e.fxPy != null) {
-      return t(
-        'Telefon wypłaca sam według Twojego kursu; zapłatę dostaniesz, '
-        'gdy odbiorca weźmie wypłatę.',
-      );
-    }
-    final String? lock = e.lock;
-    return lock != null && pyr.hasFxKey(lock)
-        ? t('Masz klucz — telefon odbierze sam.')
-        : t('Czeka na klucz od płacącego (do {date}).', <String, Object?>{
-            'date': pyrDate(e.until),
-          });
   }
 
   Widget _row({
@@ -1123,40 +724,10 @@ class PyramidWallet extends StatelessWidget {
     final Color tone = pyrTone(zen);
     final PyrAccount acc = s.accounts[me] ?? PyrAccount();
     final int now = pyr.now;
-    // Exchange payments (locked) settle by themselves: not asked here.
     final List<PyrEscrow> toAnswer = s.escrows.values
-        .where(
-          (PyrEscrow e) =>
-              e.settled == null && e.condBy == me && e.lock == null,
-        )
+        .where((PyrEscrow e) => e.settled == null && e.condBy == me)
         .toList();
-    final List<PyrEscrow> exchanges = s.escrows.values
-        .where(
-          (PyrEscrow e) =>
-              e.settled == null &&
-              e.lock != null &&
-              (e.from == me || e.condBy == me),
-        )
-        .toList();
-    // Other pyramids this person is in: exchange offers can be set there.
-    final List<PyramidState> elsewhere = pyr.myPyramids
-        .where((PyramidState x) => x.id != s.id)
-        .toList();
-    // Money converted at a merge comes in parts: one row per merge.
-    final Map<String, List<PyrEmission>> parts = <String, List<PyrEmission>>{};
-    final List<PyrEmission> emissionRows = <PyrEmission>[];
-    for (final PyrEmission e in s.emissions.values) {
-      final String? g = e.group;
-      if (g == null) {
-        emissionRows.add(e);
-      } else {
-        final List<PyrEmission> list = parts[g] ??= <PyrEmission>[];
-        if (list.isEmpty) {
-          emissionRows.add(e);
-        }
-        list.add(e);
-      }
-    }
+    final List<PyrEmission> emissionRows = s.emissions.values.toList();
     final List<PyrEscrow> refundable = s.escrows.values
         .where(
           (PyrEscrow e) => e.settled == null && e.from == me && now >= e.until,
@@ -1170,9 +741,9 @@ class PyramidWallet extends StatelessWidget {
     final List<PyrMarketMessage> market = pyr.market.values.toList()
       ..sort((PyrMarketMessage a, PyrMarketMessage b) => b.at.compareTo(a.at));
     final bool top = s.topCell.contains(me);
-    // The limit is per 30 days, whatever the terms (§23.4).
+    // The limit is per 30 days, whatever the terms.
     final int emitted = s.emittedWithin(now);
-    // Nobody records or screenshots the wallet (§14.1 point 6).
+    // Nobody records or screenshots the wallet.
     return SecureScreen(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
@@ -1278,12 +849,6 @@ class PyramidWallet extends StatelessWidget {
                       icon: const Icon(Icons.sell_rounded),
                       label: Text(t('Mój cennik')),
                     ),
-                    OutlinedButton.icon(
-                      key: const Key('pyr-pay-across'),
-                      onPressed: () => unawaited(_payAcross(context)),
-                      icon: const Icon(Icons.currency_exchange_rounded),
-                      label: Text(t('Zapłać komuś z innej piramidy')),
-                    ),
                   ],
                 ),
               ],
@@ -1294,8 +859,7 @@ class PyramidWallet extends StatelessWidget {
             ZenGroup(
               children: <Widget>[
                 for (final PyramidRecord p in pyr.pendingPayments)
-                  if ((p.pyramid == s.id ? s : pyr.pyramidState(p.pyramid))
-                      case final PyramidState ps)
+                  if (p.pyramid == s.id)
                     _row(
                       zen: zen,
                       leading: SizedBox(
@@ -1306,24 +870,15 @@ class PyramidWallet extends StatelessWidget {
                           color: tone,
                         ),
                       ),
-                      title: ps.id == s.id
-                          ? t('{amount} dla {name}', <String, Object?>{
-                              'amount': formatMoney(p.integer('amount')),
-                              'name': pyrAccountName(ps, p.str('to')),
-                            })
-                          : t(
-                              '{amount} dla {name} w „{pyramid}”',
-                              <String, Object?>{
-                                'amount': formatMoney(p.integer('amount')),
-                                'name': pyrAccountName(ps, p.str('to')),
-                                'pyramid': ps.name,
-                              },
-                            ),
+                      title: t('{amount} dla {name}', <String, Object?>{
+                        'amount': formatMoney(p.integer('amount')),
+                        'name': pyrAccountName(s, p.str('to')),
+                      }),
                       subtitle: t(
                         'Czeka na skarbników: {count} z {need}',
                         <String, Object?>{
                           'count': p.tsigs.length,
-                          'need': ps.treasurerMajority,
+                          'need': s.treasurerMajority,
                         },
                       ),
                       trailing: TextButton(
@@ -1433,92 +988,6 @@ class PyramidWallet extends StatelessWidget {
                 ],
               ),
             ),
-          if (exchanges.isNotEmpty) ...<Widget>[
-            ZenSection(t('Wymiany między piramidami')),
-            ZenGroup(
-              children: <Widget>[
-                for (final PyrEscrow e in exchanges)
-                  _row(
-                    zen: zen,
-                    leading: ZenIconBadge(
-                      icon: Icons.currency_exchange_rounded,
-                      tone: tone,
-                      size: 36,
-                    ),
-                    title: _exchangeTitle(e),
-                    subtitle: _exchangeStatus(e, now),
-                  ),
-              ],
-            ),
-          ],
-          if (elsewhere.isNotEmpty) ...<Widget>[
-            ZenSection(t('Kantor: jesteś w kilku piramidach')),
-            ZenGroup(
-              children: <Widget>[
-                for (final PyramidState q in elsewhere) ...<Widget>[
-                  _row(
-                    zen: zen,
-                    leading: ZenIconBadge(
-                      icon: Icons.attach_money_rounded,
-                      tone: zen.textMuted,
-                      size: 36,
-                    ),
-                    title: t('Saldo w „{pyramid}”: {amount}', <String, Object?>{
-                      'pyramid': q.name,
-                      'amount': formatMoney(q.balanceOf(me)),
-                    }),
-                  ),
-                  _row(
-                    zen: zen,
-                    leading: ZenIconBadge(
-                      icon: Icons.south_west_rounded,
-                      tone: tone,
-                      size: 36,
-                    ),
-                    title: t(
-                      'Wypłacam tutaj za pieniądze z „{pyramid}”',
-                      <String, Object?>{'pyramid': q.name},
-                    ),
-                    subtitle: s.fxRates[me]?[q.id] == null
-                        ? t('bez kursu')
-                        : fxRateText(s.fxRates[me]![q.id]!),
-                    trailing: TextButton(
-                      onPressed: () => unawaited(_setRate(context, s, q)),
-                      child: Text(t('Kurs')),
-                    ),
-                  ),
-                  _row(
-                    zen: zen,
-                    leading: ZenIconBadge(
-                      icon: Icons.north_east_rounded,
-                      tone: tone,
-                      size: 36,
-                    ),
-                    title: t(
-                      'Wypłacam w „{pyramid}” za pieniądze stąd',
-                      <String, Object?>{'pyramid': q.name},
-                    ),
-                    subtitle: q.fxRates[me]?[s.id] == null
-                        ? t('bez kursu')
-                        : fxRateText(q.fxRates[me]![s.id]!),
-                    trailing: TextButton(
-                      onPressed: () => unawaited(_setRate(context, q, s)),
-                      child: Text(t('Kurs')),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            ZenInfo(
-              icon: Icons.currency_exchange_rounded,
-              text: t(
-                'Z kursem telefon sam wymienia pieniądze ludziom z obu '
-                'piramid. Wypłacasz pierwszy, a zapłatę odbierasz tym samym '
-                'kluczem, którym odbiorca wziął wypłatę. Telefon musi być '
-                'wtedy w sieci (masz na to dobę).',
-              ),
-            ),
-          ],
           if (market.isNotEmpty) ...<Widget>[
             ZenSection(t('Rynek: wiadomości i prośby')),
             for (final PyrMarketMessage m in market)
@@ -1568,22 +1037,10 @@ class PyramidWallet extends StatelessWidget {
                                   height: 1.3,
                                 ),
                               ),
-                              if (m.hops > 0 ||
-                                  m.level != null ||
-                                  m.introduce != null) ...<Widget>[
+                              if (m.hops > 0 || m.level != null) ...<Widget>[
                                 const SizedBox(height: 4),
                                 Text(
                                   <String>[
-                                    if (m.introduce != null)
-                                      t(
-                                        'przedstawienie: {name} (płatność po '
-                                        'jej/jego zgodzie)',
-                                        <String, Object?>{
-                                          'name':
-                                              s.members[m.introduce]?.name ??
-                                              '?',
-                                        },
-                                      ),
                                     if (m.level != null)
                                       t('cena dla: {level}', <String, Object?>{
                                         'level':
@@ -1641,11 +1098,7 @@ class PyramidWallet extends StatelessWidget {
                         TextButton(
                           onPressed: () =>
                               unawaited(pyr.answerMarket(m.id, accept: false)),
-                          child: Text(
-                            m.amount > 0 && m.introduce == null
-                                ? t('Zwróć')
-                                : t('Odrzuć'),
-                          ),
+                          child: Text(m.amount > 0 ? t('Zwróć') : t('Odrzuć')),
                         ),
                         if (m.kind == 'ad' && m.hops > 0)
                           OutlinedButton(
@@ -1671,9 +1124,7 @@ class PyramidWallet extends StatelessWidget {
                           onPressed: () =>
                               unawaited(pyr.answerMarket(m.id, accept: true)),
                           child: Text(
-                            m.introduce != null
-                                ? t('Przekaż prośbę')
-                                : m.kind == 'reshare'
+                            m.kind == 'reshare'
                                 ? t('Udostępnij znajomym')
                                 : t('Przyjmij'),
                           ),
@@ -1841,22 +1292,16 @@ class PyramidWallet extends StatelessWidget {
                       if (!context.mounted || amount == null || amount <= 0) {
                         return;
                       }
-                      // Above the rolling limit only by a referendum of the
-                      // whole pyramid (§23.4).
-                      final bool over = amount > s.params.emitLimit - emitted;
-                      if (over &&
-                          !await confirm(
-                            context,
-                            t('Ponad limit 30 dni'),
-                            t(
-                              'Taka emisja wymaga referendum całej piramidy '
-                              '(co najmniej 72 h, ponad połowa aktywnych '
-                              'członków, „Tak” więcej niż reszta). Ogłosić je?',
-                            ),
-                          )) {
-                        return;
-                      }
-                      if (!context.mounted) {
+                      // Never above the rolling limit: the top raises the
+                      // limit itself, in the rules (24 h later).
+                      if (amount > s.params.emitLimit - emitted) {
+                        snack(
+                          context,
+                          t(
+                            'Ponad limit 30 dni. Limit zmienia szczyt w '
+                            'zasadach (Władza → Zmień zasady).',
+                          ),
+                        );
                         return;
                       }
                       final String? why = await askText(
@@ -1864,23 +1309,6 @@ class PyramidWallet extends StatelessWidget {
                         title: t('Uzasadnienie (jawne)'),
                       );
                       if (why == null || !context.mounted) {
-                        return;
-                      }
-                      if (over) {
-                        await pyr.emitReferendum(
-                          to: to,
-                          amount: amount,
-                          why: why,
-                        );
-                        if (context.mounted) {
-                          snack(
-                            context,
-                            t(
-                              'Referendum o emisji czeka na podpis drugiej '
-                              'osoby ze szczytu.',
-                            ),
-                          );
-                        }
                         return;
                       }
                       // New money: asked again who this is.
@@ -1905,38 +1333,6 @@ class PyramidWallet extends StatelessWidget {
                     icon: const Icon(Icons.add_card_rounded),
                     label: Text(t('Zaproponuj emisję')),
                   ),
-                  // Referenda that allowed money above the limit and wait
-                  // for the top to emit it (§23.4).
-                  for (final PyrReferendum r in s.referenda.values.where(
-                    (PyrReferendum r) =>
-                        r.kind == 'emit' &&
-                        r.end < now &&
-                        !s.emissions.values.any(
-                          (PyrEmission e) => e.referendum == r.id && !e.vetoed,
-                        ) &&
-                        s.referendumPasses(r.id),
-                  ))
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: FilledButton.tonalIcon(
-                        key: Key('pyr-emit-ref-${r.id}'),
-                        onPressed: () => unawaited(() async {
-                          if (await confirmSensitiveAccess(
-                            context,
-                            reason: t('Emisja pieniędzy. Potwierdź, że to Ty.'),
-                          )) {
-                            await pyr.emitByReferendum(r.id, r.question);
-                          }
-                        }()),
-                        icon: const Icon(Icons.how_to_vote_rounded),
-                        label: Text(
-                          t(
-                            'Emisja po referendum: {question}',
-                            <String, Object?>{'question': r.question},
-                          ),
-                        ),
-                      ),
-                    ),
                 ],
               ],
             ),
@@ -1960,26 +1356,11 @@ class PyramidWallet extends StatelessWidget {
                           : zen.warning,
                       size: 36,
                     ),
-                    title: e.group == null
-                        ? t('{amount} dla {name} · K{term}', <String, Object?>{
-                            'amount': formatMoney(e.amount),
-                            'name': s.members[e.to]?.name ?? '?',
-                            'term': e.term,
-                          })
-                        : t(
-                            'Przeliczenie po połączeniu: {amount} dla {count} '
-                            'os. · K{term}',
-                            <String, Object?>{
-                              'amount': formatMoney(
-                                parts[e.group]!.fold(
-                                  0,
-                                  (int a, PyrEmission x) => pyrAdd(a, x.amount),
-                                ),
-                              ),
-                              'count': parts[e.group]!.length,
-                              'term': e.term,
-                            },
-                          ),
+                    title: t('{amount} dla {name} · K{term}', <String, Object?>{
+                      'amount': formatMoney(e.amount),
+                      'name': s.members[e.to]?.name ?? '?',
+                      'term': e.term,
+                    }),
                     subtitle: <String>[
                       e.why,
                       if (e.vetoed)
@@ -1990,11 +1371,10 @@ class PyramidWallet extends StatelessWidget {
                         t('czeka do {date}', <String, Object?>{
                           'date': pyrDate(e.effectiveAt),
                         }),
-                      if (pyr.seenLate(e.group ?? e.id))
-                        t('dotarła z opóźnieniem'),
+                      if (pyr.seenLate(e.id)) t('dotarła z opóźnieniem'),
                     ].join(' · '),
                     // Who could veto when it was signed, within its time —
-                    // also when it reached this phone late (§23.4).
+                    // also when it reached this phone late.
                     trailing: pyr.canVeto(e)
                         ? TextButton(
                             style: TextButton.styleFrom(

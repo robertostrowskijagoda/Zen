@@ -11,8 +11,8 @@ import 'package:zen/src/features/pyramid/pyramid_service.dart';
 /// sealed [PyramidService.sharedState] in the account's `own` space.
 const String kPyramidShareKind = 'pyramid_state';
 
-/// Keeps the pyramid the same on every device of the account (§6.3): the
-/// devices hold the same pyramid key (§6.1), and with this they also know
+/// Keeps the pyramid the same on every device of the account: the
+/// devices hold the same pyramid key, and with this they also know
 /// the same membership, records and votes in progress, so the person can
 /// act from any of them.
 ///
@@ -140,11 +140,9 @@ final class PyramidDeviceSync {
     }
     final bool changed = await pyramid.mergeFromOwnDevice(body);
     await node.markOwnApplied(e.id);
-    final Object? followed = body['fol'];
-    if (changed && followed is Map) {
-      // A pyramid known here only by name now: its records come from
-      // friends who keep it.
-      await pyramid.askFriendsFor(followed.keys.whereType<String>());
+    if (changed && body['fol'] is int) {
+      // Kept here now too: its records come from friends who keep it.
+      await pyramid.greet();
     }
   }
 

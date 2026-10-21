@@ -11,10 +11,12 @@ import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
 import 'package:zen/src/features/profile/profile_fields.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
+import 'package:zen/src/features/pyramid/pyramid_cell_chat.dart';
 import 'package:zen/src/features/pyramid/pyramid_device_sync.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
+import 'package:zen/src/features/social/social_hub_controller.dart';
 
-/// The pyramid, its power and money (§20–24), and crisis mode (§28.1).
+/// The pyramid, its power and money, and crisis mode.
 final Provider<PyramidService> pyramidServiceProvider =
     Provider<PyramidService>((Ref ref) {
       final MeetService meet = ref.watch(meetServiceProvider);
@@ -24,29 +26,25 @@ final Provider<PyramidService> pyramidServiceProvider =
         disk: ref.read(ledgerDiskProvider),
         // Crisis announcements hop from phone to phone over Bluetooth.
         crisisBroadcast: nearby.waveAll,
-        // Friends of friends get their own market prices (§24).
+        // Friends of friends get their own market prices.
         friendsOf: (String f) => meet.book.friendsOf(f),
-        // Admission needs the level "Znajomy" or above (§20.2); without
+        // Admission needs the level "Znajomy" or above; without
         // the ledger the level is unknown and only friendship counts.
         friendLevelOf: (String a) =>
             ref.read(ledgerNodeProvider)?.levelOf(a) ?? FriendLevel.friend,
-        // Signed "met in person" attestations (§6.2) count for referenda
-        // (§20.6).
-        metInPerson: () =>
-            ref.read(ledgerNodeProvider)?.metAddresses() ?? const <String>[],
-        // The account's other devices share the pyramid key (§6.1).
+        // The account's other devices share the pyramid key.
         otherDevices: () {
           final LedgerNode? node = ref.read(ledgerNodeProvider);
           return node != null && node.isReady
               ? node.siblingAddresses
               : const <String>[];
         },
-        // A reshare on order (§24) goes out as this person's own reshare.
+        // A reshare on order goes out as this person's own reshare.
         resharePost: (Map<String, dynamic> post) =>
             reshareOrderedPost(ref.read(ledgerNodeProvider), post),
         ownPublicPosts: () =>
             ownPublicPostEntries(ref.read(ledgerNodeProvider)),
-        // National sections (§22.2): read by everyone whose profile shows
+        // National sections: read by everyone whose profile shows
         // the nationality, so members pass them on to such friends.
         nationalitiesOf: (String address) {
           final LedgerNode? node = ref.read(ledgerNodeProvider);
@@ -61,13 +59,27 @@ final Provider<PyramidService> pyramidServiceProvider =
         myNationalities: () =>
             ref.read(userProfileControllerProvider).nationalities,
       );
-      // The same pyramid on every device of the account (§6.3).
+      // The same pyramid on every device of the account.
       final LedgerNode? node = ref.read(ledgerNodeProvider);
       final PyramidDeviceSync? devices = node == null
           ? null
           : PyramidDeviceSync(node: node, pyramid: pyramid);
+      // A group chat in Chats for each of this person's cells.
+      final PyramidCellChats cellChats = PyramidCellChats(
+        pyramid: pyramid,
+        apply: (Map<String, PyrCellChat> chats) async {
+          if (!ref.exists(socialHubControllerProvider)) {
+            return false;
+          }
+          await ref
+              .read(socialHubControllerProvider.notifier)
+              .syncManagedGroups(kPyrCellGroupPrefix, chats);
+          return true;
+        },
+      );
       unawaitedLogged(
         pyramid.load().then((_) async {
+          cellChats.start();
           await pyramid.greet();
           await devices?.start();
         }),
@@ -80,6 +92,7 @@ final Provider<PyramidService> pyramidServiceProvider =
       );
       nearby.otherWaveHandlers.add(onWave);
       ref.onDispose(() {
+        cellChats.stop();
         nearby.otherWaveHandlers.remove(onWave);
         unawaitedLogged(
           devices?.stop(),
@@ -101,7 +114,7 @@ void pyramidMinute(PyramidService pyramid, int minute) {
   }
 }
 
-/// Shares [post] (a signed public post, ordered on the market, §24) with
+/// Shares [post] (a signed public post, ordered on the market) with
 /// the friends of the account of [node], as its own reshare. True when it
 /// went out.
 Future<bool> reshareOrderedPost(
@@ -139,6 +152,6 @@ List<Map<String, dynamic>> ownPublicPostEntries(LedgerNode? node) {
   return <Map<String, dynamic>>[
     for (final FeedPost p in buildFeed(node, nameOf: (String _) => ''))
       if (p.isOwn && p.audience == Audience.public && p.entry != null)
-        p.entry!.toJson(),
+        p.entry!.toCertifiedJson(),
   ];
 }

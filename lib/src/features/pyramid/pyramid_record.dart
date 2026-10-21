@@ -1,24 +1,31 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/crypto/ring_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 
 /// How far a record's own time may be from this phone's clock: ahead of it
 /// when the record arrives (anything later waits — a "time bomb" is never
-/// kept), behind it when this phone signs or publishes it (§20.5).
+/// kept), behind it when this phone signs or publishes it.
 const int kPyrMaxSkewMs = 10 * 60 * 1000;
 
-/// The largest record kept (its canonical body): generous, a merge
-/// snapshot of a big branch fits.
+/// A record whose time rules count from ([PyrT.timed]) is late on a phone
+/// when it is dated more than this before records the phone already kept:
+/// back-dated, or held back. There its delays and limits count from when
+/// the phone first saw it.
+const int kPyrLateMs = 30 * 60 * 1000;
+
+/// The largest record kept (its canonical body): generous, a revocation
+/// listing thousands of acts fits.
 const int kPyrMaxRecordBytes = 2 * 1024 * 1024;
 
 /// The most signatures (and treasurer signatures) one record may carry.
 const int kPyrMaxSigners = 100;
 
-/// Kinds of pyramid records (§20–24). Every change to the pyramid is one
-/// signed record; the state is what follows from the records (§20.5).
+/// Kinds of pyramid records. Every change to the pyramid is one
+/// signed record; the state is what follows from the records.
 abstract final class PyrT {
   static const String genesis = 'genesis';
   static const String admit = 'admit';
@@ -41,45 +48,80 @@ abstract final class PyrT {
   static const String comment = 'comment';
   static const String natPost = 'natpost';
   static const String natGrant = 'natgrant';
+
+  /// A question the top (2 of 3) asks the members; the result advises.
   static const String referendum = 'ref';
   static const String tally = 'tally';
+
+  /// New rules in numbers, signed by the top (2 of 3), applied a day
+  /// later.
   static const String constitution = 'const';
   static const String emit = 'emit';
   static const String veto = 'veto';
   static const String transfer = 'xfer';
   static const String settle = 'settle';
   static const String alarm = 'alarm';
-  static const String merge = 'merge';
-  static const String merged = 'merged';
   static const String offer = 'offer';
 
-  /// An exchange rate a member offers for money of another pyramid
-  /// (pays out here, takes the money there).
-  static const String fxRate = 'fx';
+  /// The first head of the pyramid takes the top, signed by the power key
+  /// of the genesis (only while nobody is in the pyramid).
+  static const String found = 'found';
 
-  /// The national section's lead pins (or unpins) a post (§22.2).
+  /// The power key passes to the head now at the top: signed by the old
+  /// power key — or, 72 h after the head took the top, by most of the top
+  /// cell — and by the new key and the new head. The power key only
+  /// certifies that this is the original pyramid and who its heads were.
+  static const String handover = 'hand';
+
+  /// The national section's lead pins (or unpins) a post.
   static const String natPin = 'natpin';
 
-  /// A member shows (or hides) their age and gender badge (§20.2a): the
+  /// A member shows (or hides) their age and gender badge: the
   /// birth year, gender and salt behind their data commitment.
   static const String badge = 'badge';
 
-  /// A member says they met another member in person (§6.2, §20.6), made
-  /// from their signed "met in person" attestation in the ledger: votes in
-  /// referenda count only from members met by [kPyrMetToVote] others.
-  static const String met = 'met';
+  /// A member of someone's cell says "we know each other": from then on
+  /// that person votes in the cell and in referenda (without it, 14 days
+  /// after joining).
+  static const String known = 'known';
 
-  /// Kinds signed anonymously with a ring signature (§20.3a).
+  /// Kinds signed anonymously with a ring signature.
   static const Set<String> anonymous = <String>{voteRequest, vote};
 
-  /// Kinds most treasurers sign before they count (§23.2, §23.5).
+  /// Kinds most treasurers sign before they count.
   static const Set<String> treasured = <String>{transfer, settle};
+
+  /// Kinds whose time starts a wait or counts against a limit (new rules
+  /// a day later, an emission's veto time and its 30-day limit): a phone
+  /// that sees one late ([kPyrLateMs]) counts them from then.
+  static const Set<String> timed = <String>{constitution, emit};
+
+  /// Kinds whose signatures carry their ML-DSA keys (the keyed form,
+  /// [PyramidRecord.signsWithKeys]): the records that introduce a key —
+  /// the genesis, founding, admissions, handovers of the power key — and
+  /// those read outside the pyramid by people who hold none of its records
+  /// (national-section posts, crisis alarms). Every other signature names
+  /// its key, which a phone keeping the pyramid has from those records.
+  static const Set<String> keyed = <String>{
+    genesis,
+    found,
+    admit,
+    handover,
+    natPost,
+    alarm,
+  };
 }
 
 /// One signed record. [body] is everything but the signatures; [sigs] maps
-/// signer key → Ed25519 signature of the canonical body; [ring] is a ring
-/// signature for the anonymous kinds (§20.3a); [tsigs] are treasurers'
-/// signatures on a transfer or a settlement (§23.2).
+/// signer key → hybrid signature of the canonical body (Ed25519 +
+/// ML-DSA-65, see hybrid_signature.dart); [ring] is a ring signature for
+/// the anonymous kinds (classical, see ring_signature.dart); [tsigs] are
+/// treasurers' hybrid signatures on a transfer or a settlement.
+///
+/// A signature names the signer's ML-DSA key by fingerprint; the key is
+/// published by a keyed signature on the record that introduced it
+/// ([signsWithKeys]) and looked up in [HybridKeyBook], where the service
+/// files the keys of the records it keeps ([fileKeys]).
 @immutable
 final class PyramidRecord {
   const PyramidRecord({
@@ -103,6 +145,8 @@ final class PyramidRecord {
   static final Expando<String> _contents = Expando<String>(
     'pyramidRecordContent',
   );
+  static final Expando<Map<String, String?>> _pqIds =
+      Expando<Map<String, String?>>('pyramidRecordPqIds');
 
   String get type => body['t'] as String;
   String get pyramid => body['py'] is String ? body['py'] as String : '';
@@ -122,13 +166,26 @@ final class PyramidRecord {
   String get id => _ids[this] ??= sha256Hex(signedBytes);
 
   /// The content without its time: fresh copies of one proposal (signed
-  /// again later, §20.5) share it.
+  /// again later) share it.
   String get contentKey => _contents[this] ??= sha256Hex(
     canonicalJsonBytes(<String, dynamic>{...body}..remove('at')),
   );
 
   String str(String k) => body[k] is String ? body[k] as String : '';
   int integer(String k) => body[k] is int ? body[k] as int : 0;
+
+  /// The fingerprint of the ML-DSA key that [key]'s signature carries
+  /// (its treasurer signature with [treasurer]); null without one. Worked
+  /// out once per record: the fold compares it with the key the signer
+  /// was admitted with.
+  String? pqIdOf(String key, {bool treasurer = false}) {
+    final Map<String, String?> cache = _pqIds[this] ??= <String, String?>{};
+    final String slot = treasurer ? 't|$key' : key;
+    if (!cache.containsKey(slot)) {
+      cache[slot] = hybridSignaturePqId((treasurer ? tsigs : sigs)[key]);
+    }
+    return cache[slot];
+  }
 
   PyramidRecord withSig(String key, String sig) => PyramidRecord(
     body: body,
@@ -150,8 +207,40 @@ final class PyramidRecord {
           tsigs: <String, String>{...tsigs, key: sig},
         );
 
-  Future<PyramidRecord> signedBy(LedgerKeyPair pair) async =>
-      withSig(pair.id, b64(await pair.sign(signedBytes)));
+  /// Whether signatures of this record carry their ML-DSA keys: the kinds
+  /// of [PyrT.keyed] and the top's posts to the whole pyramid (level 0),
+  /// which are read outside it too.
+  bool get signsWithKeys =>
+      PyrT.keyed.contains(type) || (type == PyrT.post && integer('lvl') == 0);
+
+  Future<PyramidRecord> signedBy(LedgerKeyPair pair) async => withSig(
+    pair.id,
+    b64(
+      await (signsWithKeys
+          ? pair.signWithKey(signedBytes)
+          : pair.sign(signedBytes)),
+    ),
+  );
+
+  /// Files the ML-DSA keys its keyed signatures carry ([HybridKeyBook]):
+  /// for a record that is kept (checked when it came).
+  void fileKeys() {
+    sigs.values.forEach(HybridKeyBook.addFromSignature);
+    tsigs.values.forEach(HybridKeyBook.addFromSignature);
+  }
+
+  /// Whether a signature of a listed signer (or a treasurer) names an
+  /// ML-DSA key this phone does not hold yet: the record that publishes
+  /// it has not come, so the record waits rather than being refused.
+  bool get lacksKeys {
+    final List<String> allowed = candidates;
+    for (final MapEntry<String, String> e in sigs.entries) {
+      if (allowed.contains(e.key) && hybridSignatureLacksKey(e.value)) {
+        return true;
+      }
+    }
+    return tsigs.values.any(hybridSignatureLacksKey);
+  }
 
   /// Whether [key] is a public key in its one canonical spelling (what
   /// [LedgerKeyPair.id] gives). Another spelling of the same 32 bytes —

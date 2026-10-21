@@ -6,10 +6,10 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 
-/// "Zgłoś" (§21.4): a reason and the evidence go to the delegates of this
+/// "Zgłoś": a reason and the evidence go to the delegates of this
 /// person's branch (or the top); the reported person never learns who.
 /// [entryId] names the reported entry for a content ban and [entry] is its
-/// signed original when the screen has one (S36).
+/// signed original when the screen has one.
 ///
 /// What was reported is hidden on this phone at once (a post, comment or
 /// message by [contentId], else by [contentHash] (local only); a dating profile by
@@ -67,7 +67,7 @@ Future<void> showReportSheet(
     target: target,
     evidence: evidence,
     datingKey: datingKey,
-    // The entry itself (S36): a ban names it.
+    // The entry itself: a ban names it.
     entryId: entryId,
     entry: entry,
   );

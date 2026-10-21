@@ -11,7 +11,7 @@ import 'support/pyramid_world.dart';
 
 /// Attacks from the security review, played on the simulated network: what
 /// a modified app or a hostile friend sends, and what honest phones do
-/// with it (§20–24, §28).
+/// with it.
 void main() {
   const int hour = 3600 * 1000;
 
@@ -107,11 +107,30 @@ void main() {
         },
       ).signedBy(x);
       await fromB(strange);
+      // …and a record of it: phones keep only the pinned pyramid.
+      final PyramidRecord elsewhere = await PyramidRecord(
+        body: <String, dynamic>{
+          't': PyrT.post,
+          'py': strange.id,
+          'at': w.net.now,
+          'by': <String>[x.id],
+          'text': 'Gdzie indziej',
+          'lvl': 0,
+        },
+      ).signedBy(x);
+      await fromB(elsewhere);
       await w.net.run();
       expect(b1.keeps(outsider.id), isFalse);
       expect(b1.keeps(bomb.id), isFalse);
       expect(b1.keeps(strange.id), isFalse);
-      expect(b1.knownPyramids, <String>[py]);
+      expect(b1.keeps(elsewhere.id), isFalse);
+      expect(
+        <String>[
+          for (final String id in b1.recordIds)
+            if (b1.recordOf(id)!.type == PyrT.genesis) id,
+        ],
+        <String>[py],
+      );
       // The pyramid goes on as before.
       await w['S'].post('Dalej działamy');
       await w.net.run();
@@ -164,55 +183,105 @@ void main() {
     },
   );
 
+  test('a back-dated emission waits its whole veto time from when the phones '
+      'saw it, and the third can still veto', () async {
+    final PyramidWorld w = await PyramidWorld.six();
+    // Long enough after the pyramid began for a record dated a day back;
+    // every phone has kept a post from an hour ago.
+    await w.net.advance(const Duration(hours: 29));
+    expect(await w['S'].post('Dzień dobry'), isNotNull);
+    await w.net.run();
+    await w.net.advance(const Duration(hours: 1));
+    final PyramidService s = w['S'];
+    final String a1 = w['A1'].myKey!;
+    final int t0 = w.net.now;
+    // S and B (colluding, with a modified app) sign an emission dated 25 h
+    // back: its veto time is over the moment it appears.
+    final PyramidRecord unsigned = PyramidRecord(
+      body: <String, dynamic>{
+        't': PyrT.emit,
+        'py': s.current,
+        'at': t0 - 25 * hour,
+        'by': <String>[s.myKey!, w['B'].myKey!]..sort(),
+        'to': a1,
+        'amount': 100000,
+        'why': 'Wstecz',
+      },
+    );
+    final PyramidRecord signed = await w['B'].signAsMe(
+      await s.signAsMe(unsigned),
+    );
+    expect(await s.ingest(signed), isTrue);
+    await w.net.run();
+    final PyrEmission e = w['A'].state!.emissions.values.single;
+    expect(
+      e.done,
+      isFalse,
+      reason:
+          'the phones kept newer records: it came late, its wait '
+          'counts from then',
+    );
+    expect(e.signedAt, t0 - 25 * hour);
+    expect(e.at, greaterThanOrEqualTo(t0));
+    expect(w['A'].seenLate(e.id), isTrue);
+    expect(w['A'].canVeto(e), isTrue);
+    expect(
+      w.net['A'].notificationTitles,
+      contains('Emisja dotarła z opóźnieniem'),
+    );
+    // A1 cannot spend it yet: it is not in A1's account anywhere.
+    expect(w['A1'].state!.balanceOf(a1), 0);
+    // The 30-day limit counts it from now, not in the window it is dated
+    // in.
+    expect(w['A'].state!.emittedWithin(w.net.now), 100000);
+    expect(w['A'].state!.emittedWithin(t0 - hour), 0);
+    // A vetoes, dated inside the emission's own wait: it counts everywhere.
+    await w['A'].veto(e.id);
+    await w.net.run();
+    for (final String who in <String>['S', 'B', 'A1', 'B1']) {
+      expect(w[who].state!.emissions[e.id]!.vetoed, isTrue, reason: who);
+      expect(w[who].state!.balanceOf(a1), 0, reason: who);
+    }
+    expect(w.views().values.toSet(), hasLength(1));
+  });
+
   test(
-    'a back-dated emission: its money waits at the treasurers and the third can still veto',
+    'back-dated new rules apply a day after the phones saw them, not at once',
     () async {
       final PyramidWorld w = await PyramidWorld.six();
-      // Long enough after the pyramid began for a record dated a day back.
-      await w.net.advance(const Duration(hours: 30));
+      await w.net.advance(const Duration(hours: 29));
+      expect(await w['S'].post('Dzień dobry'), isNotNull);
+      await w.net.run();
+      await w.net.advance(const Duration(hours: 1));
       final PyramidService s = w['S'];
-      final String a1 = w['A1'].myKey!;
-      // S and B (colluding, with a modified app) sign an emission dated 25 h
-      // back: its veto time is over the moment it appears.
-      final PyramidRecord unsigned = PyramidRecord(
-        body: <String, dynamic>{
-          't': PyrT.emit,
-          'py': s.current,
-          'at': w.net.now - 25 * hour,
-          'by': <String>[s.myKey!, w['B'].myKey!]..sort(),
-          'to': a1,
-          'amount': 100000,
-          'why': 'Wstecz',
-        },
-      );
+      final int t0 = w.net.now;
       final PyramidRecord signed = await w['B'].signAsMe(
-        await s.signAsMe(unsigned),
+        await s.signAsMe(
+          PyramidRecord(
+            body: <String, dynamic>{
+              't': PyrT.constitution,
+              'py': s.current,
+              'at': t0 - 25 * hour,
+              'by': <String>[s.myKey!, w['B'].myKey!]..sort(),
+              'params': <String, dynamic>{'emitDelayHours': 1},
+            },
+          ),
+        ),
       );
       expect(await s.ingest(signed), isTrue);
       await w.net.run();
-      final PyrEmission e = w['A'].state!.emissions.values.single;
-      expect(
-        e.done,
-        isTrue,
-        reason: 'no phone can prove the date wrong by itself',
-      );
-      expect(w['A'].seenLate(e.id), isTrue);
-      expect(w['A'].canVeto(e), isTrue);
-      expect(
-        w.net['A'].notificationTitles,
-        contains('Emisja dotarła z opóźnieniem'),
-      );
-      // A1 tries to spend it at once: no treasurer signs yet.
-      expect(await w['A1'].pay(w['B1'].myKey!, 50000), isNotNull);
-      await w.net.run();
-      expect(w['B1'].state!.balanceOf(w['B1'].myKey!), 0);
-      // A vetoes, dated inside the emission's own wait: it counts everywhere.
-      await w['A'].veto(e.id);
-      await w.net.run();
-      for (final String who in <String>['S', 'B', 'A1', 'B1']) {
-        expect(w[who].state!.emissions[e.id]!.vetoed, isTrue, reason: who);
-        expect(w[who].state!.balanceOf(a1), 0, reason: who);
+      for (final String who in <String>['S', 'A', 'B', 'A1']) {
+        final PyramidState st = w[who].state!;
+        expect(st.applied, contains(signed.id), reason: who);
+        expect(
+          st.paramsChanges[signed.id]!.effectiveAt,
+          greaterThanOrEqualTo(t0 + 24 * hour),
+          reason: who,
+        );
+        expect(st.params.emitDelayHours, 24, reason: 'not yet: $who');
       }
+      await w.net.advance(const Duration(hours: 25));
+      expect(w['A'].state!.params.emitDelayHours, 1);
       expect(w.views().values.toSet(), hasLength(1));
     },
   );
@@ -377,7 +446,6 @@ void main() {
         'py': py,
         'ids': const <String>[],
       },
-      <String, dynamic>{'type': PyramidTypes.wantAll, 'py': py},
       <String, dynamic>{
         'type': PyramidTypes.hello,
         'py': <Map<String, dynamic>>[

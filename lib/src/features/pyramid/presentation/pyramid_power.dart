@@ -15,11 +15,10 @@ Map<String, String> get kPowerNames => <String, String>{
   'pause': t('Przerwy (ban czasowy)'),
   'content': t('Bany treści'),
   'reports': t('Przyjmowanie zgłoszeń'),
-  'referendum': t('Referenda'),
   'alarm': t('Ogłoszenia alarmowe'),
 };
 
-/// Power (§21): delegations, reports, bans, referenda, alarms, the rules,
+/// Power: delegations, reports, bans, referenda, alarms, the rules,
 /// joining pyramids — for the top and the delegates.
 class PyramidPower extends StatelessWidget {
   const PyramidPower({
@@ -147,7 +146,7 @@ class PyramidPower extends StatelessWidget {
     }
   }
 
-  /// What an appeal is about (§21.4): the ban it names, else the decision
+  /// What an appeal is about: the ban it names, else the decision
   /// on the report it names.
   String _appealedDecision(Object? rep) {
     final PyrBan? ban = rep is String ? s.bans[rep] : null;
@@ -179,7 +178,7 @@ class PyramidPower extends StatelessWidget {
                 t('Dowód: {evidence}', <String, Object?>{
                   'evidence': r.evidence.isEmpty ? t('(brak)') : r.evidence,
                 }),
-                // S36: the signed original came with it and checked out.
+                // The signed original came with it and checked out.
                 if (r.entry != null)
                   t('Dołączony podpisany oryginał wpisu (sprawdzony).'),
                 if (r.stage > 0 || r.escalated)
@@ -189,7 +188,7 @@ class PyramidPower extends StatelessWidget {
           ),
           for (final MapEntry<String, String> o in <String, String>{
             'none': t('Bez naruszenia'),
-            // §21.1: breaks of 24 h, 7 days or 30 days.
+            // Breaks of 24 h, 7 days or 30 days.
             'pause1': t('Przerwa 24 h'),
             'pause7': t('Przerwa 7 dni'),
             'pause30': t('Przerwa 30 dni'),
@@ -243,17 +242,15 @@ class PyramidPower extends StatelessWidget {
     );
   }
 
+  /// A referendum on any question, asked by the top: its result only
+  /// advises the top.
   Future<void> _referendum(BuildContext context) async {
     final TextEditingController q = TextEditingController();
     final TextEditingController opts = TextEditingController(
       text: t('Tak, Nie'),
     );
     final TextEditingController days = TextEditingController(text: '7');
-    final TextEditingController params = TextEditingController(
-      text: const JsonEncoder.withIndent(' ').convert(s.params.toJson()),
-    );
     String scope = 'all';
-    String kind = 'normal';
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => StatefulBuilder(
@@ -279,17 +276,15 @@ class PyramidPower extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  if (kind != 'constitution') ...<Widget>[
-                    TextField(
-                      controller: opts,
-                      decoration: InputDecoration(
-                        labelText: t('Odpowiedzi'),
-                        helperText: t('Po przecinku, np. Tak, Nie'),
-                        prefixIcon: const Icon(Icons.list_rounded),
-                      ),
+                  TextField(
+                    controller: opts,
+                    decoration: InputDecoration(
+                      labelText: t('Odpowiedzi'),
+                      helperText: t('Od 2 do 6, po przecinku, np. Tak, Nie'),
+                      prefixIcon: const Icon(Icons.list_rounded),
                     ),
-                    const SizedBox(height: 14),
-                  ],
+                  ),
+                  const SizedBox(height: 14),
                   TextField(
                     controller: days,
                     keyboardType: TextInputType.number,
@@ -320,46 +315,14 @@ class PyramidPower extends StatelessWidget {
                         ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  Text(t('RODZAJ'), style: zen.label(color: zen.textMuted)),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: <Widget>[
-                      for (final MapEntry<String, String> o in <String, String>{
-                        'normal': t('Zwykłe'),
-                        'constitution': t('Zmiana zasad'),
-                      }.entries)
-                        ChoiceChip(
-                          label: Text(o.value),
-                          selected: kind == o.key,
-                          onSelected: (_) => set(() => kind = o.key),
-                        ),
-                    ],
+                  const SizedBox(height: 12),
+                  Text(
+                    t(
+                      'Głosowanie jest tajne. Wynik jest doradczy: decyduje '
+                      'szczyt.',
+                    ),
+                    style: TextStyle(color: zen.textSecondary, fontSize: 13),
                   ),
-                  if (kind == 'constitution') ...<Widget>[
-                    const SizedBox(height: 8),
-                    Text(
-                      t('Odpowiedzi: Tak / Nie.'),
-                      style: TextStyle(color: zen.textSecondary, fontSize: 13),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: params,
-                      maxLines: 8,
-                      style: zen.mono(color: zen.textPrimary, size: 12),
-                      decoration: InputDecoration(
-                        labelText: t('Nowe zasady'),
-                        alignLabelWithHint: true,
-                        // Money in the rules is in hundredths.
-                        helperText: t(
-                          'emitLimit w setnych: 100000000 = 1 000 000,00',
-                        ),
-                        helperMaxLines: 2,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -378,30 +341,26 @@ class PyramidPower extends StatelessWidget {
       ),
     );
     final String question = q.text.trim();
-    final List<String> options = kind == 'constitution'
-        ? <String>[t('Tak'), t('Nie')]
-        : opts.text
-              .split(',')
-              .map((String o) => o.trim())
-              .where((String o) => o.isNotEmpty)
-              .toList();
+    final List<String> options = opts.text
+        .split(',')
+        .map((String o) => o.trim())
+        .where((String o) => o.isNotEmpty)
+        .toList();
     final int d = int.tryParse(days.text) ?? 7;
-    Map<String, dynamic>? newParams;
-    try {
-      final Object? json = jsonDecode(params.text);
-      newParams = json is Map ? Map<String, dynamic>.from(json) : null;
-    } on FormatException {
-      newParams = null;
-    }
     for (final TextEditingController c in <TextEditingController>[
       q,
       opts,
       days,
-      params,
     ]) {
       disposeLater(c);
     }
-    if (ok != true || question.isEmpty || options.length < 2) {
+    if (ok != true || question.isEmpty) {
+      return;
+    }
+    if (options.length < 2 || options.length > kPyrMaxReferendumOptions) {
+      if (context.mounted) {
+        snack(context, t('Podaj od 2 do 6 odpowiedzi.'));
+      }
       return;
     }
     await pyr.referendum(
@@ -411,10 +370,106 @@ class PyramidPower extends StatelessWidget {
       scopeKind: scope,
       scopePath: scope == 'branch' ? s.pathOf(me) ?? '' : '',
       scopeNat: s.members[me]?.nat ?? '',
-      kind: kind,
-      params: kind == 'constitution' ? newParams : null,
-      via: _top ? null : _myDelegation(<String>['referendum']),
     );
+    if (context.mounted) {
+      snack(context, t('Potrzebny podpis drugiej osoby ze szczytu.'));
+    }
+  }
+
+  /// New rules, signed by the top: only the values that change, each kept
+  /// within its limits in the app; they apply 24 h later.
+  Future<void> _rules(BuildContext context) async {
+    final Map<String, dynamic> current = s.params.toJson()..remove('version');
+    final TextEditingController json = TextEditingController(
+      text: const JsonEncoder.withIndent(' ').convert(current),
+    );
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        final ZenColors zen = ZenColors.of(context);
+        return AlertDialog(
+          title: Text(t('Zmiana zasad')),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  t(
+                    'Decyduje szczyt (2 z 3). Nowe zasady są jawne od razu i '
+                    'obowiązują po 24 h, zawsze w granicach zapisanych w '
+                    'aplikacji.',
+                  ),
+                  style: TextStyle(color: zen.textSecondary, fontSize: 13),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const Key('pyr-rules-json'),
+                  controller: json,
+                  maxLines: 10,
+                  style: zen.mono(color: zen.textPrimary, size: 12),
+                  decoration: InputDecoration(
+                    labelText: t('Nowe zasady'),
+                    alignLabelWithHint: true,
+                    // Money in the rules is in hundredths.
+                    helperText: t(
+                      'emitLimit w setnych: 100000000 = 1 000 000,00',
+                    ),
+                    helperMaxLines: 2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(t('Anuluj')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(t('Podpisz')),
+            ),
+          ],
+        );
+      },
+    );
+    final String text = json.text;
+    disposeLater(json);
+    if (ok != true) {
+      return;
+    }
+    Map<String, dynamic> changed = <String, dynamic>{};
+    try {
+      final Object? parsed = jsonDecode(text);
+      if (parsed is Map) {
+        changed = <String, dynamic>{
+          for (final MapEntry<dynamic, dynamic> e in parsed.entries)
+            if (e.key is String &&
+                e.value is int &&
+                current.containsKey(e.key) &&
+                current[e.key] != e.value)
+              e.key as String: e.value,
+        };
+      }
+    } on FormatException {
+      changed = <String, dynamic>{};
+    }
+    if (changed.isEmpty) {
+      if (context.mounted) {
+        snack(context, t('Nic się nie zmienia.'));
+      }
+      return;
+    }
+    await pyr.changeRules(changed);
+    if (context.mounted) {
+      snack(
+        context,
+        t(
+          'Potrzebny podpis drugiej osoby ze szczytu; zasady obowiązują po 24 h.',
+        ),
+      );
+    }
   }
 
   Future<void> _alarm(BuildContext context) async {
@@ -435,230 +490,6 @@ class PyramidPower extends StatelessWidget {
       scopeNat: s.members[me]?.nat ?? '',
       via: _top ? null : _myDelegation(<String>['alarm']),
     );
-  }
-
-  Future<void> _merge(BuildContext context) async {
-    final List<String> others = pyr.knownPyramids
-        .where((String p) => p != s.id)
-        .toList();
-    if (others.isEmpty) {
-      final int asked = await pyr.fetchFriendsPyramids();
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              asked == 0
-                  ? t(
-                      'Nikt ze znajomych nie ma innej piramidy (albo jeszcze '
-                      'się nie odezwał).',
-                    )
-                  : tn(
-                      asked,
-                      one:
-                          'Poprosiłem znajomych o {n} piramidę — spróbuj za '
-                          'chwilę.',
-                      few:
-                          'Poprosiłem znajomych o {n} piramidy — spróbuj za '
-                          'chwilę.',
-                      many:
-                          'Poprosiłem znajomych o {n} piramid — spróbuj za '
-                          'chwilę.',
-                    ),
-            ),
-          ),
-        );
-      }
-      return;
-    }
-    final String? into = await showDialog<String>(
-      context: context,
-      builder: (BuildContext context) => SimpleDialog(
-        title: Text(t('Dołącz naszą piramidę jako gałąź…')),
-        children: <Widget>[
-          if (others.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(t('Nie znasz innej piramidy.')),
-            ),
-          for (final String p in others)
-            SimpleDialogOption(
-              onPressed: () => Navigator.of(context).pop(p),
-              child: Text(pyr.stateOf(p)?.name ?? p.substring(0, 8)),
-            ),
-        ],
-      ),
-    );
-    final PyramidState? other = into == null ? null : pyr.stateOf(into);
-    if (other == null || !context.mounted) {
-      return;
-    }
-    final String? under = await pickMember(
-      context,
-      other,
-      title: t('Pod kim (musi mieć wolne miejsce)?'),
-    );
-    if (under == null || !context.mounted) {
-      return;
-    }
-    // Our money: converted into theirs at an agreed rate, or left behind.
-    final String target = into!;
-    final ({int numer, int denom})? rate = await _askMergeRate(
-      context,
-      target,
-      other.name,
-    );
-    if (rate == null || !context.mounted) {
-      return;
-    }
-    await pyr.proposeMerge(
-      target,
-      under,
-      other.members[under]?.addr ?? '',
-      rate: rate.numer == 0 ? null : rate,
-    );
-    if (context.mounted) {
-      snack(context, t('Propozycja połączenia poszła do podpisu.'));
-    }
-  }
-
-  /// How our money goes over in a merge (§20.5): a rate (default 1:1;
-  /// numer 0 = the money stays behind), or null when cancelled.
-  Future<({int numer, int denom})?> _askMergeRate(
-    BuildContext context,
-    String into,
-    String name,
-  ) async {
-    final TextEditingController value = TextEditingController(text: '100,00');
-    bool keep = true;
-    final bool? ok = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) => StatefulBuilder(
-        builder: (BuildContext context, StateSetter set) {
-          final int typed = parseMoney(value.text) ?? 0;
-          final ({int total, int converted, int room, int waiting})? m = pyr
-              .mergeMoney(into, numer: typed <= 0 ? 1 : typed, denom: 10000);
-          final bool fits = m == null || m.converted <= m.room;
-          return AlertDialog(
-            title: Text(t('Pieniądze przy połączeniu')),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: keep,
-                    title: Text(t('Przenieś nasze pieniądze')),
-                    subtitle: Text(
-                      keep
-                          ? t(
-                              'Salda przejdą do „{name}” po kursie.',
-                              <String, Object?>{'name': name},
-                            )
-                          : t(
-                              'Pieniądze zostaną w zamkniętej piramidzie '
-                              '(bez wartości).',
-                            ),
-                    ),
-                    onChanged: (bool v) => set(() => keep = v),
-                  ),
-                  if (keep) ...<Widget>[
-                    const SizedBox(height: 8),
-                    TextField(
-                      key: const Key('pyr-merge-rate'),
-                      controller: value,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      onChanged: (_) => set(() {}),
-                      decoration: InputDecoration(
-                        labelText: t(
-                          'Za nasze 100,00 w „{name}”',
-                          <String, Object?>{'name': name},
-                        ),
-                        prefixIcon: const Icon(Icons.currency_exchange_rounded),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    ZenInfo(
-                      icon: fits
-                          ? Icons.info_outline_rounded
-                          : Icons.warning_amber_rounded,
-                      text: m == null
-                          ? t(
-                              'Nie znamy jeszcze stanu „{name}”.',
-                              <String, Object?>{'name': name},
-                            )
-                          : <String>[
-                              t(
-                                'Razem u nas: {total} → {converted} w '
-                                '„{name}”. To dla nich nowe pieniądze, więc '
-                                'liczą się jak emisja: mieszczą się w limicie '
-                                '30 dni (wolne: {room}), czekają {hours} h i '
-                                'ich szczyt może je zawetować. Podpisuje też '
-                                '2 z 3 ich szczytu.',
-                                <String, Object?>{
-                                  'total': formatMoney(m.total),
-                                  'converted': formatMoney(m.converted),
-                                  'name': name,
-                                  'room': formatMoney(m.room),
-                                  'hours':
-                                      pyr
-                                          .pyramidState(into)
-                                          ?.params
-                                          .emitDelayHours ??
-                                      24,
-                                },
-                              ),
-                              if (!fits)
-                                t(
-                                  'Za dużo — obniż kurs albo niech zmienią '
-                                  'limit w referendum.',
-                                ),
-                              if (m.waiting > 0)
-                                tn(
-                                  m.waiting,
-                                  one:
-                                      'Uwaga: {n} emisja jeszcze czeka — nie '
-                                      'przejdzie.',
-                                  few:
-                                      'Uwaga: {n} emisje jeszcze czekają — nie '
-                                      'przejdą.',
-                                  many:
-                                      'Uwaga: {n} emisji jeszcze czeka — nie '
-                                      'przejdzie.',
-                                ),
-                            ].join(' '),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: Text(t('Anuluj')),
-              ),
-              FilledButton(
-                onPressed: !keep || (typed > 0 && fits)
-                    ? () => Navigator.of(context).pop(true)
-                    : null,
-                child: Text(t('Zaproponuj')),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    final int numer = parseMoney(value.text) ?? 0;
-    disposeLater(value);
-    if (ok != true) {
-      return null;
-    }
-    if (!keep) {
-      return (numer: 0, denom: 1);
-    }
-    return numer <= 0 ? null : (numer: numer, denom: 10000);
   }
 
   Widget _none(ZenColors zen, String text) => ZenCard(
@@ -735,15 +566,9 @@ class PyramidPower extends StatelessWidget {
         .where((PyrBan b) => b.activeAt(now))
         .toList();
     final List<PyrAlarm> alarms = s.alarms.reversed.toList();
-    // Only a referendum that passed, once the sums had their time to come
-    // up (the same rule every phone applies, §21.7).
-    final List<PyrReferendum> constitutions = s.referenda.values
-        .where(
-          (PyrReferendum r) =>
-              r.kind == 'constitution' &&
-              now >= r.end + kPyrTallyGraceMs &&
-              s.constitutionPasses(r.id),
-        )
+    // New rules the top signed that are still to come.
+    final List<PyrParamsChange> coming = s.paramsChanges.values
+        .where((PyrParamsChange c) => !c.done)
         .toList();
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
@@ -765,10 +590,9 @@ class PyramidPower extends StatelessWidget {
                 icon: const Icon(Icons.badge_rounded),
                 label: Text(t('Deleguj')),
               ),
-            if (_top ||
-                _myDelegation(<String>['referendum']) != null ||
-                s.nationalLead(s.members[me]?.nat ?? '') == me)
+            if (_top)
               OutlinedButton.icon(
+                key: const Key('pyr-referendum'),
                 onPressed: () => unawaited(_referendum(context)),
                 icon: const Icon(Icons.how_to_vote_rounded),
                 label: Text(t('Referendum')),
@@ -781,14 +605,35 @@ class PyramidPower extends StatelessWidget {
                 icon: const Icon(Icons.warning_amber_rounded),
                 label: Text(t('Ogłoszenie alarmowe')),
               ),
-            if (_top)
-              OutlinedButton.icon(
-                onPressed: () => unawaited(_merge(context)),
-                icon: const Icon(Icons.merge_rounded),
-                label: Text(t('Połącz piramidy')),
-              ),
           ],
         ),
+        if (_top) ...<Widget>[
+          const SizedBox(height: 10),
+          ZenInfo(
+            key: const Key('pyr-power-key'),
+            icon: Icons.key_rounded,
+            tone: s.handoverDue ? zen.warning : tone,
+            title: t('Klucz władzy'),
+            text: s.handoverDue
+                ? t(
+                    'Nowy szef piramidy ({name}) czeka na klucz władzy. Dawny '
+                    'klucz podpisuje przekazanie sam; od {date} może je '
+                    'podpisać większość szczytu.',
+                    <String, Object?>{
+                      'name': s.members[s.head]?.name ?? '?',
+                      'date': pyrDate(s.headSince + kPyrHandoverWaitMs),
+                    },
+                  )
+                : t(
+                    'Ma go {name}, szef piramidy. Poświadcza tylko, że to '
+                    'oryginalna piramida i kto był jej szefem — nie daje '
+                    'żadnej władzy.',
+                    <String, Object?>{
+                      'name': s.members[s.powerHead]?.name ?? '?',
+                    },
+                  ),
+          ),
+        ],
         if (pyr.inbox.isNotEmpty) ...<Widget>[
           ZenSection(
             t('Zgłoszenia ({count})', <String, Object?>{
@@ -1038,23 +883,25 @@ class PyramidPower extends StatelessWidget {
             ),
           ),
         ),
+        for (final PyrParamsChange c in coming)
+          ZenInfo(
+            icon: Icons.schedule_rounded,
+            tone: zen.warning,
+            title: t('Nowe zasady od {date}', <String, Object?>{
+              'date': pyrDate(c.effectiveAt),
+            }),
+            text: const JsonEncoder.withIndent('  ').convert(c.params),
+          ),
         if (_top)
-          for (final PyrReferendum r in constitutions)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: FilledButton.tonalIcon(
-                onPressed: () => unawaited(
-                  pyr.topDecision(<String, dynamic>{'t': 'const', 'ref': r.id}),
-                ),
-                icon: const Icon(Icons.gavel_rounded),
-                label: Text(
-                  t(
-                    'Zastosuj zasady z referendum „{question}”',
-                    <String, Object?>{'question': r.question},
-                  ),
-                ),
-              ),
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: FilledButton.tonalIcon(
+              key: const Key('pyr-rules-change'),
+              onPressed: () => unawaited(_rules(context)),
+              icon: const Icon(Icons.gavel_rounded),
+              label: Text(t('Zmień zasady')),
             ),
+          ),
       ],
     );
   }

@@ -43,7 +43,7 @@ void main() {
     expect(w['S'].state!.pathOf(a1.myKey!), '0');
     expect(w['S'].state!.pathOf(keyA), '00');
 
-    // Someone (A2) asks anonymously for a new vote; nobody sees who.
+    // Someone asks anonymously for a new vote; nobody sees who.
     expect(await a2.requestElection('0'), isTrue);
     await w.net.run();
     final PyrElection e = w['S'].state!.elections.values.single;
@@ -66,8 +66,8 @@ void main() {
     'a referendum counted up the tree: votes secret, sums checkable',
     () async {
       final PyramidWorld w = await PyramidWorld.six();
-      // Votes count from members met in person by 2 others (§20.6).
-      await w.meetAll();
+      // Everybody votes (admitted straight by a member who votes).
+      await w.knowAll();
       final PyramidService s = w['S'];
       await s.referendum(
         question: 'Zbiórka na świetlicę?',
@@ -219,13 +219,7 @@ void main() {
       await w.pyr(ps[0]).load();
       await w
           .pyr(ps[0])
-          .createPyramid(
-            name: 'Chaos',
-            myName: 'p0',
-            nat: 'PL',
-            birthYear: 1970,
-            gender: 'k',
-          );
+          .found(myName: 'p0', nat: 'PL', birthYear: 1970, gender: 'k');
       // Admissions in breadth order.
       for (int i = 1; i < ps.length; i++) {
         final SimPhone head = ps[(i - 1) ~/ 2];
@@ -285,7 +279,10 @@ void main() {
         need: 1,
       );
       await w.net.run();
-      expect(w['S'].state!.rejected[r.id], 'potrzeba 2 z 3 w komórce');
+      expect(
+        w['S'].state!.rejected[r.id],
+        'potrzeba 2 z 3 w komórce (z prawem głosu)',
+      );
       // A forged signature never gets in.
       final PyramidRecord forged = PyramidRecord(
         body: r.body,

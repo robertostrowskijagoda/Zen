@@ -121,16 +121,11 @@ void main() {
     addTearDown(p2.dispose);
     await p1.load();
     await p2.load();
-    // One person, one pyramid key, whichever device (§6.1).
+    // One person, one pyramid key, whichever device.
     expect(p2.myKey, isNotNull);
     expect(p2.myKey, p1.myKey);
-    final String py = await p1.createPyramid(
-      name: 'Ruch',
-      myName: 'Ania',
-      nat: 'PL',
-      birthYear: 1990,
-      gender: 'k',
-    );
+    await p1.found(myName: 'Ania', nat: 'PL', birthYear: 1990, gender: 'k');
+    expect(p1.holdsPowerKey, isTrue);
     expect(p2.isMember, isFalse);
 
     final PyramidDeviceSync s1 = PyramidDeviceSync(
@@ -153,9 +148,10 @@ void main() {
 
     // The second device knows the membership, the data confirmed at
     // entry and the record this person signed: it can act as them.
-    expect(p2.current, py);
     expect(p2.isMember, isTrue);
     expect(p2.myData, p1.myData);
+    // The power key goes with the person, to every device.
+    expect(p2.holdsPowerKey, isTrue);
 
     // Each device voted in its own referendum, and both in "r": the
     // first device keeps its own vote, the other one is added.
@@ -173,19 +169,12 @@ void main() {
     final SimPhone s = w.add('S');
     final SimPhone x = w.add('X');
     await w.pyr(s).load();
-    await w
-        .pyr(s)
-        .createPyramid(
-          name: 'Ruch',
-          myName: 'S',
-          nat: 'PL',
-          birthYear: 1980,
-          gender: 'm',
-        );
+    await w.pyr(s).found(myName: 'S', nat: 'PL', birthYear: 1980, gender: 'm');
     await w.pyr(x).load();
     final Map<String, dynamic> theirs = w.pyr(s).sharedState()!;
     expect(await w.pyr(x).mergeFromOwnDevice(theirs), isFalse);
-    expect(w.pyr(x).current, isNull);
+    expect(w.pyr(x).isMember, isFalse);
+    expect(w.pyr(x).holdsPowerKey, isFalse);
     expect(w.pyr(x).myData, isEmpty);
   });
 
@@ -195,15 +184,7 @@ void main() {
     final MemoryLedgerDisk diskA = MemoryLedgerDisk();
     final SimPhone a = w.add('A', disk: diskA);
     await w.pyr(s).load();
-    await w
-        .pyr(s)
-        .createPyramid(
-          name: 'Ruch',
-          myName: 'S',
-          nat: 'PL',
-          birthYear: 1980,
-          gender: 'm',
-        );
+    await w.pyr(s).found(myName: 'S', nat: 'PL', birthYear: 1980, gender: 'm');
     await w.join(s, a);
     await w.sync();
     final PyramidService first = w.pyr(a);
@@ -222,7 +203,8 @@ void main() {
 
     final Map<String, dynamic> shared = first.sharedState()!;
     expect(await second.mergeFromOwnDevice(shared), isTrue);
-    await second.askFriendsFor((shared['fol'] as Map<String, dynamic>).keys);
+    // Kept here now: its records come from friends.
+    await second.greet();
     await w.net.run();
 
     expect(second.current, first.current);

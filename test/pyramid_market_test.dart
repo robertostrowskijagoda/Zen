@@ -6,8 +6,8 @@ import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
 import 'support/pyramid_world.dart';
 
-/// Money in the pyramid beyond plain transfers (§24) and moving a
-/// whole branch (§20.4), on the simulated network.
+/// Money in the pyramid beyond plain transfers and moving a
+/// whole branch, on the simulated network.
 void main() {
   /// Emits [amount] to [who] (S proposes, B signs) and waits the 24 h.
   Future<void> fund(PyramidWorld w, String who, int amount) async {

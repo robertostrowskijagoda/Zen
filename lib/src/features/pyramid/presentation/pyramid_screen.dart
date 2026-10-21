@@ -10,8 +10,7 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
-import 'package:zen/src/features/moderation/hidden_by_me.dart';
-import 'package:zen/src/features/moderation/presentation/report_content.dart';
+import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_decisions.dart';
@@ -19,6 +18,7 @@ import 'package:zen/src/features/pyramid/presentation/pyramid_national.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_power.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_wallet.dart';
 import 'package:zen/src/features/pyramid/presentation/report_sheet.dart';
+import 'package:zen/src/features/pyramid/pyramid_feed.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
@@ -249,9 +249,13 @@ Future<bool> confirm(BuildContext context, String title, String body) async =>
 void snack(BuildContext context, String text) =>
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
-/// The "Piramida" tab (§20–24).
+/// The "Piramida" tab. Its posts are read on the Tablica only; here are
+/// the actions (votes, signatures, money).
 class PyramidScreen extends ConsumerWidget {
-  const PyramidScreen({super.key});
+  const PyramidScreen({this.openVotes = false, super.key});
+
+  /// Opens on „Głosowania” (a referendum's „Głosuj →” on the Tablica).
+  final bool openVotes;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -276,8 +280,6 @@ class PyramidScreen extends ConsumerWidget {
             pyr.inbox.isNotEmpty;
         final List<Tab> tabs = <Tab>[
           Tab(text: t('Ja')),
-          Tab(text: t('Polityka')),
-          Tab(text: t('Kraj')),
           Tab(text: t('Głosowania')),
           Tab(text: t('Portfel')),
           if (power) Tab(text: t('Władza')),
@@ -285,6 +287,7 @@ class PyramidScreen extends ConsumerWidget {
         ];
         return DefaultTabController(
           length: tabs.length,
+          initialIndex: openVotes ? 1 : 0,
           child: Scaffold(
             key: const Key('pyramid-screen'),
             appBar: _PyramidAppBar(
@@ -309,8 +312,6 @@ class PyramidScreen extends ConsumerWidget {
             body: TabBarView(
               children: <Widget>[
                 _MeTab(pyr: pyr, s: s, me: me),
-                _PoliticsTab(pyr: pyr, s: s, me: me),
-                _NationTab(pyr: pyr, s: s, me: me),
                 _VotesTab(pyr: pyr, s: s, me: me),
                 PyramidWallet(pyr: pyr, s: s, me: me),
                 if (power) PyramidPower(pyr: pyr, s: s, me: me),
@@ -446,7 +447,7 @@ Future<void> showProposals(
                       ),
                     ),
                     // Everything the signature decides, the record's own
-                    // time first (§20.5).
+                    // time first.
                     for (final String line in pyr.recordDetails(p.record))
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
@@ -463,7 +464,21 @@ Future<void> showProposals(
                           ),
                         ),
                       ),
-                    if (p.record.type == PyrT.admit) ...<Widget>[
+                    if (p.record.type == PyrT.admit &&
+                        p.record.str('sp') != pyr.myKey) ...<Widget>[
+                      const SizedBox(height: 8),
+                      ZenInfo(
+                        key: const Key('pyr-admit-recommended'),
+                        icon: Icons.group_add_rounded,
+                        tone: zen.success,
+                        text: t(
+                          'Za tę osobę ręczy polecający. Ty tylko przyjmujesz ją '
+                          'do swojej komórki — potem możecie się poznać.',
+                        ),
+                      ),
+                    ],
+                    if (p.record.type == PyrT.admit &&
+                        p.record.str('sp') == pyr.myKey) ...<Widget>[
                       const SizedBox(height: 8),
                       ZenInfo(
                         icon: Icons.verified_user_outlined,
@@ -481,7 +496,7 @@ Future<void> showProposals(
                           },
                         ),
                       ),
-                      // §20.2: only a friend at "Znajomy" or above.
+                      // Only a friend at "Znajomy" or above.
                       if (pyr.admitProblem(p)
                           case final String problem) ...<Widget>[
                         const SizedBox(height: 8),
@@ -566,13 +581,12 @@ class _JoinView extends ConsumerStatefulWidget {
 }
 
 class _JoinViewState extends ConsumerState<_JoinView> {
-  Future<Map<String, Object>?> _askData({bool withPyramidName = false}) async {
-    final TextEditingController pname = TextEditingController();
+  Future<Map<String, Object>?> _askData({bool founding = false}) async {
     final TextEditingController name = TextEditingController();
     final TextEditingController nat = TextEditingController(text: 'PL');
     final TextEditingController year = TextEditingController();
     String gender = 'k';
-    // Required (§20.2a): any plausible year, minors too.
+    // Required: any plausible year, minors too.
     int? yearOf() {
       final int? y = int.tryParse(year.text.trim());
       return y != null && pyrBirthYearValid(y, widget.pyr.now) ? y : null;
@@ -584,25 +598,13 @@ class _JoinViewState extends ConsumerState<_JoinView> {
         builder: (BuildContext context, StateSetter set) {
           final ZenColors zen = ZenColors.of(context);
           return AlertDialog(
-            title: Text(withPyramidName ? t('Nowa piramida') : t('Dołączenie')),
+            title: Text(founding ? t('Założenie piramidy') : t('Dołączenie')),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
                   const SizedBox(height: 4),
-                  if (withPyramidName) ...<Widget>[
-                    TextField(
-                      controller: pname,
-                      textCapitalization: TextCapitalization.sentences,
-                      decoration: InputDecoration(
-                        labelText: t('Nazwa piramidy / ruchu'),
-                        hintText: t('np. Sąsiedzi z Mokotowa'),
-                        prefixIcon: const ZenIcon(kPyramidIcon),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
                   TextField(
                     key: const Key('pyr-pseudonym'),
                     controller: name,
@@ -707,7 +709,6 @@ class _JoinViewState extends ConsumerState<_JoinView> {
     final Map<String, Object>? out =
         ok == true && name.text.trim().isNotEmpty && y != null
         ? <String, Object>{
-            'pname': pname.text.trim(),
             'name': name.text.trim(),
             'nat': nat.text.trim(),
             'year': y,
@@ -715,7 +716,6 @@ class _JoinViewState extends ConsumerState<_JoinView> {
           }
         : null;
     for (final TextEditingController c in <TextEditingController>[
-      pname,
       name,
       nat,
       year,
@@ -738,6 +738,14 @@ class _JoinViewState extends ConsumerState<_JoinView> {
       snack(context, t('To nie jest zaproszenie do piramidy.'));
       return;
     }
+    // Only the original pyramid: a code of any other is refused.
+    if (!widget.pyr.invitesHere(code)) {
+      snack(
+        context,
+        t('To nie jest piramida Zen — ten kod pochodzi z innej piramidy.'),
+      );
+      return;
+    }
     final Map<String, Object>? d = await _askData();
     if (d == null) {
       return;
@@ -757,20 +765,35 @@ class _JoinViewState extends ConsumerState<_JoinView> {
     }
   }
 
-  Future<void> _create() async {
-    final Map<String, Object>? d = await _askData(withPyramidName: true);
+  /// The founder seats themselves at the top with the power key (once,
+  /// while the pyramid is empty).
+  Future<void> _found() async {
+    String? secret;
+    if (widget.pyr.foundNeedsKey) {
+      secret = await askText(
+        context,
+        title: t('Klucz władzy założyciela'),
+        label: t('Wklej klucz z narzędzia zen_pyramid'),
+        keyboard: TextInputType.visiblePassword,
+      );
+      if (secret == null || !mounted) {
+        return;
+      }
+    }
+    final Map<String, Object>? d = await _askData(founding: true);
     if (d == null) {
       return;
     }
-    await widget.pyr.createPyramid(
-      name: (d['pname']! as String).isEmpty
-          ? t('Piramida')
-          : d['pname']! as String,
+    final String? id = await widget.pyr.found(
       myName: d['name']! as String,
       nat: d['nat']! as String,
       birthYear: d['year']! as int,
       gender: d['g']! as String,
+      powerSecret: secret,
     );
+    if (id == null && mounted) {
+      snack(context, t('Ten klucz nie pasuje do piramidy Zen.'));
+    }
   }
 
   @override
@@ -821,6 +844,16 @@ class _JoinViewState extends ConsumerState<_JoinView> {
           ),
         ),
         const SizedBox(height: 16),
+        if (widget.pyr.current == null) ...<Widget>[
+          ZenInfo(
+            icon: Icons.hourglass_empty_rounded,
+            tone: zen.warning,
+            text: t(
+              'Piramida Zen jeszcze nie wystartowała w tej wersji aplikacji.',
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
         FilledButton.icon(
           key: const Key('pyr-join'),
           style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
@@ -828,18 +861,32 @@ class _JoinViewState extends ConsumerState<_JoinView> {
           icon: const Icon(Icons.qr_code_scanner_rounded),
           label: Text(t('Dołącz — zeskanuj kod znajomego')),
         ),
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          key: const Key('pyr-create'),
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(52),
+        // The test pyramid (debug builds) is founded by anyone; the original
+        // one only by its founder, with the power key (a quiet link below).
+        if (widget.pyr.canFound && !widget.pyr.foundNeedsKey) ...<Widget>[
+          const SizedBox(height: 10),
+          ZenInfo(
+            icon: Icons.key_rounded,
+            tone: zen.warning,
+            title: t('Piramida jeszcze nie ma szefa'),
+            text: t(
+              'Zakłada ją raz założyciel, kluczem władzy z rekordu początkowego '
+              'zapisanego w aplikacji. Każdy inny dołącza przez znajomego.',
+            ),
           ),
-          onPressed: () => unawaited(_create()),
-          icon: const Icon(Icons.add_rounded),
-          label: Text(t('Załóż nową piramidę')),
-        ),
-        if (browsing != null) ...<Widget>[
-          ZenSection(t('Piramida Twoich znajomych')),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const Key('pyr-found'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
+            ),
+            onPressed: () => unawaited(_found()),
+            icon: const Icon(Icons.key_rounded),
+            label: Text(t('Załóż piramidę kluczem władzy')),
+          ),
+        ],
+        if (browsing != null && browsing.members.isNotEmpty) ...<Widget>[
+          ZenSection(t('Piramida Zen')),
           ZenCard(
             tone: tone,
             child: Column(
@@ -899,12 +946,21 @@ class _JoinViewState extends ConsumerState<_JoinView> {
             ),
           ),
         ],
-        // §22.2: the section of the profile's nationality, read-only, for
-        // everybody — members of the pyramid comment.
+        // What somebody outside reads of the pyramid — the top's posts, the
+        // section of the profile's nationality — is on the Tablica.
         PyramidNationalEntry(
           pyr: widget.pyr,
           nationalities: ref.watch(userProfileControllerProvider).nationalities,
         ),
+        if (widget.pyr.canFound && widget.pyr.foundNeedsKey)
+          Center(
+            child: TextButton.icon(
+              key: const Key('pyr-found-key'),
+              onPressed: () => unawaited(_found()),
+              icon: const Icon(Icons.key_rounded, size: 18),
+              label: Text(t('Jestem założycielem — mam klucz władzy')),
+            ),
+          ),
       ],
     );
   }
@@ -998,10 +1054,66 @@ class _MeTab extends StatelessWidget {
   final PyramidState s;
   final String me;
 
+  /// A free place in words: under whom, on which level.
+  String _placeText(String place) {
+    final String? head = s.occupant[PyrPath.parent(place)];
+    return head == me
+        ? t('Pod Tobą · poziom {level}', <String, Object?>{
+            'level': place.length + 1,
+          })
+        : t('Pod {name} · poziom {level}', <String, Object?>{
+            'name': s.members[head]?.name ?? '?',
+            'level': place.length + 1,
+          });
+  }
+
+  /// "Polecenie": the place in this person's branch the newcomer goes to
+  /// (nearest the top by default), then the QR to show them.
   Future<void> _invite(BuildContext context) async {
-    final String? code = pyr.inviteCode();
+    final List<String> places = pyr.freePlaces();
+    if (places.isEmpty) {
+      snack(context, t('Brak wolnego miejsca w Twojej gałęzi.'));
+      return;
+    }
+    String slot = places.first;
+    if (places.length > 1) {
+      final String? picked = await showDialog<String>(
+        context: context,
+        builder: (BuildContext context) => SimpleDialog(
+          title: Text(t('Gdzie trafi nowa osoba?')),
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+              child: Text(
+                t(
+                  'Wolne miejsca w Twojej gałęzi, najbliżej szczytu na górze. '
+                  'Szef wybranej komórki dopisze swój podpis.',
+                ),
+              ),
+            ),
+            for (final String p in places)
+              SimpleDialogOption(
+                key: Key('pyr-place-$p'),
+                onPressed: () => Navigator.of(context).pop(p),
+                child: Text(
+                  p == places.first
+                      ? t('{place} (domyślnie)', <String, Object?>{
+                          'place': _placeText(p),
+                        })
+                      : _placeText(p),
+                ),
+              ),
+          ],
+        ),
+      );
+      if (picked == null || !context.mounted) {
+        return;
+      }
+      slot = picked;
+    }
+    final String? code = pyr.inviteCode(slot: slot);
     if (code == null) {
-      snack(context, t('Twoja komórka jest pełna (2 osoby pod Tobą).'));
+      snack(context, t('To miejsce jest już zajęte.'));
       return;
     }
     await showDialog<void>(
@@ -1009,7 +1121,7 @@ class _MeTab extends StatelessWidget {
       builder: (BuildContext context) {
         final ZenColors zen = ZenColors.of(context);
         return AlertDialog(
-          title: Text(t('Zaproszenie do Twojej komórki')),
+          title: Text(t('Zaproszenie do piramidy')),
           content: SizedBox(
             width: 280,
             child: SingleChildScrollView(
@@ -1037,6 +1149,13 @@ class _MeTab extends StatelessWidget {
                       'Ty ręczysz, że to prawdziwa osoba, i potwierdzasz jej '
                       'dane.',
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    t('Miejsce: {place}', <String, Object?>{
+                      'place': _placeText(slot),
+                    }),
+                    style: TextStyle(color: zen.textSecondary, fontSize: 13),
                   ),
                 ],
               ),
@@ -1158,6 +1277,7 @@ class _MeTab extends StatelessWidget {
                               t('członek'),
                             if (s.members[k] case final PyrMember m)
                               pyrAgeText(m.birthYear, pyr.now),
+                            ?pyrVoteText(s, k, pyr.now),
                           ].join(' · '),
                           style: TextStyle(
                             color: s.occupant[cell] == k
@@ -1182,6 +1302,13 @@ class _MeTab extends StatelessWidget {
                               PopupMenuItem<String>(
                                 value: 'swap',
                                 child: Text(t('Niech zostanie szefem (2 z 3)')),
+                              ),
+                            if (s.cellmates(k).contains(me) &&
+                                s.canVote(me, pyr.now) &&
+                                !s.canVote(k, pyr.now))
+                              PopupMenuItem<String>(
+                                value: 'known',
+                                child: Text(t('Poznaliśmy się (daje głos)')),
                               ),
                             PopupMenuItem<String>(
                               value: 'absent',
@@ -1365,6 +1492,17 @@ class _MeTab extends StatelessWidget {
         if (context.mounted) {
           snack(context, t('Propozycja wysłana do komórki.'));
         }
+      case 'known':
+        if (await confirm(
+          context,
+          t('Znacie się?'),
+          t(
+            'Potwierdzasz, że znasz tę osobę (nie musicie się spotkać). '
+            'Od razu dostanie głos w komórce i w referendach.',
+          ),
+        )) {
+          await pyr.confirmKnown(key);
+        }
       case 'absent':
         await pyr.proposeAbsent(key);
       case 'remove':
@@ -1452,6 +1590,13 @@ class _MeTab extends StatelessWidget {
                                 text: t('szczyt'),
                                 tone: zen.warning,
                                 icon: Icons.workspace_premium_rounded,
+                              ),
+                            if (pyr.holdsPowerKey)
+                              ZenPill(
+                                key: const Key('pyr-power-pill'),
+                                text: t('klucz władzy'),
+                                tone: zen.warning,
+                                icon: Icons.key_rounded,
                               ),
                             if (s.treasurers.contains(me))
                               ZenPill(
@@ -1545,6 +1690,7 @@ class _MeTab extends StatelessWidget {
             ],
           ),
         ),
+        PyramidPostsEntry(pyr: pyr),
         DecisionsAgainstMe(pyr: pyr, s: s, me: me),
         ZenSection(t('Twoja linia do szczytu')),
         ZenCard(
@@ -1623,15 +1769,9 @@ class _MeTab extends StatelessWidget {
         FilledButton.icon(
           key: const Key('pyr-invite'),
           style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-          onPressed: s.freeSlot(myPath) == null
-              ? null
-              : () => unawaited(_invite(context)),
+          onPressed: () => unawaited(_invite(context)),
           icon: const Icon(Icons.qr_code_2_rounded),
-          label: Text(
-            s.freeSlot(myPath) == null
-                ? t('Komórka pełna')
-                : t('Zaproś do swojej komórki'),
-          ),
+          label: Text(t('Zaproś do piramidy')),
         ),
         const SizedBox(height: 10),
         OutlinedButton.icon(
@@ -1673,7 +1813,7 @@ class _MeTab extends StatelessWidget {
             }
             bool branch = false;
             if (pyr.myCellBelow.isNotEmpty) {
-              // §20.4: alone (the cell below picks who moves up), or with
+              // Alone (the cell below picks who moves up), or with
               // the whole branch when the whole cell agrees.
               final bool? withBranch = await showDialog<bool>(
                 context: context,
@@ -1748,19 +1888,38 @@ class _MeTab extends StatelessWidget {
   }
 }
 
-/// A member's badge (§20.2a) for people: "34 l. · K".
-/// A member's age, from the birth year confirmed at entry (§20.2a).
+/// A member's vote in words, for their cell: "poznany(-a) przez Ola",
+/// "głos od 12.11.2026", or null when they simply vote (14 days in, or the
+/// founder).
+String? pyrVoteText(PyramidState s, String key, int nowMs) {
+  final List<String> by = s.knownByOf(key);
+  if (by.isNotEmpty) {
+    return t('poznany(-a) przez {names}', <String, Object?>{
+      'names': by.map((String k) => s.members[k]?.name ?? '?').join(', '),
+    });
+  }
+  final PyrMember? m = s.members[key];
+  if (m == null || s.canVote(key, nowMs)) {
+    return null;
+  }
+  return t('głos od {date}', <String, Object?>{
+    'date': pyrDate(m.joinedAt + kPyrVoteAfterMs).split(' ').first,
+  });
+}
+
+/// A member's badge for people: "34 l. · K".
+/// A member's age, from the birth year confirmed at entry.
 String pyrAgeText(int birthYear, int nowMs) =>
     t('{age} l.', <String, Object?>{'age': pyrAge(birthYear, nowMs)});
 
-/// A gender badge a member shows (§20.2a).
+/// A gender badge a member shows.
 String pyrGenderText(String gender) => switch (gender) {
   'k' => t('K'),
   'm' => t('M'),
   _ => t('inna'),
 };
 
-/// The badge this person may show (§20.2a) and the anonymous statistics of
+/// The badge this person may show and the anonymous statistics of
 /// their branch: gender and age, summed up the tree, shown only from
 /// [kPyrStatsMinPeople] people.
 class PyrBadgeAndStats extends StatelessWidget {
@@ -1843,280 +2002,86 @@ class PyrBadgeAndStats extends StatelessWidget {
   }
 }
 
-/// A political post with its numbers (§22.1a) and comments. A post the
-/// person reported is hidden behind a line they can tap to see it anyway.
-class PyrPostCard extends ConsumerWidget {
-  const PyrPostCard({
-    required this.pyr,
-    required this.s,
-    required this.me,
-    required this.post,
-    super.key,
-  });
+/// Shows the Tablica on [filter] (from a pushed Pyramid too: back to the
+/// shell first).
+void pyrOpenFeed(BuildContext context, FeedFilter filter) {
+  Navigator.of(context).popUntil((Route<dynamic> r) => r.isFirst);
+  openFeed(filter);
+}
+
+/// „Posty piramidy: N nowe · Otwórz na Tablicy →” and „Napisz do gałęzi”:
+/// the pyramid's posts are read on the Tablica only (its „Piramida”
+/// filter), never here.
+class PyramidPostsEntry extends StatelessWidget {
+  const PyramidPostsEntry({required this.pyr, super.key});
 
   final PyramidService pyr;
-  final PyramidState s;
-  final String me;
-  final PyrPost post;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    if (ref.watch(hiddenByMeProvider).hides(id: post.id)) {
-      return HiddenContentPlaceholder(
-        key: Key('pyr-hidden-${post.id}'),
-        byMe: true,
-        onShow: () => showHiddenAnyway(ref, id: post.id),
-      );
-    }
+  Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final Color tone = pyrTone(zen);
-    final Set<String> bannedIds = s.bannedEntries(pyr.now);
-    final String? nat = post.nat;
-    final bool pinned =
-        nat != null && (s.natPins[nat]?.containsKey(post.id) ?? false);
-    final bool leadsSection = nat != null && s.nationalLead(nat) == me;
-    final int? myLevel = s.levelOf(me);
-    final String? authorPath = s.pathOf(post.author);
-    final int above = myLevel == null ? 0 : myLevel - post.level;
-    final String name = s.members[post.author]?.name ?? '?';
-    final Color levelTone = post.level == 0 ? zen.warning : tone;
+    final PyramidFeed feed = pyr.feed;
+    final int fresh = feed.unread(pyr.wasRead, pyr.now).length;
+    final int national = feed.unreadNational(pyr.wasRead, pyr.now).length;
     return ZenCard(
-      padding: const EdgeInsets.fromLTRB(16, 14, 8, 6),
+      key: const Key('pyr-posts-entry'),
+      tone: tone,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                PyrAvatar(text: pyrInitial(name), tone: levelTone, size: 40),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: zen.textPrimary,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        <String>[
-                          if (authorPath != null)
-                            t('szef gałęzi {count} os.', <String, Object?>{
-                              'count': s.branchSize(authorPath),
-                            }),
-                          if (post.nat != null) post.nat!,
-                          if (s.members[post.author] case final PyrMember m)
-                            pyrAgeText(m.birthYear, pyr.now),
-                          if (s.badges[post.author] case final String g)
-                            pyrGenderText(g),
-                          pyrDate(post.at),
-                        ].join(' · '),
-                        style: TextStyle(
-                          color: zen.textMuted,
-                          fontSize: 12,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ZenPill(
-                  text: t('Poziom {level}/{depth}', <String, Object?>{
-                    'level': post.level + 1,
-                    'depth': s.depth,
-                  }),
-                  tone: levelTone,
-                  icon: Icons.arrow_upward_rounded,
-                ),
-              ],
-            ),
-          ),
-          if (above > 0) ...<Widget>[
-            const SizedBox(height: 6),
-            Text(
-              tn(
-                above,
-                one: '▲ {n} poziom nad Tobą',
-                few: '▲ {n} poziomy nad Tobą',
-                many: '▲ {n} poziomów nad Tobą',
-              ),
-              style: TextStyle(
-                color: levelTone,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-          if (pinned) ...<Widget>[
-            const SizedBox(height: 6),
-            Row(
-              children: <Widget>[
-                Icon(Icons.push_pin_rounded, size: 15, color: zen.warning),
-                const SizedBox(width: 4),
-                Text(
-                  t('Przypięte w sekcji'),
-                  style: TextStyle(
-                    color: zen.warning,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 10),
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: Text(
-              post.text,
-              style: TextStyle(
-                color: zen.textPrimary,
-                fontSize: 15,
-                height: 1.45,
-              ),
-            ),
-          ),
-          // §22.1a: for the author, how far the post got in the branch
-          // (anonymous sums climbing the tree).
-          if (pyr.reachOf(post.id) case final ({int got, int read}) reach)
-            Padding(
-              padding: const EdgeInsets.only(top: 8, right: 8),
-              child: Text(
-                t('Dotarło: {got} z {count} · przeczytało: {read}', {
-                  'got': reach.got,
-                  'count': authorPath == null
-                      ? 0
-                      : s.branchSize(authorPath) - 1,
-                  'read': reach.read,
-                }),
-                key: Key('pyr-reach-${post.id}'),
-                style: TextStyle(
-                  color: zen.textMuted,
-                  fontSize: 12,
-                  height: 1.3,
-                ),
-              ),
-            ),
-          if (post.comments.isNotEmpty)
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.fromLTRB(0, 10, 8, 0),
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-              decoration: BoxDecoration(
-                color: zen.surfaceMuted,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  for (final PyrComment c in post.comments)
-                    if (!bannedIds.contains(c.id) &&
-                        !ref.watch(hiddenByMeProvider).hides(id: c.id))
-                      InkWell(
-                        key: Key('pyr-comment-${c.id}'),
-                        // §21.4: a comment is reported with its author.
-                        onLongPress: c.author == me
-                            ? null
-                            : () => unawaited(
-                                showReportSheet(
-                                  context,
-                                  pyr,
-                                  target: c.author,
-                                  evidence: t('Komentarz — {name}\n{text}', {
-                                    'name': s.members[c.author]?.name ?? '?',
-                                    'text': c.text,
-                                  }),
-                                  contentId: c.id,
-                                  entryId: c.id,
-                                ),
-                              ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 3),
-                          child: Text.rich(
-                            TextSpan(
-                              children: <InlineSpan>[
-                                TextSpan(
-                                  text: '${s.members[c.author]?.name ?? '?'}  ',
-                                  style: TextStyle(
-                                    color: zen.textPrimary,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                TextSpan(text: c.text),
-                              ],
-                            ),
-                            style: TextStyle(
-                              color: zen.textSecondary,
-                              fontSize: 13.5,
-                              height: 1.35,
-                            ),
-                          ),
-                        ),
-                      ),
-                ],
-              ),
-            ),
-          const SizedBox(height: 2),
           Row(
-            mainAxisAlignment: MainAxisAlignment.end,
             children: <Widget>[
-              TextButton.icon(
-                onPressed: () => unawaited(() async {
-                  final String? text = await askText(
-                    context,
-                    title: t('Komentarz'),
-                    maxLines: 3,
-                  );
-                  if (text != null) {
-                    await pyr.comment(post.id, text);
-                  }
-                }()),
-                icon: const Icon(Icons.mode_comment_outlined, size: 18),
-                label: Text(
-                  post.comments.isEmpty
-                      ? t('Komentuj')
-                      : t('Komentuj ({count})', <String, Object?>{
-                          'count': post.comments.length,
-                        }),
+              ZenIconBadge(icon: Icons.forum_rounded, tone: tone, size: 40),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      fresh == 0
+                          ? t('Posty piramidy')
+                          : tn(
+                              fresh,
+                              one: 'Posty piramidy: {n} nowy',
+                              few: 'Posty piramidy: {n} nowe',
+                              many: 'Posty piramidy: {n} nowych',
+                            ),
+                      key: const Key('pyr-posts-new'),
+                      style: TextStyle(
+                        color: zen.textPrimary,
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      <String>[
+                        t('od szczytu i Twojej linii, na Tablicy'),
+                        if (national > 0)
+                          t('{n} nowe z sekcji {nat}', <String, Object?>{
+                            'n': national,
+                            'nat': feed.nat,
+                          }),
+                      ].join(' · '),
+                      style: TextStyle(color: zen.textSecondary, fontSize: 13),
+                    ),
+                  ],
                 ),
               ),
-              if (leadsSection)
-                IconButton(
-                  key: Key('pyr-pin-${post.id}'),
-                  tooltip: pinned ? t('Odepnij') : t('Przypnij'),
-                  icon: Icon(
-                    pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
-                    color: pinned ? zen.warning : zen.textMuted,
-                  ),
-                  onPressed: () =>
-                      unawaited(pyr.pinNational(post.id, on: !pinned)),
-                ),
-              IconButton(
-                tooltip: t('Zgłoś'),
-                icon: Icon(Icons.flag_outlined, color: zen.textMuted),
-                onPressed: () => unawaited(
-                  showReportSheet(
-                    context,
-                    pyr,
-                    target: post.author,
-                    evidence: post.text,
-                    contentId: post.id,
-                    // The post is a signed record every member keeps: its
-                    // id is the evidence and what a ban names (S36).
-                    entryId: post.id,
-                  ),
-                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              FilledButton.icon(
+                key: const Key('pyr-open-feed'),
+                onPressed: () => pyrOpenFeed(context, FeedFilter.pyramid),
+                icon: const Icon(Icons.newspaper_rounded),
+                label: Text(t('Otwórz na Tablicy →')),
               ),
+              PyramidBranchPostButton(pyr: pyr, branch: feed.branch),
             ],
           ),
         ],
@@ -2125,341 +2090,44 @@ class PyrPostCard extends ConsumerWidget {
   }
 }
 
-class _PoliticsTab extends StatelessWidget {
-  const _PoliticsTab({required this.pyr, required this.s, required this.me});
+/// „Napisz do gałęzi”: a signed post, under the pseudonym, to everybody
+/// below this person; it shows on the Tablica.
+class PyramidBranchPostButton extends StatelessWidget {
+  const PyramidBranchPostButton({
+    required this.pyr,
+    required this.branch,
+    super.key,
+  });
 
   final PyramidService pyr;
-  final PyramidState s;
-  final String me;
+
+  /// How many people are below.
+  final int branch;
 
   @override
   Widget build(BuildContext context) {
-    final ZenColors zen = ZenColors.of(context);
-    final Color tone = pyrTone(zen);
-    final Set<String> up = s.lineUp(me).toSet();
-    final Set<String> bannedIds = s.bannedEntries(pyr.now);
-    // §22.1: the top first, then the line up from the highest, newest first
-    // within a level; then this person's own posts.
-    final List<PyrPost> list =
-        s.posts.values
-            .where(
-              (PyrPost p) =>
-                  (up.contains(p.author) ||
-                      p.author == me ||
-                      p.author == s.head) &&
-                  !bannedIds.contains(p.id),
-            )
-            .toList()
-          ..sort(
-            (PyrPost a, PyrPost b) => a.level != b.level
-                ? a.level.compareTo(b.level)
-                : b.at.compareTo(a.at),
-          );
-    final String myPath = s.pathOf(me)!;
-    // §22.1a: what is shown here counts as opened ("przeczytało").
-    pyr.markRead(list.map((PyrPost p) => p.id));
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-      children: <Widget>[
-        ZenCard(
-          tone: tone,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  ZenIconBadge(
-                    icon: Icons.campaign_rounded,
-                    tone: tone,
-                    size: 40,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          t('Twoja gałąź'),
-                          style: TextStyle(
-                            color: zen.textPrimary,
-                            fontSize: 15.5,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        Text(
-                          t(
-                            '{count} os. przeczyta, co napiszesz',
-                            <String, Object?>{
-                              'count': s.branchSize(myPath) - 1,
-                            },
-                          ),
-                          style: TextStyle(
-                            color: zen.textSecondary,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                key: const Key('pyr-post'),
-                onPressed: () => unawaited(() async {
-                  final String? text = await askText(
-                    context,
-                    title: t(
-                      'Do Twojej gałęzi ({count} os.)',
-                      <String, Object?>{'count': s.branchSize(myPath) - 1},
-                    ),
-                    maxLines: 6,
-                  );
-                  if (text != null) {
-                    await pyr.post(text);
-                  }
-                }()),
-                icon: const Icon(Icons.edit_rounded),
-                label: Text(t('Napisz do swojej gałęzi')),
-              ),
-            ],
-          ),
-        ),
-        if (list.isEmpty)
-          ZenEmpty(
-            icon: Icons.forum_outlined,
-            tone: tone,
-            title: t('Cisza w linii'),
-            text: t('Nikt z Twojej linii jeszcze nic nie napisał.'),
-          )
-        else ...<Widget>[
-          ZenSection(t('Od szczytu w dół'), top: 16),
-          for (final PyrPost p in list)
-            PyrPostCard(pyr: pyr, s: s, me: me, post: p),
-        ],
-      ],
-    );
-  }
-}
-
-class _NationTab extends StatelessWidget {
-  const _NationTab({required this.pyr, required this.s, required this.me});
-
-  final PyramidService pyr;
-  final PyramidState s;
-  final String me;
-
-  @override
-  Widget build(BuildContext context) {
-    final ZenColors zen = ZenColors.of(context);
-    final Color tone = zenTone(zen, 1);
-    final String nat = s.members[me]!.nat;
-    final String? lead = s.nationalLead(nat);
-    final Map<String, int> grants = s.natGrants[nat] ?? const <String, int>{};
-    final Map<String, int> pins = s.natPins[nat] ?? const <String, int>{};
-    final int now = pyr.now;
-    final Set<String> bannedIds = s.bannedEntries(now);
-    final List<PyrPost> posts =
-        s.natPosts.values
-            .where((PyrPost p) => p.nat == nat && !bannedIds.contains(p.id))
-            .toList()
-          ..sort((PyrPost a, PyrPost b) {
-            // Pinned by the lead first, newest pin on top (§22.2).
-            final int pa = pins[a.id] ?? -1;
-            final int pb = pins[b.id] ?? -1;
-            if (pa != pb) {
-              return pb.compareTo(pa);
-            }
-            int prio(PyrPost p) =>
-                p.author == lead ? 0 : ((grants[p.author] ?? 0) > now ? 1 : 2);
-            final int c = prio(a).compareTo(prio(b));
-            if (c != 0) {
-              return c;
-            }
-            return a.level != b.level
-                ? a.level.compareTo(b.level)
-                : b.at.compareTo(a.at);
-          });
-    final int count = s.members.values
-        .where((PyrMember m) => m.nat == nat && s.isMember(m.key))
-        .length;
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-      children: <Widget>[
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(26),
-            gradient: LinearGradient(
-              colors: <Color>[
-                Color.alphaBlend(tone.withValues(alpha: 0.28), zen.surface),
-                Color.alphaBlend(
-                  zen.accentSecondary.withValues(alpha: 0.10),
-                  zen.surface,
-                ),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+    return OutlinedButton.icon(
+      key: const Key('pyr-post'),
+      onPressed: () => unawaited(() async {
+        final String? text = await askText(
+          context,
+          title: t('Do Twojej gałęzi ({count} os.)', <String, Object?>{
+            'count': branch,
+          }),
+          maxLines: 6,
+        );
+        if (text != null && await pyr.post(text) != null && context.mounted) {
+          snack(
+            context,
+            t(
+              'Wysłane pod pseudonimem jako podpisany rekord. Post jest na '
+              'Tablicy.',
             ),
-            border: Border.all(color: tone.withValues(alpha: 0.30)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Container(
-                    constraints: const BoxConstraints(
-                      minWidth: 64,
-                      minHeight: 64,
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: tone.withValues(alpha: 0.16),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: tone.withValues(alpha: 0.35)),
-                    ),
-                    child: Text(nat, style: zen.display(color: tone, size: 26)),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          t('Sekcja krajowa'),
-                          style: zen.display(
-                            color: zen.textPrimary,
-                            size: 20,
-                            weight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          t(
-                            'Członków piramidy z narodowością {nat}: {count}',
-                            <String, Object?>{'nat': nat, 'count': count},
-                          ),
-                          style: TextStyle(
-                            color: zen.textSecondary,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Icon(
-                    lead == null
-                        ? Icons.person_off_outlined
-                        : Icons.record_voice_over_rounded,
-                    color: tone,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      lead == null
-                          ? t(
-                              'Sekcja bez osoby prowadzącej (nikt nie ma '
-                              '{count} os. tej narodowości w gałęzi)',
-                              <String, Object?>{'count': s.params.nationalMin},
-                            )
-                          : t(
-                              'Prowadzi: {name} · poziom {level} · {count} os. '
-                              '{nat} w gałęzi',
-                              <String, Object?>{
-                                'name': s.members[lead]?.name,
-                                'level': s.levelOf(lead),
-                                'count': s.branchNat(s.pathOf(lead)!, nat),
-                                'nat': nat,
-                              },
-                            ),
-                      style: TextStyle(
-                        color: zen.textPrimary,
-                        fontSize: 14,
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  FilledButton.icon(
-                    onPressed: () => unawaited(() async {
-                      final String? text = await askText(
-                        context,
-                        title: t('Post w sekcji {nat}', <String, Object?>{
-                          'nat': nat,
-                        }),
-                        maxLines: 6,
-                      );
-                      if (text != null) {
-                        await pyr.natPost(text);
-                      }
-                    }()),
-                    icon: const Icon(Icons.edit_rounded),
-                    label: Text(t('Napisz w sekcji')),
-                  ),
-                  if (lead == me)
-                    OutlinedButton.icon(
-                      onPressed: () => unawaited(() async {
-                        final String? name = await askText(
-                          context,
-                          title: t('Komu dać priorytet (pseudonim)?'),
-                        );
-                        final String? key = s.members.values
-                            .where(
-                              (PyrMember m) => m.name == name && m.nat == nat,
-                            )
-                            .map((PyrMember m) => m.key)
-                            .firstOrNull;
-                        if (key != null) {
-                          await pyr.propose(
-                            <String, dynamic>{
-                              't': PyrT.natGrant,
-                              'nat': nat,
-                              'to': key,
-                              'until': pyr.now + 30 * 24 * 3600 * 1000,
-                            },
-                            candidates: <String>[me],
-                            need: 1,
-                          );
-                        }
-                      }()),
-                      icon: const Icon(Icons.star_outline_rounded),
-                      label: Text(t('Nadaj priorytet (30 dni)')),
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        if (posts.isEmpty)
-          ZenEmpty(
-            icon: Icons.flag_outlined,
-            tone: tone,
-            title: t('Jeszcze nic'),
-            text: t('W sekcji {nat} nikt jeszcze nie pisał.', <String, Object?>{
-              'nat': nat,
-            }),
-          )
-        else ...<Widget>[
-          ZenSection(t('Posty w sekcji'), top: 16),
-          for (final PyrPost p in posts)
-            PyrPostCard(pyr: pyr, s: s, me: me, post: p),
-        ],
-      ],
+          );
+        }
+      }()),
+      icon: const Icon(Icons.edit_rounded),
+      label: Text(t('Napisz do gałęzi')),
     );
   }
 }
@@ -2479,8 +2147,9 @@ class _VotesTab extends StatelessWidget {
     final List<PyrReferendum> list =
         s.referenda.values.where((PyrReferendum r) => s.inScope(r, me)).toList()
           ..sort((PyrReferendum a, PyrReferendum b) => b.at.compareTo(a.at));
-    // Votes count only from members met in person by 2 others (§20.6).
-    final bool met = s.metInPerson(me);
+    // A newcomer votes 14 days in, or once somebody of their cell
+    // confirmed knowing them.
+    final bool met = s.canVote(me, now);
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: <Widget>[
@@ -2490,18 +2159,16 @@ class _VotesTab extends StatelessWidget {
             key: const Key('pyr-vote-not-met'),
             icon: Icons.handshake_outlined,
             tone: zen.warning,
-            title: t('Głosujesz po spotkaniu osobiście'),
-            text: tn(
-              s.metCount(me),
-              one:
-                  'W referendach głosują osoby, które co najmniej 2 członków '
-                  'piramidy poznało osobiście. Potwierdził(a) to {n} członek.',
-              few:
-                  'W referendach głosują osoby, które co najmniej 2 członków '
-                  'piramidy poznało osobiście. Potwierdziło to {n} członków.',
-              many:
-                  'W referendach głosują osoby, które co najmniej 2 członków '
-                  'piramidy poznało osobiście. Potwierdziło to {n} członków.',
+            title: t('Głos jeszcze przed Tobą'),
+            text: t(
+              'Nowa osoba głosuje w komórce i w referendach po 14 dniach '
+              '(u Ciebie od {date}) albo od razu, gdy ktoś z Twojej komórki '
+              'potwierdzi, że się znacie.',
+              <String, Object?>{
+                'date': pyrDate(
+                  (s.members[me]?.joinedAt ?? now) + kPyrVoteAfterMs,
+                ).split(' ').first,
+              },
             ),
           ),
         if (list.isEmpty)
@@ -2520,9 +2187,7 @@ class _VotesTab extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     ZenIconBadge(
-                      icon: r.kind == 'constitution'
-                          ? Icons.gavel_rounded
-                          : Icons.how_to_vote_rounded,
+                      icon: Icons.how_to_vote_rounded,
                       tone: tone,
                       size: 40,
                     ),
@@ -2556,8 +2221,7 @@ class _VotesTab extends StatelessWidget {
                       tone: tone,
                       icon: Icons.groups_rounded,
                     ),
-                    if (r.kind == 'constitution')
-                      ZenPill(text: t('zmiana zasad'), tone: zen.warning),
+                    ZenPill(text: t('doradcze'), tone: zen.textMuted),
                     ZenPill(
                       text: now < r.end
                           ? t('do {date}', <String, Object?>{
@@ -2572,7 +2236,9 @@ class _VotesTab extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
-                if (now < r.end && met && !pyr.myVotes.containsKey(r.id))
+                if (now < r.end &&
+                    s.eligible(r, me) &&
+                    !pyr.myVotes.containsKey(r.id))
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -2693,7 +2359,8 @@ class _Result extends StatelessWidget {
         const SizedBox(height: 6),
         Text(
           t(
-            'Oddane głosy: {count} · sumy podpisane przez każdą komórkę.',
+            'Oddane głosy: {count} · sumy podpisane przez każdą komórkę. '
+            'Wynik jest doradczy: decyduje szczyt.',
             <String, Object?>{'count': total},
           ),
           style: TextStyle(color: zen.textMuted, fontSize: 12.5),

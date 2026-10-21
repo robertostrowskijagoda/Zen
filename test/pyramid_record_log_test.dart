@@ -312,14 +312,8 @@ void main() {
       final SimPhone x = w.add('X', disk: disk);
       final PyramidService s = w.pyr(x);
       await s.load();
-      await s.createPyramid(
-        name: 'Nowa',
-        myName: 'X',
-        nat: 'PL',
-        birthYear: 1990,
-        gender: 'k',
-      );
-      expect(s.knownPyramids, hasLength(1), reason: 'kept in memory');
+      await s.found(myName: 'X', nat: 'PL', birthYear: 1990, gender: 'k');
+      expect(s.isMember, isTrue, reason: 'kept in memory');
       expect(disk.writes, isEmpty);
     });
   });

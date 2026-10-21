@@ -7,9 +7,9 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 
-/// Parts of Zen that a "core" release (A15) can leave out of sight.
+/// Parts of Zen that a "core" release can leave out of sight.
 /// The pyramid (with its access market) and the wallet are on by default
-/// and can be switched off in "Funkcje eksperymentalne" (§2.5.1);
+/// and can be switched off in "Funkcje eksperymentalne";
 /// neighbours are core and have no flag.
 ///
 /// A flag hides the feature's tabs and entry points, and `ZenCore` does not

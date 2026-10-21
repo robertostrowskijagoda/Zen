@@ -4,14 +4,17 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/dev/sim/sim_network.dart';
+import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_national.dart';
+import 'package:zen/src/features/pyramid/pyramid_feed.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
+import 'package:zen/src/features/pyramid/pyramid_root.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 
 import 'support/pyramid_world.dart';
 
 /// The national section read by everybody whose profile shows the
-/// nationality, members of the pyramid or not (§9, §22.2): members pass its
+/// nationality, members of the pyramid or not: members pass its
 /// posts on to such friends; only members comment.
 void main() {
   bool national(Map<String, dynamic> m) => m['type'] == PyramidTypes.national;
@@ -52,7 +55,7 @@ void main() {
   }) => PyramidRecord(
     body: <String, dynamic>{
       't': type,
-      'py': 'py-elsewhere',
+      'py': zenPyramidRoot!.id,
       'at': at,
       'by': <String>[k.id],
       'nat': nat,
@@ -115,7 +118,7 @@ void main() {
     expect(seen.single.depth, w['B1'].state!.depth);
     expect(w['O'].isMember, isFalse);
     expect(w['O'].keeps(np.id), isFalse, reason: 'read-only: no record');
-    expect(w['O'].state, isNull);
+    expect(w['O'].state!.members, isEmpty, reason: 'keeps nothing');
     expect(
       w['Q'].nationalSection('DE').map((PyrNationalPost x) => x.id),
       <String>[np.id],
@@ -163,11 +166,17 @@ void main() {
       <String>[np.id],
     );
 
-    // Once O keeps the pyramid's records (looking at it), the section is
-    // read from them: the same post, once.
-    await w['B1'].greet(to: <String>[o.address]);
+    // Once O is joining (it keeps the pyramid's records from then), the
+    // section is read from them: the same post, once.
+    await w['O'].askToJoin(
+      invite: w['B1'].inviteCode()!,
+      myName: 'O',
+      nat: 'DE',
+      birthYear: 1990,
+      gender: 'k',
+    );
     await w.net.run();
-    await w['O'].fetchFriendsPyramids();
+    await w['O'].greet(to: <String>[w.net['B1'].address]);
     await w.net.run();
     expect(w['O'].keeps(np.id), isTrue);
     final List<PyrNationalPost> fromRecords = w['O'].nationalSection('DE');
@@ -265,11 +274,9 @@ void main() {
     );
   });
 
-  testWidgets('the join view leads to the section, read-only', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('the join view points to the Tablica, where the section is '
+      'read (no reader of its own here)', (WidgetTester tester) async {
     late PyramidService reader;
-    late PyramidRecord good;
     await tester.runAsync(() async {
       final ({
         SimNetwork net,
@@ -280,12 +287,14 @@ void main() {
       alone = await readerAlone();
       reader = alone.reader;
       final LedgerKeyPair k = await LedgerKeyPair.generate();
-      good = await natRecord(k, at: alone.net.now);
+      final PyramidRecord good = await natRecord(k, at: alone.net.now);
       await pass(alone.net, alone.friend, alone.net['R'], <PyramidRecord>[
         good,
       ]);
     });
     expect(reader.nationalSection('DE'), hasLength(1));
+    expect(reader.feed.national, hasLength(1));
+    expect(reader.feed.pyramid, isEmpty);
 
     Widget entry(List<String> nats) => MaterialApp(
       theme: ZenTheme.dark(),
@@ -305,14 +314,12 @@ void main() {
     );
 
     await tester.pumpWidget(entry(const <String>['DE']));
-    final Finder tile = find.byKey(const Key('pyr-national-read-DE'));
+    expect(find.text('Hallo zusammen'), findsNothing, reason: 'not here');
+    final Finder tile = find.byKey(const Key('pyr-read-open-feed'));
     expect(tile, findsOneWidget);
     await tester.tap(tile);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('pyr-national-reader')), findsOneWidget);
-    expect(find.byKey(Key('pyr-national-post-${good.id}')), findsOneWidget);
-    expect(find.text('Hallo zusammen'), findsOneWidget);
-    expect(find.text('Kasia'), findsOneWidget);
-    expect(find.textContaining('Komentuj'), findsNothing);
+    await tester.pump();
+    expect(feedFilterRequest.value, FeedFilter.national);
+    feedFilterRequest.value = null;
   });
 }

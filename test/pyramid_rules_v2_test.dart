@@ -3,10 +3,10 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
-/// The fold's rules: S18 (a rule failing halfway leaves no trace), the
-/// quorum from active members and the time-bound full count (§6 pt 11),
-/// emission above the limit by referendum (§23.4), the
-/// national section's pins (§22.2), badges (§20.2a), bans of entries (S36).
+/// The fold's rules: a rule failing halfway leaves no trace, advisory
+/// referenda asked by the top and the time-bound full count, new rules
+/// signed by the top (a day later, within hard limits), the
+/// national section's pins, badges, bans of entries.
 const int t0 = 1700000000000;
 const int h = 3600 * 1000;
 const int day = 24 * h;
@@ -39,25 +39,30 @@ Map<String, dynamic> member(
   String nat = 'PL',
   String dc = 'x',
   Object? yr = 1990,
-}) => <String, dynamic>{'k': k.id, 'n': name, 'nat': nat, 'yr': ?yr, 'dc': dc};
+}) => <String, dynamic>{
+  'k': k.id,
+  'pq': k.pqId,
+  'n': name,
+  'nat': nat,
+  'yr': ?yr,
+  'dc': dc,
+};
 
-/// Each member met in person by the two after them (§6.2), so all six may
-/// vote in referenda (§20.6).
-Future<List<PyramidRecord>> metRecords(
+/// [head] admits [who] right under itself, at [slot].
+Future<PyramidRecord> admitRec(
   String py,
-  List<LedgerKeyPair> k,
   int at,
-) async => <PyramidRecord>[
-  for (int i = 0; i < k.length; i++)
-    for (int j = 1; j <= 2; j++)
-      await rec(
-        PyrT.met,
-        py,
-        at + i * 2 + j,
-        <LedgerKeyPair>[k[(i + j) % k.length]],
-        <String, dynamic>{'k': k[i].id},
-      ),
-];
+  LedgerKeyPair head,
+  LedgerKeyPair who,
+  Map<String, dynamic> m,
+  String slot,
+) => rec(
+  PyrT.admit,
+  py,
+  at,
+  <LedgerKeyPair>[head, who],
+  <String, dynamic>{'sp': head.id, 'head': head.id, 'slot': slot, 'm': m},
+);
 
 const Map<String, String> allScope = <String, String>{
   'k': 'all',
@@ -65,7 +70,7 @@ const Map<String, String> allScope = <String, String>{
   'nat': '',
 };
 
-/// S on top, A and B under S, A1 and A2 under A, B1 under B; the genesis
+/// S on top, A and B under S and A2 under A, B1 under B; the genesis
 /// sets [params].
 final class World {
   World._(this.s, this.a, this.b, this.a1, this.a2, this.b1, this.records);
@@ -87,59 +92,37 @@ final class World {
     final List<LedgerKeyPair> k = <LedgerKeyPair>[
       for (int i = 0; i < 6; i++) await LedgerKeyPair.generate(),
     ];
+    final LedgerKeyPair power = await LedgerKeyPair.generate();
     final PyramidRecord g = await rec(
       PyrT.genesis,
       '',
       t0,
-      <LedgerKeyPair>[k[0]],
-      <String, dynamic>{
-        'name': 'Test',
-        'founder': member(k[0], 'S'),
-        'params': params,
-      },
+      <LedgerKeyPair>[power],
+      <String, dynamic>{'name': 'Test', 'pk': power.id, 'params': params},
     );
     final String py = g.id;
+    // Each one right under who admits them: all vote at once.
     return World._(k[0], k[1], k[2], k[3], k[4], k[5], <PyramidRecord>[
       g,
       await rec(
-        PyrT.admit,
+        PyrT.found,
         py,
-        t0 + 1,
-        <LedgerKeyPair>[k[0], k[1]],
-        <String, dynamic>{'head': k[0].id, 'm': member(k[1], 'A')},
+        t0,
+        <LedgerKeyPair>[power, k[0]],
+        <String, dynamic>{'m': member(k[0], 'S')},
       ),
-      await rec(
-        PyrT.admit,
-        py,
-        t0 + 2,
-        <LedgerKeyPair>[k[0], k[2]],
-        <String, dynamic>{'head': k[0].id, 'm': member(k[2], 'B')},
-      ),
-      await rec(
-        PyrT.admit,
+      await admitRec(py, t0 + 1, k[0], k[1], member(k[1], 'A'), '0'),
+      await admitRec(py, t0 + 2, k[0], k[2], member(k[2], 'B'), '1'),
+      await admitRec(
         py,
         t0 + 3,
-        <LedgerKeyPair>[k[1], k[3]],
-        <String, dynamic>{
-          'head': k[1].id,
-          'm': member(k[3], 'A1', dc: a1Commit),
-        },
+        k[1],
+        k[3],
+        member(k[3], 'A1', dc: a1Commit),
+        '00',
       ),
-      await rec(
-        PyrT.admit,
-        py,
-        t0 + 4,
-        <LedgerKeyPair>[k[1], k[4]],
-        <String, dynamic>{'head': k[1].id, 'm': member(k[4], 'A2')},
-      ),
-      await rec(
-        PyrT.admit,
-        py,
-        t0 + 5,
-        <LedgerKeyPair>[k[2], k[5]],
-        <String, dynamic>{'head': k[2].id, 'm': member(k[5], 'B1')},
-      ),
-      ...await metRecords(py, k, t0 + 10),
+      await admitRec(py, t0 + 4, k[1], k[4], member(k[4], 'A2'), '01'),
+      await admitRec(py, t0 + 5, k[2], k[5], member(k[5], 'B1'), '10'),
     ]);
   }
 
@@ -149,20 +132,20 @@ final class World {
   Future<PyramidRecord> referendum(
     int at,
     int end, {
-    String kind = 'constitution',
-    Map<String, dynamic>? params,
+    List<LedgerKeyPair>? by,
+    List<String> opts = const <String>['Tak', 'Nie'],
+    Map<String, dynamic> extra = const <String, dynamic>{},
   }) => rec(
     PyrT.referendum,
     py,
     at,
-    <LedgerKeyPair>[s, a],
+    by ?? <LedgerKeyPair>[s, a],
     <String, dynamic>{
-      'q': 'Pytanie?',
-      'opts': <String>['Tak', 'Nie'],
+      'q': 'Czy budujemy świetlicę?',
+      'opts': opts,
       'end': end,
       'scope': allScope,
-      'kind': kind,
-      'params': params ?? <String, dynamic>{'version': 2, 'emitLimit': 5},
+      ...extra,
     },
   );
 
@@ -186,45 +169,45 @@ final class World {
     },
   );
 
-  Future<PyramidRecord> constitution(int at, String ref) => rec(
+  Future<PyramidRecord> rules(
+    int at,
+    Map<String, dynamic> params, {
+    List<LedgerKeyPair>? by,
+  }) => rec(
     PyrT.constitution,
     py,
     at,
-    <LedgerKeyPair>[s, a],
-    <String, dynamic>{'ref': ref},
+    by ?? <LedgerKeyPair>[s, a],
+    <String, dynamic>{'params': params},
   );
 
   Future<PyramidRecord> alive(LedgerKeyPair k, int at) =>
       rec(PyrT.alive, py, at, <LedgerKeyPair>[k], <String, dynamic>{'k': k.id});
 
-  Future<PyramidRecord> emit(
-    int at,
-    LedgerKeyPair to,
-    int amount, {
-    String? ref,
-  }) => rec(
+  Future<PyramidRecord> emit(int at, LedgerKeyPair to, int amount) => rec(
     PyrT.emit,
     py,
     at,
     <LedgerKeyPair>[s, a],
-    <String, dynamic>{'to': to.id, 'amount': amount, 'why': 'x', 'ref': ?ref},
+    <String, dynamic>{'to': to.id, 'amount': amount, 'why': 'x'},
   );
 }
 
 void main() {
   tearDown(() => PyramidState.debugAfterApply = null);
 
-  group('S18: a rule failing halfway', () {
+  group('a rule failing halfway', () {
     Future<(World, PyramidRecord, PyramidRecord)> setUpZ() async {
       final World w = await World.make();
       final LedgerKeyPair z = await LedgerKeyPair.generate();
       // A2 admits Z, and the rule fails after placing Z.
-      final PyramidRecord admitZ = await rec(
-        PyrT.admit,
+      final PyramidRecord admitZ = await admitRec(
         w.py,
         t0 + day,
-        <LedgerKeyPair>[w.a2, z],
-        <String, dynamic>{'head': w.a2.id, 'm': member(z, 'Z')},
+        w.a2,
+        z,
+        member(z, 'Z'),
+        '010',
       );
       final PyramidRecord aliveZ = await w.alive(z, t0 + 2 * day);
       PyramidState.debugAfterApply = (PyramidRecord r) {
@@ -247,55 +230,137 @@ void main() {
     });
   });
 
-  group('quorum from the active members (§6 pt 11)', () {
-    Future<List<PyramidRecord>> vote(World w, int at, int end) async {
-      final PyramidRecord ref = await w.referendum(at, end);
-      // A's branch: A1, and S's own vote passed down to A.
+  group('a referendum: any question, asked by the top, advisory', () {
+    test(
+      'only 2 of 3 of the top ask; 2 to 6 options; at least 2 min',
+      () async {
+        final World w = await World.make();
+        const int at = t0 + day;
+        final PyramidRecord ok = await w.referendum(at, at + day);
+        final PyramidRecord alone = await w.referendum(
+          at + 1,
+          at + day,
+          by: <LedgerKeyPair>[w.s],
+        );
+        final PyramidRecord notTop = await w.referendum(
+          at + 2,
+          at + day,
+          by: <LedgerKeyPair>[w.a, w.a1],
+        );
+        final PyramidRecord one = await w.referendum(
+          at + 3,
+          at + day,
+          opts: <String>['Tak'],
+        );
+        final PyramidRecord seven = await w.referendum(
+          at + 4,
+          at + day,
+          opts: <String>['1', '2', '3', '4', '5', '6', '7'],
+        );
+        final PyramidRecord six = await w.referendum(
+          at + 5,
+          at + day,
+          opts: <String>['1', '2', '3', '4', '5', '6'],
+        );
+        final PyramidRecord short = await w.referendum(at + 6, at + 6 + 60000);
+        final PyramidState st = w.fold(<PyramidRecord>[
+          ok,
+          alone,
+          notTop,
+          one,
+          seven,
+          six,
+          short,
+        ]);
+        expect(st.referenda.keys, <String>[ok.id, six.id]);
+        expect(st.referenda[ok.id]!.question, 'Czy budujemy świetlicę?');
+        for (final PyramidRecord r in <PyramidRecord>[alone, notTop]) {
+          expect(st.rejected[r.id], 'referendum ogłasza szczyt (2 z 3)');
+        }
+        for (final PyramidRecord r in <PyramidRecord>[one, seven, short]) {
+          expect(st.rejected[r.id], contains('złe referendum'));
+        }
+      },
+    );
+
+    test('nobody else asks: no delegation for it, no national lead', () async {
+      final World w = await World.make(
+        params: const <String, dynamic>{'nationalMin': 1},
+      );
+      const int at = t0 + day;
+      final PyramidRecord deleg = await rec(
+        PyrT.delegate,
+        w.py,
+        at,
+        <LedgerKeyPair>[w.s, w.a],
+        <String, dynamic>{
+          'to': w.b1.id,
+          'power': 'referendum',
+          'scope': '',
+          'limit': 0,
+          'until': at + 30 * day,
+        },
+      );
+      // S leads the PL section, alone.
+      final PyramidRecord byLead = await w.referendum(
+        at + 1,
+        at + day,
+        by: <LedgerKeyPair>[w.s],
+        extra: const <String, dynamic>{
+          'scope': <String, String>{'k': 'nat', 'p': '', 'nat': 'PL'},
+        },
+      );
+      final PyramidState st = w.fold(<PyramidRecord>[deleg, byLead]);
+      expect(st.nationalLead('PL'), w.s.id);
+      expect(st.rejected[deleg.id], 'złe uprawnienie');
+      expect(st.rejected[byLead.id], 'referendum ogłasza szczyt (2 z 3)');
+    });
+
+    test('the result is published and changes nothing by itself', () async {
+      final World w = await World.make();
+      const int at = t0 + day;
+      const int end = at + day;
+      // An old-style body: its kind and rules mean nothing now.
+      final PyramidRecord ref = await w.referendum(
+        at,
+        end,
+        extra: const <String, dynamic>{
+          'kind': 'constitution',
+          'params': <String, dynamic>{'emitLimit': 5},
+        },
+      );
       final PyramidRecord tA = await w.tally(w.a, end + 60000, ref.id, <int>[
-        2,
+        3,
         0,
       ], extra: true);
-      // B's branch never counts (offline); the top counts without it once
-      // the branches had their time: A's sum plus A's own vote.
+      final PyramidRecord tB = await w.tally(w.b, end + 60000, ref.id, <int>[
+        1,
+        0,
+      ]);
       final PyramidRecord top = await w.tally(
         w.s,
-        end + 7 * h,
+        end + 2 * 60000,
         ref.id,
-        <int>[3, 0],
-        kids: <String>[tA.id],
+        <int>[6, 0],
+        kids: <String>[tA.id, tB.id],
       );
-      final PyramidRecord change = await w.constitution(end + 8 * h, ref.id);
-      return <PyramidRecord>[ref, tA, top, change];
-    }
-
-    Future<List<PyramidRecord>> onlyThreeAlive(World w, int at) async =>
-        <PyramidRecord>[
-          await w.alive(w.s, at - 5 * day),
-          await w.alive(w.a, at - 5 * day),
-          await w.alive(w.a1, at - 5 * day),
-        ];
-
-    test('a constitution needs more than half of ALL members, silent ones too '
-        '(§21.7)', () async {
-      final World w = await World.make();
-      const int at = t0 + 200 * day;
-      const int end = at + 72 * h;
-      final List<PyramidRecord> rs = <PyramidRecord>[
-        ...await onlyThreeAlive(w, at),
-        ...await vote(w, at, end),
-      ];
-      final PyramidState st = w.fold(rs);
-      // Other binding votes count from those seen lately (3 of 6)…
-      expect(st.quorumBase(end), 3);
-      // …the constitution from all six: 3 is not more than half.
-      expect(st.resultOf(rs[3].id, strict: true), <int>[3, 0]);
-      expect(st.constitutionPasses(rs[3].id), isFalse);
-      expect(st.rejected[rs.last.id], 'referendum nie przeszło');
-      expect(st.params.emitLimit, isNot(5));
+      // Enacting "by the referendum" is no longer a thing.
+      final PyramidRecord byRef = await rec(
+        PyrT.constitution,
+        w.py,
+        end + 8 * h,
+        <LedgerKeyPair>[w.s, w.a],
+        <String, dynamic>{'ref': ref.id},
+      );
+      final PyramidState st = w.fold(<PyramidRecord>[ref, tA, tB, top, byRef]);
+      expect(st.resultOf(ref.id, strict: true), <int>[6, 0]);
+      expect(st.rejected[byRef.id], 'złe zasady');
+      expect(st.params.emitLimit, PyrParams().emitLimit);
+      expect(st.params.version, 1);
     });
   });
 
-  group('a full count with a time limit (§6 pt 11)', () {
+  group('a full count with a time limit', () {
     Future<(List<PyramidRecord>, PyramidRecord)> withLateBranch(World w) async {
       const int at = t0 + day;
       const int end = at + 72 * h;
@@ -318,133 +383,148 @@ void main() {
         ref.id,
         <int>[1, 0],
       );
-      final PyramidRecord change = await w.constitution(end + 8 * h, ref.id);
-      return (<PyramidRecord>[ref, tA, top, lateB, change], change);
+      return (<PyramidRecord>[ref, tA, top, lateB], lateB);
     }
 
     test('a branch sum after the top\'s count does not void it', () async {
       final World w = await World.make();
-      final (List<PyramidRecord> rs, PyramidRecord change) =
+      final (List<PyramidRecord> rs, PyramidRecord lateB) =
           await withLateBranch(w);
       final PyramidState st = w.fold(rs);
+      expect(st.applied, contains(lateB.id));
       expect(st.resultOf(rs.first.id, strict: true), <int>[4, 0]);
-      expect(st.applied, contains(change.id));
     });
   });
 
-  group('emission above the limit by referendum (§23.4)', () {
-    Future<List<PyramidRecord>> passedVote(
-      World w,
-      int at,
-      int end,
-      int amount,
-    ) async {
-      final PyramidRecord ref = await w.referendum(
-        at,
-        end,
-        kind: 'emit',
-        params: <String, dynamic>{'to': w.a1.id, 'amount': amount},
+  group('new rules signed by the top', () {
+    test('2 of 3 sign; public at once, applied 24 h later', () async {
+      final World w = await World.make();
+      const int at = t0 + day;
+      final PyramidRecord change = await w.rules(at, <String, dynamic>{
+        'absenceDays': 30,
+        'nationalMin': 5,
+        // The version is counted, never signed.
+        'version': 9,
+      });
+      PyramidState st = w.fold(<PyramidRecord>[change], now: at + 23 * h);
+      expect(st.applied, contains(change.id));
+      expect(st.paramsChanges[change.id]!.effectiveAt, at + kPyrParamsDelayMs);
+      expect(st.paramsChanges[change.id]!.done, isFalse);
+      expect(st.params.absenceDays, 60);
+      expect(st.params.version, 1);
+      st = w.fold(<PyramidRecord>[change], now: at + kPyrParamsDelayMs);
+      expect(st.paramsChanges[change.id]!.done, isTrue);
+      expect(st.params.absenceDays, 30);
+      expect(st.params.nationalMin, 5);
+      expect(st.params.immunityDepth, 3, reason: 'the rest stays');
+      expect(st.params.version, 2);
+      expect(
+        st.history.where((PyrHistory x) => x.recordId == change.id),
+        hasLength(1),
       );
-      final PyramidRecord tA = await w.tally(w.a, end + 60000, ref.id, <int>[
-        3,
-        0,
-      ], extra: true);
-      final PyramidRecord tB = await w.tally(w.b, end + 60000, ref.id, <int>[
-        1,
-        0,
-      ]);
-      final PyramidRecord top = await w.tally(
-        w.s,
-        end + 7 * h,
-        ref.id,
-        <int>[6, 0],
-        kids: <String>[tA.id, tB.id],
-      );
-      return <PyramidRecord>[ref, tA, tB, top];
-    }
+    });
 
-    test('a passed referendum allows exactly its emission, once', () async {
+    test('nobody but 2 of the top; nothing to change is refused', () async {
+      final World w = await World.make();
+      const int at = t0 + day;
+      final PyramidRecord alone = await w.rules(
+        at,
+        <String, dynamic>{'absenceDays': 30},
+        by: <LedgerKeyPair>[w.s],
+      );
+      final PyramidRecord notTop = await w.rules(
+        at + 1,
+        <String, dynamic>{'absenceDays': 30},
+        by: <LedgerKeyPair>[w.a, w.a1, w.a2],
+      );
+      final PyramidRecord empty = await w.rules(at + 2, const <String, dynamic>{
+        'absenceDays': 'trzydzieści',
+      });
+      final PyramidState st = w.fold(<PyramidRecord>[alone, notTop, empty]);
+      expect(st.rejected[alone.id], 'zasady zmienia szczyt (2 z 3)');
+      expect(st.rejected[notTop.id], 'zasady zmienia szczyt (2 z 3)');
+      expect(st.rejected[empty.id], 'złe zasady');
+      expect(st.params.absenceDays, 60);
+      expect(st.paramsChanges, isEmpty);
+    });
+
+    test('the hard limits in code hold whatever the top signs', () async {
+      final World w = await World.make();
+      const int at = t0 + day;
+      final PyramidRecord low = await w.rules(at, const <String, dynamic>{
+        'absenceDays': 1,
+        'immunityDepth': -5,
+        'treasurerDepth': 0,
+        'emitLimit': -1,
+        'emitDelayHours': 0,
+        'nationalMin': 0,
+        'electionHours': 0,
+        'reportEscalateHours': 0,
+      });
+      PyramidState st = w.fold(<PyramidRecord>[low]);
+      expect(st.params.absenceDays, 7);
+      expect(st.params.immunityDepth, 0);
+      expect(st.params.treasurerDepth, 1);
+      expect(st.params.emitLimit, 0);
+      expect(st.params.emitDelayHours, 1);
+      expect(st.params.nationalMin, 1);
+      expect(st.params.electionHours, 1);
+      expect(st.params.reportEscalateHours, 1);
+      final PyramidRecord high = await w.rules(at, const <String, dynamic>{
+        'absenceDays': 99999,
+        'treasurerDepth': 99,
+        'emitLimit': kPyrMaxAmount * 10,
+        'emitDelayHours': 99999,
+      });
+      st = w.fold(<PyramidRecord>[high]);
+      expect(st.params.absenceDays, 3650);
+      expect(st.params.treasurerDepth, 6);
+      expect(st.params.emitLimit, kPyrMaxAmount);
+      expect(st.params.emitDelayHours, 24 * 30);
+    });
+
+    test('no emission above the limit; the top raises the limit itself, '
+        'a day later', () async {
       final World w = await World.make();
       final int limit = PyrParams().emitLimit;
       const int at = t0 + day;
-      const int end = at + 72 * h;
-      final List<PyramidRecord> vote = await passedVote(w, at, end, 3 * limit);
-      final String ref = vote.first.id;
-      final PyramidRecord withoutRef = await w.emit(
-        end + 7 * h,
-        w.a1,
-        3 * limit,
-      );
-      final PyramidRecord tooEarly = await w.emit(
-        end + h,
-        w.a1,
-        3 * limit,
-        ref: ref,
-      );
-      final PyramidRecord other = await w.emit(
-        end + 7 * h + 1,
-        w.a1,
-        4 * limit,
-        ref: ref,
-      );
-      final PyramidRecord ok = await w.emit(
-        end + 7 * h + 2,
-        w.a1,
-        3 * limit,
-        ref: ref,
-      );
-      final PyramidRecord again = await w.emit(
-        end + 7 * h + 3,
-        w.a1,
-        3 * limit,
-        ref: ref,
-      );
-      // An ordinary emission still fits the limit: the referendum's money
-      // is not counted in it.
-      final PyramidRecord normal = await w.emit(end + 7 * h + 4, w.a1, limit);
-      final PyramidState st = w.fold(<PyramidRecord>[
-        ...vote,
-        withoutRef,
-        tooEarly,
-        other,
-        ok,
-        again,
-        normal,
-      ]);
-      expect(st.rejected[withoutRef.id], contains('limit'));
-      expect(st.rejected[tooEarly.id], contains('za wcześnie'));
-      expect(st.rejected[other.id], 'emisja inna niż w referendum');
-      expect(st.applied, contains(ok.id));
-      expect(st.rejected[again.id], 'to referendum już wykorzystano');
-      expect(st.applied, contains(normal.id));
-      // It waited its day like any emission.
-      expect(st.balanceOf(w.a1.id), 4 * limit);
-    });
-
-    test('a short emission vote is refused', () async {
-      final World w = await World.make();
-      const int at = t0 + day;
-      final PyramidRecord short = await w.referendum(
-        at,
+      final PyramidRecord raise = await w.rules(at, <String, dynamic>{
+        'emitLimit': 5 * limit,
+      });
+      final PyramidRecord tooSoon = await w.emit(at + h, w.a1, 3 * limit);
+      // An old "by referendum" field allows nothing.
+      final PyramidRecord byRef = await rec(
+        PyrT.emit,
+        w.py,
         at + 2 * h,
-        kind: 'emit',
-        params: <String, dynamic>{'to': w.a1.id, 'amount': 5},
+        <LedgerKeyPair>[w.s, w.a],
+        <String, dynamic>{
+          'to': w.a1.id,
+          'amount': 3 * limit,
+          'why': 'x',
+          'ref': 'r1',
+        },
       );
-      expect(w.fold(<PyramidRecord>[short]).rejected[short.id], isNotNull);
+      final PyramidRecord later = await w.emit(at + 25 * h, w.a1, 3 * limit);
+      final PyramidState st = w.fold(<PyramidRecord>[
+        raise,
+        tooSoon,
+        byRef,
+        later,
+      ]);
+      expect(st.rejected[tooSoon.id], contains('limit'));
+      expect(st.rejected[byRef.id], contains('limit'));
+      expect(st.applied, contains(later.id));
+      expect(st.balanceOf(w.a1.id), 3 * limit);
     });
   });
 
-  group('the birth year at entry (§20.2a)', () {
+  group('the birth year at entry', () {
     test('required and plausible; minors are admitted; the year is public '
         'in the member data', () async {
       final World w = await World.make();
-      Future<PyramidRecord> admit(int at, LedgerKeyPair z, Object? yr) => rec(
-        PyrT.admit,
-        w.py,
-        at,
-        <LedgerKeyPair>[w.a2, z],
-        <String, dynamic>{'head': w.a2.id, 'm': member(z, 'Z', yr: yr)},
-      );
+      Future<PyramidRecord> admit(int at, LedgerKeyPair z, Object? yr) =>
+          admitRec(w.py, at, w.a2, z, member(z, 'Z', yr: yr), '010');
       final LedgerKeyPair z = await LedgerKeyPair.generate();
       final PyramidRecord none = await admit(t0 + day, z, null);
       final PyramidRecord zero = await admit(t0 + day + 1, z, 0);

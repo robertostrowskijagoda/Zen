@@ -36,6 +36,7 @@ Map<String, dynamic> member(
   String nat = 'PL',
 }) => <String, dynamic>{
   'k': k.id,
+  'pq': k.pqId,
   'n': name,
   'nat': nat,
   // The records here are dated in 1970.
@@ -119,52 +120,48 @@ void main() {
       final LedgerKeyPair b = await LedgerKeyPair.generate();
       final LedgerKeyPair a1 = await LedgerKeyPair.generate();
       final LedgerKeyPair a2 = await LedgerKeyPair.generate();
+      final LedgerKeyPair power = await LedgerKeyPair.generate();
       final PyramidRecord g = await rec(
         PyrT.genesis,
         '',
         1,
-        <LedgerKeyPair>[s],
-        <String, dynamic>{'name': 'Test', 'founder': member(s, 'S')},
+        <LedgerKeyPair>[power],
+        <String, dynamic>{'name': 'Test', 'pk': power.id},
       );
       final String py = g.id;
+      Future<PyramidRecord> admit(
+        int at,
+        LedgerKeyPair head,
+        LedgerKeyPair who,
+        String name,
+        String slot,
+      ) => rec(
+        PyrT.admit,
+        py,
+        at,
+        <LedgerKeyPair>[head, who],
+        <String, dynamic>{
+          'sp': head.id,
+          'head': head.id,
+          'slot': slot,
+          'm': member(who, name),
+        },
+      );
       final List<PyramidRecord> all = <PyramidRecord>[
         g,
         await rec(
-          PyrT.admit,
+          PyrT.found,
           py,
-          2,
-          <LedgerKeyPair>[s, a],
-          <String, dynamic>{'head': s.id, 'm': member(a, 'A')},
+          1,
+          <LedgerKeyPair>[power, s],
+          <String, dynamic>{'m': member(s, 'S')},
         ),
-        await rec(
-          PyrT.admit,
-          py,
-          3,
-          <LedgerKeyPair>[s, b],
-          <String, dynamic>{'head': s.id, 'm': member(b, 'B')},
-        ),
-        await rec(
-          PyrT.admit,
-          py,
-          4,
-          <LedgerKeyPair>[a, a1],
-          <String, dynamic>{'head': a.id, 'm': member(a1, 'A1')},
-        ),
-        await rec(
-          PyrT.admit,
-          py,
-          5,
-          <LedgerKeyPair>[a, a2],
-          <String, dynamic>{'head': a.id, 'm': member(a2, 'A2')},
-        ),
-        // A third one under A: no room.
-        await rec(
-          PyrT.admit,
-          py,
-          6,
-          <LedgerKeyPair>[a, s],
-          <String, dynamic>{'head': a.id, 'm': member(s, 'X')},
-        ),
+        await admit(2, s, a, 'A', '0'),
+        await admit(3, s, b, 'B', '1'),
+        await admit(4, a, a1, 'A1', '00'),
+        await admit(5, a, a2, 'A2', '01'),
+        // Somebody already in: not again.
+        await admit(6, a, s, 'X', '000'),
       ];
       PyramidState st = PyramidState.fold(py, all, now: 100);
       expect(st.pathOf(a.id), '0');

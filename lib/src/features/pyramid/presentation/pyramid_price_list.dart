@@ -8,7 +8,7 @@ import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
-/// The price list of a pyramid member on their profile (§24): each service
+/// The price list of a pyramid member on their profile: each service
 /// on its own, by level of acquaintance where it differs. Nothing when the
 /// person is not in this phone's pyramid or asks nothing; the pyramid is
 /// never started just for this.
@@ -70,8 +70,12 @@ List<PyrPriceRow> pyrPriceRows(PyramidState s, String key) {
         (
           kind: k.key,
           label: k.value,
+          // By level when they differ, or when some level is left out
+          // (it may not use the service: a first message from strangers).
           prices:
-              levels[k.key] != null && levels[k.key]!.values.toSet().length > 1
+              levels[k.key] != null &&
+                  (levels[k.key]!.values.toSet().length > 1 ||
+                      levels[k.key]!.length < kPriceLevels.length)
               ? levels[k.key]!
               : <String, int>{'': flat[k.key]!},
         ),

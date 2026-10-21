@@ -24,8 +24,7 @@ Uint8List _stored(FeatureFlags flags) =>
 
 void main() {
   group('FeatureFlags', () {
-    test('pyramid, wallet and dating on by default; neighbours are core '
-        '(§2.5.1)', () {
+    test('pyramid, wallet and dating on by default; neighbours are core', () {
       const FeatureFlags flags = FeatureFlags();
       expect(flags.isEnabled(ZenFeature.pyramid), isTrue);
       expect(flags.isEnabled(ZenFeature.wallet), isTrue);
