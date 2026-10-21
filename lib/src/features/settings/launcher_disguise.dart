@@ -7,7 +7,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/update/store_build.dart';
 
 /// Android: switches the launcher entry between Zen's own icon and name and
-/// a neutral "Notatki" one (§14.2, "Kamuflaż ikony"). Native side:
+/// a neutral "Notatki" one ("Kamuflaż ikony"). Native side:
 /// `ZenSystemBridge` flips two activity-aliases so that exactly one launcher
 /// entry is enabled.
 class LauncherDisguise {

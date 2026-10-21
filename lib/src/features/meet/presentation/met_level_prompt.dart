@@ -13,8 +13,8 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 
 /// After adding someone who may have been met in person (a scanned or
 /// shown QR, "W pobliżu", an event): asks „Poznaliśmy się osobiście?” and
-/// how close they are (§8). Only "Tak" signs the "met in person"
-/// attestation (§6.2); each side of a meeting confirms it on its own phone.
+/// how close they are. Only "Tak" signs the "met in person"
+/// attestation; each side of a meeting confirms it on its own phone.
 /// Returns the level chosen, or `null` for "Nie" ("Znajomy" stays, nothing
 /// is signed).
 Future<FriendLevel?> showMetLevelPrompt(
@@ -49,7 +49,7 @@ Future<FriendLevel?> showMetLevelPrompt(
   return level;
 }
 
-/// „Poznaliśmy się osobiście?” with the three levels of closeness (§8).
+/// „Poznaliśmy się osobiście?” with the three levels of closeness.
 class MetLevelDialog extends StatefulWidget {
   const MetLevelDialog({this.name = '', super.key});
 

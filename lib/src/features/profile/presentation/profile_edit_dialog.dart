@@ -22,7 +22,7 @@ import 'package:zen/src/features/profile/profile_cover.dart';
 import 'package:zen/src/features/profile/profile_fields.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 
-/// Edits your profile: photo, cover, name and bio (§9). The short status
+/// Edits your profile: photo, cover, name and bio. The short status
 /// is set from the top bar, not here.
 class ProfileEditDialog extends ConsumerStatefulWidget {
   const ProfileEditDialog({super.key});
@@ -52,7 +52,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
   bool _isProcessingImage = false;
   bool _isSaving = false;
 
-  /// Who sees each field (§9), as edited here.
+  /// Who sees each field, as edited here.
   late Map<String, String> _visibility;
   late TextEditingController _nationalityController;
   String? _nationalityError;
@@ -584,7 +584,7 @@ class _ProfileEditDialogState extends ConsumerState<ProfileEditDialog> {
                           if (_coverPath != null &&
                               File(_coverPath!).existsSync())
                             Image(
-                              // A saved cover is in the vault (§14.1).
+                              // A saved cover is in the vault.
                               image: mediaFileImage(_coverPath!),
                               key: const Key('profile-cover-preview'),
                               fit: BoxFit.cover,
@@ -840,7 +840,7 @@ class _EditSection extends StatelessWidget {
   }
 }
 
-/// Formatting for the bio: the same marks as in posts (§24).
+/// Formatting for the bio: the same marks as in posts.
 class _BioToolbar extends StatelessWidget {
   const _BioToolbar({required this.controller});
 

@@ -40,7 +40,7 @@ sha() {
 
 sources=$(
   cd "$root"
-  for file in $(ls *.go | grep -v '_test\.go$' | sort) go.mod go.sum build_android.sh; do
+  for file in $(ls *.go internal/*/*.go | grep -v '_test\.go$' | sort) go.mod go.sum build_android.sh; do
     printf '%s %s\n' "$file" "$(sha < "$file")"
   done
 )

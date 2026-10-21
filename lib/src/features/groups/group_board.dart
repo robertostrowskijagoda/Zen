@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-// The group board (§13): a space of posts that belongs to one group, apart
+// The group board: a space of posts that belongs to one group, apart
 // from the group chat. Every member keeps the board of the group; a post
 // is written by its author and goes to all members (`group_post`, a
 // reliable frame, so members who are away get it from their relays). A

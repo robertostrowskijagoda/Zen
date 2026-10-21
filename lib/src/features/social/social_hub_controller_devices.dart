@@ -1,6 +1,6 @@
 part of 'social_hub_controller.dart';
 
-/// Several devices of one account (§6): what another own device sent, and
+/// Several devices of one account: what another own device sent, and
 /// the backup of friends and groups the account's devices share.
 mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
   /// Another device of this account sent [payload] to [peerAddress]: show

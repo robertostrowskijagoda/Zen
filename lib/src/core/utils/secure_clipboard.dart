@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-/// How long text copied from the app stays in the system clipboard (§14.1).
+/// How long text copied from the app stays in the system clipboard.
 const Duration kClipboardTtl = Duration(seconds: 60);
 
 /// Copies [text] and clears the clipboard after [ttl], unless something

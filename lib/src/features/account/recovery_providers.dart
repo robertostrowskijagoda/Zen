@@ -15,7 +15,7 @@ Set<String> _acceptedFriends(SocialHubState state) => <String>{
       PeerShareCodec.normalizeAddress(f.address),
 };
 
-/// The recovery service (§6.3), running with the ledger; `null` while the
+/// The recovery service, running with the ledger; `null` while the
 /// ledger is off (tests, previews).
 final Provider<RecoveryService?> recoveryServiceProvider =
     Provider<RecoveryService?>((Ref ref) {

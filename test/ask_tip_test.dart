@@ -6,7 +6,7 @@ import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
 import 'support/pyramid_world.dart';
 
-/// "Daj napiwek" in "Zapytaj sieć" (§17.5, §24): answers of pyramid
+/// "Daj napiwek" in "Zapytaj sieć": answers of pyramid
 /// members carry their pyramid key, the asker pays a tip in the pyramid's
 /// money.
 void main() {

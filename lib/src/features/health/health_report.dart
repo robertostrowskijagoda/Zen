@@ -18,7 +18,7 @@ enum HealthFix { none, permissions, appSettings }
 /// What the node is doing (mirrors the shell's service health).
 enum HealthNetState { active, syncing, stopped, failed }
 
-/// One line of "Dlaczego nie działa?" (STAN A22).
+/// One line of "Dlaczego nie działa?".
 @immutable
 class HealthItem {
   const HealthItem({

@@ -4,10 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:zen/src/features/profile/avatar_sanitizer.dart';
 
-/// Longest side of a photo in an event's shared album (§17.1).
+/// Longest side of a photo in an event's shared album.
 const int kEventPhotoSide = 1024;
 
-/// Longest side of a flat's profile photo (§18.1).
+/// Longest side of a flat's profile photo.
 const int kFlatPhotoSide = 320;
 
 /// Largest compressed flat photo (it travels in every copy of the profile).

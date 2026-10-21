@@ -52,7 +52,7 @@ final class UserProfile {
   final String avatarPreset;
   final String? avatarPath;
 
-  /// The wide photo behind the profile header (§9).
+  /// The wide photo behind the profile header.
   final String? coverPath;
   final String? _customStatus;
   String get customStatus => _customStatus ?? t('Dostępny w sieci Yggdrasil');
@@ -60,11 +60,11 @@ final class UserProfile {
   String get bio => _bio ?? t('Użytkownik bezpiecznej sieci Zen.');
   final int updatedAtMillis;
 
-  /// Who sees each profile field (§9): field name → visibility name (see
+  /// Who sees each profile field: field name → visibility name (see
   /// `profile_fields.dart`). A missing field keeps its default.
   final Map<String, String> visibility;
 
-  /// Country codes the user chose to show (§9, opens §22.2); may be empty.
+  /// Country codes the user chose to show (opens the national sections); may be empty.
   final List<String> nationalities;
 
   UserProfile copyWith({

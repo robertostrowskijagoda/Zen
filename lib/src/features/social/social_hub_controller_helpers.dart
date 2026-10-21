@@ -1359,7 +1359,7 @@ Map<String, dynamic> _buildOutgoingTextPayload({
     'createdAt': DateTime.fromMillisecondsSinceEpoch(
       sentAtMillis,
     ).toUtc().toIso8601String(),
-    // Disappearing messages: the sender's timer (§14.1 point 10).
+    // Disappearing messages: the sender's timer.
     if (ttl > 0) 'ttl': ttl,
   };
 }
@@ -1751,6 +1751,14 @@ List<String> normalizedGroupMembers(Iterable<String> addresses) {
   return result;
 }
 
+/// Whether another feature keeps [group]'s member list
+/// ([SocialHubController.syncManagedGroups]: the pyramid's cell chats,
+/// worked out from the pyramid). Nobody's signal and no "add" in the app
+/// changes it: a cell member could otherwise bring anyone into the cell's
+/// chat on everybody's phone.
+bool isManagedGroup(GroupProfile group) =>
+    group.createdById.endsWith('-') && group.id.startsWith(group.createdById);
+
 /// Membership test that tolerates the different spellings of one address.
 bool groupHasMember(GroupProfile group, String address) {
   if (group.hasMember(address)) {
@@ -1779,6 +1787,9 @@ List<String>? _groupMembersAfterInvite(
   ZenSignal signal, {
   String selfAddress = '',
 }) {
+  if (isManagedGroup(group)) {
+    return null;
+  }
   final bool fromCreator = PeerShareCodec.addressesEqual(
     group.createdById,
     signal.sender,

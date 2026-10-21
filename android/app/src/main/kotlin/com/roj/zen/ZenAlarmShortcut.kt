@@ -17,7 +17,7 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * Counting for the power-button alarm shortcut (§16.3), without any Android
+ * Counting for the power-button alarm shortcut, without any Android
  * dependency. Every press of the power button turns the screen on or off, so
  * [presses] such changes within [windowMs] mean the button was pressed that
  * many times on purpose. After a shortcut nothing counts for [cooldownMs], so
@@ -51,7 +51,7 @@ class PowerPressCounter(
 }
 
 /**
- * The power-button alarm shortcut (§16.3) on `zen/alarm_shortcut`.
+ * The power-button alarm shortcut on `zen/alarm_shortcut`.
  *
  * Dart turns it on while the person allows it; a receiver for screen on/off
  * then counts presses for as long as the process lives (the foreground

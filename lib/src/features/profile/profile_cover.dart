@@ -6,7 +6,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/profile/avatar_sanitizer.dart';
 import 'package:zen/src/features/profile/own_profile_images.dart';
 
-/// The cover photo behind the profile header (§9): a 3:1 JPEG, at most
+/// The cover photo behind the profile header: a 3:1 JPEG, at most
 /// [kCoverWidth] wide. Re-encoded, so nothing but pixels leaves the device
 /// (no EXIF, no GPS).
 const int kCoverWidth = 1500;
@@ -96,5 +96,5 @@ Future<String> storeCoverImage({
 }
 
 /// Removes a cover written by [storeCoverImage], or the vault copy it was
-/// moved into (§14.1). Ignores anything else.
+/// moved into. Ignores anything else.
 Future<void> deleteCoverImage(String? path) => deleteOwnProfileImage(path);

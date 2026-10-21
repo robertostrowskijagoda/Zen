@@ -2,47 +2,31 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
-import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
+import 'package:zen/src/features/meet/intro/gate_terms.dart';
 import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/intro/intro_service.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
-import 'package:zen/src/features/pyramid/presentation/wallet_screen.dart';
-import 'package:zen/src/features/pyramid/pyramid_providers.dart';
-import 'package:zen/src/features/pyramid/pyramid_service.dart';
-import 'package:zen/src/features/pyramid/pyramid_state.dart';
+import 'package:zen/src/features/meet/presentation/gate_widgets.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
-/// Addresses of the members of this person's pyramid (empty outside one),
-/// e.g. to tell whether a friend may also set a price on the market (§24).
-Set<String> pyramidFriendAddresses(PyramidService pyr) {
-  if (!pyr.isMember) {
-    return const <String>{};
-  }
-  final PyramidState? s = pyr.state;
-  if (s == null) {
-    return const <String>{};
-  }
-  return <String>{
-    for (final PyrMember m in s.members.values)
-      if (m.active && m.addr.isNotEmpty)
-        PeerShareCodec.normalizeAddress(m.addr),
-  };
-}
+// Gates: the introduction dialog with its prices and the cheapest way, the
+// ways being opened, this person's gate terms.
+export 'package:zen/src/features/meet/presentation/gate_widgets.dart'
+    show GateRunsTile, GateSettingsTile, askIntroduction;
 
 void _snack(BuildContext context, String text) =>
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
-/// Requests waiting for this person (§24.1): friend lists, introductions
+/// Requests waiting for this person: friend lists, introductions
 /// to pass on, introductions and letters for them. Nothing when empty.
 class IntroInboxSection extends ConsumerWidget {
   const IntroInboxSection({this.padding = EdgeInsets.zero, super.key});
@@ -136,7 +120,12 @@ class _IntroCard extends StatelessWidget {
       (IntroRole.middle, _) => (
         Icons.waving_hand_rounded,
         t('{name} prosi o przedstawienie', {'name': x}),
-        t('Komu: {name}', {'name': intro.host.nameOf(c.target)}),
+        c.price > 0
+            ? t('Komu: {name} · zapłacono: {price} (wróci, gdy odmówisz)', {
+                'name': intro.host.nameOf(c.target),
+                'price': formatPoints(c.price),
+              })
+            : t('Komu: {name}', {'name': intro.host.nameOf(c.target)}),
       ),
       (_, IntroKind.letter) => (
         Icons.mail_outline_rounded,
@@ -331,12 +320,19 @@ String _askedStatus(IntroService intro, IntroCase c) {
     },
     IntroKind.intro => switch (c.status) {
       IntroStatus.open => t('Czeka na: {via}', {'via': via}),
-      IntroStatus.forwarded => t('Przekazane przez: {via}. Decyduje: {name}', {
-        'via': via,
-        'name': c.targetName,
-      }),
+      IntroStatus.forwarded => t(
+        'Brama otwarta przez: {via}. Możesz napisać; o znajomości decyduje: '
+        '{name}',
+        {'via': via, 'name': c.targetName},
+      ),
       IntroStatus.accepted => t('Przyjęte — zaproszenie do znajomych wysłane'),
-      IntroStatus.declined => t('Nie przekazane przez: {via}', {'via': via}),
+      IntroStatus.declined =>
+        c.price > 0 && c.payment == null
+            ? t('Brama płatna: {price} (przez: {via})', {
+                'via': via,
+                'price': formatPoints(c.price),
+              })
+            : t('Nie przekazane przez: {via}', {'via': via}),
       IntroStatus.refused => t('Bez odpowiedzi'),
     },
     IntroKind.letter => switch (c.status) {
@@ -380,7 +376,7 @@ String _handledLine(IntroService intro, IntroCase c) {
 }
 
 /// What this person asked for (introductions, letters, lists) and what
-/// went through them (§24.1). Nothing when both are empty.
+/// went through them. Nothing when both are empty.
 class MyIntrosTile extends ConsumerWidget {
   const MyIntrosTile({super.key});
 
@@ -398,6 +394,7 @@ class MyIntrosTile extends ConsumerWidget {
         final int going = mine.where((IntroCase c) => c.isPending).length;
         return ZenGroup(
           children: <Widget>[
+            if (intro.runs.isNotEmpty) gateRunsTile(intro),
             if (mine.isNotEmpty)
               ExpansionTile(
                 key: const Key('intro-mine'),
@@ -450,8 +447,8 @@ class MyIntrosTile extends ConsumerWidget {
   }
 }
 
-/// "Kto widzi moją listę znajomych" (§24.1): everyone, friends at level
-/// "Znajomy" and up (the default, §8), only those this person let (after
+/// "Kto widzi moją listę znajomych": everyone, friends at level
+/// "Znajomy" and up (the default), only those this person let (after
 /// they asked; revocable here), or nobody.
 class FriendListAudienceTile extends ConsumerWidget {
   const FriendListAudienceTile({super.key});
@@ -584,7 +581,7 @@ class FriendListAudienceTile extends ConsumerWidget {
   }
 }
 
-/// "Przekazuj listy od znajomych" (§24.1): this phone passes friends'
+/// "Przekazuj listy od znajomych": this phone passes friends'
 /// letters on to its friends, within limits.
 class RelayLettersSwitch extends ConsumerWidget {
   const RelayLettersSwitch({super.key});
@@ -659,190 +656,7 @@ class _ViaPicker extends StatelessWidget {
   }
 }
 
-/// Consent is the currency; in a shared pyramid the friend may also set a
-/// price on its market (§24) — linked, not done here.
-class _EconomyNote extends StatelessWidget {
-  const _EconomyNote({
-    required this.friend,
-    required this.inPyramid,
-    required this.onOpenMarket,
-  });
-
-  final String friend;
-  final bool inPyramid;
-
-  /// Null while the wallet is switched off: no link to the market.
-  final VoidCallback? onOpenMarket;
-
-  @override
-  Widget build(BuildContext context) {
-    final ZenColors zen = ZenColors.of(context);
-    if (!inPyramid) {
-      return ZenInfo(
-        icon: Icons.volunteer_activism_rounded,
-        tone: zenTone(zen, 5),
-        text: t(
-          'Bez pieniędzy i punktów: {name} decyduje, czy przekazać, '
-          'a druga osoba — czy chce się poznać.',
-          {'name': friend},
-        ),
-      );
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        ZenInfo(
-          key: const Key('intro-pyramid-note'),
-          icon: kPyramidIcon,
-          tone: zenTone(zen, 2),
-          title: t('Jesteście w jednej piramidzie'),
-          text: t(
-            '{name} może też ustalić cenę za przedstawienie na rynku '
-            'piramidy. Tu prosisz za darmo — walutą jest zgoda.',
-            {'name': friend},
-          ),
-        ),
-        if (onOpenMarket != null)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              key: const Key('intro-open-market'),
-              onPressed: onOpenMarket,
-              icon: const Icon(Icons.storefront_rounded, size: 18),
-              label: Text(t('Otwórz rynek')),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-/// "Poproś o przedstawienie" (§24.1): asks one of [via] (friends who know
-/// [targetName]) to introduce this person to them.
-Future<void> askIntroduction(
-  BuildContext context,
-  WidgetRef ref, {
-  required String target,
-  required String targetName,
-  required List<String> via,
-}) async {
-  if (via.isEmpty) {
-    return;
-  }
-  final IntroService intro = ref.read(introServiceProvider);
-  // The pyramid's market and the wallet only while they are switched on
-  // (§2.5.1).
-  final FeatureFlags flags = ref.read(featureFlagsProvider);
-  final Set<String> pyramid = flags.isEnabled(ZenFeature.pyramid)
-      ? pyramidFriendAddresses(ref.read(pyramidServiceProvider))
-      : const <String>{};
-  final bool wallet = flags.isEnabled(ZenFeature.wallet);
-  final NavigatorState nav = Navigator.of(context);
-  final TextEditingController note = TextEditingController();
-  String middle = via.first;
-  final bool? ok = await showDialog<bool>(
-    context: context,
-    builder: (BuildContext context) => StatefulBuilder(
-      builder: (BuildContext context, StateSetter set) {
-        final String f = intro.host.nameOf(middle);
-        final IntroCase? had = intro.pending(
-          IntroKind.intro,
-          middle,
-          target: target,
-        );
-        return AlertDialog(
-          key: const Key('intro-dialog'),
-          title: Text(t('Poznaj: {name}', {'name': targetName})),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                _ViaPicker(
-                  via: via,
-                  picked: middle,
-                  nameOf: intro.host.nameOf,
-                  onPick: (String v) => set(() => middle = v),
-                ),
-                if (had != null)
-                  ZenInfo(
-                    icon: Icons.history_rounded,
-                    text: t('Prośba już wysłana — czeka na: {name}.', {
-                      'name': f,
-                    }),
-                  )
-                else
-                  TextField(
-                    key: const Key('intro-note'),
-                    controller: note,
-                    minLines: 2,
-                    maxLines: 4,
-                    maxLength: kIntroNoteMaxChars,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: InputDecoration(
-                      labelText: t('Kilka słów dla: {name}', {'name': f}),
-                      hintText: t('Dlaczego chcesz poznać tę osobę…'),
-                    ),
-                  ),
-                _EconomyNote(
-                  friend: f,
-                  inPyramid: pyramid.contains(middle),
-                  onOpenMarket: wallet
-                      ? () {
-                          Navigator.of(context).pop(false);
-                          unawaited(
-                            nav.push(
-                              MaterialPageRoute<void>(
-                                builder: (BuildContext context) =>
-                                    const WalletScreen(),
-                              ),
-                            ),
-                          );
-                        }
-                      : null,
-                ),
-              ],
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: Text(t('Anuluj')),
-            ),
-            if (had == null)
-              FilledButton(
-                key: const Key('intro-send'),
-                onPressed: () => Navigator.of(context).pop(true),
-                child: Text(t('Poproś')),
-              ),
-          ],
-        );
-      },
-    ),
-  );
-  final String text = note.text;
-  disposeLater(note);
-  if (ok != true) {
-    return;
-  }
-  final String f = intro.host.nameOf(middle);
-  final IntroCase? c = await intro.askIntro(
-    middle: middle,
-    target: target,
-    targetName: targetName,
-    note: text,
-  );
-  if (context.mounted) {
-    _snack(
-      context,
-      c == null
-          ? t('Nie można teraz poprosić.')
-          : t('Prośba poszła do: {name}.', {'name': f}),
-    );
-  }
-}
-
-/// "Napisz list" (§24.1): one letter to [targetName] through one of [via].
+/// "Napisz list": one letter to [targetName] through one of [via].
 Future<void> sendLetterTo(
   BuildContext context,
   WidgetRef ref, {
@@ -950,7 +764,7 @@ Future<void> sendLetterTo(
   }
 }
 
-/// "Zapytaj o opinię" (§16.1): a private message to one of [via] about
+/// "Zapytaj o opinię": a private message to one of [via] about
 /// [targetName], then the conversation opens.
 Future<void> askOpinion(
   BuildContext context,

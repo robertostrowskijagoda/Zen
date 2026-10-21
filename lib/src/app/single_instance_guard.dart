@@ -81,7 +81,7 @@ abstract final class ZenSingleInstance {
     if (!ownedByZen && Platform.isWindows && port == lockPort) {
       // The port was busy, but whatever was on the port did NOT complete
       // the Zen handshake (or answered without a window). Only hung copies
-      // of this very executable run by this user are ended (S-15): never
+      // of this very executable run by this user are ended: never
       // somebody else's process that happens to share the name.
       await _cleanupZombieProcesses();
       await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -383,7 +383,7 @@ bool _bringExistingWindowToForeground() {
 
 /// Ends hung copies of this very executable run by this user (they hold the
 /// lock port without answering). Never anything else: a process that only
-/// shares the name, or another user's Zen, is left alone (S-15). System
+/// shares the name, or another user's Zen, is left alone. System
 /// tools are run by their full path in `%SystemRoot%\System32`.
 Future<void> _cleanupZombieProcesses() async {
   if (!Platform.isWindows) return;

@@ -11,7 +11,7 @@ import 'package:zen/src/features/social/social_event_text.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
 
-/// Saved texts kept as events and put into words when shown (STAN A23):
+/// Saved texts kept as events and put into words when shown:
 /// system lines in chats and inbox entries follow the app's language.
 void main() {
   tearDown(ZenI18n.debugReset);

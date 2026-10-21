@@ -4,7 +4,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-/// Whether the first start shows the "Zabezpiecz konto" card (§6.1, §6.3)
+/// Whether the first start shows the "Zabezpiecz konto" card
 /// after the permissions step, until it is answered. Off in tests and
 /// previews; the real app turns it on (like the permissions step).
 final Provider<bool> accountSecureStepRequiredProvider = Provider<bool>(

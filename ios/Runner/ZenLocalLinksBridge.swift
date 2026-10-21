@@ -9,7 +9,7 @@ import Security
   import FlutterMacOS
 #endif
 
-/// Links with friends nearby without a network (§5.1 item 6) on iPhone,
+/// Links with friends nearby without a network on iPhone,
 /// iPad and Mac; one file for both apps (the Mac project refers to this
 /// one). Dart decides whom to link with (native_stream_local_link.dart);
 /// this file drives the radios and pumps each stream into the endpoint the

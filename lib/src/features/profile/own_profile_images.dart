@@ -7,7 +7,7 @@ import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 
 // Your own photo and cover live in the media vault, encrypted like
-// everything else of yours (§14.1), not as plain files. The profile editor
+// everything else of yours, not as plain files. The profile editor
 // prepares a plain file first (checked, re-encoded); saving the profile
 // moves it into the vault.
 

@@ -149,7 +149,7 @@ abstract interface class ChatSyncTarget {
   Future<void> forgetGroupFromOtherDevice(String groupId);
 }
 
-/// Keeps the conversations of the account's devices the same (§6):
+/// Keeps the conversations of the account's devices the same:
 ///
 /// * what this device sends is copied (sealed, with its file) into the
 ///   account's `own` space, which only its own devices get;
@@ -237,7 +237,7 @@ final class DeviceChatSync {
   /// This device sent [message] in conversation [key].
   void onOutgoing(String key, ChatMessage message) {
     if (message.disappears) {
-      // Never into the ledger's lasting copies (§14.1 point 10): the other
+      // Never into the ledger's lasting copies: the other
       // devices get it live (`acct_mirror`), and it dies everywhere.
       return;
     }

@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 
-/// S-16: the diagnostics log lies next to the encrypted data in plain
+/// The diagnostics log lies next to the encrypted data in plain
 /// text, so it keeps no bridge or peer URLs, IP addresses or file names.
 void main() {
   test('URLs keep only their scheme, IP addresses one part', () {

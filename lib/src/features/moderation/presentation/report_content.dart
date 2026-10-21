@@ -11,7 +11,7 @@ import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
-/// "Zgłoś" for a post, comment or message (§21.4): the author is found in
+/// "Zgłoś" for a post, comment or message: the author is found in
 /// the pyramid by their device [authorAddress], [text] goes in as evidence
 /// (under [header]) and, with [hashContent], the entry so the delegate can
 /// ban the content itself. Once reported, the content is hidden on this
@@ -20,7 +20,7 @@ import 'package:zen/src/features/pyramid/pyramid_state.dart';
 /// out where the store cannot. Without a pyramid the sheet offers only
 /// what works on this phone: hiding and deleting.
 ///
-/// [contentId] also names the reported entry for a content ban (S36), and
+/// [contentId] also names the reported entry for a content ban, and
 /// [entry] — the signed original, where the screen has it — goes in as
 /// evidence nobody can make up.
 Future<void> reportContent(
@@ -49,7 +49,7 @@ Future<void> reportContent(
     entryId: !hashContent
         ? null
         : (contentId.isNotEmpty ? contentId : entry?.id),
-    entry: hashContent ? entry?.toJson() : null,
+    entry: hashContent ? entry?.toCertifiedJson() : null,
     deleteLocal: deleteLocal,
   );
 }
@@ -65,7 +65,7 @@ void showHiddenAnyway(
     .read(hiddenByMeProvider.notifier)
     .showContent(id: id, text: text, datingKey: datingKey);
 
-/// Content the pyramid banned, now: ids of banned entries (S36), for
+/// Content the pyramid banned, now: ids of banned entries, for
 /// [isContentBanned]. Empty when the pyramid has not started (it is never
 /// started just for this).
 Set<String> bannedContentNow(WidgetRef ref) {

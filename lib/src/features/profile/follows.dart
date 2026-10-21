@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
@@ -11,7 +12,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-// Following (§12): anyone may follow anyone, without asking; a follower
+// Following: anyone may follow anyone, without asking; a follower
 // sees only public posts.
 //
 // A follow is a signed `follow` entry in the follower's own `acts` space
@@ -287,7 +288,16 @@ final class FollowLedger {
 
   Map<String, dynamic>? _helloExtras(String address) {
     final LogEntry? e = _latest[address];
-    return e == null ? null : <String, dynamic>{'fw': e.toJson()};
+    if (e == null) {
+      return null;
+    }
+    // The hello carries this device's certificate; a notice another
+    // device of the account wrote goes with its own.
+    return <String, dynamic>{
+      'fw': e.device == node.identity.deviceKey.id
+          ? e.toJson()
+          : e.toCertifiedJson(),
+    };
   }
 
   // ---- followers ----
@@ -302,24 +312,31 @@ final class FollowLedger {
       return;
     }
     unawaitedLogged(
-      takeNotice(address, account, notice),
+      takeNotice(
+        address,
+        account,
+        notice,
+        certificate: DeviceCertificate.fromJson(payload['cert']),
+      ),
       context: 'Odczyt obserwowania nie udał się',
     );
   }
 
   /// Takes a follow notice [notice] that came from [address] in a proven
-  /// hello of [account]. Returns true when the followers changed.
+  /// hello of [account] (whose device [certificate] checks a notice that
+  /// comes without its own). Returns true when the followers changed.
   @visibleForTesting
   Future<bool> takeNotice(
     String address,
     String account,
-    Object? notice,
-  ) async {
+    Object? notice, {
+    DeviceCertificate? certificate,
+  }) async {
     await ready;
     if (_blocked.containsKey(account) || account == node.account) {
       return false;
     }
-    final LogEntry? e = await verifiedEntry(notice);
+    final LogEntry? e = await verifiedEntry(notice, certificate: certificate);
     if (e == null ||
         e.kind != kFollowKind ||
         e.account != account ||
@@ -400,7 +417,7 @@ final class FollowLedger {
     ]..sort((Follower a, Follower b) => b.since.compareTo(a.since));
   }
 
-  /// Everyone following: friends (automatically) and the others (§12).
+  /// Everyone following: friends (automatically) and the others.
   int get followerCount =>
       node.friendAccounts.values.toSet().length + followers.length;
 
@@ -409,7 +426,7 @@ final class FollowLedger {
 
   bool isBlocked(String account) => _blocked.containsKey(account);
 
-  /// Blocks a follower (§12): they leave the list, their notices are
+  /// Blocks a follower: they leave the list, their notices are
   /// ignored and their reactions disappear from this account's threads (a
   /// signed `thread_block`). They can still read public posts.
   Future<void> block(String account, {String name = ''}) async {

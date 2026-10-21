@@ -45,7 +45,7 @@ final class ChatMessage {
   final ChatMessageDeliveryState deliveryState;
   final int? readAtMillis;
 
-  /// When a disappearing message is deleted (§14.1 point 10); `null` for
+  /// When a disappearing message is deleted; `null` for
   /// messages that stay.
   final int? expiresAtMillis;
 

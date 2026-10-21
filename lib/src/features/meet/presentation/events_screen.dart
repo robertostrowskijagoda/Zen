@@ -42,7 +42,7 @@ String eventDate(int millis) {
   });
 }
 
-/// "Wydarzenia" (§17): mine and the ones I am invited to.
+/// "Wydarzenia": mine and the ones I am invited to.
 class EventsScreen extends ConsumerStatefulWidget {
   const EventsScreen({super.key});
 
@@ -1075,7 +1075,7 @@ class EventScreen extends ConsumerWidget {
           content: Text(t('Zaproszenie do {name} wysłane.', {'name': g.name})),
         ),
       );
-      // Met in person: how close are you (§8)?
+      // Met in person: how close are you?
       await showMetLevelPrompt(context, address: g.address, name: g.name);
     }
   }
@@ -1130,7 +1130,7 @@ class EventScreen extends ConsumerWidget {
   }
 }
 
-/// The ticket QR shown at the door (§17.1): renewed every 20 s and signed
+/// The ticket QR shown at the door: renewed every 20 s and signed
 /// by this phone's own key, so a screenshot passed on to someone else stops
 /// working after about a minute and a half.
 class _LiveTicketCode extends StatefulWidget {
@@ -1318,7 +1318,7 @@ String? pyramidKeyOfAddress(PyramidState s, String address) {
   return null;
 }
 
-/// After the event (§17.1): the shared album, gratitude cards for the host
+/// After the event: the shared album, gratitude cards for the host
 /// and a tip in the pyramid's currency.
 class _AfterEvent extends ConsumerWidget {
   const _AfterEvent({
@@ -1437,7 +1437,7 @@ class _AfterEvent extends ConsumerWidget {
       return;
     }
     final bool sent = await events.sendThanks(event.id, text);
-    // It also counts on the host's profile ("Podziękowania", §9), when
+    // It also counts on the host's profile ("Podziękowania"), when
     // their account is known and the monthly limit allows.
     final LedgerNode? node = ref.read(ledgerNodeProvider);
     final String? account = node == null || !node.isReady

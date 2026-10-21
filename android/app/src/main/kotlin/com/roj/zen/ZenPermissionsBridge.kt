@@ -17,7 +17,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * The permissions screen (§25.2, `zen/permissions`): what is allowed now,
+ * The permissions screen (`zen/permissions`): what is allowed now,
  * and asking for one thing at a time (notifications, microphone, camera).
  * Bluetooth goes through [ZenNearbyBridge]; battery optimisation through
  * the foreground-service plugin. The system dialog answers later: the app

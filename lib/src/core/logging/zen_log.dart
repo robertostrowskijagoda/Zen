@@ -182,7 +182,7 @@ final RegExp _peerAddressPattern = RegExp(
   r'(?<![0-9A-Za-z:_])[23][0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{0,4}){2,7}(?![0-9A-Za-z_])',
 );
 
-/// [text] as the diagnostics log keeps it (S-16), readable outside the
+/// [text] as the diagnostics log keeps it, readable outside the
 /// encrypted data:
 ///  - paths under the app's own folders ([privatePlaces], see
 ///    [diagnosticsPrivatePlaces]) become `<app>/<first folder>/…`: file

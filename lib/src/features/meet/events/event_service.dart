@@ -53,7 +53,7 @@ abstract interface class EventHost {
   Future<void> notify(RuntimeSystemNotification notification);
 }
 
-/// A signed ticket (§17.1): shown as a QR code at the door, checked by the
+/// A signed ticket: shown as a QR code at the door, checked by the
 /// organizer's phone without internet.
 ///
 /// Pinned to the guest's phone: "Będę" sends the organizer a key that only
@@ -180,7 +180,12 @@ final class EventTicket {
     }
   }
 
-  Future<bool> verify(String ticketKey) => verifyLedgerSignature(
+  /// The organizer's signature, classical Ed25519
+  /// ([LedgerKeyPair.signClassical]): the ticket and its live code must fit
+  /// one QR code, which a hybrid signature (5.3 KB) does not. It is checked
+  /// at the door during the event, so forging one would take a quantum
+  /// computer then.
+  Future<bool> verify(String ticketKey) => verifyClassicalSignature(
     publicKey: ticketKey,
     message: signedBytes(eventId, guest, name, pin),
     signature: signature,
@@ -203,7 +208,7 @@ enum CheckIn {
   replayed,
 }
 
-/// Events "po znajomości" (§17.1–17.2): the organizer's phone keeps the
+/// Events "po znajomości": the organizer's phone keeps the
 /// event and its guest list and sends everyone the current copy; guests
 /// answer, ask to bring someone, and pass the invitation on as far as the
 /// organizer allowed.
@@ -658,7 +663,7 @@ final class EventService extends ChangeNotifier {
     ),
   );
 
-  /// Lets [guest] bring [count] people without asking (§17.2).
+  /// Lets [guest] bring [count] people without asking.
   Future<void> allowPlusOnes(String id, String guest, int count) => _change(
     id,
     (MeetEvent e) => e.copyWith(
@@ -717,7 +722,8 @@ final class EventService extends ChangeNotifier {
     final LedgerKeyPair key = await LedgerKeyPair.fromSeed(
       unb64(_seeds[e.id], length: 32)!,
     );
-    final Uint8List sig = await key.sign(
+    // Classical: the ticket goes into a QR code at the door.
+    final Uint8List sig = await key.signClassical(
       EventTicket.signedBytes(e.id, g.address, g.name, pin),
     );
     return EventTicket(
@@ -775,7 +781,7 @@ final class EventService extends ChangeNotifier {
     }
   }
 
-  // ---- who may answer (§17.1: "zasięg w krokach") ----
+  // ---- who may answer ("zasięg w krokach") ----
 
   /// One step of the invitation keys. The organizer derives, from its own
   /// secret, a key for each friend it invites (`fwd`); whoever passes the
@@ -864,7 +870,7 @@ final class EventService extends ChangeNotifier {
         (now - at).abs() > EventTicket.liveSlack) {
       return (CheckIn.expired, g);
     }
-    if (!await verifyLedgerSignature(
+    if (!await verifyClassicalSignature(
       publicKey: pin,
       message: EventTicket.liveBytes(t.eventId, t.guest, at),
       signature: proof,
@@ -897,7 +903,7 @@ final class EventService extends ChangeNotifier {
   // ---- as a guest ----
 
   /// Answers an invitation. "Będę" also sends this phone's own key for the
-  /// event, so the ticket gets pinned to this phone (§17.1). Saying it
+  /// event, so the ticket gets pinned to this phone. Saying it
   /// again pins a ticket that is not pinned yet.
   Future<void> rsvp(String id, GuestStatus status) async {
     final MeetEvent? e = _events[id];
@@ -948,7 +954,7 @@ final class EventService extends ChangeNotifier {
     }
     final LedgerKeyPair pair = await _pinPair(id);
     final int at = EventTicket.windowOf(_now());
-    final Uint8List sig = await pair.sign(
+    final Uint8List sig = await pair.signClassical(
       EventTicket.liveBytes(t.eventId, t.guest, at),
     );
     return t.toLiveQr(at, b64(sig));
@@ -1161,7 +1167,7 @@ final class EventService extends ChangeNotifier {
         ),
       );
     }
-    // Pass it on as far as the organizer allowed (§17.1): never further
+    // Pass it on as far as the organizer allowed: never further
     // than the event's own reach, counted along the chain — whatever the
     // frame says.
     final Object? hops = payload['hops'];
@@ -1415,7 +1421,7 @@ final class EventService extends ChangeNotifier {
     }
   }
 
-  // ---- after the event: shared album and gratitude cards (§17.1) ----
+  // ---- after the event: shared album and gratitude cards ----
 
   Future<void> _saveAlbum(String id) async {
     if (_diskUnreadable) {

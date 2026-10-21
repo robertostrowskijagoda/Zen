@@ -8,7 +8,7 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 
-/// Paper copy of the account key (§6.1).
+/// Paper copy of the account key.
 ///
 /// The 32-byte seed of the account key plus a 3-byte checksum is 35 bytes,
 /// exactly 56 base32 characters (RFC 4648 alphabet, no padding), written as

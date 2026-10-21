@@ -24,7 +24,7 @@ import io.flutter.plugin.common.MethodChannel
  * page (so a Zen QR scanned with the camera opens straight in Zen) and open
  * an https page in the browser. `setDisguise` switches the launcher entry
  * between Zen's own icon and name and a neutral notes one (two
- * activity-aliases, exactly one enabled; §14.2). `soundsSilenced` tells
+ * activity-aliases, exactly one enabled). `soundsSilenced` tells
  * whether the phone keeps quiet (Zen's in-app sounds follow it).
  */
 object ZenSystemBridge {

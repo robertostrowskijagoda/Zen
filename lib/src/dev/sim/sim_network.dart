@@ -89,7 +89,7 @@ final class SimPhone implements EventHost {
   String toString() => name;
 }
 
-/// A deterministic network of simulated phones (§ testing on many
+/// A deterministic network of simulated phones (for testing on many
 /// clients): virtual time, delays, loss, phones going off and on,
 /// partitions, and relays that hold messages for phones that are off (like
 /// the app's reliable delivery). Every run with the same seed does the same.

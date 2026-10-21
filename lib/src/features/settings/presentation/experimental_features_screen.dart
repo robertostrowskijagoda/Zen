@@ -6,7 +6,7 @@ import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 
-/// Ustawienia → "Funkcje eksperymentalne" (A15): show or hide the parts of
+/// Ustawienia → "Funkcje eksperymentalne": show or hide the parts of
 /// Zen that a "core" release leaves out. Hiding keeps their data.
 class ExperimentalFeaturesScreen extends ConsumerWidget {
   const ExperimentalFeaturesScreen({super.key});

@@ -9,7 +9,7 @@ import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-/// Messages of the recovery protocol (§6.3), over the signal transport:
+/// Messages of the recovery protocol, over the signal transport:
 ///
 /// * `rc_store {piece}`: owner → helper (a friend in the circle);
 /// * `rc_ack {account, created}`: helper → owner;
@@ -502,7 +502,7 @@ final class RecoveryService {
 
   /// [half] as kept: the fields recovery uses, the account it names and
   /// who sent it — after recovery they are greeted first, and they
-  /// hold the sealed backup of friends and groups (§6). `null` for a
+  /// hold the sealed backup of friends and groups. `null` for a
   /// malformed half, a bad account or an Argon2 cost not accepted.
   Map<String, dynamic>? _receivedHalf(
     RecoveryKind kind,

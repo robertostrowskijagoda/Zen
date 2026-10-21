@@ -14,7 +14,7 @@ import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
 
-/// "Przywróć klucz" (§6.1): takes the account back on a new device from the
+/// "Przywróć klucz": takes the account back on a new device from the
 /// encrypted backup file (and its password) or from the typed or scanned
 /// code. As with recovery through the circle, nothing is taken before the
 /// person confirms the account by its fingerprint.

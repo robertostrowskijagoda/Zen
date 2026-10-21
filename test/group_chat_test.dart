@@ -20,7 +20,7 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 /// Invitations to groups from people who are not friends are taken (off
-/// by default, §8).
+/// by default).
 final List _invitesFromAnyone = [
   appSettingsInitialStateProvider.overrideWithValue(
     const AppSettings(groupInviteFrom: GroupInviteFrom.everyone),

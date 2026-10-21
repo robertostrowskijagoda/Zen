@@ -108,8 +108,8 @@ final class ZenBootstrapResult {
         relayStateStore: stores.relayStateStore,
       ),
       ...buildRuntimeSystemNotificationProviderOverrides(
-        // Android: the permission is asked for on the permissions screen
-        // (§25.2), not when the first notification is set up.
+        // Android: the permission is asked for on the permissions screen,
+        // not when the first notification is set up.
         serviceFactory:
             systemNotificationServiceFactory ??
             (() => FlutterLocalRuntimeSystemNotificationService(
@@ -125,8 +125,8 @@ final class ZenBootstrapResult {
       ...buildSocialHubProviderOverrides(
         signalQueueStore: stores.signalQueueStore,
         socialSnapshotStore: stores.socialSnapshotStore,
-        // Disappearing messages (§14.1) on top of the copy for the
-        // account's other devices (§6).
+        // Disappearing messages on top of the copy for the
+        // account's other devices.
         messageTimelineStore: DisappearingTimelineStore(
           SyncingMessageTimelineStore(stores.messageTimelineStore),
         ),
@@ -138,12 +138,12 @@ final class ZenBootstrapResult {
       groupStoreProvider.overrideWithValue(stores.groupStore),
       ledgerDiskProvider.overrideWithValue(stores.ledgerDisk),
       ledgerNodeEnabledProvider.overrideWithValue(true),
-      // A computer is a bridge of the mesh without asking (§5.1); not in
+      // A computer is a bridge of the mesh without asking; not in
       // tests, which must not touch the real router.
       bridgeHostEnabledProvider.overrideWithValue(
         isDesktopPlatform && !Platform.environment.containsKey('FLUTTER_TEST'),
       ),
-      // §14.1: an app password is required by default — not for a debug
+      // An app password is required by default — not for a debug
       // test profile (--zen-profile), which a script drives from outside.
       // Debug only: a profile build is a real install too.
       appPasswordRequiredProvider.overrideWithValue(
@@ -152,7 +152,7 @@ final class ZenBootstrapResult {
           hasTestProfile: ZenInstance.profile != null,
         ),
       ),
-      // §25.2: the permissions and Bluetooth step once after the password;
+      // The permissions and Bluetooth step once after the password;
       // skipped the same way where a script drives the app.
       permissionsSetupRequiredProvider.overrideWithValue(
         zenStartupGatesRequired(
@@ -160,7 +160,7 @@ final class ZenBootstrapResult {
           hasTestProfile: ZenInstance.profile != null,
         ),
       ),
-      // §6.1, §6.3: the "Zabezpiecz konto" card once after that.
+      // The "Zabezpiecz konto" card once after that.
       accountSecureStepRequiredProvider.overrideWithValue(
         zenStartupGatesRequired(
           environment: Platform.environment,
@@ -171,12 +171,12 @@ final class ZenBootstrapResult {
   }
 }
 
-/// Whether the app password (§14.1) and the permissions step (§25.2) are
+/// Whether the app password and the permissions step are
 /// required at start. They are skipped only under `flutter test`
 /// (`FLUTTER_TEST` in [environment]) or for a test profile (--zen-profile,
 /// [hasTestProfile]) in a debug build — never in a release build, whatever
 /// the environment says: `FLUTTER_TEST` is just a variable anyone starting
-/// the process can set (S-20).
+/// the process can set.
 @visibleForTesting
 bool zenStartupGatesRequired({
   required Map<String, String> environment,
@@ -208,8 +208,7 @@ final class ZenBootstrapper {
            supportDirectoryLoader ?? ZenInstance.supportDirectory,
        _appSecurityServiceBuilder =
            appSecurityServiceBuilder ??
-           // Biometric unlock goes through the device's security hardware
-           // (§14.1).
+           // Biometric unlock goes through the device's security hardware.
            (() => LocalAppSecurityService(keyVault: platformKeyVault())),
        _appSettingsStoreBuilder =
            appSettingsStoreBuilder ?? buildZenAppSettingsStoreForDirectory,
@@ -326,7 +325,7 @@ final class ZenBootstrapper {
           nodeConfigProtector: appSecurityService == null
               ? null
               // Android: the background service runs the node while the
-              // app is locked, without the master key (§14.1).
+              // app is locked, without the master key.
               : Platform.isAndroid
               ? BackgroundKeyProtector(
                   appSecurityService.credentialsStore,

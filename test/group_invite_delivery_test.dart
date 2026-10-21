@@ -63,7 +63,7 @@ final class _Harness {
       overrides: [
         ...extraOverrides,
         // These tests check what notifications say; hiding the text (on by
-        // default, §14.1) has its own test.
+        // default) has its own test.
         ...buildAppSettingsProviderOverrides(
           store: MemoryAppSettingsStore(),
           initialState: AppSettings(hideNotificationContent: hideContent),
@@ -313,6 +313,36 @@ void main() {
           h.notifications.activeNotifications.single.title,
           contains('Wyprawa'),
         );
+      },
+    );
+
+    test(
+      'a member cannot bring anyone into a managed (pyramid cell) chat',
+      () async {
+        final _Harness h = _Harness();
+        await h.controller.syncManagedGroups(
+          'pyrcell-',
+          <String, ({String name, List<String> members})>{
+            'pyrcell-abc': (name: 'Komórka', members: <String>[ada, bob]),
+          },
+        );
+        expect(isManagedGroup(h.state.groups['pyrcell-abc']!), isTrue);
+        // Ada (a member of the cell) syncs a list with one more person, as
+        // adding someone to an ordinary group would.
+        await h.deliver(ada, _invite('pyrcell-abc', <String>[ada, bob, cyd]));
+        expect(
+          h.state.groups['pyrcell-abc']!.memberAddresses,
+          isNot(contains(cyd)),
+        );
+        await h.controller.addMemberToGroup(
+          groupId: 'pyrcell-abc',
+          memberAddress: cyd,
+        );
+        expect(
+          h.state.groups['pyrcell-abc']!.memberAddresses,
+          isNot(contains(cyd)),
+        );
+        expect(h.sentTo(cyd, 'group_invite'), isEmpty);
       },
     );
 

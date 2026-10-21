@@ -46,7 +46,7 @@ val zenAbis: List<String> = (project.findProperty("target-platform") as String?)
 // allow together with abiFilters.
 val zenSplitPerAbi = project.hasProperty("split-per-abi")
 
-// Distribution flavors (docs/STATUS.md):
+// Distribution flavors:
 //   full         - the full app (self-update, "Podaj dalej" with the APK);
 //   appStoreOnly - Google Play / Galaxy Store ONLY, never to be sideloaded:
 //                  no REQUEST_INSTALL_PACKAGES (src/appStoreOnly/
@@ -244,6 +244,6 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-    // System biometric prompt with a Keystore key (§14.1).
+    // System biometric prompt with a Keystore key.
     implementation("androidx.biometric:biometric:1.1.0")
 }

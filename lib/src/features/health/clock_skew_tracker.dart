@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 /// Compares this phone's clock with the timestamps friends put on their
-/// messages (STAN A21). Each subsystem silently drops what lies outside its
+/// messages. Each subsystem silently drops what lies outside its
 /// own tolerance, so a clock that is off by minutes looks like "nothing
 /// arrives" — this makes it visible.
 ///
@@ -16,7 +16,7 @@ class ClockSkewTracker extends ChangeNotifier {
   /// The process-wide tracker, fed by the message handler.
   static final ClockSkewTracker instance = ClockSkewTracker();
 
-  /// Beyond this the phone's clock is called wrong (A21).
+  /// Beyond this the phone's clock is called wrong.
   static const Duration warnThreshold = Duration(minutes: 2);
 
   /// Samples older than this are replaced even by a smaller difference

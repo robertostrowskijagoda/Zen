@@ -9,7 +9,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/follows.dart';
 import 'package:zen/src/features/profile/presentation/mini_profile.dart';
 
-/// Who follows you (§12): friends automatically, and everyone else who
+/// Who follows you: friends automatically, and everyone else who
 /// chose to. A follower can be blocked: they leave the list and their
 /// likes and comments disappear from your posts (they can still read what
 /// is public).

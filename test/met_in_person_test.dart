@@ -15,9 +15,9 @@ import 'package:zen/src/features/pyramid/pyramid_state.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-/// The pyramid key from the account key (A7, §6.1), signed "met in person"
-/// attestations (§6.2), "w tym N zweryfikowanych" (§11) and referendum
-/// votes only from members met in person by 2 others (§20.6).
+/// The pyramid key from the account key, signed "met in person"
+/// attestations, "w tym N zweryfikowanych", and the pyramid's vote: 14
+/// days in, or known by somebody of the cell.
 final class _Linked extends MemorySignalTransport {
   _Linked(this.address, this.nodes);
 
@@ -106,6 +106,7 @@ Future<PyramidRecord> _rec(
 
 Map<String, dynamic> _member(LedgerKeyPair k, String name) => <String, dynamic>{
   'k': k.id,
+  'pq': k.pqId,
   'n': name,
   'nat': 'PL',
   'yr': 1990,
@@ -113,7 +114,7 @@ Map<String, dynamic> _member(LedgerKeyPair k, String name) => <String, dynamic>{
 };
 
 void main() {
-  group('the pyramid key comes from the account key (A7)', () {
+  group('the pyramid key comes from the account key', () {
     test('every device of the account, and a recovered one, has the same '
         'pyramid key; a password does not hide it', () async {
       final LedgerKeyPair account = await LedgerKeyPair.generate();
@@ -150,7 +151,7 @@ void main() {
     });
   });
 
-  group('"met in person" attestations (§6.2)', () {
+  group('"met in person" attestations', () {
     test('a body says the other account and only the day', () {
       final Map<String, dynamic> body = metBody(
         'x' * 44,
@@ -196,8 +197,7 @@ void main() {
     });
   });
 
-  test('"w tym N zweryfikowanych": likers met in person by a friend '
-      '(§11)', () async {
+  test('"w tym N zweryfikowanych": likers met in person by a friend', () async {
     final _Mesh mesh = _Mesh();
     final LedgerNode ada = await mesh.node('200::a');
     final LedgerNode bob = await mesh.node('200::b');
@@ -228,7 +228,7 @@ void main() {
     expect(verifiedSummary(post), 'w tym 1 zweryfikowana');
 
     // A pyramid member counts as verified too ("piramida albo spotkani
-    // osobiście", §11).
+    // osobiście").
     final FeedPost withPyramid = buildFeed(
       ada,
       nameOf: (String a) => a,
@@ -238,10 +238,11 @@ void main() {
     expect(verifiedSummary(withPyramid), 'w tym 2 zweryfikowane');
   });
 
-  group('referenda only from members met in person by 2 (§20.6)', () {
+  group('the vote: 14 days in, or known by somebody of the cell', () {
     late LedgerKeyPair s;
     late LedgerKeyPair a;
     late LedgerKeyPair b;
+    late LedgerKeyPair c;
     late List<PyramidRecord> base;
     late String py;
     late PyramidRecord ref;
@@ -250,30 +251,48 @@ void main() {
       s = await LedgerKeyPair.generate();
       a = await LedgerKeyPair.generate();
       b = await LedgerKeyPair.generate();
+      c = await LedgerKeyPair.generate();
+      final LedgerKeyPair power = await LedgerKeyPair.generate();
       final PyramidRecord g = await _rec(
         PyrT.genesis,
         '',
         t0,
-        <LedgerKeyPair>[s],
-        <String, dynamic>{'name': 'Test', 'founder': _member(s, 'S')},
+        <LedgerKeyPair>[power],
+        <String, dynamic>{'name': 'Test', 'pk': power.id},
       );
       py = g.id;
+      Future<PyramidRecord> admit(
+        int at,
+        LedgerKeyPair sponsor,
+        LedgerKeyPair head,
+        LedgerKeyPair who,
+        String name,
+        String slot,
+      ) => _rec(
+        PyrT.admit,
+        py,
+        at,
+        <LedgerKeyPair>{sponsor, head, who}.toList(),
+        <String, dynamic>{
+          'sp': sponsor.id,
+          'head': head.id,
+          'slot': slot,
+          'm': _member(who, name),
+        },
+      );
       base = <PyramidRecord>[
         g,
         await _rec(
-          PyrT.admit,
+          PyrT.found,
           py,
-          t0 + 1,
-          <LedgerKeyPair>[s, a],
-          <String, dynamic>{'head': s.id, 'm': _member(a, 'A')},
+          t0,
+          <LedgerKeyPair>[power, s],
+          <String, dynamic>{'m': _member(s, 'S')},
         ),
-        await _rec(
-          PyrT.admit,
-          py,
-          t0 + 2,
-          <LedgerKeyPair>[s, b],
-          <String, dynamic>{'head': s.id, 'm': _member(b, 'B')},
-        ),
+        await admit(t0 + 1, s, s, a, 'A', '0'),
+        await admit(t0 + 2, s, s, b, 'B', '1'),
+        // "Polecenie": S brings C into A's cell.
+        await admit(t0 + 3, s, a, c, 'C', '00'),
       ];
       ref = await _rec(
         PyrT.referendum,
@@ -285,31 +304,20 @@ void main() {
           'opts': <String>['Tak', 'Nie'],
           'end': t0 + 2 * h,
           'scope': <String, String>{'k': 'all', 'p': '', 'nat': ''},
-          'kind': 'normal',
         },
       );
     });
 
-    Future<PyramidRecord> met(LedgerKeyPair by, LedgerKeyPair about, int at) =>
-        _rec(
-          PyrT.met,
-          py,
-          at,
-          <LedgerKeyPair>[by],
-          <String, dynamic>{'k': about.id},
-        );
-
-    Future<PyramidRecord> tally(List<int> counts, int at) => _rec(
-      PyrT.tally,
+    Future<PyramidRecord> known(
+      LedgerKeyPair by,
+      LedgerKeyPair about,
+      int at,
+    ) => _rec(
+      PyrT.known,
       py,
       at,
-      <LedgerKeyPair>[s],
-      <String, dynamic>{
-        'ref': ref.id,
-        'counts': counts,
-        'kids': <String>[],
-        'extra': false,
-      },
+      <LedgerKeyPair>[by],
+      <String, dynamic>{'k': about.id},
     );
 
     PyramidState fold(List<PyramidRecord> more) => PyramidState.fold(
@@ -318,44 +326,65 @@ void main() {
       now: t0 + 30 * h,
     );
 
-    test('a meeting counts once, between two members', () async {
-      final PyramidRecord self = await met(a, a, t0 + 10);
-      final PyramidRecord ok = await met(s, a, t0 + 11);
-      final PyramidRecord again = await met(s, a, t0 + 12);
-      final PyramidState st = fold(<PyramidRecord>[self, ok, again]);
-      expect(st.rejected[self.id], 'nie członek');
-      expect(st.rejected[again.id], 'już potwierdzone');
-      expect(st.metCount(a.id), 1);
-      expect(st.metInPerson(a.id), isFalse, reason: 'one is not enough');
-      expect(st.eligible(st.referenda[ref.id]!, a.id), isFalse);
-      expect(st.inScope(st.referenda[ref.id]!, a.id), isTrue);
+    test('the founder votes at once, so does whom a voter admits right under '
+        'itself; a newcomer brought to another cell does not', () async {
+      final PyramidState st = fold(const <PyramidRecord>[]);
+      expect(st.pathOf(c.id), '00');
+      expect(st.members[c.id]!.admittedBy, s.id, reason: 'S vouches');
+      expect(st.canVote(s.id, t0), isTrue);
+      expect(st.canVote(a.id, t0 + 1), isTrue);
+      expect(st.knownByOf(a.id), <String>[s.id]);
+      expect(st.canVote(c.id, t0 + 3), isFalse);
+      expect(st.eligible(st.referenda[ref.id]!, c.id), isFalse);
+      expect(st.inScope(st.referenda[ref.id]!, c.id), isTrue);
     });
 
-    test('nobody met in person: no vote counts; a top cannot sum votes of '
-        'members nobody met', () async {
-      final PyramidRecord t = await tally(<int>[1, 0], t0 + 3 * h);
-      final PyramidState st = fold(<PyramidRecord>[t]);
-      expect(st.rejected[t.id], 'zawyżona suma');
-      expect(st.quorumBase(t0 + 2 * h), 1);
+    test(
+      '"poznaliśmy się": only somebody of the cell who votes, once',
+      () async {
+        final PyramidRecord self = await known(c, c, t0 + 10);
+        final PyramidRecord stranger = await known(b, c, t0 + 11);
+        final PyramidRecord ok = await known(a, c, t0 + 12);
+        final PyramidRecord again = await known(a, c, t0 + 13);
+        final PyramidState st = fold(<PyramidRecord>[
+          self,
+          stranger,
+          ok,
+          again,
+        ]);
+        expect(st.rejected[self.id], 'nie członek');
+        expect(st.rejected[stranger.id], 'potwierdza ktoś z tej samej komórki');
+        expect(st.rejected[again.id], 'już potwierdzone');
+        expect(st.knownByOf(c.id), <String>[a.id]);
+        expect(st.canVote(c.id, t0 + 12), isTrue);
+        expect(st.eligible(st.referenda[ref.id]!, c.id), isTrue);
+      },
+    );
+
+    test('14 days after joining anybody votes', () {
+      final PyramidState st = fold(const <PyramidRecord>[]);
+      expect(st.canVote(c.id, t0 + 3 + kPyrVoteAfterMs - 1), isFalse);
+      expect(st.canVote(c.id, t0 + 3 + kPyrVoteAfterMs), isTrue);
     });
 
-    test('A met by S and B votes, B met only by S does not', () async {
-      final List<PyramidRecord> meetings = <PyramidRecord>[
-        await met(s, a, t0 + 10),
-        await met(b, a, t0 + 11),
-        await met(s, b, t0 + 12),
-      ];
-      final PyramidRecord two = await tally(<int>[2, 0], t0 + 3 * h);
-      final PyramidRecord one = await tally(<int>[1, 0], t0 + 3 * h + 1);
-      final PyramidState st = fold(<PyramidRecord>[...meetings, two, one]);
-      expect(st.metInPerson(a.id), isTrue);
-      expect(st.metInPerson(b.id), isFalse);
-      expect(st.eligible(st.referenda[ref.id]!, a.id), isTrue);
-      expect(st.rejected[two.id], 'zawyżona suma');
-      expect(st.applied, contains(one.id));
-      expect(st.resultOf(ref.id), <int>[1, 0]);
-      // Turnout is counted from those who may vote.
-      expect(st.quorumBase(t0 + 2 * h), 1);
+    test('a swap in the cell counts only those with a vote', () async {
+      Future<PyramidRecord> swap(int at) => _rec(
+        PyrT.swap,
+        py,
+        at,
+        <LedgerKeyPair>[a, c],
+        <String, dynamic>{'cell': '0', 'head': a.id, 'up': c.id},
+      );
+      final PyramidRecord early = await swap(t0 + 20);
+      PyramidState st = fold(<PyramidRecord>[early]);
+      expect(
+        st.rejected[early.id],
+        'potrzeba 2 z 3 w komórce (z prawem głosu)',
+      );
+      final PyramidRecord later = await swap(t0 + 40);
+      st = fold(<PyramidRecord>[early, await known(a, c, t0 + 30), later]);
+      expect(st.applied, contains(later.id));
+      expect(st.pathOf(c.id), '0');
     });
   });
 }

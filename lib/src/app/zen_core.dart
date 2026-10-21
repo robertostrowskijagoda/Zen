@@ -4,7 +4,7 @@ import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 
 /// One part of Zen that [ZenCore] starts and stops: its services, timers and
-/// what it does when the app comes back (A15).
+/// what it does when the app comes back.
 ///
 /// A module of a [feature] runs only while that feature is enabled; a module
 /// without one is part of the core and always runs.
@@ -38,7 +38,7 @@ abstract class ZenModule {
   void onInteractiveChanged(bool interactive) {}
 }
 
-/// The composition root (A15, step 0): starts and stops Zen's modules in a
+/// The composition root (step 0): starts and stops Zen's modules in a
 /// defined order, honouring the feature flags, and runs their minute duties.
 ///
 /// Plain Dart: the app creates one through a provider and its widgets only

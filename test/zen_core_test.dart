@@ -91,7 +91,7 @@ void main() {
       await core.start();
       log.clear();
 
-      // The pyramid is on by default (§2.5.1).
+      // The pyramid is on by default.
       core.applyFlags(
         const FeatureFlags().withFeature(ZenFeature.dating, false),
       );

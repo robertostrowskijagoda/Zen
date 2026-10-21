@@ -9,7 +9,7 @@ import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/core/ledger/shamir.dart';
 
-/// Account password and recovery through the circle (§6.1, §6.3).
+/// Account password and recovery through the circle.
 ///
 /// The account key (its 32-byte seed) can be got back in two ways:
 ///

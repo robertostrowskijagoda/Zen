@@ -18,7 +18,7 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
-/// Levels of acquaintance (§8, §16.2, §7, §26.1): what a weak acquaintance
+/// Levels of acquaintance: what a weak acquaintance
 /// gets, who may invite to groups, who keeps the mailboxes and recovery
 /// pieces.
 final String weak = PeerShareCodec.normalizeAddress('200::a1');
@@ -120,7 +120,7 @@ void main() {
     return (service, host);
   }
 
-  group('friend list (§8, §9)', () {
+  group('friend list', () {
     test('by default weak acquaintances get an empty list', () async {
       final (MeetService service, _Host host) = meet();
       expect(service.book.friendListAudience, FriendListAudience.friends);
@@ -195,7 +195,7 @@ void main() {
     });
   });
 
-  group('statuses (§16.2)', () {
+  group('statuses', () {
     test('weak acquaintances see only "Nie przeszkadzać"', () async {
       final (MeetService service, _Host host) = meet();
       await service.setMyIntent(
@@ -231,7 +231,7 @@ void main() {
     });
   });
 
-  group('group invitations (§8)', () {
+  group('group invitations', () {
     test('the threshold by level', () {
       bool ok(GroupInviteFrom f, FriendLevel? l, {bool friend = true}) =>
           groupInviteAllowed(f, isFriend: friend, level: l);
@@ -334,7 +334,7 @@ void main() {
     });
   });
 
-  group('circle and mailboxes prefer "Przyjaciel" (§7)', () {
+  group('circle and mailboxes prefer "Przyjaciel"', () {
     test('closest first, stable within a level', () {
       expect(closestFirst(<String>[weak, mid, close], levelOf), <String>[
         close,

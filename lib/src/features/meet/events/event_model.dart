@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-/// How far an event reaches (§17.1): only the people the organizer
+/// How far an event reaches: only the people the organizer
 /// picked, or as far as friends / friends of friends pass it on.
 enum EventReach {
   selected(0),
@@ -133,7 +133,7 @@ enum EventKind {
       EventKind.other;
 }
 
-/// An event "po znajomości" (§17): the organizer's device holds the truth
+/// An event "po znajomości": the organizer's device holds the truth
 /// and sends every guest the current copy.
 @immutable
 final class MeetEvent {
@@ -303,7 +303,7 @@ final class MeetEvent {
 String _clipText(Object? v, int max) =>
     v is String ? (v.length > max ? v.substring(0, max) : v) : '';
 
-/// A photo in an event's shared album (§17.1, "po wydarzeniu"): added by a
+/// A photo in an event's shared album ("po wydarzeniu"): added by a
 /// guest who went (or the organizer), seen only by the event's guests.
 @immutable
 final class EventPhoto {
@@ -353,7 +353,7 @@ final class EventPhoto {
   }
 }
 
-/// A gratitude card for the host ("karta wdzięczności", §17.1): a short
+/// A gratitude card for the host ("karta wdzięczności"): a short
 /// thank-you from a guest after the event.
 @immutable
 final class EventThanks {

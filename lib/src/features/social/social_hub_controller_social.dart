@@ -264,7 +264,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       payload: const <String, dynamic>{'type': 'friend_remove'},
     );
     await _cancelQueuedTraffic(canonical, keep: 'friend_remove');
-    // The account's other devices remove them too (§6).
+    // The account's other devices remove them too.
     ref.read(accountDirectoryHolderProvider).friendRemoved?.call(canonical);
 
     final Map<String, FriendProfile> friends = Map<String, FriendProfile>.from(
@@ -316,7 +316,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       current.copyWith(nickname: sanitizeFriendNickname(nickname)),
       nicknameChanged: true,
     );
-    // The account's other devices take it from the contacts backup (§6).
+    // The account's other devices take it from the contacts backup.
     state = state.copyWith(friends: friends);
     await _persistState();
   }
@@ -1437,8 +1437,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     _persistSoon();
   }
 
-  /// Remembers the Zen version an accepted friend named in a ping or pong
-  /// (A17). Self-reported: it only feeds the "friends have a newer Zen"
+  /// Remembers the Zen version an accepted friend named in a ping or pong.
+  /// Self-reported: it only feeds the "friends have a newer Zen"
   /// hint, nothing else may depend on it.
   Future<void> notePeerAppVersion({
     required String peerAddress,
@@ -1614,6 +1614,63 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     return group;
   }
 
+  /// Groups kept in step with something outside the chats (the cells of
+  /// the pyramid): every member's device works out the same members, so
+  /// nothing is sent — each group whose id starts with [prefix] is only
+  /// created, updated or dropped here, as [wanted] says.
+  Future<void> syncManagedGroups(
+    String prefix,
+    Map<String, ({String name, List<String> members})> wanted,
+  ) async {
+    await _enqueueStateWork(() async {
+      final Map<String, GroupProfile> groups = Map<String, GroupProfile>.of(
+        state.groups,
+      );
+      bool changed = false;
+      for (final String id in groups.keys.toList()) {
+        if (id.startsWith(prefix) && !wanted.containsKey(id)) {
+          groups.remove(id);
+          changed = true;
+        }
+      }
+      for (final MapEntry<String, ({String name, List<String> members})> e
+          in wanted.entries) {
+        if (!e.key.startsWith(prefix)) {
+          continue;
+        }
+        final List<String> members = cappedGroupMembers(
+          normalizedGroupMembers(e.value.members),
+        );
+        final GroupProfile? had = groups[e.key];
+        if (had == null) {
+          groups[e.key] = GroupProfile(
+            id: e.key,
+            name: e.value.name,
+            createdById: prefix,
+            createdAtMillis: DateTime.now().millisecondsSinceEpoch,
+            memberAddresses: members,
+            lastActivityLabel: t('Teraz'),
+            lastMessagePreview: t('Czat Twojej komórki w piramidzie.'),
+          );
+          changed = true;
+        } else if (had.name != e.value.name ||
+            had.isInvitePending ||
+            !listEquals(had.memberAddresses, members)) {
+          groups[e.key] = had.copyWith(
+            name: e.value.name,
+            memberAddresses: members,
+            isInvitePending: false,
+          );
+          changed = true;
+        }
+      }
+      if (changed) {
+        state = state.copyWith(groups: groups);
+        await _persistState();
+      }
+    });
+  }
+
   Future<void> addMemberToGroup({
     required String groupId,
     required String memberAddress,
@@ -1622,6 +1679,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     final String member = PeerShareCodec.normalizeAddress(memberAddress);
     if (current == null ||
         current.isInvitePending ||
+        isManagedGroup(current) ||
         member.isEmpty ||
         groupHasMember(current, member)) {
       return;
@@ -1820,7 +1878,7 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     );
     final GroupProfile? removed = groups.remove(groupId);
     if (removed != null) {
-      // The account's other devices leave it too (§6).
+      // The account's other devices leave it too.
       ref.read(accountDirectoryHolderProvider).groupLeft?.call(groupId);
     }
     state = _withRejectedGroup(

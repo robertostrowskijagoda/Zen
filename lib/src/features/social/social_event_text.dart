@@ -14,7 +14,7 @@ const String kSocialEventMimeType = 'application/vnd.zen.event+json';
 
 /// A text the app saves (a system message in a chat, an inbox entry) kept
 /// as an event [code] and its [args], and put into words in the app's
-/// language when it is shown (STAN A23): switching the language also
+/// language when it is shown: switching the language also
 /// changes what was saved before. The text made when it was saved stays
 /// next to it, for older builds and codes this build does not know.
 ///

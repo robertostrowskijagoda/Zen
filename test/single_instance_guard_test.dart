@@ -89,7 +89,7 @@ void main() {
     );
   });
 
-  group('zombie cleanup (S-15)', () {
+  group('zombie cleanup', () {
     const String own = r'C:\Users\Ala\AppData\Local\Zen\zen.exe';
 
     test('only other copies of this executable run by this user', () {

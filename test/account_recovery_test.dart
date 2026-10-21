@@ -472,7 +472,7 @@ void main() {
 
       await f.beginRecovery();
       expect(f.collecting, isTrue);
-      // A fresh address nobody named cannot take the helpers' places (Z2-10).
+      // A fresh address nobody named cannot take the helpers' places.
       await send(pieces[0].emergency, account: key.id);
       expect(f.receivedCount(RecoveryKind.emergency), 0, reason: 'not named');
 
@@ -644,7 +644,7 @@ void main() {
     final Finder collecting = find.byKey(const Key('recovery-collecting'));
     await waitFor(() => collecting.evaluate().isNotEmpty);
     expect(collecting, findsOneWidget);
-    // Only the helpers named here can send pieces (Z2-10).
+    // Only the helpers named here can send pieces.
     for (int i = 0; i < 4; i++) {
       final Finder code = find.byKey(const Key('recovery-helper-code'));
       await tester.ensureVisible(code);

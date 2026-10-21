@@ -114,21 +114,30 @@ void main() {
         spaceKind: 'acts',
       );
       // D passes C's notice off as its own.
-      expect(await onA.takeNotice(dan, d.account, follow.toJson()), isFalse);
+      expect(
+        await onA.takeNotice(dan, d.account, follow.toCertifiedJson()),
+        isFalse,
+      );
       // Not a follow at all.
       final LogEntry like = await c.publish(
         kLikeKind,
         likeBody('x'),
         spaceKind: 'acts',
       );
-      expect(await onA.takeNotice(cel, c.account, like.toJson()), isFalse);
+      expect(
+        await onA.takeNotice(cel, c.account, like.toCertifiedJson()),
+        isFalse,
+      );
       // A follow of somebody else's account.
       final LogEntry other = await c.publish(
         kFollowKind,
         followBody(dan, account: d.account),
         spaceKind: 'acts',
       );
-      expect(await onA.takeNotice(cel, c.account, other.toJson()), isFalse);
+      expect(
+        await onA.takeNotice(cel, c.account, other.toCertifiedJson()),
+        isFalse,
+      );
       // Garbage.
       expect(
         await onA.takeNotice(cel, c.account, <String, dynamic>{}),
@@ -136,7 +145,10 @@ void main() {
       );
       expect(onA.followers, isEmpty);
       // The real thing.
-      expect(await onA.takeNotice(cel, c.account, follow.toJson()), isTrue);
+      expect(
+        await onA.takeNotice(cel, c.account, follow.toCertifiedJson()),
+        isTrue,
+      );
       expect(onA.followers.single.account, c.account);
     },
   );

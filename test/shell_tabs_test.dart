@@ -173,7 +173,7 @@ void main() {
     tester.view.physicalSize = const Size(420, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    // Pyramid and wallet are on by default (§2.5.1).
+    // Pyramid and wallet are on by default.
     await _pumpApp(tester);
 
     for (final String id in <String>[
@@ -190,7 +190,7 @@ void main() {
     ]) {
       expect(find.byKey(Key('more-tab-$id')), findsOneWidget, reason: id);
     }
-    // Grouped as in the plan (§25).
+    // Grouped by area.
     expect(find.text('WSPÓLNOTA'), findsOneWidget);
     await tester.tap(find.byKey(const Key('more-tab-about')));
     await tester.pump(const Duration(milliseconds: 400));

@@ -15,7 +15,7 @@ import 'package:zen/src/features/permissions/presentation/permissions_screen.dar
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/shell/presentation/app_shell_screen.dart';
 
-/// "Dlaczego nie działa?" (STAN A22): one list of everything that makes
+/// "Dlaczego nie działa?": one list of everything that makes
 /// messages and alarms not arrive — network, neighbours, background
 /// service, notifications, battery, the clock and free space — each with
 /// what to do about it.
@@ -340,7 +340,7 @@ class _HealthScreenState extends ConsumerState<HealthScreen>
 }
 
 /// A bar under the connection status when this phone's clock is off by
-/// more than two minutes (STAN A21): messages, meetings and tickets are
+/// more than two minutes: messages, meetings and tickets are
 /// otherwise dropped silently. Tap: the health report.
 class ClockSkewBanner extends ConsumerWidget {
   const ClockSkewBanner({super.key});

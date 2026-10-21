@@ -6,6 +6,7 @@ import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
 PyrMember _member(String key, String addr) => PyrMember(
   key: key,
+  pq: 'pq-$key',
   name: key,
   nat: 'PL',
   birthYear: 1990,
@@ -27,6 +28,27 @@ void main() {
     expect(pyramidKeyForAddress(members, '200::b'), '');
     expect(pyramidKeyForAddress(members, ''), '');
     expect(pyramidKeyForAddress(const <PyrMember>[], '200::a'), '');
+  });
+
+  test('an address two active members claim belongs to neither', () {
+    final PyrMember gone = _member('k-old', '200::d')..active = false;
+    expect(
+      pyramidKeyForAddress(<PyrMember>[
+        _member('k-ada', '200::a'),
+        _member('k-eve', '200::a'),
+      ], '200::a'),
+      '',
+      reason: 'Eve copied Ada\'s address: payments go to nobody',
+    );
+    // Somebody who left keeps their old address on record: the member
+    // using it now gets it.
+    expect(
+      pyramidKeyForAddress(<PyrMember>[
+        gone,
+        _member('k-new', '200::d'),
+      ], '200::d'),
+      'k-new',
+    );
   });
 
   test('evidence carries a header and is cut to the limit', () {
@@ -58,7 +80,7 @@ void main() {
     expect(isContentHidden(banned, 'Dzień dobry', id: 'p3'), isFalse);
   });
 
-  test('a ban of an entry holds whatever its text (S36)', () {
+  test('a ban of an entry holds whatever its text', () {
     const String bad = 'Kup tanio!!!';
     final Set<String> banned = <String>{'entry-1'};
     // One space added: still the banned entry.

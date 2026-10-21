@@ -15,7 +15,7 @@ import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
-/// "Zapytaj sieć" (§17.5).
+/// "Zapytaj sieć".
 class AskScreen extends ConsumerStatefulWidget {
   const AskScreen({super.key});
 
@@ -83,7 +83,7 @@ class _AskScreenState extends ConsumerState<AskScreen> {
     disposeLater(c);
     if (text != null && text.trim().isNotEmpty) {
       // A pyramid member signs the answer with its pyramid key, so the
-      // asker can give a tip (§24).
+      // asker can give a tip.
       final PyramidService pyr = ref.read(pyramidServiceProvider);
       final bool member = pyr.isMember;
       await ask.answer(
@@ -95,7 +95,7 @@ class _AskScreenState extends ConsumerState<AskScreen> {
     }
   }
 
-  /// "Daj napiwek" (§17.5, §24): a payment in the pyramid's currency to
+  /// "Daj napiwek": a payment in the pyramid's currency to
   /// the one who answered.
   Future<void> _tip(
     AskService ask,

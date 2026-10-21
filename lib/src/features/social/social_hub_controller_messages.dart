@@ -14,7 +14,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     if (trimmed.isEmpty) {
       return;
     }
-    // Someone who is not a friend (§13, §24.1): within the limits, and
+    // Someone who is not a friend: within the limits, and
     // with this person's mini-profile. Throws [StrangerMessageRefused].
     final bool toStranger = _isStrangerChatPeer(peerAddress);
     final Map<String, dynamic>? mini = toStranger
@@ -1112,7 +1112,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
 int _effectiveSentAt(ZenSignal signal, int receivedAtMillis) {
   final int? claimed = signal.sentAtMillis;
   if (claimed != null) {
-    // A21: what friends' timestamps say about this phone's clock.
+    // What friends' timestamps say about this phone's clock.
     ClockSkewTracker.instance.observe(signal.sender, claimed, receivedAtMillis);
   }
   if (claimed == null ||

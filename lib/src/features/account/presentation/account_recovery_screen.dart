@@ -28,12 +28,12 @@ import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
-/// "Konto i odzyskiwanie" (§6): account password, the circle that keeps
+/// "Konto i odzyskiwanie": account password, the circle that keeps
 /// recovery pieces, helping friends, and recovering on a new device.
 class AccountRecoveryScreen extends ConsumerStatefulWidget {
   const AccountRecoveryScreen({super.key});
 
-  /// Opens after the person confirms who they are (§14.1 point 4).
+  /// Opens after the person confirms who they are.
   static Future<void> open(BuildContext context) async {
     if (!await confirmSensitiveAccess(
           context,
@@ -102,7 +102,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
   }
 
   /// Who keeps the pieces: the mailbox circle and the other friends,
-  /// "Przyjaciel" first (§7).
+  /// "Przyjaciel" first.
   List<String> _helpers() {
     final RelayEngine? engine = ref.read(relayEngineProvider);
     final SocialHubState social = ref.read(socialHubControllerProvider);
@@ -189,7 +189,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     );
   }
 
-  /// Starts taking pieces on this device (§6.3).
+  /// Starts taking pieces on this device.
   Future<String> _beginRecovery() async {
     final RecoveryService? service = _service;
     if (service == null) {
@@ -293,7 +293,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
       return t('Otrzymany klucz nie pasuje do konta.');
     }
     // The friends who helped keep a sealed copy of the friends and groups:
-    // greeted first after the restart, they give it back (§6). Senders of
+    // greeted first after the restart, they give it back. Senders of
     // pieces for other accounts are not greeted.
     await node.rememberDeviceAddresses(<String>{
       ...candidate.helpers,
@@ -510,7 +510,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     );
   }
 
-  /// "Co odzyskasz" (§6.3): what comes back with the recovery circle and what
+  /// "Co odzyskasz": what comes back with the recovery circle and what
   /// never does, so nobody expects the chat history on a new phone.
   Widget _recoverScope(ZenColors zen, Key key) => Container(
     key: key,

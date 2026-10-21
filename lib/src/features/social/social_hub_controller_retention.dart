@@ -108,7 +108,7 @@ mixin _SocialHubRetentionMixin on _SocialHubControllerBase {
   }
 
   /// Removes one message from this phone only ("Usuń z mojego urządzenia"
-  /// after a report, §21.4): the other side keeps its copy. Its file and
+  /// after a report): the other side keeps its copy. Its file and
   /// unfinished transfers go with it, and the chat list shows the message
   /// before it. [key] is a friend's address, or `group:<id>` for a group.
   /// False when the message is not there (any more).

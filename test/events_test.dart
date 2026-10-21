@@ -455,7 +455,7 @@ void main() {
       final String faked = kubaTicket.toLiveQr(
         fresh.liveAt!,
         b64(
-          await other.sign(
+          await other.signClassical(
             EventTicket.liveBytes(e.id, kubaTicket.guest, fresh.liveAt!),
           ),
         ),

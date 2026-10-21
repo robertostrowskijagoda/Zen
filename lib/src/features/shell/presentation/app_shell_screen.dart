@@ -10,7 +10,6 @@ import 'package:zen/src/app/app_data_reset.dart';
 import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
-import 'package:zen/src/app/theme/zen_concept.dart';
 import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
@@ -35,6 +34,7 @@ import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
 import 'package:zen/src/features/dating/presentation/dating_screen.dart';
+import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/presentation/feed_screen.dart';
 import 'package:zen/src/features/groups/presentation/create_group_sheet.dart';
 import 'package:zen/src/features/groups/presentation/group_conversation_screen.dart';
@@ -285,7 +285,7 @@ class AppShellScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // With the social network on, the app gets its vertical tabs (§25);
+    // With the social network on, the app gets its vertical tabs;
     // the plain messenger layout stays for builds without it.
     if (ref.watch(ledgerNodeEnabledProvider)) {
       return const _TabbedShell();
@@ -298,7 +298,7 @@ class AppShellScreen extends ConsumerWidget {
             _StatusBar(),
             // A newer release on GitHub, or GitHub blocked.
             GithubUpdateBanner(),
-            // The chat list shows the last messages (S-9).
+            // The chat list shows the last messages.
             Expanded(
               child: SecureScreen(child: _ChatsPage(key: Key('chats-page'))),
             ),

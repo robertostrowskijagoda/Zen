@@ -15,9 +15,9 @@ import (
 
 const (
 	// Longest base64 text a fragment set may add up to: the encoding of a
-	// signal of the largest size. Anything longer is refused as it grows,
-	// not after it has been buffered whole.
-	maxSignalEncodedBytes = ((maxSignalPayloadBytes + 2) / 3) * 4
+	// signal of the largest size, sealed (maxSignalWireBytes). Anything
+	// longer is refused as it grows, not after it has been buffered whole.
+	maxSignalEncodedBytes = ((maxSignalWireBytes + 2) / 3) * 4
 	// Most fragments a signal can have, derived from the byte cap.
 	maxSignalChunks = (maxSignalEncodedBytes + signalChunkSize - 1) / signalChunkSize
 	// Signals half-received at once, from everyone together and from one
@@ -222,6 +222,19 @@ func decodeSignalWire(source string, encodedPayload string) (string, bool) {
 	}
 
 	wireStr := string(decodedPayload)
+	if isPQWire(wireStr) {
+		// Sealed (pq_session.go): opened, then decompressed, by the node.
+		if len(wireStr) > maxSignalWireBytes {
+			return "", false
+		}
+		return wireStr, true
+	}
+	return inflateSignalText(source, wireStr)
+}
+
+// inflateSignalText is a signal text as the app reads it: decompressed when
+// it is zstd, within maxSignalPayloadBytes.
+func inflateSignalText(source string, wireStr string) (string, bool) {
 	if len(wireStr) > maxSignalPayloadBytes {
 		fmt.Printf("[ZEN-GO] rejecting oversized signal (%d bytes) from %s\n", len(wireStr), source)
 		return "", false

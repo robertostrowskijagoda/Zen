@@ -8,7 +8,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart' show contentHash;
 
-/// What this person hid on this phone after reporting it (§21.4).
+/// What this person hid on this phone after reporting it.
 ///
 /// A report hides the reported post, comment, message or dating profile
 /// from the reporter at once, whatever the pyramid decides. The keys are

@@ -12,7 +12,7 @@ import 'package:zen/src/features/meet/presentation/intent_widgets.dart';
 import 'package:zen/src/features/meet/presentation/plan_screen.dart';
 import 'package:zen/src/features/meet/presentation/table_screen.dart';
 
-/// "Spotkania" (§15–17): what friends are up for now, the alarm, people
+/// "Spotkania": what friends are up for now, the alarm, people
 /// nearby, events and the rest of meeting people through people.
 class MeetHubScreen extends ConsumerWidget {
   const MeetHubScreen({super.key});

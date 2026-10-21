@@ -50,7 +50,7 @@ bool isMediaVaultPath(String? path) =>
     path != null && path.toLowerCase().endsWith(kMediaVaultExtension);
 
 /// Encrypted files for media: attachments, voice messages and friends'
-/// photos (§14.1 point 5).
+/// photos.
 ///
 /// A file is AES-256-GCM in [kMediaVaultSegmentBytes] segments under a key
 /// derived from the master data key, so a part of it (one chunk of an

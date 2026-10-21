@@ -9,6 +9,8 @@ import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/feed/feed_maintenance.dart';
 import 'package:zen/src/features/groups/group_board_providers.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/meet/circle/food_providers.dart';
+import 'package:zen/src/features/meet/graph/graph_providers.dart';
 import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/plan/plan_providers.dart';
@@ -24,7 +26,7 @@ import 'package:zen/src/features/update/update_service.dart';
 ///
 /// The Android background service does not run it: while the app is locked
 /// or gone the service only receives, without the master key, into a sealed
-/// inbox the app drains after unlock (`LockedReceiver`, §14.1).
+/// inbox the app drains after unlock (`LockedReceiver`).
 final Provider<ZenCore> zenCoreProvider = Provider<ZenCore>((Ref ref) {
   final ZenCore core = ZenCore(
     modules: zenAppModules(ref),
@@ -49,17 +51,17 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
       // Starts the ledger (posts, profiles) once the transport is up.
       ref.read(ledgerNodeProvider);
       ref.read(recoveryServiceProvider);
-      // A computer offers itself as a mesh bridge (§5.1).
+      // A computer offers itself as a mesh bridge.
       ref.read(bridgeHostProvider);
-      // New versions of the app from friends (§14.2).
+      // New versions of the app from friends.
       ref.read(updateServiceProvider);
     },
   ),
-  // Friends nearby without internet: same Wi-Fi, Wi-Fi Direct (§5.1).
+  // Friends nearby without internet: same Wi-Fi, Wi-Fi Direct.
   LocalLinksModule(ref),
   ServicesModule(
     id: 'feed',
-    // Notifications about reactions and the storage limits (§7, §11).
+    // Notifications about reactions and the storage limits.
     start: () {
       ref.read(feedMaintenanceProvider)?.start();
     },
@@ -70,16 +72,19 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
   ServicesModule(
     id: 'meet',
     start: () {
-      // Friends' statuses and alarms; this phone shown nearby (§15–16).
+      // Friends' statuses and alarms; this phone shown nearby.
       ref.read(meetServiceProvider);
       ref.read(nearbyServiceProvider);
       ref.read(eventServiceProvider);
       ref.read(askServiceProvider);
       ref.read(tableServiceProvider);
       ref.read(circleServiceProvider);
-      // Introductions and letters through friends (§24.1).
+      ref.read(foodServiceProvider);
+      // Introductions and letters through friends.
       ref.read(introServiceProvider);
-      // Group boards (§13).
+      // "Otwarci na poznanie" on the graph (friends pass it on).
+      ref.read(openToMeetServiceProvider);
+      // Group boards.
       ref.read(groupBoardServiceProvider);
     },
     // The Android background service may have taken frames meanwhile.
@@ -89,11 +94,14 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
       unawaited(ref.read(askServiceProvider).load());
       unawaited(ref.read(tableServiceProvider).load());
       unawaited(ref.read(circleServiceProvider).load());
+      unawaited(ref.read(foodServiceProvider).load());
     },
+    // Gates and payments that wait, now and then.
+    minute: (int minute) => introMinute(ref, minute),
   ),
   ServicesModule(
     id: 'neighbors',
-    // Flats and neighbours (§18): core, always on (§2.5.1).
+    // Flats and neighbours: core, always on.
     start: () {
       ref.read(neighborsServiceProvider);
     },
@@ -104,7 +112,7 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
   ServicesModule(
     id: 'dating',
     feature: ZenFeature.dating,
-    // Dating packages pass through every phone (§19).
+    // Dating packages pass through every phone.
     start: () {
       ref.read(datingServiceProvider);
     },
@@ -119,7 +127,7 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
   ServicesModule(
     id: 'pyramid',
     feature: ZenFeature.pyramid,
-    // The pyramid, its money and crisis mode (§20–24, §28).
+    // The pyramid, its money and crisis mode.
     start: () {
       ref.read(pyramidServiceProvider);
     },
@@ -132,7 +140,7 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
   ),
   ServicesModule(
     id: 'plan',
-    // Plan na weekend (§17.6).
+    // Plan na weekend.
     start: () {
       ref.read(planServiceProvider);
     },

@@ -49,7 +49,7 @@ import 'package:zen/src/features/social/presentation/friend_nickname_prompt.dart
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
-/// A person's profile (§9): cover and photo, name, status and bio, then
+/// A person's profile: cover and photo, name, status and bio, then
 /// their posts, their photos and videos ("Galeria") and gratitude cards.
 /// Your own profile is edited here ("Edytuj profil"), not in settings; the
 /// status is set from the top bar.
@@ -232,7 +232,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ? latestProfile(node, account)
         : null;
     // With the sealed parts this device may read (fields shown only to
-    // some friends, §9).
+    // some friends).
     final ProfileView? view = !_isOwn && node != null && account != null
         ? readProfile(node, account)
         : null;
@@ -247,7 +247,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ? me.customStatus
         : pick(peer?.status, view?.status);
     final String bio = _isOwn ? me.bio : pick(peer?.bio, view?.bio);
-    // Not (yet) a friend: "Dodaj" and "Obserwuj" (§9, §12).
+    // Not (yet) a friend: "Dodaj" and "Obserwuj".
     final bool canFollow =
         !_isOwn &&
         friend?.status != FriendRelationshipStatus.accepted &&
@@ -288,7 +288,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final String? coverPath = me.coverPath;
     final MediaRef? theirCover = view?.cover ?? card?.cover;
     if (_isOwn && coverPath != null && File(coverPath).existsSync()) {
-      // Kept encrypted in the vault (§14.1).
+      // Kept encrypted in the vault.
       cover = Image(
         image: mediaFileImage(coverPath),
         key: const Key('profile-cover'),
@@ -324,7 +324,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           for (final ({MediaRef ref, LogEntry? entry}) m in media)
             if (!isPhotoMime(m.ref.mime)) m,
         ];
-    // Friends and followers (§9, §12): your own from this device, someone
+    // Friends and followers: your own from this device, someone
     // else's as far as they show them.
     final int? friendCount = _isOwn
         ? social.acceptedFriends.length
@@ -671,7 +671,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                   return;
                                 }
                                 // What the level lets them see goes out
-                                // again (§8: friend list, statuses).
+                                // again (friend list, statuses).
                                 unawaited(
                                   setFriendLevel(
                                     node: node,
@@ -818,7 +818,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       key: const Key('profile-posts'),
                       padding: readableInsets(context, bottom: 32),
                       children: <Widget>[
-                        // §24: the person's price list in the pyramid.
+                        // The person's price list in the pyramid.
                         PyramidPriceList(address: other, own: _isOwn),
                         if (posts.isEmpty)
                           ZenEmpty(
@@ -1324,7 +1324,7 @@ class _ProfileStats extends StatelessWidget {
   }
 }
 
-/// "Informacje" (§9): what the profile says beyond the posts. On your own
+/// "Informacje": what the profile says beyond the posts. On your own
 /// profile each field also says who sees it.
 class _ProfileInfo extends StatelessWidget {
   const _ProfileInfo({
@@ -1545,7 +1545,7 @@ class _ProfilePost extends StatelessWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
 
-  /// Someone else's post: "Zgłoś" (§21.4).
+  /// Someone else's post: "Zgłoś".
   final VoidCallback? onReport;
 
   @override

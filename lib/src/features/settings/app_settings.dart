@@ -187,34 +187,45 @@ enum AppAccentTheme {
 
 /// The look of the whole app (Ustawienia → Wygląd). [classic] is the
 /// accent-driven look ([AppAccentTheme] picks its colour); the others are
-/// fixed palettes that share one calmer component style (soft page
-/// transitions, no ink ripples). Each has a light and a dark variant; the
-/// mode is chosen separately ([AppThemeMode]).
+/// fixed palettes that share one calmer component style (no ink ripples,
+/// their own page transitions). [neon] (black and lit lines, glow and
+/// motion) and [winamp] (a retro desktop player skin, dark only) add their
+/// own component character. Each has a light and a dark variant; the mode
+/// is chosen separately ([AppThemeMode]).
 enum AppPalette {
   classic,
-  calm,
   neon,
+  winamp,
+  calm,
+  graphite,
   forest,
   dusk;
 
   String get label => switch (this) {
     AppPalette.classic => t('Klasyczny'),
+    AppPalette.neon => t('Neon'),
+    AppPalette.winamp => t('Retro'),
     AppPalette.calm => t('Cisza'),
-    AppPalette.neon => t('Neon nocą'),
+    AppPalette.graphite => t('Grafit'),
     AppPalette.forest => t('Las'),
     AppPalette.dusk => t('Zmierzch'),
   };
 
   String get tagline => switch (this) {
     AppPalette.classic => t('akcent do wyboru'),
+    AppPalette.neon => t('czerń / cyjan / magenta, świecące linie'),
+    AppPalette.winamp => t('stary odtwarzacz: LCD / zieleń / chrom'),
     AppPalette.calm => t('kamień / piasek / łupek'),
-    AppPalette.neon => t('grafit / cyjan / magenta'),
+    AppPalette.graphite => t('grafit / cyjan / magenta'),
     AppPalette.forest => t('mech / papier'),
     AppPalette.dusk => t('indygo / fiolet'),
   };
+
+  /// No light variant: the palette stays dark in the light mode too.
+  bool get darkOnly => this == AppPalette.winamp;
 }
 
-/// Who may invite this person to a new group (§8). Members of a group the
+/// Who may invite this person to a new group. Members of a group the
 /// person is in may always add people to it.
 enum GroupInviteFrom {
   /// Anyone, people who are not friends too (the behaviour before 1.11).
@@ -313,7 +324,7 @@ final class AppSettings {
       autoDownloadMedia && (!mediaOnlyOnWifi || onUnmetered);
 
   /// Notifications say only "Nowa wiadomość", so message text never lands
-  /// in the system's notification history (§14.1). On by default.
+  /// in the system's notification history. On by default.
   final bool hideNotificationContent;
 
   /// "Dźwięki w aplikacji": short sounds when a message is sent and a call
@@ -323,37 +334,37 @@ final class AppSettings {
   final bool inAppSounds;
 
   /// Screenshots and screen recording are blocked on conversations and
-  /// account screens, and their content is hidden in the recent-apps view
-  /// (§14.1). On by default.
+  /// account screens, and their content is hidden in the recent-apps view.
+  /// On by default.
   final bool secureScreens;
 
   /// Android: the launcher shows a neutral "Notatki" icon and name instead
-  /// of Zen's (§14.2, camouflage). Off by default.
+  /// of Zen's (camouflage). Off by default.
   final bool disguiseIcon;
 
-  /// The user chose to run without an app password (§14.1: it is required
+  /// The user chose to run without an app password (it is required
   /// by default). Off by default.
   final bool allowNoAppPassword;
 
-  /// A computer helps others connect (a mesh bridge, §5.1). On by default
+  /// A computer helps others connect (a mesh bridge). On by default
   /// and not advertised; it can be switched off at the bottom of the
   /// settings (Sieć i usługa).
   final bool bridgeEnabled;
 
-  /// The first-start step "Uprawnienia i Bluetooth" (§25.2) was gone
+  /// The first-start step "Uprawnienia i Bluetooth" was gone
   /// through: it is not shown again (it stays under Ustawienia).
   final bool permissionsSetupDone;
 
-  /// The first-start card "Zabezpiecz konto" was answered (§6.1, §6.3).
+  /// The first-start card "Zabezpiecz konto" was answered.
   final bool accountSecureOffered;
 
   /// The paper copy of the account key was written down and checked.
   final bool paperBackupDone;
 
-  /// Who may invite this person to a new group (§8).
+  /// Who may invite this person to a new group.
   final GroupInviteFrom groupInviteFrom;
 
-  /// "Znajomi w tej samej sieci Wi-Fi" (§5.1 item 6): friends' and the
+  /// "Znajomi w tej samej sieci Wi-Fi": friends' and the
   /// account's own devices on one network connect directly, also without
   /// internet. `null` until the person chooses.
   final bool? lanDiscovery;

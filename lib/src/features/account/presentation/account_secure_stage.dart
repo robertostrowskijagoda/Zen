@@ -10,7 +10,7 @@ import 'package:zen/src/features/account/presentation/account_recovery_screen.da
 import 'package:zen/src/features/account/presentation/key_backup_screen.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-/// "Zabezpiecz konto" (§6.1, §6.3): the first start, right after the
+/// "Zabezpiecz konto": the first start, right after the
 /// permissions step. Offers the recovery circle and the backup of the
 /// key (file or code), or "later" — remembered, with a reminder in Settings
 /// until the account is secured.

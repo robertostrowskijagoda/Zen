@@ -32,7 +32,7 @@ List buildRuntimeSystemNotificationProviderOverrides({
               soundEffects: ref.read(zenSoundEffectsProvider),
             ),
         // Read on every post, so flipping the setting applies at once.
-        // Also while this device shares its screen in a call (§13.1).
+        // Also while this device shares its screen in a call.
         hideContent: () =>
             ref.read(appSettingsControllerProvider).hideNotificationContent ||
             screenShareHidesNotifications.value,
@@ -50,7 +50,7 @@ enum RuntimeSystemNotificationCategory {
   call,
   transfer,
 
-  /// A friend's alarm (§16.3): loudest, full screen, cannot be missed.
+  /// A friend's alarm: loudest, full screen, cannot be missed.
   alarm,
 }
 
@@ -222,7 +222,7 @@ abstract interface class RuntimeSystemNotificationService {
 /// what it is about) stays, as it always did for chat messages — except
 /// where the title itself tells too much ("X idzie na randkę", "Odpowiedź:
 /// {pytanie}", "Zaproszenie: {wydarzenie}"): dating, questions, events,
-/// introductions and the pyramid get a generic title too (S-12). Calls and
+/// introductions and the pyramid get a generic title too. Calls and
 /// alarms are left alone: the ringing UI must say who calls, and an alarm
 /// has to be readable at a glance.
 final class PrivacyRedactingNotificationService

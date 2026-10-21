@@ -104,7 +104,7 @@ void main() {
     expect(result.stores.appSettingsStore, same(store));
   });
 
-  group('zenStartupGatesRequired (S-20)', () {
+  group('zenStartupGatesRequired', () {
     const Map<String, String> underTest = <String, String>{
       'FLUTTER_TEST': 'true',
     };

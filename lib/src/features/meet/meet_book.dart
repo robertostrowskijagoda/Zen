@@ -9,12 +9,12 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/nearby_crypto.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-/// "Chcę pogadać" and friends (§16.2): what someone is up for right now.
+/// "Chcę pogadać" and friends: what someone is up for right now.
 ///
 /// Sent by name, so the order here is only the order on screen; an older
 /// app that does not know a newer status simply shows none.
 enum IntentKind {
-  /// Not the alarm (§16.3, danger, location, sound): "please, today" — a
+  /// Not the alarm (danger, location, sound): "please, today" — a
   /// louder notification than [help].
   urgent('🆘'),
   help('🤝'),
@@ -26,7 +26,7 @@ enum IntentKind {
   play('🎲'),
   dnd('🔕'),
 
-  /// Opt-in, only while dating is on (§16.2, §19); never shown to the
+  /// Opt-in, only while dating is on; never shown to the
   /// people the dating profile is hidden from.
   dating('💘'),
 
@@ -178,12 +178,12 @@ final class IntentStatus {
   }
 }
 
-/// Who sees this person's friend list (§16.1, §24.1).
+/// Who sees this person's friend list.
 enum FriendListAudience {
   /// Every friend, weak acquaintances too.
   all,
 
-  /// Friends at level "Znajomy" and up (the default, §8): a weak
+  /// Friends at level "Znajomy" and up (the default): a weak
   /// acquaintance sees it only after asking and being let in.
   friends,
 
@@ -215,7 +215,7 @@ enum AlarmResponse {
       .firstOrNull;
 }
 
-/// A piece of sound recorded during an alarm (§16.3): the audio itself
+/// A piece of sound recorded during an alarm: the audio itself
 /// lives in the store under [MeetStore.audioKey].
 @immutable
 final class AlarmClip {
@@ -242,7 +242,7 @@ final class AlarmClip {
   }
 }
 
-/// What a friend's phone told about this person's alarm (§16.3): when it
+/// What a friend's phone told about this person's alarm: when it
 /// got it and when the friend opened it. Times are this phone's.
 @immutable
 final class AlarmDelivery {
@@ -269,11 +269,11 @@ final class AlarmDelivery {
   }
 }
 
-/// How far this person's alarm got with one friend (§16.3): sent and not
+/// How far this person's alarm got with one friend: sent and not
 /// confirmed yet, on their phone, opened, answered.
 enum AlarmReach { sent, delivered, seen, answered }
 
-/// One alarm (§16.3), sent or received.
+/// One alarm, sent or received.
 @immutable
 final class AlarmRecord {
   const AlarmRecord({
@@ -344,7 +344,7 @@ final class AlarmRecord {
   bool get hasLocation => lat != null && lon != null;
 
   /// A friend's alarm heard only over Bluetooth that ended by itself (no
-  /// network copy came, §16.3): nobody knows how it ended.
+  /// network copy came): nobody knows how it ended.
   bool get expiredNearby => !isOwn && nearby && !isActive;
 
   /// How far this alarm got with [friend] (a normalised address).
@@ -535,19 +535,19 @@ final class MeetBook {
   /// Friends who have this person's current nearby keys.
   final Set<String> nearbyGivenTo = <String>{};
 
-  /// This person's private nearby key (§15, S6): never sent; friends get
+  /// This person's private nearby key: never sent; friends get
   /// only what comes from it, one set per friend
   /// ([NearbyOwnKeys.materialFor]).
   String? nearbyPrivate;
 
-  /// Addresses blocked in "W pobliżu" (§15), normalised.
+  /// Addresses blocked in "W pobliżu", normalised.
   final Set<String> nearbyBlocked = <String>{};
 
-  /// Whether this phone shows itself to people nearby (§15). Off until the
+  /// Whether this phone shows itself to people nearby. Off until the
   /// person turns it on (privacy by default).
   bool nearbyVisible = false;
 
-  /// Who may see this person's friend list (§9, §16.1, §24.1).
+  /// Who may see this person's friend list.
   FriendListAudience friendListAudience = FriendListAudience.friends;
 
   /// Friends allowed to see the list while it is shown only on request
@@ -562,7 +562,7 @@ final class MeetBook {
   bool get shareFriendList => friendListAudience != FriendListAudience.nobody;
 
   /// Whether [friend] may see the list now ([weak]: they are only a weak
-  /// acquaintance, §8).
+  /// acquaintance).
   bool showsFriendListTo(String friend, {bool weak = false}) =>
       switch (friendListAudience) {
         FriendListAudience.all => true,
@@ -575,24 +575,24 @@ final class MeetBook {
       };
 
   /// Record sound during this person's alarm and send it to the friends
-  /// who get the alarm (§16.3, off by default).
+  /// who get the alarm (off by default).
   bool alarmRecordAudio = false;
 
-  /// Also tell phones nearby over Bluetooth (§16.3, off by default):
+  /// Also tell phones nearby over Bluetooth (off by default):
   /// friends recognise this phone, others see only "someone nearby needs
   /// help".
   bool alarmNearby = false;
 
-  /// Raise the alarm by pressing the power button 5 times (§16.3, Android,
+  /// Raise the alarm by pressing the power button 5 times (Android,
   /// off by default).
   bool alarmPowerButton = false;
 
-  /// Phone numbers for the backup SMS of the alarm (§16.3): the system SMS
+  /// Phone numbers for the backup SMS of the alarm: the system SMS
   /// app opens with the alarm text, the person presses send. Never leaves
   /// this phone.
   List<String> alarmSmsNumbers = <String>[];
 
-  /// Seed (base64url) of this person's alarm key (§16.3): an Ed25519 key
+  /// Seed (base64url) of this person's alarm key: an Ed25519 key
   /// that signs alarm frames only, certified by the device key; the alarm
   /// kit hands it to the locked Android service instead of any other key.
   String? alarmKeySeed;
@@ -609,7 +609,7 @@ final class MeetBook {
   static const int maxAlarmKeysPerFriend = 4;
 
   /// Look around for friends now and then without the "W pobliżu" screen
-  /// open (§15, off by default: scanning is for that screen): a short
+  /// open (off by default: scanning is for that screen): a short
   /// low-power scan every few minutes that only marks friends met in person.
   bool nearbyBackgroundScan = false;
 
@@ -821,7 +821,7 @@ final class MeetBook {
         if (e.key is String && keys is List) {
           book.friendAlarmKeys[e.key as String] = <String>[
             for (final Object? k in keys.take(maxAlarmKeysPerFriend))
-              if (k is String && k.length <= 64) k,
+              if (k is String && k.length <= 100) k,
           ];
         }
       }

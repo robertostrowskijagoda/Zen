@@ -11,7 +11,7 @@ import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/profile_gallery.dart';
 
-/// Adds photos and videos to the profile's gallery (§9). Not a post: it
+/// Adds photos and videos to the profile's gallery. Not a post: it
 /// does not show on the wall. Friends only unless chosen otherwise.
 class GalleryAddScreen extends StatefulWidget {
   const GalleryAddScreen({

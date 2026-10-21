@@ -25,7 +25,8 @@ void main(List<String> args) {
     () async {
       WidgetsFlutterBinding.ensureInitialized();
       _installGlobalErrorHandlers();
-      // The Go bridge's licenses next to the Dart packages' ones.
+      // NOTICE and the Go, native and font licenses next to the Dart
+      // packages' ones.
       registerGoLicenses();
       // Linux: video_player has no backend there; Zen's own on GStreamer.
       LinuxVideoPlayer.registerIfNeeded();

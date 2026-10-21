@@ -4,7 +4,7 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 
 /// The phone makers whose battery managers close apps in the background on
-/// their own, whatever the system's battery optimisation says (§25.2).
+/// their own, whatever the system's battery optimisation says.
 enum PhoneVendor {
   xiaomi,
   samsung,
@@ -88,7 +88,7 @@ enum PhoneVendor {
 }
 
 /// "Telefony mają też własne «zabójce baterii»": instructions for the
-/// maker of this phone, the others folded away (§25.2).
+/// maker of this phone, the others folded away.
 class VendorBatteryHelp extends StatelessWidget {
   const VendorBatteryHelp({
     required this.manufacturer,

@@ -19,12 +19,12 @@ import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-/// "Urządzenia" (§6): this account's devices, linking a new one and cutting
+/// "Urządzenia": this account's devices, linking a new one and cutting
 /// off a lost one.
 class AccountDevicesScreen extends ConsumerStatefulWidget {
   const AccountDevicesScreen({super.key});
 
-  /// Opens after the person confirms who they are (§14.1 point 4).
+  /// Opens after the person confirms who they are.
   static Future<void> open(BuildContext context) async {
     if (!await confirmSensitiveAccess(
           context,
@@ -354,7 +354,7 @@ class _Waiting extends StatelessWidget {
   }
 }
 
-/// Asks for the account password (§6.1).
+/// Asks for the account password.
 Future<String?> askAccountPassword(BuildContext context, String title) async {
   final TextEditingController controller = TextEditingController();
   final String? result = await showDialog<String>(
@@ -676,7 +676,7 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
     _receiver = AccountLinkReceiver(transport: ref.read(meshTransportProvider))
       ..start();
     // Every greeting device shows its own digits: a stranger who greets
-    // first cannot block the real one (S-14).
+    // first cannot block the real one.
     _offers = _receiver.changes.listen((_) {
       if (mounted) {
         setState(() {});

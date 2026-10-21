@@ -1,7 +1,7 @@
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 
-/// "Usuń z mojego urządzenia" for a reported post (§21.4): the photos,
+/// "Usuń z mojego urządzenia" for a reported post: the photos,
 /// films and recordings of it go from this phone and are never fetched or
 /// passed on again. The entries of the ledger are signed and append-only
 /// (nobody's log can be rewritten on another phone), so the text of the

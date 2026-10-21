@@ -8,7 +8,7 @@ import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-/// Linking a new device to the account (§6, several devices).
+/// Linking a new device to the account (several devices).
 ///
 /// The new device shows its invitation code (the same one friends use).
 /// The device that already has the account sends the account key to that

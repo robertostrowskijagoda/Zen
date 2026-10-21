@@ -28,14 +28,14 @@ abstract final class MeetTypes {
   static const String alarm = 'alarm';
   static const String alarmResponse = 'alarm_resp';
 
-  /// Sound recorded during an alarm (§16.3).
+  /// Sound recorded during an alarm.
   static const String alarmAudio = 'alarm_audio';
 
-  /// A friend's phone confirms an alarm (§16.3): `k` is `got` (the phone
+  /// A friend's phone confirms an alarm: `k` is `got` (the phone
   /// has it) or `seen` (the friend opened it).
   static const String alarmAck = 'alarm_ack';
 
-  /// A friend's alarm key, certified by their device key (`c`, §16.3).
+  /// A friend's alarm key, certified by their device key (`c`).
   static const String alarmKey = 'alarm_key';
 
   /// This person's own alarm as the locked Android service raised or
@@ -44,6 +44,12 @@ abstract final class MeetTypes {
   /// unlock. Taken only from this device's own address.
   static const String ownAlarm = 'alarm_own';
   static const String ownAlarmAudio = 'alarm_own_audio';
+
+  /// A friend's alarm wave the locked service heard over Bluetooth (and
+  /// checked with the friend's key): `f` the friend, `id`, `at` when heard.
+  /// Left in the sealed inbox like [ownAlarm]; taken only from this
+  /// device's own address.
+  static const String ownNearbyAlarm = 'alarm_own_near';
   static const String nearbyKey = 'nearby_key';
   static const String friendList = 'friend_list';
 
@@ -60,6 +66,7 @@ abstract final class MeetTypes {
     alarmKey,
     ownAlarm,
     ownAlarmAudio,
+    ownNearbyAlarm,
     nearbyKey,
     friendList,
     request,
@@ -85,7 +92,7 @@ const int kMaxFriendListEntries = 2000;
 /// What an address on a friend's list may look like (a mesh address).
 final RegExp _listAddress = RegExp(r'^[0-9A-Za-z:._-]{1,64}$');
 
-/// A friend's alarm heard only over Bluetooth (§16.3) ends by itself after
+/// A friend's alarm heard only over Bluetooth ends by itself after
 /// this long, unless the network copy came meanwhile.
 const Duration kNearbyAlarmLife = Duration(hours: 1);
 
@@ -125,7 +132,7 @@ enum AlarmPinKind { normal, panic, wrong }
 /// same for both PINs, so whoever watches cannot tell.
 enum AlarmEndResult { ended, wrongPin, noAlarm }
 
-/// Statuses ("Chcę pogadać", §16.2), alarms (§16.3) and nearby keys (§15)
+/// Statuses ("Chcę pogadać"), alarms and nearby keys
 /// between friends. The same code runs in the app and in the Android
 /// background service; the state lives in [MeetStore].
 final class MeetService extends ChangeNotifier {
@@ -180,7 +187,7 @@ final class MeetService extends ChangeNotifier {
   /// when a friend asks (set by the app and the background service).
   Map<String, String> Function()? friendNames;
 
-  /// This person's private level for a friend (§8; set by the app and the
+  /// This person's private level for a friend (set by the app and the
   /// background service). Without it (or `null`: the ledger is not up)
   /// every friend counts as "Znajomy".
   FriendLevel? Function(String address)? levelOf;
@@ -199,11 +206,11 @@ final class MeetService extends ChangeNotifier {
   /// Its certificate, once made ([_alarmCertificate]).
   AlarmKeyCertificate? _alarmCert;
 
-  /// Whether [friend] is only a weak acquaintance ("Słaby znajomy", §8):
+  /// Whether [friend] is only a weak acquaintance ("Słaby znajomy"):
   /// no friend list and no statuses but "Nie przeszkadzać" by default.
   bool isWeak(String friend) => levelOf?.call(friend) == FriendLevel.weak;
 
-  /// Whether [friend] may see the friend list now (§8, §24.1).
+  /// Whether [friend] may see the friend list now.
   bool friendListVisibleTo(String friend) => _book.showsFriendListTo(
     friend,
     weak:
@@ -211,7 +218,7 @@ final class MeetService extends ChangeNotifier {
         isWeak(friend),
   );
 
-  /// Whether [friend] may see [status] (§16.2): "przyjaciele" only when
+  /// Whether [friend] may see [status]: "przyjaciele" only when
   /// [IntentStatus.onlyClose]; "Nie przeszkadzać" every friend; the rest
   /// friends at level "Znajomy" and up.
   bool statusVisibleTo(IntentStatus status, String friend) {
@@ -331,12 +338,16 @@ final class MeetService extends ChangeNotifier {
       return false;
     }
     final String from = _key(frame.from);
-    if (type == MeetTypes.ownAlarm || type == MeetTypes.ownAlarmAudio) {
+    if (type == MeetTypes.ownAlarm ||
+        type == MeetTypes.ownAlarmAudio ||
+        type == MeetTypes.ownNearbyAlarm) {
       // Only what this device's own service left in the sealed inbox.
       if (host.isSelf(from)) {
         try {
           if (type == MeetTypes.ownAlarm) {
             await _onOwnAlarm(frame.payload);
+          } else if (type == MeetTypes.ownNearbyAlarm) {
+            await _onKeptNearbyAlarm(frame.payload);
           } else {
             await _onOwnAlarmAudio(frame.payload);
           }
@@ -369,7 +380,7 @@ final class MeetService extends ChangeNotifier {
         case MeetTypes.request:
           await _onRequest(from, frame.payload);
         case MeetTypes.nearbyKey:
-          // `z`: the friend's keys for this phone alone (S6).
+          // `z`: the friend's keys for this phone alone.
           final Object? z = frame.payload['z'];
           if (z is String && FriendNearbyKey.parse(z) != null) {
             await _update<void>(
@@ -441,20 +452,20 @@ final class MeetService extends ChangeNotifier {
     final bool showsStatus =
         mine != null && mine.activeAt(_now()) && statusVisibleTo(mine, friend);
     return <String, dynamic>{
-      // A friend who may not see the list holds the empty one (§24.1).
+      // A friend who may not see the list holds the empty one.
       if (_book.friendListSent.isNotEmpty)
         'mf': _short(
           friendListVisibleTo(friend)
               ? _book.friendListSent
               : emptyFriendListDigest,
         ),
-      // What this friend holds of this phone's per-friend keys (S6).
+      // What this friend holds of this phone's per-friend keys.
       if (nearbyKeysFor(friend) case final String keys)
         'mz': _secretDigest(keys),
       'ms': showsStatus ? mine.setAt : 0,
-      // The alarm key friends should hold (§16.3).
+      // The alarm key friends should hold.
       if (_alarmKeyPair case final LedgerKeyPair key)
-        'ma': _secretDigest(key.id),
+        'ma': _secretDigest(key.hybridId),
     };
   }
 
@@ -646,7 +657,7 @@ final class MeetService extends ChangeNotifier {
     if (!await _putFriendAlarm(merged)) {
       return; // too many of theirs already going on
     }
-    // The owner learns at once that this phone has it (§16.3): the first
+    // The owner learns at once that this phone has it: the first
     // copy, and any copy they ask about (they have no confirmation yet).
     if (_confirmed.add(merged.id) || payload['cf'] == true) {
       await _confirmAlarm(from, merged.id);
@@ -728,7 +739,7 @@ final class MeetService extends ChangeNotifier {
     }
   }
 
-  /// A friend's phone confirmed this person's alarm (§16.3). Only for this
+  /// A friend's phone confirmed this person's alarm. Only for this
   /// person's own alarm, only from a friend it went to; read from the store
   /// (the background service may hold an older copy).
   Future<void> _onAlarmAck(String from, Map<String, dynamic> payload) async {
@@ -859,7 +870,7 @@ final class MeetService extends ChangeNotifier {
   /// Sets (or with `null` clears) what this person is up for, and tells
   /// friends ("przyjaciele" only when [IntentStatus.onlyClose]). Friends in
   /// [except] are told there is no status (e.g. people the dating profile
-  /// is hidden from never see „Randkuję”, §16.2).
+  /// is hidden from never see „Randkuję”).
   Future<void> setMyIntent(
     IntentStatus? status, {
     Set<String> except = const <String>{},
@@ -1049,11 +1060,11 @@ final class MeetService extends ChangeNotifier {
   Future<void> setAlarmNearby(bool on) =>
       _update<void>((MeetBook b) => b.alarmNearby = on);
 
-  /// The power-button shortcut (§16.3, Android).
+  /// The power-button shortcut (Android).
   Future<void> setAlarmPowerButton(bool on) =>
       _update<void>((MeetBook b) => b.alarmPowerButton = on);
 
-  /// The numbers of the alarm's backup SMS (§16.3); invalid ones and
+  /// The numbers of the alarm's backup SMS; invalid ones and
   /// repeats are dropped.
   Future<void> setAlarmSmsNumbers(Iterable<String> numbers) {
     final List<String> clean = <String>[];
@@ -1075,7 +1086,7 @@ final class MeetService extends ChangeNotifier {
   /// go). Friends who already have it see nothing new.
   ///
   /// With [to]: only to those of them (friends it already went to) — e.g.
-  /// the ones whose phone did not confirm it (§16.3).
+  /// the ones whose phone did not confirm it.
   Future<void> resendOwnAlarm({Iterable<String>? to}) async {
     final AlarmRecord? own = _book.ownActiveAlarm;
     if (own == null) {
@@ -1102,7 +1113,7 @@ final class MeetService extends ChangeNotifier {
     return '${t.toRadixString(36)}${_random.nextInt(1 << 30).toRadixString(36)}';
   }
 
-  // ---- alarm: the alarm key and the alarm kit (§16.3) ----
+  // ---- alarm: the alarm key and the alarm kit ----
 
   /// This person's alarm key, made (and saved) on first use. It signs alarm
   /// frames and nothing else; the alarm kit gives it to the locked Android
@@ -1154,7 +1165,7 @@ final class MeetService extends ChangeNotifier {
     }
     final LedgerKeyPair key = await alarmKey();
     final AlarmKeyCertificate? had = _alarmCert;
-    if (had != null && had.key == key.id && had.address == self) {
+    if (had != null && had.key == key.hybridId && had.address == self) {
       return had;
     }
     final LedgerIdentity? me = await LedgerIdentity.read(store.disk);
@@ -1165,7 +1176,7 @@ final class MeetService extends ChangeNotifier {
       deviceKey: me.deviceKey,
       certificate: me.certificate,
       address: self,
-      alarmKey: key.id,
+      alarmKey: key.hybridId,
       issued: _now(),
     );
   }
@@ -1231,7 +1242,7 @@ final class MeetService extends ChangeNotifier {
     return verifyAlarmFrame(sk, payload);
   }
 
-  /// What the alarm kit holds of this person's setup now (§16.3): the
+  /// What the alarm kit holds of this person's setup now: the
   /// alarm key, the id the kit's alarm will carry (a new one once the last
   /// one was used), who gets it (with this phone's Bluetooth keys for
   /// them), the settings, and the alarm already going on. Without devices
@@ -1308,7 +1319,7 @@ final class MeetService extends ChangeNotifier {
         'kit': true,
       });
 
-  /// This person's alarm as the locked service had it (§16.3): taken over
+  /// This person's alarm as the locked service had it: taken over
   /// here — the screen, answers and delivery notes that come after it in
   /// the inbox, the position and sound from now on (`AlarmWatcher`) — and
   /// sent once more through the mailboxes to whoever has not confirmed it.
@@ -1405,7 +1416,7 @@ final class MeetService extends ChangeNotifier {
     );
   }
 
-  // ---- alarm: sound (§16.3) ----
+  // ---- alarm: sound ----
 
   /// Adds a piece of sound recorded during this person's running alarm
   /// and sends it to the friends who got the alarm. Returns the piece, or
@@ -1511,14 +1522,14 @@ final class MeetService extends ChangeNotifier {
     );
   }
 
-  // ---- alarm: Bluetooth nearby (§16.3) ----
+  // ---- alarm: Bluetooth nearby ----
 
   /// The wave that tells phones nearby about [alarm]: its id, the time and
   /// whether it ended. Unsigned, it makes phones around show only an
   /// unchecked note.
   ///
   /// With [to] (a friend who has this phone's per-friend keys) the wave is
-  /// signed with the key of that pair ([AlarmWave.buildPair], S6): only
+  /// signed with the key of that pair ([AlarmWave.buildPair]): only
   /// that friend can check it and knows whose it is. `NearbyService.waveAll`
   /// does the same per phone, for friends recognised by their own
   /// per-friend keys.
@@ -1558,7 +1569,7 @@ final class MeetService extends ChangeNotifier {
   /// Slot of the quiet note about an unchecked wave (one at a time).
   static const String unverifiedWaveSlot = 'alarm-near';
 
-  /// An alarm wave heard over Bluetooth (§16.3). [friend]: the friend whose
+  /// An alarm wave heard over Bluetooth. [friend]: the friend whose
   /// nearby token it carried (`null`: nobody known); [source]: the
   /// Bluetooth address of the phone that wrote it.
   ///
@@ -1697,6 +1708,40 @@ final class MeetService extends ChangeNotifier {
     );
   }
 
+  /// A friend's alarm wave the locked service heard and checked
+  /// ([MeetTypes.ownNearbyAlarm]): taken like one heard here, from when it
+  /// was heard. It already rang there; after unlock the alarm screen opens
+  /// for it (`AlarmWatcher`), so nothing rings again.
+  Future<void> _onKeptNearbyAlarm(Map<String, dynamic> p) async {
+    final Object? f = p['f'];
+    final Object? id = p['id'];
+    final Object? at = p['at'];
+    if (f is! String || id is! String || !kAlarmIdPattern.hasMatch(id)) {
+      return;
+    }
+    if (at is! int) {
+      return;
+    }
+    final String friend = _key(f);
+    final int t = _now();
+    if (!host.isFriend(friend) ||
+        _book.alarm(id) != null ||
+        t - at >= kNearbyAlarmLife.inMilliseconds ||
+        at - t > kAlarmWaveFreshFor.inMilliseconds ||
+        !_takeNewAlarm(friend)) {
+      return;
+    }
+    final AlarmRecord alarm = AlarmRecord(
+      id: id,
+      from: friend,
+      at: min(at, t),
+      nearby: true,
+    );
+    if (await _putFriendAlarm(alarm) && _confirmed.add(id)) {
+      await _confirmAlarm(friend, id);
+    }
+  }
+
   /// Friends' alarms heard only over Bluetooth end by themselves after
   /// [kNearbyAlarmLife] (the network copy never came: nothing more is
   /// known). Called now and then.
@@ -1810,7 +1855,7 @@ final class MeetService extends ChangeNotifier {
 
   // ---- nearby keys ----
 
-  /// This person's private nearby key (S6), made on first use; never sent.
+  /// This person's private nearby key, made on first use; never sent.
   Future<String> nearbyPrivateKey() async {
     final String? had = _book.nearbyPrivate;
     if (had != null) {
@@ -1881,7 +1926,7 @@ final class MeetService extends ChangeNotifier {
       return;
     }
     for (final String friend in only ?? friendsWithNames.keys) {
-      // Who may not see it (§24.1) gets an empty list and forgets theirs.
+      // Who may not see it gets an empty list and forgets theirs.
       final bool sees = friendListVisibleTo(friend);
       await _send(friend, <String, dynamic>{
         'type': MeetTypes.friendList,
@@ -1910,7 +1955,7 @@ final class MeetService extends ChangeNotifier {
     on ? FriendListAudience.all : FriendListAudience.nobody,
   );
 
-  /// Who sees this person's friend list (§24.1). Send the list again after
+  /// Who sees this person's friend list. Send the list again after
   /// this (`shareFriendList(..., force: true)`).
   Future<void> setFriendListAudience(FriendListAudience audience) =>
       _update<void>((MeetBook b) {
@@ -1941,7 +1986,7 @@ final class MeetService extends ChangeNotifier {
   }
 
   /// Sends [friend] the current status again, or "none" when they may not
-  /// see it (after their level changed, §8).
+  /// see it (after their level changed).
   Future<void> resendStatus(String friend) async {
     final IntentStatus? mine = _book.myIntent;
     final bool sees =
@@ -1952,7 +1997,7 @@ final class MeetService extends ChangeNotifier {
     });
   }
 
-  /// A friend's level changed (§8): what they may see is sent again.
+  /// A friend's level changed: what they may see is sent again.
   Future<void> levelChanged(String friend) async {
     if (!host.isFriend(friend)) {
       return;
@@ -1967,7 +2012,7 @@ final class MeetService extends ChangeNotifier {
       if (_book.friendsOf(f).containsKey(_key(address))) f,
   ];
 
-  /// Blocks [address] in "W pobliżu" for good (§15).
+  /// Blocks [address] in "W pobliżu" for good.
   Future<void> blockNearby(String address) => _update<void>((MeetBook b) {
     if (b.nearbyBlocked.length < 1000) {
       b.nearbyBlocked.add(_key(address));
@@ -1981,7 +2026,7 @@ final class MeetService extends ChangeNotifier {
   Future<void> setNearbyVisible(bool on) =>
       _update<void>((MeetBook b) => b.nearbyVisible = on);
 
-  /// The short look around every few minutes (§15).
+  /// The short look around every few minutes.
   Future<void> setNearbyBackgroundScan(bool on) =>
       _update<void>((MeetBook b) => b.nearbyBackgroundScan = on);
 

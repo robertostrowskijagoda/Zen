@@ -10,7 +10,7 @@ import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/ledger_profile.dart';
 
-/// Profile fields that have their own visibility (§9). The name is always
+/// Profile fields that have their own visibility. The name is always
 /// shown: without it nobody could be found or recognised.
 enum ProfileField {
   status,
@@ -22,7 +22,7 @@ enum ProfileField {
   followerCount,
 }
 
-/// Who sees a profile field (§9): "Publiczne / Wszyscy znajomi / Znajomi
+/// Who sees a profile field: "Publiczne / Wszyscy znajomi / Znajomi
 /// i przyjaciele / Przyjaciele / Tylko ja".
 enum FieldVisibility { public, all, mid, close, onlyMe }
 
@@ -177,7 +177,7 @@ String nationalityLabel(String code) => '${flagOf(code)} $code'.trim();
 // ---- the profile in the ledger: a public entry and sealed parts ----
 
 /// Entry kinds of the sealed parts of a profile, one per audience: the
-/// fields only friends of that level may read (§9). The public `profile`
+/// fields only friends of that level may read. The public `profile`
 /// entry carries the public ones. Older versions ignore these kinds.
 const Map<Audience, String> kProfilePartKinds = <Audience, String>{
   Audience.all: 'profile_all',

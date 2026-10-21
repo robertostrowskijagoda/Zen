@@ -79,7 +79,7 @@ class _StatusBar extends ConsumerWidget {
                     const SizedBox(width: 8),
                   ],
                   if (!state.isConnected) ...<Widget>[
-                    // Not connected: "Dlaczego nie działa?" (A22).
+                    // Not connected: "Dlaczego nie działa?".
                     IconButton(
                       key: const Key('status-health'),
                       tooltip: t('Dlaczego nie działa?'),
@@ -453,11 +453,11 @@ class _ChatsPageState extends ConsumerState<_ChatsPage> {
                       ],
                     ),
                   ),
-                // Introductions, letters and friend-list requests (§24.1).
+                // Introductions, letters and friend-list requests.
                 const IntroInboxSection(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
                 ),
-                // Conversations with people who are not friends (§13).
+                // Conversations with people who are not friends.
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16),
                   child: StrangerChatsSection(),
@@ -681,9 +681,9 @@ class _SettingsScreen extends ConsumerWidget {
           key: const Key('settings-tab-body'),
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
           children: <Widget>[
-            // Your profile is edited on the profile tab, not here (§9).
+            // Your profile is edited on the profile tab, not here.
             const _QuickLockPanel(),
-            // Friends run a newer Zen (A17): a quiet hint, gone otherwise.
+            // Friends run a newer Zen: a quiet hint, gone otherwise.
             const FriendsNewerVersionBanner(),
             _SettingsGroup(
               title: t('Prywatność i bezpieczeństwo'),
@@ -876,7 +876,7 @@ class _SettingsScreen extends ConsumerWidget {
             _SettingsGroup(
               title: t('Aplikacja'),
               tiles: <Widget>[
-                // §25.2: the same steps as on the first start.
+                // The same steps as on the first start.
                 _SettingsNavTile(
                   key: const Key('settings-nav-permissions'),
                   icon: Icons.verified_user_outlined,
@@ -1301,7 +1301,7 @@ class _LiveTechInfoSection extends ConsumerWidget {
   }
 }
 
-/// "Łączność bez internetu" (§5.1 item 6): friends and own devices nearby
+/// "Łączność bez internetu": friends and own devices nearby
 /// link directly (offline_links_section.dart).
 class _OfflineLinksPanel extends StatelessWidget {
   const _OfflineLinksPanel();
@@ -1315,7 +1315,7 @@ class _OfflineLinksPanel extends StatelessWidget {
   }
 }
 
-/// Which Yggdrasil and Go the bridge was built with (§5.2).
+/// Which Yggdrasil and Go the bridge was built with.
 class _BridgeBuildInfoLine extends ConsumerWidget {
   const _BridgeBuildInfoLine();
 
@@ -1344,13 +1344,13 @@ class _BridgeBuildInfoLine extends ConsumerWidget {
   }
 }
 
-/// Whether this computer is a bridge of the mesh (§5.1). Nothing on phones.
+/// Whether this computer is a bridge of the mesh. Nothing on phones.
 class _BridgeHostSection extends ConsumerWidget {
   const _BridgeHostSection();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Only on a computer, where the app is a bridge by default (§5.1).
+    // Only on a computer, where the app is a bridge by default.
     if (!isDesktopPlatform || !ref.watch(bridgeHostEnabledProvider)) {
       return const SizedBox.shrink();
     }
@@ -1821,7 +1821,13 @@ class _AppearanceSection extends ConsumerWidget {
     final AppSettingsController controller = ref.read(
       appSettingsControllerProvider.notifier,
     );
-    final Brightness brightness = Theme.of(context).brightness;
+    // The previews follow the chosen mode (a dark-only palette keeps the
+    // app dark, not the previews).
+    final Brightness brightness = switch (settings.themeMode) {
+      AppThemeMode.light => Brightness.light,
+      AppThemeMode.dark => Brightness.dark,
+      AppThemeMode.system => MediaQuery.platformBrightnessOf(context),
+    };
     return _Panel(
       accentTone: zen.accentTertiary,
       child: Column(
@@ -1888,6 +1894,16 @@ class _AppearanceSection extends ConsumerWidget {
                 ),
             ],
           ),
+          if (settings.palette.darkOnly) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              t('{palette} ma tylko wersję ciemną.', {
+                'palette': settings.palette.label,
+              }),
+              key: const Key('settings-palette-dark-only'),
+              style: TextStyle(color: zen.textSecondary, fontSize: 13),
+            ),
+          ],
           // The accent is the colour of Klasyczny; the other palettes have
           // their own.
           if (settings.palette == AppPalette.classic) ...<Widget>[
@@ -1938,6 +1954,7 @@ class _PaletteCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final ZenColors c = colors;
+    final ZenLook look = ZenLook.forPalette(palette);
     final BorderRadius radius = BorderRadius.circular(18);
     Widget line(Color color, double widthFactor, {double height = 5}) {
       return FractionallySizedBox(
@@ -2058,13 +2075,25 @@ class _PaletteCard extends StatelessWidget {
                                         6,
                                         6,
                                       ),
-                                      decoration: BoxDecoration(
-                                        color: c.surface,
-                                        borderRadius: BorderRadius.circular(7),
-                                        border: Border.all(
-                                          color: c.outlineSoft,
-                                        ),
-                                      ),
+                                      decoration: look.bevelled
+                                          ? ShapeDecoration(
+                                              color: c.surface,
+                                              shape: ZenBevelBorder.of(c),
+                                            )
+                                          : BoxDecoration(
+                                              color: c.surface,
+                                              borderRadius:
+                                                  BorderRadius.circular(
+                                                    7 * look.corner,
+                                                  ),
+                                              border: Border.all(
+                                                color: look.outlined
+                                                    ? c.accent.withValues(
+                                                        alpha: 0.7,
+                                                      )
+                                                    : c.outlineSoft,
+                                              ),
+                                            ),
                                       child: Row(
                                         children: <Widget>[
                                           Expanded(
@@ -2108,7 +2137,7 @@ class _PaletteCard extends StatelessWidget {
                                             ? c.surfaceRaised
                                             : c.accent,
                                         borderRadius: BorderRadius.circular(
-                                          999,
+                                          look.bevelled ? 0 : 999,
                                         ),
                                         border: c.glow > 0
                                             ? Border.all(color: c.accent)
@@ -3322,7 +3351,7 @@ class _QrScreenFriendRequestCard extends ConsumerWidget {
                       }
                       if (navigator.mounted) {
                         // They just scanned this code: this side confirms
-                        // the meeting too (§6.2).
+                        // the meeting too.
                         await showMetLevelPrompt(
                           navigator.context,
                           address: peerAddress,
@@ -4241,7 +4270,7 @@ final class _AddFriendResult {
 
   final PeerDialTarget target;
 
-  /// The code came from a scanned QR: the two met in person (§8).
+  /// The code came from a scanned QR: the two met in person.
   final bool metInPerson;
 
   /// What the user wants to call them ('' for nothing); their own name
@@ -4274,7 +4303,7 @@ Future<void> showAddFriendSheet(
     ),
   );
   if (result.metInPerson) {
-    // Met in person: how close are you (§8)? "Znajomy" when skipped.
+    // Met in person: how close are you? "Znajomy" when skipped.
     await showMetLevelPrompt(
       context,
       address: result.target.address,

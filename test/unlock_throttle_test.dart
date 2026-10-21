@@ -3,7 +3,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/unlock_throttle.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
-/// Z2-9: the lock screen slows password guessing down, and the counter
+/// The lock screen slows password guessing down, and the counter
 /// survives a restart.
 void main() {
   late MemorySecurityCredentialsStore store;

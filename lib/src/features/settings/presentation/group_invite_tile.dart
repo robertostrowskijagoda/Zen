@@ -7,7 +7,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-/// "Kto może zapraszać mnie do grup" (§8): an invitation to a new group from
+/// "Kto może zapraszać mnie do grup": an invitation to a new group from
 /// someone below the chosen level is declined at once.
 class GroupInviteFromTile extends ConsumerWidget {
   const GroupInviteFromTile({super.key});

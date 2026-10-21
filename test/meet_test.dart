@@ -225,7 +225,7 @@ void main() {
     final _Host bob = _Host(net, 'bob', <String>['ania']);
     await ania.service.shareNearbySecret('bob');
     final String first = ania.service.book.nearbyPrivate!;
-    // Bob keeps Ania's keys for him alone (S6), never her private key.
+    // Bob keeps Ania's keys for him alone, never her private key.
     final String firstKeys = ania.service.nearbyKeysFor('bob')!;
     expect(bob.service.book.friendNearbySecrets['ania'], firstKeys);
     expect(ania.service.book.nearbyGivenTo, contains('bob'));
@@ -358,7 +358,7 @@ void main() {
 
     // Kasia is a friend but not "przyjaciel": she hears it nearby, and it
     // rings like one from the network.
-    // Her phone signs the wave for Kasia alone (S6: NearbyService.waveAll
+    // Her phone signs the wave for Kasia alone (NearbyService.waveAll
     // does this for each friend it recognises).
     expect(kasia.service.book.alarm(alarm.id), isNull);
     final Map<String, dynamic> forKasia = ania.service.alarmWave(

@@ -4,8 +4,8 @@ import FlutterMacOS
 import LocalAuthentication
 
 /// Screen protection (`zen/secure_window`) and the hardware key vault
-/// (`zen/keyvault`) on the Mac, as security_bridge.cpp does on Windows
-/// (§14.1). Dart side: secure_screen.dart and platform_key_vault.dart.
+/// (`zen/keyvault`) on the Mac, as security_bridge.cpp does on Windows.
+/// Dart side: secure_screen.dart and platform_key_vault.dart.
 enum SecurityBridge {
   static func register(with messenger: FlutterBinaryMessenger, window: NSWindow) {
     let secureWindow = FlutterMethodChannel(

@@ -4,7 +4,7 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// Most people who keep recovery pieces.
 const int kMaxRecoveryHelpers = 6;
 
-/// Who keeps the recovery pieces (§6.3, §7): the mailbox circle and the
+/// Who keeps the recovery pieces: the mailbox circle and the
 /// other friends, "Przyjaciel" first, then "Znajomy", then weak
 /// acquaintances; within a level mailboxes come before the rest, in their
 /// order. At most [max] people, each once.

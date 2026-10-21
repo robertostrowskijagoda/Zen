@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-// A film that plays while it downloads (§10) needs its index first: the
+// A film that plays while it downloads needs its index first: the
 // `moov` box of an MP4 / MOV file says where every frame is, and phones
 // usually write it at the very end, after the frames (`mdat`). A player
 // that gets the file from the start would then wait for the whole file.

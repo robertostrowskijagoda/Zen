@@ -1415,7 +1415,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Scanned in person: the app asks whether you met, and how close you
-    // are (§6.2, §8).
+    // are.
     expect(find.text('Poznaliśmy się osobiście?'), findsOneWidget);
     await tester.tap(find.byKey(const Key('met-level-skip')));
     await tester.pumpAndSettle();
@@ -3074,7 +3074,7 @@ void main() {
     await tester.tap(accept);
     await tester.pumpAndSettle();
 
-    // The side showing the code is asked about the meeting too (§6.2).
+    // The side showing the code is asked about the meeting too.
     expect(find.text('Poznaliśmy się osobiście?'), findsOneWidget);
     await tester.tap(find.byKey(const Key('met-level-skip')));
     await tester.pumpAndSettle();

@@ -82,6 +82,10 @@ function Get-ZenSourceHash([string]$Salt) {
   $files = @(Get-ChildItem -Path $root -Filter '*.go' -File |
       Where-Object { $_.Name -notlike '*_test.go' } |
       Sort-Object Name)
+  # The bridge's own packages (internal/mldsa, internal/zensig).
+  $files += @(Get-ChildItem -Path (Join-Path $root 'internal') -Filter '*.go' -File -Recurse |
+      Where-Object { $_.Name -notlike '*_test.go' } |
+      Sort-Object FullName)
   $files += @(Get-Item -LiteralPath (Join-Path $root 'go.mod'), (Join-Path $root 'go.sum'), $buildScript)
   $lines = @(foreach ($file in $files) {
       "$($file.Name) $((Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash)"

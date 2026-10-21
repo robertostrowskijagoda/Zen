@@ -86,7 +86,7 @@ ZenPersistentStores buildZenPersistentStoresForDirectory(
     codec: codec,
     protector: dataProtector,
   );
-  // Leftovers of writes that were killed halfway (A20); best effort.
+  // Leftovers of writes that were killed halfway; best effort.
   unawaited(binaryStore.sweepOrphanTemporaries().catchError((Object _) => 0));
   return ZenPersistentStores(
     signalQueueStore: FileSignalQueueStore(store: binaryStore),

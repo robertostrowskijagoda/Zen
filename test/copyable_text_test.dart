@@ -41,7 +41,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(copied, 'Hej!');
 
-    // §14.1: nothing copied from the app lingers in the clipboard.
+    // Nothing copied from the app lingers in the clipboard.
     await tester.pump(kClipboardTtl + const Duration(seconds: 1));
     await tester.pumpAndSettle();
     expect(copied, '');

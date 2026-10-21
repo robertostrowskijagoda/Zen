@@ -133,7 +133,7 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(secureScreens: value));
   }
 
-  /// Android: switches the launcher icon and name (§14.2) and remembers the
+  /// Android: switches the launcher icon and name and remembers the
   /// choice. Returns `false`, changing nothing, when the phone did not take
   /// the switch.
   Future<bool> setDisguiseIcon(bool value) async {
@@ -152,43 +152,43 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(bridgeEnabled: value));
   }
 
-  /// "Znajomi w tej samej sieci Wi-Fi" (§5.1 item 6); the local links
+  /// "Znajomi w tej samej sieci Wi-Fi"; the local links
   /// controller applies it to the running node.
   Future<void> setLanDiscovery(bool value) async {
     await _save(state.copyWith(lanDiscovery: value));
   }
 
-  /// "Wi-Fi Direct (Android)" (§5.1 item 6).
+  /// "Wi-Fi Direct (Android)".
   Future<void> setWifiDirect(bool value) async {
     await _save(state.copyWith(wifiDirect: value));
   }
 
-  /// "Bluetooth" (§5.1 item 6).
+  /// "Bluetooth".
   Future<void> setBluetoothLinks(bool value) async {
     await _save(state.copyWith(bluetoothLinks: value));
   }
 
-  /// "Apple Wi-Fi/Bluetooth" (§5.1 item 6, iPhone, iPad and Mac).
+  /// "Apple Wi-Fi/Bluetooth" (item 6, iPhone, iPad and Mac).
   Future<void> setMultipeerLinks(bool value) async {
     await _save(state.copyWith(multipeerLinks: value));
   }
 
-  /// The first-start permissions step is done (§25.2).
+  /// The first-start permissions step is done.
   Future<void> setPermissionsSetupDone(bool value) async {
     await _save(state.copyWith(permissionsSetupDone: value));
   }
 
-  /// The first-start "Zabezpiecz konto" card was answered (§6.3).
+  /// The first-start "Zabezpiecz konto" card was answered.
   Future<void> setAccountSecureOffered(bool value) async {
     await _save(state.copyWith(accountSecureOffered: value));
   }
 
-  /// The paper copy of the account key was written down (§6.1).
+  /// The paper copy of the account key was written down.
   Future<void> setPaperBackupDone(bool value) async {
     await _save(state.copyWith(paperBackupDone: value));
   }
 
-  /// Who may invite this person to a new group (§8).
+  /// Who may invite this person to a new group.
   Future<void> setGroupInviteFrom(GroupInviteFrom value) async {
     await _save(state.copyWith(groupInviteFrom: value));
   }

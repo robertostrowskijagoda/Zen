@@ -283,7 +283,7 @@ void main() {
     );
     final LogEntry fake = await b.publish(kReshareDeleteKind, <String, dynamic>{
       'post': post.id,
-      'entry': tomb.toJson(),
+      'entry': tomb.toCertifiedJson(),
     });
     expect(await unpackTombstone(fake), isNull);
     final ReshareCache cache = ReshareCache();

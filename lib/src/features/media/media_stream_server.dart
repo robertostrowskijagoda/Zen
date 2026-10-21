@@ -5,7 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 
-/// A film the [MediaStreamServer] plays while it downloads (§10): its
+/// A film the [MediaStreamServer] plays while it downloads: its
 /// plain bytes in segments that open one by one.
 abstract interface class StreamedMedia {
   /// All the plain bytes, or `null` while that is not known yet.

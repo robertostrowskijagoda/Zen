@@ -47,7 +47,7 @@ Future<void> performZenLocalDataReset(WidgetRef ref) async {
     scratch: await findZenScratchPlaces(),
     deleteExports: () => const ExportedFilesIndex().deleteAll(),
   );
-  // The diagnostics log is plain text (S-16): it goes with the support
+  // The diagnostics log is plain text: it goes with the support
   // folder, and again here in case a line written during the wipe brought
   // it back.
   await ZenDiagnosticsLog.clear();

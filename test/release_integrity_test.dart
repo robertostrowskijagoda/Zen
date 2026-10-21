@@ -4,12 +4,12 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
-import 'package:cryptography/cryptography.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
@@ -163,18 +163,21 @@ Uint8List _apk(Map<int, List<int>> schemes) {
 }
 
 void main() {
-  late List<SimpleKeyPair> toolKeys;
+  late List<tool.ToolKey> toolKeys;
   late List<String> maintainers;
 
   setUpAll(() async {
-    toolKeys = <SimpleKeyPair>[
+    // The tool signs as the app does (the bridge when the run has it).
+    tool.useToolSigner(hybridSigner);
+    toolKeys = <tool.ToolKey>[
       for (int i = 0; i < 3; i++)
         await tool.keyFromSeed(List<int>.filled(32, i + 11)),
     ];
     maintainers = <String>[
-      for (final SimpleKeyPair k in toolKeys) await tool.publicKeyOf(k),
+      for (final tool.ToolKey k in toolKeys) await tool.publicKeyOf(k),
     ];
   });
+  tearDownAll(() => tool.useToolSigner(null));
 
   Future<Map<String, dynamic>> signedJson(
     Map<String, dynamic> unsigned, {
@@ -207,7 +210,7 @@ void main() {
     signers: signers,
   );
 
-  group('signed donation details (§14.3)', () {
+  group('signed donation details', () {
     test('the tool writes the same details the app shows', () {
       expect(tool.kDefaultDonationUrl, kDonationUrl);
       expect(tool.kDefaultAuthor, kOfficialAuthor);
@@ -629,7 +632,19 @@ void main() {
       expect(await confirms(sha: 'ee' * 32), isFalse);
       expect(await confirms(maintainers: <String>[]), isFalse);
       final LedgerKeyPair other = await LedgerKeyPair.generate();
-      expect(await confirms(maintainers: <String>[other.id]), isFalse);
+      expect(await confirms(maintainers: <String>[other.hybridId]), isFalse);
+      // The key is a hybrid id: both halves pinned. Its Ed25519 half alone,
+      // or paired with another ML-DSA key, is not the maintainer.
+      expect(key, hasLength(89));
+      expect(
+        await confirms(maintainers: <String>[key.substring(0, 44)]),
+        isFalse,
+      );
+      expect(
+        signed.signatures[key],
+        hasLength(kKeyedHybridSignatureChars),
+        reason: 'SHA256SUMS.sig carries a keyed hybrid signature',
+      );
       expect(
         () => tool.createSignedSums(version: 'v1.12.0', sumsText: ''),
         throwsFormatException,
@@ -656,7 +671,7 @@ void main() {
       );
     });
 
-    test('the certificate fingerprint is read and pinned (S15)', () async {
+    test('the certificate fingerprint is read and pinned', () async {
       final List<int> certificate = utf8.encode('certyfikat wydania');
       final String sha = crypto.sha256.convert(certificate).toString();
       final File apk = File(at('zen.apk'))

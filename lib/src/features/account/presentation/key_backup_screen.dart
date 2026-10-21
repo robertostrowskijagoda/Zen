@@ -22,7 +22,7 @@ import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-/// "Kopia zapasowa klucza" (§6.1): the two ways to back up the account key,
+/// "Kopia zapasowa klucza": the two ways to back up the account key,
 /// on one screen. (a) an encrypted file protected by a password the person
 /// types twice; (b) the key shown as a code (14 groups of four and a QR) to
 /// write down or scan on a new phone. Opens only after the app password is

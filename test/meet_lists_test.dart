@@ -176,7 +176,7 @@ void main() {
     expect(bob.service.book.friendNearbySecrets['ania'], isNull);
 
     await ania.ping(bob);
-    // Her keys for Bob alone (S6).
+    // Her keys for Bob alone.
     expect(
       bob.service.book.friendNearbySecrets['ania'],
       ania.service.nearbyKeysFor('bob'),

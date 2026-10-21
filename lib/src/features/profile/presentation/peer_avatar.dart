@@ -53,7 +53,7 @@ class PeerAvatar extends ConsumerWidget {
   }
 }
 
-/// What someone shows about themselves: the mini-profile (§9), with
+/// What someone shows about themselves: the mini-profile, with
 /// "Profil", "Wiadomość" or "Dodaj", and "Obserwuj".
 Future<void> showPeerProfileSheet(BuildContext context, String address) =>
     showMiniProfile(context, address);

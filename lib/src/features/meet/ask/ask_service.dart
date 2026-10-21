@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
@@ -22,7 +23,7 @@ abstract final class AskTypes {
   static const Set<String> all = <String>{ask, answer};
 }
 
-/// How long a question lives (§17.5).
+/// How long a question lives.
 const Duration kQuestionLife = Duration(days: 7);
 
 /// Flood guard on the receiving side: questions this phone takes in from
@@ -39,7 +40,7 @@ const int kAnswerMaxChars = 1000;
 const int kAnswersPerQuestion = 200;
 const int kAnswersFromFriendPerQuestion = 50;
 
-/// What the answerer signs with their device key (§17.5): the question,
+/// What the answerer signs with their device key: the question,
 /// their own address and name, the words and the pyramid key a tip goes to.
 /// Whoever passes the answer back adds their name to the path but cannot
 /// change any of this without the signature failing.
@@ -81,7 +82,7 @@ final class AskAnswer {
   final int at;
 
   /// The one who answered, in the pyramid (when a member): where a tip
-  /// goes (§24). Only what they said about themselves.
+  /// goes. Only what they said about themselves.
   final String? pyramidKey;
   final String? pyramid;
 
@@ -139,7 +140,7 @@ final class AskAnswer {
 String? askKeyField(Object? v) =>
     v is String && v.isNotEmpty && v.length <= 100 ? v : null;
 
-/// A question asked of the network (§17.5): no database of
+/// A question asked of the network: no database of
 /// recommendations, just people asking people.
 final class Question {
   Question({
@@ -229,7 +230,7 @@ final class Question {
   }
 }
 
-/// "Zapytaj sieć" (§17.5): a question goes to friends; anyone may answer
+/// "Zapytaj sieć": a question goes to friends; anyone may answer
 /// or, by hand, pass it on (at most two steps from the asker). Answers go
 /// back the same way, so the asker never needs to know who is two steps
 /// away — they see "znajomy Bartka: …".
@@ -385,7 +386,7 @@ final class AskService extends ChangeNotifier {
 
   /// Answers; it travels back to the asker the way the question came.
   /// A member of a pyramid adds its pyramid key ([pyramidKey], of
-  /// [pyramid]), so the asker can give a tip (§24).
+  /// [pyramid]), so the asker can give a tip.
   Future<void> answer(
     String id,
     String text, {
@@ -484,8 +485,7 @@ final class AskService extends ChangeNotifier {
     String? pyramid,
   }) async {
     if (proof is! Map ||
-        proof['s'] is! String ||
-        (proof['s'] as String).length > 200 ||
+        !isHybridSignatureText(proof['s']) ||
         proof['a'] is! String ||
         !isRoutablePeerAddress(proof['a'] as String) ||
         path.isEmpty) {
@@ -498,9 +498,8 @@ final class AskService extends ChangeNotifier {
     final String answerer = _n(proof['a'] as String);
     final bool sound =
         await cert.verify() &&
-        await verifyLedgerSignature(
-          publicKey: cert.device,
-          message: askAnswerSignedBytes(
+        await cert.verifyByDevice(
+          askAnswerSignedBytes(
             id: id,
             answerer: answerer,
             name: path.first,
@@ -508,7 +507,7 @@ final class AskService extends ChangeNotifier {
             pyramidKey: pyramidKey,
             pyramid: pyramid,
           ),
-          signature: proof['s'] as String,
+          proof['s'] as String,
         );
     if (!sound) {
       return false;

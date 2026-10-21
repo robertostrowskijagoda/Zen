@@ -183,7 +183,7 @@ void main() {
     });
   });
 
-  group('member list of a joined group (S-5)', () {
+  group('member list of a joined group', () {
     ProviderContainer groupContainer() => buildContainer(
       seed: SocialHubState.empty().copyWith(
         friends: <String, FriendProfile>{

@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 
-/// S-12: with "Powiadomienia bez treści" on, the features whose title
+/// With "Powiadomienia bez treści" on, the features whose title
 /// alone tells too much get a generic title as well.
 void main() {
   RuntimeSystemNotification post(

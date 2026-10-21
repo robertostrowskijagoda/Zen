@@ -99,7 +99,7 @@ final class _Hub {
   Future<void> start() => transport.start();
 
   /// Invitations to groups from people who are not friends are taken (off
-  /// by default, §8).
+  /// by default).
   Future<void> allowInvitesFromAnyone() => container
       .read(appSettingsControllerProvider.notifier)
       .setGroupInviteFrom(GroupInviteFrom.everyone);
@@ -294,7 +294,7 @@ void main() {
     test('a stranger cannot post into the invitation they sent', () async {
       final _Hub hub = _Hub();
       await hub.start();
-      // Only when invitations from anyone are taken (not the default, §8).
+      // Only when invitations from anyone are taken (not the default).
       await hub.allowInvitesFromAnyone();
       final String stranger = _nodeAddress(7);
       await hub.deliver(stranger, <String, dynamic>{

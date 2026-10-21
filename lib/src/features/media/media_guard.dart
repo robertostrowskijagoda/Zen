@@ -6,7 +6,7 @@ import 'package:image/image.dart' as img;
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/safe_file_name.dart';
 
-/// Protection against media that is not what it claims to be (§19).
+/// Protection against media that is not what it claims to be.
 ///
 /// Everything a friend (or a stranger) sends is checked by what its bytes
 /// are, never by its name or by the type the sender claims:
@@ -402,7 +402,7 @@ bool looksLikeSafeContainer(Uint8List bytes) {
   return sniffMediaKind(bytes) == MediaKind.audio;
 }
 
-/// Whether a film that is still downloading may go to the player (§10),
+/// Whether a film that is still downloading may go to the player,
 /// from its first bytes [head] and its whole [length]: a video, and for an
 /// MP4/MOV file the first box is `ftyp` and every top-level box that starts
 /// in [head] has a printable name and fits in [length]. What comes later is

@@ -20,12 +20,12 @@ class _ShellTab {
   /// A drawn icon instead of [icon] (color, size, selected).
   final Widget Function(Color color, double size, bool selected)? glyph;
 
-  /// `null`: a button on the rail. Otherwise the tab lives under "Więcej"
-  /// (§25), in this group.
+  /// `null`: a button on the rail. Otherwise the tab lives under "Więcej",
+  /// in this group.
   final _MoreGroup? group;
 }
 
-/// Sections of the "Więcej" sheet for the rarely used tabs (§25).
+/// Sections of the "Więcej" sheet for the rarely used tabs.
 enum _MoreGroup {
   meetings,
   community,
@@ -104,7 +104,7 @@ List<_ShellTab> get _shellTabs => <_ShellTab>[
     glyph: _pyramidGlyph,
     group: _MoreGroup.community,
   ),
-  // The points wallet, right before Bluetooth (§18).
+  // The points wallet, right before Bluetooth.
   _ShellTab(
     id: 'wallet',
     label: t('Portfel'),
@@ -112,7 +112,7 @@ List<_ShellTab> get _shellTabs => <_ShellTab>[
     selectedIcon: Icons.attach_money_rounded,
     group: _MoreGroup.community,
   ),
-  // Bluetooth "people nearby" sits right before the invite QR (§12).
+  // Bluetooth "people nearby" sits right before the invite QR.
   _ShellTab(
     id: 'nearby',
     label: t('Osoby w pobliżu'),
@@ -134,7 +134,7 @@ List<_ShellTab> get _shellTabs => <_ShellTab>[
     selectedIcon: Icons.info_rounded,
     group: _MoreGroup.other,
   ),
-  // Last, at the bottom of the rail and in red (§16.3).
+  // Last, at the bottom of the rail and in red.
   _ShellTab(
     id: 'alarm',
     label: t('Alarm'),
@@ -150,11 +150,11 @@ final ValueNotifier<String?> _shellTabRequest = ValueNotifier<String?>(null);
 /// The app opens on the conversations.
 final int _startTab = _shellTabs.indexWhere((_ShellTab t) => t.id == 'chats');
 
-/// The rail is a narrow strip of icons (§25). It can be hidden completely;
+/// The rail is a narrow strip of icons. It can be hidden completely;
 /// a small tab at the left edge brings it back.
 const double _railWidth = 56;
 
-/// The app with vertical tabs on the left (§25): a slim icon rail on
+/// The app with vertical tabs on the left: a slim icon rail on
 /// every screen size; it can be hidden completely.
 class _TabbedShell extends ConsumerStatefulWidget {
   const _TabbedShell();
@@ -178,6 +178,7 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
   void initState() {
     super.initState();
     _shellTabRequest.addListener(_onTabRequest);
+    feedOpenRequest.addListener(_onFeedRequest);
     // The rail remembers whether it was hidden last time.
     unawaited(
       ref
@@ -195,7 +196,13 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
   @override
   void dispose() {
     _shellTabRequest.removeListener(_onTabRequest);
+    feedOpenRequest.removeListener(_onFeedRequest);
     super.dispose();
+  }
+
+  /// The Tablica asked for from elsewhere ([openFeed]); it sets the filter.
+  void _onFeedRequest() {
+    _shellTabRequest.value = 'feed';
   }
 
   void _onTabRequest() {
@@ -205,7 +212,7 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
     }
     _shellTabRequest.value = null;
     final int i = _shellTabs.indexWhere((_ShellTab t) => t.id == id);
-    // A feature switched off (A15) has no tab to go to.
+    // A feature switched off has no tab to go to.
     if (i >= 0 && ref.read(featureFlagsProvider).showsTab(id)) {
       _select(i);
     }
@@ -234,7 +241,7 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
     });
   }
 
-  /// "Więcej": the rarely used tabs, grouped (§25).
+  /// "Więcej": the rarely used tabs, grouped.
   Future<void> _openMore(int current) async {
     final String? id = await showModalBottomSheet<String>(
       context: context,
@@ -253,7 +260,7 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
   }
 
   Widget _page(int index) => switch (_shellTabs[index].id) {
-    // The chat list shows the last messages, dating who meets whom (S-9).
+    // The chat list shows the last messages, dating who meets whom.
     'chats' => const SecureScreen(child: _ChatsPage(key: Key('chats-page'))),
     'feed' => const FeedScreen(),
     'meet' => const MeetHubScreen(),
@@ -283,7 +290,7 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
           children: <Widget>[
             // Connection status stays across the top; a tap opens settings.
             const _StatusBar(),
-            // This phone's clock is off (A21): a bar, tap for the report.
+            // This phone's clock is off: a bar, tap for the report.
             const ClockSkewBanner(),
             // A newer release on GitHub, or GitHub blocked.
             const GithubUpdateBanner(),
@@ -485,7 +492,7 @@ class _SideTabs extends ConsumerWidget {
         child: Column(
           children: <Widget>[
             const SizedBox(height: 4),
-            // Up top, within the thumb's reach (§25).
+            // Up top, within the thumb's reach.
             IconButton(
               key: const Key('side-tabs-hide'),
               tooltip: t('Ukryj pasek'),
@@ -617,8 +624,6 @@ class _SideTabButton extends StatelessWidget {
         : selected
         ? zen.accent
         : zen.textMuted;
-    final Color hue = danger ? zen.danger : zen.accent;
-    final Color hue2 = danger ? zen.danger : zen.accentSecondary;
     final bool compact = extent < 46;
     final double iconSize = compact ? 22 : 24;
     // Slim buttons keep almost the whole height tappable.
@@ -649,31 +654,10 @@ class _SideTabButton extends StatelessWidget {
               key: Key('side-tab-${tab.id}'),
               borderRadius: BorderRadius.circular(14),
               onTap: onTap,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOutCubic,
+              child: ZenRailTabFrame(
+                selected: selected,
+                danger: danger,
                 padding: EdgeInsets.symmetric(vertical: padding),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  gradient: selected
-                      ? LinearGradient(
-                          colors: <Color>[
-                            hue.withValues(alpha: 0.28),
-                            hue2.withValues(alpha: 0.14),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        )
-                      : null,
-                  border: Border.all(
-                    color: selected
-                        ? hue.withValues(alpha: 0.35)
-                        : danger
-                        ? zen.danger.withValues(alpha: 0.30)
-                        : Colors.transparent,
-                  ),
-                  boxShadow: selected ? zen.neonGlow(hue) : null,
-                ),
                 child: Center(
                   child: Badge(
                     isLabelVisible: badge > 0,

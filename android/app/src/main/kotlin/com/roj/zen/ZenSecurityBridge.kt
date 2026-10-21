@@ -28,7 +28,7 @@ import javax.crypto.spec.OAEPParameterSpec
 import javax.crypto.spec.PSource
 
 /**
- * §14.1 on Android:
+ * Security channels on Android:
  *  - `zen/secure_window`: FLAG_SECURE on the window (no screenshots, no
  *    recording, blank in the recent apps);
  *  - `zen/keyvault`: the app's master key wrapped by an RSA key pair in the
@@ -63,7 +63,7 @@ object ZenSecurityBridge {
             when (call.method) {
                 "setSecure" -> {
                     // While "Blokuj zrzuty i nagrywanie ekranu" is on, Dart keeps the
-                    // whole window secure (S-9), not only the protected screens:
+                    // whole window secure, not only the protected screens:
                     // the recent-apps preview is taken whenever the app is left,
                     // from whatever screen is open then (the chat list too).
                     val secure = call.argument<Boolean>("secure") ?: false

@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Admission of local sockets to a call relay (STAN S38).
+// Admission of local sockets to a call relay.
 //
 // The relay is a UDP port on this device that the local WebRTC stack sends
 // call media to. Any other app on the device can send to that port too, so

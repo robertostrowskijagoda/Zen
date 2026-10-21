@@ -51,7 +51,7 @@ const Set<String> _callCommit = <String>{
 };
 
 /// Makes an account with several devices look like one person to the app
-/// (§6, several devices), without the app knowing:
+/// (several devices), without the app knowing:
 ///
 /// * whatever the app sends to a friend goes to every device of the
 ///   friend's account;

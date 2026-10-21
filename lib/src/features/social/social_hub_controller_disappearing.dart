@@ -1,6 +1,6 @@
 part of 'social_hub_controller.dart';
 
-/// Disappearing messages (§14.1 point 10): a per-conversation timer, the
+/// Disappearing messages: a per-conversation timer, the
 /// same on both sides, after which messages are deleted with their files.
 ///
 /// * changing the timer tells the friend (or every group member) and this

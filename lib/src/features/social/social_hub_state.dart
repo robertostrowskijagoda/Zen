@@ -76,7 +76,7 @@ final class InboxEntry {
   final String? routeKey;
   final String? peerAddress;
 
-  /// What the title says, put into words when it is shown (STAN A23).
+  /// What the title says, put into words when it is shown.
   final SocialEventText? titleEvent;
 
   /// What the body says, when it is not a friend's own words.
@@ -254,7 +254,7 @@ final class SocialHubState {
   /// Version of the user's own profile last sent to all friends.
   final int profileSentVersion;
 
-  /// Disappearing messages (§14.1 point 10): conversation key (a friend's
+  /// Disappearing messages: conversation key (a friend's
   /// address or `group:<id>`) → seconds a message lives. Absent = off.
   final Map<String, int> disappearingTimers;
 
@@ -268,7 +268,7 @@ final class SocialHubState {
   /// what happened. Never stored: it describes this run only.
   final bool snapshotUnreadable;
 
-  /// The Zen version each friend last named in a ping or pong (A17), by
+  /// The Zen version each friend last named in a ping or pong, by
   /// [FriendProfile.address]. Self-reported: only for the "friends have a
   /// newer Zen" hint, never for anything that guards security.
   final Map<String, String> peerAppVersions;

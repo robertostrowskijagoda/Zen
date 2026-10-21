@@ -25,7 +25,7 @@ import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
-/// The mini-profile (§9): a compact card made from someone's profile —
+/// The mini-profile: a compact card made from someone's profile —
 /// photo, name, status, badges and numbers — with what can be done right
 /// away: open the whole profile, write ("Wiadomość") or invite ("Dodaj"),
 /// follow. Opened from the graph, people nearby, lists of likes and
@@ -50,7 +50,7 @@ Future<void> openConversationWith(
   ),
 );
 
-/// "Dodaj": invites [address] to be friends (§9). Returns true when sent.
+/// "Dodaj": invites [address] to be friends. Returns true when sent.
 Future<bool> inviteAsFriend(
   BuildContext context,
   WidgetRef ref,
@@ -301,8 +301,8 @@ class _MiniProfileSheetState extends ConsumerState<MiniProfileSheet> {
                   icon: const Icon(Icons.person_rounded, size: 18),
                   label: Text(t('Profil')),
                 ),
-                // Someone who is not a friend can be written to as well
-                // (§13, §24.1): text only, within limits, with this
+                // Someone who is not a friend can be written to as well:
+                // text only, within limits, with this
                 // person's mini-profile.
                 if (!isFriend &&
                     friend?.status != FriendRelationshipStatus.blocked &&

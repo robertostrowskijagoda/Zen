@@ -13,7 +13,7 @@ import 'package:zen/src/features/settings/app_settings_store.dart';
 
 /// The lock screen's way out when the password is gone ("Nie pamiętam
 /// hasła — zacznij od nowa": hold for ten seconds, then everything on this
-/// device is erased) and its throttling of password attempts (Z2-9).
+/// device is erased) and its throttling of password attempts.
 void main() {
   late MemorySecurityCredentialsStore store;
   late LocalAppSecurityService security;

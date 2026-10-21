@@ -14,7 +14,7 @@ import 'package:zen/src/features/permissions/presentation/vendor_battery_help.da
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-/// "Uprawnienia i Bluetooth" from the settings (§25.2).
+/// "Uprawnienia i Bluetooth" from the settings.
 class PermissionsScreen extends StatelessWidget {
   const PermissionsScreen({super.key});
 
@@ -32,7 +32,7 @@ class PermissionsScreen extends StatelessWidget {
   );
 }
 
-/// The first start, right after the app password (§25.2): the same steps
+/// The first start, right after the app password: the same steps
 /// once; this phone is shown nearby only if the person turns that on.
 class PermissionsSetupStage extends StatelessWidget {
   const PermissionsSetupStage({super.key});
@@ -172,8 +172,8 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
     }
   }
 
-  /// Saves the choice and starts (or stops) showing this phone nearby
-  /// (low-power advertising, §15).
+  /// Saves the choice and starts (or stops) showing this phone nearby.
+  /// (low-power advertising).
   Future<void> _applyVisible(bool on) async {
     try {
       final MeetService meet = ref.read(meetServiceProvider);

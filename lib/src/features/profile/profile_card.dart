@@ -23,7 +23,7 @@ const int _maxIncomingAvatarDimension = 2048;
 /// The `profile_update` payload for [profile]: what friends see about you.
 ///
 /// It goes to every friend alike, so a field reaches it only when all
-/// friends may see it (§9: "Publiczne" or "Wszyscy znajomi"); friends of a
+/// friends may see it ("Publiczne" or "Wszyscy znajomi"); friends of a
 /// higher level read the other fields from the sealed parts of the profile
 /// in the ledger (`profile_fields.dart`). The avatar goes as a small JPEG
 /// thumbnail, never the original photo.

@@ -22,8 +22,8 @@ try {
   # Resolves go.sum after a dependency bump (e.g. Yggdrasil).
   go mod tidy
   if ($LASTEXITCODE -ne 0) { throw 'go mod tidy failed' }
-  go vet .
-  go test -count=1 .
+  go vet ./...
+  go test -count=1 ./...
 }
 finally {
   Pop-Location

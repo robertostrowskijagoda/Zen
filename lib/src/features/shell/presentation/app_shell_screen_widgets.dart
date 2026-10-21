@@ -357,53 +357,14 @@ class _ServiceButton extends StatelessWidget {
   }
 }
 
-/// The unread count of a chat: a small accent capsule.
+/// The unread count of a chat (the look's count badge).
 class _UnreadBadge extends StatelessWidget {
   const _UnreadBadge(this.count, {super.key});
 
   final int count;
 
   @override
-  Widget build(BuildContext context) {
-    final ZenColors zen = ZenColors.of(context);
-    return ZenSoftPulse(color: zen.accent, child: _badge(zen));
-  }
-
-  Widget _badge(ZenColors zen) {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-      padding: const EdgeInsets.symmetric(horizontal: 7),
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: <Color>[
-            zen.accent,
-            zen.gradientPartner(zen.accent, zen.accentSecondary),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(999),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: zen.accent.withValues(alpha: 0.35),
-            blurRadius: 10,
-            spreadRadius: -3,
-          ),
-        ],
-      ),
-      child: Text(
-        count > 99 ? '99+' : '$count',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: zen.onAccent,
-          fontSize: 12,
-          fontWeight: FontWeight.w800,
-          height: 1.1,
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => ZenCountBadge(count);
 }
 
 /// A row of a chat list: avatar, name and time on top, last message and the

@@ -78,7 +78,7 @@ final class AppMeetHost implements MeetHost {
       ref.read(runtimeSystemNotificationServiceProvider).dismissSlot(slotKey);
 }
 
-/// Statuses, alarms and nearby keys (§15–16) in the app.
+/// Statuses, alarms and nearby keys in the app.
 final Provider<MeetService> meetServiceProvider = Provider<MeetService>((
   Ref ref,
 ) {
@@ -94,11 +94,11 @@ final Provider<MeetService> meetServiceProvider = Provider<MeetService>((
   }
 
   service.friendNames = names;
-  // Weak acquaintances get no friend list and statuses (§8); after a
+  // Weak acquaintances get no friend list and statuses; after a
   // level change [setFriendLevel] sends both again.
   service.levelOf = (String a) => ref.read(ledgerNodeProvider)?.levelOf(a);
   // The alarm key's certificate names this device; a friend's must come
-  // from the account the ledger knows for them (§16.3).
+  // from the account the ledger knows for them.
   service.ownAddress = () => ref.read(runtimeNodeSnapshotProvider).localAddress;
   service.accountOf = (String a) {
     final LedgerNode? node = ref.read(ledgerNodeProvider);
@@ -213,7 +213,7 @@ Future<void> _syncNearbySecrets(MeetService service) async {
   }
 }
 
-/// People nearby (§15). Starts showing this phone when Bluetooth may be
+/// People nearby. Starts showing this phone when Bluetooth may be
 /// used and the person did not hide it.
 final Provider<NearbyService> nearbyServiceProvider = Provider<NearbyService>((
   Ref ref,
@@ -296,7 +296,7 @@ final class MeetEventHost implements EventHost {
       meet.notify(notification);
 }
 
-/// Events "po znajomości" (§17).
+/// Events "po znajomości".
 final Provider<EventService> eventServiceProvider = Provider<EventService>((
   Ref ref,
 ) {
@@ -342,7 +342,7 @@ void listenFrames(
   ref.onDispose(() => unawaited(sub.cancel()));
 }
 
-/// "Zapytaj sieć" (§17.5).
+/// "Zapytaj sieć".
 final Provider<AskService> askServiceProvider = Provider<AskService>((Ref ref) {
   final MeetService meet = ref.watch(meetServiceProvider);
   final AskService ask = AskService(
@@ -355,7 +355,7 @@ final Provider<AskService> askServiceProvider = Provider<AskService>((Ref ref) {
   return ask;
 });
 
-/// Stół na sześć (§17.4).
+/// Stół na sześć.
 final Provider<TableService> tableServiceProvider = Provider<TableService>((
   Ref ref,
 ) {
@@ -372,7 +372,7 @@ final Provider<TableService> tableServiceProvider = Provider<TableService>((
   return table;
 });
 
-/// Kółko obiadowe (§17.3).
+/// Kółko obiadowe.
 final Provider<CircleService> circleServiceProvider = Provider<CircleService>((
   Ref ref,
 ) {

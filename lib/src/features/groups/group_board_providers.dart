@@ -55,7 +55,7 @@ final class AppGroupBoardHost implements GroupBoardHost {
       .send(remoteAddress: to, payload: payload);
 }
 
-/// The boards of this person's groups (§13).
+/// The boards of this person's groups.
 final Provider<GroupBoardService> groupBoardServiceProvider =
     Provider<GroupBoardService>((Ref ref) {
       final GroupBoardService board = GroupBoardService(

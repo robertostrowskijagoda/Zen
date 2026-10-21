@@ -95,14 +95,14 @@ Future<Map<String, dynamic>?> handleFeatureHarness(
         },
       };
     case '/x/pyramid/create':
-      final String id = await pyr.createPyramid(
-        name: str('name', 'Test'),
+      // The test pyramid (debug builds): its power key is public.
+      final String? id = await pyr.found(
         myName: str('me', 'Ja'),
         nat: str('nat', 'PL'),
         birthYear: integer('year', 1990),
         gender: str('g', 'k'),
       );
-      return <String, dynamic>{'ok': true, 'id': id};
+      return <String, dynamic>{'ok': id != null, 'id': id};
     case '/x/pyramid/invite':
       return <String, dynamic>{
         'ok': pyr.inviteCode() != null,
@@ -207,7 +207,7 @@ Future<Map<String, dynamic>?> handleFeatureHarness(
         'code': ref.read(neighborsServiceProvider).doorCode?.toQr(),
       };
     case '/x/flat/accept':
-      // Lets in everyone knocking on the door (§18.2).
+      // Lets in everyone knocking on the door.
       final NeighborsService knocked = ref.read(neighborsServiceProvider);
       int accepted = 0;
       for (final FlatKnock k in knocked.knocks) {

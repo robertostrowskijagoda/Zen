@@ -27,7 +27,7 @@ abstract interface class GroupBoardHost {
   Future<void> send(String to, Map<String, dynamic> payload);
 }
 
-/// The boards of this person's groups (§13; see `group_board.dart`).
+/// The boards of this person's groups (see `group_board.dart`).
 final class GroupBoardService extends ChangeNotifier {
   GroupBoardService({
     required this.host,

@@ -8,7 +8,7 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/presentation/group_invite_tile.dart';
 
-/// The screens of the levels of acquaintance (§8).
+/// The screens of the levels of acquaintance.
 Widget _app(ProviderContainer container, Widget home) =>
     UncontrolledProviderScope(
       container: container,

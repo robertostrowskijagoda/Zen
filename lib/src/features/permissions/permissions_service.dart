@@ -3,13 +3,13 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
+import 'package:zen/src/features/meet/location.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 
-/// Something Zen asks the system for (§25.2), in the order it asks.
+/// Something Zen asks the system for, in the order it asks.
 enum ZenPermission {
   notifications,
 
@@ -21,7 +21,7 @@ enum ZenPermission {
   bluetoothOn,
 
   /// Where this phone is while Zen is open: the place sent with an alarm,
-  /// neighbours nearby (§16.3, §17).
+  /// neighbours nearby.
   location,
 
   /// The same, also with the screen off ("Always" in the system dialog):
@@ -88,7 +88,7 @@ abstract interface class PermissionsPlatform {
   /// step is skipped).
   bool get hasAnything;
 
-  /// Whether people nearby (Bluetooth, §15) exist on this platform.
+  /// Whether people nearby (Bluetooth) exist on this platform.
   bool get hasBluetooth;
 
   Future<PermissionsSnapshot> check();
@@ -193,7 +193,7 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
 
   Future<LocationPermission?> _locationPermission() async {
     try {
-      return await Geolocator.checkPermission();
+      return await checkLocationPermission();
     } on Object catch (error) {
       logZenWarning('Uprawnienia (położenie): $error');
       return null;
@@ -220,15 +220,15 @@ final class AndroidPermissionsPlatform implements PermissionsPlatform {
         await _radio.requestEnable();
       case ZenPermission.location:
         try {
-          await Geolocator.requestPermission();
+          await requestLocationPermission();
         } on Object catch (error) {
           logZenWarning('Uprawnienia (położenie): $error');
         }
       case ZenPermission.backgroundLocation:
         try {
-          LocationPermission now = await Geolocator.checkPermission();
+          LocationPermission now = await checkLocationPermission();
           if (now == LocationPermission.denied) {
-            now = await Geolocator.requestPermission();
+            now = await requestLocationPermission();
           }
           // Android 11+ takes "all the time" only from the settings page.
           if (now != LocationPermission.always) {
@@ -334,7 +334,7 @@ final Provider<PermissionsPlatform> permissionsPlatformProvider =
       return const NoPermissionsPlatform();
     });
 
-/// Whether the first start shows "Uprawnienia i Bluetooth" (§25.2) until
+/// Whether the first start shows "Uprawnienia i Bluetooth" until
 /// it is done. Off in tests and previews; the real app turns it on (like
 /// the app password).
 final Provider<bool> permissionsSetupRequiredProvider = Provider<bool>(

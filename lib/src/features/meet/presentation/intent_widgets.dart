@@ -94,7 +94,7 @@ const List<IntentKind> kFriendIntentOrder = <IntentKind>[
   IntentKind.custom,
 ];
 
-/// "Na teraz" (§16.2): this person's own status on top (or the question
+/// "Na teraz": this person's own status on top (or the question
 /// what they are up for), then which friends are up for something now,
 /// grouped by kind.
 class IntentPanel extends ConsumerWidget {
@@ -109,7 +109,7 @@ class IntentPanel extends ConsumerWidget {
       builder: (BuildContext context) => ListenableBuilder(
         listenable: Listenable.merge(<Listenable>[service, dating]),
         builder: (BuildContext context, Widget? _) {
-          // „Randkuję” only while dating is on (§16.2).
+          // „Randkuję” only while dating is on.
           final bool datingOn = dating.active;
           final int now = service.now;
           final IntentStatus? stored = service.book.myIntent;

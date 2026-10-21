@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Limits for a computer that is a bridge (§5.1 "przeciążenie mostu"):
+// Limits for a computer that is a bridge ("przeciążenie mostu"):
 // strangers peer with it, so one of them (or a botnet) must not take every
 // connection slot, saturate the home uplink or burn a metered plan.
 //

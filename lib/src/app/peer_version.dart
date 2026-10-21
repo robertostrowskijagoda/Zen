@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/app_version.dart';
 
-/// What this build can do, announced to friends in ping and pong (A17).
+/// What this build can do, announced to friends in ping and pong.
 ///
 /// Short, stable names; a new one is added when a feature changes what goes
 /// over the wire, never renamed. Informational only: nothing that guards

@@ -6,7 +6,7 @@ import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 
-/// Entry kind of photos and videos added to the profile's gallery (§9).
+/// Entry kind of photos and videos added to the profile's gallery.
 /// They live in the account's feed space (so friends get them the same
 /// way), but they are not posts: the wall never shows them, and posts never
 /// land in the gallery.

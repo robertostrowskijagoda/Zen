@@ -17,7 +17,7 @@ import (
 )
 
 // Name resolution for the Go side where the platform gives Go no resolver
-// configuration (Android: no /etc/resolv.conf, STAN S38).
+// configuration (Android: no /etc/resolv.conf).
 //
 // Every query first goes to the system resolver (getaddrinfo, which also
 // honours Android's "Private DNS" setting). Only when that does not work

@@ -9,7 +9,7 @@ import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/groups/group_board.dart';
 import 'package:zen/src/features/groups/group_board_service.dart';
 
-/// The "Tablica" tab of a group (§13): the group's own space of posts,
+/// The "Tablica" tab of a group: the group's own space of posts,
 /// newest first. Authors edit and remove their posts; the group's creator
 /// may remove any.
 class GroupBoardView extends StatefulWidget {

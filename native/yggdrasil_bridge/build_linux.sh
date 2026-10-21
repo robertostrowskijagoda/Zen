@@ -57,7 +57,7 @@ fi
 source_hash() {
   (
     cd "$root"
-    for f in *.go go.mod go.sum build_linux.sh; do
+    for f in *.go internal/*/*.go go.mod go.sum build_linux.sh; do
       case "$f" in
         *_test.go) continue ;;
       esac

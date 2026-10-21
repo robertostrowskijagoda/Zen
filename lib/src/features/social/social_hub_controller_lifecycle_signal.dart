@@ -528,7 +528,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       // amounts to, which the user still has to confirm.
       signal = _unsolicitedAcceptAsRequest(signal);
     }
-    // Someone who is not a friend writing in an ordinary chat (§13, §24.1):
+    // Someone who is not a friend writing in an ordinary chat:
     // let in only within the limits, with their mini-profile.
     if (await _handleStrangerChatSignal(signal, timestamp)) {
       return;
@@ -595,7 +595,7 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
               isFriend: knownPeer?.status == FriendRelationshipStatus.accepted,
               level: ref.read(friendLevelLookupProvider).of(signal.sender),
             )) {
-          // Below the level this person takes invitations from (§8): said
+          // Below the level this person takes invitations from: said
           // no at once, so the inviter stops re-sending.
           _replyToGroupSignal(
             peerAddress: signal.sender,
