@@ -8,6 +8,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/chat/stranger_chats.dart';
+import 'package:zen/src/features/meet/graph/graph_insights.dart';
 import 'package:zen/src/features/meet/intro/gate_route.dart';
 import 'package:zen/src/features/meet/intro/gate_terms.dart';
 import 'package:zen/src/features/meet/intro/intro_providers.dart';
@@ -21,15 +22,18 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 void _snack(BuildContext context, String text) =>
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
-/// The way a plan goes, in words: "Ania → Bartek".
-String gatePlanThrough(IntroService intro, GatePlan plan) {
-  final List<String> names = <String>[
-    if (plan.steps.isNotEmpty) intro.host.nameOf(plan.steps.first.via),
-    for (int i = 0; i < plan.steps.length - 1; i++)
-      plan.steps[i].toName.isEmpty ? t('ktoś') : plan.steps[i].toName,
-  ];
-  return names.join(' → ');
-}
+/// The gatekeepers of [plan] by name, in order: the friend first, then
+/// each one a gate opens to (without the target).
+List<String> gatePlanNames(IntroService intro, GatePlan plan) => <String>[
+  if (plan.steps.isNotEmpty) intro.host.nameOf(plan.steps.first.via),
+  for (int i = 0; i < plan.steps.length - 1; i++)
+    plan.steps[i].toName.isEmpty ? t('ktoś') : plan.steps[i].toName,
+];
+
+/// The way a plan goes, in words: "Ania → Bartek"; a long one shortened in
+/// the middle ("Ania → Bartek → … 3 … → Ola → Piotr").
+String gatePlanThrough(IntroService intro, GatePlan plan) =>
+    wayText(gatePlanNames(intro, plan));
 
 /// "5 pkt", "za darmo", with how many gates wait for someone's consent.
 String gatePlanCost(GatePlan plan) => <String>[
@@ -66,6 +70,250 @@ List<String> reachLines(IntroService intro, ReachPlan plan) {
     ReachChoice.none => t('Nie znamy drogi, która na pewno zadziała.'),
   };
   return <String>[best, direct, through];
+}
+
+/// A way through gates step by step: who opens each gate, to whom, and on
+/// what terms. A long way shows its ends and opens to show the rest.
+class GatePlanSteps extends StatefulWidget {
+  const GatePlanSteps({required this.intro, required this.plan, super.key});
+
+  final IntroService intro;
+  final GatePlan plan;
+
+  /// Steps shown before the way is opened up.
+  static const int shownEnds = 2;
+
+  @override
+  State<GatePlanSteps> createState() => _GatePlanStepsState();
+}
+
+class _GatePlanStepsState extends State<GatePlanSteps> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final List<GateStepPlan> steps = widget.plan.steps;
+    final List<String> names = gatePlanNames(widget.intro, widget.plan);
+    final bool long = steps.length > GatePlanSteps.shownEnds * 2 + 1;
+    final int hidden = long && !_open
+        ? steps.length - GatePlanSteps.shownEnds * 2
+        : 0;
+    Widget row(int i) {
+      final GateStepPlan s = steps[i];
+      final String to = s.toName.isEmpty ? t('ktoś') : s.toName;
+      return Padding(
+        key: Key('gate-step-$i'),
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            CircleAvatar(
+              radius: 11,
+              backgroundColor: zen.accent.withValues(alpha: 0.16),
+              foregroundColor: zen.accent,
+              child: Text('${i + 1}', style: const TextStyle(fontSize: 11)),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '${names[i]} → $to · ${s.terms?.label ?? t('decyduje sam(a)')}',
+                style: TextStyle(color: zen.textPrimary, fontSize: 13.5),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      key: const Key('gate-plan-steps'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          tn(
+            steps.length,
+            one: '{n} brama po kolei',
+            few: '{n} bramy po kolei',
+            many: '{n} bram po kolei',
+          ),
+          style: zen.label(color: zen.textSecondary),
+        ),
+        const SizedBox(height: 4),
+        if (hidden == 0)
+          for (int i = 0; i < steps.length; i++) row(i)
+        else ...<Widget>[
+          for (int i = 0; i < GatePlanSteps.shownEnds; i++) row(i),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const Key('gate-steps-more'),
+              onPressed: () => setState(() => _open = true),
+              icon: const Icon(Icons.unfold_more_rounded),
+              label: Text(
+                tn(
+                  hidden,
+                  one: 'Pokaż jeszcze {n} bramę',
+                  few: 'Pokaż jeszcze {n} bramy',
+                  many: 'Pokaż jeszcze {n} bram',
+                ),
+              ),
+            ),
+          ),
+          for (
+            int i = steps.length - GatePlanSteps.shownEnds;
+            i < steps.length;
+            i++
+          )
+            row(i),
+        ],
+      ],
+    );
+  }
+}
+
+/// "Jak dotrzeć" to someone further than friends of friends: the cheapest
+/// way known (gates one after another, or writing directly) and taking it.
+Future<void> reachPerson(
+  BuildContext context,
+  WidgetRef ref, {
+  required String target,
+  required String targetName,
+}) async {
+  final IntroService intro = ref.read(introServiceProvider);
+  final StrangerChatBook strangers = ref.read(strangerChatsProvider);
+  final DirectTerms direct =
+      strangers.termsOf?.call(target) ?? const DirectTerms.unknown();
+  final ReachPlan plan = intro.planTo(target, direct: direct);
+  final bool member = intro.wallet?.myKey != null;
+  final NavigatorState nav = Navigator.of(context);
+  final TextEditingController note = TextEditingController();
+  final GatePlan? gates = plan.gates;
+  final _Reach? choice = await showDialog<_Reach>(
+    context: context,
+    builder: (BuildContext context) {
+      final ZenColors zen = ZenColors.of(context);
+      return AlertDialog(
+        key: const Key('reach-dialog'),
+        title: Text(t('Jak dotrzeć: {name}', {'name': targetName})),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              ZenInfo(
+                key: const Key('reach-plan'),
+                icon: Icons.route_rounded,
+                tone: zen.accent,
+                text: <String>[
+                  ...reachLines(intro, plan),
+                  if (!member)
+                    t(
+                      'Płatne bramy i wiadomości działają tylko między '
+                      'członkami piramidy; poza nią — tylko darmowe.',
+                    ),
+                ].join('\n'),
+              ),
+              if (gates != null && gates.steps.length > 1) ...<Widget>[
+                const SizedBox(height: 10),
+                GatePlanSteps(intro: intro, plan: gates),
+              ],
+              if (gates != null)
+                TextField(
+                  key: const Key('reach-note'),
+                  controller: note,
+                  minLines: 2,
+                  maxLines: 4,
+                  maxLength: kIntroNoteMaxChars,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(
+                    labelText: t('Kilka słów dla każdej bramy'),
+                    hintText: t('Dlaczego chcesz poznać tę osobę…'),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(t('Anuluj')),
+          ),
+          if (plan.direct.usable)
+            TextButton(
+              key: const Key('reach-direct'),
+              onPressed: () => Navigator.of(context).pop(_Reach.direct),
+              child: Text(
+                plan.direct.price > 0
+                    ? t('Zapłać {price} i napisz', {
+                        'price': formatPoints(plan.direct.price),
+                      })
+                    : t('Napisz bezpośrednio'),
+              ),
+            ),
+          if (gates != null)
+            FilledButton(
+              key: const Key('reach-run'),
+              onPressed: () => Navigator.of(context).pop(_Reach.cheapest),
+              child: Text(
+                t('Otwórz drogę ({cost})', {'cost': gatePlanCost(gates)}),
+              ),
+            ),
+        ],
+      );
+    },
+  );
+  final String text = note.text;
+  disposeLater(note);
+  if (choice == null || !context.mounted) {
+    return;
+  }
+  switch (choice) {
+    case _Reach.cheapest:
+      await _openWay(context, intro, gates!, target, targetName, text);
+    case _Reach.direct:
+      await _writeDirectly(context, intro, nav, plan, target, targetName);
+    case _Reach.ask:
+      return;
+  }
+}
+
+/// Writes to [target] directly: free, or paying their price first.
+Future<void> _writeDirectly(
+  BuildContext context,
+  IntroService intro,
+  NavigatorState nav,
+  ReachPlan plan,
+  String target,
+  String targetName,
+) async {
+  if (plan.direct.price <= 0) {
+    unawaited(
+      nav.push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) =>
+              ConversationScreen(peerAddress: target, title: targetName),
+        ),
+      ),
+    );
+    return;
+  }
+  if (!await confirmPayment(context)) {
+    return;
+  }
+  final bool paid = await intro.payToWrite(target, price: plan.direct.price);
+  if (context.mounted) {
+    _snack(
+      context,
+      paid
+          ? t(
+              'Płatność w drodze. Gdy {name} ją przyjmie, możesz napisać '
+              '(do {n} wiadomości przed odpowiedzią).',
+              {'name': targetName, 'n': kStrangerMessagesBeforeReply},
+            )
+          : t('Płatność nie poszła (za mało punktów albo poza piramidą).'),
+    );
+  }
 }
 
 /// What one gatekeeper's [terms] mean for the asker.
@@ -214,6 +462,10 @@ Future<void> askIntroduction(
                       ),
                   ].join('\n'),
                 ),
+                if (gates != null && gates.steps.length > 1) ...<Widget>[
+                  const SizedBox(height: 10),
+                  GatePlanSteps(intro: intro, plan: gates),
+                ],
               ],
             ),
           ),
@@ -299,36 +551,7 @@ Future<void> askIntroduction(
     case _Reach.cheapest:
       await _openWay(context, intro, plan.gates!, target, targetName, text);
     case _Reach.direct:
-      if (plan.direct.price <= 0) {
-        unawaited(
-          nav.push(
-            MaterialPageRoute<void>(
-              builder: (BuildContext context) =>
-                  ConversationScreen(peerAddress: target, title: targetName),
-            ),
-          ),
-        );
-        return;
-      }
-      if (!await confirmPayment(context)) {
-        return;
-      }
-      final bool paid = await intro.payToWrite(
-        target,
-        price: plan.direct.price,
-      );
-      if (context.mounted) {
-        _snack(
-          context,
-          paid
-              ? t(
-                  'Płatność w drodze. Gdy {name} ją przyjmie, możesz napisać '
-                  '(do {n} wiadomości przed odpowiedzią).',
-                  {'name': targetName, 'n': kStrangerMessagesBeforeReply},
-                )
-              : t('Płatność nie poszła (za mało punktów albo poza piramidą).'),
-        );
-      }
+      await _writeDirectly(context, intro, nav, plan, target, targetName);
   }
 }
 
@@ -461,7 +684,26 @@ Widget gateRunsTile(IntroService intro) {
                   })
                 : t('Do: {name}', {'name': r.targetName}),
           ),
-          subtitle: Text(gateRunStatus(r)),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(gateRunStatus(r)),
+              if (r.going && r.steps.length > 1)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: LinearProgressIndicator(
+                    key: Key('intro-way-progress-${r.id}'),
+                    value:
+                        r.steps
+                            .where(
+                              (GateRunStep s) => s.state == GateStepState.open,
+                            )
+                            .length /
+                        r.steps.length,
+                  ),
+                ),
+            ],
+          ),
           trailing: r.going
               ? TextButton(
                   key: Key('intro-way-cancel-${r.id}'),

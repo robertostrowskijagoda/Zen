@@ -134,6 +134,11 @@ class _IntroCard extends StatelessWidget {
           'via': via,
         }),
       ),
+      (_, IntroKind.friend) => (
+        Icons.person_add_alt_rounded,
+        t('{name} chce dodać Cię do znajomych', {'name': x}),
+        t('Znacie się przez: {via}. Zdecyduj, czy chcesz.', {'via': via}),
+      ),
       _ => (
         Icons.waving_hand_rounded,
         t('{via} przedstawia Ci: {name}', {'via': via, 'name': x}),
@@ -228,11 +233,11 @@ class _IntroCard extends StatelessWidget {
                     ),
                   ),
                   icon: const Icon(Icons.person_add_rounded, size: 18),
-                  label: Text(
-                    c.kind == IntroKind.letter
-                        ? t('Zaproś do znajomych')
-                        : t('Poznajmy się'),
-                  ),
+                  label: Text(switch (c.kind) {
+                    IntroKind.letter => t('Zaproś do znajomych'),
+                    IntroKind.friend => t('Dodaj do znajomych'),
+                    _ => t('Poznajmy się'),
+                  }),
                 ),
               if (middle)
                 OutlinedButton(
@@ -307,6 +312,9 @@ String _askedTitle(IntroService intro, IntroCase c) => switch (c.kind) {
   IntroKind.list => t('Lista znajomych: {name}', {
     'name': intro.host.nameOf(c.middle),
   }),
+  IntroKind.friend => t('Zaproszenie do znajomych: {name}', {
+    'name': c.targetName,
+  }),
 };
 
 String _askedStatus(IntroService intro, IntroCase c) {
@@ -342,6 +350,26 @@ String _askedStatus(IntroService intro, IntroCase c) {
       IntroStatus.declined => t('Nie poszedł (przez: {via})', {'via': via}),
       IntroStatus.refused => t('Bez odpowiedzi'),
     },
+    IntroKind.friend =>
+      intro.host.isFriend(c.target)
+          ? t('Jesteście znajomymi')
+          : switch (c.status) {
+              IntroStatus.open => t('Czeka na: {via}', {'via': via}),
+              IntroStatus.forwarded =>
+                c.middle.isEmpty
+                    ? t('Wysłane bezpośrednio. Decyduje: {name}', {
+                        'name': c.targetName,
+                      })
+                    : t('Dotarło przez: {via}. Decyduje: {name}', {
+                        'via': via,
+                        'name': c.targetName,
+                      }),
+              IntroStatus.accepted => t('Przyjęte — jesteście znajomymi'),
+              IntroStatus.declined => t('Nie przekazane przez: {via}', {
+                'via': via,
+              }),
+              IntroStatus.refused => t('Bez odpowiedzi'),
+            },
   };
 }
 
@@ -368,6 +396,11 @@ String _handledLine(IntroService intro, IntroCase c) {
     }),
     IntroKind.intro => '$x → ${intro.host.nameOf(c.target)} — $done',
     IntroKind.letter => t('List: {from} → {to} — {status}', {
+      'from': x,
+      'to': intro.host.nameOf(c.target),
+      'status': done,
+    }),
+    IntroKind.friend => t('Zaproszenie: {from} → {to} — {status}', {
       'from': x,
       'to': intro.host.nameOf(c.target),
       'status': done,
@@ -502,6 +535,10 @@ class FriendListAudienceTile extends ConsumerWidget {
                     'Widzą ją znajomi i przyjaciele. Słaby znajomy może '
                     'poprosić, a Ty zgadzasz się w Skrzynce.',
                   ),
+                  FriendListAudience.close => t(
+                    'Widzą ją tylko przyjaciele. Inni znajomi mogą poprosić, '
+                    'a Ty zgadzasz się w Skrzynce.',
+                  ),
                   FriendListAudience.onRequest => t(
                     'Znajomy może poprosić, a Ty zgadzasz się w Skrzynce. '
                     'Zgodę cofniesz w każdej chwili.',
@@ -529,6 +566,7 @@ class FriendListAudienceTile extends ConsumerWidget {
                           FriendListAudience.friends,
                           t('Znajomi i przyjaciele'),
                         ),
+                        (FriendListAudience.close, t('Tylko przyjaciele')),
                         (FriendListAudience.onRequest, t('Tylko na prośbę')),
                         (FriendListAudience.nobody, t('Nikt')),
                       ])
@@ -542,6 +580,7 @@ class FriendListAudienceTile extends ConsumerWidget {
                 ],
               ),
               if ((audience == FriendListAudience.onRequest ||
+                      audience == FriendListAudience.close ||
                       audience == FriendListAudience.friends) &&
                   allowed.isNotEmpty) ...<Widget>[
                 const SizedBox(height: 12),

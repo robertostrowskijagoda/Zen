@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/features/meet/graph/graph_insights.dart';
 import 'package:zen/src/features/meet/graph/graph_model.dart';
 
 /// How one person is drawn in the current mode.
@@ -167,9 +168,15 @@ const int _maxLabels = 220;
 /// Line labels drawn at most in one paint.
 const int _maxEdgeTags = 200;
 
+/// Share of the timeline over which someone new grows to full size.
+const double _growSpan = 0.05;
+
 /// The graph. Level of detail: many people are dots drawn in a few batched
 /// calls, names show by zoom and only inside [visible]; positions move
-/// only while [progress] runs (a mode change), never otherwise.
+/// only while [progress] runs (a mode change), never otherwise. With a
+/// [timeline], people appear as [clock] (0…1 of its span) passes the day
+/// they came, and a ring in [metTone] marks a meeting in person once its
+/// day has passed — the layout stays, so playing it is only repainting.
 class GraphPainter extends CustomPainter {
   GraphPainter({
     required this.scene,
@@ -183,7 +190,14 @@ class GraphPainter extends CustomPainter {
     required this.guide,
     this.scale = 1,
     this.visible,
-  }) : super(repaint: progress);
+    this.timeline,
+    this.clock,
+    this.metTone,
+  }) : super(
+         repaint: clock == null
+             ? progress
+             : Listenable.merge(<Listenable>[progress, clock]),
+       );
 
   final GraphScene scene;
   final GraphLook look;
@@ -200,6 +214,35 @@ class GraphPainter extends CustomPainter {
 
   /// The part of the picture on screen (`null`: all of it).
   final Rect? visible;
+
+  /// When each person came and was met (aligned with the layout).
+  final GraphTimeline? timeline;
+
+  /// Where on the [timeline] the picture is (0…1).
+  final Animation<double>? clock;
+  final Color? metTone;
+
+  /// Whether person [i] was met in person by [at].
+  bool _metBy(int i, double at) {
+    final GraphTimeline? tl = timeline;
+    return tl != null && i >= 0 && i < tl.met.length && tl.met[i] <= at;
+  }
+
+  /// How grown person [i] is now (0: not there yet, 1: fully).
+  double _grown(int i, double at) {
+    final GraphTimeline? tl = timeline;
+    if (tl == null || i < 0 || i >= tl.born.length) {
+      return 1;
+    }
+    final double b = tl.born[i];
+    if (b < 0) {
+      return 1;
+    }
+    if (b > at) {
+      return 0;
+    }
+    return ((at - b) / _growSpan).clamp(0.0, 1.0);
+  }
 
   Float32List _positions(double phase) {
     final Float32List to = scene.layout.xy;
@@ -224,6 +267,9 @@ class GraphPainter extends CustomPainter {
     final int n = scene.layout.nodes.length;
     Offset at(int i) => i < 0 ? c : Offset(xy[2 * i], xy[2 * i + 1]);
     bool shown(Offset p) => visible == null || visible!.inflate(40).contains(p);
+    final double now = clock?.value ?? 1;
+    final bool timed = timeline != null;
+    bool there(int i) => !timed || i < 0 || _grown(i, now) > 0;
 
     // Faint rings where the people are.
     final Paint ringPaint = Paint()
@@ -247,7 +293,8 @@ class GraphPainter extends CustomPainter {
     final int edges = scene.edgeCount;
     for (int e = 0; e < edges; e++) {
       final EdgeLook l = look.edges[e];
-      if (l.color.a == 0) {
+      if (l.color.a == 0 ||
+          (timed && (!there(scene.edgeFrom[e]) || !there(scene.edgeTo[e])))) {
         continue;
       }
       final Offset a = at(scene.edgeFrom[e]);
@@ -283,8 +330,11 @@ class GraphPainter extends CustomPainter {
       if (linkCount > 600) {
         final Float32List pts = Float32List(linkCount * 4);
         for (int i = 0; i < linkCount; i++) {
-          final Offset x = at(links[2 * i]);
-          final Offset y = at(links[2 * i + 1]);
+          // Not there yet: a point under "Ty" (drawn over it).
+          final bool hide =
+              timed && (!there(links[2 * i]) || !there(links[2 * i + 1]));
+          final Offset x = hide ? c : at(links[2 * i]);
+          final Offset y = hide ? c : at(links[2 * i + 1]);
           pts
             ..[4 * i] = x.dx
             ..[4 * i + 1] = x.dy
@@ -295,6 +345,9 @@ class GraphPainter extends CustomPainter {
       } else {
         final Path curves = Path();
         for (int i = 0; i < linkCount; i++) {
+          if (timed && (!there(links[2 * i]) || !there(links[2 * i + 1]))) {
+            continue;
+          }
           final Offset x = at(links[2 * i]);
           final Offset y = at(links[2 * i + 1]);
           final Offset mid = (x + y) / 2;
@@ -343,9 +396,29 @@ class GraphPainter extends CustomPainter {
     final Paint stroke = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.6;
+    final Paint metRing = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = metTone ?? me;
     for (int i = 0; i < n; i++) {
       final NodeLook l = look.nodes[i];
       final Offset p = at(i);
+      if (timed) {
+        final double g = _grown(i, now);
+        if (g <= 0) {
+          continue;
+        }
+        final bool metBy = _metBy(i, now);
+        if (g < 1 || metBy) {
+          // Growing, or met by now: drawn on its own.
+          final double r = l.radius * (0.4 + 0.6 * g);
+          canvas.drawCircle(p, r, fill..color = l.fill);
+          if (metBy) {
+            canvas.drawCircle(p, r + 3.5, metRing);
+          }
+          continue;
+        }
+      }
       if (l.radius <= 5 && l.ring == null && l.dot == null) {
         final (double, List<double>) b = dots.putIfAbsent(
           l.fill.toARGB32(),
@@ -417,6 +490,9 @@ class GraphPainter extends CustomPainter {
         if (!forced && (!shown(p) || !(g.isFriend ? friendNames : farNames))) {
           continue;
         }
+        if (timeline != null && _grown(i, clock?.value ?? 1) < 1) {
+          continue;
+        }
         final TextPainter tp = labels.get(g.name, text, bold: true);
         final Offset topLeft = p + Offset(-tp.width / 2, l.radius + 6);
         _pill(canvas, topLeft, tp, labelBg.withValues(alpha: 0.88));
@@ -443,7 +519,8 @@ class GraphPainter extends CustomPainter {
       if (l.tag == null ||
           l.label ||
           (g.isFriend ? friendNames : farNames) ||
-          !shown(at(i))) {
+          !shown(at(i)) ||
+          (timeline != null && _grown(i, clock?.value ?? 1) < 1)) {
         continue;
       }
       final TextPainter tag = labels.get(l.tag!, l.tagTone ?? text);
@@ -592,6 +669,7 @@ class GraphPainter extends CustomPainter {
   bool shouldRepaint(GraphPainter old) =>
       !identical(old.scene, scene) ||
       !identical(old.look, look) ||
+      !identical(old.timeline, timeline) ||
       old.scale != scale ||
       old.visible != visible ||
       old.me != me ||

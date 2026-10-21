@@ -86,6 +86,15 @@ const int kIntroForwardsPerFriendPerDay = 10;
 /// Payments for a first message taken from one person a day.
 const int kIntroPaysPerDay = 5;
 
+/// Friend requests one person sends from the graph in a week (through a
+/// friend or directly; the sender's app counts).
+const int kFriendAsksPerWeek = 10;
+
+/// Friend requests a phone passes on from one friend in a week, and from
+/// everybody together (the middle friend's app checks).
+const int kFriendRelaysPerSenderWeek = 5;
+const int kFriendRelaysPerWeek = 30;
+
 /// Cases waiting for this person's answer, at most.
 const int kIntroMaxOpen = 50;
 
@@ -195,7 +204,12 @@ enum IntroKind {
   letter,
 
   /// X asks F to see F's friend list.
-  list;
+  list,
+
+  /// X sends Y (a friend of F) a friend request through F: F's phone
+  /// passes it on by itself (within limits, only when X sees F's list),
+  /// Y accepts or not. The normal friend request follows an acceptance.
+  friend;
 
   static IntroKind? byName(Object? name) =>
       IntroKind.values.where((IntroKind k) => k.name == name).firstOrNull;
@@ -548,6 +562,9 @@ final class IntroService extends ChangeNotifier {
   /// Letters this phone passed on: who sent them and when.
   final List<(String, int)> _relayed = <(String, int)>[];
 
+  /// Friend requests this phone passed on: who sent them and when.
+  final List<(String, int)> _friendRelayed = <(String, int)>[];
+
   bool _relayLetters = true;
 
   /// This person's gate terms.
@@ -692,6 +709,7 @@ final class IntroService extends ChangeNotifier {
       }
       _cases.clear();
       _relayed.clear();
+      _friendRelayed.clear();
       _relayLetters = true;
       _gates = GateSettings();
       _cards.clear();
@@ -716,6 +734,16 @@ final class IntroService extends ChangeNotifier {
           for (final Object? r in relayed.take(kLettersRelayedPerWeek * 4)) {
             if (r is List && r.length == 2 && r[0] is String && r[1] is int) {
               _relayed.add((r[0] as String, r[1] as int));
+            }
+          }
+        }
+        final Object? friendRelayed = json['frl'];
+        if (friendRelayed is List) {
+          for (final Object? r in friendRelayed.take(
+            kFriendRelaysPerWeek * 4,
+          )) {
+            if (r is List && r.length == 2 && r[0] is String && r[1] is int) {
+              _friendRelayed.add((r[0] as String, r[1] as int));
             }
           }
         }
@@ -800,6 +828,7 @@ final class IntroService extends ChangeNotifier {
     final int ms = _now();
     _cases.removeWhere((String _, IntroCase c) => !c.aliveAt(ms));
     _relayed.removeWhere(((String, int) r) => ms - r.$2 > _week);
+    _friendRelayed.removeWhere(((String, int) r) => ms - r.$2 > _week);
     final int over = _cases.length - kIntroMaxCases;
     if (over > 0) {
       // Decided ones go first, oldest first.
@@ -826,6 +855,11 @@ final class IntroService extends ChangeNotifier {
           'relayed': <List<Object>>[
             for (final (String, int) r in _relayed) <Object>[r.$1, r.$2],
           ],
+          if (_friendRelayed.isNotEmpty)
+            'frl': <List<Object>>[
+              for (final (String, int) r in _friendRelayed)
+                <Object>[r.$1, r.$2],
+            ],
           if (!_relayLetters) 'relay': false,
           'gates': _gates.toJson(),
           if (_cards.isNotEmpty)
@@ -923,6 +957,96 @@ final class IntroService extends ChangeNotifier {
       targetName,
       introText(note, kIntroNoteMaxChars),
     );
+  }
+
+  /// Friend requests this person may still send from the graph this week
+  /// ([kFriendAsksPerWeek]).
+  int friendAsksLeft() {
+    final int ms = _now();
+    final int sent = _cases.values
+        .where(
+          (IntroCase c) =>
+              c.role == IntroRole.asker &&
+              c.kind == IntroKind.friend &&
+              ms - c.at < _week,
+        )
+        .length;
+    return max(0, kFriendAsksPerWeek - sent);
+  }
+
+  /// This person's friend request to [target] from the graph that is still
+  /// going (through anyone, or directly).
+  IntroCase? friendAskTo(String target) {
+    final String y = _n(target);
+    final int ms = _now();
+    for (final IntroCase c in _cases.values) {
+      if (c.role == IntroRole.asker &&
+          c.kind == IntroKind.friend &&
+          c.target == y &&
+          c.isPending &&
+          c.aliveAt(ms)) {
+        return c;
+      }
+    }
+    return null;
+  }
+
+  /// "Dodaj do znajomych" on someone this person knows of from the graph:
+  /// a friend request through [middle] (a friend who knows them; their
+  /// phone passes it on by itself), or — with no [middle] — sent directly
+  /// to their address. They accept or not; the friendship is then made by
+  /// the normal friend requests, keys and levels as with a code. At most
+  /// [kFriendAsksPerWeek] a week. Returns the case (the one already going,
+  /// if any), or `null` when it cannot go.
+  Future<IntroCase?> askFriend({
+    required String target,
+    required String targetName,
+    String middle = '',
+    String note = '',
+  }) async {
+    await _ready();
+    final String y = _address(target);
+    if (y.isEmpty || _isSelf(y) || host.isFriend(y)) {
+      return null;
+    }
+    final IntroCase? had = friendAskTo(y);
+    if (had != null) {
+      return had;
+    }
+    if (friendAsksLeft() <= 0) {
+      return null;
+    }
+    final String words = introText(note, kIntroNoteMaxChars);
+    if (middle.isNotEmpty) {
+      return _askAbout(IntroKind.friend, middle, y, targetName, words);
+    }
+    final IntroFriending? f = friending;
+    if (f == null || f.isBlocked(y)) {
+      return null;
+    }
+    final IntroCase c = IntroCase(
+      id: _newId(),
+      kind: IntroKind.friend,
+      role: IntroRole.asker,
+      at: _now(),
+      target: y,
+      targetName: sanitizePeerName(targetName),
+      text: words,
+      status: IntroStatus.forwarded,
+    );
+    try {
+      await f.befriend(
+        y,
+        name: c.targetName,
+        note: words.isNotEmpty ? words : t('Znamy się przez znajomych.'),
+      );
+    } on Object catch (error, stack) {
+      logZenError('Graf: zaproszenie do znajomych', error, stack);
+      return null;
+    }
+    _cases[c.id] = c;
+    await _save();
+    return c;
   }
 
   /// Sends [target] one letter through [middle] (a friend who knows them).
@@ -1249,7 +1373,6 @@ final class IntroService extends ChangeNotifier {
     // Passing a friend on tells [q] who this person's friends are: only to
     // those who see the list anyway.
     if (m != null && m.friendListVisibleTo(q)) {
-      int budget = kGateRelayEntries;
       for (final String f in host.friends()) {
         final String g = _n(f);
         final GateCard? card = _cards[g];
@@ -1257,14 +1380,6 @@ final class IntroService extends ChangeNotifier {
         if (g == q || card == null || !card.relay || open == null) {
           continue;
         }
-        if (budget <= 0) {
-          break;
-        }
-        final List<RelayedGate> below = card.relayed
-            .where((RelayedGate r) => r.address != q)
-            .take(budget - 1)
-            .toList();
-        budget -= 1 + below.length;
         final Map<String, String> list = m.book.friendsOf(g);
         relayed.add(
           RelayedGate(
@@ -1276,7 +1391,7 @@ final class IntroService extends ChangeNotifier {
               ))
                 e.key: e.value,
             },
-            relayed: below,
+            relayed: card.relayed,
           ),
         );
       }
@@ -1285,7 +1400,14 @@ final class IntroService extends ChangeNotifier {
       terms: _gates.termsFor(q),
       relay: _gates.relay,
       open: _gates.relay ? _gates.defaults : null,
-      relayed: relayed,
+      // The nearest gatekeepers first, as far as the card's budget goes.
+      relayed: trimRelayed(
+        relayed,
+        exclude: <String>{
+          q,
+          if (host.ownAddress().isNotEmpty) _n(host.ownAddress()),
+        },
+      ),
     ).toJson();
   }
 
@@ -1357,6 +1479,31 @@ final class IntroService extends ChangeNotifier {
       }
     }
     return _index[p]?.friends ?? const <String, String>{};
+  }
+
+  /// What friends passed on about gatekeepers further away, as one object
+  /// that changes whenever that knowledge does (to rebuild what depends on
+  /// [farPeople] only then).
+  Object get relayedToken => _index;
+
+  /// People this phone knows of beyond friends of friends: the friends of
+  /// gatekeepers that friends passed on (address → their own name and the
+  /// gatekeepers who know them). Ways through gates reach them.
+  Map<String, ({String name, Set<String> via})> farPeople() {
+    final Map<String, ({String name, Set<String> via})> out =
+        <String, ({String name, Set<String> via})>{};
+    _index.forEach((
+      String gatekeeper,
+      ({GateTerms terms, Map<String, String> friends}) known,
+    ) {
+      known.friends.forEach((String a, String name) {
+        out
+            .putIfAbsent(a, () => (name: name, via: <String>{}))
+            .via
+            .add(gatekeeper);
+      });
+    });
+    return out;
   }
 
   /// Whether this person can pay [gatekeeper] (both in the pyramid).
@@ -1677,7 +1824,6 @@ final class IntroService extends ChangeNotifier {
       return had;
     }
     if (plan.isEmpty ||
-        plan.steps.length > kGateMaxSteps ||
         !host.isFriend(plan.steps.first.via) ||
         _n(plan.steps.last.to) != _n(target) ||
         (plan.price > 0 && wallet?.myKey == null)) {
@@ -2363,6 +2509,10 @@ final class IntroService extends ChangeNotifier {
       await _result(from, id, 'no');
       return;
     }
+    if (kind == IntroKind.friend) {
+      await _relayFriendAsk(from, id, target, text, proof);
+      return;
+    }
     final Object? x = p['x'];
     // A payment pays for one gate (or one first message) only: one already
     // attached to another request here counts as none.
@@ -2433,6 +2583,53 @@ final class IntroService extends ChangeNotifier {
     await _checkGatePayment(c);
   }
 
+  /// A friend asks this phone to pass their friend request on to [target]
+  /// (one of this person's friends): passed on by itself — the asker sees
+  /// this person's friend list anyway — within the weekly limits; this
+  /// person finds it later under "Przeszło przez Ciebie".
+  Future<void> _relayFriendAsk(
+    String from,
+    String id,
+    String target,
+    String text,
+    Map<String, dynamic> proof,
+  ) async {
+    bool sees = false;
+    try {
+      sees = meet().friendListVisibleTo(from);
+    } on Object {
+      sees = false;
+    }
+    final int ms = _now();
+    final List<(String, int)> week = <(String, int)>[
+      for (final (String, int) r in _friendRelayed)
+        if (ms - r.$2 < _week) r,
+    ];
+    if (!sees ||
+        week.length >= kFriendRelaysPerWeek ||
+        week.where(((String, int) r) => r.$1 == from).length >=
+            kFriendRelaysPerSenderWeek) {
+      await _result(from, id, 'no');
+      return;
+    }
+    _friendRelayed.add((from, ms));
+    final IntroCase c = IntroCase(
+      id: id,
+      kind: IntroKind.friend,
+      role: IntroRole.middle,
+      at: ms,
+      asker: from,
+      target: target,
+      text: text,
+      proof: proof,
+      status: IntroStatus.forwarded,
+    );
+    _cases[id] = c;
+    await _save();
+    await _sendForward(c);
+    await _result(from, id, 'fwd');
+  }
+
   /// Whether payment [x] already pays for a gate request or a first
   /// message here (so it is not counted twice).
   bool _paymentTaken(String x) =>
@@ -2463,7 +2660,9 @@ final class IntroService extends ChangeNotifier {
       case FriendListAudience.nobody:
         await _result(from, id, 'no');
       // A weak acquaintance asks like everybody does "on request".
-      case FriendListAudience.onRequest || FriendListAudience.friends:
+      case FriendListAudience.onRequest ||
+          FriendListAudience.friends ||
+          FriendListAudience.close:
         if (m.friendListVisibleTo(from)) {
           await m.resendFriendList(from);
           await _result(from, id, 'ok');
@@ -2592,6 +2791,11 @@ final class IntroService extends ChangeNotifier {
           : c.text.isNotEmpty
           ? c.text
           : t('Przyjmij albo odrzuć w Skrzynce.');
+    } else if (kind == IntroKind.friend) {
+      title = t('{name} chce dodać Cię do znajomych', {'name': c.askerName});
+      body = c.text.isNotEmpty
+          ? c.text
+          : t('Znacie się przez: {via}.', {'via': via});
     } else {
       title = t('List od: {name} (przez: {via})', {
         'name': c.askerName,
@@ -2670,6 +2874,12 @@ final class IntroService extends ChangeNotifier {
           return;
         }
         c.status = IntroStatus.forwarded;
+        if (c.kind == IntroKind.friend) {
+          // Passed on by the friend's phone itself: nothing to tell yet.
+          c.changedAt = _now();
+          await _save();
+          return;
+        }
         title = c.kind == IntroKind.letter
             ? t('List poszedł dalej')
             : t('Brama otwarta');
@@ -2696,6 +2906,7 @@ final class IntroService extends ChangeNotifier {
           IntroKind.intro =>
             s == 'price' ? t('Ta brama jest płatna') : t('Bez przedstawienia'),
           IntroKind.letter => t('List nie poszedł'),
+          IntroKind.friend => t('Zaproszenie nie poszło'),
         };
         body = switch (c.kind) {
           IntroKind.list => t('{via} nie pokazuje teraz swojej listy.', {
@@ -2714,6 +2925,11 @@ final class IntroService extends ChangeNotifier {
             'na ten tydzień.',
             {'via': via},
           ),
+          IntroKind.friend => t(
+            'Przez: {via} — limit na ten tydzień albo ta osoba nie '
+            'pokazuje Ci już swojej listy.',
+            {'via': via},
+          ),
         };
       case 'ok':
         if (!c.isPending) {
@@ -2723,6 +2939,8 @@ final class IntroService extends ChangeNotifier {
         c.befriendDue = c.kind != IntroKind.list;
         title = c.kind == IntroKind.list
             ? t('Widzisz listę znajomych: {via}', {'via': via})
+            : c.kind == IntroKind.friend
+            ? t('Zaproszenie przyjęte: {name}', {'name': c.targetName})
             : t('Możecie się poznać: {name}', {'name': c.targetName});
         body = c.kind == IntroKind.list
             ? t('Ta lista pojawi się w Twoim grafie.')

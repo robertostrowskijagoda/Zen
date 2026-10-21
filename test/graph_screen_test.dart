@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -8,6 +10,7 @@ import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/graph/gate_prices.dart';
+import 'package:zen/src/features/meet/graph/graph_full_screen.dart';
 import 'package:zen/src/features/meet/graph/graph_providers.dart';
 import 'package:zen/src/features/meet/graph/open_to_meet.dart';
 import 'package:zen/src/features/meet/intro/intro_providers.dart';
@@ -93,6 +96,18 @@ MeetBook _book() => MeetBook()
     _lucja: 'Łucja',
     _bartek: 'Bartek',
   };
+
+/// The system bars, as the full-screen graph switches them.
+final class _Chrome implements FullScreenChrome {
+  int entered = 0;
+  int exited = 0;
+
+  @override
+  Future<void> enter() async => entered++;
+
+  @override
+  Future<void> exit() async => exited++;
+}
 
 /// Gate prices as the next feature will give them (made up for the test).
 final class _GatePrices extends ChangeNotifier implements GatePriceSource {
@@ -623,6 +638,361 @@ void main() {
       find.text('Ty → Ania → Xawery\n2 kroki · płatne: 5 zł'),
       findsOneWidget,
     );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('graph: who to meet with one tap, "Przyjaciele" only, a '
+      'private circle name, friend requests from the graph and the new '
+      'modes', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(480, 2600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final _Host host = _Host(<String, String>{
+      _ania: 'Ania',
+      _bartek: 'Bartek',
+      _celina: 'Celina',
+    });
+    final MeetService meet = MeetService(
+      host: host,
+      store: MeetStore(MemoryLedgerDisk()),
+    );
+    await tester.runAsync(() async {
+      await meet.handle(
+        _list(_ania, <String, String>{
+          _xawery: 'Xawery',
+          _lucja: 'Łucja',
+          _bartek: 'Bartek',
+        }),
+      );
+      await meet.handle(_list(_celina, <String, String>{_xawery: 'Xawery'}));
+    });
+    final MemorySignalTransport transport = MemorySignalTransport();
+    final MemoryLedgerDisk ledger = MemoryLedgerDisk();
+    await tester.runAsync(() => LedgerIdentity.loadOrCreate(ledger));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          socialHubAutoHydrateProvider.overrideWithValue(false),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              friends: <String, FriendProfile>{
+                _ania: _friend(_ania, 'Ania'),
+                _bartek: _friend(_bartek, 'Bartek'),
+                _celina: _friend(_celina, 'Celina'),
+              },
+            ),
+          ),
+          signalTransportProvider.overrideWithValue(transport),
+          ledgerDiskProvider.overrideWithValue(ledger),
+          introServiceProvider.overrideWith((Ref ref) {
+            final IntroService intro = IntroService(
+              host: MeetEventHost(
+                AppMeetHost(ref),
+                address: () => addr('01'),
+                name: () => 'Ja',
+              ),
+              disk: ledger,
+              meet: () => ref.read(meetServiceProvider),
+              friending: AppIntroFriending(ref),
+            );
+            ref.onDispose(intro.dispose);
+            return intro;
+          }),
+          meetServiceProvider.overrideWithValue(meet),
+          pyramidServiceProvider.overrideWithValue(
+            PyramidService(
+              host: MeetEventHost(host, address: () => '', name: () => 'Ja'),
+              disk: MemoryLedgerDisk(),
+            ),
+          ),
+        ],
+        child: MaterialApp(theme: ZenTheme.dark(), home: const GraphScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    Future<void> tapKey(Key key) async {
+      if (find.byKey(key).evaluate().isEmpty) {
+        // The page is a lazy list: what scrolled far away is not built;
+        // back to the top, where the modes and the graph are.
+        tester
+            .state<ScrollableState>(
+              find
+                  .descendant(
+                    of: find.byType(ListView).first,
+                    matching: find.byType(Scrollable),
+                  )
+                  .first,
+            )
+            .position
+            .jumpTo(0);
+        await tester.pump();
+      }
+      await tester.ensureVisible(find.byKey(key));
+      await tester.pump();
+      await tester.tap(find.byKey(key));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+
+    Future<void> closeSheet() async {
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+
+    List<Map<String, dynamic>> asks(String kind) => <Map<String, dynamic>>[
+      for (final ({String remoteAddress, Map<String, dynamic> payload}) s
+          in transport.sentSignals)
+        if (s.payload['type'] == IntroTypes.ask && s.payload['k'] == kind)
+          s.payload,
+    ];
+
+    // "Kogo warto poznać": Xawery, known by Ania and Celina; one tap asks.
+    expect(find.byKey(const Key('graph-who-to-meet')), findsOneWidget);
+    expect(find.byKey(Key('graph-meet-$_xawery')), findsOneWidget);
+    expect(find.byKey(Key('graph-meet-$_lucja')), findsNothing);
+    await tapKey(Key('graph-meet-ask-$_xawery'));
+    await tester.pump(const Duration(seconds: 1));
+    expect(asks(IntroKind.intro.name).single['a'], _xawery);
+    expect(find.byKey(Key('graph-meet-$_xawery')), findsNothing);
+
+    // Filters: close friends only, friends and close friends, everyone.
+    await tapKey(const Key('graph-filters'));
+    await tapKey(const Key('graph-rings-close'));
+    expect(find.text('Widać: 0 z 5'), findsOneWidget);
+    await tapKey(const Key('graph-rings-friends'));
+    expect(find.text('Widać: 3 z 5'), findsOneWidget);
+    await tapKey(const Key('graph-rings-all'));
+    expect(find.byKey(const Key('graph-count')), findsNothing);
+    await closeSheet();
+
+    // A private name of a circle, then a filter by it.
+    await tapKey(const Key('graph-circles'));
+    final Finder circle = find.byWidgetPredicate(
+      (Widget w) =>
+          w is ListTile &&
+          w.key is ValueKey<String> &&
+          (w.key! as ValueKey<String>).value.startsWith('graph-circle-'),
+    );
+    expect(circle, findsWidgets);
+    await tester.ensureVisible(circle.first);
+    await tester.pump();
+    await tester.tap(circle.first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.enterText(
+      find.byKey(const Key('graph-circle-name')),
+      'Wspinaczka',
+    );
+    await tester.tap(find.byKey(const Key('graph-circle-save')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Wspinaczka'), findsOneWidget);
+    final ProviderContainer container = ProviderScope.containerOf(
+      tester.element(find.byType(GraphScreen)),
+    );
+    final String labelId = container
+        .read(graphNotesProvider)
+        .notes
+        .labels
+        .values
+        .single
+        .id;
+    await tapKey(const Key('graph-filters'));
+    await tapKey(Key('graph-label-$labelId'));
+    expect(find.byKey(const Key('graph-count')), findsOneWidget);
+    await tapKey(const Key('graph-label-any'));
+    await closeSheet();
+
+    // "Dodaj do znajomych" on a friend of a friend: through Ania.
+    await tester.ensureVisible(find.byKey(const Key('graph-search')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('graph-search')), 'luc');
+    await tester.pump();
+    await tapKey(Key('graph-hit-$_lucja'));
+    expect(find.byKey(const Key('graph-person-sheet')), findsOneWidget);
+    await tapKey(const Key('graph-add-friend'));
+    await tester.pump(const Duration(seconds: 1));
+    final Map<String, dynamic> friendAsk = asks(IntroKind.friend.name).single;
+    expect(friendAsk['a'], _lucja);
+    await tester.enterText(find.byKey(const Key('graph-search')), '');
+    await tester.pump();
+
+    // The new modes: bridges, long silences, the timeline.
+    expect(find.byKey(const Key('graph-snapshot')), findsOneWidget);
+    await tapKey(const Key('graph-mode-bridges'));
+    expect(find.byKey(const Key('graph-bridges')), findsOneWidget);
+    expect(find.byKey(const Key('graph-legend-bridges')), findsOneWidget);
+    await tapKey(const Key('graph-mode-neglect'));
+    expect(find.byKey(const Key('graph-neglect')), findsOneWidget);
+    await tapKey(const Key('graph-neglect-weeks-4'));
+    expect(container.read(graphNotesProvider).notes.neglectWeeks, 4);
+    await tapKey(const Key('graph-mode-time'));
+    expect(find.byKey(const Key('graph-time-bar')), findsOneWidget);
+    await tapKey(const Key('graph-time-3'));
+    await tester.pump();
+    expect(find.byKey(const Key('graph-time-state')), findsOneWidget);
+    await tapKey(const Key('graph-time-play'));
+    await tester.pump(const Duration(seconds: 7));
+    await tester.pump();
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('graph: full screen with a button, F11, Esc and a double click; '
+      'the controls hide by themselves; the mode comes back; it turns', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(480, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final _Host host = _Host(<String, String>{
+      _ania: 'Ania',
+      _bartek: 'Bartek',
+    });
+    final MeetService meet = MeetService(
+      host: host,
+      store: MeetStore(MemoryLedgerDisk()),
+    );
+    final _Chrome chrome = _Chrome();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          socialHubAutoHydrateProvider.overrideWithValue(false),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              friends: <String, FriendProfile>{
+                _ania: _friend(_ania, 'Ania'),
+                _bartek: _friend(_bartek, 'Bartek'),
+              },
+            ),
+          ),
+          signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+          ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+          meetServiceProvider.overrideWithValue(meet),
+          graphFullScreenChromeProvider.overrideWithValue(chrome),
+          pyramidServiceProvider.overrideWithValue(
+            PyramidService(
+              host: MeetEventHost(host, address: () => '', name: () => 'Ja'),
+              disk: MemoryLedgerDisk(),
+            ),
+          ),
+        ],
+        child: MaterialApp(theme: ZenTheme.dark(), home: const GraphScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    Future<void> settle() async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+
+    double controls() => tester
+        .widget<AnimatedOpacity>(
+          find
+              .ancestor(
+                of: find.byKey(const Key('graph-full-controls')),
+                matching: find.byType(AnimatedOpacity),
+              )
+              .first,
+        )
+        .opacity;
+
+    // The button: the graph alone, the system bars away.
+    await tester.ensureVisible(find.byKey(const Key('graph-full-toggle')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('graph-full-toggle')));
+    await settle();
+    expect(find.byKey(const Key('graph-full-screen')), findsOneWidget);
+    expect(chrome.entered, 1);
+    expect(find.byKey(const Key('graph-viewer')), findsWidgets);
+    expect(controls(), 1);
+
+    // Another mode right there.
+    await tester.tap(find.byKey(const Key('graph-mode-statuses')).last);
+    await settle();
+    // Untouched for a while: the controls hide; a touch brings them back.
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controls(), 0);
+    await tester.tapAt(const Offset(240, 990));
+    await settle();
+    expect(controls(), 1);
+
+    // It turns: the picture is laid out again for the new shape.
+    tester.view.physicalSize = const Size(1000, 480);
+    await settle();
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const Key('graph-full-layout')), findsOneWidget);
+    tester.view.physicalSize = const Size(480, 1000);
+    await settle();
+
+    // Esc: back, the bars back, in the mode chosen there.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle();
+    await tester.pump();
+    expect(find.byKey(const Key('graph-full-screen')), findsNothing);
+    expect(chrome.exited, 1);
+    expect(find.byKey(const Key('graph-legend-statuses')), findsOneWidget);
+
+    // F11 on and off.
+    await tester.sendKeyEvent(LogicalKeyboardKey.f11);
+    await settle();
+    expect(find.byKey(const Key('graph-full-screen')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.f11);
+    await settle();
+    await tester.pump();
+    expect(find.byKey(const Key('graph-full-screen')), findsNothing);
+    expect(chrome.entered, 2);
+    expect(chrome.exited, 2);
+
+    // A double click on a computer.
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          socialHubAutoHydrateProvider.overrideWithValue(false),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              friends: <String, FriendProfile>{_ania: _friend(_ania, 'Ania')},
+            ),
+          ),
+          signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+          ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+          meetServiceProvider.overrideWithValue(meet),
+          graphFullScreenChromeProvider.overrideWithValue(chrome),
+          pyramidServiceProvider.overrideWithValue(
+            PyramidService(
+              host: MeetEventHost(host, address: () => '', name: () => 'Ja'),
+              disk: MemoryLedgerDisk(),
+            ),
+          ),
+        ],
+        child: MaterialApp(theme: ZenTheme.dark(), home: const GraphScreen()),
+      ),
+    );
+    await settle();
+    // On a computer the canvas takes a double click (gesture arena details
+    // aside, the handler is what matters here).
+    final GestureDetector canvas = tester.widget<GestureDetector>(
+      find.byKey(const Key('graph-canvas')),
+    );
+    expect(canvas.onDoubleTap, isNotNull);
+    canvas.onDoubleTap!();
+    await settle();
+    final bool full = find
+        .byKey(const Key('graph-full-screen'))
+        .evaluate()
+        .isNotEmpty;
+    debugDefaultTargetPlatformOverride = null;
+    expect(full, isTrue);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 5));

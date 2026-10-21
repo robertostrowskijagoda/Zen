@@ -6,6 +6,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/features/meet/ask/ask_path_view.dart';
 import 'package:zen/src/features/meet/ask/ask_service.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_wallet.dart';
@@ -289,13 +290,14 @@ class _AskScreenState extends ConsumerState<AskScreen> {
                             tone: zen.success,
                             icon: Icons.forum_rounded,
                           ),
+                        AskPathView(question: q, nameOf: ask.host.nameOf),
                         for (final (int i, AskAnswer a) in q.answers.indexed)
                           Container(
                             margin: const EdgeInsets.only(top: 8),
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
                               color: zen.surfaceRaised,
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: context.zenRadius(14),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,

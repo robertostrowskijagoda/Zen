@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
@@ -11,17 +13,27 @@ import 'package:zen/src/app/theme/zen_glyphs.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/meet/events/event_model.dart';
+import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/meet/graph/gate_prices.dart';
+import 'package:zen/src/features/meet/graph/graph_full_screen.dart';
+import 'package:zen/src/features/meet/graph/graph_insights.dart';
 import 'package:zen/src/features/meet/graph/graph_model.dart';
+import 'package:zen/src/features/meet/graph/graph_notes.dart';
 import 'package:zen/src/features/meet/graph/graph_painter.dart';
+import 'package:zen/src/features/meet/graph/graph_panels.dart';
 import 'package:zen/src/features/meet/graph/graph_providers.dart';
 import 'package:zen/src/features/meet/graph/open_to_meet.dart';
+import 'package:zen/src/features/meet/graph/trust_map.dart';
+import 'package:zen/src/features/meet/intro/gate_terms.dart';
 import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/intro/intro_service.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
@@ -29,6 +41,7 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/presentation/ask_screen.dart';
+import 'package:zen/src/features/meet/presentation/gate_widgets.dart';
 import 'package:zen/src/features/meet/presentation/intent_widgets.dart';
 import 'package:zen/src/features/meet/presentation/intro_widgets.dart';
 import 'package:zen/src/features/profile/presentation/profile_screen.dart';
@@ -49,20 +62,25 @@ IconData _modeIcon(GraphMode m) => switch (m) {
   GraphMode.pyramid => kPyramidIcon,
   GraphMode.gates => Icons.toll_rounded,
   GraphMode.route => Icons.route_rounded,
+  GraphMode.time => Icons.history_rounded,
+  GraphMode.bridges => Icons.device_hub_rounded,
+  GraphMode.neglect => Icons.hourglass_bottom_rounded,
 };
 
 String _ringLabel(int ring) => switch (ring) {
   1 => t('Przyjaciel(-ółka)'),
   2 => t('Znajomy(-a)'),
   3 => t('Słaby(-a) znajomy(-a)'),
-  _ => t('Znajomy(-a) znajomych'),
+  4 => t('Znajomy(-a) znajomych'),
+  _ => t('Dalsza znajomość'),
 };
 
 String _ringFilterLabel(int ring) => switch (ring) {
   1 => t('Przyjaciele'),
   2 => t('Znajomi'),
   3 => t('Słabi znajomi'),
-  _ => t('Znajomi znajomych'),
+  4 => t('Znajomi znajomych'),
+  _ => t('Dalej'),
 };
 
 /// "5 min temu", "3 godz. temu", "2 dni temu".
@@ -142,7 +160,8 @@ Map<String, PyramidMark> pyramidMarks(PyramidService? pyr) {
 }
 
 /// The look of each person and line in [mode]. Pure: the same inputs
-/// give the same picture (tests read it).
+/// give the same picture (tests read it). [bridges] and [islands] (people
+/// of lone circles) for "Mosty", [neglected] for "Dawno".
 GraphLook graphLook({
   required GraphScene scene,
   required GraphMode mode,
@@ -153,6 +172,9 @@ GraphLook graphLook({
   String? selected,
   Set<String> marked = const <String>{},
   List<String> route = const <String>[],
+  Set<String> bridges = const <String>{},
+  Set<String> islands = const <String>{},
+  Set<String> neglected = const <String>{},
 }) {
   final List<GraphNode> nodes = scene.layout.nodes;
   final bool crowded = nodes.length > 1500;
@@ -175,6 +197,8 @@ GraphLook graphLook({
             2 => 9.0,
             _ => 7.5,
           }
+        : n.isFar
+        ? (crowded ? 2.5 : 3.5)
         : (crowded ? 3.0 : 4.5);
     Color fill = n.isFriend
         ? switch (n.ring) {
@@ -182,6 +206,8 @@ GraphLook graphLook({
             2 => zen.accent.withValues(alpha: 0.82),
             _ => zen.accent.withValues(alpha: 0.58),
           }
+        : n.isFar
+        ? zen.textMuted.withValues(alpha: 0.7)
         : zen.textMuted;
     Color? ring;
     Color? dot;
@@ -227,6 +253,25 @@ GraphLook graphLook({
       case GraphMode.route:
         if (routing && !onRoute.contains(a)) {
           fill = dim(fill, 0.2);
+        }
+      case GraphMode.time:
+        break;
+      case GraphMode.bridges:
+        if (bridges.contains(a)) {
+          ring = zen.accent;
+          tag = t('most');
+          tagTone = zen.accent;
+        } else if (islands.contains(a)) {
+          fill = zenTone(zen, 5);
+        } else {
+          fill = dim(fill, n.isFriend ? 0.45 : 0.2);
+        }
+      case GraphMode.neglect:
+        if (neglected.contains(a)) {
+          fill = zen.accentSecondary;
+          ring = zen.accentSecondary.withValues(alpha: 0.5);
+        } else {
+          fill = dim(fill, n.isFriend ? 0.4 : 0.15);
         }
     }
     if (lit) {
@@ -297,6 +342,17 @@ GraphLook graphLook({
         if (routing) {
           color = color.withValues(alpha: 0.2);
         }
+      case GraphMode.time:
+        break;
+      case GraphMode.bridges:
+        color = color.withValues(alpha: spoke ? 0.4 : 0.2);
+      case GraphMode.neglect:
+        if (spoke && neglected.contains(to.address)) {
+          color = zen.accentSecondary;
+          dashed = true;
+        } else {
+          color = color.withValues(alpha: spoke ? 0.35 : 0.15);
+        }
     }
     edges.add(EdgeLook(color: color, width: width, dashed: dashed, tag: tag));
   }
@@ -304,7 +360,8 @@ GraphLook graphLook({
     nodes: looks,
     edges: edges,
     link: switch (mode) {
-      GraphMode.friends => zen.outline.withValues(alpha: 0.6),
+      GraphMode.friends || GraphMode.time => zen.outline.withValues(alpha: 0.6),
+      GraphMode.bridges => zen.outline.withValues(alpha: 0.5),
       GraphMode.route when routing => zen.outline.withValues(alpha: 0.12),
       _ => zen.outline.withValues(alpha: 0.3),
     },
@@ -313,7 +370,7 @@ GraphLook graphLook({
         for (final String a in route)
           if (index[a] case final int i) i,
     ],
-    showHalos: mode == GraphMode.friends,
+    showHalos: mode == GraphMode.friends || mode == GraphMode.bridges,
   );
 }
 
@@ -323,21 +380,29 @@ int graphBand(
   GraphMode mode,
   GraphNode n,
   GraphFacts f,
-  Map<String, PyramidMark> pyr,
-) {
+  Map<String, PyramidMark> pyr, {
+  Set<String> neglected = const <String>{},
+}) {
   switch (mode) {
     case GraphMode.statuses:
       final bool on =
           f.statusOf(n.address) != null || f.openOf(n.address) != null;
+      if (n.isFar) {
+        return on ? 4 : 5;
+      }
       return n.isFriend ? (on ? 1 : 2) : (on ? 3 : 4);
     case GraphMode.met:
-      return n.isFriend ? (f.met(n.address) ? 1 : 2) : 4;
+      return n.isFriend ? (f.met(n.address) ? 1 : 2) : n.ring;
     case GraphMode.pyramid:
       final PyramidMark? m = pyr[n.address];
-      return m == null ? (n.isFriend ? 3 : 4) : (m.line ? 1 : 2);
+      return m == null ? (n.isFriend ? 3 : n.ring) : (m.line ? 1 : 2);
+    case GraphMode.neglect:
+      return n.isFriend ? (neglected.contains(n.address) ? 1 : 2) : n.ring;
     case GraphMode.friends:
     case GraphMode.gates:
     case GraphMode.route:
+    case GraphMode.time:
+    case GraphMode.bridges:
       return n.ring;
   }
 }
@@ -347,7 +412,23 @@ int graphBand(
 /// prices and the way to a person; search, filters, focus and the card of
 /// each person with what can be done.
 class GraphScreen extends ConsumerStatefulWidget {
-  const GraphScreen({super.key});
+  const GraphScreen({
+    super.key,
+    this.fullScreen = false,
+    this.initial = const GraphView(),
+    this.onLeave,
+  });
+
+  /// The graph alone on the whole screen, its controls as an overlay that
+  /// hides by itself.
+  final bool fullScreen;
+
+  /// How to look at it first (the mode, filters… of the screen it came
+  /// from).
+  final GraphView initial;
+
+  /// Full screen: how it was looked at when it closed.
+  final ValueChanged<GraphView>? onLeave;
 
   static Future<void> open(BuildContext context) => Navigator.of(context).push(
     MaterialPageRoute<void>(
@@ -369,6 +450,7 @@ final class _GraphData {
     required this.ringOf,
     required this.mutual,
     required this.met,
+    required this.book,
   });
 
   final Object key;
@@ -377,10 +459,26 @@ final class _GraphData {
   final Map<String, int> ringOf;
   final Map<String, int> mutual;
   final Set<String> met;
+  final MeetBook book;
+
+  /// Communities among everyone ([graphClusters]): the same colours and
+  /// names whatever the filters.
+  late final Map<String, int> clusters = graphClusters(all, book);
+
+  /// Friends who know each other ([friendLinks]).
+  late final List<(String, String)> links = friendLinks(friendOrder, book);
+
+  /// Bridges and lone circles ([bridgesOf]).
+  late final BridgeReport bridges = bridgesOf(
+    all,
+    clusters,
+    links,
+    mutual: mutual,
+  );
 }
 
 class _GraphScreenState extends ConsumerState<GraphScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   GraphMode _mode = GraphMode.friends;
   GraphFilters _filters = const GraphFilters();
   RouteGoal _goal = RouteGoal.shortest;
@@ -399,6 +497,25 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     value: 1,
   );
   final GraphLabelCache _labels = GraphLabelCache();
+
+  /// Where the timeline is (0: 12 months ago … 1: now); runs when played.
+  late final AnimationController _clock = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 6),
+    value: 1,
+  );
+
+  /// Months back the timeline shows (0: now).
+  int _timeMonths = 0;
+  GraphTimeline? _timeline;
+  Object? _timelineKey;
+
+  /// People further away, read again only when friends passed on more.
+  Map<String, FarPerson> _far = const <String, FarPerson>{};
+  Object? _farToken;
+
+  /// Conversations were read once for their dates (this screen's life).
+  bool _scanned = false;
 
   _GraphData? _data;
   GraphScene? _scene;
@@ -425,14 +542,207 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
   void initState() {
     super.initState();
     _view.addListener(_onView);
+    final GraphView v = widget.initial;
+    _mode = v.mode;
+    _filters = v.filters;
+    _goal = v.goal;
+    _selected = v.selected;
+    _timeMonths = v.timeMonths;
+    if (_mode == GraphMode.time) {
+      _clock.value = timelinePhase(_timeMonths);
+    }
+    if (widget.fullScreen) {
+      _chrome = ref.read(graphFullScreenChromeProvider);
+      unawaited(_chrome!.enter());
+      _armHide();
+    }
+  }
+
+  // ---- full screen ----
+
+  /// The system's bars while full screen (null otherwise).
+  FullScreenChrome? _chrome;
+
+  /// The overlay controls are shown (always, outside full screen).
+  bool _chromeShown = true;
+  Timer? _hide;
+
+  /// A computer: a double click also switches full screen.
+  static bool get _desktopInput => switch (defaultTargetPlatform) {
+    TargetPlatform.windows ||
+    TargetPlatform.linux ||
+    TargetPlatform.macOS => true,
+    _ => false,
+  };
+
+  GraphView _currentView() => GraphView(
+    mode: _mode,
+    filters: _filters,
+    goal: _goal,
+    selected: _selected,
+    timeMonths: _timeMonths,
+  );
+
+  /// Full screen on, or back from it.
+  Future<void> _toggleFull() async {
+    if (widget.fullScreen) {
+      await Navigator.of(context).maybePop();
+      return;
+    }
+    await Navigator.of(context, rootNavigator: true).push(
+      PageRouteBuilder<void>(
+        pageBuilder:
+            (
+              BuildContext context,
+              Animation<double> animation,
+              Animation<double> secondary,
+            ) => GraphScreen(
+              fullScreen: true,
+              initial: _currentView(),
+              onLeave: _backFromFull,
+            ),
+        transitionsBuilder:
+            (
+              BuildContext context,
+              Animation<double> animation,
+              Animation<double> secondary,
+              Widget child,
+            ) => FadeTransition(opacity: animation, child: child),
+      ),
+    );
+  }
+
+  /// Back from full screen: looked at as it was left there.
+  void _backFromFull(GraphView v) {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _mode = v.mode;
+      _filters = v.filters;
+      _goal = v.goal;
+      _selected = v.selected;
+      _timeMonths = v.timeMonths;
+    });
+    if (_mode == GraphMode.time) {
+      _clock.value = timelinePhase(_timeMonths);
+    }
+  }
+
+  /// A touch, a click or the mouse moving: the controls come back for a
+  /// while.
+  void _poke() {
+    if (!widget.fullScreen) {
+      return;
+    }
+    if (!_chromeShown) {
+      setState(() => _chromeShown = true);
+    }
+    _armHide();
+  }
+
+  void _armHide() {
+    _hide?.cancel();
+    _hide = Timer(kGraphChromeHideAfter, () {
+      if (mounted && _chromeShown) {
+        setState(() => _chromeShown = false);
+      }
+    });
+  }
+
+  /// Controls that hide by themselves in full screen.
+  Widget _fading(Widget child) => AnimatedOpacity(
+    opacity: _chromeShown ? 1 : 0,
+    duration: const Duration(milliseconds: 250),
+    child: IgnorePointer(ignoring: !_chromeShown, child: child),
+  );
+
+  /// The full-screen page: [picture] fills it, the mode bar (and the
+  /// route's or timeline's controls) float on top while shown.
+  Widget _fullLayout(
+    BuildContext context, {
+    required Widget picture,
+    required List<GraphMode> modes,
+    required GraphRoute route,
+    required String? selected,
+    required List<GraphNode> all,
+    required MeetService meet,
+    required bool timed,
+    required GraphNotes kept,
+  }) {
+    final ZenColors zen = ZenColors.of(context);
+    return Listener(
+      key: const Key('graph-full-layout'),
+      onPointerDown: (_) => _poke(),
+      onPointerHover: (_) => _poke(),
+      child: Stack(
+        children: <Widget>[
+          Positioned.fill(
+            child: ColoredBox(color: zen.surface, child: picture),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: SafeArea(
+              bottom: false,
+              child: _fading(
+                Container(
+                  key: const Key('graph-full-controls'),
+                  margin: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                  padding: const EdgeInsets.only(top: 4),
+                  decoration: BoxDecoration(
+                    color: zen.surfaceRaised.withValues(alpha: 0.9),
+                    borderRadius: context.zenRadius(18),
+                    border: Border.all(color: zen.outlineSoft),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      _modeBar(context, modes),
+                      if (_mode == GraphMode.route)
+                        _routeBar(context, route, selected, all, meet),
+                      if (timed)
+                        GraphTimeBar(
+                          months: _timeMonths,
+                          onMonths: _setTime,
+                          playing: _clock.isAnimating,
+                          onPlay: _playTime,
+                          clock: _clock,
+                          timeline: _timeline,
+                          nodes: _scene?.layout.nodes ?? const <GraphNode>[],
+                          baseline: kept.baseline,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   void dispose() {
+    _hide?.cancel();
+    final FullScreenChrome? chrome = _chrome;
+    if (chrome != null) {
+      unawaited(chrome.exit());
+    }
+    final ValueChanged<GraphView>? leave = widget.onLeave;
+    if (leave != null) {
+      final GraphView v = _currentView();
+      // Not while the tree is being taken down: right after.
+      WidgetsBinding.instance.addPostFrameCallback((_) => leave(v));
+    }
     _view
       ..removeListener(_onView)
       ..dispose();
     _move.dispose();
+    _clock.dispose();
     _labels.clear();
     _search.dispose();
     super.dispose();
@@ -506,7 +816,64 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     if (mode == _mode) {
       return;
     }
+    if (_clock.isAnimating) {
+      _clock.stop();
+    }
     setState(() => _mode = mode);
+    if (mode == GraphMode.time) {
+      _clock.value = timelinePhase(_timeMonths);
+    }
+  }
+
+  /// The timeline at [months] back (0: now).
+  void _setTime(int months) {
+    _clock.stop();
+    setState(() => _timeMonths = months);
+    _clock.value = timelinePhase(months);
+  }
+
+  /// Plays how the graph grew over the last 12 months (or stops it).
+  void _playTime() {
+    if (_clock.isAnimating) {
+      _clock.stop();
+      setState(() {});
+      return;
+    }
+    setState(() => _timeMonths = 0);
+    unawaited(
+      _clock.forward(from: 0).whenComplete(() {
+        if (mounted) {
+          setState(() {});
+        }
+      }),
+    );
+  }
+
+  /// People further away: friends of gatekeepers friends passed on, and
+  /// people open to meet further out (as far as the graph reaches).
+  Map<String, FarPerson> _farFor(IntroService intro, OpenToMeetService open) {
+    final Map<String, FarPerson> daters = open.farOpen();
+    final Object token = Object.hash(
+      identityHashCode(intro.relayedToken),
+      daters.length,
+      Object.hashAllUnordered(daters.keys),
+    );
+    if (token != _farToken) {
+      _farToken = token;
+      final Map<String, FarPerson> merged = <String, FarPerson>{
+        for (final MapEntry<String, FarPerson> e in intro.farPeople().entries)
+          e.key: (name: e.value.name, via: <String>{...e.value.via}),
+      };
+      daters.forEach((String a, FarPerson p) {
+        final FarPerson? had = merged[a];
+        merged[a] = (
+          name: had == null || had.name.isEmpty ? p.name : had.name,
+          via: <String>{...?had?.via, ...p.via},
+        );
+      });
+      _far = merged;
+    }
+    return _far;
   }
 
   /// The people, rebuilt when the friends, their lists or levels change.
@@ -514,6 +881,8 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     required SocialHubState social,
     required MeetBook book,
     required LedgerNode? node,
+    Map<String, FarPerson> far = const <String, FarPerson>{},
+    String own = '',
   }) {
     FriendLevel levelOf(String a) => node?.levelOf(a) ?? FriendLevel.friend;
     final String levels = <String>[
@@ -525,6 +894,8 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
       identityHashCode(social.friends),
       levels,
       _selected,
+      identityHashCode(far),
+      own,
     );
     final _GraphData? had = _data;
     if (had != null && had.key == key) {
@@ -536,12 +907,16 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
       levelOf: levelOf,
       maxFriendsOfFriends: kGraphMaxNodes,
       keep: <String>{?_selected},
+      far: far,
+      self: own.isEmpty
+          ? null
+          : (String a) => PeerShareCodec.addressesEqual(a, own),
     );
     // Friends, closest first: the way through them wins a tie.
     final List<GraphNode> friends =
         all.where((GraphNode n) => n.isFriend).toList()
           ..sort((GraphNode a, GraphNode b) => a.ring.compareTo(b.ring));
-    return _data = _GraphData(
+    final _GraphData data = _data = _GraphData(
       key: key,
       all: all,
       friendOrder: <String>[for (final GraphNode n in friends) n.address],
@@ -554,7 +929,21 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
           for (final GraphNode n in friends)
             if (node.hasMet(n.address)) n.address,
       },
+      book: book,
     );
+    // Dates from now on: who came since the graph was last drawn.
+    final GraphNotesService notes = ref.read(graphNotesProvider);
+    unawaitedLogged(
+      notes.observe(
+        friends: data.friendOrder,
+        far: <String>[
+          for (final GraphNode n in all)
+            if (!n.isFriend) n.address,
+        ],
+      ),
+      context: 'Graf: daty',
+    );
+    return data;
   }
 
   List<String> _nationsOf(LedgerNode? node, GraphNode n) {
@@ -578,28 +967,31 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     required GraphFacts facts,
     required Map<String, PyramidMark> pyramid,
     required Map<String, int> ringOf,
-    required List<GroupProfile> groups,
+    required Map<String, int> clusters,
+    required String Function(int cluster) circleName,
     required ZenColors zen,
+    Set<String> neglected = const <String>{},
+    Object names = '',
   }) {
+    int band(GraphNode n) =>
+        graphBand(_mode, n, facts, pyramid, neglected: neglected);
     final Object key = Object.hash(
       Object.hashAll(<String>[for (final GraphNode n in nodes) n.address]),
       size,
       _mode,
-      Object.hashAll(<int>[
-        for (final GraphNode n in nodes) graphBand(_mode, n, facts, pyramid),
-      ]),
+      Object.hashAll(<int>[for (final GraphNode n in nodes) band(n)]),
       identityHashCode(_data),
+      names,
     );
     final GraphScene? old = _scene;
     if (old != null && _sceneKey == key) {
       return old;
     }
-    final Map<String, int> clusters = graphClusters(nodes, book);
     final GraphLayout layout = graphLayout(
       nodes,
       size,
       cluster: clusters,
-      bandOf: (GraphNode n) => graphBand(_mode, n, facts, pyramid),
+      bandOf: band,
     );
     final Map<String, int> index = <String, int>{
       for (int i = 0; i < nodes.length; i++) nodes[i].address: i,
@@ -658,22 +1050,8 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
         if (index[a] case final int x)
           if (index[b] case final int y) ...<int>[x, y],
     ];
-    // Communities: a soft blob each, named after a shared chat group or
-    // the friend who knows most of them.
-    final Map<String, Set<String>> groupMembers = <String, Set<String>>{
-      for (final GroupProfile g in groups)
-        if (g.name.trim().isNotEmpty)
-          g.name.trim(): <String>{
-            for (final String m in g.memberAddresses)
-              PeerShareCodec.normalizeAddress(m),
-          },
-    };
-    final Map<int, String> names = clusterNames(
-      nodes,
-      clusters,
-      groups: groupMembers,
-      mutual: facts.mutual,
-    );
+    // Communities: a soft blob each, named by this person, else after a
+    // shared chat group or the friend who knows most of them.
     final Map<int, List<Offset>> spots = <int, List<Offset>>{};
     for (int i = 0; i < nodes.length; i++) {
       final int c = clusters[nodes[i].address] ?? -1;
@@ -697,7 +1075,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
             center: mid,
             radius: r + 20,
             color: zenTone(zen, e.key % 6),
-            name: names[e.key] ?? '',
+            name: circleName(e.key),
           );
         }(),
     ];
@@ -742,14 +1120,19 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
         .isEnabled(ZenFeature.pyramid);
     final SocialHubState social = watchSocialPeople(ref);
     final LedgerNode? node = ref.watch(ledgerNodeProvider);
-    return Scaffold(
-      key: const Key('graph-screen'),
-      appBar: ZenSectionBar(title: t('Graf znajomych')),
+    final GraphNotesService notes = ref.watch(graphNotesProvider);
+    final Widget screen = Scaffold(
+      key: Key(widget.fullScreen ? 'graph-full-screen' : 'graph-screen'),
+      appBar: widget.fullScreen
+          ? null
+          : ZenSectionBar(title: t('Graf znajomych')),
       body: ListenableBuilder(
         listenable: Listenable.merge(<Listenable>[
           meet,
           nearby,
           open,
+          intro,
+          notes,
           if (pyramidOn) pyramid,
           ?prices.changes,
         ]),
@@ -763,9 +1146,141 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
           prices: prices,
           social: social,
           node: node,
+          notes: notes,
         ),
       ),
     );
+    // F11 switches full screen, Esc leaves it (keyboards, mostly computers).
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.f11): () =>
+            unawaited(_toggleFull()),
+        if (widget.fullScreen)
+          const SingleActivator(LogicalKeyboardKey.escape): () =>
+              unawaited(_toggleFull()),
+      },
+      child: Focus(autofocus: true, child: screen),
+    );
+  }
+
+  /// The circles of [data] with their names: the one this person gave
+  /// (privately) or the automatic one.
+  List<GraphCircle> _circlesOf(
+    _GraphData data,
+    GraphNotesService notes,
+    SocialHubState social,
+  ) {
+    final Object key = Object.hash(
+      identityHashCode(data),
+      notes.revision,
+      identityHashCode(social.groups),
+    );
+    if (key == _circlesKey) {
+      return _circles;
+    }
+    _circlesKey = key;
+    return _circles = _makeCircles(data, notes.notes, social);
+  }
+
+  Object? _circlesKey;
+  List<GraphCircle> _circles = const <GraphCircle>[];
+
+  List<GraphCircle> _makeCircles(
+    _GraphData data,
+    GraphNotes kept,
+    SocialHubState social,
+  ) {
+    final Map<String, Set<String>> groupMembers = <String, Set<String>>{
+      for (final GroupProfile g in social.groups.values)
+        if (g.name.trim().isNotEmpty)
+          g.name.trim(): <String>{
+            for (final String m in g.memberAddresses)
+              PeerShareCodec.normalizeAddress(m),
+          },
+    };
+    final Map<int, String> auto = clusterNames(
+      data.all,
+      data.clusters,
+      groups: groupMembers,
+      mutual: data.mutual,
+    );
+    final Map<int, Set<String>> members = <int, Set<String>>{};
+    data.clusters.forEach((String a, int c) {
+      if (c >= 0) {
+        members.putIfAbsent(c, () => <String>{}).add(a);
+      }
+    });
+    final List<int> ids = members.keys.toList()..sort();
+    return <GraphCircle>[
+      for (final int c in ids)
+        (
+          id: c,
+          name: auto[c] ?? '',
+          label: labelFor(members[c]!, kept.labels.values),
+          members: members[c]!,
+        ),
+    ];
+  }
+
+  /// The days friends were met in person, read again only when the people
+  /// or what is known about meetings changed.
+  Map<String, int> _metDaysFor(LedgerNode? node, _GraphData data) {
+    final Object key = Object.hash(
+      identityHashCode(data),
+      node?.isReady ?? false,
+      data.met.length,
+    );
+    if (key != _metKey) {
+      _metKey = key;
+      _metDays = metDays(node);
+    }
+    return _metDays;
+  }
+
+  Object? _metKey;
+  Map<String, int> _metDays = const <String, int>{};
+
+  /// Friends whose conversations were read again this time.
+  final Set<String> _refreshed = <String>{};
+
+  /// Reads the dates out of conversations already on this phone: everyone
+  /// once, and [again] (those "Dawno" would show) once more, after this
+  /// frame.
+  void _scanLater(
+    GraphNotesService notes,
+    SocialHubState social,
+    Iterable<String> again,
+  ) {
+    final List<String> fresh = <String>[
+      for (final String a in again)
+        if (_refreshed.add(a)) a,
+    ];
+    if (_scanned && fresh.isEmpty) {
+      return;
+    }
+    final bool first = !_scanned;
+    _scanned = true;
+    final Map<String, String> addressOf = <String, String>{
+      for (final FriendProfile f in social.acceptedFriends)
+        PeerShareCodec.normalizeAddress(f.address): f.address,
+    };
+    final Future<List<ChatMessage>> Function(String) load = ref
+        .read(messageTimelineStoreProvider)
+        .load;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaitedLogged(() async {
+        if (first) {
+          await notes.scanConversations(addressOf.values, load);
+        }
+        if (fresh.isNotEmpty) {
+          await notes.scanConversations(
+            <String>[for (final String a in fresh) addressOf[a] ?? a],
+            load,
+            all: true,
+          );
+        }
+      }(), context: 'Graf: daty z rozmów');
+    });
   }
 
   Widget _content(
@@ -778,6 +1293,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     required GatePriceSource prices,
     required SocialHubState social,
     required LedgerNode? node,
+    required GraphNotesService notes,
   }) {
     final ZenColors zen = ZenColors.of(context);
     final int nowMs = meet.now;
@@ -785,8 +1301,29 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
       social: social,
       book: meet.book,
       node: node,
+      far: _farFor(intro, open),
+      own: intro.host.ownAddress(),
     );
     final List<GraphNode> all = data.all;
+    final GraphNotes kept = notes.notes;
+    // Circles, with the names this person gave them (only they see them).
+    final List<GraphCircle> circles = _circlesOf(data, notes, social);
+    final Map<int, GraphCircle> circleById = <int, GraphCircle>{
+      for (final GraphCircle c in circles) c.id: c,
+    };
+    String circleName(int c) {
+      final GraphCircle? x = circleById[c];
+      return x == null ? '' : (x.label?.name ?? x.name);
+    }
+
+    final Map<String, Set<String>> labelPeople = <String, Set<String>>{
+      for (final CircleLabel l in kept.labels.values)
+        l.id: <String>{
+          ...l.members,
+          for (final GraphCircle c in circles)
+            if (c.label?.id == l.id) ...c.members,
+        },
+    };
     final Map<String, GraphNode> byAddress = <String, GraphNode>{
       for (final GraphNode n in all) n.address: n,
     };
@@ -806,6 +1343,8 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
         return n == null ? const <String>[] : _nationsOf(node, n);
       },
       pyramidOf: (String a) => pyr[a],
+      inLabel: (String a, String label) =>
+          labelPeople[label]?.contains(a) ?? false,
       mutual: data.mutual,
     );
     final List<GraphMode> modes = <GraphMode>[
@@ -821,6 +1360,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
             target: selected,
             prices: _mode == GraphMode.route ? prices : const NoGatePrices(),
             goal: _mode == GraphMode.route ? _goal : RouteGoal.shortest,
+            friendsOf: intro.knownFriendsOf,
           );
     final Set<String> onRoute = route.path.toSet();
     final List<GraphNode> nodes = all
@@ -838,15 +1378,59 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     final Set<String> marked = <String>{
       for (final GraphNode h in hits) h.address,
     };
+    // What the modes about this person's own circle need.
+    final bool timed = _mode == GraphMode.time;
+    final Map<String, int> metAt = timed || _mode == GraphMode.neglect
+        ? _metDaysFor(node, data)
+        : const <String, int>{};
+    final List<NeglectedFriend> neglectedList = _mode == GraphMode.neglect
+        ? neglectedFriends(all, kept, now: nowMs, metAt: metAt)
+        : const <NeglectedFriend>[];
+    final Set<String> neglected = <String>{
+      for (final NeglectedFriend f in neglectedList) f.node.address,
+    };
+    if (timed || _mode == GraphMode.neglect) {
+      _scanLater(notes, social, neglected);
+    }
+    final BridgeReport? bridges = _mode == GraphMode.bridges
+        ? data.bridges
+        : null;
+    final Set<String> islandPeople = <String>{
+      if (bridges != null)
+        for (final GraphNode n in all)
+          if (n.isFriend &&
+              bridges.islands.contains(data.clusters[n.address] ?? -1))
+            n.address,
+    };
+    final IntentStatus? myIntent = meet.book.myIntent;
+    final Set<String> asked = <String>{
+      for (final IntroCase c in intro.mine)
+        if (c.isPending) c.target,
+    };
+    final List<MeetSuggestion> suggestions = _mode == GraphMode.friends
+        ? whoToMeet(
+            all,
+            facts,
+            myStatus: myIntent != null && myIntent.activeAt(nowMs)
+                ? myIntent
+                : null,
+            myOpen: open.mine,
+            skip: asked,
+          )
+        : const <MeetSuggestion>[];
+    String nameOfAny(String a) => byAddress[a]?.name ?? meet.host.nameOf(a);
+
+    // The people who connect [n], closest friends first.
+    List<String> viaOf(GraphNode n) => <String>[...n.via]
+      ..sort(
+        (String a, String b) =>
+            (data.ringOf[a] ?? 9).compareTo(data.ringOf[b] ?? 9),
+      );
 
     void openPerson(GraphNode n) {
       FocusScope.of(context).unfocus();
       setState(() => _selected = n.address);
-      final List<String> via = <String>[...n.via]
-        ..sort(
-          (String a, String b) =>
-              (data.ringOf[a] ?? 9).compareTo(data.ringOf[b] ?? 9),
-        );
+      final List<String> via = viaOf(n);
       unawaited(
         _show(
           context,
@@ -856,15 +1440,90 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
           n: n,
           facts: facts,
           prices: prices,
+          pyramid: pyramid,
           route: graphRoute(
             friends: data.friendOrder,
             book: meet.book,
             target: n.address,
             prices: prices,
             goal: _mode == GraphMode.route ? _goal : RouteGoal.shortest,
+            friendsOf: intro.knownFriendsOf,
           ),
           via: via,
+          nameOf: nameOfAny,
         ),
+      );
+    }
+
+    final Widget picture = all.isEmpty
+        ? Center(
+            child: SingleChildScrollView(
+              child: ZenEmpty(
+                icon: Icons.hub_rounded,
+                title: t('Tu będzie Twój graf'),
+                text: t(
+                  'Dodaj znajomych, a pojawią się wokół Ciebie — '
+                  'najbliżsi najbliżej środka.',
+                ),
+              ),
+            ),
+          )
+        : LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints box) {
+              final Size size = box.biggest;
+              _canvas = size;
+              final GraphScene scene = _sceneFor(
+                nodes: nodes,
+                size: size,
+                book: meet.book,
+                facts: facts,
+                pyramid: pyr,
+                ringOf: data.ringOf,
+                clusters: data.clusters,
+                circleName: circleName,
+                zen: zen,
+                neglected: neglected,
+                names: Object.hashAll(<String>[
+                  for (final GraphCircle c in circles) c.label?.name ?? c.name,
+                ]),
+              );
+              final GraphLook look = graphLook(
+                scene: scene,
+                mode: _mode,
+                facts: facts,
+                zen: zen,
+                prices: prices,
+                pyramid: pyr,
+                selected: selected,
+                marked: marked,
+                route: route.path,
+                bridges: bridges?.bridges ?? const <String>{},
+                islands: islandPeople,
+                neglected: neglected,
+              );
+              return _canvasView(
+                context,
+                scene,
+                look,
+                size,
+                openPerson,
+                timeline: timed
+                    ? _timelineFor(scene, notes, metAt, nowMs)
+                    : null,
+              );
+            },
+          );
+    if (widget.fullScreen) {
+      return _fullLayout(
+        context,
+        picture: picture,
+        modes: modes,
+        route: route,
+        selected: selected,
+        all: all,
+        meet: meet,
+        timed: timed,
+        kept: kept,
       );
     }
 
@@ -934,7 +1593,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                                     ? _ringLabel(h.ring)
                                     : t('Przez: {names}', {
                                         'names': h.via
-                                            .map(meet.host.nameOf)
+                                            .map(nameOfAny)
                                             .join(', '),
                                       }),
                                 maxLines: 1,
@@ -962,12 +1621,23 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
             _modeBar(context, modes),
             if (_mode == GraphMode.route)
               _routeBar(context, route, selected, all, meet),
+            if (timed)
+              GraphTimeBar(
+                months: _timeMonths,
+                onMonths: _setTime,
+                playing: _clock.isAnimating,
+                onPlay: _playTime,
+                clock: _clock,
+                timeline: _timeline,
+                nodes: _scene?.layout.nodes ?? const <GraphNode>[],
+                baseline: kept.baseline,
+              ),
             SizedBox(
               height: graphHeight,
               child: Container(
                 margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(26),
+                  borderRadius: context.zenRadius(26),
                   border: Border.all(color: zen.outlineSoft),
                   gradient: RadialGradient(
                     colors: <Color>[
@@ -981,53 +1651,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                   ),
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: all.isEmpty
-                    ? Center(
-                        child: SingleChildScrollView(
-                          child: ZenEmpty(
-                            icon: Icons.hub_rounded,
-                            title: t('Tu będzie Twój graf'),
-                            text: t(
-                              'Dodaj znajomych, a pojawią się wokół Ciebie — '
-                              'najbliżsi najbliżej środka.',
-                            ),
-                          ),
-                        ),
-                      )
-                    : LayoutBuilder(
-                        builder: (BuildContext context, BoxConstraints box) {
-                          final Size size = box.biggest;
-                          _canvas = size;
-                          final GraphScene scene = _sceneFor(
-                            nodes: nodes,
-                            size: size,
-                            book: meet.book,
-                            facts: facts,
-                            pyramid: pyr,
-                            ringOf: data.ringOf,
-                            groups: social.groups.values.toList(),
-                            zen: zen,
-                          );
-                          final GraphLook look = graphLook(
-                            scene: scene,
-                            mode: _mode,
-                            facts: facts,
-                            zen: zen,
-                            prices: prices,
-                            pyramid: pyr,
-                            selected: selected,
-                            marked: marked,
-                            route: route.path,
-                          );
-                          return _canvasView(
-                            context,
-                            scene,
-                            look,
-                            size,
-                            openPerson,
-                          );
-                        },
-                      ),
+                child: picture,
               ),
             ),
             if (!_filters.isEmpty && all.isNotEmpty)
@@ -1072,6 +1696,51 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                 ),
               ),
             _legend(context, nodes, facts, prices),
+            if (bridges != null)
+              BridgesSection(
+                report: bridges,
+                nameOf: nameOfAny,
+                circleName: circleName,
+                onIntroduce: (String a, String b) => unawaited(
+                  introduceFriends(
+                    context,
+                    ref,
+                    a: a,
+                    b: b,
+                    nameA: nameOfAny(a),
+                    nameB: nameOfAny(b),
+                  ),
+                ),
+              ),
+            if (_mode == GraphMode.neglect)
+              NeglectSection(
+                items: neglectedList,
+                weeks: kept.neglectWeeks,
+                onWeeks: (int w) => unawaited(notes.setNeglectWeeks(w)),
+                now: nowMs,
+                onWrite: _write,
+                onLater: (GraphNode n) => unawaited(
+                  notes.snooze(n.address, const Duration(days: 28)),
+                ),
+              ),
+            if (_mode == GraphMode.friends) ...<Widget>[
+              MeetSuggestionsSection(
+                items: suggestions,
+                nameOf: nameOfAny,
+                onAsk: (MeetSuggestion s) =>
+                    unawaited(_quickIntro(intro, s.node, viaOf(s.node))),
+                onAdd: (MeetSuggestion s) =>
+                    unawaited(_addFriend(intro, s.node, viaOf(s.node))),
+                onOpen: (MeetSuggestion s) => openPerson(s.node),
+              ),
+              CirclesSection(
+                circles: <GraphCircle>[
+                  for (final GraphCircle c in circles)
+                    if (c.members.length >= 2) c,
+                ],
+                onRename: (GraphCircle c) => unawaited(_renameCircle(notes, c)),
+              ),
+            ],
             if (all.isNotEmpty && all.every((GraphNode n) => n.isFriend))
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
@@ -1140,6 +1809,158 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     );
   }
 
+  /// The timeline of [scene] over the last 12 months, built again only
+  /// when the people, the notes or the day change.
+  GraphTimeline _timelineFor(
+    GraphScene scene,
+    GraphNotesService notes,
+    Map<String, int> metAt,
+    int nowMs,
+  ) {
+    const int day = 24 * 3600 * 1000;
+    final int to = nowMs - nowMs % day + day;
+    final Object key = Object.hash(
+      identityHashCode(scene),
+      notes.revision,
+      identityHashCode(metAt),
+      to,
+    );
+    final GraphTimeline? had = _timeline;
+    if (had != null && key == _timelineKey) {
+      return had;
+    }
+    _timelineKey = key;
+    final GraphTimeline made = graphTimeline(
+      scene.layout.nodes,
+      notes.notes,
+      from: monthsBack(to, 12),
+      to: to,
+      metAt: metAt,
+    );
+    _timeline = made;
+    // The bar above the picture shows what the new timeline says.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+    return made;
+  }
+
+  /// Opens the conversation with friend [n].
+  void _write(GraphNode n) {
+    final FriendProfile? friend = n.friend;
+    if (friend == null) {
+      return;
+    }
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (BuildContext context) =>
+              ConversationScreen(peerAddress: friend.address, title: n.name),
+        ),
+      ),
+    );
+  }
+
+  /// One tap: asks the closest friend in [via] to introduce this person to
+  /// [n] (a priced gate opens the dialog with its price instead).
+  Future<void> _quickIntro(
+    IntroService intro,
+    GraphNode n,
+    List<String> via,
+  ) async {
+    if (via.isEmpty) {
+      return;
+    }
+    final String middle = via.first;
+    final GateTerms? terms = intro.gateTermsOf(middle);
+    if (terms != null && !terms.free) {
+      await askIntroduction(
+        context,
+        ref,
+        target: n.address,
+        targetName: n.name,
+        via: via,
+      );
+      return;
+    }
+    final IntroCase? c = await intro.askIntro(
+      middle: middle,
+      target: n.address,
+      targetName: n.name,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+    _snack(
+      c == null
+          ? t('Nie można teraz poprosić.')
+          : t('Prośba poszła do: {name}.', {'name': intro.host.nameOf(middle)}),
+    );
+  }
+
+  /// "Dodaj do znajomych" on someone who is not a friend: a friend request
+  /// through the closest friend who knows them, or directly when no friend
+  /// does. They decide.
+  Future<void> _addFriend(
+    IntroService intro,
+    GraphNode n,
+    List<String> via,
+  ) async {
+    final String middle = n.ring == 4 && via.isNotEmpty ? via.first : '';
+    if (intro.friendAskTo(n.address) == null && intro.friendAsksLeft() <= 0) {
+      _snack(
+        t(
+          'Wysłano już {n} zaproszeń z grafu w tym tygodniu. Spróbuj za '
+          'kilka dni.',
+          {'n': kFriendAsksPerWeek},
+        ),
+      );
+      return;
+    }
+    final IntroCase? c = await intro.askFriend(
+      target: n.address,
+      targetName: n.name,
+      middle: middle,
+    );
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+    _snack(
+      c == null
+          ? t('Nie można teraz wysłać zaproszenia.')
+          : middle.isEmpty
+          ? t('Zaproszenie poszło do: {name}.', {'name': n.name})
+          : t('Zaproszenie idzie przez: {via}. Decyduje: {name}.', {
+              'via': intro.host.nameOf(middle),
+              'name': n.name,
+            }),
+    );
+  }
+
+  /// Gives circle [c] a private name (or takes it back).
+  Future<void> _renameCircle(GraphNotesService notes, GraphCircle c) async {
+    final CircleLabel? label = c.label;
+    final String? name = await askCircleName(
+      context,
+      current: label?.name ?? c.name,
+      named: label != null,
+    );
+    if (name == null) {
+      return;
+    }
+    if (cleanCircleLabel(name).isEmpty) {
+      if (label != null) {
+        await notes.removeLabel(label.id);
+      }
+      return;
+    }
+    await notes.setLabel(c.members, name);
+  }
+
   /// The modes, and the filters button with how many are on.
   Widget _modeBar(BuildContext context, List<GraphMode> modes) {
     final int active = _filters.active;
@@ -1166,6 +1987,21 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                 ],
               ),
             ),
+          ),
+          IconButton(
+            key: const Key('graph-snapshot'),
+            tooltip: t('Zrzut grafu bez danych osobowych'),
+            onPressed: _scene == null || _data == null
+                ? null
+                : () => unawaited(
+                    showGraphSnapshot(
+                      context,
+                      ref,
+                      scene: _scene!,
+                      clusters: _data!.clusters,
+                    ),
+                  ),
+            icon: const Icon(Icons.photo_camera_outlined),
           ),
           Badge(
             isLabelVisible: active > 0,
@@ -1247,8 +2083,9 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     GraphScene scene,
     GraphLook look,
     Size size,
-    void Function(GraphNode) openPerson,
-  ) {
+    void Function(GraphNode) openPerson, {
+    GraphTimeline? timeline,
+  }) {
     final ZenColors zen = ZenColors.of(context);
     final List<GraphNode> nodes = scene.layout.nodes;
     final Widget picture = ListenableBuilder(
@@ -1277,12 +2114,21 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
         }
         return GestureDetector(
           key: const Key('graph-canvas'),
+          // A double click on a computer: full screen on or off.
+          onDoubleTap: _desktopInput ? () => unawaited(_toggleFull()) : null,
           onTapUp: (TapUpDetails d) {
             GraphNode? hit;
             // The tap area stays the size of a finger when the picture is
             // zoomed in.
             double best = max(10, 28 / scale);
-            for (final GraphNode n in nodes) {
+            for (int i = 0; i < nodes.length; i++) {
+              final GraphNode n = nodes[i];
+              // Not on the timeline yet: not there to tap.
+              if (timeline != null &&
+                  i < timeline.born.length &&
+                  timeline.born[i] > _clock.value) {
+                continue;
+              }
               final double dist = (n.at - d.localPosition).distance;
               if (dist < best) {
                 best = dist;
@@ -1315,6 +2161,9 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                 guide: zen.outlineSoft,
                 scale: lod,
                 visible: visible,
+                timeline: timeline,
+                clock: timeline == null ? null : _clock,
+                metTone: zen.success,
               ),
             ),
           ),
@@ -1337,26 +2186,46 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
           bottom: 8,
           child: ListenableBuilder(
             listenable: _view,
-            builder: (BuildContext context, Widget? _) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                IconButton.filledTonal(
-                  key: const Key('graph-zoom-in'),
-                  tooltip: t('Przybliż'),
-                  onPressed: _scale >= _maxScale
-                      ? null
-                      : () => _zoom(1.6, size),
-                  icon: const Icon(Icons.add_rounded),
+            builder: (BuildContext context, Widget? _) => _fading(
+              SafeArea(
+                top: false,
+                left: false,
+                right: widget.fullScreen,
+                bottom: widget.fullScreen,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    IconButton.filledTonal(
+                      key: const Key('graph-full-toggle'),
+                      tooltip: widget.fullScreen
+                          ? t('Zamknij pełny ekran')
+                          : t('Pełny ekran'),
+                      onPressed: () => unawaited(_toggleFull()),
+                      icon: Icon(
+                        widget.fullScreen
+                            ? Icons.fullscreen_exit_rounded
+                            : Icons.fullscreen_rounded,
+                      ),
+                    ),
+                    IconButton.filledTonal(
+                      key: const Key('graph-zoom-in'),
+                      tooltip: t('Przybliż'),
+                      onPressed: _scale >= _maxScale
+                          ? null
+                          : () => _zoom(1.6, size),
+                      icon: const Icon(Icons.add_rounded),
+                    ),
+                    IconButton.filledTonal(
+                      key: const Key('graph-zoom-out'),
+                      tooltip: t('Oddal'),
+                      onPressed: _scale <= 1.001
+                          ? null
+                          : () => _zoom(1 / 1.6, size),
+                      icon: const Icon(Icons.remove_rounded),
+                    ),
+                  ],
                 ),
-                IconButton.filledTonal(
-                  key: const Key('graph-zoom-out'),
-                  tooltip: t('Oddal'),
-                  onPressed: _scale <= 1.001
-                      ? null
-                      : () => _zoom(1 / 1.6, size),
-                  icon: const Icon(Icons.remove_rounded),
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -1378,7 +2247,11 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     final bool anyNear = nearby.people.any(
       (NearbyPerson p) => p.friend != null,
     );
-    final bool anyFar = all.any((GraphNode n) => !n.isFriend);
+    final bool anyFar = all.any((GraphNode n) => n.ring == 4);
+    final bool anyFurther = all.any((GraphNode n) => n.isFar);
+    final List<CircleLabel> labels =
+        ref.read(graphNotesProvider).notes.labels.values.toList()
+          ..sort((CircleLabel a, CircleLabel b) => a.name.compareTo(b.name));
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -1412,7 +2285,28 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                   spacing: 6,
                   runSpacing: 6,
                   children: <Widget>[
-                    for (final int ring in <int>[1, 2, 3, if (anyFar) 4])
+                    for (final RingPreset p in RingPreset.values)
+                      ChoiceChip(
+                        key: Key('graph-rings-${p.name}'),
+                        showCheckmark: false,
+                        label: Text(p.label),
+                        selected: RingPreset.of(f.rings) == p,
+                        onSelected: (_) => apply(f.copyWith(rings: p.rings)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: <Widget>[
+                    for (final int ring in <int>[
+                      1,
+                      2,
+                      3,
+                      if (anyFar) 4,
+                      if (anyFurther) 5,
+                    ])
                       FilterChip(
                         key: Key('graph-ring-$ring'),
                         label: Text(_ringFilterLabel(ring)),
@@ -1427,6 +2321,30 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                       ),
                   ],
                 ),
+                if (labels.isNotEmpty || f.label != null) ...<Widget>[
+                  ZenSection(t('Twoje nazwy kręgów')),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: <Widget>[
+                      ChoiceChip(
+                        key: const Key('graph-label-any'),
+                        label: Text(t('dowolny')),
+                        selected: f.label == null,
+                        onSelected: (_) => apply(f.copyWith(label: () => null)),
+                      ),
+                      for (final CircleLabel l in labels)
+                        ChoiceChip(
+                          key: Key('graph-label-${l.id}'),
+                          avatar: const Icon(Icons.lock_outline_rounded),
+                          label: Text(l.name),
+                          selected: f.label == l.id,
+                          onSelected: (_) =>
+                              apply(f.copyWith(label: () => l.id)),
+                        ),
+                    ],
+                  ),
+                ],
                 ZenSection(t('Wspólni znajomi')),
                 Wrap(
                   spacing: 6,
@@ -1592,6 +2510,33 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
         _LegendLine(color: zen.accent, label: t('droga')),
         _LegendDot(color: zen.accent, label: t('osoby na drodze'), ring: true),
       ],
+      GraphMode.time => <Widget>[
+        _LegendDot(color: zen.accent, label: t('znajomi wtedy')),
+        _LegendDot(
+          color: zen.success,
+          label: t('spotkani osobiście do tego dnia'),
+          ring: true,
+        ),
+      ],
+      GraphMode.bridges => <Widget>[
+        _LegendDot(
+          color: zen.accent,
+          label: t('most — jedyne połączenie kręgów'),
+          ring: true,
+        ),
+        _LegendDot(color: zenTone(zen, 5), label: t('samotny krąg')),
+      ],
+      GraphMode.neglect => <Widget>[
+        _LegendDot(
+          color: zen.accentSecondary,
+          label: t('dawno się nie widzieliście'),
+        ),
+        _LegendLine(
+          color: zen.accentSecondary,
+          label: t('więź do odnowienia'),
+          dashed: true,
+        ),
+      ],
     };
     bool gateData = false;
     if (_mode == GraphMode.gates) {
@@ -1654,10 +2599,14 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     required GraphNode n,
     required GraphFacts facts,
     required GatePriceSource prices,
+    required PyramidService? pyramid,
     required GraphRoute route,
     required List<String> via,
+    required String Function(String address) nameOf,
   }) async {
     final bool far = !n.isFriend;
+    // Further than friends of friends: those who know them are not friends.
+    final bool further = n.isFar;
     final List<String> mutual = far ? via : meet.mutualFriends(n.address);
     final IntentStatus? s = facts.statusOf(n.address);
     final OpenToMeet? openTo = facts.openOf(n.address);
@@ -1684,6 +2633,8 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     final bool listMissing = !far && meet.book.friendsOf(n.address).isEmpty;
     final bool listAsked =
         listMissing && intro.pending(IntroKind.list, n.address) != null;
+    final bool friendAsked = far && intro.friendAskTo(n.address) != null;
+    final TrustMap trust = _trustOf(node, n, pyramid, meet);
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -1847,16 +2798,18 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                       : (far ? t('Znacie się przez') : t('Wspólni znajomi')),
                   text: mutual.isEmpty
                       ? t('Brak wspólnych znajomych (albo ich nie pokazują).')
-                      : mutual.map(meet.host.nameOf).join(', '),
+                      : mutual.map(nameOf).join(', '),
                 ),
               ],
+              if (!far || !trust.isEmpty) TrustMapView(map: trust),
               if (far && route.path.isNotEmpty)
                 ZenInfo(
+                  key: const Key('graph-best-way'),
                   icon: Icons.timeline_rounded,
                   tone: zen.accent,
                   title: t('Najlepsza droga'),
                   text:
-                      '${<String>[t('Ty'), for (final String a in route.path) a == n.address ? n.name : meet.host.nameOf(a)].join(' → ')}\n${routeCostText(route.cost, route.gates)}',
+                      '${wayText(<String>[t('Ty'), for (final String a in route.path) a == n.address ? n.name : nameOf(a)])}\n${routeCostText(route.cost, route.gates)}',
                 ),
               ZenInfo(
                 key: const Key('graph-gate'),
@@ -1935,8 +2888,51 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                   ),
                 ],
               ],
-              if (far && via.isNotEmpty) ...<Widget>[
+              if (far) ...<Widget>[
                 const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  key: const Key('graph-add-friend'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                  ),
+                  onPressed: friendAsked
+                      ? null
+                      : () => then(
+                          () => _addFriend(
+                            intro,
+                            n,
+                            further ? const <String>[] : via,
+                          ),
+                        ),
+                  icon: const Icon(Icons.person_add_alt_rounded),
+                  label: Text(
+                    friendAsked
+                        ? t('Zaproszenie wysłane')
+                        : t('Dodaj do znajomych'),
+                  ),
+                ),
+              ],
+              if (further) ...<Widget>[
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  key: const Key('graph-reach'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                  ),
+                  onPressed: () => then(
+                    () => reachPerson(
+                      this.context,
+                      ref,
+                      target: n.address,
+                      targetName: n.name,
+                    ),
+                  ),
+                  icon: const Icon(Icons.route_rounded),
+                  label: Text(t('Jak dotrzeć')),
+                ),
+              ],
+              if (far && !further && via.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 8),
                 FilledButton.icon(
                   key: const Key('graph-intro'),
                   style: FilledButton.styleFrom(
@@ -2002,6 +2998,54 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
           ),
         );
       },
+    );
+  }
+
+  /// The trust map of [n]: meetings, gratitude cards, the pyramid and
+  /// gatherings, as far as this phone knows them.
+  TrustMap _trustOf(
+    LedgerNode? node,
+    GraphNode n,
+    PyramidService? pyramid,
+    MeetService meet,
+  ) {
+    int? since;
+    for (final PyrMember m
+        in pyramid?.state?.members.values ?? const <PyrMember>[]) {
+      if (m.active &&
+          m.addr.isNotEmpty &&
+          PeerShareCodec.addressesEqual(m.addr, n.address)) {
+        since = m.joinedAt;
+        break;
+      }
+    }
+    EventService? events;
+    try {
+      events = ref.read(eventServiceProvider);
+    } on Object {
+      events = null;
+    }
+    bool went(EventService service, MeetEvent e, String? who) {
+      bool going(EventGuest? g) =>
+          g != null && (g.status == GuestStatus.going || g.checkedIn);
+      if (who == null) {
+        return e.isMine || going(service.myGuest(e));
+      }
+      return (!e.isMine && PeerShareCodec.addressesEqual(e.organizer, who)) ||
+          going(e.guest(who));
+    }
+
+    final EventService? service = events;
+    return trustMapOf(
+      address: n.address,
+      node: node,
+      nameOf: meet.host.nameOf,
+      pyramidSince: since,
+      events: service?.events ?? const <MeetEvent>[],
+      went: service == null
+          ? null
+          : (MeetEvent e, String? who) => went(service, e, who),
+      now: meet.now,
     );
   }
 
@@ -2168,7 +3212,7 @@ class _LegendLine extends StatelessWidget {
                 height: 2.4,
                 decoration: BoxDecoration(
                   color: color,
-                  borderRadius: BorderRadius.circular(2),
+                  borderRadius: context.zenRadius(2),
                 ),
               ),
           ],
@@ -2201,7 +3245,7 @@ class _LegendTag extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: context.zenRadius(8),
             border: Border.all(color: color),
           ),
           child: Text('…', style: TextStyle(color: color, fontSize: 10)),
@@ -2235,7 +3279,8 @@ class _GraphSemantics extends CustomPainter {
     1 => t('najbliżsi'),
     2 => t('znajomi'),
     3 => t('słabi znajomi'),
-    _ => t('znajomi znajomych'),
+    4 => t('znajomi znajomych'),
+    _ => t('dalsze znajomości'),
   };
 
   @override

@@ -159,14 +159,74 @@ final class _Cost implements Comparable<_Cost> {
   }
 }
 
+/// A binary heap of partial ways: cheapest first, then the order pushed
+/// (so a tie keeps the order of the friends).
+final class _WayHeap {
+  final List<(String, _Cost, int)> _items = <(String, _Cost, int)>[];
+  int _seq = 0;
+
+  bool get isNotEmpty => _items.isNotEmpty;
+
+  bool _less((String, _Cost, int) a, (String, _Cost, int) b) {
+    final int c = a.$2.compareTo(b.$2);
+    return c != 0 ? c < 0 : a.$3 < b.$3;
+  }
+
+  void _swap(int i, int j) {
+    final (String, _Cost, int) tmp = _items[i];
+    _items[i] = _items[j];
+    _items[j] = tmp;
+  }
+
+  void push(String at, _Cost cost) {
+    _items.add((at, cost, _seq++));
+    int i = _items.length - 1;
+    while (i > 0) {
+      final int p = (i - 1) >> 1;
+      if (!_less(_items[i], _items[p])) {
+        break;
+      }
+      _swap(i, p);
+      i = p;
+    }
+  }
+
+  (String, _Cost) pop() {
+    final (String, _Cost, int) top = _items.first;
+    final (String, _Cost, int) last = _items.removeLast();
+    if (_items.isNotEmpty) {
+      _items[0] = last;
+      int i = 0;
+      while (true) {
+        final int l = 2 * i + 1;
+        final int r = l + 1;
+        int m = i;
+        if (l < _items.length && _less(_items[l], _items[m])) {
+          m = l;
+        }
+        if (r < _items.length && _less(_items[r], _items[m])) {
+          m = r;
+        }
+        if (m == i) {
+          break;
+        }
+        _swap(i, m);
+        i = m;
+      }
+    }
+    return (top.$1, top.$2);
+  }
+}
+
 /// The cheapest way to [target] through gates, over what this phone knows:
 /// this person's [friends] (no gate to them), the friend lists it holds and
 /// the ones friends passed on ([friendsOf]), and each gatekeeper's terms for
 /// this person ([termsOf]; null: not known — counted as waiting for a
 /// decision). A priced gate counts only when [canPay] (both are in the
-/// pyramid). Dijkstra: cheapest first, then fewer steps waiting for a
-/// decision, then fewer gates; at most [maxSteps] gates. Empty when no way
-/// is known. [self] is this person's own address (never a step).
+/// pyramid). Dijkstra with a heap: cheapest first, then fewer steps waiting
+/// for a decision, then fewer gates. A way may have any number of gates:
+/// only what is known bounds it. Empty when no way is known. [self] is this
+/// person's own address (never a step).
 GatePlan cheapestGates({
   required String target,
   required List<String> friends,
@@ -174,7 +234,6 @@ GatePlan cheapestGates({
   required GateTerms? Function(String gatekeeper) termsOf,
   bool Function(String gatekeeper)? canPay,
   String self = '',
-  int maxSteps = kGateMaxSteps,
 }) {
   String n(String a) => PeerShareCodec.normalizeAddress(a);
   final String goal = n(target);
@@ -186,48 +245,34 @@ GatePlan cheapestGates({
   final Map<String, _Cost> best = <String, _Cost>{};
   final Map<String, GateStepPlan> stepTo = <String, GateStepPlan>{};
   final Set<String> done = <String>{};
-  // A small list as the queue: ways are short and lists are bounded.
-  final List<(String, _Cost, int)> queue = <(String, _Cost, int)>[];
-  int seq = 0;
-  void push(String at, _Cost c) => queue.add((at, c, seq++));
+  final _WayHeap queue = _WayHeap();
   for (final String f in friends) {
     final String a = n(f);
     if (a == me || best.containsKey(a)) {
       continue;
     }
     best[a] = const _Cost(0, 0, 0);
-    push(a, const _Cost(0, 0, 0));
+    queue.push(a, const _Cost(0, 0, 0));
   }
   while (queue.isNotEmpty) {
-    int pick = 0;
-    for (int i = 1; i < queue.length; i++) {
-      final int c = queue[i].$2.compareTo(queue[pick].$2);
-      if (c < 0 || (c == 0 && queue[i].$3 < queue[pick].$3)) {
-        pick = i;
-      }
-    }
-    final (String at, _Cost cost, int _) = queue.removeAt(pick);
+    final (String at, _Cost cost) = queue.pop();
     if (!done.add(at)) {
       continue;
     }
     if (at == goal) {
       break;
     }
-    if (cost.steps >= maxSteps) {
-      continue;
-    }
     final GateTerms? terms = termsOf(at);
     if (terms != null && !terms.free && !(canPay?.call(at) ?? false)) {
       // A price nobody here can pay: no gate through [at].
       continue;
     }
-    final Map<String, String> next = friendsOf(at);
-    for (final MapEntry<String, String> e in next.entries) {
+    final _Cost c = cost.plus(terms);
+    for (final MapEntry<String, String> e in friendsOf(at).entries) {
       final String to = n(e.key);
       if (to.isEmpty || to == me || mine.contains(to) || done.contains(to)) {
         continue;
       }
-      final _Cost c = cost.plus(terms);
       final _Cost? had = best[to];
       if (had == null || c.compareTo(had) < 0) {
         best[to] = c;
@@ -237,7 +282,7 @@ GatePlan cheapestGates({
           toName: e.value,
           terms: terms,
         );
-        push(to, c);
+        queue.push(to, c);
       }
     }
   }
@@ -245,13 +290,16 @@ GatePlan cheapestGates({
     return const GatePlan(<GateStepPlan>[]);
   }
   final List<GateStepPlan> steps = <GateStepPlan>[];
+  final Set<String> walked = <String>{};
   String at = goal;
-  while (stepTo.containsKey(at) && steps.length <= maxSteps) {
+  // Each step was set from a node settled before it: the walk back ends at
+  // a friend (the guard only stops a corrupted map from looping).
+  while (stepTo.containsKey(at) && walked.add(at)) {
     final GateStepPlan s = stepTo[at]!;
-    steps.insert(0, s);
+    steps.add(s);
     at = s.via;
   }
-  return GatePlan(steps);
+  return GatePlan(steps.reversed.toList());
 }
 
 /// Both ways to [target] and the cheaper one: writing directly on
@@ -266,7 +314,6 @@ ReachPlan planReach({
   bool Function(String gatekeeper)? canPay,
   DirectTerms direct = const DirectTerms.unknown(),
   String self = '',
-  int maxSteps = kGateMaxSteps,
 }) {
   final String goal = PeerShareCodec.normalizeAddress(target);
   if (friends.any((String f) => PeerShareCodec.normalizeAddress(f) == goal)) {
@@ -283,7 +330,6 @@ ReachPlan planReach({
     termsOf: termsOf,
     canPay: canPay,
     self: self,
-    maxSteps: maxSteps,
   );
   final GatePlan? way = gates.isEmpty ? null : gates;
   final ReachChoice best;
@@ -448,8 +494,7 @@ final class GateRun {
       return null;
     }
     final List<GateRunStep> steps = <GateRunStep>[
-      for (final Object? s in (json['st'] as List).take(kGateMaxSteps))
-        ?GateRunStep.fromJson(s),
+      for (final Object? s in json['st'] as List) ?GateRunStep.fromJson(s),
     ];
     if (steps.isEmpty) {
       return null;

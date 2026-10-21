@@ -20,8 +20,15 @@ abstract final class AskTypes {
   static const String ask = 'ask';
   static const String answer = 'ask_answer';
 
-  static const Set<String> all = <String>{ask, answer};
+  /// A friend tells the asker they passed the question on, and to how many
+  /// people (no names: only the way it went, never who is behind it).
+  static const String passed = 'ask_passed';
+
+  static const Set<String> all = <String>{ask, answer, passed};
 }
+
+/// Most people one friend may say they passed a question on to.
+const int kAskPassedMax = 500;
 
 /// How long a question lives.
 const Duration kQuestionLife = Duration(days: 7);
@@ -155,8 +162,10 @@ final class Question {
     this.answeredByMe = false,
     this.forwarded = false,
     Set<String>? sentTo,
+    Map<String, int>? passedOn,
   }) : answers = answers ?? <AskAnswer>[],
-       sentTo = sentTo ?? <String>{};
+       sentTo = sentTo ?? <String>{},
+       passedOn = passedOn ?? <String, int>{};
 
   final String id;
   final String text;
@@ -179,6 +188,10 @@ final class Question {
   /// answers come only from them.
   final Set<String> sentTo;
 
+  /// This person's question: friends who passed it on, and to how many
+  /// people (the answer path, without anyone's words).
+  final Map<String, int> passedOn;
+
   bool get isMine => from == null;
 
   bool aliveAt(int now) => now - at < kQuestionLife.inMilliseconds;
@@ -197,6 +210,7 @@ final class Question {
     if (answeredByMe) 'answered': true,
     if (forwarded) 'fwd': true,
     if (sentTo.isNotEmpty) 'to': sentTo.toList(),
+    if (passedOn.isNotEmpty) 'po': passedOn,
   };
 
   static Question? fromJson(Object? json) {
@@ -210,6 +224,7 @@ final class Question {
     final Object? via = json['via'];
     final Object? answers = json['answers'];
     final Object? to = json['to'];
+    final Object? po = json['po'];
     return Question(
       id: json['id'] as String,
       text: json['text'] as String,
@@ -226,6 +241,12 @@ final class Question {
       answeredByMe: json['answered'] == true,
       forwarded: json['fwd'] == true,
       sentTo: <String>{if (to is List) ...to.whereType<String>()},
+      passedOn: <String, int>{
+        if (po is Map)
+          for (final MapEntry<dynamic, dynamic> e in po.entries)
+            if (e.key is String && e.value is int)
+              e.key as String: (e.value as int).clamp(0, kAskPassedMax),
+      },
     );
   }
 }
@@ -381,6 +402,16 @@ final class AskService extends ChangeNotifier {
     }
     q.forwarded = true;
     await _save();
+    // The asker sees the way their question went: through this person,
+    // to how many (no names).
+    final String? back = q.from;
+    if (back != null && q.sentTo.isNotEmpty) {
+      await _send(back, <String, dynamic>{
+        'type': AskTypes.passed,
+        'id': q.id,
+        'n': q.sentTo.length,
+      });
+    }
     return true;
   }
 
@@ -541,6 +572,8 @@ final class AskService extends ChangeNotifier {
     try {
       if (type == AskTypes.ask) {
         await _onAsk(from, frame.payload);
+      } else if (type == AskTypes.passed) {
+        await _onPassed(from, frame.payload);
       } else {
         await _onAnswer(from, frame.payload);
       }
@@ -607,6 +640,22 @@ final class AskService extends ChangeNotifier {
         slotKey: 'ask',
       ),
     );
+  }
+
+  /// A friend this person asked passed the question on.
+  Future<void> _onPassed(String from, Map<String, dynamic> p) async {
+    final Object? id = p['id'];
+    final Object? n = p['n'];
+    final Question? q = id is String ? _questions[id] : null;
+    if (q == null || !q.isMine || !q.sentTo.contains(from) || n is! int) {
+      return;
+    }
+    final int count = n.clamp(0, kAskPassedMax);
+    if (q.passedOn[from] == count) {
+      return;
+    }
+    q.passedOn[from] = count;
+    await _save();
   }
 
   Future<void> _onAnswer(String from, Map<String, dynamic> p) async {
@@ -705,6 +754,58 @@ final class AskService extends ChangeNotifier {
       logZenWarning('Zapytaj sieć: ${payload['type']} do $to: $error');
     }
   }
+}
+
+/// One friend on the answer path of a question: whether they answered,
+/// to how many they passed it on, and who answered through them.
+@immutable
+final class AskPathBranch {
+  const AskPathBranch({
+    required this.friend,
+    this.answered = false,
+    this.passedTo = 0,
+    this.further = const <String>[],
+  });
+
+  /// The friend (normalised address).
+  final String friend;
+  final bool answered;
+  final int passedTo;
+
+  /// Names of those who answered through them (as they signed them).
+  final List<String> further;
+
+  bool get active => answered || passedTo > 0 || further.isNotEmpty;
+}
+
+/// The answer path of this person's question [q]: through whom it went and
+/// who answered — never the words. Friends who did something first (who
+/// answered, then who passed it on), the quiet ones only counted.
+({List<AskPathBranch> branches, int quiet}) askPathOf(Question q) {
+  final Map<String, AskPathBranch> by = <String, AskPathBranch>{};
+  for (final String f in q.sentTo) {
+    final List<String> further = <String>[
+      for (final AskAnswer a in q.answers)
+        if (a.from == f && a.path.length > 1) a.path.first,
+    ];
+    by[f] = AskPathBranch(
+      friend: f,
+      answered: q.answers.any(
+        (AskAnswer a) => a.from == f && a.path.length == 1,
+      ),
+      passedTo: q.passedOn[f] ?? 0,
+      further: further.toSet().toList(),
+    );
+  }
+  final List<AskPathBranch> active =
+      by.values.where((AskPathBranch b) => b.active).toList()
+        ..sort((AskPathBranch a, AskPathBranch b) {
+          int rank(AskPathBranch x) =>
+              (x.answered ? 0 : 2) + (x.further.isNotEmpty ? 0 : 1);
+          final int byRank = rank(a).compareTo(rank(b));
+          return byRank != 0 ? byRank : a.friend.compareTo(b.friend);
+        });
+  return (branches: active, quiet: by.length - active.length);
 }
 
 /// "Kasia" for a friend's own answer, "znajomy(-a) Bartka" for an answer

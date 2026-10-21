@@ -5,6 +5,7 @@ import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/meet/graph/graph_notes.dart';
 import 'package:zen/src/features/meet/graph/open_to_meet.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
@@ -28,6 +29,8 @@ final Provider<OpenToMeetService> openToMeetServiceProvider =
             ref.read(featureFlagsProvider).isEnabled(ZenFeature.dating)
             ? ref.read(datingServiceProvider).hiddenAddresses()
             : const <String>{},
+        // People across opened gates: they see the flag, theirs shows here.
+        gateContacts: () => datingGateContacts(ref),
       );
       unawaitedLogged(open.load(), context: 'Graf: otwarci na poznanie');
       listenFrames(ref, open.handle, 'Graf: otwarci na poznanie');
@@ -76,4 +79,31 @@ final Provider<OpenToMeetService> openToMeetServiceProvider =
         open.dispose();
       });
       return open;
+    });
+
+/// What the graph keeps for this person only (dates, private circle names,
+/// reminders). Friends are noted as they come and go while it lives.
+final Provider<GraphNotesService> graphNotesProvider =
+    Provider<GraphNotesService>((Ref ref) {
+      final GraphNotesService notes = GraphNotesService(
+        disk: ref.read(ledgerDiskProvider),
+      );
+      unawaitedLogged(notes.load(), context: 'Graf: notatki');
+      ref.listen<String>(
+        socialHubControllerProvider.select(
+          (SocialHubState s) => (acceptedFriendAddresses(s)..sort()).join(','),
+        ),
+        (String? previous, String next) {
+          if (next.isEmpty) {
+            return;
+          }
+          unawaitedLogged(
+            notes.observe(friends: next.split(',')),
+            context: 'Graf: daty znajomych',
+          );
+        },
+        fireImmediately: true,
+      );
+      ref.onDispose(notes.dispose);
+      return notes;
     });

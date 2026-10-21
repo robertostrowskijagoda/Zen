@@ -33,14 +33,13 @@ const Duration kGateStepWait = Duration(days: 1);
 /// A payment that has not reached this phone yet is waited for this long.
 const Duration kGatePaymentWait = Duration(days: 2);
 
-/// Most gates on one way.
-const int kGateMaxSteps = 4;
-
 /// How far friends pass on a gatekeeper's terms and friend list (when the
-/// gatekeeper allows it): to friends of friends, and one step further.
-const int kGateRelayDepth = 2;
+/// gatekeeper allows it), in steps. A way through gates is as long as what
+/// is known this way: the planner itself has no limit of gates.
+const int kGateRelayDepth = 6;
 
-/// Passed-on gatekeepers in one card, at most (all depths together).
+/// Passed-on gatekeepers in one card, at most (all depths together): the
+/// nearest first, so a card stays small however far it reaches.
 const int kGateRelayEntries = 40;
 
 /// People listed for one passed-on gatekeeper, at most.
@@ -167,6 +166,50 @@ final class GateSettings {
 /// whole tree while it is read).
 final class _Budget {
   int entries = kGateRelayEntries;
+}
+
+/// [roots] cut to [budget] gatekeepers in all and [depth] levels, nearest
+/// first (breadth-first, so no single branch eats the card): each address
+/// once, never one of [exclude] (the one the card is for). A gatekeeper
+/// further away is kept only under one that is kept.
+List<RelayedGate> trimRelayed(
+  List<RelayedGate> roots, {
+  int budget = kGateRelayEntries,
+  int depth = kGateRelayDepth,
+  Set<String> exclude = const <String>{},
+}) {
+  final Set<RelayedGate> keep = Set<RelayedGate>.identity();
+  final Set<String> seen = <String>{...exclude};
+  List<RelayedGate> level = roots;
+  int left = budget;
+  for (int d = 0; d < depth && level.isNotEmpty && left > 0; d++) {
+    final List<RelayedGate> next = <RelayedGate>[];
+    for (final RelayedGate g in level) {
+      if (left <= 0) {
+        break;
+      }
+      if (!seen.add(g.address)) {
+        continue;
+      }
+      keep.add(g);
+      left--;
+      next.addAll(g.relayed);
+    }
+    level = next;
+  }
+  RelayedGate cut(RelayedGate g) => RelayedGate(
+    address: g.address,
+    terms: g.terms,
+    friends: g.friends,
+    relayed: <RelayedGate>[
+      for (final RelayedGate r in g.relayed)
+        if (keep.contains(r)) cut(r),
+    ],
+  );
+  return <RelayedGate>[
+    for (final RelayedGate g in roots)
+      if (keep.contains(g)) cut(g),
+  ];
 }
 
 /// A gatekeeper a friend passed on: their terms for people introduced to

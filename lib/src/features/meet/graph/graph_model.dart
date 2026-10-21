@@ -15,6 +15,10 @@ import 'package:zen/src/features/social/social_hub_state.dart';
 /// found by search).
 const int kGraphMaxNodes = 5000;
 
+/// Most people drawn further away than friends of friends (known from
+/// gates friends passed on, or open to meet further out).
+const int kGraphMaxFar = 1500;
+
 /// What the graph shows. Each mode only colours what this phone already
 /// knows; none of them asks anyone for more.
 enum GraphMode {
@@ -34,7 +38,16 @@ enum GraphMode {
   gates,
 
   /// The shortest or cheapest way to a person.
-  route;
+  route,
+
+  /// How the graph grew: 3, 6, 12 months ago (dates kept on this phone).
+  time,
+
+  /// Friends who alone connect circles, and circles without connections.
+  bridges,
+
+  /// Friends not talked to or met for a long time (only for this person).
+  neglect;
 
   String get label => switch (this) {
     GraphMode.friends => t('Znajomi'),
@@ -43,6 +56,9 @@ enum GraphMode {
     GraphMode.pyramid => t('Piramida'),
     GraphMode.gates => t('Bramy'),
     GraphMode.route => t('Ścieżka'),
+    GraphMode.time => t('Oś czasu'),
+    GraphMode.bridges => t('Mosty'),
+    GraphMode.neglect => t('Dawno'),
   };
 }
 
@@ -59,29 +75,44 @@ final class GraphNode {
   final String address;
   final String name;
 
-  /// 1 = przyjaciele, 2 = znajomi, 3 = słabi znajomi, 4 = znajomi znajomych.
+  /// 1 = przyjaciele, 2 = znajomi, 3 = słabi znajomi, 4 = znajomi znajomych,
+  /// 5 = further away (through gates friends passed on, or open to meet).
   final int ring;
   final FriendProfile? friend;
 
-  /// Friends who connect to them (for friends of friends).
+  /// Friends who connect to them (for friends of friends); for people
+  /// further away, the people drawn who know them.
   final List<String> via;
 
   /// Where the layout put them (the end of an animation).
   Offset at = Offset.zero;
 
   bool get isFriend => ring < 4;
+
+  /// Further away than friends of friends.
+  bool get isFar => ring >= 5;
 }
 
+/// Someone known beyond friends of friends: their own name and the people
+/// who know them (gatekeepers, or the friend of a friend who passed on
+/// that they are open to meet).
+typedef FarPerson = ({String name, Set<String> via});
+
 /// Builds the rings: friends by level, then friends of friends from the
-/// lists friends shared. Nothing but what reached this phone: a friend
-/// who does not show their list adds nobody. Addresses in [keep] are drawn
-/// even past the limit (the person picked in search).
+/// lists friends shared, then [far] people (ring 5) known through someone
+/// already drawn. Nothing but what reached this phone: a friend who does
+/// not show their list adds nobody. Addresses in [keep] are drawn even past
+/// the limit (the person picked in search). [self]: this person's own
+/// addresses, never drawn as someone else.
 List<GraphNode> buildGraph({
   required SocialHubState social,
   required MeetBook book,
   required FriendLevel Function(String address) levelOf,
   int maxFriendsOfFriends = 80,
   Set<String> keep = const <String>{},
+  Map<String, FarPerson> far = const <String, FarPerson>{},
+  int maxFar = kGraphMaxFar,
+  bool Function(String address)? self,
 }) {
   final List<GraphNode> nodes = <GraphNode>[];
   final Set<String> mine = <String>{};
@@ -104,7 +135,7 @@ List<GraphNode> buildGraph({
   final Map<String, GraphNode> fof = <String, GraphNode>{};
   for (final String friend in order) {
     book.friendsOf(friend).forEach((String a, String name) {
-      if (mine.contains(a)) {
+      if (mine.contains(a) || (self?.call(a) ?? false)) {
         return;
       }
       final GraphNode? had = fof[a];
@@ -120,7 +151,58 @@ List<GraphNode> buildGraph({
       }
     });
   }
-  return nodes..addAll(fof.values);
+  nodes.addAll(fof.values);
+  if (far.isEmpty) {
+    return nodes;
+  }
+  // Further out, step by step: someone is drawn once a person who knows
+  // them is (so every one of them hangs on a line to the middle).
+  final Set<String> drawn = <String>{
+    for (final GraphNode n in nodes) n.address,
+  };
+  final Map<String, FarPerson> left = <String, FarPerson>{
+    for (final MapEntry<String, FarPerson> e in far.entries)
+      if (!drawn.contains(PeerShareCodec.normalizeAddress(e.key)) &&
+          !(self?.call(PeerShareCodec.normalizeAddress(e.key)) ?? false))
+        PeerShareCodec.normalizeAddress(e.key): e.value,
+  };
+  int added = 0;
+  bool grew = true;
+  while (grew && left.isNotEmpty) {
+    grew = false;
+    final List<GraphNode> wave = <GraphNode>[];
+    final List<String> keys = left.keys.toList()..sort();
+    for (final String a in keys) {
+      if (added >= maxFar && !keep.contains(a)) {
+        continue;
+      }
+      final List<String> via = <String>[
+        for (final String v in left[a]!.via)
+          if (drawn.contains(PeerShareCodec.normalizeAddress(v)))
+            PeerShareCodec.normalizeAddress(v),
+      ]..sort();
+      if (via.isEmpty) {
+        continue;
+      }
+      final String name = left[a]!.name;
+      wave.add(
+        GraphNode(
+          address: a,
+          name: name.isEmpty ? t('ktoś') : name,
+          ring: 5,
+          via: via,
+        ),
+      );
+      added++;
+    }
+    for (final GraphNode n in wave) {
+      left.remove(n.address);
+      drawn.add(n.address);
+      nodes.add(n);
+      grew = true;
+    }
+  }
+  return nodes;
 }
 
 /// Two friends who know each other (one has the other on the list they
@@ -159,7 +241,9 @@ Map<String, int> mutualCounts(List<GraphNode> nodes, MeetBook book) {
   }
   return <String, int>{
     for (final GraphNode n in nodes)
-      n.address: n.isFriend ? (out[n.address] ?? 0) : n.via.length,
+      n.address: n.isFriend
+          ? (out[n.address] ?? 0)
+          : (n.isFar ? 0 : n.via.length),
   };
 }
 
@@ -385,18 +469,22 @@ final class GraphRoute {
 }
 
 /// The best way to [target] over what is known: this person's [friends]
-/// (closest first; on a tie the closer friend wins) and the lists they
-/// shared. Each step costs what [prices] says (nothing known: one hop).
-/// Dijkstra; empty when [target] cannot be reached.
+/// (closest first; on a tie the closer friend wins), the lists they shared
+/// and — with [friendsOf] — what friends passed on about people further
+/// away. Each step costs what [prices] says (nothing known: one hop).
+/// Dijkstra with a heap, any number of steps; empty when [target] cannot be
+/// reached.
 GraphRoute graphRoute({
   required List<String> friends,
   required MeetBook book,
   required String target,
   GatePriceSource prices = const NoGatePrices(),
   RouteGoal goal = RouteGoal.shortest,
+  Map<String, String> Function(String person)? friendsOf,
 }) {
   final String goalAddress = PeerShareCodec.normalizeAddress(target);
   const String me = '';
+  final Set<String> walked = <String>{};
   final Map<String, RouteCost> best = <String, RouteCost>{
     me: const RouteCost(),
   };
@@ -415,8 +503,11 @@ GraphRoute graphRoute({
     if (at == goalAddress) {
       break;
     }
-    // Only friends' lists are known here, so a way is at most two steps.
-    final Iterable<String> next = at == me ? mine : book.friendsOf(at).keys;
+    final Iterable<String> next = at == me
+        ? mine
+        : (friendsOf ?? book.friendsOf)(
+            at,
+          ).keys.map(PeerShareCodec.normalizeAddress);
     for (final String n in next) {
       if (done.contains(n) || n == me) {
         continue;
@@ -440,12 +531,16 @@ GraphRoute graphRoute({
   final List<String> path = <String>[];
   final List<GatePrice?> gates = <GatePrice?>[];
   String at = goalAddress;
-  while (at != me) {
-    path.insert(0, at);
-    gates.insert(0, gateTo[at]);
+  while (at != me && walked.add(at)) {
+    path.add(at);
+    gates.add(gateTo[at]);
     at = parent[at]!;
   }
-  return GraphRoute(path: path, gates: gates, cost: best[goalAddress]!);
+  return GraphRoute(
+    path: path.reversed.toList(),
+    gates: gates.reversed.toList(),
+    cost: best[goalAddress]!,
+  );
 }
 
 /// The shortest way (in steps) to [target]: see [graphRoute].
@@ -582,8 +677,10 @@ final class GraphFacts {
     bool Function(String address)? nearby,
     List<String> Function(String address)? nationsOf,
     PyramidMark? Function(String address)? pyramidOf,
+    bool Function(String address, String label)? inLabel,
     this.mutual = const <String, int>{},
-  }) : _statusOf = statusOf,
+  }) : _inLabel = inLabel,
+       _statusOf = statusOf,
        _online = online,
        _openOf = openOf,
        _met = met,
@@ -598,6 +695,7 @@ final class GraphFacts {
   final bool Function(String address)? _nearby;
   final List<String> Function(String address)? _nationsOf;
   final PyramidMark? Function(String address)? _pyramidOf;
+  final bool Function(String address, String label)? _inLabel;
 
   /// Friends who know each person ([mutualCounts]).
   final Map<String, int> mutual;
@@ -612,6 +710,9 @@ final class GraphFacts {
   PyramidMark? pyramidOf(String a) => _pyramidOf?.call(a);
   int mutualOf(String a) => mutual[a] ?? 0;
 
+  /// Whether [a] is in the circle this person named [label] (privately).
+  bool inLabel(String a, String label) => _inLabel?.call(a, label) ?? false;
+
   /// Nationalities the person's profile shows this phone (codes).
   List<String> nationsOf(String a) =>
       _nations[a] ??= _nationsOf?.call(a) ?? const <String>[];
@@ -621,18 +722,43 @@ final class GraphFacts {
       statusOf(a) != null || online(a) || openOf(a) != null;
 }
 
+/// Quick choices of who is drawn: everyone, friends and close friends, or
+/// close friends only ("Przyjaciele").
+enum RingPreset {
+  all(<int>{1, 2, 3, 4, 5}),
+  friends(<int>{1, 2}),
+  close(<int>{1});
+
+  const RingPreset(this.rings);
+
+  final Set<int> rings;
+
+  String get label => switch (this) {
+    RingPreset.all => t('Wszyscy'),
+    RingPreset.friends => t('Znajomi i przyjaciele'),
+    RingPreset.close => t('Przyjaciele'),
+  };
+
+  /// The preset [rings] are, if any.
+  static RingPreset? of(Set<int> rings) => RingPreset.values
+      .where((RingPreset p) => setEquals(p.rings, rings))
+      .firstOrNull;
+}
+
 /// The filters of the graph. The default shows everyone.
 @immutable
 final class GraphFilters {
   const GraphFilters({
-    this.rings = const <int>{1, 2, 3, 4},
+    this.rings = allRings,
     this.minMutual = 0,
     this.nationality,
     this.withStatus = false,
     this.nearby = false,
+    this.label,
   });
 
-  /// Which circles: 1 przyjaciele, 2 znajomi, 3 słabi, 4 znajomi znajomych.
+  /// Which circles: 1 przyjaciele, 2 znajomi, 3 słabi, 4 znajomi znajomych,
+  /// 5 dalej.
   final Set<int> rings;
 
   /// At least this many mutual friends (0: any).
@@ -643,7 +769,10 @@ final class GraphFilters {
   final bool withStatus;
   final bool nearby;
 
-  static const Set<int> allRings = <int>{1, 2, 3, 4};
+  /// Only the people of the circle this person named so (its id).
+  final String? label;
+
+  static const Set<int> allRings = <int>{1, 2, 3, 4, 5};
 
   /// How many filters are on.
   int get active =>
@@ -651,7 +780,8 @@ final class GraphFilters {
       (minMutual > 0 ? 1 : 0) +
       (nationality != null ? 1 : 0) +
       (withStatus ? 1 : 0) +
-      (nearby ? 1 : 0);
+      (nearby ? 1 : 0) +
+      (label != null ? 1 : 0);
 
   bool get isEmpty => active == 0;
 
@@ -660,7 +790,8 @@ final class GraphFilters {
       (minMutual <= 0 || f.mutualOf(n.address) >= minMutual) &&
       (nationality == null || f.nationsOf(n.address).contains(nationality)) &&
       (!withStatus || f.hasStatus(n.address)) &&
-      (!nearby || f.nearby(n.address));
+      (!nearby || f.nearby(n.address)) &&
+      (label == null || f.inLabel(n.address, label!));
 
   GraphFilters copyWith({
     Set<int>? rings,
@@ -668,12 +799,14 @@ final class GraphFilters {
     String? Function()? nationality,
     bool? withStatus,
     bool? nearby,
+    String? Function()? label,
   }) => GraphFilters(
     rings: rings ?? this.rings,
     minMutual: minMutual ?? this.minMutual,
     nationality: nationality != null ? nationality() : this.nationality,
     withStatus: withStatus ?? this.withStatus,
     nearby: nearby ?? this.nearby,
+    label: label != null ? label() : this.label,
   );
 
   @override
@@ -683,7 +816,8 @@ final class GraphFilters {
       other.minMutual == minMutual &&
       other.nationality == nationality &&
       other.withStatus == withStatus &&
-      other.nearby == nearby;
+      other.nearby == nearby &&
+      other.label == label;
 
   @override
   int get hashCode => Object.hash(
@@ -692,6 +826,7 @@ final class GraphFilters {
     nationality,
     withStatus,
     nearby,
+    label,
   );
 }
 

@@ -646,7 +646,7 @@ void main() {
     });
 
     test(
-      'a price nobody can pay closes that gate; too long a way is no way',
+      'a price nobody can pay closes that gate; a long way is still a way',
       () {
         GatePlan plan = cheapestGates(
           target: x,
@@ -686,7 +686,8 @@ void main() {
           termsOf: (String _) => _freeAtOnce,
           self: me,
         );
-        expect(plan.isEmpty, isTrue, reason: 'six gates > $kGateMaxSteps');
+        expect(plan.steps, hasLength(6), reason: 'no limit of gates');
+        expect(plan.through, chain.take(6).toList());
       },
     );
 
@@ -983,6 +984,164 @@ void main() {
         const GatePrice.free(),
       );
       expect(prices.changes, same(ania.intro));
+    });
+  });
+
+  group('ways of any length', () {
+    test('Dijkstra over a long line and a wide graph: the cheapest of all, '
+        'as many gates as it takes', () {
+      final String me = addr('a0');
+      // A line of 60 people, and a short way through an expensive gate.
+      final List<String> line = <String>[
+        for (int i = 0; i < 60; i++) addr('1${i.toString().padLeft(3, '0')}'),
+      ];
+      final String pricey = addr('fff1');
+      final Map<String, Map<String, String>> lists =
+          <String, Map<String, String>>{
+            for (int i = 0; i < line.length - 1; i++)
+              line[i]: <String, String>{line[i + 1]: 'n$i'},
+            pricey: <String, String>{line.last: 'koniec'},
+          };
+      // Many dead ends next to the line (a wide graph).
+      for (int i = 0; i < line.length - 1; i++) {
+        for (int k = 0; k < 30; k++) {
+          lists[line[i]]![addr('2${i.toString().padLeft(2, '0')}$k')] = '';
+        }
+      }
+      GatePlan plan = cheapestGates(
+        target: line.last,
+        friends: <String>[line.first, pricey],
+        friendsOf: (String p) => lists[p] ?? const <String, String>{},
+        termsOf: (String k) =>
+            k == pricey ? const GateTerms(price: 100) : _freeAtOnce,
+        canPay: (String _) => true,
+        self: me,
+      );
+      expect(plan.steps, hasLength(59), reason: 'free beats 1 pkt');
+      expect(plan.steps.first.via, line.first);
+      expect(plan.steps.last.to, line.last);
+      expect(plan.price, 0);
+      expect(plan.through, line.take(59).toList());
+      // The pricey one is free too now: one gate wins (fewer gates).
+      plan = cheapestGates(
+        target: line.last,
+        friends: <String>[line.first, pricey],
+        friendsOf: (String p) => lists[p] ?? const <String, String>{},
+        termsOf: (String _) => _freeAtOnce,
+        self: me,
+      );
+      expect(plan.steps.single.via, pricey);
+    });
+
+    test('a card passes the nearest gatekeepers first, each once, never the '
+        'one it is for', () {
+      RelayedGate g(
+        String a, [
+        List<RelayedGate> below = const <RelayedGate>[],
+      ]) => RelayedGate(address: addr(a), terms: _freeAtOnce, relayed: below);
+      final List<RelayedGate> roots = <RelayedGate>[
+        g('11', <RelayedGate>[
+          g('12', <RelayedGate>[
+            g('13', <RelayedGate>[g('14')]),
+          ]),
+        ]),
+        g('21', <RelayedGate>[g('22'), g('11'), g('99')]),
+        g('31'),
+      ];
+      final List<RelayedGate> cut = trimRelayed(
+        roots,
+        budget: 6,
+        exclude: <String>{addr('99')},
+      );
+      List<String> flat(List<RelayedGate> gates) => <String>[
+        for (final RelayedGate r in gates) ...<String>[
+          r.address,
+          ...flat(r.relayed),
+        ],
+      ];
+      expect(flat(cut), <String>[
+        addr('11'),
+        addr('12'),
+        addr('13'),
+        addr('21'),
+        addr('22'),
+        addr('31'),
+      ]);
+      // Deep enough and big enough: the whole line.
+      expect(
+        flat(trimRelayed(roots, exclude: <String>{addr('99')})),
+        contains(addr('14')),
+      );
+      expect(
+        <String>[
+          for (final RelayedGate r in trimRelayed(roots, depth: 1)) r.address,
+        ],
+        <String>[addr('11'), addr('21'), addr('31')],
+      );
+      // A card read back keeps all the levels.
+      final GateCard card = GateCard(
+        terms: _free,
+        relay: true,
+        open: _free,
+        relayed: trimRelayed(roots),
+      );
+      final GateCard back = GateCard.fromJson(
+        jsonDecode(jsonEncode(card.toJson())),
+      )!;
+      expect(flat(back.relayed), contains(addr('14')));
+    });
+
+    test('six gates, known only from what friends passed on, opened one '
+        'after another', () async {
+      final _Net net = _Net();
+      final _Phone ania = _Phone(net, 'Ania', 'a0');
+      final List<_Phone> line = <_Phone>[
+        for (int i = 1; i <= 7; i++) _Phone(net, 'P$i', 'b$i'),
+      ];
+      _befriend(ania, line.first);
+      for (int i = 0; i < line.length - 1; i++) {
+        _befriend(line[i], line[i + 1]);
+      }
+      final List<_Phone> all = <_Phone>[ania, ...line];
+      for (final _Phone p in all) {
+        await LedgerIdentity.loadOrCreate(p.disk);
+        await p.intro.load();
+        await p.strangers.load();
+        await p.meet.shareFriendList(p.meet.friendNames!(), force: true);
+      }
+      for (final _Phone p in line.reversed) {
+        await p.intro.setGateDefaults(_freeAtOnce);
+        await p.intro.setGateRelay(true);
+      }
+      for (final _Phone p in line.reversed) {
+        await p.intro.shareGates(force: true);
+      }
+      final _Phone target = line.last;
+      expect(
+        ania.intro.knownFriendsOf(line[5].address).keys,
+        contains(target.address),
+        reason: 'five steps away, passed on friend to friend',
+      );
+      final ReachPlan reach = ania.intro.planTo(target.address);
+      expect(reach.best, ReachChoice.gates);
+      final GatePlan plan = reach.gates!;
+      expect(plan.steps, hasLength(6));
+      final GateRun? run = await ania.intro.openWay(
+        plan,
+        target: target.address,
+        targetName: 'P7',
+      );
+      expect(run!.state, GateRunState.done);
+      expect(
+        run.steps.every((GateRunStep s) => s.state == GateStepState.open),
+        isTrue,
+      );
+      expect(target.intro.needsMe.single.asker, ania.address);
+      expect(
+        GateRun.fromJson(jsonDecode(jsonEncode(run.toJson())))!.steps,
+        hasLength(6),
+        reason: 'kept whole',
+      );
     });
   });
 }
