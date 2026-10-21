@@ -1,0 +1,523 @@
+import 'package:flutter/material.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/theme/zen_backdrop.dart';
+import 'package:zen/src/app/theme/zen_kit.dart';
+import 'package:zen/src/app/theme/zen_palettes.dart';
+import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/features/settings/app_settings.dart';
+
+/// The theme picker of Ustawienia → Wygląd: the palettes in their groups
+/// ([ZenThemeCategory]), each as a live miniature of the app drawn with
+/// that palette's own theme (rail, header, a card with a badge, a chat
+/// bubble, a button, a label and its backdrop). One tap applies it.
+class ZenThemePicker extends StatelessWidget {
+  const ZenThemePicker({
+    required this.selected,
+    required this.accent,
+    required this.brightness,
+    required this.onSelect,
+    super.key,
+  });
+
+  final AppPalette selected;
+
+  /// The accent of Klasyczny.
+  final AppAccentTheme accent;
+
+  /// The mode the previews are shown in (a dark-only palette stays dark).
+  final Brightness brightness;
+  final ValueChanged<AppPalette> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return Column(
+      key: const Key('settings-palette-picker'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        for (final ZenThemeCategory category in ZenThemeCategory.values)
+          Padding(
+            key: Key('settings-palette-category-${category.name}'),
+            padding: EdgeInsets.only(
+              top: category == ZenThemeCategory.values.first ? 0 : 18,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  category.label,
+                  style: TextStyle(
+                    color: zen.textPrimary,
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  category.caption,
+                  style: TextStyle(
+                    color: zen.textSecondary,
+                    fontSize: 12.5,
+                    height: 1.3,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints c) {
+                    // Two previews per row on a phone, more on a wide window.
+                    const double gap = 10;
+                    final int columns = (c.maxWidth / 170).floor().clamp(2, 6);
+                    final double width =
+                        (c.maxWidth - gap * (columns - 1)) / columns;
+                    return Wrap(
+                      spacing: gap,
+                      runSpacing: gap,
+                      children: <Widget>[
+                        for (final AppPalette p in category.palettes)
+                          SizedBox(
+                            width: width,
+                            child: ZenThemeCard(
+                              palette: p,
+                              accent: accent,
+                              brightness: brightness,
+                              selected: selected == p,
+                              onTap: () => onSelect(p),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// One palette to pick: its miniature, name and character.
+class ZenThemeCard extends StatelessWidget {
+  const ZenThemeCard({
+    required this.palette,
+    required this.accent,
+    required this.brightness,
+    required this.selected,
+    required this.onTap,
+    super.key,
+  });
+
+  final AppPalette palette;
+  final AppAccentTheme accent;
+  final Brightness brightness;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final ZenLook look = ZenLook.of(context);
+    final ShapeBorder shape = RoundedRectangleBorder(
+      borderRadius: look.br(18),
+      side: BorderSide(
+        color: selected ? zen.accent : zen.outlineSoft,
+        width: selected ? 2 : 1,
+      ),
+    );
+    return Semantics(
+      selected: selected,
+      button: true,
+      label: palette.label,
+      child: Material(
+        color: look.panelColor(zen),
+        shape: shape,
+        child: InkWell(
+          key: Key('settings-palette-${palette.name}'),
+          customBorder: shape,
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                ClipRRect(
+                  borderRadius: look.br(12),
+                  child: ZenThemePreview(
+                    palette: palette,
+                    accent: accent,
+                    brightness: brightness,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(6, 8, 4, 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              palette.label,
+                              style: TextStyle(
+                                color: zen.textPrimary,
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              palette.tagline,
+                              style: TextStyle(
+                                color: zen.textSecondary,
+                                fontSize: 12,
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (palette.darkOnly)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4, top: 1),
+                          child: Icon(
+                            Icons.dark_mode_rounded,
+                            size: 16,
+                            color: zen.textMuted,
+                            semanticLabel: t('tylko ciemny'),
+                          ),
+                        ),
+                      if (selected)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4),
+                          child: Icon(
+                            Icons.check_circle_rounded,
+                            size: 20,
+                            color: zen.accent,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A still miniature of the app in [palette]: built from the real kit
+/// pieces under that palette's theme, then scaled down. It does not
+/// animate and takes no taps.
+class ZenThemePreview extends StatelessWidget {
+  const ZenThemePreview({
+    required this.palette,
+    required this.accent,
+    required this.brightness,
+    super.key,
+  });
+
+  final AppPalette palette;
+  final AppAccentTheme accent;
+  final Brightness brightness;
+
+  /// The logical size the miniature is laid out at before scaling.
+  static const Size layoutSize = Size(220, 150);
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = ZenTheme.forPalette(palette, accent, brightness);
+    return ExcludeSemantics(
+      child: IgnorePointer(
+        child: TickerMode(
+          enabled: false,
+          child: AspectRatio(
+            aspectRatio: layoutSize.width / layoutSize.height,
+            child: FittedBox(
+              child: SizedBox.fromSize(
+                size: layoutSize,
+                child: Theme(
+                  data: theme,
+                  child: DefaultTextStyle(
+                    style: theme.textTheme.bodyMedium ?? const TextStyle(),
+                    child: const _MiniApp(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniApp extends StatelessWidget {
+  const _MiniApp();
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final ZenLook look = ZenLook.of(context);
+    final BoxDecoration? themed = look.bubble(zen, outgoing: true);
+    final Decoration bubble =
+        themed ??
+        BoxDecoration(
+          gradient: zen.accentGradient,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(look.radius(12)),
+            topRight: Radius.circular(look.radius(12)),
+            bottomLeft: Radius.circular(look.radius(12)),
+            bottomRight: Radius.circular(look.radius(3)),
+          ),
+        );
+    return ColoredBox(
+      color: zen.background,
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          if (look.backdrop != ZenBackdrop.none)
+            ZenBackdropLayer(kind: look.backdrop, colors: zen, still: true),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              // The tab rail with its active tab.
+              DecoratedBox(
+                decoration: look.railDecoration(zen),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(3, 8, 3, 8),
+                  child: Column(
+                    children: <Widget>[
+                      for (final (int i, IconData icon) in <IconData>[
+                        Icons.dynamic_feed_rounded,
+                        Icons.chat_bubble_rounded,
+                        Icons.people_alt_rounded,
+                        Icons.person_rounded,
+                      ].indexed)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 5),
+                          child: ZenRailTabFrame(
+                            selected: i == 1,
+                            padding: const EdgeInsets.all(3),
+                            child: Icon(
+                              icon,
+                              size: 13,
+                              color: i == 1 ? zen.accent : zen.textMuted,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      _MiniHeader(zen: zen, look: look),
+                      const SizedBox(height: 7),
+                      ZenCard(
+                        margin: EdgeInsets.zero,
+                        padding: const EdgeInsets.all(6),
+                        child: Row(
+                          children: <Widget>[
+                            const ZenBlobAvatar(
+                              name: 'Ada',
+                              online: true,
+                              size: 20,
+                              showStatus: false,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Text(
+                                    'Ada',
+                                    maxLines: 1,
+                                    style: TextStyle(
+                                      color: zen.textPrimary,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  Container(
+                                    margin: const EdgeInsets.only(top: 3),
+                                    height: 3,
+                                    width: 46,
+                                    color: zen.textMuted,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const ZenCountBadge(2),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: bubble,
+                          child: Text(
+                            t('Cześć!'),
+                            maxLines: 1,
+                            style: TextStyle(
+                              color: themed == null
+                                  ? zen.onAccent
+                                  : zen.textPrimary,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      Row(
+                        children: <Widget>[
+                          FilledButton(
+                            onPressed: () {},
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size(0, 22),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              visualDensity: VisualDensity.compact,
+                              textStyle: const TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            child: Text(t('Zapisz'), maxLines: 1),
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(child: ZenPill(text: t('nowe'))),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The section header of the look, in miniature.
+class _MiniHeader extends StatelessWidget {
+  const _MiniHeader({required this.zen, required this.look});
+
+  final ZenColors zen;
+  final ZenLook look;
+
+  @override
+  Widget build(BuildContext context) {
+    final TextStyle title = zen.display(
+      color: look.header == ZenHeaderStyle.spectrum
+          ? zen.accent
+          : zen.textPrimary,
+      size: 14,
+      weight: FontWeight.w600,
+    );
+    final List<Shadow>? glow = look.lit
+        ? <Shadow>[
+            Shadow(color: zen.accent.withValues(alpha: 0.7), blurRadius: 6),
+          ]
+        : null;
+    final Widget text = Text(
+      'Zen',
+      maxLines: 1,
+      style: title.copyWith(shadows: glow),
+    );
+    final Widget mark = switch (look.header) {
+      ZenHeaderStyle.bar || ZenHeaderStyle.neonTube => Container(
+        width: 3,
+        height: 13,
+        margin: const EdgeInsets.only(right: 6),
+        decoration: BoxDecoration(
+          color: zen.accent,
+          borderRadius: look.br(2),
+          boxShadow: zen.neonGlow(zen.accent, radius: 6),
+        ),
+      ),
+      ZenHeaderStyle.prompt => Padding(
+        padding: const EdgeInsets.only(right: 5),
+        child: Text('>', style: title.copyWith(color: zen.accent)),
+      ),
+      ZenHeaderStyle.spectrum => Container(
+        width: 14,
+        height: 12,
+        margin: const EdgeInsets.only(right: 6),
+        decoration: ShapeDecoration(
+          color: zen.surfaceSunk,
+          shape: ZenBevelBorder.of(zen, sunken: true),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: <Widget>[
+            for (final double h in <double>[6, 9, 4])
+              Container(width: 2, height: h, color: zen.accent),
+          ],
+        ),
+      ),
+      ZenHeaderStyle.brackets ||
+      ZenHeaderStyle.underline => const SizedBox.shrink(),
+    };
+    Widget header = Row(children: <Widget>[mark, text]);
+    if (look.header == ZenHeaderStyle.brackets) {
+      header = Row(
+        children: <Widget>[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              border: Border.all(color: zen.accent.withValues(alpha: 0.8)),
+              boxShadow: zen.neonGlow(zen.accent, radius: 6),
+            ),
+            child: text,
+          ),
+        ],
+      );
+    } else if (look.header == ZenHeaderStyle.underline) {
+      header = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          text,
+          Container(
+            margin: const EdgeInsets.only(top: 2),
+            width: 16,
+            height: 1,
+            color: zen.accent,
+          ),
+        ],
+      );
+    } else if (look.header == ZenHeaderStyle.prompt) {
+      header = Row(
+        children: <Widget>[
+          mark,
+          text,
+          Container(
+            margin: const EdgeInsets.only(left: 3),
+            width: 6,
+            height: 12,
+            color: zen.accent,
+          ),
+        ],
+      );
+    }
+    return header;
+  }
+}

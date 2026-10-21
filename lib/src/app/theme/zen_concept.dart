@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 
-/// The component style shared by the fixed palettes (Neon, Retro, Cisza,
-/// Grafit, Las, Zmierzch): their motion and lit accents, picked by the
-/// palette's [ZenLook]. Klasyczny does not use any of it. Every animation
+/// The component style shared by the fixed palettes: their motion and lit
+/// accents, picked by the palette's [ZenLook]. Klasyczny does not use any
+/// of it. Every animation
 /// here stands still when the system asks for reduced motion
 /// ([ZenMotion.allowedIn]).
 
@@ -39,6 +39,47 @@ class ZenSoftPageTransitionsBuilder extends PageTransitionsBuilder {
       ),
     );
   }
+}
+
+/// Wraps the transition of [inner] for see-through pages (a look with a
+/// backdrop): the page below fades out while a new page covers it, so two
+/// pages never show through each other. Under reduced motion the page below
+/// is hidden at once.
+class ZenFadeBehindTransitionsBuilder extends PageTransitionsBuilder {
+  const ZenFadeBehindTransitionsBuilder(this.inner);
+
+  final PageTransitionsBuilder inner;
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final Widget page = inner.buildTransitions<T>(
+      route,
+      context,
+      animation,
+      secondaryAnimation,
+      child,
+    );
+    final bool still = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    return FadeTransition(
+      opacity: still
+          ? secondaryAnimation.drive(const _HiddenOnceCovered())
+          : ReverseAnimation(secondaryAnimation),
+      child: page,
+    );
+  }
+}
+
+class _HiddenOnceCovered extends Animatable<double> {
+  const _HiddenOnceCovered();
+
+  @override
+  double transform(double t) => t > 0 ? 0 : 1;
 }
 
 /// Tab indicator: a short bar under the label (rounded unless [rounded] is

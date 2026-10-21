@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_language_controller.dart';
 import 'package:zen/src/app/i18n/zen_locales.dart';
+import 'package:zen/src/app/theme/zen_backdrop.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/app/zen_core.dart';
@@ -132,7 +133,11 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
                 // column (before, only the home screen did and pushed
                 // screens stretched across the window).
                 child: _DesktopViewportFrame(
-                  child: child ?? const SizedBox.shrink(),
+                  // The look's backdrop (rain, grid, scan lines…) behind
+                  // every page.
+                  child: ZenBackdropHost(
+                    child: child ?? const SizedBox.shrink(),
+                  ),
                 ),
               ),
             ),

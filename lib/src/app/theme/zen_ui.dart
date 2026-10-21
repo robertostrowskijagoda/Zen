@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/theme/zen_backdrop.dart';
 import 'package:zen/src/app/theme/zen_concept.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_retro.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 
-/// Corner recipes from the grayscale canvas.
+/// Corner recipes of the rounded default look (Klasyczny). Code with a
+/// context scales them to the current look ([ZenLook.br],
+/// [ZenLook.radius]).
 abstract final class ZenRadii {
   static const BorderRadius pill = BorderRadius.all(Radius.circular(999));
   static const BorderRadius card = BorderRadius.all(Radius.circular(20));
@@ -90,10 +93,92 @@ class ZenSectionBar extends StatelessWidget implements PreferredSizeWidget {
       titleSpacing: look.header == ZenHeaderStyle.spectrum ? 12 : 20,
       toolbarHeight: kToolbarHeight + 8,
       title: switch (look.header) {
-        ZenHeaderStyle.bar => _bar(zen),
+        ZenHeaderStyle.bar => _bar(zen, look),
         ZenHeaderStyle.neonTube => _neonTube(zen),
         ZenHeaderStyle.spectrum => _spectrum(zen),
+        ZenHeaderStyle.prompt => _prompt(zen),
+        ZenHeaderStyle.brackets => _brackets(zen),
+        ZenHeaderStyle.underline => _underline(zen),
       },
+    );
+  }
+
+  /// Terminals: a chevron, the title and a blinking block cursor.
+  Widget _prompt(ZenColors zen) {
+    final TextStyle style = zen.display(
+      color: zen.textPrimary,
+      size: 24,
+      weight: FontWeight.w500,
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text('>', style: style.copyWith(color: zen.accent)),
+        const SizedBox(width: 10),
+        Flexible(child: _titleText(style)),
+        const SizedBox(width: 6),
+        ZenBlinkingCursor(color: zen.accent, height: 22),
+      ],
+    );
+  }
+
+  /// HUD corner marks around a lit title, lighting up once.
+  Widget _brackets(ZenColors zen) {
+    return ZenFlickerOn(
+      child: CustomPaint(
+        painter: _BracketPainter(color: zen.accent, glow: zen.glow),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: _titleText(
+            zen
+                .display(
+                  color: zen.textPrimary,
+                  size: 24,
+                  weight: FontWeight.w500,
+                  letterSpacing: 1.6,
+                )
+                .copyWith(
+                  shadows: <Shadow>[
+                    Shadow(
+                      color: zen.accent.withValues(alpha: 0.7),
+                      blurRadius: 10,
+                    ),
+                  ],
+                ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Elegant: the title over a short fine rule and a dash.
+  Widget _underline(ZenColors zen) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        _titleText(
+          zen.display(
+            color: zen.textPrimary,
+            size: 25,
+            weight: FontWeight.w500,
+            letterSpacing: 0.4,
+          ),
+        ),
+        const SizedBox(height: 5),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(width: 28, height: 1.5, color: zen.accent),
+            const SizedBox(width: 4),
+            Container(
+              width: 6,
+              height: 1.5,
+              color: zen.accent.withValues(alpha: 0.5),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -105,7 +190,7 @@ class ZenSectionBar extends StatelessWidget implements PreferredSizeWidget {
     style: style,
   );
 
-  Widget _bar(ZenColors zen) {
+  Widget _bar(ZenColors zen, ZenLook look) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
@@ -121,7 +206,7 @@ class ZenSectionBar extends StatelessWidget implements PreferredSizeWidget {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
             ),
-            borderRadius: BorderRadius.circular(3),
+            borderRadius: look.br(3),
             boxShadow: zen.neonGlow(zen.accent, radius: 10),
           ),
         ),
@@ -336,33 +421,40 @@ class ZenBlobAvatar extends StatelessWidget {
         (glyph ?? (name.trim().isEmpty ? '?' : name.trim().characters.first))
             .toUpperCase();
     // Neon: a lit ring, glowing while the person is online.
-    final Color ring = look.outlined
+    final Color ring = look.lit
         ? zen.accent.withValues(alpha: online ? 0.95 : 0.55)
         : look.bevelled
         ? zen.outlineStrong
         : zen.outline;
+    // Round in the rounded looks; a rounded square, down to a sharp one,
+    // in the angular looks.
+    final bool round = look.corner >= 0.5;
+    final BorderRadius corners = look.br(size * 0.5);
     return SizedBox.square(
       dimension: size,
       child: Stack(
         clipBehavior: Clip.none,
         children: <Widget>[
-          if (look.outlined && online)
+          if (look.lit && online)
             Positioned.fill(
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
+                  shape: round ? BoxShape.circle : BoxShape.rectangle,
+                  borderRadius: round ? null : corners,
                   boxShadow: zen.neonGlow(zen.accent, radius: 12),
                 ),
               ),
             ),
-          // A true circle: the border is drawn on the same shape as the clip
-          // (a square border inside a rounded clip showed its corners).
-          ClipOval(
+          // The border is drawn on the same shape as the clip (a square
+          // border inside a rounded clip showed its corners).
+          ClipRRect(
+            borderRadius: round ? BorderRadius.circular(size / 2) : corners,
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: zen.surfaceSunk,
-                shape: BoxShape.circle,
-                border: Border.all(color: ring, width: look.outlined ? 1.4 : 1),
+                shape: round ? BoxShape.circle : BoxShape.rectangle,
+                borderRadius: round ? null : corners,
+                border: Border.all(color: ring, width: look.lit ? 1.4 : 1),
                 image: image == null
                     ? null
                     : DecorationImage(image: image!, fit: BoxFit.cover),
@@ -491,7 +583,7 @@ class ZenBadge extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: ZenRadii.pill,
+        borderRadius: ZenLook.of(context).chipRadius,
         border: Border.all(color: zen.outlineStrong),
       ),
       child: Padding(
@@ -540,4 +632,49 @@ class ZenUnreadBlob extends StatelessWidget {
       ),
     );
   }
+}
+
+/// HUD corner marks at the four corners of the box, lit.
+class _BracketPainter extends CustomPainter {
+  const _BracketPainter({required this.color, required this.glow});
+
+  final Color color;
+  final double glow;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const double arm = 8;
+    final Path p = Path()
+      ..moveTo(0, arm)
+      ..lineTo(0, 0)
+      ..lineTo(arm, 0)
+      ..moveTo(size.width - arm, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width, arm)
+      ..moveTo(size.width, size.height - arm)
+      ..lineTo(size.width, size.height)
+      ..lineTo(size.width - arm, size.height)
+      ..moveTo(arm, size.height)
+      ..lineTo(0, size.height)
+      ..lineTo(0, size.height - arm);
+    final Paint line = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = color;
+    if (glow > 0) {
+      canvas.drawPath(
+        p,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3
+          ..color = color.withValues(alpha: (0.4 * glow).clamp(0.0, 1.0))
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+      );
+    }
+    canvas.drawPath(p, line);
+  }
+
+  @override
+  bool shouldRepaint(_BracketPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.glow != glow;
 }

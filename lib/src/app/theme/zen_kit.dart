@@ -9,29 +9,12 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 /// cards, empty states and explanations. Every screen uses these, so the
 /// whole app reads as one piece.
 
-/// The tone of feature [i]: hues around the accent, so every theme gets its
-/// own, still matching rainbow (icons of the hub, chips, avatars). A
-/// [ZenColors.duotone] palette has no rainbow: the accent, and its partner
-/// for every fourth feature.
-Color zenTone(ZenColors zen, int i) {
-  if (zen.duotone) {
-    return i % 4 == 1 ? zen.accentSecondary : zen.accent;
-  }
-  final HSLColor a = HSLColor.fromColor(zen.accent);
-  if (a.saturation < 0.08) {
-    return zen.textPrimary;
-  }
-  final bool dark = zen.background.computeLuminance() < 0.2;
-  // Offsets picked so the default violet gives: violet, magenta, coral,
-  // orange, pink, green, teal, blue (dating pink, neighbours green…).
-  const List<double> offsets = <double>[0, 45, 105, 140, 72, 210, 255, 320];
-  return HSLColor.fromAHSL(
-    1,
-    (a.hue + offsets[i % offsets.length] + (i ~/ offsets.length) * 20) % 360,
-    zen.toneSaturation,
-    dark ? 0.68 : 0.45,
-  ).toColor();
-}
+/// The numbered feature colour [i] (lists of things without a meaning of
+/// their own: avatars, groups, graph nodes): one of the theme's tones
+/// ([ZenTones.numbered]), so it is always a colour of the palette. Things
+/// with a meaning use [ZenToneColors.tone] with their [ZenTone] instead.
+Color zenTone(ZenColors zen, int i) =>
+    zen.tone(ZenTones.numbered[i.abs() % ZenTones.numbered.length]);
 
 /// An icon in a soft rounded square of its tone.
 class ZenIconBadge extends StatelessWidget {
@@ -57,7 +40,7 @@ class ZenIconBadge extends StatelessWidget {
         width: size,
         height: size,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(look.radius(size * 0.32)),
+          borderRadius: look.br(size * 0.32),
           border: Border.all(color: t.withValues(alpha: 0.7)),
           boxShadow: zen.neonGlow(t, radius: 8),
           color: zen.background,
@@ -84,12 +67,27 @@ class ZenIconBadge extends StatelessWidget {
         child: ZenIcon(icon, color: t, size: size * 0.5),
       );
     }
+    if (look.flat) {
+      // Flat looks: an even tint, a clear line unless the look has none.
+      return Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: Color.alphaBlend(t.withValues(alpha: 0.12), zen.surface),
+          borderRadius: look.br(size * 0.32),
+          border: look.borders == ZenBorderStyle.none
+              ? null
+              : Border.all(color: t.withValues(alpha: 0.45)),
+        ),
+        child: ZenIcon(icon, color: t, size: size * 0.5),
+      );
+    }
     final double top = zen.gradient >= 1 ? 0.26 : 0.14 + 0.12 * zen.gradient;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.32),
+        borderRadius: look.br(size * 0.32),
         gradient: LinearGradient(
           colors: <Color>[
             t.withValues(alpha: top),
@@ -245,7 +243,7 @@ class ZenGridTile extends StatelessWidget {
         child: Ink(
           decoration: look.filledBubbles
               ? BoxDecoration(
-                  borderRadius: BorderRadius.circular(22),
+                  borderRadius: look.br(22),
                   gradient: LinearGradient(
                     colors: <Color>[
                       tone.withValues(
@@ -370,6 +368,49 @@ class ZenSection extends StatelessWidget {
         child: ZenTitleBar(title, trailing: button),
       );
     }
+    if (look.sections == ZenSectionStyle.prompt) {
+      // A terminal comment line.
+      return Padding(
+        padding: EdgeInsets.fromLTRB(4, top, 0, 8),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                '// ${title.toUpperCase()}',
+                style: zen
+                    .label(color: zen.accent)
+                    .copyWith(letterSpacing: 1.4),
+              ),
+            ),
+            ?button,
+          ],
+        ),
+      );
+    }
+    if (look.sections == ZenSectionStyle.ruled) {
+      // Small caps between fine rules.
+      final Widget rule = Container(height: 1, color: zen.outline);
+      return Padding(
+        padding: EdgeInsets.fromLTRB(4, top, 0, 8),
+        child: Row(
+          children: <Widget>[
+            SizedBox(width: 14, child: rule),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                title.toUpperCase(),
+                style: zen
+                    .label(color: zen.textSecondary)
+                    .copyWith(letterSpacing: 1.8),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(child: rule),
+            ?button,
+          ],
+        ),
+      );
+    }
     final bool rule = look.sections == ZenSectionStyle.neonRule;
     final Text label = Text(
       title.toUpperCase(),
@@ -444,11 +485,14 @@ class ZenHero extends StatelessWidget {
     // (Cisza) get an even tint instead. Neon draws a lit frame over a
     // drifting field, retro an LCD panel.
     final double g = zen.gradient;
+    final Color base = look.glass
+        ? zen.surface.withValues(alpha: 0.74)
+        : zen.surface;
     final Decoration decoration = switch (look.surfaces) {
       ZenSurfaceStyle.outlined => ShapeDecoration(
         color: zen.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(look.radius(26)),
+          borderRadius: look.br(26),
           side: BorderSide(color: t.withValues(alpha: 0.85)),
         ),
         shadows: zen.neonGlow(t, radius: 18),
@@ -457,19 +501,24 @@ class ZenHero extends StatelessWidget {
         color: zen.surfaceSunk,
         shape: ZenBevelBorder.of(zen, sunken: true),
       ),
-      ZenSurfaceStyle.filled => BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
+      // Flat: an even tint in the look's own frame.
+      ZenSurfaceStyle.flat => ShapeDecoration(
+        color: Color.alphaBlend(t.withValues(alpha: 0.08), zen.surface),
+        shape: look.panelShape(zen, radius: 26, tone: t),
+      ),
+      ZenSurfaceStyle.filled || ZenSurfaceStyle.glass => BoxDecoration(
+        borderRadius: look.br(26),
         gradient: LinearGradient(
           colors: <Color>[
             Color.alphaBlend(
               t.withValues(alpha: g >= 1 ? 0.30 : 0.12 + 0.18 * g),
-              zen.surface,
+              base,
             ),
             Color.alphaBlend(
               zen
                   .gradientPartner(t, zen.accentSecondary)
                   .withValues(alpha: 0.10),
-              zen.surface,
+              base,
             ),
           ],
           begin: Alignment.topLeft,
@@ -496,7 +545,11 @@ class ZenHero extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: look.filledBubbles
+                  // Lit, LCD and terminal looks: the title glows a little.
+                  style:
+                      !(look.outlined ||
+                          look.bevelled ||
+                          (look.flat && zen.glow > 0))
                       ? titleStyle
                       : titleStyle.copyWith(
                           shadows: <Shadow>[
@@ -535,7 +588,7 @@ class ZenHero extends StatelessWidget {
       decoration: decoration,
       child: look.ambient
           ? ClipRRect(
-              borderRadius: BorderRadius.circular(look.radius(26)),
+              borderRadius: look.br(26),
               child: ZenAmbientField(tone: t, child: content),
             )
           : content,
@@ -565,10 +618,12 @@ class ZenEmpty extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final ZenLook look = ZenLook.of(context);
     final Color t = tone ?? zen.accent;
+    // Square looks get a square picture.
+    final BoxShape round = look.sharp ? BoxShape.rectangle : BoxShape.circle;
     final Decoration picture = switch (look.surfaces) {
       // Neon: a lit ring.
       ZenSurfaceStyle.outlined => BoxDecoration(
-        shape: BoxShape.circle,
+        shape: round,
         color: zen.background,
         border: Border.all(color: t.withValues(alpha: 0.9), width: 1.4),
         boxShadow: zen.neonGlow(t, radius: 20),
@@ -578,8 +633,16 @@ class ZenEmpty extends StatelessWidget {
         color: zen.surfaceSunk,
         shape: ZenBevelBorder.of(zen, sunken: true),
       ),
-      ZenSurfaceStyle.filled => BoxDecoration(
-        shape: BoxShape.circle,
+      // Flat: an even tint and the look's line.
+      ZenSurfaceStyle.flat => BoxDecoration(
+        shape: round,
+        color: Color.alphaBlend(t.withValues(alpha: 0.10), zen.surface),
+        border: look.borders == ZenBorderStyle.none
+            ? null
+            : Border.all(color: t.withValues(alpha: 0.5)),
+      ),
+      ZenSurfaceStyle.filled || ZenSurfaceStyle.glass => BoxDecoration(
+        shape: round,
         gradient: RadialGradient(
           colors: <Color>[t.withValues(alpha: 0.30), t.withValues(alpha: 0.04)],
         ),
@@ -658,16 +721,19 @@ class ZenInfo extends StatelessWidget {
     final Decoration decoration = switch (look.surfaces) {
       ZenSurfaceStyle.outlined => BoxDecoration(
         color: zen.surface,
-        borderRadius: BorderRadius.circular(look.radius(18)),
+        borderRadius: look.br(18),
         border: Border.all(color: t.withValues(alpha: 0.5)),
       ),
       ZenSurfaceStyle.bevelled => ShapeDecoration(
         color: zen.surfaceSunk,
         shape: ZenBevelBorder.of(zen, sunken: true),
       ),
-      ZenSurfaceStyle.filled => BoxDecoration(
-        color: t.withValues(alpha: 0.09),
-        borderRadius: BorderRadius.circular(18),
+      ZenSurfaceStyle.flat => look.panel(zen, radius: 18, tone: t),
+      ZenSurfaceStyle.filled || ZenSurfaceStyle.glass => BoxDecoration(
+        color: look.glass
+            ? Color.alphaBlend(t.withValues(alpha: 0.09), look.panelColor(zen))
+            : t.withValues(alpha: 0.09),
+        borderRadius: look.br(18),
         border: Border.all(color: t.withValues(alpha: 0.22)),
       ),
     };
@@ -733,19 +799,22 @@ class ZenPill extends StatelessWidget {
     final ZenLook look = ZenLook.of(context);
     final Color t = tone ?? zen.accent;
     // Neon: a lit outline instead of a tint.
-    final bool line = look.outlined && !filled;
+    // Outline chips: a line instead of a tint.
+    final bool line = look.chips == ZenChipStyle.outline && !filled;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
       decoration: BoxDecoration(
         color: filled
             ? t
             : line
-            ? Colors.transparent
+            ? const Color(0x00000000)
             : t.withValues(alpha: 0.13),
-        borderRadius: BorderRadius.circular(look.bevelled ? 0 : 999),
+        borderRadius: look.chipRadius,
         border: line
             ? Border.all(color: t.withValues(alpha: 0.75))
-            : look.bevelled && !filled
+            : !filled &&
+                  (look.chips == ZenChipStyle.bevel ||
+                      look.chips == ZenChipStyle.tag)
             ? Border.all(color: t.withValues(alpha: 0.35))
             : null,
       ),
@@ -800,13 +869,7 @@ class ZenGroup extends StatelessWidget {
         child: Column(
           children: <Widget>[
             for (int i = 0; i < children.length; i++) ...<Widget>[
-              if (i > 0)
-                Divider(
-                  height: 1,
-                  indent: look.bevelled ? 0 : 16,
-                  endIndent: look.bevelled ? 0 : 16,
-                  color: look.bevelled ? zen.surfaceSunk : zen.outlineSoft,
-                ),
+              if (i > 0) const ZenDivider(),
               children[i],
             ],
           ],
@@ -863,8 +926,8 @@ class ZenCard extends StatelessWidget {
         child: Padding(padding: padding, child: child),
       ),
     );
-    if (look.outlined && tone != null) {
-      // Neon: a highlighted card glows.
+    if (look.lit && tone != null) {
+      // Lit looks: a highlighted card glows.
       card = DecoratedBox(
         decoration: ShapeDecoration(
           shape: shape,
@@ -919,7 +982,7 @@ class ZenCountBadge extends StatelessWidget {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: look.br(999),
           boxShadow: <BoxShadow>[
             BoxShadow(
               color: t.withValues(alpha: 0.35),
@@ -943,10 +1006,11 @@ class ZenCountBadge extends StatelessWidget {
   }
 }
 
-/// The frame of a tab in the side rail: a soft gradient pill when
-/// [selected]; in Neon a lit outline with a glow and a light running along
-/// its underline; in Retro a chrome key, pressed in when selected.
-/// [danger] (the alarm) is always red.
+/// The frame of a tab in the side rail, in the look's nav style
+/// ([ZenNavStyle]): a soft gradient capsule; a lit outline with a glow and
+/// a light running along its underline; a chrome key, pressed in when
+/// selected; a bar along the edge; or a sharp block. [danger] (the alarm)
+/// is always red.
 class ZenRailTabFrame extends StatelessWidget {
   const ZenRailTabFrame({
     required this.selected,
@@ -967,78 +1031,186 @@ class ZenRailTabFrame extends StatelessWidget {
     final ZenLook look = ZenLook.of(context);
     final Color hue = danger ? zen.danger : zen.accent;
     final Color hue2 = danger ? zen.danger : zen.accentSecondary;
-    const Duration duration = Duration(milliseconds: 200);
-    if (look.bevelled) {
-      return AnimatedContainer(
-        duration: duration,
-        padding: padding,
-        decoration: ShapeDecoration(
-          color: selected ? zen.surfaceSunk : zen.surfaceRaised,
-          shape: ZenBevelBorder.of(zen, sunken: selected),
-        ),
-        child: child,
-      );
-    }
-    if (look.outlined) {
-      return Stack(
-        children: <Widget>[
-          AnimatedContainer(
-            duration: duration,
-            curve: Curves.easeOutCubic,
-            padding: padding,
-            decoration: BoxDecoration(
-              color: selected ? zen.background : Colors.transparent,
-              borderRadius: BorderRadius.circular(look.radius(16)),
-              border: Border.all(
-                color: selected
-                    ? hue.withValues(alpha: 0.9)
-                    : danger
-                    ? zen.danger.withValues(alpha: 0.35)
-                    : Colors.transparent,
-              ),
-              boxShadow: selected ? zen.neonGlow(hue, radius: 14) : null,
-            ),
-            child: child,
+    const Color clear = Color(0x00000000);
+    final Duration duration = look.duration(200);
+    final Color idleEdge = danger ? zen.danger.withValues(alpha: 0.30) : clear;
+    switch (look.nav) {
+      case ZenNavStyle.bevel:
+        return AnimatedContainer(
+          duration: duration,
+          padding: padding,
+          decoration: ShapeDecoration(
+            color: selected ? zen.surfaceSunk : zen.surfaceRaised,
+            shape: ZenBevelBorder.of(zen, sunken: selected),
           ),
-          if (selected && look.tabSweep)
-            Positioned(
-              left: 8,
-              right: 8,
-              bottom: 4,
-              height: 2,
-              child: _ZenSweepLine(color: hue, partner: hue2),
+          child: child,
+        );
+      case ZenNavStyle.glow:
+        return Stack(
+          children: <Widget>[
+            AnimatedContainer(
+              duration: duration,
+              curve: look.curve,
+              padding: padding,
+              decoration: BoxDecoration(
+                color: selected ? zen.background : clear,
+                borderRadius: look.br(16),
+                border: Border.all(
+                  color: selected ? hue.withValues(alpha: 0.9) : idleEdge,
+                ),
+                boxShadow: selected ? zen.neonGlow(hue, radius: 14) : null,
+              ),
+              child: child,
             ),
-        ],
-      );
+            if (selected && look.tabSweep)
+              Positioned(
+                left: 8,
+                right: 8,
+                bottom: 4,
+                height: 2,
+                child: _ZenSweepLine(color: hue, partner: hue2),
+              ),
+          ],
+        );
+      case ZenNavStyle.underline:
+        // A bar along the leading edge, a faint tint behind the glyph.
+        return AnimatedContainer(
+          duration: duration,
+          curve: look.curve,
+          padding: padding,
+          decoration: BoxDecoration(
+            color: selected ? hue.withValues(alpha: 0.08) : clear,
+            border: Border(
+              left: BorderSide(color: selected ? hue : idleEdge, width: 3),
+            ),
+          ),
+          child: child,
+        );
+      case ZenNavStyle.block:
+        // A sharp block with an outline, like a selected menu entry.
+        return AnimatedContainer(
+          duration: duration,
+          curve: look.curve,
+          padding: padding,
+          decoration: BoxDecoration(
+            color: selected ? hue.withValues(alpha: 0.16) : clear,
+            borderRadius: look.br(4),
+            border: Border.all(color: selected ? hue : idleEdge),
+          ),
+          child: child,
+        );
+      case ZenNavStyle.pill:
+        return AnimatedContainer(
+          duration: duration,
+          curve: look.curve,
+          padding: padding,
+          decoration: BoxDecoration(
+            borderRadius: look.br(16),
+            gradient: selected
+                ? LinearGradient(
+                    colors: <Color>[
+                      hue.withValues(alpha: 0.28),
+                      hue2.withValues(alpha: 0.14),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  )
+                : null,
+            border: Border.all(
+              color: selected ? hue.withValues(alpha: 0.35) : idleEdge,
+            ),
+            boxShadow: selected ? zen.neonGlow(hue) : null,
+          ),
+          child: child,
+        );
     }
-    return AnimatedContainer(
-      duration: duration,
-      curve: Curves.easeOutCubic,
-      padding: padding,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: selected
-            ? LinearGradient(
-                colors: <Color>[
-                  hue.withValues(alpha: 0.28),
-                  hue2.withValues(alpha: 0.14),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              )
-            : null,
-        border: Border.all(
-          color: selected
-              ? hue.withValues(alpha: 0.35)
-              : danger
-              ? zen.danger.withValues(alpha: 0.30)
-              : Colors.transparent,
-        ),
-        boxShadow: selected ? zen.neonGlow(hue) : null,
-      ),
-      child: child,
-    );
   }
+}
+
+/// A line between rows, in the look's divider style ([ZenDividerStyle]):
+/// a hairline (full width or inset), a dashed line, a carved groove, a lit
+/// line fading out at both ends, or almost nothing.
+class ZenDivider extends StatelessWidget {
+  const ZenDivider({this.indent = 16, this.endIndent, super.key});
+
+  /// The inset of an inset divider at the start.
+  final double indent;
+
+  /// The inset at the end ([indent] when null).
+  final double? endIndent;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final ZenLook look = ZenLook.of(context);
+    final Color color = look.dividerColor(zen);
+    switch (look.dividers) {
+      case ZenDividerStyle.none:
+      case ZenDividerStyle.inset:
+        return Divider(
+          height: 1,
+          thickness: 1,
+          indent: indent,
+          endIndent: endIndent ?? indent,
+          color: color,
+        );
+      case ZenDividerStyle.hairline:
+        return Divider(height: 1, thickness: 1, color: color);
+      case ZenDividerStyle.dashed:
+        return Padding(
+          padding: EdgeInsetsDirectional.only(
+            start: indent,
+            end: endIndent ?? indent,
+          ),
+          child: SizedBox(
+            height: 1,
+            width: double.infinity,
+            child: CustomPaint(painter: _DashPainter(color)),
+          ),
+        );
+      case ZenDividerStyle.groove:
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(height: 1, color: zen.surfaceSunk),
+            Container(
+              height: 1,
+              color: zen.outlineStrong.withValues(alpha: 0.45),
+            ),
+          ],
+        );
+      case ZenDividerStyle.glow:
+        return Container(
+          height: 1,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: <Color>[
+                zen.accent.withValues(alpha: 0),
+                zen.accent.withValues(alpha: 0.45),
+                zen.accent.withValues(alpha: 0),
+              ],
+            ),
+          ),
+        );
+    }
+  }
+}
+
+class _DashPainter extends CustomPainter {
+  const _DashPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint p = Paint()..color = color;
+    for (double x = 0; x < size.width; x += 7) {
+      canvas.drawRect(Rect.fromLTWH(x, 0, 4, size.height), p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashPainter oldDelegate) => oldDelegate.color != color;
 }
 
 /// A lit underline with a bright spot sweeping along it now and then

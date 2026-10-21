@@ -186,43 +186,69 @@ enum AppAccentTheme {
 }
 
 /// The look of the whole app (Ustawienia → Wygląd). [classic] is the
-/// accent-driven look ([AppAccentTheme] picks its colour); the others are
-/// fixed palettes that share one calmer component style (no ink ripples,
-/// their own page transitions). [neon] (black and lit lines, glow and
-/// motion) and [winamp] (a retro desktop player skin, dark only) add their
-/// own component character. Each has a light and a dark variant; the mode
-/// is chosen separately ([AppThemeMode]).
+/// accent-driven default ([AppAccentTheme] picks its colour); the others
+/// are fixed palettes, each with its own component character (shapes,
+/// borders, surfaces, motion, sometimes a backdrop), grouped in the picker
+/// by `ZenThemeCategory`. Most have a light and a dark variant; the mode is
+/// chosen separately ([AppThemeMode]); [darkOnly] ones stay dark.
 enum AppPalette {
   classic,
-  neon,
-  winamp,
-  calm,
+  ink,
   graphite,
+  calm,
   forest,
-  dusk;
+  mist,
+  neon,
+  grid,
+  rain,
+  player,
+  phosphor,
+  dusk,
+  onyx,
+  pearl;
 
   String get label => switch (this) {
     AppPalette.classic => t('Klasyczny'),
-    AppPalette.neon => t('Neon'),
-    AppPalette.winamp => t('Retro'),
-    AppPalette.calm => t('Cisza'),
+    AppPalette.ink => t('Atrament'),
     AppPalette.graphite => t('Grafit'),
+    AppPalette.calm => t('Cisza'),
     AppPalette.forest => t('Las'),
+    AppPalette.mist => t('Mgła'),
+    AppPalette.neon => t('Neon'),
+    AppPalette.grid => t('Neonowa siatka'),
+    AppPalette.rain => t('Cyfrowy deszcz'),
+    AppPalette.player => t('Odtwarzacz'),
+    AppPalette.phosphor => t('Fosfor'),
     AppPalette.dusk => t('Zmierzch'),
+    AppPalette.onyx => t('Onyks'),
+    AppPalette.pearl => t('Perła'),
   };
 
   String get tagline => switch (this) {
     AppPalette.classic => t('akcent do wyboru'),
-    AppPalette.neon => t('czerń / cyjan / magenta, świecące linie'),
-    AppPalette.winamp => t('stary odtwarzacz: LCD / zieleń / chrom'),
-    AppPalette.calm => t('kamień / piasek / łupek'),
+    AppPalette.ink => t('papier / granat, ostre rogi'),
     AppPalette.graphite => t('grafit / cyjan / magenta'),
+    AppPalette.calm => t('kamień / piasek / łupek'),
     AppPalette.forest => t('mech / papier'),
+    AppPalette.mist => t('mgła / błękit, bez ramek'),
+    AppPalette.neon => t('czerń / cyjan / magenta, świecące linie'),
+    AppPalette.grid => t('cyjan / pomarańcz, siatka po horyzont'),
+    AppPalette.rain => t('zielone znaki spływające po czerni'),
+    AppPalette.player => t('stary odtwarzacz: LCD / zieleń / chrom'),
+    AppPalette.phosphor => t('bursztynowy monitor, linie obrazu'),
     AppPalette.dusk => t('indygo / fiolet'),
+    AppPalette.onyx => t('czerń / złoto, podwójne linie'),
+    AppPalette.pearl => t('perła / róż, matowe szkło'),
   };
 
   /// No light variant: the palette stays dark in the light mode too.
-  bool get darkOnly => this == AppPalette.winamp;
+  bool get darkOnly => switch (this) {
+    AppPalette.grid ||
+    AppPalette.rain ||
+    AppPalette.player ||
+    AppPalette.phosphor => true,
+    _ => false,
+  };
 }
 
 /// Who may invite this person to a new group. Members of a group the
@@ -261,7 +287,7 @@ final class AppSettings {
     this.palette = defaultPalette,
     this.gifApiKey = '',
     this.autoDownloadMedia = true,
-    this.mediaOnlyOnWifi = true,
+    this.mediaOnlyOnWifi = false,
     this.hideNotificationContent = true,
     this.inAppSounds = true,
     this.secureScreens = true,
@@ -271,6 +297,8 @@ final class AppSettings {
     this.permissionsSetupDone = false,
     this.accountSecureOffered = false,
     this.paperBackupDone = false,
+    this.legalAcceptedVersion = '',
+    this.legalAcceptedAtMillis = 0,
     this.groupInviteFrom = GroupInviteFrom.friends,
     this.lanDiscovery,
     this.wifiDirect = false,
@@ -315,7 +343,8 @@ final class AppSettings {
   final bool autoDownloadMedia;
 
   /// Automatic downloads (above) happen only on Wi-Fi or a wired network,
-  /// not on mobile data. On by default.
+  /// not on mobile data. Off by default: everything downloads on mobile
+  /// data too, unless the person restricts it.
   final bool mediaOnlyOnWifi;
 
   /// Whether media may download on their own right now, given whether the
@@ -360,6 +389,14 @@ final class AppSettings {
 
   /// The paper copy of the account key was written down and checked.
   final bool paperBackupDone;
+
+  /// The version of the terms, the privacy policy and the licence notice
+  /// the person accepted on the first start ('' = not yet). A newer version
+  /// of the documents asks again.
+  final String legalAcceptedVersion;
+
+  /// When they were accepted (milliseconds since the epoch, 0 = never).
+  final int legalAcceptedAtMillis;
 
   /// Who may invite this person to a new group.
   final GroupInviteFrom groupInviteFrom;
@@ -434,6 +471,8 @@ final class AppSettings {
     bool? permissionsSetupDone,
     bool? accountSecureOffered,
     bool? paperBackupDone,
+    String? legalAcceptedVersion,
+    int? legalAcceptedAtMillis,
     GroupInviteFrom? groupInviteFrom,
     bool? lanDiscovery,
     bool? wifiDirect,
@@ -468,6 +507,9 @@ final class AppSettings {
       permissionsSetupDone: permissionsSetupDone ?? this.permissionsSetupDone,
       accountSecureOffered: accountSecureOffered ?? this.accountSecureOffered,
       paperBackupDone: paperBackupDone ?? this.paperBackupDone,
+      legalAcceptedVersion: legalAcceptedVersion ?? this.legalAcceptedVersion,
+      legalAcceptedAtMillis:
+          legalAcceptedAtMillis ?? this.legalAcceptedAtMillis,
       groupInviteFrom: groupInviteFrom ?? this.groupInviteFrom,
       lanDiscovery: lanDiscovery ?? this.lanDiscovery,
       wifiDirect: wifiDirect ?? this.wifiDirect,
@@ -499,6 +541,8 @@ final class AppSettings {
     'permissionsSetupDone': permissionsSetupDone,
     'accountSecureOffered': accountSecureOffered,
     'paperBackupDone': paperBackupDone,
+    'legalAcceptedVersion': legalAcceptedVersion,
+    'legalAcceptedAtMillis': legalAcceptedAtMillis,
     'groupInviteFrom': groupInviteFrom.name,
     'lanDiscovery': ?lanDiscovery,
     'wifiDirect': wifiDirect,
@@ -543,6 +587,8 @@ final class AppSettings {
       permissionsSetupDone: pick<bool>('permissionsSetupDone'),
       accountSecureOffered: pick<bool>('accountSecureOffered'),
       paperBackupDone: pick<bool>('paperBackupDone'),
+      legalAcceptedVersion: pick<String>('legalAcceptedVersion'),
+      legalAcceptedAtMillis: pick<int>('legalAcceptedAtMillis'),
       groupInviteFrom: byName(GroupInviteFrom.values, 'groupInviteFrom'),
       lanDiscovery: pick<bool>('lanDiscovery'),
       wifiDirect: pick<bool>('wifiDirect'),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/app/theme/zen_backdrop.dart';
 import 'package:zen/src/app/theme/zen_concept.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -85,6 +86,7 @@ void main() {
       }
 
       for (final AppPalette palette in AppPalette.values) {
+        final ZenLook look = ZenLook.forPalette(palette);
         for (final Brightness brightness in Brightness.values) {
           final ZenColors colors = ZenColors.forPalette(
             palette,
@@ -108,16 +110,79 @@ void main() {
             greaterThanOrEqualTo(2.0),
             reason: '$where accent vs surface',
           );
+          // Body text (primary and secondary) reads at 4.5:1 on every
+          // surface it sits on, faint text at 3:1.
+          final Map<String, Color> grounds = <String, Color>{
+            'background': colors.background,
+            'surface': colors.surface,
+            'surfaceRaised': colors.surfaceRaised,
+            'surfaceMuted': colors.surfaceMuted,
+            'panel': Color.alphaBlend(
+              look.panelColor(colors),
+              colors.background,
+            ),
+          };
+          for (final MapEntry<String, Color> g in grounds.entries) {
+            expect(
+              contrast(colors.textPrimary, g.value),
+              greaterThanOrEqualTo(4.5),
+              reason: '$where text vs ${g.key}',
+            );
+          }
+          for (final String g in <String>['background', 'surface', 'panel']) {
+            expect(
+              contrast(colors.textSecondary, grounds[g]!),
+              greaterThanOrEqualTo(4.5),
+              reason: '$where secondary text vs $g',
+            );
+          }
           expect(
-            contrast(colors.textPrimary, colors.background),
-            greaterThanOrEqualTo(4.5),
-            reason: '$where text vs background',
-          );
-          expect(
-            contrast(colors.textSecondary, colors.surface),
+            contrast(colors.textMuted, colors.surface),
             greaterThanOrEqualTo(3.0),
-            reason: '$where secondary text vs surface',
+            reason: '$where muted text vs surface',
           );
+          // Over the backdrop: the strongest mark of the effect under the
+          // text still leaves body text readable.
+          if (look.backdrop != ZenBackdrop.none) {
+            final double a = ZenBackdropPainter.maxAlpha(look.backdrop);
+            final List<Color> marks = switch (look.backdrop) {
+              ZenBackdrop.rain => <Color>[
+                colors.accent,
+                Color.lerp(colors.accent, colors.textPrimary, 0.5)!,
+              ],
+              ZenBackdrop.grid => <Color>[
+                colors.accent,
+                colors.accentSecondary,
+              ],
+              ZenBackdrop.scanlines => <Color>[colors.accent],
+              ZenBackdrop.aurora || ZenBackdrop.none => colors.accentTrio,
+            };
+            for (final Color mark in marks) {
+              final Color under = Color.alphaBlend(
+                mark.withValues(alpha: a),
+                colors.background,
+              );
+              expect(
+                contrast(colors.textPrimary, under),
+                greaterThanOrEqualTo(4.5),
+                reason: '$where text over the backdrop',
+              );
+              expect(
+                contrast(colors.textSecondary, under),
+                greaterThanOrEqualTo(4.5),
+                reason: '$where secondary text over the backdrop',
+              );
+              // A glass panel over the backdrop.
+              expect(
+                contrast(
+                  colors.textPrimary,
+                  Color.alphaBlend(look.panelColor(colors), under),
+                ),
+                greaterThanOrEqualTo(4.5),
+                reason: '$where text on a panel over the backdrop',
+              );
+            }
+          }
           expect(colors.concept, palette != AppPalette.classic);
           expect(
             ZenTheme.dark(AppSettings.defaultAccentTheme, palette),

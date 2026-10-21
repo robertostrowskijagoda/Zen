@@ -1,15 +1,18 @@
-// The look concepts side by side: the same screens (Tablica, Czaty, a
-// conversation, Profil, and the Wygląd picker) in every palette, light and
-// dark, with the app's real fonts. Runs on the host, no device needed:
+// The themes side by side: the same screens (Tablica, Czaty, a
+// conversation, Profil, the settings, and the Wygląd picker with its
+// groups) in every palette, light and dark, with the app's real fonts
+// (one family set for every theme). Runs on the host, no device needed:
 //
 //   flutter test --no-pub tool/ui_tour/theme_concepts_test.dart --update-goldens
 //
 // Shots: scratch/concepts/<palette>_<mode>/<screen>.png (outside the repo),
-// layout problems in scratch/concepts/<palette>_<mode>.txt. A dark-only
-// palette (winamp) has no _light shots. neon_dark also gets an animation
-// strip: the conversation opening, frames anim_00.png … anim_05.png at
-// 0, 200, … 1000 ms (for a GIF).
-// CONCEPTS_ONLY=neon_dark,winamp_dark renders just those.
+// layout problems in scratch/concepts/<palette>_<mode>.txt. Dark-only
+// palettes (grid, rain, player, phosphor) have no _light shots. The
+// backdrops (rain, grid, scan lines, aurora) show as a still frame, as
+// with motion off. neon_dark also gets an animation strip: the
+// conversation opening, frames anim_00.png … anim_05.png at 0, 200, …
+// 1000 ms (for a GIF).
+// CONCEPTS_ONLY=neon_dark,rain_dark renders just those.
 import 'dart:async';
 import 'dart:io';
 
@@ -59,7 +62,6 @@ Future<void> _loadFonts() async {
     'assets/fonts/JetBrainsMono-Variable.ttf',
   ]);
   await load('DM Sans', <String>['assets/fonts/DMSans-Variable.ttf']);
-  await load('VT323', <String>['assets/fonts/VT323-Regular.ttf']);
   await load('Space Mono', <String>[
     'assets/fonts/SpaceMono-Regular.ttf',
     'assets/fonts/SpaceMono-Bold.ttf',
@@ -330,12 +332,41 @@ void main() {
         if (await tap(find.byKey(const Key('side-tab-profile')))) {
           await shot('profile');
         }
-        // The picker itself (Ustawienia → Wygląd).
-        where = 'appearance';
+        // The settings (every row in its tone), then the picker itself
+        // (Ustawienia → Wygląd).
+        where = 'settings';
         await tap(find.byKey(const Key('side-tab-chats')));
-        if (await tap(find.byKey(const Key('chats-status-chip'))) &&
+        final bool inSettings = await tap(
+          find.byKey(const Key('chats-status-chip')),
+        );
+        if (inSettings) {
+          await shot('settings');
+          // The rest of the list.
+          final Finder last = find.byKey(const Key('settings-nav-reset'));
+          if (last.evaluate().isNotEmpty) {
+            await tester.ensureVisible(last);
+            await tester.pump();
+            await shot('settings_end');
+          }
+        }
+        where = 'appearance';
+        if (inSettings &&
             await tap(find.byKey(const Key('settings-nav-appearance')))) {
           await shot('appearance');
+          // The other groups of the picker.
+          for (final String group in <String>['toned', 'cool', 'elegant']) {
+            where = 'appearance_$group';
+            final Finder header = find.byKey(
+              Key('settings-palette-category-$group'),
+            );
+            if (header.evaluate().isEmpty) {
+              problems.add('[$config] $where: not found');
+              continue;
+            }
+            await tester.ensureVisible(header);
+            await tester.pump();
+            await shot('appearance_$group');
+          }
         }
 
         // The test must end with no timer pending: take the app down, drop

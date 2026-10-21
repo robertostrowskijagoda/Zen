@@ -5,16 +5,166 @@ import 'package:zen/src/app/theme/zen_palettes.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
-/// How cards, groups, tiles and chat bubbles are drawn.
+export 'package:zen/src/app/theme/zen_borders.dart';
+
+/// How cards, groups, tiles and chat bubbles are filled.
 enum ZenSurfaceStyle {
-  /// A filled surface with a soft outline.
+  /// A filled surface, soft tints and gradients (Klasyczny).
   filled,
 
-  /// Near-black with a thin lit 1px outline (Neon).
+  /// Near-black with a thin lit outline (Neon, Neonowa siatka).
   outlined,
 
-  /// A flat panel in a bevelled 1px chrome frame, square corners (Retro).
+  /// A flat panel in a bevelled chrome frame (Odtwarzacz).
   bevelled,
+
+  /// See-through frosted panels over the backdrop (Perła).
+  glass,
+
+  /// One plain colour, no gradients (Atrament, terminals, Onyks).
+  flat,
+}
+
+/// The outline of panels, fields and floating sheets.
+enum ZenBorderStyle {
+  /// No line: panels stand apart by colour and space.
+  none,
+
+  /// A thin 1px line.
+  hairline,
+
+  /// Two thin lines with a narrow gap.
+  doubleLine,
+
+  /// A lit line with a glow around it.
+  glow,
+
+  /// A bevelled chrome frame.
+  bevel,
+}
+
+/// What lifts raised things (the main button, menus, highlighted cards).
+enum ZenElevation {
+  /// Nothing: flat colour only.
+  flat,
+
+  /// A soft drop shadow.
+  shadow,
+
+  /// A glow of the accent instead of a shadow.
+  glow,
+}
+
+/// How rows of a list are separated.
+enum ZenDividerStyle {
+  /// Only space (a barely visible line).
+  none,
+
+  /// A full-width thin line.
+  hairline,
+
+  /// A thin line inset from the edges.
+  inset,
+
+  /// A dashed line.
+  dashed,
+
+  /// A carved double line (dark over light).
+  groove,
+
+  /// A lit line fading out at both ends.
+  glow,
+}
+
+/// The outline of buttons.
+enum ZenButtonShape {
+  /// Fully rounded capsules.
+  pill,
+
+  /// Softly rounded rectangles.
+  rounded,
+
+  /// Sharp rectangles.
+  square,
+
+  /// Chrome keys that press in.
+  bevel,
+}
+
+/// How the main (filled) button is painted.
+enum ZenButtonFill {
+  /// One solid accent colour.
+  solid,
+
+  /// The accent gradient.
+  gradient,
+
+  /// An accent outline on a dark fill (a lit line in a glowing look).
+  line,
+
+  /// A chrome key with an accent label.
+  chrome,
+}
+
+/// How chips, pills and small labels look.
+enum ZenChipStyle {
+  /// Capsules.
+  pill,
+
+  /// Small rounded tags.
+  tag,
+
+  /// Outlines only.
+  outline,
+
+  /// Little chrome keys.
+  bevel,
+}
+
+/// How the selected tab of the side rail is marked.
+enum ZenNavStyle {
+  /// A soft gradient capsule.
+  pill,
+
+  /// A bar along the edge.
+  underline,
+
+  /// A sharp block with an outline.
+  block,
+
+  /// A chrome key, pressed in.
+  bevel,
+
+  /// A lit outline with a light running along it.
+  glow,
+}
+
+/// How text fields are drawn.
+enum ZenFieldStyle {
+  /// A filled box with an outline.
+  outline,
+
+  /// Only a line under the text.
+  underline,
+}
+
+/// A decorative layer behind the whole app (only where the page itself
+/// shows; text sits on panels above it).
+enum ZenBackdrop {
+  /// Nothing.
+  none,
+
+  /// Green signs running down in columns.
+  rain,
+
+  /// A neon floor grid in perspective.
+  grid,
+
+  /// Monitor scan lines with a slow rolling band.
+  scanlines,
+
+  /// Still, soft blooms of colour (behind glass panels).
+  aurora,
 }
 
 /// What stands next to the title of a main section ([ZenSectionBar]).
@@ -27,6 +177,15 @@ enum ZenHeaderStyle {
 
   /// The title on an LCD strip with a spectrum-analyzer bar strip.
   spectrum,
+
+  /// A command prompt: a chevron, the title and a blinking cursor.
+  prompt,
+
+  /// HUD corner marks around the title.
+  brackets,
+
+  /// A short fine rule under the title.
+  underline,
 }
 
 /// How counts (unread messages, tile badges) are drawn.
@@ -46,8 +205,14 @@ enum ZenSectionStyle {
   /// Lit caps followed by a fading neon line.
   neonRule,
 
-  /// A tiny title bar: pixel caps and pinstripes.
+  /// A tiny title bar: caps and pinstripes.
   titleBar,
+
+  /// A comment line of a terminal (`// LABEL`).
+  prompt,
+
+  /// Small caps between fine rules.
+  ruled,
 }
 
 /// How a pushed screen comes in.
@@ -66,33 +231,54 @@ enum ZenPageMotion {
 }
 
 /// The component character of a palette, next to its colours
-/// ([ZenColors]): what the shared widgets draw (outline or fill, a header
-/// decoration, LED numbers) and which animations play. Screens never ask
-/// which palette is on; they use the kit, and the kit asks this.
+/// ([ZenColors]): shapes (corner scale), borders, surfaces, elevation,
+/// dividers, buttons, chips, the tab rail, fields, a backdrop, headers and
+/// motion. Screens never ask which palette is on; they use the kit and
+/// these helpers, and the Material component themes are built from them
+/// ([ZenTheme]). The font is the same in every look.
 @immutable
 final class ZenLook extends ThemeExtension<ZenLook> {
   const ZenLook({
     this.surfaces = ZenSurfaceStyle.filled,
+    this.borders = ZenBorderStyle.hairline,
+    this.elevation = ZenElevation.shadow,
+    this.dividers = ZenDividerStyle.inset,
+    this.buttons = ZenButtonShape.pill,
+    this.buttonFill = ZenButtonFill.solid,
+    this.chips = ZenChipStyle.pill,
+    this.nav = ZenNavStyle.pill,
+    this.fields = ZenFieldStyle.outline,
+    this.backdrop = ZenBackdrop.none,
     this.header = ZenHeaderStyle.bar,
     this.numbers = ZenNumberStyle.plain,
     this.sections = ZenSectionStyle.caps,
     this.pages = ZenPageMotion.platform,
     this.corner = 1,
+    this.tempo = 1,
+    this.curve = Curves.easeOutCubic,
     this.breathe = false,
     this.flickerOn = false,
     this.tabSweep = false,
     this.ambient = false,
   });
 
-  /// Klasyczny.
+  /// Klasyczny (the default).
   static const ZenLook classic = ZenLook();
 
-  /// The calm fixed palettes (Cisza, Grafit, Las, Zmierzch).
-  static const ZenLook soft = ZenLook(pages: ZenPageMotion.soft);
+  /// The calm fixed palettes: soft transitions, flat lift.
+  static const ZenLook soft = ZenLook(
+    elevation: ZenElevation.flat,
+    pages: ZenPageMotion.soft,
+  );
 
   /// Neon: black, thin lit lines, glow and light motion.
   static const ZenLook neon = ZenLook(
     surfaces: ZenSurfaceStyle.outlined,
+    borders: ZenBorderStyle.glow,
+    elevation: ZenElevation.glow,
+    dividers: ZenDividerStyle.glow,
+    chips: ZenChipStyle.outline,
+    nav: ZenNavStyle.glow,
     header: ZenHeaderStyle.neonTube,
     sections: ZenSectionStyle.neonRule,
     pages: ZenPageMotion.neonWipe,
@@ -106,14 +292,32 @@ final class ZenLook extends ThemeExtension<ZenLook> {
   /// Retro: an old desktop player skin.
   static const ZenLook retro = ZenLook(
     surfaces: ZenSurfaceStyle.bevelled,
+    borders: ZenBorderStyle.bevel,
+    elevation: ZenElevation.flat,
+    dividers: ZenDividerStyle.groove,
+    buttons: ZenButtonShape.bevel,
+    buttonFill: ZenButtonFill.chrome,
+    chips: ZenChipStyle.bevel,
+    nav: ZenNavStyle.bevel,
     header: ZenHeaderStyle.spectrum,
     numbers: ZenNumberStyle.led,
     sections: ZenSectionStyle.titleBar,
     pages: ZenPageMotion.stepped,
     corner: 0,
+    tempo: 0.8,
+    curve: Curves.linear,
   );
 
   final ZenSurfaceStyle surfaces;
+  final ZenBorderStyle borders;
+  final ZenElevation elevation;
+  final ZenDividerStyle dividers;
+  final ZenButtonShape buttons;
+  final ZenButtonFill buttonFill;
+  final ZenChipStyle chips;
+  final ZenNavStyle nav;
+  final ZenFieldStyle fields;
+  final ZenBackdrop backdrop;
   final ZenHeaderStyle header;
   final ZenNumberStyle numbers;
   final ZenSectionStyle sections;
@@ -121,6 +325,12 @@ final class ZenLook extends ThemeExtension<ZenLook> {
 
   /// Scale of the corner radii (1 = the rounded default, 0 = square).
   final double corner;
+
+  /// Length of the component animations (1 = default, more is slower).
+  final double tempo;
+
+  /// The curve of the component animations.
+  final Curve curve;
 
   /// The primary action and unread badges breathe a glow.
   final bool breathe;
@@ -142,12 +352,50 @@ final class ZenLook extends ThemeExtension<ZenLook> {
 
   bool get outlined => surfaces == ZenSurfaceStyle.outlined;
   bool get bevelled => surfaces == ZenSurfaceStyle.bevelled;
+  bool get glass => surfaces == ZenSurfaceStyle.glass;
+  bool get flat => surfaces == ZenSurfaceStyle.flat;
+
+  /// Lit (glowing) outlines.
+  bool get lit => borders == ZenBorderStyle.glow;
+
+  /// Square corners everywhere (avatars and badges too).
+  bool get sharp => corner <= 0.05;
 
   /// Outgoing text bubbles are filled with the accent gradient.
-  bool get filledBubbles => surfaces == ZenSurfaceStyle.filled;
+  bool get filledBubbles =>
+      surfaces == ZenSurfaceStyle.filled || surfaces == ZenSurfaceStyle.glass;
 
   /// The corner radius [r] of the rounded default, in this look.
   double radius(double r) => r * corner;
+
+  /// [radius] as a [BorderRadius].
+  BorderRadius br(double r) => BorderRadius.circular(radius(r));
+
+  /// A component animation of [ms] milliseconds in this look's tempo.
+  Duration duration(int ms) => Duration(milliseconds: (ms * tempo).round());
+
+  /// The line of a panel's outline (hairline and glow looks); a tone
+  /// highlights it.
+  BorderSide outlineSide(ZenColors zen, {Color? tone}) {
+    return switch (borders) {
+      ZenBorderStyle.none =>
+        tone == null
+            ? BorderSide.none
+            : BorderSide(color: tone.withValues(alpha: 0.35)),
+      ZenBorderStyle.glow => BorderSide(
+        color: tone == null ? zen.outline : tone.withValues(alpha: 0.75),
+      ),
+      ZenBorderStyle.hairline ||
+      ZenBorderStyle.doubleLine ||
+      ZenBorderStyle.bevel => BorderSide(
+        color: tone != null
+            ? tone.withValues(alpha: 0.35)
+            : flat
+            ? zen.outline
+            : zen.outlineSoft,
+      ),
+    };
+  }
 
   /// The outline of a card-like panel ([tone] highlights it; [sunken]
   /// presses a bevelled one in).
@@ -157,39 +405,62 @@ final class ZenLook extends ThemeExtension<ZenLook> {
     Color? tone,
     bool sunken = false,
   }) {
-    return switch (surfaces) {
-      ZenSurfaceStyle.bevelled => ZenBevelBorder.of(zen, sunken: sunken),
-      ZenSurfaceStyle.outlined => RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(this.radius(radius)),
-        side: BorderSide(
-          color: tone == null ? zen.outline : tone.withValues(alpha: 0.75),
-        ),
+    final BorderRadius r = br(radius);
+    return switch (borders) {
+      ZenBorderStyle.bevel => ZenBevelBorder.of(zen, sunken: sunken),
+      ZenBorderStyle.doubleLine => ZenDoubleBorder(
+        borderRadius: r,
+        color: tone ?? zen.outlineStrong,
+        inner: (tone ?? zen.outline).withValues(alpha: 0.6),
       ),
-      ZenSurfaceStyle.filled => RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(radius),
-        side: BorderSide(
-          color: tone == null ? zen.outlineSoft : tone.withValues(alpha: 0.35),
-        ),
+      ZenBorderStyle.none ||
+      ZenBorderStyle.hairline ||
+      ZenBorderStyle.glow => RoundedRectangleBorder(
+        borderRadius: r,
+        side: outlineSide(zen, tone: tone),
       ),
     };
   }
 
   /// The fill of a card-like panel.
   Color panelColor(ZenColors zen, {Color? tone, bool sunken = false}) {
-    if (sunken && bevelled) {
+    if (sunken && (bevelled || flat)) {
       return zen.surfaceSunk;
     }
     final double alpha = switch (surfaces) {
       ZenSurfaceStyle.outlined => 0.05,
       ZenSurfaceStyle.bevelled => 0.08,
+      ZenSurfaceStyle.flat => 0.08,
+      ZenSurfaceStyle.glass => 0.10,
       ZenSurfaceStyle.filled => 0.10,
     };
+    final Color base = glass
+        ? zen.surface.withValues(alpha: 0.74)
+        : zen.surface;
     return tone == null
-        ? zen.surface
-        : Color.alphaBlend(tone.withValues(alpha: alpha), zen.surface);
+        ? base
+        : Color.alphaBlend(tone.withValues(alpha: alpha), base);
   }
 
-  /// A panel as a decoration (fill, outline and, for a highlighted neon
+  /// What lifts a raised element of [tone] (the accent when null): a glow,
+  /// a soft shadow or nothing.
+  List<BoxShadow>? lift(ZenColors zen, {Color? tone, double radius = 14}) {
+    return switch (elevation) {
+      ZenElevation.flat => null,
+      ZenElevation.glow => zen.neonGlow(tone ?? zen.accent, radius: radius),
+      ZenElevation.shadow => <BoxShadow>[
+        BoxShadow(
+          color: const Color(0xFF000000).withValues(
+            alpha: zen.background.computeLuminance() > 0.4 ? 0.08 : 0.32,
+          ),
+          blurRadius: radius,
+          offset: Offset(0, radius * 0.25),
+        ),
+      ],
+    };
+  }
+
+  /// A panel as a decoration (fill, outline and, for a highlighted lit
   /// panel, its glow).
   ShapeDecoration panel(
     ZenColors zen, {
@@ -200,29 +471,145 @@ final class ZenLook extends ThemeExtension<ZenLook> {
     return ShapeDecoration(
       color: panelColor(zen, tone: tone, sunken: sunken),
       shape: panelShape(zen, radius: radius, tone: tone, sunken: sunken),
-      shadows: outlined && tone != null ? zen.neonGlow(tone, radius: 14) : null,
+      shadows: lit && tone != null ? zen.neonGlow(tone, radius: 14) : null,
     );
   }
 
+  /// The outline of a button ([pressed] presses a chrome key in).
+  OutlinedBorder buttonBorder(ZenColors zen, {bool pressed = false}) {
+    return switch (buttons) {
+      ZenButtonShape.bevel => ZenBevelBorder.of(zen, sunken: pressed),
+      ZenButtonShape.pill => RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(radius(999)),
+      ),
+      ZenButtonShape.rounded => RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(radius(12)),
+      ),
+      ZenButtonShape.square => const RoundedRectangleBorder(),
+    };
+  }
+
+  /// The outline of a chip or a small label.
+  OutlinedBorder chipBorder(ZenColors zen, {BorderSide? side}) {
+    final BorderSide s = side ?? BorderSide.none;
+    return switch (chips) {
+      ZenChipStyle.bevel => ZenBevelBorder.of(zen),
+      ZenChipStyle.pill => RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(radius(999)),
+        side: s,
+      ),
+      ZenChipStyle.tag || ZenChipStyle.outline => RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(radius(8)),
+        side: s,
+      ),
+    };
+  }
+
+  /// The corner radius of chips and pills.
+  BorderRadius get chipRadius => switch (chips) {
+    ZenChipStyle.bevel => BorderRadius.zero,
+    ZenChipStyle.pill => BorderRadius.circular(radius(999)),
+    ZenChipStyle.tag ||
+    ZenChipStyle.outline => BorderRadius.circular(radius(8)),
+  };
+
+  /// The outline of dialogs, menus and sheets ([topOnly]: a sheet rising
+  /// from the bottom edge).
+  ShapeBorder floatingShape(
+    ZenColors zen, {
+    double radius = 28,
+    bool topOnly = false,
+  }) {
+    final BorderRadius r = topOnly
+        ? BorderRadius.vertical(top: Radius.circular(this.radius(radius)))
+        : BorderRadius.circular(this.radius(radius));
+    return switch (borders) {
+      ZenBorderStyle.bevel => ZenBevelBorder.of(zen),
+      ZenBorderStyle.doubleLine => ZenDoubleBorder(
+        borderRadius: r,
+        color: zen.outlineStrong,
+        inner: zen.outline,
+      ),
+      ZenBorderStyle.glow => RoundedRectangleBorder(
+        borderRadius: r,
+        side: BorderSide(color: zen.accent.withValues(alpha: 0.45)),
+      ),
+      ZenBorderStyle.hairline => RoundedRectangleBorder(
+        borderRadius: r,
+        side: topOnly ? BorderSide.none : BorderSide(color: zen.outlineSoft),
+      ),
+      ZenBorderStyle.none => RoundedRectangleBorder(borderRadius: r),
+    };
+  }
+
+  /// The colour of a divider line in this look.
+  Color dividerColor(ZenColors zen) => switch (dividers) {
+    ZenDividerStyle.none => zen.outlineSoft.withValues(alpha: 0.45),
+    ZenDividerStyle.glow => zen.accent.withValues(alpha: 0.35),
+    ZenDividerStyle.groove => zen.surfaceSunk,
+    ZenDividerStyle.dashed => zen.outline,
+    ZenDividerStyle.hairline || ZenDividerStyle.inset => zen.outlineSoft,
+  };
+
+  /// The decoration of the side tab rail.
+  Decoration railDecoration(ZenColors zen) {
+    final Color edge = switch (borders) {
+      ZenBorderStyle.glow => zen.accent.withValues(alpha: 0.35),
+      ZenBorderStyle.bevel => zen.outlineStrong,
+      ZenBorderStyle.doubleLine => zen.outline,
+      ZenBorderStyle.none => zen.surfaceSunk,
+      ZenBorderStyle.hairline => zen.outlineSoft,
+    };
+    return BoxDecoration(
+      color: bevelled ? zen.surface : zen.surfaceSunk,
+      border: Border(right: BorderSide(color: edge)),
+      boxShadow: lit
+          ? <BoxShadow>[
+              BoxShadow(
+                color: zen.accent.withValues(alpha: 0.12 * zen.glow),
+                blurRadius: 10,
+              ),
+            ]
+          : null,
+    );
+  }
+
+  /// The corners of a chat bubble: rounded, with one small corner on the
+  /// side of the sender.
+  BorderRadius bubbleRadius({required bool outgoing}) => outgoing
+      ? BorderRadius.only(
+          topLeft: Radius.circular(radius(22)),
+          topRight: Radius.circular(radius(22)),
+          bottomRight: Radius.circular(radius(5)),
+          bottomLeft: Radius.circular(radius(22)),
+        )
+      : BorderRadius.only(
+          topLeft: Radius.circular(radius(22)),
+          topRight: Radius.circular(radius(22)),
+          bottomRight: Radius.circular(radius(22)),
+          bottomLeft: Radius.circular(radius(5)),
+        );
+
   /// The decoration of a chat bubble in this look; null keeps the default
-  /// bubbles of the filled look.
+  /// gradient bubbles of the filled looks.
   BoxDecoration? bubble(ZenColors zen, {required bool outgoing}) {
-    final BorderRadius r = outgoing
-        ? BorderRadius.only(
-            topLeft: Radius.circular(radius(22)),
-            topRight: Radius.circular(radius(22)),
-            bottomRight: Radius.circular(radius(5)),
-            bottomLeft: Radius.circular(radius(22)),
-          )
-        : BorderRadius.only(
-            topLeft: Radius.circular(radius(22)),
-            topRight: Radius.circular(radius(22)),
-            bottomRight: Radius.circular(radius(22)),
-            bottomLeft: Radius.circular(radius(5)),
-          );
+    final BorderRadius r = bubbleRadius(outgoing: outgoing);
     switch (surfaces) {
       case ZenSurfaceStyle.filled:
+      case ZenSurfaceStyle.glass:
         return null;
+      case ZenSurfaceStyle.flat:
+        return BoxDecoration(
+          color: outgoing ? zen.accentSoft : zen.surface,
+          borderRadius: r,
+          border: borders == ZenBorderStyle.none
+              ? null
+              : Border.all(
+                  color: outgoing
+                      ? zen.accent.withValues(alpha: 0.55)
+                      : zen.outline,
+                ),
+        );
       case ZenSurfaceStyle.outlined:
         return BoxDecoration(
           color: outgoing
@@ -263,11 +650,22 @@ final class ZenLook extends ThemeExtension<ZenLook> {
   @override
   ZenLook copyWith({
     ZenSurfaceStyle? surfaces,
+    ZenBorderStyle? borders,
+    ZenElevation? elevation,
+    ZenDividerStyle? dividers,
+    ZenButtonShape? buttons,
+    ZenButtonFill? buttonFill,
+    ZenChipStyle? chips,
+    ZenNavStyle? nav,
+    ZenFieldStyle? fields,
+    ZenBackdrop? backdrop,
     ZenHeaderStyle? header,
     ZenNumberStyle? numbers,
     ZenSectionStyle? sections,
     ZenPageMotion? pages,
     double? corner,
+    double? tempo,
+    Curve? curve,
     bool? breathe,
     bool? flickerOn,
     bool? tabSweep,
@@ -275,11 +673,22 @@ final class ZenLook extends ThemeExtension<ZenLook> {
   }) {
     return ZenLook(
       surfaces: surfaces ?? this.surfaces,
+      borders: borders ?? this.borders,
+      elevation: elevation ?? this.elevation,
+      dividers: dividers ?? this.dividers,
+      buttons: buttons ?? this.buttons,
+      buttonFill: buttonFill ?? this.buttonFill,
+      chips: chips ?? this.chips,
+      nav: nav ?? this.nav,
+      fields: fields ?? this.fields,
+      backdrop: backdrop ?? this.backdrop,
       header: header ?? this.header,
       numbers: numbers ?? this.numbers,
       sections: sections ?? this.sections,
       pages: pages ?? this.pages,
       corner: corner ?? this.corner,
+      tempo: tempo ?? this.tempo,
+      curve: curve ?? this.curve,
       breathe: breathe ?? this.breathe,
       flickerOn: flickerOn ?? this.flickerOn,
       tabSweep: tabSweep ?? this.tabSweep,
@@ -293,107 +702,75 @@ final class ZenLook extends ThemeExtension<ZenLook> {
       return this;
     }
     final ZenLook pick = t < 0.5 ? this : other;
-    return pick.copyWith(corner: lerpDouble(corner, other.corner, t));
-  }
-}
-
-/// A 1px bevelled chrome frame with square corners: lit on the top and
-/// left, shaded on the bottom and right ([sunken] swaps them, a pressed
-/// button or an LCD well).
-@immutable
-class ZenBevelBorder extends OutlinedBorder {
-  const ZenBevelBorder({
-    required this.light,
-    required this.dark,
-    this.width = 1,
-    this.sunken = false,
-    super.side,
-  });
-
-  /// The frame in the colours of [zen].
-  factory ZenBevelBorder.of(ZenColors zen, {bool sunken = false}) =>
-      ZenBevelBorder(
-        light: zen.outlineStrong,
-        dark: zen.surfaceSunk,
-        sunken: sunken,
-      );
-
-  final Color light;
-  final Color dark;
-  final double width;
-  final bool sunken;
-
-  @override
-  EdgeInsetsGeometry get dimensions => EdgeInsets.all(width);
-
-  @override
-  Path getInnerPath(Rect rect, {TextDirection? textDirection}) =>
-      Path()..addRect(rect.deflate(width));
-
-  @override
-  Path getOuterPath(Rect rect, {TextDirection? textDirection}) =>
-      Path()..addRect(rect);
-
-  @override
-  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
-    if (rect.isEmpty || width <= 0) {
-      return;
-    }
-    final Paint lit = Paint()..color = sunken ? dark : light;
-    final Paint shade = Paint()..color = sunken ? light : dark;
-    canvas
-      ..drawRect(Rect.fromLTWH(rect.left, rect.top, rect.width, width), lit)
-      ..drawRect(Rect.fromLTWH(rect.left, rect.top, width, rect.height), lit)
-      ..drawRect(
-        Rect.fromLTWH(rect.left, rect.bottom - width, rect.width, width),
-        shade,
-      )
-      ..drawRect(
-        Rect.fromLTWH(rect.right - width, rect.top, width, rect.height),
-        shade,
-      );
-  }
-
-  @override
-  ShapeBorder scale(double t) => ZenBevelBorder(
-    light: light,
-    dark: dark,
-    width: width * t,
-    sunken: sunken,
-    side: side.scale(t),
-  );
-
-  @override
-  ZenBevelBorder copyWith({BorderSide? side}) => ZenBevelBorder(
-    light: light,
-    dark: dark,
-    width: width,
-    sunken: sunken,
-    side: side ?? this.side,
-  );
-
-  @override
-  ShapeBorder? lerpFrom(ShapeBorder? a, double t) {
-    if (a is ZenBevelBorder) {
-      return ZenBevelBorder(
-        light: Color.lerp(a.light, light, t)!,
-        dark: Color.lerp(a.dark, dark, t)!,
-        width: lerpDouble(a.width, width, t)!,
-        sunken: t < 0.5 ? a.sunken : sunken,
-      );
-    }
-    return super.lerpFrom(a, t);
+    return pick.copyWith(
+      corner: lerpDouble(corner, other.corner, t),
+      tempo: lerpDouble(tempo, other.tempo, t),
+    );
   }
 
   @override
   bool operator ==(Object other) =>
-      other is ZenBevelBorder &&
-      other.light == light &&
-      other.dark == dark &&
-      other.width == width &&
-      other.sunken == sunken &&
-      other.side == side;
+      other is ZenLook &&
+      other.surfaces == surfaces &&
+      other.borders == borders &&
+      other.elevation == elevation &&
+      other.dividers == dividers &&
+      other.buttons == buttons &&
+      other.buttonFill == buttonFill &&
+      other.chips == chips &&
+      other.nav == nav &&
+      other.fields == fields &&
+      other.backdrop == backdrop &&
+      other.header == header &&
+      other.numbers == numbers &&
+      other.sections == sections &&
+      other.pages == pages &&
+      other.corner == corner &&
+      other.tempo == tempo &&
+      other.curve == curve &&
+      other.breathe == breathe &&
+      other.flickerOn == flickerOn &&
+      other.tabSweep == tabSweep &&
+      other.ambient == ambient;
 
   @override
-  int get hashCode => Object.hash(light, dark, width, sunken, side);
+  int get hashCode => Object.hashAll(<Object?>[
+    surfaces,
+    borders,
+    elevation,
+    dividers,
+    buttons,
+    buttonFill,
+    chips,
+    nav,
+    fields,
+    backdrop,
+    header,
+    numbers,
+    sections,
+    pages,
+    corner,
+    tempo,
+    curve,
+    breathe,
+    flickerOn,
+    tabSweep,
+    ambient,
+  ]);
+}
+
+/// The current look's shapes, for screens: corner radii written for the
+/// rounded default follow the look (square in a sharp one).
+extension ZenLookContext on BuildContext {
+  /// The corner radius [r] of the rounded default, in the current look.
+  BorderRadius zenRadius(double r) => ZenLook.of(this).br(r);
+
+  /// Rounded top corners [r] (a sheet rising from the bottom edge), in the
+  /// current look.
+  BorderRadius zenTopRadius(double r) =>
+      BorderRadius.vertical(top: Radius.circular(ZenLook.of(this).radius(r)));
+
+  /// The outline of a bottom sheet in the current look.
+  ShapeBorder zenSheetShape() =>
+      ZenLook.of(this).floatingShape(ZenColors.of(this), topOnly: true);
 }
