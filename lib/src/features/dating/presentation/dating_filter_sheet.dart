@@ -47,6 +47,23 @@ class _DatingFilterSheetState extends State<DatingFilterSheet> {
   late Set<String> _interests = <String>{...widget.initial.interests};
   late bool _withPhoto = widget.initial.withPhoto;
   late int _minMutual = widget.initial.minMutual;
+  final TextEditingController _tag = TextEditingController();
+
+  @override
+  void dispose() {
+    _tag.dispose();
+    super.dispose();
+  }
+
+  void _addTag(String raw) {
+    final String? tag = datingTag(raw);
+    _tag.clear();
+    if (tag == null ||
+        _interests.any((String i) => datingTagKey(i) == datingTagKey(tag))) {
+      return;
+    }
+    _set(() => _interests = <String>{..._interests, tag});
+  }
 
   void _changed() => widget.onChanged(
     DatingFilter(
@@ -66,7 +83,7 @@ class _DatingFilterSheetState extends State<DatingFilterSheet> {
 
   void _clear() => _set(() {
     _intent = null;
-    _hops = kDatingMaxHops;
+    _hops = kDatingRangeGates;
     _genders = <DatingGender>{...kDatingAllGenders};
     _interests = <String>{};
     _withPhoto = false;
@@ -142,14 +159,10 @@ class _DatingFilterSheetState extends State<DatingFilterSheet> {
               spacing: 6,
               runSpacing: 6,
               children: <Widget>[
-                for (int h = 1; h <= kDatingMaxHops; h++)
+                for (int h = 1; h <= kDatingRangeGates; h++)
                   ChoiceChip(
                     key: Key('dating-filter-hops-$h'),
-                    label: Text(
-                      h == 1
-                          ? t('Tylko moi znajomi')
-                          : t('Też znajomi znajomych'),
-                    ),
+                    label: Text(datingReachLabel(h)),
                     selected: _hops == h,
                     onSelected: (_) => _set(() => _hops = h),
                   ),
@@ -188,21 +201,43 @@ class _DatingFilterSheetState extends State<DatingFilterSheet> {
               style: TextStyle(color: zen.textMuted, fontSize: 12.5),
             ),
             const SizedBox(height: 8),
+            TextField(
+              key: const Key('dating-filter-tag'),
+              controller: _tag,
+              maxLength: kDatingTagMaxChars,
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                labelText: t('Dodaj zainteresowanie'),
+                suffixIcon: IconButton(
+                  tooltip: t('Dodaj'),
+                  icon: const Icon(Icons.add_rounded),
+                  onPressed: () => _addTag(_tag.text),
+                ),
+              ),
+              onSubmitted: _addTag,
+            ),
             Wrap(
               spacing: 6,
               runSpacing: 6,
               children: <Widget>[
-                for (final String code in kDatingInterests)
+                for (final String tag in <String>{
+                  ..._interests,
+                  for (final String s in datingTagSuggestions())
+                    if (!_interests.any(
+                      (String i) => datingTagKey(i) == datingTagKey(s),
+                    ))
+                      s,
+                })
                   FilterChip(
-                    key: Key('dating-filter-interest-$code'),
-                    label: Text(datingInterestLabel(code)),
-                    selected: _interests.contains(code),
+                    key: Key('dating-filter-interest-$tag'),
+                    label: Text(tag),
+                    selected: _interests.contains(tag),
                     onSelected: (bool v) => _set(() {
                       _interests = <String>{..._interests};
                       if (v) {
-                        _interests.add(code);
+                        _interests.add(tag);
                       } else {
-                        _interests.remove(code);
+                        _interests.remove(tag);
                       }
                     }),
                   ),

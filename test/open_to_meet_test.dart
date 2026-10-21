@@ -143,8 +143,15 @@ void main() {
       }),
     );
     expect(s.openOf(yeti), OpenToMeet.both);
-    // Yeti's flag changed here: friends who may see it were told.
-    expect(host.to(zosia).single['r'], <String, String>{yeti: 'b'});
+    // Yeti's flag changed here: friends who may see it were told, with
+    // Yeti's hide list, so it can go one step further.
+    final Map<dynamic, dynamic> toZosia =
+        host.to(zosia).single['r'] as Map<dynamic, dynamic>;
+    expect(toZosia.keys, <String>[yeti]);
+    expect(toZosia[yeti]['o'], 'b');
+    expect(toZosia[yeti]['h'], 1);
+    expect(toZosia[yeti]['xs'], 'salt');
+    expect(RelayedOpen.fromJson(toZosia[yeti])!.reaches(hidden), isFalse);
     expect(host.to(hidden), isEmpty);
     expect(host.to(quiet), isEmpty);
     expect(host.to(yeti), isEmpty, reason: 'never back to Yeti');
@@ -218,5 +225,85 @@ void main() {
     // Ania stops passing it on: it is gone.
     await s.handle(_frame(ania, const <String, dynamic>{}));
     expect(s.openOf(zosia), isNull);
+  });
+
+  test('a flag goes three steps: a friend of a friend passes it on once more '
+      '(checking the hide list), and far people show for the graph', () async {
+    final String fof = addr('a7');
+    final String far = addr('a8');
+    final _Host host = _Host(<String>[ania, zosia, hidden]);
+    final OpenToMeetService s = OpenToMeetService(
+      host: host,
+      disk: MemoryLedgerDisk(),
+      listVisibleTo: (String a) => true,
+    );
+    // Ania passes on her friend Yeti (hidden from `hidden`) and someone
+    // three steps from here, known to her friend of a friend.
+    await s.handle(
+      _frame(ania, <String, dynamic>{
+        'r': <String, dynamic>{
+          yeti: <String, dynamic>{
+            'o': 'd',
+            'n': 'Yeti',
+            'h': 1,
+            'xs': 'salt',
+            'ex': <String>[openHideHash('salt', hidden)],
+          },
+          far: <String, dynamic>{'o': 'b', 'n': 'Daleki', 'h': 2, 'v': fof},
+        },
+      }),
+    );
+    expect(s.openOf(yeti), OpenToMeet.dates);
+    expect(s.openOf(far), OpenToMeet.both);
+    // Yeti goes on to Zosia as three steps away from her, known to Ania;
+    // never to the one Yeti hides from, never further than that.
+    final Map<dynamic, dynamic> toZosia =
+        s.payloadFor(zosia)['r'] as Map<dynamic, dynamic>;
+    expect(toZosia[yeti]['h'], 2);
+    expect(toZosia[yeti]['v'], ania);
+    expect(toZosia[yeti].containsKey('ex'), isFalse);
+    expect(RelayedOpen.fromJson(toZosia[yeti])!.reaches(quiet), isFalse);
+    expect(toZosia.containsKey(far), isFalse, reason: 'three steps is all');
+    expect(
+      (s.payloadFor(hidden)['r'] as Map?)?.containsKey(yeti) ?? false,
+      isFalse,
+    );
+    // For the graph's far ring: who is three steps away, and who knows them.
+    final Map<String, ({String name, Set<String> via})> farOnes = s.farOpen();
+    expect(farOnes.keys, <String>[far]);
+    expect(farOnes[far]!.name, 'Daleki');
+    expect(farOnes[far]!.via, <String>{fof});
+  });
+
+  test('people across an opened gate get the flag and theirs is taken, '
+      'never passed further', () async {
+    final String gate = addr('9a');
+    final String behind = addr('9b');
+    final _Host host = _Host(<String>[ania]);
+    final OpenToMeetService s = OpenToMeetService(
+      host: host,
+      disk: MemoryLedgerDisk(),
+      listVisibleTo: (String a) => true,
+      gateContacts: () => <String>{gate},
+    );
+    await s.setMine(OpenToMeet.friends);
+    expect(host.to(gate).single['o'], 'f');
+    await s.handle(
+      _frame(gate, <String, dynamic>{
+        'o': 'd',
+        'xs': 's',
+        'r': <String, String>{behind: 'b'},
+      }),
+    );
+    expect(s.openOf(gate), OpenToMeet.dates);
+    expect(s.openOf(behind), OpenToMeet.both);
+    final Map<String, ({String name, Set<String> via})> farOnes = s.farOpen();
+    expect(farOnes.keys.toSet(), <String>{gate, behind});
+    expect(farOnes[behind]!.via, <String>{gate});
+    // Not passed on to friends.
+    expect(s.payloadFor(ania).containsKey('r'), isFalse);
+    // A stranger is still not listened to.
+    await s.handle(_frame(stranger, <String, dynamic>{'o': 'd'}));
+    expect(s.openOf(stranger), isNull);
   });
 }

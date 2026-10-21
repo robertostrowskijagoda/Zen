@@ -34,6 +34,13 @@ final class _Net {
     (friends[a.address] ??= <String>{}).add(b.address);
     (friends[b.address] ??= <String>{}).add(a.address);
   }
+
+  /// [a] opened a gate to [b] (an introduction that came through): both
+  /// phones count the other as a person across a gate.
+  void gate(_Phone a, _Phone b) {
+    a.gates.add(b.address);
+    b.gates.add(a.address);
+  }
 }
 
 final class _Phone implements EventHost {
@@ -52,6 +59,7 @@ final class _Phone implements EventHost {
       host: this,
       disk: disk,
       now: () => net.clock,
+      gateContacts: () => gates,
       raiseAlarm: (String note) async => alarms.add(note),
       currentPosition: position == null ? null : () async => position,
       decoyFetchShare: decoyShare,
@@ -77,6 +85,9 @@ final class _Phone implements EventHost {
 
   /// The share of lanterns this phone asks the profile of with dating off.
   final double decoyShare;
+
+  /// People across a gate this person opened (or who opened one to them).
+  final Set<String> gates = <String>{};
   final List<(String, int, String)> payments = <(String, int, String)>[];
   final String address;
   final MemoryLedgerDisk disk = MemoryLedgerDisk();
@@ -151,52 +162,119 @@ final class _Phone implements EventHost {
       .length;
 
   /// Back messages received that are big enough to be a profile (or a
-  /// cover): a match test and its answer are much smaller.
+  /// cover, or a part of one): match tests and their answers are much
+  /// smaller.
   int profilesIn() => received
       .where(
         (Map<String, dynamic> p) =>
             p['type'] == DatingTypes.back &&
-            jsonEncode(p).length > kDatingBucket,
+            jsonEncode(p).length > kDatingCoreBytes,
       )
       .length;
+
+  /// Names of the profiles waiting for a decision here.
+  Set<String> names() => <String>{
+    for (final SeenProfile s in service.toDecide) s.profile.name,
+  };
 }
 
-void main() {
-  test(
-    'a sealed box opens only for its recipient, and tells who sent it',
-    () async {
-      final RelayIdentity a = await RelayIdentity.generate();
-      final RelayIdentity b = await RelayIdentity.generate();
-      final RelayIdentity eve = await RelayIdentity.generate();
-      final Map<String, String> box = await DatingBox.seal(
-        me: a,
-        recipient: b.publicKey,
-        payload: <String, dynamic>{'k': 'msg', 't': 'hej'},
-      );
-      expect(
-        box['s'],
-        isNot(base64Url.encode(a.publicKey)),
-        reason: 'the sender is hidden',
-      );
-      final (List<int>, Map<String, dynamic>)? opened = await DatingBox.open(
-        me: b,
-        box: box,
-      );
-      expect(base64Url.encode(opened!.$1), base64Url.encode(a.publicKey));
-      expect(opened.$2['t'], 'hej');
-      expect(await DatingBox.open(me: eve, box: box), isNull);
+/// A small JPEG of one shade (base64).
+String _jpeg(int shade) => base64Encode(
+  img.encodeJpg(
+    img.Image(width: 24, height: 24)..clear(img.ColorRgb8(shade, 40, 90)),
+  ),
+);
 
-      // Both sides compute the same "Tak" token; a third key gets another.
-      expect(
-        await datingLikeToken(a, b.publicKey),
-        await datingLikeToken(b, a.publicKey),
-      );
-      expect(
-        await datingLikeToken(a, eve.publicKey),
-        isNot(await datingLikeToken(a, b.publicKey)),
-      );
-    },
-  );
+void main() {
+  test('a sealed box opens only for its recipient and tells who sent it; to '
+      'a hybrid key it is post-quantum hybrid, with a fresh KEM every '
+      'time', () async {
+    final RelayIdentity a = await RelayIdentity.generateHybrid();
+    final RelayIdentity b = await RelayIdentity.generateHybrid();
+    final RelayIdentity eve = await RelayIdentity.generateHybrid();
+    Future<Map<String, String>> seal() => DatingBox.seal(
+      me: a,
+      recipient: b.publicKey,
+      recipientPq: b.pqPublicKey,
+      payload: <String, dynamic>{'k': 'msg', 't': 'hej'},
+    );
+    final Map<String, String> box = await seal();
+    expect(DatingBox.isHybrid(box), isTrue);
+    expect(
+      jsonEncode(box),
+      isNot(contains(base64Url.encode(a.publicKey))),
+      reason: 'the sender is hidden',
+    );
+    final (Uint8List, Map<String, dynamic>)? opened = await DatingBox.open(
+      me: b,
+      box: box,
+    );
+    expect(base64Url.encode(opened!.$1), base64Url.encode(a.publicKey));
+    expect(opened.$2['t'], 'hej');
+    expect(await DatingBox.open(me: eve, box: box), isNull);
+    // Without the hybrid half of the key it does not open at all.
+    expect(
+      await DatingBox.open(
+        me: RelayIdentity(privateKey: b.privateKey, publicKey: b.publicKey),
+        box: box,
+      ),
+      isNull,
+    );
+    // Changed on the way: refused.
+    final String x = box['x']!;
+    final Map<String, String> bent = <String, String>{
+      ...box,
+      'x': '${x.substring(0, 10)}${x[10] == 'A' ? 'B' : 'A'}${x.substring(11)}',
+    };
+    expect(await DatingBox.open(me: b, box: bent), isNull);
+    // Two boxes to one person share nothing a phone on the way could link.
+    final Map<String, String> again = await seal();
+    expect(again['c'], isNot(box['c']));
+    expect(again['e'], isNot(box['e']));
+    expect(again['x']!.length, box['x']!.length);
+
+    // To a lantern's small classical key: no KEM, and it still opens.
+    final RelayIdentity lantern = await RelayIdentity.generate();
+    final Map<String, String> q = await DatingBox.seal(
+      me: a,
+      recipient: lantern.publicKey,
+      payload: <String, dynamic>{'k': 'match'},
+    );
+    expect(DatingBox.isHybrid(q), isFalse);
+    expect((await DatingBox.open(me: lantern, box: q))!.$2['k'], 'match');
+
+    // The pair's own key: both sides get the same from their two "Tak"s.
+    final (String, Uint8List) ab = await datingPairEncapsulate(b.pqPublicKey!);
+    final (String, Uint8List) ba = await datingPairEncapsulate(a.pqPublicKey!);
+    final Uint8List? atB = await datingPairDecapsulate(b, ab.$1);
+    final Uint8List? atA = await datingPairDecapsulate(a, ba.$1);
+    expect(atB, ab.$2);
+    expect(atA, ba.$2);
+    expect(await datingPairDecapsulate(eve, ab.$1), isNot(ab.$2));
+    final String ka = base64Url.encode(a.publicKey);
+    final String kb = base64Url.encode(b.publicKey);
+    final Uint8List onA = datingPairKey(
+      myKey: ka,
+      theirKey: kb,
+      mine: ab.$2,
+      theirs: atA!,
+    );
+    final Uint8List onB = datingPairKey(
+      myKey: kb,
+      theirKey: ka,
+      mine: ba.$2,
+      theirs: atB!,
+    );
+    expect(onA, onB);
+    expect(
+      datingMessageMac(onA, 'id1', 'hej'),
+      datingMessageMac(onB, 'id1', 'hej'),
+    );
+    expect(
+      datingMessageMac(onA, 'id1', 'hej!'),
+      isNot(datingMessageMac(onB, 'id1', 'hej')),
+    );
+  });
 
   test('profiles are fetched 2 steps away through phones without dating; '
       'likes, a match and messages go back sealed', () async {
@@ -266,19 +344,19 @@ void main() {
     );
   });
 
-  test('a lantern goes 2 steps and no further; a profile is asked for only '
-      'when the match test says the two fit', () async {
+  test('a lantern goes 3 steps (no gate needed) and no further; "Jak daleko '
+      'chcesz widzieć" narrows it both ways', () async {
     final _Net net = _Net();
     final _Phone ania = _Phone(net, 'ania');
     final _Phone bob = _Phone(net, 'bob');
     final _Phone cyryl = _Phone(net, 'cyryl');
     final _Phone darek = _Phone(net, 'darek');
-    final _Phone ewa = _Phone(net, 'ewa');
+    final _Phone zenek = _Phone(net, 'zenek');
     net
       ..link(ania, bob)
       ..link(bob, cyryl)
       ..link(cyryl, darek)
-      ..link(bob, ewa);
+      ..link(darek, zenek);
     await bob.service.load();
     await cyryl.service.load();
     await darek.date(
@@ -286,68 +364,151 @@ void main() {
       gender: DatingGender.man,
       wants: <DatingGender>{DatingGender.woman},
     );
-    // Ewa dates too, but is a woman and Ania looks for men.
-    await ewa.date(
-      name: 'Ewa',
-      gender: DatingGender.woman,
-      wants: <DatingGender>{DatingGender.man},
+    await zenek.date(
+      name: 'Zenek',
+      gender: DatingGender.man,
+      wants: <DatingGender>{DatingGender.woman},
     );
     await ania.date(
       name: 'Ania',
       gender: DatingGender.woman,
       wants: <DatingGender>{DatingGender.man},
     );
-    await ania.service.maybePublish(force: true);
-
-    // Three steps away: the lantern never arrives.
+    await darek.service.maybePublish(force: true);
     final String lanternId =
         ania.sent.lastWhere(
               (Map<String, dynamic> p) => p['type'] == DatingTypes.lantern,
             )['id']
             as String;
+
+    // Three steps away: no gate needed.
+    final SeenProfile atDarek = darek.service.toDecide.single;
+    expect(atDarek.profile.name, 'Ania');
+    expect(atDarek.distance, 3);
+    expect(atDarek.gate, isFalse);
+    expect(atDarek.path, <String>['cyryl', 'bob']);
+    expect(ania.names(), <String>{'Darek'});
+    // Four steps away: the lantern never arrives.
     expect(
-      darek.received.where((Map<String, dynamic> p) => p['id'] == lanternId),
+      zenek.received.where((Map<String, dynamic> p) => p['id'] == lanternId),
       isEmpty,
     );
-    expect(darek.service.toDecide, isEmpty);
-    expect(cyryl.service.toDecide, isEmpty);
-
-    // Two steps away, but it does not fit Ewa: her phone runs only the
-    // small sealed match test, never gets the profile, and the lantern costs
-    // the network well under 100 bytes.
-    expect(
-      ewa.received.any((Map<String, dynamic> p) => p['id'] == lanternId),
-      isTrue,
-    );
-    expect(ewa.backCount(), greaterThan(0));
-    expect(ewa.profilesIn(), 0);
-    expect(ewa.service.toDecide, isEmpty);
-    final List<Map<String, dynamic>> lanterns = <Map<String, dynamic>>[
-      for (final _Phone p in <_Phone>[ania, bob, cyryl, darek, ewa])
-        ...p.sent.where(
-          (Map<String, dynamic> m) => m['type'] == DatingTypes.lantern,
-        ),
-    ];
-    expect(lanterns, isNotEmpty);
-    for (final Map<String, dynamic> l in lanterns) {
-      expect(jsonEncode(l['l']).length, lessThan(100));
-      expect(DatingLantern.fromJson(l['l']), isNotNull);
-      expect((l['path'] as List).length, lessThanOrEqualTo(1));
+    expect(zenek.service.toDecide, isEmpty);
+    for (final _Phone p in <_Phone>[ania, bob, cyryl, darek, zenek]) {
+      for (final Map<String, dynamic> l in p.sent.where(
+        (Map<String, dynamic> m) => m['type'] == DatingTypes.lantern,
+      )) {
+        expect((l['path'] as List).length, lessThanOrEqualTo(2));
+        expect(jsonEncode(l['l']).length, lessThan(100));
+      }
     }
-    expect(jsonEncode(lanterns), isNot(contains('Ania')));
 
-    // A fitting person two steps away is asked.
-    final _Phone fred = _Phone(net, 'fred');
-    net.link(fred, bob);
-    await fred.date(
-      name: 'Fred',
+    // Two steps at most, on Ania's side: someone three steps away does not
+    // fit any more (her test is closed), and she asks with fillers only.
+    await ania.service.saveMine(
+      (MyDating m) => m.wants = const DatingWants(
+        genders: <DatingGender>{DatingGender.man},
+        hops: 2,
+      ),
+    );
+    final _Phone emil = _Phone(net, 'emil');
+    net.link(emil, cyryl);
+    await emil.date(
+      name: 'Emil',
       gender: DatingGender.man,
       wants: <DatingGender>{DatingGender.woman},
     );
     await ania.service.maybePublish(force: true);
-    expect(fred.service.toDecide.single.profile.name, 'Ania');
-    expect(fred.service.toDecide.single.distance, 2);
-    expect(fred.backCount(), greaterThan(0));
+    expect(emil.service.toDecide, isEmpty);
+    expect(ania.names(), isNot(contains('Emil')));
+    // And on the asker's side: two steps is too far for someone who looks
+    // only among friends.
+    final _Phone filip = _Phone(net, 'filip');
+    net.link(filip, bob);
+    await filip.date(
+      name: 'Filip',
+      gender: DatingGender.man,
+      wants: <DatingGender>{DatingGender.woman},
+      hops: 1,
+    );
+    await ania.service.maybePublish(force: true);
+    expect(filip.service.toDecide, isEmpty);
+    expect(ania.names(), isNot(contains('Filip')));
+    expect(datingReachLabel(kDatingRangeGates), 'Dalej przez otwarte bramy');
+  });
+
+  test('across an opened gate lanterns go on, marked so: people there are '
+      'seen only with "dalej przez otwarte bramy"; strangers send '
+      'nothing', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone xawery = _Phone(net, 'xawery');
+    final _Phone yorik = _Phone(net, 'yorik');
+    final _Phone obcy = _Phone(net, 'obcy');
+    net
+      ..link(xawery, yorik)
+      // Ania opened a gate to Xawery (they are not friends).
+      ..gate(ania, xawery);
+    await xawery.date(
+      name: 'Xawery',
+      gender: DatingGender.man,
+      wants: <DatingGender>{DatingGender.woman},
+      hops: kDatingRangeGates,
+    );
+    await yorik.date(
+      name: 'Yorik',
+      gender: DatingGender.man,
+      wants: <DatingGender>{DatingGender.woman},
+    );
+    await ania.date(
+      name: 'Ania',
+      gender: DatingGender.woman,
+      wants: <DatingGender>{DatingGender.man},
+    );
+    await xawery.service.maybePublish(force: true);
+    // Three steps is her reach: across the gate is further.
+    expect(ania.service.toDecide, isEmpty);
+    expect(xawery.service.toDecide, isEmpty);
+
+    await ania.service.saveMine(
+      (MyDating m) => m.wants = const DatingWants(
+        genders: <DatingGender>{DatingGender.man},
+        hops: kDatingRangeGates,
+      ),
+    );
+    await ania.service.maybePublish(force: true);
+    await xawery.service.maybePublish(force: true);
+    await yorik.service.maybePublish(force: true);
+    final SeenProfile atAnia = ania.service.toDecide.single;
+    expect(atAnia.profile.name, 'Xawery');
+    expect(atAnia.gate, isTrue);
+    expect(atAnia.reach, kDatingRangeGates);
+    expect(xawery.service.toDecide.single.profile.name, 'Ania');
+    // Yorik looks three steps: a way across a gate is too far for him, and
+    // the phones on the way, not Ania, say it crossed one.
+    expect(ania.names(), isNot(contains('Yorik')));
+    expect(yorik.service.toDecide, isEmpty);
+    expect(
+      yorik.received.any(
+        (Map<String, dynamic> m) =>
+            m['type'] == DatingTypes.lantern && m['g'] == true,
+      ),
+      isTrue,
+    );
+
+    // Someone who is neither a friend nor across a gate is not listened to.
+    await obcy.service.load();
+    final int before = ania.sent.length;
+    await obcy.send(ania.address, <String, dynamic>{
+      'type': DatingTypes.lantern,
+      'id': 'obcy-1',
+      'hops': 2,
+      'path': const <String>[],
+      'l': DatingLantern(
+        base64Url.encode((await RelayIdentity.generate()).publicKey),
+      ).toJson(),
+    });
+    expect(ania.sent, hasLength(before));
   });
 
   test('every phone runs the match test; a share of the lanterns that do not '
@@ -547,32 +708,30 @@ void main() {
     expect(DatingLantern.fromJson('x'), isNull);
   });
 
-  test('a phone with dating off never fits; hidden people never see a '
-      'profile', () async {
+  test('a phone with dating off never fits; a hidden friend never sees the '
+      'profile, whichever way the lantern reaches them, and hiding with the '
+      'circle also keeps out those who come only through them', () async {
     final _Net net = _Net();
     final _Phone ania = _Phone(net, 'ania');
     final _Phone bob = _Phone(net, 'bob');
     final _Phone ewa = _Phone(net, 'ewa');
+    final _Phone ola = _Phone(net, 'ola');
+    final _Phone piotr = _Phone(net, 'piotr');
     net
       ..link(ania, bob)
-      ..link(bob, ewa);
+      ..link(ania, ewa)
+      ..link(bob, ewa)
+      ..link(bob, ola)
+      // Piotr reaches Ania only through Ewa.
+      ..link(ewa, piotr);
     await bob.service.load();
-    await ewa.date(name: 'Ewa', gender: DatingGender.woman);
+    // With dating off, the phone tells its friends its dating key all the
+    // same (so nobody can tell), and shows nothing.
     await bob.service.maybePublish(force: true);
-    expect(
-      bob.sent.where(
-        (Map<String, dynamic> p) => p['type'] == DatingTypes.lantern,
-      ),
-      isNotEmpty,
-    );
-    expect(
-      ewa.service.toDecide,
-      isEmpty,
-      reason: 'a phone with dating off shows nothing',
-    );
-
-    // Ania hides from Ewa: the lantern passes Bob, but Ewa never sees the
-    // profile.
+    expect(bob.service.toDecide, isEmpty);
+    await ewa.date(name: 'Ewa', gender: DatingGender.woman);
+    await ola.date(name: 'Ola', gender: DatingGender.woman);
+    await piotr.date(name: 'Piotr', gender: DatingGender.man);
     await ania.service.load();
     await ania.service.saveMine((MyDating m) {
       m
@@ -581,63 +740,150 @@ void main() {
         ..gender = DatingGender.woman
         ..hiddenFriends.add(ewa.address);
     });
-    await ania.service.maybePublish(force: true);
-    expect(ewa.service.toDecide, isEmpty);
-    await ewa.service.maybePublish(force: true);
-    expect(ewa.service.toDecide, isEmpty);
-    expect(ania.service.toDecide.single.profile.name, 'Ewa');
+    // Ewa's dating key is known before any lantern of Ania's goes out, so
+    // it does not matter which way her questions come.
+    expect(ania.service.knownKeyOf(ewa.address), ewa.service.myKey);
+    expect(ania.service.knownKeyOf(bob.address), bob.service.myKey);
+    final String aniaKey = ania.service.myKey!;
 
-    // Preferences count both ways: a profile for men only skips Ewa.
-    final _Phone ola = _Phone(net, 'ola');
-    net.link(ola, bob);
-    await ola.date(
-      name: 'Ola',
-      gender: DatingGender.woman,
-      wants: <DatingGender>{DatingGender.man},
-    );
+    await ania.service.maybePublish(force: true);
     expect(
-      ewa.service.toDecide.where((SeenProfile s) => s.profile.name == 'Ola'),
+      ewa.received.where(
+        (Map<String, dynamic> m) => m['type'] == DatingTypes.lantern,
+      ),
+      isNotEmpty,
+      reason: 'the same lantern as everyone, directly and through Bob',
+    );
+    expect(ewa.service.profile(aniaKey), isNull);
+    // (Ewa's phone passes Piotr's request and Ania's answer on, sealed;
+    // none of it is for her.)
+    expect(
+      ewa.shown.where((RuntimeSystemNotification n) => n.body.contains('Ania')),
       isEmpty,
     );
+    expect(ola.names(), contains('Ania'));
+    // Hidden only from Ewa: her circle still meets Ania, also through her.
+    expect(piotr.names(), contains('Ania'));
+    // Hiding is one way: Ania still sees Ewa.
+    await ewa.service.maybePublish(force: true);
+    expect(ania.names(), contains('Ewa'));
+
+    // Hidden from Ewa and her circle: whoever comes only through Ewa is out.
+    await ania.service.saveMine(
+      (MyDating m) => m.hiddenCircles.add(ewa.address),
+    );
+    expect(ania.service.hiddenCircles(), <String>{ewa.address});
+    final _Phone rafal = _Phone(net, 'rafal');
+    net.link(rafal, ewa);
+    // Two steps at most: the way round through Bob is too far for him.
+    await rafal.date(name: 'Rafał', gender: DatingGender.man, hops: 2);
+    await ania.service.maybePublish(force: true);
+    expect(rafal.names(), isNot(contains('Ania')));
+    expect(ewa.service.profile(aniaKey), isNull);
+    final _Phone sara = _Phone(net, 'sara');
+    net.link(sara, bob);
+    await sara.date(name: 'Sara', gender: DatingGender.woman);
+    await ania.service.maybePublish(force: true);
+    expect(sara.names(), contains('Ania'), reason: 'through Bob all is open');
+    // The profile carries no list of hidden people anybody could probe.
+    final DatingProfile atSara = sara.service.profile(aniaKey)!.profile;
+    expect(atSara.wireJson().keys, isNot(contains('ex')));
+    expect(atSara.wireJson().keys, isNot(contains('xs')));
   });
 
-  test('a friend introduces two people who would not meet otherwise', () async {
+  test('a friend introduces two of their friends, whatever their own wishes '
+      'and without dating at all: both get the other one\'s signed profile '
+      'and the note, the matchmaker learns nothing, and only people who fit '
+      'each other meet', () async {
     final _Net net = _Net();
-    final _Phone marta = _Phone(net, 'marek');
+    final _Phone marek = _Phone(net, 'marek');
     final _Phone xenia = _Phone(net, 'xenia');
     final _Phone yann = _Phone(net, 'yann');
+    final _Phone zuza = _Phone(net, 'zuza');
     net
-      ..link(marta, xenia)
-      ..link(marta, yann);
-    await marta.date(name: 'Marek', gender: DatingGender.man);
+      ..link(marek, xenia)
+      ..link(marek, yann)
+      ..link(marek, zuza);
+    // Marek does not date at all.
+    await marek.service.load();
     await xenia.date(
       name: 'Xenia',
       gender: DatingGender.woman,
       wants: <DatingGender>{DatingGender.man},
       hops: 1,
     );
-    await yann.date(name: 'Yann', gender: DatingGender.man, hops: 1);
-    await marta.service.maybePublish(force: true);
-    await xenia.service.maybePublish(force: true);
-    await yann.service.maybePublish(force: true);
-    expect(
-      xenia.service.toDecide.where((SeenProfile s) => s.profile.name == 'Yann'),
-      isEmpty,
-      reason: 'two steps is too far for her',
+    await yann.date(
+      name: 'Yann',
+      gender: DatingGender.man,
+      wants: <DatingGender>{DatingGender.woman},
+      hops: 1,
     );
-    expect(
-      marta.service.toDecide.map((SeenProfile s) => s.profile.name),
-      containsAll(<String>['Xenia', 'Yann']),
+    await zuza.date(
+      name: 'Zuza',
+      gender: DatingGender.woman,
+      wants: <DatingGender>{DatingGender.man},
+      hops: 1,
     );
-
     final String x = xenia.service.myKey!;
     final String y = yann.service.myKey!;
-    expect(await marta.service.introduce(x, y, 'Oboje kochacie góry'), isTrue);
+    final String z = zuza.service.myKey!;
+    expect(xenia.service.profile(y), isNull, reason: 'too far for her');
+
+    expect(
+      await marek.service.introduce(
+        DatingEnd.friend(xenia.address),
+        DatingEnd.friend(yann.address),
+        'Oboje kochacie góry',
+      ),
+      isTrue,
+    );
     final SeenProfile atX = xenia.service.profile(y)!;
     expect(atX.introBy, 'marek');
     expect(atX.introNote, 'Oboje kochacie góry');
+    expect(atX.introVia, marek.address);
+    expect(atX.distance, 0);
+    expect(await atX.profile.verify(), isTrue);
     expect(yann.service.profile(x)!.introBy, 'marek');
     expect(xenia.shown.last.title, 'marek chce Cię komuś przedstawić');
+    expect(xenia.names(), contains('Yann'));
+    // Marek's phone handed the lanterns over and passed sealed boxes: no
+    // profile, no name.
+    expect(marek.service.profile(x), isNull);
+    expect(marek.service.profile(y), isNull);
+    expect(jsonEncode(marek.received), isNot(contains('Xenia')));
+    expect(jsonEncode(marek.sent), isNot(contains('Yann')));
+    // The one who introduced them is whom they can ask.
+    expect(xenia.service.opinionFriends(y), <String>[marek.address]);
+
+    // Two women who both look for men: introduced, but they do not fit, so
+    // neither sees the other.
+    expect(
+      await marek.service.introduce(
+        DatingEnd.friend(xenia.address),
+        DatingEnd.friend(zuza.address),
+        '',
+      ),
+      isTrue,
+    );
+    expect(xenia.service.profile(z), isNull);
+    expect(zuza.service.profile(x), isNull);
+    // One cannot be introduced to oneself, nor to a stranger.
+    expect(
+      await marek.service.introduce(
+        DatingEnd.friend(xenia.address),
+        DatingEnd.friend(xenia.address),
+        '',
+      ),
+      isFalse,
+    );
+    expect(
+      await marek.service.introduce(
+        DatingEnd.friend(xenia.address),
+        const DatingEnd.friend('200::dead'),
+        '',
+      ),
+      isFalse,
+    );
 
     await xenia.service.decide(y, true);
     await yann.service.decide(x, true);
@@ -650,44 +896,163 @@ void main() {
     expect(yann.service.chat(x).last.mine, isFalse);
   });
 
-  test('asking a friend for an opinion, and a friend vouching', () async {
+  test('someone from the matchmaker\'s Dating can be introduced to a friend '
+      'far away; a match from it can thank the matchmaker in currency, '
+      'only within one pyramid', () async {
+    final _Net net = _Net();
+    final _Phone marek = _Phone(net, 'marek', pyramid: 'pyr-marek');
+    final _Phone piotr = _Phone(net, 'piotr');
+    final _Phone zofia = _Phone(net, 'zofia');
+    final _Phone yann = _Phone(
+      net,
+      'yann',
+      pyramid: 'pyr-yann',
+      payable: <String>{'pyr-marek'},
+    );
+    net
+      ..link(marek, piotr)
+      ..link(piotr, zofia)
+      ..link(marek, yann);
+    await piotr.service.load();
+    await zofia.date(
+      name: 'Zofia',
+      gender: DatingGender.woman,
+      wants: <DatingGender>{DatingGender.man},
+    );
+    await yann.date(
+      name: 'Yann',
+      gender: DatingGender.man,
+      wants: <DatingGender>{DatingGender.woman},
+      hops: 1,
+    );
+    // Marek dates, men only: Zofia (two steps away) is in his Dating.
+    await marek.date(
+      name: 'Marek',
+      gender: DatingGender.man,
+      wants: <DatingGender>{DatingGender.man},
+      intent: DatingIntent.friends,
+    );
+    await zofia.service.maybePublish(force: true);
+    final String z = zofia.service.myKey!;
+    final String y = yann.service.myKey!;
+    expect(marek.service.profile(z), isNull, reason: 'not his wish');
+    await marek.service.saveMine(
+      (MyDating m) => m.wants = const DatingWants(
+        genders: <DatingGender>{DatingGender.woman},
+      ),
+    );
+    await zofia.service.maybePublish(force: true);
+    expect(marek.service.profile(z), isNotNull);
+    expect(yann.service.profile(z), isNull);
+
+    expect(
+      await marek.service.introduce(
+        DatingEnd.profile(z),
+        DatingEnd.friend(yann.address),
+        'Pasujecie',
+      ),
+      isTrue,
+    );
+    final SeenProfile atYann = yann.service.profile(z)!;
+    expect(atYann.introBy, 'marek');
+    expect(atYann.introPyr, 'pyr-marek');
+    final SeenProfile atZofia = zofia.service.profile(y)!;
+    expect(atZofia.introBy, 'marek');
+    expect(atZofia.introNote, 'Pasujecie');
+    expect(atZofia.introVia, isNull, reason: 'Marek is not her friend');
+    expect(zofia.service.opinionFriends(y), isEmpty);
+
+    // Not before the match.
+    expect(yann.service.canThank(z), isFalse);
+    await yann.service.decide(z, true);
+    await zofia.service.decide(y, true);
+    expect(yann.service.isMatch(z), isTrue);
+    expect(zofia.service.isMatch(y), isTrue);
+    expect(yann.service.canThank(z), isTrue);
+    // Zofia is in no pyramid: no button for her.
+    expect(zofia.service.canThank(y), isFalse);
+    expect(await zofia.service.thankMatchmaker(y, 5), isFalse);
+    expect(zofia.payments, isEmpty);
+    expect(await yann.service.thankMatchmaker(z, 5), isTrue);
+    expect(yann.payments.single, ('pyr-marek', 5, 'Podziękowanie'));
+    expect(yann.service.thanked(z), isTrue);
+    // A match without an introduction has nobody to thank.
+    expect(marek.service.canThank(z), isFalse);
+  });
+
+  test('"Zapytaj o opinię" goes to someone who knows the person — never to '
+      'the person themselves', () async {
     final _Net net = _Net();
     final _Phone ania = _Phone(net, 'ania');
     final _Phone bob = _Phone(net, 'bob');
+    final _Phone cela = _Phone(net, 'cela');
     final _Phone darek = _Phone(net, 'darek');
     net
       ..link(ania, bob)
+      ..link(ania, cela)
+      ..link(bob, cela)
       ..link(bob, darek);
-    await bob.service.load();
-    await ania.date(name: 'Ania', gender: DatingGender.woman);
-    await darek.date(name: 'Darek', gender: DatingGender.man);
-    await ania.service.maybePublish(force: true);
-    final String aniaKey = ania.service.myKey!;
+    await cela.service.load();
+    await ania.date(
+      name: 'Ania',
+      gender: DatingGender.woman,
+      wants: <DatingGender>{DatingGender.man},
+    );
+    await bob.date(
+      name: 'Bob',
+      gender: DatingGender.man,
+      wants: <DatingGender>{DatingGender.woman},
+    );
+    await darek.date(
+      name: 'Darek',
+      gender: DatingGender.man,
+      wants: <DatingGender>{DatingGender.woman},
+    );
+    await bob.service.maybePublish(force: true);
+    await darek.service.maybePublish(force: true);
+    final String bobKey = bob.service.myKey!;
+    final String darekKey = darek.service.myKey!;
 
+    // Bob is Ania's friend: she can ask Cela, who knows them both — not Bob.
+    final SeenProfile atAnia = ania.service.profile(bobKey)!;
+    expect(atAnia.distance, 1);
+    expect(atAnia.mutual, <String>[cela.address]);
+    expect(ania.service.opinionFriends(bobKey), <String>[cela.address]);
     expect(
-      await darek.service.askOpinion(aniaKey, 'Co sądzisz o Ani?'),
+      await ania.service.askOpinion(
+        bobKey,
+        'Co sądzisz o Bobie?',
+        friend: bob.address,
+      ),
+      isFalse,
+      reason: 'never to the person',
+    );
+    expect(
+      await ania.service.askOpinion(bobKey, 'Co sądzisz o Bobie?'),
+      isTrue,
+    );
+    expect(bob.service.asksToMe, isEmpty);
+    expect(cela.service.asksToMe.single.name, 'Bob');
+
+    // Darek is two steps away, through Bob: Bob knows him.
+    expect(ania.service.opinionFriends(darekKey), contains(bob.address));
+    expect(
+      await ania.service.askOpinion(
+        darekKey,
+        'Co sądzisz o Darku?',
+        friend: bob.address,
+      ),
       isTrue,
     );
     final OpinionAsk asked = bob.service.asksToMe.single;
-    expect(asked.question, 'Co sądzisz o Ani?');
-    expect(asked.name, 'Ania');
-    await bob.service.answerOpinion(asked.id, 'Świetna, polecam');
-    expect(darek.service.myAsks.single.answer, 'Świetna, polecam');
-
-    await ania.service.requestVouch(bob.address);
-    final String req = bob.service.vouchRequests.keys.single;
-    await bob.service.writeVouch(req, 'Najlepsza kucharka na osiedlu');
-    expect(bob.service.vouchRequests, isEmpty);
-    final DatingVouch v = ania.service.me.vouches.single;
-    expect(v.by, 'bob');
-    expect(v.approved, isFalse);
-    await ania.service.setVouch(v.id, keep: true);
-    // The approved word travels with the profile asked for after the next
-    // lantern.
-    await ania.service.maybePublish(force: true);
+    expect(asked.question, 'Co sądzisz o Darku?');
+    expect(asked.name, 'Darek');
+    await bob.service.answerOpinion(asked.id, 'Świetny, polecam');
     expect(
-      darek.service.profile(aniaKey)!.profile.vouches.single.text,
-      'Najlepsza kucharka na osiedlu',
+      ania.service.myAsks
+          .firstWhere((OpinionAsk a) => a.name == 'Darek')
+          .answer,
+      'Świetny, polecam',
     );
   });
 
@@ -1001,98 +1366,286 @@ void main() {
     expect(seen.map((DatingVouch v) => v.text), <String>['Gotuje genialnie']);
   });
 
-  test('up to four photos travel with the profile', () async {
-    String jpeg(int shade) => base64Encode(
-      img.encodeJpg(
-        img.Image(width: 24, height: 24)..clear(img.ColorRgb8(shade, 40, 90)),
+  test('up to 50 vouches: friends sign them, the owner approves them, and a '
+      'viewer gets every one in parts, each checked', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone bob = _Phone(net, 'bob');
+    final _Phone darek = _Phone(net, 'darek');
+    net
+      ..link(ania, bob)
+      ..link(bob, darek);
+    await bob.service.load();
+    await ania.date(name: 'Ania', gender: DatingGender.woman);
+    await darek.date(name: 'Darek', gender: DatingGender.man);
+    final String aniaKey = ania.service.myKey!;
+
+    // More than two parts' worth of words from friends.
+    const int many = kDatingVouchesPerPart * 2 + 1;
+    for (int i = 0; i < many; i++) {
+      await ania.service.requestVouch(bob.address);
+      await bob.service.writeVouch(
+        bob.service.vouchRequests.keys.single,
+        'Słowo $i',
+      );
+    }
+    expect(bob.service.vouchRequests, isEmpty);
+    expect(ania.service.me.vouches, hasLength(many));
+    expect(ania.service.me.vouches.first.by, 'bob');
+    expect(ania.service.me.vouches.first.approved, isFalse);
+    for (final DatingVouch v in List<DatingVouch>.of(ania.service.me.vouches)) {
+      await ania.service.setVouch(v.id, keep: true);
+    }
+    await ania.service.maybePublish(force: true);
+    final DatingProfile atDarek = darek.service.profile(aniaKey)!.profile;
+    expect(atDarek.vouchDigests, hasLength(many));
+    expect(atDarek.vouches, hasLength(many));
+    expect(atDarek.complete, isTrue);
+    expect(atDarek.vouches.map((DatingVouch v) => v.text).toSet(), <String>{
+      for (int i = 0; i < many; i++) 'Słowo $i',
+    });
+
+    // At most 50 shown on a profile; a few more may wait for approval.
+    final LedgerKeyPair friend = await LedgerKeyPair.generate();
+    await ania.service.saveMine((MyDating m) => m.vouches.clear());
+    final List<DatingVouch> lots = <DatingVouch>[
+      for (int i = 0; i < kDatingMaxVouches + 5; i++)
+        await DatingVouch.sign(
+          signer: friend,
+          id: 'v$i',
+          forKey: aniaKey,
+          by: 'Kasia',
+          text: 'Super $i',
+          at: i,
+        ),
+    ];
+    await ania.service.saveMine((MyDating m) => m.vouches.addAll(lots));
+    for (final DatingVouch v in lots) {
+      await ania.service.setVouch(v.id, keep: true);
+    }
+    expect(
+      ania.service.me.vouches.where((DatingVouch v) => v.approved),
+      hasLength(kDatingMaxVouches),
+    );
+    final MyDating back = MyDating.fromJson(
+      jsonDecode(jsonEncode(ania.service.me.toJson())),
+    );
+    expect(back.vouches, hasLength(kDatingMaxVouches + 5));
+  });
+
+  test('a profile answer and a cover are exactly one size; photos come '
+      'after it, one part of one size each, checked against the signed '
+      'profile', () async {
+    final Map<String, dynamic> small = datingPadded(<String, dynamic>{
+      'cover': true,
+    });
+    int size(Map<String, dynamic> m) => utf8.encode(jsonEncode(m)).length;
+    expect(size(small), kDatingCoreBytes);
+    expect(
+      size(
+        datingPadded(<String, dynamic>{
+          'ph': 'x' * 40000,
+        }, size: kDatingPartBytes),
       ),
+      kDatingPartBytes,
     );
-    final List<String> photos = <String>[jpeg(10), jpeg(80), jpeg(160)];
-    final DatingProfile p = DatingProfile(
-      key: 'k',
-      name: 'Ola',
-      gender: DatingGender.woman,
-      at: 1,
-      photos: photos,
-    );
-    final Map<String, dynamic> json =
-        jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>;
-    expect(json['ph'], photos);
-    expect(DatingProfile.fromJson(json)!.photos, photos);
-    expect(DatingProfile.fromJson(json)!.photo, photos.first);
-
-    // Too many photos.
     expect(
-      DatingProfile.fromJson(<String, dynamic>{
-        ...json,
-        'ph': <String>[for (int i = 0; i < 6; i++) jpeg(i * 30)],
-      })!.photos,
-      hasLength(kDatingMaxPhotos),
+      size(
+        datingPadded(<String, dynamic>{'cover': true}, size: kDatingPartBytes),
+      ),
+      kDatingPartBytes,
     );
 
-    // The own settings keep them in order.
-    final MyDating me = MyDating(photos: List<String>.of(photos));
-    expect(
-      MyDating.fromJson(jsonDecode(jsonEncode(me.toJson()))).photos,
-      photos,
-    );
-    me.photo = null;
-    expect(me.photos, isEmpty);
-
-    // Over the network, each photo is re-encoded and all of them arrive.
     final _Net net = _Net();
     final _Phone ania = _Phone(net, 'ania');
     final _Phone darek = _Phone(net, 'darek');
-    net.link(ania, darek);
+    final _Phone ewa = _Phone(net, 'ewa', decoyShare: 1);
+    net
+      ..link(ania, darek)
+      ..link(ania, ewa);
     await darek.date(name: 'Darek', gender: DatingGender.man);
+    // Ewa does not fit Ania; her phone asks for the profile anyway (a decoy)
+    // and gets a cover.
+    await ewa.date(
+      name: 'Ewa',
+      gender: DatingGender.woman,
+      wants: <DatingGender>{DatingGender.woman},
+    );
+    final List<String> photos = <String>[_jpeg(10), _jpeg(80), _jpeg(160)];
     await ania.service.load();
     await ania.service.saveMine((MyDating m) {
       m
         ..enabled = true
         ..name = 'Ania'
         ..gender = DatingGender.woman
+        ..wants = const DatingWants(genders: <DatingGender>{DatingGender.man})
+        ..about = 'Lubię góry'
         ..photos.addAll(photos);
     });
     await ania.service.maybePublish(force: true);
     final DatingProfile atDarek = darek.service.toDecide.single.profile;
+    expect(atDarek.photoDigests, hasLength(3));
     expect(atDarek.photos, hasLength(3));
     for (final String ph in atDarek.photos) {
       expect(img.decodeJpg(base64Decode(ph)), isNotNull);
     }
+    expect(ewa.service.toDecide, isEmpty);
+
+    // What Ania's phone sent back: the answers to profile requests (Darek's
+    // real one, Ewa's cover) all one size, the parts all another.
+    final List<int> big = <int>[
+      for (final Map<String, dynamic> m in ania.sent)
+        if (m['type'] == DatingTypes.back &&
+            jsonEncode(m).length > kDatingCoreBytes)
+          ((m['box'] as Map)['x'] as String).length,
+    ];
+    final Set<int> cores = big.where((int n) => n < kDatingPartBytes).toSet();
+    final Set<int> parts = big.where((int n) => n >= kDatingPartBytes).toSet();
+    expect(cores, hasLength(1), reason: 'a real profile and a cover alike');
+    expect(parts, hasLength(1));
+    expect(
+      big.where((int n) => n < kDatingPartBytes).length,
+      greaterThanOrEqualTo(2),
+    );
+    // The answer itself never carries a photo.
+    expect(cores.single, lessThan(kDatingCoreBytes * 2));
+
+    // Kept here with the photos, they survive a restart.
+    final DatingService again = DatingService(
+      host: darek,
+      disk: darek.disk,
+      now: () => net.clock,
+    );
+    await again.load();
+    expect(again.profile(ania.service.myKey!)!.profile.photos, hasLength(3));
   });
 
-  test('a profile and a cover are padded to whole buckets, at least as many '
-      'as asked', () {
-    final DatingProfile p = DatingProfile(
-      key: 'ania-key',
+  test('a profile is signed by its owner: a changed word, photo, wish or key '
+      'breaks the signature', () async {
+    final LedgerKeyPair signer = await LedgerKeyPair.generate();
+    final RelayIdentity id = await RelayIdentity.generateHybrid();
+    final RelayIdentity other = await RelayIdentity.generateHybrid();
+    final String photo = _jpeg(10);
+    final DatingProfile p = await DatingProfile.sign(
+      signerKey: signer,
+      key: base64Url.encode(id.publicKey),
+      pq: base64Url.encode(id.pqPublicKey!),
       name: 'Ania',
       gender: DatingGender.woman,
-      at: 1,
-      about: 'Lubię góry',
+      at: 5,
+      about: 'Góry',
+      interests: <String>['góry'],
+      photos: <String>[photo],
     );
-    int size(Map<String, dynamic> m) => utf8.encode(jsonEncode(m)).length;
-    final Map<String, dynamic> real = datingPadded(p.toJson(), minBuckets: 2);
-    final Map<String, dynamic> cover = datingPadded(const <String, dynamic>{
-      'v': 1,
-      'cover': true,
-    }, minBuckets: 2);
-    expect(size(real), 2 * kDatingBucket);
-    expect(size(cover), 2 * kDatingBucket);
-    expect(DatingProfile.fromJson(real)!.about, 'Lubię góry');
-    expect(cover['cover'], isTrue);
+    expect(await p.verify(), isTrue);
+    final Map<String, dynamic> wire =
+        jsonDecode(jsonEncode(p.wireJson())) as Map<String, dynamic>;
+    expect(wire.containsKey('ph'), isFalse, reason: 'photos come as parts');
+    expect(wire['phd'], <String>[datingPhotoDigest(photo)]);
+    expect(await DatingProfile.fromJson(wire)!.verify(), isTrue);
+    for (final Map<String, dynamic> change in <Map<String, dynamic>>[
+      <String, dynamic>{'n': 'Ewa'},
+      <String, dynamic>{'ab': 'Morze'},
+      <String, dynamic>{
+        'it': <String>['morze'],
+      },
+      <String, dynamic>{
+        'phd': <String>[datingPhotoDigest(_jpeg(99))],
+      },
+      <String, dynamic>{'k': base64Url.encode(other.publicKey)},
+      <String, dynamic>{'q': base64Url.encode(other.pqPublicKey!)},
+      <String, dynamic>{'want': const DatingWants(hops: 1).toJson()},
+      <String, dynamic>{'sig': 'x'},
+    ]) {
+      final DatingProfile? changed = DatingProfile.fromJson(<String, dynamic>{
+        ...wire,
+        ...change,
+      });
+      expect(await changed!.verify(), isFalse, reason: '$change');
+    }
+    expect(DatingProfile.fromJson(<String, dynamic>{'cover': true}), isNull);
+    // Kept here with the photo, still the same signed core.
+    final DatingProfile kept = DatingProfile.fromJson(
+      jsonDecode(jsonEncode(p.toJson())),
+    )!;
+    expect(kept.photos, <String>[photo]);
+    expect(await kept.verify(), isTrue);
+  });
 
-    // A big profile takes as many buckets as it needs.
-    final Map<String, dynamic> big = datingPadded(
-      DatingProfile(
-        key: 'k',
-        name: 'Ola',
-        gender: DatingGender.woman,
-        at: 1,
-        about: 'x' * 5000,
-      ).toJson(),
+  test('the distance is counted by the phones on the way, not claimed by the '
+      'asker: a far asker cannot pass for a friend', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone bob = _Phone(net, 'bob');
+    final _Phone eve = _Phone(net, 'eve');
+    net
+      ..link(ania, bob)
+      ..link(bob, eve);
+    await eve.service.load();
+    await bob.date(
+      name: 'Bob',
+      gender: DatingGender.man,
+      wants: <DatingGender>{DatingGender.woman},
     );
-    expect(size(big) % kDatingBucket, 0);
-    expect(size(big), 2 * kDatingBucket);
+    // Ania meets friends only.
+    await ania.date(
+      name: 'Ania',
+      gender: DatingGender.woman,
+      wants: <DatingGender>{DatingGender.man},
+      hops: 1,
+    );
+    await bob.service.maybePublish(force: true);
+    final String bobKey = bob.service.myKey!;
+    expect(ania.service.knownKeyOf(bob.address), bobKey);
+    final Map<String, dynamic> lantern = eve.received.lastWhere(
+      (Map<String, dynamic> m) =>
+          m['type'] == DatingTypes.lantern &&
+          (m['path'] as List).isNotEmpty &&
+          ania.sent.any((Map<String, dynamic> a) => a['id'] == m['id']),
+    );
+    final String id = lantern['id'] as String;
+    final Uint8List lanternKey = decodeRelayKey((lantern['l'] as Map)['k'])!;
+
+    // Eve's modified phone claims to be one step away, in every way it can.
+    final RelayIdentity fresh = await RelayIdentity.generateHybrid();
+    final (RelayIdentity, List<String>) q = await DatingMatch.ask(
+      const DatingWants(
+        genders: <DatingGender>{DatingGender.woman},
+      ).seekTags(DatingGender.man),
+      Random(1),
+    );
+    final int before = eve.received.length;
+    await eve.send(bob.address, <String, dynamic>{
+      'type': DatingTypes.back,
+      'to': id,
+      'm': 'eve-mark',
+      'box': await DatingBox.seal(
+        me: fresh,
+        recipient: lanternKey,
+        payload: <String, dynamic>{
+          'k': 'match',
+          'id': id,
+          'd': 1,
+          'q': q.$2,
+          'pq': base64Url.encode(fresh.pqPublicKey!),
+        },
+      ),
+      'ttl': 7,
+      'n': -5,
+    });
+    final Map<String, dynamic> answer = eve.received
+        .sublist(before)
+        .lastWhere((Map<String, dynamic> m) => m['type'] == DatingTypes.back);
+    final Map<String, dynamic> opened = (await DatingBox.open(
+      me: fresh,
+      box: answer['box'],
+    ))!.$2;
+    // Two steps, as Bob's phone counted: out of Ania's reach, so no fit.
+    expect(await DatingMatch.fits(q.$1, opened['r'], opened['o']), isFalse);
+    // Bob's key stays Bob's, and Bob still meets Ania.
+    expect(ania.service.knownKeyOf(bob.address), bobKey);
+    expect(ania.names(), contains('Bob'));
+    expect(bob.names(), contains('Ania'));
   });
 
   test('phones on the way cannot read a profile; the one who asks for it '
@@ -1159,54 +1712,6 @@ void main() {
       isEmpty,
     );
     expect(ania.service.toDecide.single.profile.name, 'Ola');
-  });
-
-  test('a match from an introduction can thank the matchmaker in currency, '
-      'only within one pyramid', () async {
-    final _Net net = _Net();
-    final _Phone marek = _Phone(net, 'marek', pyramid: 'pyr-marek');
-    final _Phone xenia = _Phone(
-      net,
-      'xenia',
-      pyramid: 'pyr-xenia',
-      payable: <String>{'pyr-marek'},
-    );
-    final _Phone yann = _Phone(net, 'yann');
-    net
-      ..link(marek, xenia)
-      ..link(marek, yann);
-    await marek.date(name: 'Marek', gender: DatingGender.man);
-    await xenia.date(
-      name: 'Xenia',
-      gender: DatingGender.woman,
-      wants: <DatingGender>{DatingGender.man},
-      hops: 1,
-    );
-    await yann.date(name: 'Yann', gender: DatingGender.man, hops: 1);
-    await marek.service.maybePublish(force: true);
-    await xenia.service.maybePublish(force: true);
-    await yann.service.maybePublish(force: true);
-    final String x = xenia.service.myKey!;
-    final String y = yann.service.myKey!;
-    expect(await marek.service.introduce(x, y, 'Pasujecie'), isTrue);
-    expect(xenia.service.profile(y)!.introPyr, 'pyr-marek');
-
-    // Not before the match.
-    expect(xenia.service.canThank(y), isFalse);
-    await xenia.service.decide(y, true);
-    await yann.service.decide(x, true);
-    expect(xenia.service.canThank(y), isTrue);
-    // Yann is in no pyramid: no button for him.
-    expect(yann.service.canThank(x), isFalse);
-    expect(await yann.service.thankMatchmaker(x, 5), isFalse);
-    expect(yann.payments, isEmpty);
-
-    expect(await xenia.service.thankMatchmaker(y, 5), isTrue);
-    expect(xenia.payments.single, ('pyr-marek', 5, 'Podziękowanie'));
-    expect(xenia.service.thanked(y), isTrue);
-
-    // A match without an introduction has nobody to thank.
-    expect(marek.service.canThank(x), isFalse);
   });
 
   test('"Idę na randkę" deadlines in the background service: the alarm is '
@@ -1307,7 +1812,8 @@ void main() {
         'balast': 'x' * 100000,
       }, hops: 5);
       expect(passed().single['l'], lantern);
-      expect(passed().single['hops'], 0);
+      // Three steps: one left after the friend it goes to.
+      expect(passed().single['hops'], 1);
       expect(passed().single[kSendOnceKey], isTrue);
 
       for (int i = 0; i < kDatingLanternsPerFriendPerDay + 10; i++) {
@@ -1359,13 +1865,15 @@ void main() {
   });
 
   test('a modified friend asking with a new key every time gets only a few '
-      'answers per lantern, no profile without a proof of fit, and nothing '
-      'when hidden', () async {
+      'answers per lantern and no profile without a proof of fit; hidden '
+      'with their circle, nothing that comes through them fits', () async {
     final _Net net = _Net();
     final _Phone ania = _Phone(net, 'ania');
     final _Phone eve = _Phone(net, 'eve');
     net.link(ania, eve);
     await eve.service.load();
+    // Eve's phone tells Ania its dating key, as every phone does.
+    await eve.service.maybePublish(force: true);
     await ania.service.load();
     await ania.service.saveMine((MyDating m) {
       m
@@ -1385,12 +1893,14 @@ void main() {
       lanternKey = decodeRelayKey((l['l'] as Map)['k'])!;
     }
 
-    // Sends [payload] sealed to the lantern from [me], as Eve's phone would,
-    // and opens what comes back.
+    // Sends [payload] sealed to the lantern from [me], as Eve's phone would
+    // (claiming it passed [n] phones before hers), and opens what comes
+    // back.
     Future<Map<String, dynamic>?> ask(
       RelayIdentity me,
-      Map<String, dynamic> payload,
-    ) async {
+      Map<String, dynamic> payload, {
+      int n = 0,
+    }) async {
       final int before = eve.received.length;
       await eve.send(ania.address, <String, dynamic>{
         'type': DatingTypes.back,
@@ -1402,6 +1912,7 @@ void main() {
           payload: payload,
         ),
         'ttl': 7,
+        'n': n,
       });
       final List<Map<String, dynamic>> back = <Map<String, dynamic>>[
         for (final Map<String, dynamic> m in eve.received.sublist(before))
@@ -1413,12 +1924,12 @@ void main() {
       return (await DatingBox.open(me: me, box: back.single['box']))?.$2;
     }
 
-    // Probing: a new key for every question, as a friend and as if passed on.
-    // Returns the answered questions (key, blinding secret, points, answer).
-    Future<List<_Probe>> probe(int times) async {
+    // Probing: a new key for every question. Returns the answered questions
+    // (key, blinding secret, points, answer).
+    Future<List<_Probe>> probe(int times, {required int n}) async {
       final List<_Probe> got = <_Probe>[];
       for (int i = 0; i < times; i++) {
-        final RelayIdentity fresh = await RelayIdentity.generate();
+        final RelayIdentity fresh = await RelayIdentity.generateHybrid();
         final (RelayIdentity, List<String>) q = await DatingMatch.ask(
           const DatingWants().seekTags(DatingGender.man),
           Random(i),
@@ -1426,9 +1937,9 @@ void main() {
         final Map<String, dynamic>? a = await ask(fresh, <String, dynamic>{
           'k': 'match',
           'id': lanternId,
-          'd': i.isEven ? 1 : 2,
           'q': q.$2,
-        });
+          'pq': base64Url.encode(fresh.pqPublicKey!),
+        }, n: n);
         if (a != null) {
           got.add((fresh, q.$1, q.$2, a));
         }
@@ -1436,15 +1947,23 @@ void main() {
       return got;
     }
 
+    Future<Map<String, dynamic>?> fetch(_Probe p, RelayIdentity b) =>
+        ask(p.$1, <String, dynamic>{
+          'k': 'fetch',
+          'id': lanternId,
+          'a': p.$4['a'],
+          'b': b.toJson(),
+        });
+
     await publish();
-    final List<_Probe> answered = await probe(40);
-    expect(
-      answered,
-      hasLength(kDatingMatchFarPerFriend),
-      reason:
-          'keys are free; answers per lantern and friend are not (her '
-          "own phone already asked once as herself, so no other key does)",
+    // As herself: her own phone already asked once, so no other key does.
+    expect(await probe(5, n: 0), isEmpty);
+    // Pretending to pass questions on: a limited number per lantern.
+    final List<_Probe> answered = await probe(
+      kDatingMatchFarPerFriend + 10,
+      n: 1,
     );
+    expect(answered, hasLength(kDatingMatchFarPerFriend));
     // A new secret for every answer: no two answers can be put together.
     expect(answered[1].$4['o'], isNot(answered[2].$4['o']));
     // A man looking for anyone fits Ania (a woman looking for anyone).
@@ -1452,101 +1971,239 @@ void main() {
     expect(await DatingMatch.fits(far.$2, far.$4['r'], far.$4['o']), isTrue);
 
     // Without a proof of fit (a made-up secret) only a cover comes back.
-    final Map<String, dynamic>? cover = await ask(far.$1, <String, dynamic>{
-      'k': 'fetch',
-      'id': lanternId,
-      'a': far.$4['a'],
-      'b': (await RelayIdentity.generate()).toJson(),
-    });
+    final Map<String, dynamic>? cover = await fetch(
+      far,
+      await RelayIdentity.generate(),
+    );
     expect((cover!['p'] as Map)['cover'], isTrue);
     // The same answer cannot be used twice.
-    expect(
-      await ask(far.$1, <String, dynamic>{
-        'k': 'fetch',
-        'id': lanternId,
-        'a': far.$4['a'],
-        'b': far.$2.toJson(),
-      }),
-      isNull,
+    expect(await fetch(far, far.$2), isNull);
+    // With the proof: the signed profile, as for anyone who fits — exactly
+    // as long as the cover.
+    final Map<String, dynamic>? real = await fetch(
+      answered.last,
+      answered.last.$2,
     );
-    // With the proof: the profile, as for anyone who fits.
-    final _Probe other = answered.last;
-    final Map<String, dynamic>? real = await ask(other.$1, <String, dynamic>{
-      'k': 'fetch',
-      'id': lanternId,
-      'a': other.$4['a'],
-      'b': other.$2.toJson(),
-    });
-    expect((real!['p'] as Map)['n'], 'Ania');
+    final DatingProfile profile = DatingProfile.fromJson(real!['p'])!;
+    expect(profile.name, 'Ania');
+    expect(await profile.verify(), isTrue);
+    expect(jsonEncode(real['p']).length, jsonEncode(cover['p']).length);
 
-    // Hidden from Eve: whatever keys she asks with, she never fits and gets
-    // no profile, even with a valid proof.
-    await ania.service.saveMine(
-      (MyDating m) => m.hiddenFriends.add(eve.address),
-    );
+    // Hidden from Eve and her circle: whatever keys come through her, they
+    // never fit and get no profile, even with a valid proof.
+    await ania.service.saveMine((MyDating m) {
+      m
+        ..hiddenFriends.add(eve.address)
+        ..hiddenCircles.add(eve.address);
+    });
     await publish();
-    final List<_Probe> hidden = await probe(40);
-    expect(hidden, hasLength(kDatingMatchFarPerFriend));
+    final List<_Probe> hidden = await probe(10, n: 1);
+    expect(hidden, hasLength(10));
     for (final _Probe h in hidden) {
       expect(await DatingMatch.fits(h.$2, h.$4['r'], h.$4['o']), isFalse);
     }
-    final Map<String, dynamic>? none =
-        await ask(hidden.last.$1, <String, dynamic>{
-          'k': 'fetch',
-          'id': lanternId,
-          'a': hidden.last.$4['a'],
-          'b': hidden.last.$2.toJson(),
-        });
+    final Map<String, dynamic>? none = await fetch(hidden.last, hidden.last.$2);
     expect((none!['p'] as Map)['cover'], isTrue);
   });
 
-  test('a friend the dating profile is hidden from never fits, even when the '
-      'lantern reaches them through someone else', () async {
+  test('a filter passes a profile by the kind of meeting, reach, gender, '
+      'interests (as typed, compared without case or marks), a photo and '
+      'mutual friends', () {
+    SeenProfile seen({
+      DatingGender gender = DatingGender.woman,
+      int distance = 2,
+      bool gate = false,
+      List<String> interests = const <String>[],
+      List<String> photos = const <String>[],
+      List<String>? mutual,
+    }) => SeenProfile(
+      profile: DatingProfile(
+        key: 'k',
+        name: 'Ola',
+        gender: gender,
+        at: 1,
+        interests: interests,
+        photoDigests: <String>[
+          for (final String p in photos) datingPhotoDigest(p),
+        ],
+      ),
+      replyTo: 'r',
+      at: 1,
+      distance: distance,
+      gate: gate,
+      mutual: mutual,
+    );
+    const Set<DatingIntent> dates = <DatingIntent>{DatingIntent.dates};
+    const Set<DatingIntent> either = <DatingIntent>{
+      DatingIntent.dates,
+      DatingIntent.friends,
+    };
+    const DatingFilter none = DatingFilter();
+    expect(none.active, 0);
+    expect(none.passes(seen(), modes: dates), isTrue);
+    expect(none.passes(seen(gate: true), modes: dates), isTrue);
+
+    const DatingFilter friends = DatingFilter(intent: DatingIntent.friends);
+    expect(friends.passes(seen(), modes: dates), isFalse);
+    expect(friends.passes(seen(), modes: either), isTrue);
+
+    const DatingFilter near = DatingFilter(hops: 1);
+    expect(near.passes(seen(), modes: dates), isFalse);
+    expect(near.passes(seen(distance: 1), modes: dates), isTrue);
+    expect(
+      near.passes(seen(distance: 0), modes: dates),
+      isTrue,
+      reason: 'introduced by a friend',
+    );
+    const DatingFilter three = DatingFilter(hops: 3);
+    expect(three.passes(seen(distance: 3), modes: dates), isTrue);
+    expect(
+      three.passes(seen(distance: 1, gate: true), modes: dates),
+      isFalse,
+      reason: 'across a gate is further than three steps',
+    );
+
+    const DatingFilter men = DatingFilter(
+      genders: <DatingGender>{DatingGender.man},
+    );
+    expect(men.passes(seen(), modes: dates), isFalse);
+    expect(men.passes(seen(gender: DatingGender.man), modes: dates), isTrue);
+
+    const DatingFilter hills = DatingFilter(interests: <String>{'GORY'});
+    expect(
+      hills.passes(seen(interests: <String>['książki']), modes: dates),
+      isFalse,
+    );
+    expect(
+      hills.passes(seen(interests: <String>['książki', 'góry']), modes: dates),
+      isTrue,
+    );
+
+    const DatingFilter photo = DatingFilter(withPhoto: true);
+    expect(photo.passes(seen(), modes: dates), isFalse);
+    expect(photo.passes(seen(photos: <String>['x']), modes: dates), isTrue);
+
+    const DatingFilter mutual = DatingFilter(minMutual: 2);
+    expect(mutual.passes(seen(mutual: <String>['a']), modes: dates), isFalse);
+    expect(
+      mutual.passes(seen(mutual: <String>['a', 'b']), modes: dates),
+      isTrue,
+    );
+
+    const DatingFilter all = DatingFilter(
+      intent: DatingIntent.friends,
+      hops: 1,
+      genders: <DatingGender>{DatingGender.man},
+      interests: <String>{'żeglarstwo'},
+      withPhoto: true,
+      minMutual: 1,
+    );
+    expect(all.active, 6);
+    final DatingFilter back = DatingFilter.fromJson(
+      jsonDecode(jsonEncode(all.toJson())),
+    );
+    expect(back.intent, DatingIntent.friends);
+    expect(back.hops, 1);
+    expect(back.genders, <DatingGender>{DatingGender.man});
+    expect(back.interests, <String>{'żeglarstwo'});
+    expect(back.withPhoto, isTrue);
+    expect(back.minMutual, 1);
+
+    // Interests are typed freely: tidied, compared without case or marks,
+    // each once, a few at most, none too long.
+    expect(datingTag('  Góry  #Wysokie\n'), 'góry wysokie');
+    expect(datingTag('   '), isNull);
+    expect(datingTag(5), isNull);
+    expect(datingTag('x' * 40)!.length, kDatingTagMaxChars);
+    expect(datingTagKey('GÓRY'), 'gory');
+    expect(datingTagKey('Żeglarstwo'), datingTagKey('zeglarstwo'));
+    expect(datingTagKey('Łódź'), 'lodz');
+    expect(
+      datingTagsFrom(<Object?>['Góry', 'gory', 'GÓRY', 'morze', 5, '']),
+      <String>['góry', 'morze'],
+    );
+    expect(
+      datingTagsFrom(<String>[for (int i = 0; i < 30; i++) 'pasja $i']),
+      hasLength(kDatingMaxInterests),
+    );
+    expect(datingTagSuggestions(), contains('góry'));
+    // A profile keeps them as typed (the owner's signature covers them).
+    const DatingProfile p = DatingProfile(
+      key: 'k',
+      name: 'Ola',
+      gender: DatingGender.woman,
+      at: 1,
+      interests: <String>['planszówki', 'muzyka'],
+    );
+    expect(
+      DatingProfile.fromJson(<String, dynamic>{
+        ...p.wireJson(),
+        'k': base64Url.encode(List<int>.filled(32, 7)),
+      })!.interests,
+      <String>['planszówki', 'muzyka'],
+    );
+    expect(
+      MyDating.fromJson(
+        MyDating(interests: <String>['Góry', 'góry', 'Morze']).toJson(),
+      ).interests,
+      <String>['góry', 'morze'],
+    );
+  });
+
+  test('"Bezpieczna randka": a pair sees the friends they have in common only '
+      'once both agreed, and can ask them about each other', () async {
     final _Net net = _Net();
     final _Phone ania = _Phone(net, 'ania');
+    final _Phone darek = _Phone(net, 'darek');
     final _Phone bob = _Phone(net, 'bob');
-    final _Phone ewa = _Phone(net, 'ewa');
-    final _Phone ola = _Phone(net, 'ola');
+    final _Phone cela = _Phone(net, 'cela');
+    final _Phone fela = _Phone(net, 'fela');
+    final _Phone gosia = _Phone(net, 'gosia');
     net
       ..link(ania, bob)
-      ..link(bob, ewa)
-      ..link(bob, ola)
-      ..link(ania, ewa);
-    await bob.service.load();
-    // Ewa and Ola both date and both fit Ania (and each other: so the
-    // checks below look for Ania's profile on Ewa's phone, not any).
-    await ewa.date(name: 'Ewa', gender: DatingGender.woman);
-    await ola.date(name: 'Ola', gender: DatingGender.woman);
-    await ania.service.load();
-    await ania.service.saveMine((MyDating m) {
-      m
-        ..enabled = true
-        ..name = 'Ania'
-        ..gender = DatingGender.woman
-        ..hiddenFriends.add(ewa.address);
-    });
-    // The first lantern reaches Ewa through Bob first, then from Ania
-    // herself: the profile is dropped on Ewa's phone, and her match test
-    // from one step away tells Ania's phone Ewa's dating key.
+      ..link(darek, bob)
+      ..link(ania, cela)
+      ..link(darek, cela)
+      ..link(ania, fela)
+      ..link(darek, gosia);
+    for (final _Phone p in <_Phone>[bob, cela, fela, gosia]) {
+      await p.service.load();
+    }
+    await ania.date(name: 'Ania', gender: DatingGender.woman);
+    await darek.date(name: 'Darek', gender: DatingGender.man);
     await ania.service.maybePublish(force: true);
-    expect(ewa.service.profile(ania.service.myKey!), isNull);
-    expect(ola.service.toDecide.single.profile.name, 'Ania');
+    final String aniaKey = ania.service.myKey!;
+    final String darekKey = darek.service.myKey!;
+    expect(await ania.service.shareMutualFriends(darekKey), isFalse);
+    await ania.service.decide(darekKey, true);
+    await darek.service.decide(aniaKey, true);
+    expect(ania.service.isMatch(darekKey), isTrue);
 
-    // From now on Ewa never fits — directly or through Bob — and gets no
-    // profile at all; Ola still does.
-    ewa.received.clear();
-    ola.received.clear();
-    await ania.service.maybePublish(force: true);
+    expect(ania.service.mutualFriendsWith(darekKey), isNull);
+    expect(await ania.service.shareMutualFriends(darekKey), isTrue);
+    expect(ania.service.mutualConsent(darekKey), (true, false));
+    // Darek holds Ania's marks, but sees nothing before he agrees himself.
+    expect(darek.service.mutualConsent(aniaKey), (false, true));
+    expect(darek.service.mutualFriendsWith(aniaKey), isNull);
+    expect(ania.service.mutualFriendsWith(darekKey), isNull);
+
+    await darek.service.shareMutualFriends(aniaKey);
+    expect(ania.service.mutualFriendsWith(darekKey)!.toSet(), <String>{
+      bob.address,
+      cela.address,
+    });
+    expect(darek.service.mutualFriendsWith(aniaKey)!.toSet(), <String>{
+      bob.address,
+      cela.address,
+    });
     expect(
-      ewa.received.where(
-        (Map<String, dynamic> m) => m['type'] == DatingTypes.lantern,
-      ),
-      hasLength(2),
-      reason: 'the same lantern as everyone, directly and through Bob',
+      ania.service.opinionFriends(darekKey).toSet(),
+      containsAll(<String>[bob.address, cela.address]),
     );
-    expect(ewa.profilesIn(), 0);
-    expect(ewa.service.profile(ania.service.myKey!), isNull);
-    expect(ola.profilesIn(), greaterThan(0));
+    // What went out names nobody: only marks made with the pair's own key.
+    final String out = jsonEncode(<Object>[ania.sent, darek.sent]);
+    expect(out, isNot(contains(fela.address)));
+    expect(out, isNot(contains(gosia.address)));
   });
 
   test(
@@ -1703,7 +2360,7 @@ void main() {
             'q': q.$2,
           },
         );
-        questions.add(box['c']!.length);
+        questions.add(box['x']!.length);
         for (final Set<String> offer in <Set<String>>[
           const <String>{},
           for (final DatingWants k in kinds) k.offerTags(woman),
@@ -1724,7 +2381,7 @@ void main() {
               'o': a.$2,
             },
           );
-          answers.add(back['c']!.length);
+          answers.add(back['x']!.length);
         }
       }
       expect(questions, hasLength(1));
@@ -1835,122 +2492,6 @@ void main() {
     expect(darek.shown.last.title, 'Para! ❤️');
   });
 
-  test('a filter passes a profile by the kind of meeting, distance, gender, '
-      'interests, a photo and mutual friends', () {
-    SeenProfile seen({
-      DatingGender gender = DatingGender.woman,
-      int distance = 2,
-      List<String> interests = const <String>[],
-      List<String> photos = const <String>[],
-      List<String>? mutual,
-    }) => SeenProfile(
-      profile: DatingProfile(
-        key: 'k',
-        name: 'Ola',
-        gender: gender,
-        at: 1,
-        interests: interests,
-        photos: photos,
-      ),
-      replyTo: 'r',
-      at: 1,
-      distance: distance,
-      mutual: mutual,
-    );
-    const Set<DatingIntent> dates = <DatingIntent>{DatingIntent.dates};
-    const Set<DatingIntent> either = <DatingIntent>{
-      DatingIntent.dates,
-      DatingIntent.friends,
-    };
-    const DatingFilter none = DatingFilter();
-    expect(none.active, 0);
-    expect(none.passes(seen(), modes: dates), isTrue);
-
-    const DatingFilter friends = DatingFilter(intent: DatingIntent.friends);
-    expect(friends.passes(seen(), modes: dates), isFalse);
-    expect(friends.passes(seen(), modes: either), isTrue);
-
-    const DatingFilter near = DatingFilter(hops: 1);
-    expect(near.passes(seen(), modes: dates), isFalse);
-    expect(near.passes(seen(distance: 1), modes: dates), isTrue);
-    expect(
-      near.passes(seen(distance: 0), modes: dates),
-      isTrue,
-      reason: 'introduced by a friend',
-    );
-
-    const DatingFilter men = DatingFilter(
-      genders: <DatingGender>{DatingGender.man},
-    );
-    expect(men.passes(seen(), modes: dates), isFalse);
-    expect(men.passes(seen(gender: DatingGender.man), modes: dates), isTrue);
-
-    const DatingFilter hills = DatingFilter(interests: <String>{'mountains'});
-    expect(
-      hills.passes(seen(interests: <String>['books']), modes: dates),
-      isFalse,
-    );
-    expect(
-      hills.passes(
-        seen(interests: <String>['books', 'mountains']),
-        modes: dates,
-      ),
-      isTrue,
-    );
-
-    const DatingFilter photo = DatingFilter(withPhoto: true);
-    expect(photo.passes(seen(), modes: dates), isFalse);
-    expect(photo.passes(seen(photos: <String>['x']), modes: dates), isTrue);
-
-    const DatingFilter mutual = DatingFilter(minMutual: 2);
-    expect(mutual.passes(seen(mutual: <String>['a']), modes: dates), isFalse);
-    expect(
-      mutual.passes(seen(mutual: <String>['a', 'b']), modes: dates),
-      isTrue,
-    );
-
-    const DatingFilter all = DatingFilter(
-      intent: DatingIntent.friends,
-      hops: 1,
-      genders: <DatingGender>{DatingGender.man},
-      interests: <String>{'sea'},
-      withPhoto: true,
-      minMutual: 1,
-    );
-    expect(all.active, 6);
-    final DatingFilter back = DatingFilter.fromJson(
-      jsonDecode(jsonEncode(all.toJson())),
-    );
-    expect(back.intent, DatingIntent.friends);
-    expect(back.hops, 1);
-    expect(back.genders, <DatingGender>{DatingGender.man});
-    expect(back.interests, <String>{'sea'});
-    expect(back.withPhoto, isTrue);
-    expect(back.minMutual, 1);
-
-    // Only known interests, in a fixed order, at most a few.
-    expect(
-      datingInterestsFromJson(<Object?>['sea', 'x', 'mountains', 5]),
-      <String>['mountains', 'sea'],
-    );
-    expect(
-      datingInterestsFromJson(kDatingInterests),
-      hasLength(kDatingMaxInterests),
-    );
-    const DatingProfile p = DatingProfile(
-      key: 'k',
-      name: 'Ola',
-      gender: DatingGender.woman,
-      at: 1,
-      interests: <String>['boardgames', 'music'],
-    );
-    // Read back in the order of kDatingInterests.
-    expect(DatingProfile.fromJson(p.toJson())!.interests, <String>[
-      'music',
-      'boardgames',
-    ]);
-  });
-
   test('filters stay on the phone: the distance works in the match test as '
       'fillers only (like not fitting), the rest on the profiles that came; '
       'the asked wishes never change, so nobody can tell', () async {
@@ -1992,10 +2533,12 @@ void main() {
             as String;
     // The sizes of what [p] sent back for the lantern [id]: its match test,
     // and its request for the profile.
+    // (Only what the phone itself sent: with three steps it also passes
+    // other phones' questions on, counted by `n`.)
     List<int> asked(_Phone p, String id) => <int>[
       for (final Map<String, dynamic> m in p.sent)
-        if (m['type'] == DatingTypes.back && m['to'] == id)
-          ((m['box'] as Map)['c'] as String).length,
+        if (m['type'] == DatingTypes.back && m['to'] == id && m['n'] == 0)
+          ((m['box'] as Map)['x'] as String).length,
     ];
     Set<String> names(DatingService s) => <String>{
       for (final SeenProfile p in s.toDecide) p.profile.name,

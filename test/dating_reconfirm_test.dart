@@ -17,94 +17,73 @@ void main() {
     return service;
   }
 
-  Future<void> pump(
-    WidgetTester tester,
-    MemoryAppSecurityService service, {
-    bool askOnOpen = true,
-    Duration away = Duration.zero,
-  }) => tester.pumpWidget(
-    ProviderScope(
-      overrides: [appSecurityServiceProvider.overrideWithValue(service)],
-      child: MaterialApp(
-        home: DatingReconfirm(
-          away: away,
-          askOnOpen: askOnOpen,
-          child: const Scaffold(body: Text('treść randek')),
+  Future<void> pump(WidgetTester tester, MemoryAppSecurityService service) =>
+      tester.pumpWidget(
+        ProviderScope(
+          overrides: [appSecurityServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(
+            home: DatingReconfirm(child: Scaffold(body: Text('treść randek'))),
+          ),
         ),
-      ),
-    ),
-  );
+      );
 
-  Future<void> typePassword(WidgetTester tester) async {
-    await tester.enterText(
-      find.byKey(const Key('sensitive-access-password')),
-      'sekret123',
-    );
-    await tester.tap(find.byKey(const Key('sensitive-access-confirm')));
-    await tester.pumpAndSettle();
-  }
-
-  testWidgets('dating opens only after the app password, and asks again '
-      'after the app was in the background', (WidgetTester tester) async {
-    final MemoryAppSecurityService service = await security(password: true);
+  testWidgets('dating opens at once in an unlocked app: no password, no '
+      'biometrics, also after a trip out of the app', (
+    WidgetTester tester,
+  ) async {
+    late final MemoryAppSecurityService service;
+    await tester.runAsync(() async {
+      service = await security(password: true);
+    });
+    expect(service.isLocked, isFalse);
     await pump(tester, service);
     await tester.pumpAndSettle();
-    expect(find.text('treść randek'), findsNothing);
-    expect(find.byKey(const Key('sensitive-access-dialog')), findsOneWidget);
-    await typePassword(tester);
     expect(find.text('treść randek'), findsOneWidget);
+    expect(find.byKey(const Key('sensitive-access-dialog')), findsNothing);
 
-    // Away and back: shut again, and asked again at once.
+    // Out of the app and back while the app itself stays unlocked: still
+    // open (the app's own lock decides when to lock).
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
-    expect(find.text('treść randek'), findsNothing);
-    expect(find.byKey(const Key('sensitive-access-dialog')), findsOneWidget);
+    expect(find.text('treść randek'), findsOneWidget);
+    expect(find.byKey(const Key('sensitive-access-dialog')), findsNothing);
+  });
 
-    // Declined: the lock screen stays until the person unlocks it.
-    await tester.tap(find.text('Anuluj'));
+  testWidgets('while the app is locked nothing of dating is even built; '
+      'unlocking the app opens it again by itself', (
+    WidgetTester tester,
+  ) async {
+    late final MemoryAppSecurityService service;
+    await tester.runAsync(() async {
+      service = await security(password: true);
+    });
+    await pump(tester, service);
+    await tester.pumpAndSettle();
+    expect(find.text('treść randek'), findsOneWidget);
+
+    service.lock();
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('dating-locked')), findsOneWidget);
     expect(find.text('treść randek'), findsNothing);
-    await tester.tap(find.byKey(const Key('dating-unlock')));
-    await tester.pumpAndSettle();
-    await typePassword(tester);
-    expect(find.text('treść randek'), findsOneWidget);
-  });
 
-  testWidgets('a short trip out of the app does not ask again', (
-    WidgetTester tester,
-  ) async {
-    final MemoryAppSecurityService service = await security(password: true);
-    await pump(tester, service, away: const Duration(hours: 1));
-    await tester.pumpAndSettle();
-    await typePassword(tester);
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.runAsync(() async {
+      expect(await service.unlock('sekret123'), isTrue);
+    });
     await tester.pumpAndSettle();
     expect(find.text('treść randek'), findsOneWidget);
+    expect(find.byKey(const Key('sensitive-access-dialog')), findsNothing);
   });
 
   testWidgets('without an app password there is nothing to ask', (
     WidgetTester tester,
   ) async {
-    final MemoryAppSecurityService service = await security(password: false);
+    late final MemoryAppSecurityService service;
+    await tester.runAsync(() async {
+      service = await security(password: false);
+    });
     await pump(tester, service);
     await tester.pumpAndSettle();
     expect(find.text('treść randek'), findsOneWidget);
-  });
-
-  testWidgets('screens opened from inside dating do not ask on opening', (
-    WidgetTester tester,
-  ) async {
-    final MemoryAppSecurityService service = await security(password: true);
-    await pump(tester, service, askOnOpen: false);
-    await tester.pumpAndSettle();
-    expect(find.text('treść randek'), findsOneWidget);
-    expect(find.byKey(const Key('sensitive-access-dialog')), findsNothing);
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await tester.pumpAndSettle();
-    expect(find.text('treść randek'), findsNothing);
   });
 }

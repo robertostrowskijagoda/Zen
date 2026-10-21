@@ -18,6 +18,7 @@ import 'package:zen/src/features/dating/presentation/dating_profile_editor.dart'
 import 'package:zen/src/features/dating/presentation/dating_reconfirm.dart';
 import 'package:zen/src/features/meet/location.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
+import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/presentation/safe_photo.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
@@ -161,7 +162,7 @@ class _DatingPhotoPagerState extends State<DatingPhotoPager> {
                       color: i == current
                           ? const Color(0xFFFFFFFF)
                           : const Color(0x99FFFFFF),
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: context.zenRadius(4),
                       boxShadow: const <BoxShadow>[
                         BoxShadow(color: Color(0x40000000), blurRadius: 4),
                       ],
@@ -181,8 +182,13 @@ String datingWay(SeenProfile s) {
   if (s.introBy != null) {
     return t('Przedstawia: {name}', {'name': s.introBy});
   }
-  if (s.distance <= 1) {
+  if (s.distance <= 1 && !s.gate) {
     return t('To ktoś z Twoich znajomych');
+  }
+  if (s.gate) {
+    return s.path.isEmpty
+        ? t('Przez otwartą bramę')
+        : t('Przez otwartą bramę: {path}', {'path': s.path.join(' → ')});
   }
   return t('Znacie się przez: {path}', {'path': s.path.join(' → ')});
 }
@@ -217,8 +223,8 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
     unawaited(ref.read(datingServiceProvider).load());
   }
 
-  // Shut until the person confirms (and again after the app was away):
-  // dating is one of the sensitive places.
+  // Shut only while the app itself is locked: an unlocked app does not ask
+  // for the password again.
   @override
   Widget build(BuildContext context) =>
       DatingReconfirm(child: Builder(builder: _buildContent));
@@ -245,8 +251,9 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
                   icon: Icons.favorite_rounded,
                   tone: tone,
                   text: t(
-                    'Tylko z ludźmi oddalonymi o 1–2 kroki znajomości — '
-                    'zawsze jest ktoś wspólny, kogo można zapytać.',
+                    'Tylko z ludźmi oddalonymi o 1–3 kroki znajomości (albo '
+                    'za bramami, które otworzysz) — zawsze jest ktoś po '
+                    'drodze, kogo można zapytać.',
                   ),
                 ),
                 ZenInfo(
@@ -471,7 +478,7 @@ class DatingQuote extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: tone.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: context.zenRadius(16),
         border: Border.all(color: tone.withValues(alpha: 0.20)),
       ),
       child: Row(
@@ -577,62 +584,109 @@ class _NewProfiles extends StatelessWidget {
       onMatchmake: (SeenProfile s) =>
           unawaited(introduceDatingProfile(context, dating, s)),
       onAsk: (SeenProfile s) => unawaited(askDatingOpinion(context, dating, s)),
+      canAsk: (SeenProfile s) =>
+          dating.opinionFriends(s.profile.key).isNotEmpty,
     );
   }
 }
 
-/// "Zapytaj o opinię": a question to the friend the profile came
-/// through (they learn that this person dates).
+/// "Zapytaj o opinię": a question to a friend who knows the person — a
+/// mutual friend, the friend the profile came through, or the one who
+/// introduced you (never the person themselves). That friend learns that
+/// this person dates.
 Future<void> askDatingOpinion(
   BuildContext context,
   DatingService dating,
-  SeenProfile s,
-) async {
+  SeenProfile s, {
+  String? friend,
+}) async {
+  final List<String> can = dating.opinionFriends(s.profile.key);
+  if (can.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(t('Nie ma kogo zapytać o tę osobę.'))),
+    );
+    return;
+  }
+  final MeetHostNames names = MeetHostNames.of(context);
+  String to = friend != null && can.contains(friend) ? friend : can.first;
   final TextEditingController c = TextEditingController(
     text: t('Co sądzisz o {name}?', {'name': s.profile.name}),
   );
   final bool? ok = await showDialog<bool>(
     context: context,
-    builder: (BuildContext context) => AlertDialog(
-      title: Text(t('Zapytaj o opinię')),
-      content: SizedBox(
-        width: 400,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              ZenInfo(
-                icon: Icons.info_outline_rounded,
-                text: t(
-                  'Pytanie trafi do znajomego, od którego przyszedł profil. '
-                  'Uwaga: dowie się wtedy, że randkujesz.',
+    builder: (BuildContext context) => StatefulBuilder(
+      builder: (BuildContext context, StateSetter set) => AlertDialog(
+        title: Text(t('Zapytaj o opinię')),
+        content: SizedBox(
+          width: 400,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                ZenInfo(
+                  icon: Icons.info_outline_rounded,
+                  text: t(
+                    'Pytanie trafi do znajomego, który zna tę osobę. Uwaga: '
+                    'dowie się wtedy, że randkujesz.',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('dating-ask-text'),
-                controller: c,
-                maxLines: 3,
-                maxLength: 500,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: InputDecoration(labelText: t('Pytanie')),
-              ),
-            ],
+                const SizedBox(height: 12),
+                if (can.length > 1)
+                  DropdownButtonFormField<String>(
+                    key: const Key('dating-ask-friend'),
+                    initialValue: to,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: t('Kogo zapytać'),
+                      prefixIcon: const Icon(Icons.person_rounded),
+                    ),
+                    items: <DropdownMenuItem<String>>[
+                      for (final String f in can)
+                        DropdownMenuItem<String>(
+                          value: f,
+                          child: Text(
+                            names.nameOf(f),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: (String? v) => set(() => to = v ?? to),
+                  )
+                else
+                  Text(
+                    t('Zapytasz: {name}', {'name': names.nameOf(to)}),
+                    style: TextStyle(
+                      color: ZenColors.of(context).textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const Key('dating-ask-text'),
+                  controller: c,
+                  maxLines: 3,
+                  maxLength: 500,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(labelText: t('Pytanie')),
+                ),
+              ],
+            ),
           ),
         ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('dating-ask-send'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('Zapytaj')),
+          ),
+        ],
       ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: Text(t('Anuluj')),
-        ),
-        FilledButton(
-          key: const Key('dating-ask-send'),
-          onPressed: () => Navigator.of(context).pop(true),
-          child: Text(t('Zapytaj')),
-        ),
-      ],
     ),
   );
   final String question = c.text;
@@ -640,7 +694,11 @@ Future<void> askDatingOpinion(
   if (ok != true) {
     return;
   }
-  final bool sent = await dating.askOpinion(s.profile.key, question);
+  final bool sent = await dating.askOpinion(
+    s.profile.key,
+    question,
+    friend: to,
+  );
   if (context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -654,63 +712,148 @@ Future<void> askDatingOpinion(
   }
 }
 
-/// "Swatuj": introduces [s] to another person this phone knows from
-/// dating; both get the other's profile and the note.
+/// One person to pick for an introduction: a friend, or someone this phone
+/// knows from Dating.
+typedef _IntroChoice = (DatingEnd, String, String?);
+
+/// The people [dating] can introduce, apart from [except]: friends first
+/// (whom the matchmaker knows), then people from Dating.
+List<_IntroChoice> _introChoices(
+  DatingService dating,
+  MeetHostNames names, {
+  DatingEnd? except,
+}) {
+  final Set<String> seen = <String>{};
+  return <_IntroChoice>[
+    for (final String f in names.friends())
+      if (DatingEnd.friend(f) != except &&
+          dating.canIntroduce(DatingEnd.friend(f)) &&
+          seen.add(f))
+        (DatingEnd.friend(f), names.nameOf(f), null),
+    for (final SeenProfile o in <SeenProfile>[
+      ...dating.toDecide,
+      ...dating.liked,
+      ...dating.matches,
+    ])
+      if (DatingEnd.profile(o.profile.key) != except &&
+          dating.canIntroduce(DatingEnd.profile(o.profile.key)) &&
+          seen.add(o.profile.key))
+        (DatingEnd.profile(o.profile.key), o.profile.name, o.profile.photo),
+  ];
+}
+
+/// "Swatuj" / "Przedstaw": picks one or two people and a note, and
+/// introduces them. With [first] given (a profile from Dating) only the
+/// other person is picked. Works whether this person dates or not: each of
+/// the two runs the private match test with the other; this phone learns
+/// nothing, and only people who fit each other get each other's profile.
 Future<void> introduceDatingProfile(
   BuildContext context,
-  DatingService dating,
-  SeenProfile s,
-) async {
-  final List<SeenProfile> others = <SeenProfile>[
-    ...dating.toDecide,
-    ...dating.liked,
-    ...dating.matches,
-  ].where((SeenProfile o) => o.profile.key != s.profile.key).toList();
-  if (others.isEmpty) {
+  DatingService dating, [
+  SeenProfile? first,
+]) async {
+  final MeetHostNames names = MeetHostNames.of(context);
+  final DatingEnd? fixed = first == null
+      ? null
+      : DatingEnd.profile(first.profile.key);
+  final List<_IntroChoice> choices = _introChoices(
+    dating,
+    names,
+    except: fixed,
+  );
+  if (choices.length < (fixed == null ? 2 : 1)) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(t('Nie znasz jeszcze nikogo innego w randkach.'))),
+      SnackBar(content: Text(t('Nie ma jeszcze kogo ze sobą poznać.'))),
     );
     return;
   }
-  String? chosen;
+  final List<DatingEnd> picked = <DatingEnd>[?fixed];
   final TextEditingController note = TextEditingController();
+  final TextEditingController search = TextEditingController();
   final bool? ok = await showDialog<bool>(
     context: context,
     builder: (BuildContext context) => StatefulBuilder(
       builder: (BuildContext context, StateSetter set) {
         final ZenColors zen = ZenColors.of(context);
         final Color tone = datingTone(zen);
+        final String query = search.text.trim().toLowerCase();
+        final List<_IntroChoice> shown = <_IntroChoice>[
+          for (final _IntroChoice c in choices)
+            if (query.isEmpty ||
+                c.$2.toLowerCase().contains(query) ||
+                picked.contains(c.$1))
+              c,
+        ];
+        final bool ready = picked.length == 2;
         return AlertDialog(
-          title: Text(t('Przedstaw {name} komuś', {'name': s.profile.name})),
+          title: Text(
+            first == null
+                ? t('Kogo ze sobą poznać?')
+                : t('Przedstaw {name} komuś', {'name': first.profile.name}),
+          ),
           content: SizedBox(
-            width: 400,
+            width: 420,
             child: ListView(
               shrinkWrap: true,
               children: <Widget>[
-                for (final SeenProfile o in others)
+                ZenInfo(
+                  icon: Icons.lock_rounded,
+                  tone: tone,
+                  text: t(
+                    'Ich telefony same sprawdzą, czy do siebie pasują. Ty '
+                    'nie dowiesz się, czy randkują ani co odpowiedzą; oni '
+                    'zobaczą swoje profile tylko wtedy, gdy pasują.',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (choices.length > 6)
+                  TextField(
+                    controller: search,
+                    onChanged: (_) => set(() {}),
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.search_rounded),
+                      hintText: t('Szukaj'),
+                    ),
+                  ),
+                for (final _IntroChoice c in shown)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 2),
                     child: ListTile(
-                      selected: chosen == o.profile.key,
+                      key: Key('dating-intro-${c.$2}'),
+                      selected: picked.contains(c.$1),
                       selectedColor: tone,
                       selectedTileColor: tone.withValues(alpha: 0.10),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: context.zenRadius(16),
                       ),
-                      leading: datingPhoto(o.profile.photo, size: 40),
+                      leading: c.$1.address != null
+                          ? Icon(Icons.person_rounded, color: tone)
+                          : datingPhoto(c.$3, size: 40),
                       title: Text(
-                        o.profile.name,
+                        c.$2,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      trailing: chosen == o.profile.key
+                      subtitle: Text(
+                        c.$1.address != null ? t('Znajomy') : t('Z randek'),
+                      ),
+                      trailing: picked.contains(c.$1)
                           ? Icon(Icons.check_circle_rounded, color: tone)
                           : null,
-                      onTap: () => set(() => chosen = o.profile.key),
+                      onTap: () => set(() {
+                        if (picked.contains(c.$1)) {
+                          if (c.$1 != fixed) {
+                            picked.remove(c.$1);
+                          }
+                        } else if (picked.length < 2) {
+                          picked.add(c.$1);
+                        }
+                      }),
                     ),
                   ),
                 const SizedBox(height: 12),
                 TextField(
+                  key: const Key('dating-intro-note'),
                   controller: note,
                   maxLength: 300,
                   textCapitalization: TextCapitalization.sentences,
@@ -728,7 +871,8 @@ Future<void> introduceDatingProfile(
               child: Text(t('Anuluj')),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
+              key: const Key('dating-intro-send'),
+              onPressed: ready ? () => Navigator.of(context).pop(true) : null,
               child: Text(t('Przedstaw')),
             ),
           ],
@@ -738,15 +882,18 @@ Future<void> introduceDatingProfile(
   );
   final String text = note.text;
   disposeLater(note);
-  final String? pick = chosen;
-  if (ok == true && pick != null) {
-    final bool sent = await dating.introduce(s.profile.key, pick, text);
+  disposeLater(search);
+  if (ok == true && picked.length == 2) {
+    final bool sent = await dating.introduce(picked[0], picked[1], text);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             sent
-                ? t('Wysłane do obojga.')
+                ? t(
+                    'Wysłane. Jeśli do siebie pasują, oboje zobaczą swoje '
+                    'profile.',
+                  )
                 : t('Nie da się teraz do nich dotrzeć.'),
           ),
         ),
@@ -819,10 +966,7 @@ class DatingProfileScreen extends ConsumerWidget {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (BuildContext context) => SecureScreen(
-            child: DatingReconfirm(
-              askOnOpen: false,
-              child: DatingProfileScreen(profileKey: key),
-            ),
+            child: DatingReconfirm(child: DatingProfileScreen(profileKey: key)),
           ),
         ),
       );
@@ -1015,225 +1159,231 @@ class DatingProfileScreen extends ConsumerWidget {
               ),
             ],
           ),
-          body: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-            children: <Widget>[
-              Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 440),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(28),
-                    child: AspectRatio(
-                      aspectRatio: 1,
-                      child: DatingPhotoPager(photos: p.photos),
+          body: SelectionArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+              children: <Widget>[
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 440),
+                    child: ClipRRect(
+                      borderRadius: context.zenRadius(28),
+                      child: AspectRatio(
+                        aspectRatio: 1,
+                        child: DatingPhotoPager(photos: p.photos),
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                p.name,
-                style: zen.display(
-                  color: zen.textPrimary,
-                  size: 28,
-                  weight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: <Widget>[
-                  ZenPill(
-                    text: p.gender.label,
-                    tone: tone,
-                    icon: Icons.person_rounded,
-                  ),
-                  ZenPill(
-                    text: p.wants.intent.label,
-                    tone: tone,
-                    icon: p.wants.intent == DatingIntent.friends
-                        ? Icons.waving_hand_rounded
-                        : Icons.favorite_border_rounded,
-                  ),
-                  if (match)
-                    ZenPill(
-                      text: friends ? t('Znajomość') : t('Para'),
-                      tone: zen.success,
-                      icon: friends
-                          ? Icons.waving_hand_rounded
-                          : Icons.favorite_rounded,
-                      filled: true,
-                    ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              ZenInfo(
-                icon: Icons.people_alt_rounded,
-                tone: tone,
-                text: s.mutual.isEmpty
-                    ? datingWay(s)
-                    : '${datingWay(s)} · ${datingMutual(s)}',
-              ),
-              if (note != null && note.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 6),
-                DatingQuote(text: note, tone: tone),
-              ],
-              if (p.about.isNotEmpty) ...<Widget>[
-                ZenSection(t('O mnie')),
+                const SizedBox(height: 16),
                 Text(
-                  p.about,
-                  style: TextStyle(
+                  p.name,
+                  style: zen.display(
                     color: zen.textPrimary,
-                    fontSize: 15,
-                    height: 1.45,
+                    size: 28,
+                    weight: FontWeight.w600,
                   ),
                 ),
-              ],
-              if (p.lookingFor.isNotEmpty) ...<Widget>[
-                ZenSection(t('Czego szukam')),
-                Text(
-                  p.lookingFor,
-                  style: TextStyle(
-                    color: zen.textPrimary,
-                    fontSize: 15,
-                    height: 1.45,
-                  ),
-                ),
-              ],
-              if (p.interests.isNotEmpty) ...<Widget>[
-                ZenSection(t('Zainteresowania')),
+                const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
                   runSpacing: 6,
                   children: <Widget>[
-                    for (final String i in p.interests)
-                      ZenPill(text: datingInterestLabel(i), tone: tone),
-                  ],
-                ),
-              ],
-              if (p.vouches.isNotEmpty) ...<Widget>[
-                ZenSection(t('Znajomi o mnie')),
-                for (final DatingVouch v in p.vouches)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: DatingQuote(
-                      text: v.text,
-                      by: v.by,
-                      signed: true,
+                    ZenPill(
+                      text: p.gender.label,
                       tone: tone,
+                      icon: Icons.person_rounded,
                     ),
-                  ),
-              ],
-              const SizedBox(height: 24),
-              if (match)
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                    backgroundColor: tone,
-                    foregroundColor: ZenColors.foregroundFor(tone),
-                  ),
-                  onPressed: () =>
-                      unawaited(DatingChatScreen.open(context, p.key)),
-                  icon: const Icon(Icons.chat_rounded),
-                  label: Text(t('Napisz')),
-                )
-              else
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size.fromHeight(52),
-                        ),
-                        onPressed: decided == false
-                            ? null
-                            : () => unawaited(dating.decide(p.key, false)),
-                        icon: const Icon(Icons.close_rounded),
-                        label: Text(
-                          decided == false
-                              ? t('Powiedziałeś(-aś) „Nie”')
-                              : t('Nie'),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                        ),
+                    ZenPill(
+                      text: p.wants.intent.label,
+                      tone: tone,
+                      icon: p.wants.intent == DatingIntent.friends
+                          ? Icons.waving_hand_rounded
+                          : Icons.favorite_border_rounded,
+                    ),
+                    if (match)
+                      ZenPill(
+                        text: friends ? t('Znajomość') : t('Para'),
+                        tone: zen.success,
+                        icon: friends
+                            ? Icons.waving_hand_rounded
+                            : Icons.favorite_rounded,
+                        filled: true,
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size.fromHeight(52),
-                          backgroundColor: tone,
-                          foregroundColor: ZenColors.foregroundFor(tone),
-                        ),
-                        onPressed: decided == true
-                            ? null
-                            : () => unawaited(dating.decide(p.key, true)),
-                        icon: Icon(
-                          friends
-                              ? Icons.waving_hand_rounded
-                              : Icons.favorite_rounded,
-                        ),
-                        label: Text(
-                          decided == true
-                              ? t('Powiedziałeś(-aś) „Tak”')
-                              : t('Tak'),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
                   ],
                 ),
-              if (match && dating.thanked(p.key)) ...<Widget>[
-                const SizedBox(height: 10),
-                Center(
-                  child: ZenPill(
-                    text: t('Podziękowano swatowi'),
-                    tone: zen.success,
-                    icon: Icons.volunteer_activism_rounded,
-                  ),
+                const SizedBox(height: 8),
+                ZenInfo(
+                  icon: Icons.people_alt_rounded,
+                  tone: tone,
+                  text: s.mutual.isEmpty
+                      ? datingWay(s)
+                      : '${datingWay(s)} · ${datingMutual(s)}',
                 ),
-              ] else if (dating.canThank(p.key)) ...<Widget>[
-                const SizedBox(height: 10),
-                FilledButton.tonalIcon(
-                  key: const Key('dating-thank'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                  ),
-                  onPressed: () => unawaited(_thank(context, ref, dating, s)),
-                  icon: const Icon(Icons.volunteer_activism_rounded),
-                  label: Text(
-                    t('Podziękuj swatowi ({name})', {'name': s.introBy}),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  if (s.friend != null)
-                    OutlinedButton.icon(
-                      onPressed: () =>
-                          unawaited(askDatingOpinion(context, dating, s)),
-                      icon: const Icon(Icons.forum_rounded),
-                      label: Text(t('Zapytaj o opinię')),
+                if (note != null && note.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 6),
+                  DatingQuote(text: note, tone: tone),
+                ],
+                if (p.about.isNotEmpty) ...<Widget>[
+                  ZenSection(t('O mnie')),
+                  Text(
+                    p.about,
+                    style: TextStyle(
+                      color: zen.textPrimary,
+                      fontSize: 15,
+                      height: 1.45,
                     ),
-                  OutlinedButton.icon(
-                    onPressed: () =>
-                        unawaited(introduceDatingProfile(context, dating, s)),
-                    icon: const Icon(Icons.people_alt_rounded),
-                    label: Text(friends ? t('Przedstaw') : t('Swatuj')),
                   ),
                 ],
-              ),
-            ],
+                if (p.lookingFor.isNotEmpty) ...<Widget>[
+                  ZenSection(t('Czego szukam')),
+                  Text(
+                    p.lookingFor,
+                    style: TextStyle(
+                      color: zen.textPrimary,
+                      fontSize: 15,
+                      height: 1.45,
+                    ),
+                  ),
+                ],
+                if (p.interests.isNotEmpty) ...<Widget>[
+                  ZenSection(t('Zainteresowania')),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: <Widget>[
+                      for (final String i in p.interests)
+                        ZenPill(text: i, tone: tone),
+                    ],
+                  ),
+                ],
+                if (p.vouchDigests.isNotEmpty) ...<Widget>[
+                  ZenSection(
+                    t('Znajomi o mnie ({count})', {
+                      'count': p.vouchDigests.length,
+                    }),
+                  ),
+                  DatingVouchList(
+                    vouches: p.vouches,
+                    expected: p.vouchDigests.length,
+                    tone: tone,
+                  ),
+                ],
+                const SizedBox(height: 24),
+                if (match)
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      backgroundColor: tone,
+                      foregroundColor: ZenColors.foregroundFor(tone),
+                    ),
+                    onPressed: () =>
+                        unawaited(DatingChatScreen.open(context, p.key)),
+                    icon: const Icon(Icons.chat_rounded),
+                    label: Text(t('Napisz')),
+                  )
+                else
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(52),
+                          ),
+                          onPressed: decided == false
+                              ? null
+                              : () => unawaited(dating.decide(p.key, false)),
+                          icon: const Icon(Icons.close_rounded),
+                          label: Text(
+                            decided == false
+                                ? t('Powiedziałeś(-aś) „Nie”')
+                                : t('Nie'),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(52),
+                            backgroundColor: tone,
+                            foregroundColor: ZenColors.foregroundFor(tone),
+                          ),
+                          onPressed: decided == true
+                              ? null
+                              : () => unawaited(dating.decide(p.key, true)),
+                          icon: Icon(
+                            friends
+                                ? Icons.waving_hand_rounded
+                                : Icons.favorite_rounded,
+                          ),
+                          label: Text(
+                            decided == true
+                                ? t('Powiedziałeś(-aś) „Tak”')
+                                : t('Tak'),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                if (match && dating.thanked(p.key)) ...<Widget>[
+                  const SizedBox(height: 10),
+                  Center(
+                    child: ZenPill(
+                      text: t('Podziękowano swatowi'),
+                      tone: zen.success,
+                      icon: Icons.volunteer_activism_rounded,
+                    ),
+                  ),
+                ] else if (dating.canThank(p.key)) ...<Widget>[
+                  const SizedBox(height: 10),
+                  FilledButton.tonalIcon(
+                    key: const Key('dating-thank'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                    onPressed: () => unawaited(_thank(context, ref, dating, s)),
+                    icon: const Icon(Icons.volunteer_activism_rounded),
+                    label: Text(
+                      t('Podziękuj swatowi ({name})', {'name': s.introBy}),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+                if (match) ...<Widget>[
+                  const SizedBox(height: 10),
+                  DatingSafeMutual(dating: dating, profileKey: p.key),
+                ],
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    if (dating.opinionFriends(p.key).isNotEmpty)
+                      OutlinedButton.icon(
+                        key: const Key('dating-profile-ask'),
+                        onPressed: () =>
+                            unawaited(askDatingOpinion(context, dating, s)),
+                        icon: const Icon(Icons.forum_rounded),
+                        label: Text(t('Zapytaj o opinię')),
+                      ),
+                    OutlinedButton.icon(
+                      onPressed: () =>
+                          unawaited(introduceDatingProfile(context, dating, s)),
+                      icon: const Icon(Icons.people_alt_rounded),
+                      label: Text(friends ? t('Przedstaw') : t('Swatuj')),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -1251,10 +1401,7 @@ class DatingChatScreen extends ConsumerStatefulWidget {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (BuildContext context) => SecureScreen(
-            child: DatingReconfirm(
-              askOnOpen: false,
-              child: DatingChatScreen(profileKey: key),
-            ),
+            child: DatingReconfirm(child: DatingChatScreen(profileKey: key)),
           ),
         ),
       );
@@ -1334,6 +1481,10 @@ class _DatingChatScreenState extends ConsumerState<DatingChatScreen> {
                         'znajomych.',
                       ),
                     ),
+                    DatingSafeMutual(
+                      dating: dating,
+                      profileKey: widget.profileKey,
+                    ),
                     if (lines.isEmpty)
                       ZenEmpty(
                         icon: Icons.waving_hand_rounded,
@@ -1361,12 +1512,9 @@ class _DatingChatScreenState extends ConsumerState<DatingChatScreen> {
                           constraints: const BoxConstraints(maxWidth: 480),
                           decoration: BoxDecoration(
                             color: l.mine ? tone : zen.surfaceRaised,
-                            borderRadius: BorderRadius.only(
-                              topLeft: const Radius.circular(18),
-                              topRight: const Radius.circular(18),
-                              bottomLeft: Radius.circular(l.mine ? 18 : 6),
-                              bottomRight: Radius.circular(l.mine ? 6 : 18),
-                            ),
+                            borderRadius: ZenLook.of(
+                              context,
+                            ).bubbleRadius(outgoing: l.mine),
                             border: l.mine
                                 ? null
                                 : Border.all(color: zen.outlineSoft),
@@ -1532,6 +1680,18 @@ class _FriendCorner extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        ZenSection(t('Swatanie')),
+        ZenTile(
+          key: const Key('dating-matchmake-friends'),
+          icon: Icons.people_alt_rounded,
+          tone: tone,
+          title: t('Poznaj ze sobą znajomych'),
+          subtitle: t(
+            'Także gdy sam(a) nie randkujesz. Zobaczą się nawzajem tylko, '
+            'jeśli do siebie pasują.',
+          ),
+          onTap: () => unawaited(introduceDatingProfile(context, dating)),
+        ),
         if (watching.isNotEmpty) ZenSection(t('Czuwasz')),
         for (final SafeDate d in watching)
           Builder(
@@ -1936,7 +2096,7 @@ class _SafeDateCard extends ConsumerWidget {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: tone.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: context.zenRadius(14),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2021,12 +2181,229 @@ class _SafeDateCard extends ConsumerWidget {
 
 /// Friends and their names, for the dating screens.
 final class MeetHostNames {
-  MeetHostNames(this.ref);
+  MeetHostNames(WidgetRef ref) : _meet = ref.read(meetServiceProvider);
 
-  final WidgetRef ref;
+  MeetHostNames.of(BuildContext context)
+    : _meet = ProviderScope.containerOf(
+        context,
+        listen: false,
+      ).read(meetServiceProvider);
 
-  List<String> friends() => ref.read(meetServiceProvider).host.friends();
-  List<String> closeFriends() =>
-      ref.read(meetServiceProvider).host.closeFriends();
-  String nameOf(String a) => ref.read(meetServiceProvider).host.nameOf(a);
+  final MeetService _meet;
+
+  List<String> friends() => _meet.host.friends();
+  List<String> closeFriends() => _meet.host.closeFriends();
+  String nameOf(String a) => _meet.host.nameOf(a);
+}
+
+/// Friends' vouches on a profile: the first few, the rest behind "Pokaż
+/// wszystkie" (a profile may carry up to [kDatingMaxVouches]). [expected]
+/// is how many the profile names (the others are still on their way).
+class DatingVouchList extends StatefulWidget {
+  const DatingVouchList({
+    required this.vouches,
+    required this.tone,
+    this.expected,
+    this.first = 3,
+    super.key,
+  });
+
+  final List<DatingVouch> vouches;
+  final Color tone;
+  final int? expected;
+
+  /// Shown before "Pokaż wszystkie".
+  final int first;
+
+  @override
+  State<DatingVouchList> createState() => _DatingVouchListState();
+}
+
+class _DatingVouchListState extends State<DatingVouchList> {
+  bool _all = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final List<DatingVouch> list = widget.vouches;
+    final List<DatingVouch> shown = _all
+        ? list
+        : list.take(widget.first).toList();
+    final int waiting = (widget.expected ?? list.length) - list.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        for (final DatingVouch v in shown)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: DatingQuote(
+              text: v.text,
+              by: v.by,
+              signed: true,
+              tone: widget.tone,
+            ),
+          ),
+        if (list.length > widget.first)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const Key('dating-vouches-more'),
+              onPressed: () => setState(() => _all = !_all),
+              icon: Icon(
+                _all ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+              ),
+              label: Text(
+                _all
+                    ? t('Pokaż mniej')
+                    : t('Pokaż wszystkie ({count})', {'count': list.length}),
+              ),
+            ),
+          ),
+        if (waiting > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              tn(
+                waiting,
+                one: 'Jeszcze {n} poręczenie w drodze…',
+                few: 'Jeszcze {n} poręczenia w drodze…',
+                many: 'Jeszcze {n} poręczeń w drodze…',
+              ),
+              style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// "Bezpieczna randka" with a match: who you both know. The friends on the
+/// way the profile came are shown at once (this phone knows them); the
+/// full list of mutual friends only after both agreed, and each of them can
+/// be asked for an opinion.
+class DatingSafeMutual extends StatelessWidget {
+  const DatingSafeMutual({
+    required this.dating,
+    required this.profileKey,
+    super.key,
+  });
+
+  final DatingService dating;
+  final String profileKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final SeenProfile? s = dating.profile(profileKey);
+    if (s == null || !dating.isMatch(profileKey)) {
+      return const SizedBox.shrink();
+    }
+    final ZenColors zen = ZenColors.of(context);
+    final MeetHostNames names = MeetHostNames.of(context);
+    final (bool mine, bool theirs) = dating.mutualConsent(profileKey);
+    final List<String>? both = dating.mutualFriendsWith(profileKey);
+    final List<String> ask = dating.opinionFriends(profileKey);
+    final String way = datingWay(s);
+    return ZenCard(
+      key: const Key('dating-safe-mutual'),
+      tone: zen.success,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              ZenIconBadge(icon: Icons.shield_rounded, tone: zen.success),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  t('Bezpieczna randka'),
+                  style: TextStyle(
+                    color: zen.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SelectableText(
+            way,
+            style: TextStyle(color: zen.textSecondary, height: 1.35),
+          ),
+          if (both != null) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              both.isEmpty
+                  ? t('Nie macie wspólnych znajomych.')
+                  : t('Wspólni znajomi — możesz ich zapytać:'),
+              style: TextStyle(
+                color: zen.textPrimary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ] else if (ask.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            Text(
+              t('Możesz zapytać o tę osobę:'),
+              style: TextStyle(
+                color: zen.textPrimary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          if (ask.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: <Widget>[
+                for (final String f in ask)
+                  ActionChip(
+                    avatar: const Icon(Icons.forum_rounded, size: 18),
+                    label: Text(
+                      names.nameOf(f),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onPressed: () => unawaited(
+                      askDatingOpinion(context, dating, s, friend: f),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 10),
+          if (!mine)
+            OutlinedButton.icon(
+              key: const Key('dating-mutual-share'),
+              onPressed: () => unawaited(dating.shareMutualFriends(profileKey)),
+              icon: const Icon(Icons.group_rounded),
+              label: Text(
+                t('Pokaż wspólnych znajomych (za zgodą obojga)'),
+                textAlign: TextAlign.center,
+              ),
+            )
+          else if (!theirs)
+            Text(
+              t(
+                'Zgoda wysłana. Wspólnych znajomych zobaczycie, gdy druga '
+                'osoba też się zgodzi.',
+              ),
+              style: TextStyle(color: zen.textMuted, fontSize: 13),
+            ),
+          if (!mine)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                t(
+                  'Druga osoba zobaczy tylko tych Twoich znajomych, których '
+                  'sama zna.',
+                ),
+                style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }

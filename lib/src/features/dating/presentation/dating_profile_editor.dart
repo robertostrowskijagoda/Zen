@@ -36,7 +36,7 @@ class DatingProfileEditor extends ConsumerStatefulWidget {
   static Future<void> open(BuildContext context) => Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (BuildContext context) => const SecureScreen(
-        child: DatingReconfirm(askOnOpen: false, child: DatingProfileEditor()),
+        child: DatingReconfirm(child: DatingProfileEditor()),
       ),
     ),
   );
@@ -68,10 +68,15 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
   late Set<DatingGender> _friendGenders = <DatingGender>{
     ..._me.wants.friendGenders,
   };
-  late final Set<String> _interests = <String>{..._me.interests};
+  late final List<String> _interests = List<String>.of(_me.interests);
+  late final TextEditingController _tag = TextEditingController();
   late final List<String> _photos = List<String>.of(_me.photos);
   late final Set<String> _hiddenFriends = <String>{..._me.hiddenFriends};
+  late final Set<String> _hiddenCircles = <String>{..._me.hiddenCircles};
   late final Set<String> _hiddenGroups = <String>{..._me.hiddenGroups};
+
+  /// All approved vouches are listed (otherwise the first few).
+  bool _allVouches = false;
 
   /// "Pokazać Cię na grafie…?" (`null` until the saved answer is read).
   bool? _showOnGraph;
@@ -94,6 +99,7 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
     _name.dispose();
     _about.dispose();
     _look.dispose();
+    _tag.dispose();
     super.dispose();
   }
 
@@ -205,10 +211,13 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
         ..photos.addAll(_photos);
       m.interests
         ..clear()
-        ..addAll(datingInterestsFromJson(_interests.toList()));
+        ..addAll(datingTagsFrom(_interests));
       m.hiddenFriends
         ..clear()
         ..addAll(_hiddenFriends);
+      m.hiddenCircles
+        ..clear()
+        ..addAll(_hiddenCircles.where(_hiddenFriends.contains));
       m.hiddenGroups
         ..clear()
         ..addAll(_hiddenGroups);
@@ -301,6 +310,130 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
     }
   }
 
+  /// Vouches listed before "Pokaż wszystkie".
+  static const int _vouchesFirst = 5;
+
+  /// Vouches waiting for approval first, then the first few shown ones (or
+  /// all of them).
+  List<DatingVouch> _shownVouches() {
+    final List<DatingVouch> all = <DatingVouch>[
+      ..._dating.me.vouches.where((DatingVouch v) => !v.approved),
+      ..._dating.me.vouches.where((DatingVouch v) => v.approved),
+    ];
+    return _allVouches ? all : all.take(_vouchesFirst).toList();
+  }
+
+  /// Adds an interest typed or picked ([datingTag]); the same one twice
+  /// (by [datingTagKey]) is not added.
+  void _addTag(String raw) {
+    final String? tag = datingTag(raw);
+    if (tag == null || _interests.length >= kDatingMaxInterests) {
+      return;
+    }
+    setState(() {
+      if (!_interests.any((String i) => datingTagKey(i) == datingTagKey(tag))) {
+        _interests.add(tag);
+      }
+      _tag.clear();
+    });
+  }
+
+  /// "Ukryj przed" one friend: not at all, only from them, or from them and
+  /// everyone this person reaches only through them.
+  Future<void> _chooseHiding(String address, String name) async {
+    final int current = !_hiddenFriends.contains(address)
+        ? 0
+        : _hiddenCircles.contains(address)
+        ? 2
+        : 1;
+    final int? choice = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (BuildContext context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            for (final (int, IconData, String, String) o
+                in <(int, IconData, String, String)>[
+                  (0, Icons.person_rounded, t('Nie ukrywaj'), ''),
+                  (
+                    1,
+                    Icons.visibility_off_rounded,
+                    t('Ukryj tylko przed nim / nią'),
+                    t(
+                      'Jego/jej znajomi mogą Cię dalej zobaczyć, także przez '
+                      'tę osobę.',
+                    ),
+                  ),
+                  (
+                    2,
+                    Icons.group_off_rounded,
+                    t('Ukryj przed nim / nią i jego/jej kręgiem'),
+                    t(
+                      'Nikt, do kogo docierasz tylko przez tę osobę, nie '
+                      'zobaczy Twojego profilu (ani Ty jego).',
+                    ),
+                  ),
+                ])
+              ListTile(
+                key: Key('dating-hide-choice-${o.$1}'),
+                leading: Icon(o.$2),
+                title: Text(o.$3),
+                subtitle: o.$4.isEmpty ? null : Text(o.$4),
+                trailing: current == o.$1
+                    ? const Icon(Icons.check_rounded)
+                    : null,
+                onTap: () => Navigator.of(context).pop(o.$1),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _toggle<String>(_hiddenFriends, address, choice > 0);
+      _toggle<String>(_hiddenCircles, address, choice == 2);
+    });
+  }
+
+  /// Turning the graph flag on asks once more: it shows people that this
+  /// person dates.
+  Future<void> _setShowOnGraph(bool on) async {
+    if (!on) {
+      setState(() => _showOnGraph = false);
+      return;
+    }
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(t('Pokazać na grafie?')),
+        content: Text(
+          t(
+            'Znajomi do 3 kroków (i osoby za otwartymi bramami), którzy widzą '
+            'Cię na grafie, zobaczą przy Twoim imieniu, że jesteś otwarta(-y) '
+            'na poznanie. Możesz to w każdej chwili wyłączyć.',
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('dating-graph-confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('Pokaż')),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      setState(() => _showOnGraph = true);
+    }
+  }
+
   void _toggle<T>(Set<T> set, T value, bool on) {
     if (on) {
       set.add(value);
@@ -314,11 +447,6 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
     final ZenColors zen = ZenColors.of(context);
     final Color tone = datingTone(zen);
     final SocialHubState social = watchSocialPeople(ref);
-    final TextStyle rowTitle = TextStyle(
-      color: zen.textPrimary,
-      fontSize: 15,
-      fontWeight: FontWeight.w700,
-    );
     final TextStyle note = TextStyle(
       color: zen.textSecondary,
       fontSize: 13.5,
@@ -386,7 +514,7 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                         clipBehavior: Clip.none,
                         children: <Widget>[
                           InkWell(
-                            borderRadius: BorderRadius.circular(22),
+                            borderRadius: context.zenRadius(22),
                             onTap: i == 0 ? null : () => _makeMain(i),
                             child: datingPhoto(_photos[i], size: 76),
                           ),
@@ -430,13 +558,13 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                     if (_photos.length < kDatingMaxPhotos)
                       InkWell(
                         key: const Key('dating-photo-add'),
-                        borderRadius: BorderRadius.circular(22),
+                        borderRadius: context.zenRadius(22),
                         onTap: () => unawaited(_pickPhotos()),
                         child: Container(
                           width: 76,
                           height: 76,
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(22),
+                            borderRadius: context.zenRadius(22),
                             color: tone.withValues(alpha: 0.08),
                             border: Border.all(
                               color: tone.withValues(alpha: 0.35),
@@ -554,14 +682,15 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                 ),
                 subtitle: Text(
                   t(
-                    'Znajomi i znajomi znajomych, którzy już widzą Cię na '
-                    'grafie, zobaczą przy Tobie „randki” albo „znajomości”. '
-                    'Nic więcej z profilu randkowego; osoby z „Ukryj przed” '
-                    'nie zobaczą nic.',
+                    'Domyślnie nie. Włączone: ludzie do 3 kroków znajomości '
+                    '(i za otwartymi bramami) zobaczą na grafie Twoje imię '
+                    'z „randki” albo „znajomości” — czyli że randkujesz. '
+                    'Nic więcej z profilu; osoby z „Ukryj przed” nie '
+                    'zobaczą nic.',
                   ),
                 ),
                 onChanged: _enabled
-                    ? (bool v) => setState(() => _showOnGraph = v)
+                    ? (bool v) => unawaited(_setShowOnGraph(v))
                     : null,
               ),
             ],
@@ -627,50 +756,12 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
               ),
             ],
           ],
-          const SizedBox(height: 8),
-          ZenCard(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Expanded(child: Text(t('Jak daleko'), style: rowTitle)),
-                    ZenPill(
-                      text: tn(
-                        _hops,
-                        one: '{n} krok znajomości',
-                        few: '{n} kroki znajomości',
-                        many: '{n} kroków znajomości',
-                      ),
-                      tone: tone,
-                    ),
-                  ],
-                ),
-                Slider(
-                  value: _hops.toDouble(),
-                  min: 1,
-                  max: kDatingMaxHops.toDouble(),
-                  divisions: kDatingMaxHops - 1,
-                  label: '$_hops',
-                  activeColor: tone,
-                  onChanged: (double v) => setState(() => _hops = v.round()),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    t('1 — Twoi znajomi, 2 — ich znajomi.'),
-                    style: TextStyle(color: zen.textMuted, fontSize: 12.5),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          ZenSection(t('Zainteresowania')),
+          ZenSection(t('Jak daleko chcesz widzieć')),
           Text(
-            t('Do {count} — pomagają innym trafić na Ciebie w filtrach.', {
-              'count': kDatingMaxInterests,
-            }),
+            t(
+              'Tylko ludzie w tym zasięgu zobaczą Twój profil i Ty ich. Do 3 '
+              'kroków nie trzeba otwierać bram.',
+            ),
             style: note,
           ),
           const SizedBox(height: 8),
@@ -678,19 +769,75 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
             spacing: 6,
             runSpacing: 6,
             children: <Widget>[
-              for (final String code in kDatingInterests)
-                FilterChip(
-                  key: Key('dating-interest-$code'),
-                  label: Text(datingInterestLabel(code)),
-                  selected: _interests.contains(code),
-                  onSelected:
-                      !_interests.contains(code) &&
-                          _interests.length >= kDatingMaxInterests
-                      ? null
-                      : (bool v) => setState(
-                          () => _toggle<String>(_interests, code, v),
-                        ),
+              for (int h = 1; h <= kDatingRangeGates; h++)
+                ChoiceChip(
+                  key: Key('dating-reach-$h'),
+                  label: Text(datingReachLabel(h)),
+                  selected: _hops == h,
+                  onSelected: (_) => setState(() => _hops = h),
                 ),
+            ],
+          ),
+          ZenSection(t('Zainteresowania')),
+          Text(
+            t(
+              'Wpisz własne albo wybierz z podpowiedzi — do {count}. Wielkość '
+              'liter i polskie znaki nie mają znaczenia w filtrach.',
+              {'count': kDatingMaxInterests},
+            ),
+            style: note,
+          ),
+          const SizedBox(height: 8),
+          if (_interests.isNotEmpty)
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: <Widget>[
+                for (final String tag in _interests)
+                  InputChip(
+                    key: Key('dating-tag-$tag'),
+                    label: Text(tag),
+                    selected: true,
+                    showCheckmark: false,
+                    onDeleted: () => setState(() => _interests.remove(tag)),
+                  ),
+              ],
+            ),
+          const SizedBox(height: 8),
+          TextField(
+            key: const Key('dating-tag-input'),
+            controller: _tag,
+            enabled: _interests.length < kDatingMaxInterests,
+            maxLength: kDatingTagMaxChars,
+            textInputAction: TextInputAction.done,
+            decoration: InputDecoration(
+              labelText: t('Dodaj zainteresowanie'),
+              hintText: t('np. wspinaczka'),
+              suffixIcon: IconButton(
+                key: const Key('dating-tag-add'),
+                tooltip: t('Dodaj'),
+                icon: const Icon(Icons.add_rounded),
+                onPressed: () => _addTag(_tag.text),
+              ),
+            ),
+            onSubmitted: _addTag,
+          ),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: <Widget>[
+              for (final String tag in datingTagSuggestions())
+                if (!_interests.any(
+                  (String i) => datingTagKey(i) == datingTagKey(tag),
+                ))
+                  ActionChip(
+                    key: Key('dating-tag-suggest-$tag'),
+                    avatar: const Icon(Icons.add_rounded, size: 16),
+                    label: Text(tag),
+                    onPressed: _interests.length >= kDatingMaxInterests
+                        ? null
+                        : () => _addTag(tag),
+                  ),
             ],
           ),
           ZenSection(t('Ukryj przed')),
@@ -698,8 +845,10 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
             icon: Icons.visibility_off_rounded,
             tone: tone,
             text: t(
-              'Ci ludzie nie zobaczą Twojego profilu (np. rodzina, praca). '
-              'Działa też, gdy profil dotrze do nich okrężną drogą.',
+              'Ci ludzie nie zobaczą Twojego profilu (np. rodzina, praca), '
+              'także gdy dotrze do nich okrężną drogą. Przy znajomym możesz '
+              'wybrać: tylko on(a), albo też jego/jej krąg — wtedy nie '
+              'poznasz nikogo, do kogo docierasz tylko przez tę osobę.',
             ),
           ),
           const SizedBox(height: 8),
@@ -732,22 +881,27 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                 ),
               for (final FriendProfile f in social.acceptedFriends)
                 FilterChip(
+                  key: Key('dating-hide-${f.address}'),
                   showCheckmark: false,
                   avatar: Icon(
-                    _hiddenFriends.contains(f.address)
-                        ? Icons.visibility_off_rounded
-                        : Icons.person_rounded,
+                    !_hiddenFriends.contains(f.address)
+                        ? Icons.person_rounded
+                        : _hiddenCircles.contains(f.address)
+                        ? Icons.group_off_rounded
+                        : Icons.visibility_off_rounded,
                     size: 18,
                   ),
                   label: Text(
-                    social.nameFor(f),
+                    _hiddenCircles.contains(f.address) &&
+                            _hiddenFriends.contains(f.address)
+                        ? t('{name} i krąg', {'name': social.nameFor(f)})
+                        : social.nameFor(f),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                   selected: _hiddenFriends.contains(f.address),
-                  onSelected: (bool v) => setState(
-                    () => _toggle<String>(_hiddenFriends, f.address, v),
-                  ),
+                  onSelected: (_) =>
+                      unawaited(_chooseHiding(f.address, social.nameFor(f))),
                 ),
             ],
           ),
@@ -768,7 +922,7 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                       style: note,
                     ),
                   ),
-                for (final DatingVouch v in _dating.me.vouches)
+                for (final DatingVouch v in _shownVouches())
                   ZenCard(
                     tone: v.approved ? null : zen.warning,
                     padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
@@ -836,6 +990,36 @@ class _DatingProfileEditorState extends ConsumerState<DatingProfileEditor> {
                       ],
                     ),
                   ),
+                if (_dating.me.vouches.length > _vouchesFirst)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      key: const Key('dating-editor-vouches-more'),
+                      onPressed: () =>
+                          setState(() => _allVouches = !_allVouches),
+                      icon: Icon(
+                        _allVouches
+                            ? Icons.expand_less_rounded
+                            : Icons.expand_more_rounded,
+                      ),
+                      label: Text(
+                        _allVouches
+                            ? t('Pokaż mniej')
+                            : t('Pokaż wszystkie ({count})', {
+                                'count': _dating.me.vouches.length,
+                              }),
+                      ),
+                    ),
+                  ),
+                Text(
+                  t('Na profilu: {count} z {max}', {
+                    'count': _dating.me.vouches
+                        .where((DatingVouch v) => v.approved)
+                        .length,
+                    'max': kDatingMaxVouches,
+                  }),
+                  style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+                ),
               ],
             ),
           ),

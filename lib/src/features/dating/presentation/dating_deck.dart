@@ -18,6 +18,7 @@ class DatingSwipeDeck extends StatefulWidget {
     this.onOpen,
     this.onMatchmake,
     this.onAsk,
+    this.canAsk,
     this.friendsOnly,
     super.key,
   });
@@ -32,9 +33,12 @@ class DatingSwipeDeck extends StatefulWidget {
   /// "Swatuj": introduce this person to someone else.
   final void Function(SeenProfile seen)? onMatchmake;
 
-  /// "Zapytaj o opinię" the friend the profile came through; off
-  /// for profiles that came with no friend (an introduction).
+  /// "Zapytaj o opinię" a friend who knows the person.
   final void Function(SeenProfile seen)? onAsk;
+
+  /// Whether there is anyone to ask about [seen] (without it: anyone the
+  /// profile came through).
+  final bool Function(SeenProfile seen)? canAsk;
 
   /// Whether the two would meet only as new friends (no dates): the card
   /// then does not speak of dating.
@@ -294,7 +298,9 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
                     label: t('Zapytaj o opinię'),
                     color: zen.accentSecondary,
                     size: 46,
-                    onTap: widget.onAsk == null || top.friend == null
+                    onTap:
+                        widget.onAsk == null ||
+                            !(widget.canAsk?.call(top) ?? top.friend != null)
                         ? null
                         : () => widget.onAsk!(top),
                   ),
@@ -436,12 +442,11 @@ class _DatingSwipeCardState extends State<DatingSwipeCard> {
     return Material(
       color: zen.surface,
       clipBehavior: Clip.antiAlias,
-      elevation: 3,
-      shadowColor: const Color(0x33000000),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(28),
-        side: BorderSide(color: zen.outlineSoft),
-      ),
+      // Lifted the way the look lifts things (a shadow, a glow, or flat
+      // with its outline).
+      elevation: ZenLook.of(context).elevation == ZenElevation.flat ? 0 : 3,
+      shadowColor: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.2),
+      shape: ZenLook.of(context).panelShape(zen, radius: 28),
       child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints c) => Stack(
           fit: StackFit.expand,
@@ -499,7 +504,7 @@ class _DatingSwipeCardState extends State<DatingSwipeCard> {
                                       alpha: i == page ? 0.9 : 0.25,
                                     )
                                   : Color(i == page ? 0xFFFFFFFF : 0x73FFFFFF),
-                              borderRadius: BorderRadius.circular(2),
+                              borderRadius: context.zenRadius(2),
                             ),
                           ),
                         ),
@@ -584,7 +589,7 @@ class _Stamp extends StatelessWidget {
               decoration: BoxDecoration(
                 color: color.withValues(alpha: 0.12),
                 border: Border.all(color: color, width: 4),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: context.zenRadius(12),
               ),
               child: Text(
                 text,
@@ -707,7 +712,7 @@ class _DescriptionPage extends StatelessWidget {
                         icon: Icons.group_rounded,
                       ),
                     for (final String i in p.interests)
-                      ZenPill(text: datingInterestLabel(i), tone: tone),
+                      ZenPill(text: i, tone: tone),
                   ],
                 ),
                 const SizedBox(height: 18),
@@ -748,6 +753,18 @@ class _DescriptionPage extends StatelessWidget {
                 ],
                 for (final DatingVouch v in p.vouches.take(2)) ...<Widget>[
                   DatingQuote(text: v.text, by: v.by, signed: true, tone: tone),
+                  const SizedBox(height: 10),
+                ],
+                if (p.vouchDigests.length > 2) ...<Widget>[
+                  Text(
+                    tn(
+                      p.vouchDigests.length - 2,
+                      one: 'i {n} poręczenie więcej w całym profilu',
+                      few: 'i {n} poręczenia więcej w całym profilu',
+                      many: 'i {n} poręczeń więcej w całym profilu',
+                    ),
+                    style: TextStyle(color: zen.textMuted, fontSize: 13),
+                  ),
                   const SizedBox(height: 10),
                 ],
                 if (empty)

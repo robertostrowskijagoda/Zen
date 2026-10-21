@@ -12,7 +12,7 @@ SeenProfile _seen(String name, {String? friend = '200::f'}) => SeenProfile(
     at: 1,
     about: '$name lubi góry i dobrą kawę.',
     lookingFor: 'Kogoś do wspólnych wypraw',
-    vouches: const <DatingVouch>[
+    vouchSlots: const <DatingVouch?>[
       DatingVouch(
         id: 'v1',
         by: 'Kasia',
@@ -49,6 +49,7 @@ void main() {
     ThemeData? theme,
     Size size = const Size(360, 740),
     double textScale = 1,
+    bool Function(SeenProfile s)? canAsk,
   }) async {
     tester.view.physicalSize = size * 2;
     tester.view.devicePixelRatio = 2;
@@ -70,6 +71,7 @@ void main() {
             onOpen: (SeenProfile s) => opened.add(s.profile.name),
             onMatchmake: (SeenProfile s) => matched.add(s.profile.name),
             onAsk: (SeenProfile s) => asked.add(s.profile.name),
+            canAsk: canAsk,
           ),
         ),
       ),
@@ -182,5 +184,40 @@ void main() {
     );
     expect(tester.takeException(), isNull);
     expect(find.byKey(const Key('dating-deck-yes')), findsOneWidget);
+  });
+
+  testWidgets('„Zapytaj o opinię” only when someone knows the person; many '
+      'vouches are counted, not all shown', (WidgetTester tester) async {
+    final SeenProfile many = SeenProfile(
+      profile: DatingProfile(
+        key: 'k-Ola',
+        name: 'Ola',
+        gender: DatingGender.woman,
+        at: 1,
+        vouchDigests: <String>[for (int i = 0; i < 12; i++) 'd$i'],
+        vouchSlots: <DatingVouch?>[
+          for (int i = 0; i < 12; i++)
+            DatingVouch(
+              id: 'v$i',
+              by: 'Kasia',
+              text: 'Słowo $i',
+              signer: 'vk',
+              sig: 'sig',
+              at: i,
+            ),
+        ],
+      ),
+      replyTo: 'r',
+      at: 1,
+      friend: '200::f',
+      distance: 1,
+    );
+    await pumpDeck(tester, <SeenProfile>[
+      many,
+    ], canAsk: (SeenProfile s) => false);
+    expect(find.text('i 10 poręczeń więcej w całym profilu'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('dating-deck-ask')));
+    await tester.pump();
+    expect(asked, isEmpty, reason: 'the only friend is the person');
   });
 }
