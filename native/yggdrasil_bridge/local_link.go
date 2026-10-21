@@ -24,8 +24,10 @@ import (
 //
 // Nobody else may learn who is there. The app gives the bridge one secret
 // per device it may link with (a friend's device or one of the account's
-// own), derived on both sides from the two devices' static keys
-// (X25519, runtime_lan_discovery.dart); a stranger has none of them.
+// own), the same on both sides: once the two devices paired over the
+// post-quantum session layer, it mixes in random contributions they
+// exchanged there; before, it comes from their static keys alone (X25519,
+// runtime_lan_discovery.dart). A stranger has none of them.
 //
 //   - Adverts (LAN beacons, Wi-Fi Direct service records, Bluetooth
 //     advertisements) carry a Bloom filter of tags: one per secret, keyed

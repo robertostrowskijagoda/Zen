@@ -3,10 +3,12 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
+import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
 String _hex(List<int> bytes) =>
@@ -126,5 +128,107 @@ void main() {
         <String, dynamic>{'Address': '200::1', 'Secret': 'ab', 'Own': true},
       ],
     });
+  });
+
+  test('two devices pair over the sealed signals: the secret becomes '
+      'post-quantum on both sides, a new install pairs again', () async {
+    final LedgerKeyPair a = await LedgerKeyPair.fromSeed(_seed(7));
+    final LedgerKeyPair b = await LedgerKeyPair.fromSeed(_seed(8));
+    const String atA = '200:a::1';
+    const String atB = '200:b::1';
+    final Map<String, LocalPairKeys> byAddress = <String, LocalPairKeys>{};
+    final List<Map<String, dynamic>> sent = <Map<String, dynamic>>[];
+    late LocalPairKeys pa;
+    late LocalPairKeys pb;
+    String? deviceAt(String address) => switch (address) {
+      atA => b64(a.publicKey),
+      atB => b64(b.publicKey),
+      _ => null,
+    };
+    LocalPairKeys make(LedgerKeyPair key, String own, LedgerDisk disk) =>
+        LocalPairKeys(
+          disk: disk,
+          ownDevice: b64(key.publicKey),
+          send: (String to, Map<String, dynamic> payload) async {
+            sent.add(payload);
+            final LocalPairKeys? there = byAddress[to];
+            await there?.onFrame(
+              SignalTransportFrame(
+                from: own,
+                payload:
+                    jsonDecode(jsonEncode(payload)) as Map<String, dynamic>,
+                receivedAtMillis: 0,
+              ),
+              deviceAt: deviceAt,
+            );
+          },
+        );
+    final MemoryLedgerDisk diskA = MemoryLedgerDisk();
+    pa = make(a, atA, diskA);
+    pb = make(b, atB, MemoryLedgerDisk());
+    byAddress[atA] = pa;
+    byAddress[atB] = pb;
+    int changes = 0;
+    pa.onChanged = () => changes++;
+
+    final String classical = (await LocalLinkSecrets(
+      a,
+    ).secretWith(b.publicKey))!;
+    await pa.offer(b64(b.publicKey), atB);
+    expect(sent, hasLength(3), reason: 'offer, answer, confirmation');
+    expect(
+      sent.every((Map<String, dynamic> m) => m['type'] == kLocalPairType),
+      isTrue,
+    );
+    expect(pa.paired(b64(b.publicKey)), isTrue);
+    expect(pb.paired(b64(a.publicKey)), isTrue);
+    expect(changes, 1);
+    final String? ab = await LocalLinkSecrets(
+      a,
+      pairs: pa,
+    ).secretWith(b.publicKey);
+    final String? ba = await LocalLinkSecrets(
+      b,
+      pairs: pb,
+    ).secretWith(a.publicKey);
+    expect(ab, ba);
+    expect(ab, isNot(classical));
+    // Paired: nothing more is offered.
+    await pa.offer(b64(b.publicKey), atB);
+    expect(sent, hasLength(3));
+
+    // Kept across restarts.
+    final LocalPairKeys again = make(a, atA, diskA);
+    await again.offer(b64(b.publicKey), atB);
+    expect(again.pairSecret(b64(b.publicKey)), pa.pairSecret(b64(b.publicKey)));
+
+    // B is installed anew: its new contribution pairs again.
+    pb = make(b, atB, MemoryLedgerDisk());
+    byAddress[atB] = pb;
+    await pb.offer(b64(a.publicKey), atA);
+    expect(pa.paired(b64(b.publicKey)), isTrue);
+    expect(pb.paired(b64(a.publicKey)), isTrue);
+    expect(
+      await LocalLinkSecrets(a, pairs: pa).secretWith(b.publicKey),
+      await LocalLinkSecrets(b, pairs: pb).secretWith(a.publicKey),
+    );
+
+    // A contribution from an address that is not the device's is ignored.
+    final LedgerKeyPair c = await LedgerKeyPair.fromSeed(_seed(9));
+    await pa.onFrame(
+      SignalTransportFrame(
+        from: '200:c::1',
+        payload: <String, dynamic>{
+          'type': kLocalPairType,
+          'd': b64(c.publicKey),
+          'to': b64(a.publicKey),
+          'c': b64(List<int>.filled(32, 1)),
+          'h': '',
+        },
+        receivedAtMillis: 0,
+      ),
+      deviceAt: deviceAt,
+    );
+    expect(pa.paired(b64(c.publicKey)), isFalse);
   });
 }

@@ -12,9 +12,11 @@ import 'package:zen/src/features/runtime/bluetooth_local_links.dart';
 import 'package:zen/src/features/runtime/local_link.dart';
 import 'package:zen/src/features/runtime/runtime_lan_discovery.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
+import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/wifi_direct_local_link.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 
 // "Łączność bez internetu": keeps the running node's local
 // links in line with the settings, the devices the ledger knows and
@@ -239,10 +241,12 @@ List<LocalLink> platformLocalLinks([TargetPlatform? platform]) {
 }
 
 /// The devices this one links with: friends' devices and the account's own,
-/// each with its pair secret.
+/// each with its pair secret — post-quantum once paired over [pairing]'s
+/// signals ([LocalPairKeys]).
 Future<List<LocalLinkPeer>> Function() ledgerLocalLinkPeers(
-  LedgerNode? Function() ledger,
-) {
+  LedgerNode? Function() ledger, {
+  LocalLinkPairing? pairing,
+}) {
   LocalLinkSecrets? secrets;
   return () async {
     final LedgerNode? node = ledger();
@@ -252,19 +256,74 @@ Future<List<LocalLinkPeer>> Function() ledgerLocalLinkPeers(
     await node.start();
     final LocalLinkSecrets made = secrets ??= LocalLinkSecrets(
       node.identity.deviceKey,
+      pairs: pairing?.keysFor(node),
     );
     return made.peersFor(node.linkableDevices, account: node.account);
   };
 }
 
+/// The pairings of the ledger's device ([LocalPairKeys]): sent and taken
+/// over the signal transport.
+final class LocalLinkPairing {
+  LocalLinkPairing(this.transport);
+
+  final SignalTransport transport;
+  LocalPairKeys? _keys;
+  LedgerNode? _node;
+
+  /// Called when a pair's secret changed.
+  void Function()? onChanged;
+
+  /// The pairings of [node]'s device (made the first time).
+  LocalPairKeys keysFor(LedgerNode node) {
+    final LocalPairKeys? had = _keys;
+    if (had != null && identical(_node, node)) {
+      return had;
+    }
+    _node = node;
+    return _keys = LocalPairKeys(
+      disk: node.disk,
+      ownDevice: node.identity.deviceKey.id,
+      send: (String to, Map<String, dynamic> payload) =>
+          transport.send(remoteAddress: to, payload: payload),
+    )..onChanged = () => onChanged?.call();
+  }
+
+  /// A signal that came: a pairing is taken from a device the ledger has
+  /// at the sender's address.
+  Future<void> onFrame(SignalTransportFrame frame) async {
+    final LedgerNode? node = _node;
+    final LocalPairKeys? keys = _keys;
+    if (node == null || keys == null) {
+      return;
+    }
+    final String from = PeerShareCodec.normalizeAddress(frame.from);
+    await keys.onFrame(
+      frame,
+      deviceAt: (String address) {
+        for (final AccountDevice d in node.linkableDevices) {
+          final String? at = d.address;
+          if (at != null && PeerShareCodec.normalizeAddress(at) == from) {
+            return d.device;
+          }
+        }
+        return null;
+      },
+    );
+  }
+}
+
 final Provider<LocalLinksController> localLinksControllerProvider =
     Provider<LocalLinksController>((Ref ref) {
       final LedgerNode? ledger = ref.watch(ledgerNodeProvider);
+      final SignalTransport transport = ref.read(signalTransportProvider);
+      final LocalLinkPairing pairing = LocalLinkPairing(transport);
       final LocalLinksController controller = LocalLinksController(
         target: _RuntimeTarget(ref.watch(runtimeNodeRuntimeProvider)),
-        loadPeers: ledgerLocalLinkPeers(() => ledger),
+        loadPeers: ledgerLocalLinkPeers(() => ledger, pairing: pairing),
         transports: platformLocalLinks(),
       );
+      pairing.onChanged = () => unawaited(controller.refreshPeers());
       ref.listen<AppSettings>(appSettingsControllerProvider, (
         AppSettings? previous,
         AppSettings next,
@@ -276,6 +335,17 @@ final Provider<LocalLinksController> localLinksControllerProvider =
       }, fireImmediately: true);
       final List<StreamSubscription<void>> subscriptions =
           <StreamSubscription<void>>[
+            transport.frames
+                .where(
+                  (SignalTransportFrame f) =>
+                      f.payload['type'] == kLocalPairType,
+                )
+                .listen(
+                  (SignalTransportFrame f) => unawaitedLogged(
+                    pairing.onFrame(f),
+                    context: 'Local link pairing',
+                  ),
+                ),
             if (ledger != null) ...<StreamSubscription<void>>[
               ledger.devicesChanged.listen(
                 (_) => unawaited(controller.refreshPeers()),

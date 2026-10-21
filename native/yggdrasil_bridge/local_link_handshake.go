@@ -44,12 +44,10 @@ import (
 //     hellos and both ciphertexts). A side without the pair's secret cannot
 //     get them, and someone who recorded the stream cannot either, later,
 //     with a quantum computer: the stream is hybrid post-quantum (it
-//     carries signals already sealed by the session layer anyway). What
-//     stays classical is the pair's secret itself (X25519 of the two
-//     devices' keys, runtime_lan_discovery.dart): with a quantum computer
-//     and both devices' public keys one could recognise their adverts, or
-//     sit in the middle of a new link as it is made — not read one
-//     recorded before.
+//     carries signals already sealed by the session layer anyway). The
+//     pair's secret is post-quantum too once the devices paired
+//     (runtime_lan_discovery.dart); a pair that never reached each other
+//     over the network has only the X25519 one of the two devices' keys.
 //  5. Each side's first encrypted record is its Yggdrasil public key; it
 //     must hash to the mesh address the secret was given for.
 //
