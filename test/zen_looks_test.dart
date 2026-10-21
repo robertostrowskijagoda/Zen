@@ -145,15 +145,26 @@ void main() {
     expect(ZenLook.forPalette(AppPalette.neon).outlined, isTrue);
     expect(ZenLook.forPalette(AppPalette.player).bevelled, isTrue);
     expect(ZenLook.forPalette(AppPalette.player).numbers, ZenNumberStyle.led);
-    expect(AppPalette.player.darkOnly, isTrue);
-    expect(AppPalette.neon.darkOnly, isFalse);
 
     PageTransitionsBuilder? pageOf(AppPalette palette) => ZenTheme.dark(
       AppSettings.defaultAccentTheme,
       palette,
     ).pageTransitionsTheme.builders[TargetPlatform.android];
     expect(pageOf(AppPalette.neon), isA<ZenNeonWipeTransitionsBuilder>());
-    expect(pageOf(AppPalette.player), isA<ZenSteppedPageTransitionsBuilder>());
+    // The player sits on brushed metal now: its stepped fade, with the page
+    // below fading out.
+    expect(
+      (pageOf(AppPalette.player)! as ZenFadeBehindTransitionsBuilder).inner,
+      isA<ZenSteppedPageTransitionsBuilder>(),
+    );
+    PageTransitionsBuilder? innerOf(AppPalette p) =>
+        (pageOf(p)! as ZenFadeBehindTransitionsBuilder).inner;
+    expect(innerOf(AppPalette.cipher), isA<ZenGlitchPageTransitionsBuilder>());
+    expect(
+      innerOf(AppPalette.lightcycle),
+      isA<ZenStreakPageTransitionsBuilder>(),
+    );
+    expect(innerOf(AppPalette.deepSea), isA<ZenBubblePageTransitionsBuilder>());
     expect(pageOf(AppPalette.calm), isA<ZenSoftPageTransitionsBuilder>());
     // Pages over a backdrop fade the page below out.
     expect(pageOf(AppPalette.rain), isA<ZenFadeBehindTransitionsBuilder>());
@@ -288,6 +299,88 @@ void main() {
     expect(grid.progressIndicatorTheme.color, grid.colorScheme.primary);
   });
 
+  test('the wild looks are many, each with its own effect', () {
+    final List<AppPalette> wild = ZenThemeCategory.wild.palettes;
+    expect(wild.length, greaterThanOrEqualTo(10));
+    expect(<String>{
+      for (final AppPalette p in AppPalette.values) p.label,
+    }, hasLength(AppPalette.values.length));
+    final Set<ZenBackdrop> effects = <ZenBackdrop>{};
+    for (final AppPalette p in wild) {
+      final ZenLook look = ZenLook.forPalette(p);
+      expect(look.backdrop, isNot(ZenBackdrop.none), reason: '$p');
+      // More than a recolour: its own frames or its own header.
+      expect(
+        look.borders != ZenBorderStyle.hairline ||
+            look.header != ZenHeaderStyle.bar,
+        isTrue,
+        reason: '$p',
+      );
+      effects.add(look.backdrop);
+    }
+    expect(effects, hasLength(wild.length));
+    // The player has no stray analyzer by its section titles any more.
+    expect(
+      ZenLook.forPalette(AppPalette.player).header,
+      isNot(ZenHeaderStyle.spectrum),
+    );
+  });
+
+  test('every theme has its own light and dark variant', () {
+    for (final AppPalette p in AppPalette.values) {
+      final ZenColors light = ZenColors.forPalette(
+        p,
+        AppSettings.defaultAccentTheme,
+        Brightness.light,
+      );
+      final ZenColors dark = ZenColors.forPalette(
+        p,
+        AppSettings.defaultAccentTheme,
+        Brightness.dark,
+      );
+      expect(
+        ThemeData.estimateBrightnessForColor(light.background),
+        Brightness.light,
+        reason: '$p light',
+      );
+      expect(
+        ThemeData.estimateBrightnessForColor(dark.background),
+        Brightness.dark,
+        reason: '$p dark',
+      );
+      // Same identity: the same look (shapes, frames, effect) in both.
+      expect(
+        ZenTheme.light(AppSettings.defaultAccentTheme, p).extension<ZenLook>(),
+        ZenTheme.dark(AppSettings.defaultAccentTheme, p).extension<ZenLook>(),
+        reason: '$p',
+      );
+      expect(light.duotone, dark.duotone, reason: '$p restricted in both');
+    }
+  });
+
+  test('the new frames keep their shape and take a button outline', () {
+    const Rect rect = Rect.fromLTWH(0, 0, 120, 60);
+    final List<OutlinedBorder> frames = <OutlinedBorder>[
+      const ZenCutBorder(cut: 10, pads: true),
+      const ZenPixelBorder(),
+      ZenWindowBorder(borderRadius: BorderRadius.circular(6)),
+      ZenSheenBorder(borderRadius: BorderRadius.circular(10)),
+      const ZenBevelBorder(
+        light: Color(0xFFFFFFFF),
+        dark: Color(0xFF000000),
+        rivets: true,
+      ),
+      ZenDoubleBorder(borderRadius: BorderRadius.circular(8), ornaments: true),
+    ];
+    const BorderSide side = BorderSide(color: Color(0xFF123456), width: 2);
+    for (final OutlinedBorder f in frames) {
+      expect(f.getOuterPath(rect).getBounds(), rect, reason: '$f');
+      expect(f.copyWith(side: side).side, side, reason: '$f');
+      expect(f.copyWith(), f, reason: '$f');
+      expect(f.scale(1), isA<ShapeBorder>());
+    }
+  });
+
   test('Neon is black with one cyan and one magenta, few colours', () {
     final ZenColors neon = ZenColors.forPalette(
       AppPalette.neon,
@@ -368,9 +461,6 @@ void main() {
 
   for (final AppPalette palette in AppPalette.values) {
     for (final Brightness brightness in Brightness.values) {
-      if (palette.darkOnly && brightness == Brightness.light) {
-        continue;
-      }
       testWidgets('the kit builds in ${palette.name} ${brightness.name}', (
         WidgetTester tester,
       ) async {
@@ -418,6 +508,8 @@ void main() {
       AppPalette.player,
       AppPalette.phosphor,
       AppPalette.pearl,
+      // The wild looks: every effect, header and transition style.
+      for (final AppPalette p in ZenThemeCategory.wild.palettes) p,
     ]) {
       final ZenLook look = ZenLook.forPalette(palette);
       await _pumpLook(tester, palette);
@@ -428,7 +520,10 @@ void main() {
       }
       expect(
         find.byType(ZenFlickerOn),
-        look.flickerOn ? findsOneWidget : findsNothing,
+        look.header == ZenHeaderStyle.neonTube ||
+                look.header == ZenHeaderStyle.brackets
+            ? findsOneWidget
+            : findsNothing,
         reason: '$palette',
       );
       final bool animated = ZenBackdropLayer.framesPerSecond(look.backdrop) > 0;

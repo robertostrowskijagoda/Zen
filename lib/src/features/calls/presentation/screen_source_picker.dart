@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
+import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
 
 /// Asks which screen or window to share; `null` when cancelled.
@@ -29,7 +30,7 @@ class ScreenSourcePicker extends StatelessWidget {
     Widget tile(ScreenShareSource s) => InkWell(
       key: Key('screen-source-${s.id}'),
       onTap: () => Navigator.of(context).pop(s),
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: context.zenRadius(16),
       child: SizedBox(
         width: 170,
         child: Padding(
@@ -40,7 +41,7 @@ class ScreenSourcePicker extends StatelessWidget {
               AspectRatio(
                 aspectRatio: 16 / 9,
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: context.zenRadius(12),
                   child: s.thumbnail == null
                       ? const ColoredBox(
                           color: Colors.black26,

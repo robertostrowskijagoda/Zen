@@ -68,9 +68,6 @@ Future<void> _frames(WidgetTester tester) async {
 void main() {
   for (final AppPalette palette in AppPalette.values) {
     for (final Brightness brightness in Brightness.values) {
-      if (palette.darkOnly && brightness == Brightness.light) {
-        continue;
-      }
       testWidgets(
         'the settings use only colours of ${palette.name} ${brightness.name}',
         (WidgetTester tester) async {

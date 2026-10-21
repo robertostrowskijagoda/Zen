@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:zen/src/app/theme/zen_effects.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 
@@ -73,7 +74,7 @@ class ZenBackdropLayer extends StatefulWidget {
     ZenBackdrop.rain => 12,
     ZenBackdrop.grid => 20,
     ZenBackdrop.scanlines => 12,
-    ZenBackdrop.aurora || ZenBackdrop.none => 0,
+    _ => ZenEffects.fps(kind),
   };
 
   @override
@@ -208,13 +209,11 @@ class ZenBackdropPainter extends CustomPainter {
   /// The strongest opacity any mark of [kind] is painted with: text stays
   /// readable over it (the theme test checks body text against the
   /// background with a mark of the accent at this opacity on it).
-  static double maxAlpha(ZenBackdrop kind) => switch (kind) {
-    ZenBackdrop.rain => 0.34,
-    ZenBackdrop.grid => 0.30,
-    ZenBackdrop.scanlines => 0.10,
-    ZenBackdrop.aurora => 0.16,
-    ZenBackdrop.none => 0,
-  };
+  static double maxAlpha(ZenBackdrop kind) => ZenEffects.maxAlpha(kind);
+
+  /// The colours the marks of [kind] are painted in.
+  static List<Color> marks(ZenBackdrop kind, ZenColors colors) =>
+      ZenEffects.marks(kind, colors);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -225,14 +224,18 @@ class ZenBackdropPainter extends CustomPainter {
     switch (kind) {
       case ZenBackdrop.rain:
         _paintRain(canvas, size, t);
+      case ZenBackdrop.cipher:
+        _paintRain(canvas, size, t, dense: true);
       case ZenBackdrop.grid:
         _paintGrid(canvas, size, t);
+      case ZenBackdrop.lightcycle:
+        _paintGrid(canvas, size, t, trails: 4);
       case ZenBackdrop.scanlines:
         _paintScanlines(canvas, size, t);
       case ZenBackdrop.aurora:
         _paintAurora(canvas, size);
-      case ZenBackdrop.none:
-        break;
+      default:
+        ZenEffects.paint(kind, canvas, size, t, colors);
     }
   }
 
@@ -274,24 +277,27 @@ class ZenBackdropPainter extends CustomPainter {
     return (x ^ (x >> 15)) & 0x7fffffff;
   }
 
-  void _paintRain(Canvas canvas, Size size, double t) {
-    final int columns = (size.width / _pitchX).ceil();
+  /// The rain; [dense]: the hacker look's heavier version, columns close
+  /// together, longer trails and a glitch line now and then.
+  void _paintRain(Canvas canvas, Size size, double t, {bool dense = false}) {
+    final double pitchX = dense ? 11 : _pitchX;
+    final int columns = (size.width / pitchX).ceil();
     final int rows = (size.height / _pitchY).ceil() + 1;
     const int levels = 5;
     final List<Path> trail = List<Path>.generate(levels, (_) => Path());
     final Path heads = Path();
-    final double top = maxAlpha(ZenBackdrop.rain);
+    final double top = maxAlpha(dense ? ZenBackdrop.cipher : ZenBackdrop.rain);
     for (int c = 0; c < columns; c++) {
       final int h = _hash(c, 7);
       // Each column: its own speed (rows a second), trail and phase; some
       // columns rest now and then.
-      final double speed = 3 + (h % 70) / 10;
-      final int length = 6 + h % 13;
+      final double speed = (dense ? 5 : 3) + (h % 70) / 10;
+      final int length = dense ? 10 + h % 18 : 6 + h % 13;
       final double phase = (h % 997) / 13.0;
-      final double span = rows + length + (h % 9) * 2.0;
+      final double span = rows + length + (h % 9) * (dense ? 1.0 : 2.0);
       final double head = (t * speed + phase) % span;
       final int headRow = head.floor();
-      final double x = c * _pitchX + 3;
+      final double x = c * pitchX + 3;
       for (int k = 0; k < length; k++) {
         final int row = headRow - k;
         if (row < 0 || row >= rows) {
@@ -325,16 +331,26 @@ class ZenBackdropPainter extends CustomPainter {
       0.5,
     )!.withValues(alpha: top);
     canvas.drawPath(heads, paint);
+    if (dense && (t * 1.7) % 3 < 0.25) {
+      // A glitch line tearing across for a moment.
+      final double y = (_hash((t * 1.7 / 3).floor(), 3) % 1000) / 1000;
+      paint.color = colors.accent.withValues(alpha: top * 0.8);
+      canvas.drawRect(Rect.fromLTWH(0, y * size.height, size.width, 2), paint);
+    }
   }
 
   // --- Neon floor grid -----------------------------------------------------
 
-  void _paintGrid(Canvas canvas, Size size, double t) {
+  /// The floor grid; [trails] light trails race along it (one in the neon
+  /// grid look, a pack of them in the light-cycle look).
+  void _paintGrid(Canvas canvas, Size size, double t, {int trails = 1}) {
     final double w = size.width;
     final double h = size.height;
-    final double horizon = h * 0.62;
+    final double horizon = h * (trails > 1 ? 0.56 : 0.62);
     final double cx = w / 2;
-    final double top = maxAlpha(ZenBackdrop.grid);
+    final double top = maxAlpha(
+      trails > 1 ? ZenBackdrop.lightcycle : ZenBackdrop.grid,
+    );
     // The sky: a faint glow of the second colour along the horizon.
     final Rect sky = Rect.fromLTWH(0, horizon - h * 0.18, w, h * 0.18);
     canvas.drawRect(
@@ -392,36 +408,39 @@ class ZenBackdropPainter extends CustomPainter {
         ..drawLine(far, near, glow)
         ..drawLine(far, near, line);
     }
-    // A light trail racing along one lane towards the viewer.
-    final double run = (t * 0.35) % 1;
-    final double d0 = 12 * (1 - run) + 0.6;
-    const int lane = 3;
-    Offset onLane(double d) {
-      final double k = (1 / d).clamp(0.0, 1.0);
-      final double y = horizon + (h - horizon) * k;
-      final double x = cx + lane * w * (0.012 + (0.22 - 0.012) * k);
-      return Offset(x, y);
-    }
+    // Light trails racing along lanes towards the viewer.
+    for (int k = 0; k < trails; k++) {
+      final double run = (t * (0.35 + k * 0.11) + k * 0.37) % 1;
+      final double d0 = 12 * (1 - run) + 0.6;
+      final int lane = trails == 1 ? 3 : <int>[3, -2, 6, -5][k % 4];
+      final Color tone = k.isEven ? colors.accentSecondary : colors.accent;
+      Offset onLane(double d) {
+        final double q = (1 / d).clamp(0.0, 1.0);
+        final double y = horizon + (h - horizon) * q;
+        final double x = cx + lane * w * (0.012 + (0.22 - 0.012) * q);
+        return Offset(x, y);
+      }
 
-    final Offset a = onLane(d0 + 2.5);
-    final Offset b = onLane(d0);
-    canvas
-      ..drawLine(
-        a,
-        b,
-        Paint()
-          ..strokeWidth = 5
-          ..color = colors.accentSecondary.withValues(alpha: top * 0.4)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
-      )
-      ..drawLine(
-        a,
-        b,
-        Paint()
-          ..strokeWidth = 2
-          ..strokeCap = StrokeCap.round
-          ..color = colors.accentSecondary.withValues(alpha: top),
-      );
+      final Offset a = onLane(d0 + 2.5);
+      final Offset b = onLane(d0);
+      canvas
+        ..drawLine(
+          a,
+          b,
+          Paint()
+            ..strokeWidth = 5
+            ..color = tone.withValues(alpha: top * 0.4)
+            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+        )
+        ..drawLine(
+          a,
+          b,
+          Paint()
+            ..strokeWidth = 2
+            ..strokeCap = StrokeCap.round
+            ..color = tone.withValues(alpha: top),
+        );
+    }
   }
 
   // --- Scan lines ----------------------------------------------------------

@@ -169,7 +169,7 @@ class _IncomingCallOverlayState extends ConsumerState<_IncomingCallOverlay> {
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                       ),
-                      borderRadius: const BorderRadius.all(Radius.circular(32)),
+                      borderRadius: context.zenRadius(32),
                       border: Border.all(
                         color: Colors.white.withValues(alpha: 0.10),
                       ),
@@ -189,9 +189,7 @@ class _IncomingCallOverlayState extends ConsumerState<_IncomingCallOverlay> {
                           DecoratedBox(
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.10),
-                              borderRadius: const BorderRadius.all(
-                                Radius.circular(999),
-                              ),
+                              borderRadius: context.zenRadius(999),
                             ),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(

@@ -71,7 +71,7 @@ class ScreenShareReminderBanner extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: zen.danger.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: context.zenRadius(16),
         border: Border.all(color: zen.danger.withValues(alpha: 0.3)),
       ),
       child: Row(

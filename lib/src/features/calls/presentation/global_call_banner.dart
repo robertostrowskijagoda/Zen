@@ -41,7 +41,7 @@ class GlobalCallBanner extends StatelessWidget {
         color: incomingRinging
             ? zen.warning.withValues(alpha: 0.14)
             : zen.surfaceMuted,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: context.zenRadius(14),
       ),
       child: Padding(
         padding: const EdgeInsets.all(10),
@@ -59,7 +59,7 @@ class GlobalCallBanner extends StatelessWidget {
           tone: incomingRinging ? zen.warning : zen.accent,
           alpha: 0.1,
         ),
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: context.zenRadius(22),
         border: Border.all(
           color: incomingRinging
               ? zen.warning.withValues(alpha: 0.6)

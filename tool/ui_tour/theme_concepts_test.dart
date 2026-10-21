@@ -6,13 +6,14 @@
 //   flutter test --no-pub tool/ui_tour/theme_concepts_test.dart --update-goldens
 //
 // Shots: scratch/concepts/<palette>_<mode>/<screen>.png (outside the repo),
-// layout problems in scratch/concepts/<palette>_<mode>.txt. Dark-only
-// palettes (grid, rain, player, phosphor) have no _light shots. The
-// backdrops (rain, grid, scan lines, aurora) show as a still frame, as
-// with motion off. neon_dark also gets an animation strip: the
+// layout problems in scratch/concepts/<palette>_<mode>.txt. Every palette
+// is shot in both modes. The backdrops show as a still frame, as with
+// motion off. neon_dark also gets an animation strip: the
 // conversation opening, frames anim_00.png … anim_05.png at 0, 200, …
 // 1000 ms (for a GIF).
-// CONCEPTS_ONLY=neon_dark,rain_dark renders just those.
+// CONCEPTS_ONLY=neon_dark,rain_dark renders just those;
+// CONCEPTS_GROUP=wild renders one picker group (classic, wild, toned, cool,
+// elegant) — the wild themes with their backdrops in a still frame.
 import 'dart:async';
 import 'dart:io';
 
@@ -23,6 +24,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
+import 'package:zen/src/app/theme/zen_palettes.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
@@ -133,14 +135,15 @@ void main() {
       .split(',')
       .where((String s) => s.isNotEmpty)
       .toList();
+  final String group = Platform.environment['CONCEPTS_GROUP'] ?? '';
   for (final AppPalette palette in AppPalette.values) {
+    if (group.isNotEmpty && ZenPalettes.categoryOf(palette).name != group) {
+      continue;
+    }
     for (final Brightness brightness in Brightness.values) {
       final bool dark = brightness == Brightness.dark;
       final String config = '${palette.name}_${dark ? 'dark' : 'light'}';
       if (only.isNotEmpty && !only.contains(config)) {
-        continue;
-      }
-      if (palette.darkOnly && !dark) {
         continue;
       }
       testWidgets('concept $config', (WidgetTester tester) async {

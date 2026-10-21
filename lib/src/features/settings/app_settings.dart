@@ -189,8 +189,10 @@ enum AppAccentTheme {
 /// accent-driven default ([AppAccentTheme] picks its colour); the others
 /// are fixed palettes, each with its own component character (shapes,
 /// borders, surfaces, motion, sometimes a backdrop), grouped in the picker
-/// by `ZenThemeCategory`. Most have a light and a dark variant; the mode is
-/// chosen separately ([AppThemeMode]); [darkOnly] ones stay dark.
+/// by `ZenThemeCategory`. The mode is
+/// chosen separately ([AppThemeMode]): every palette has a light and a dark
+/// variant. The last group ("Odjechane") are the wild looks with strong
+/// effects.
 enum AppPalette {
   classic,
   ink,
@@ -205,7 +207,20 @@ enum AppPalette {
   phosphor,
   dusk,
   onyx,
-  pearl;
+  pearl,
+  cipher,
+  lightcycle,
+  fairy,
+  synthwave,
+  neonCity,
+  arcade,
+  space,
+  vapor,
+  deepSea,
+  comic,
+  steam,
+  holo,
+  volcano;
 
   String get label => switch (this) {
     AppPalette.classic => t('Klasyczny'),
@@ -222,6 +237,19 @@ enum AppPalette {
     AppPalette.dusk => t('Zmierzch'),
     AppPalette.onyx => t('Onyks'),
     AppPalette.pearl => t('Perła'),
+    AppPalette.cipher => t('Zielony szyfr'),
+    AppPalette.lightcycle => t('Świetlny tor'),
+    AppPalette.fairy => t('Zaczarowana noc'),
+    AppPalette.synthwave => t('Retrozachód'),
+    AppPalette.neonCity => t('Neonowe miasto'),
+    AppPalette.arcade => t('Ośmiobitowiec'),
+    AppPalette.space => t('Głęboki kosmos'),
+    AppPalette.vapor => t('Pastelowa fala'),
+    AppPalette.deepSea => t('Głębina'),
+    AppPalette.comic => t('Komiks'),
+    AppPalette.steam => t('Mosiądz i para'),
+    AppPalette.holo => t('Hologram'),
+    AppPalette.volcano => t('Wulkan'),
   };
 
   String get tagline => switch (this) {
@@ -239,15 +267,21 @@ enum AppPalette {
     AppPalette.dusk => t('indygo / fiolet'),
     AppPalette.onyx => t('czerń / złoto, podwójne linie'),
     AppPalette.pearl => t('perła / róż, matowe szkło'),
-  };
-
-  /// No light variant: the palette stays dark in the light mode too.
-  bool get darkOnly => switch (this) {
-    AppPalette.grid ||
-    AppPalette.rain ||
-    AppPalette.player ||
-    AppPalette.phosphor => true,
-    _ => false,
+    AppPalette.cipher => t('gęsty deszcz znaków, terminal, zakłócenia'),
+    AppPalette.lightcycle => t(
+      'cyjan i pomarańcz, ścięte rogi, świetlne smugi',
+    ),
+    AppPalette.fairy => t('nocne niebo, gwiazdy, złote ornamenty'),
+    AppPalette.synthwave => t('pasiaste słońce, fioletowa siatka, chrom'),
+    AppPalette.neonCity => t('magenta i żółć, deszcz nad miastem, zakłócenia'),
+    AppPalette.arcade => t('piksele, twarde cienie, migające gwiazdki'),
+    AppPalette.space => t('gwiazdy, mgławice, szkło kokpitu'),
+    AppPalette.vapor => t('pastele, stare okienka, słońce nad siatką'),
+    AppPalette.deepSea => t('ciemna toń, świecące drobiny, bąble'),
+    AppPalette.comic => t('gruby tusz, raster, twarde cienie'),
+    AppPalette.steam => t('nity, sepia, obracające się zębatki'),
+    AppPalette.holo => t('tęczowy połysk, matowe szkło'),
+    AppPalette.volcano => t('żar, pęknięcia, unoszące się iskry'),
   };
 }
 
@@ -286,6 +320,7 @@ final class AppSettings {
     this.accentTheme = defaultAccentTheme,
     this.palette = defaultPalette,
     this.gifApiKey = '',
+    this.gifSearch = true,
     this.autoDownloadMedia = true,
     this.mediaOnlyOnWifi = false,
     this.hideNotificationContent = true,
@@ -338,6 +373,11 @@ final class AppSettings {
   final String gifApiKey;
 
   bool get usesOwnGifKey => gifApiKey.isNotEmpty;
+
+  /// GIF search in the chats (the GIF button). It is the one feature that
+  /// talks to an outside service (klipy.com); turned off, nothing is ever
+  /// sent there and the button is gone. On by default.
+  final bool gifSearch;
 
   /// Photos and videos in posts download on their own (default: yes).
   final bool autoDownloadMedia;
@@ -460,6 +500,7 @@ final class AppSettings {
     AppAccentTheme? accentTheme,
     AppPalette? palette,
     String? gifApiKey,
+    bool? gifSearch,
     bool? autoDownloadMedia,
     bool? mediaOnlyOnWifi,
     bool? hideNotificationContent,
@@ -495,6 +536,7 @@ final class AppSettings {
       accentTheme: accentTheme ?? this.accentTheme,
       palette: palette ?? this.palette,
       gifApiKey: normalizeGifApiKey(gifApiKey ?? this.gifApiKey),
+      gifSearch: gifSearch ?? this.gifSearch,
       autoDownloadMedia: autoDownloadMedia ?? this.autoDownloadMedia,
       mediaOnlyOnWifi: mediaOnlyOnWifi ?? this.mediaOnlyOnWifi,
       hideNotificationContent:
@@ -530,6 +572,7 @@ final class AppSettings {
     'accentTheme': accentTheme.name,
     'palette': palette.name,
     'gifApiKey': gifApiKey,
+    'gifSearch': gifSearch,
     'autoDownloadMedia': autoDownloadMedia,
     'mediaOnlyOnWifi': mediaOnlyOnWifi,
     'hideNotificationContent': hideNotificationContent,
@@ -576,6 +619,7 @@ final class AppSettings {
       accentTheme: byName(AppAccentTheme.values, 'accentTheme'),
       palette: byName(AppPalette.values, 'palette'),
       gifApiKey: pick<String>('gifApiKey'),
+      gifSearch: pick<bool>('gifSearch'),
       autoDownloadMedia: pick<bool>('autoDownloadMedia'),
       mediaOnlyOnWifi: pick<bool>('mediaOnlyOnWifi'),
       hideNotificationContent: pick<bool>('hideNotificationContent'),

@@ -136,7 +136,7 @@ class _FloatingCallChipState extends ConsumerState<_FloatingCallChip> {
         offset: const Offset(0, -14),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            borderRadius: const BorderRadius.all(Radius.circular(999)),
+            borderRadius: context.zenRadius(999),
             boxShadow: <BoxShadow>[
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.28),

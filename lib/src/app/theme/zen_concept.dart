@@ -419,8 +419,10 @@ class ZenBreathingGlow extends StatefulWidget {
   State<ZenBreathingGlow> createState() => _ZenBreathingGlowState();
 }
 
+// Not the single-ticker mixin: the controller is dropped when the look
+// stops breathing and made again when it breathes once more.
 class _ZenBreathingGlowState extends State<ZenBreathingGlow>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   AnimationController? _breath;
 
   @override
@@ -522,7 +524,7 @@ class ZenAmbientField extends StatefulWidget {
 }
 
 class _ZenAmbientFieldState extends State<ZenAmbientField>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   /// One loop of the field: every spark's path repeats exactly in it.
   static const Duration _loop = Duration(seconds: 60);
 
@@ -770,7 +772,7 @@ class ZenSoftPulse extends StatefulWidget {
 }
 
 class _ZenSoftPulseState extends State<ZenSoftPulse>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   AnimationController? _breath;
 
   @override
@@ -830,6 +832,199 @@ class _ZenSoftPulseState extends State<ZenSoftPulse>
           ],
         ),
         child: widget.child,
+      ),
+    );
+  }
+}
+
+/// Glitch page transition (the hacker and city looks): for the first part
+/// of the push the page flickers in a few hard steps, shifted sideways with
+/// bright slices and scan lines across it, then settles. Reduced motion
+/// shows it at once.
+class ZenGlitchPageTransitionsBuilder extends PageTransitionsBuilder {
+  const ZenGlitchPageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+      return child;
+    }
+    final ZenColors zen = ZenColors.of(context);
+    return AnimatedBuilder(
+      animation: animation,
+      child: child,
+      builder: (BuildContext context, Widget? page) {
+        final double v = animation.value;
+        final bool done =
+            v >= 0.5 || animation.status == AnimationStatus.reverse;
+        // Six hard steps: jumps sideways and flicker.
+        final int step = (v / 0.5 * 6).floor().clamp(0, 5);
+        const List<double> shift = <double>[-14, 9, -5, 12, -3, 0];
+        const List<double> light = <double>[0.2, 0.7, 0.35, 0.9, 0.6, 1];
+        return Stack(
+          fit: StackFit.passthrough,
+          children: <Widget>[
+            Opacity(
+              opacity: done ? 1 : light[step],
+              child: Transform.translate(
+                offset: Offset(done ? 0 : shift[step], 0),
+                child: page,
+              ),
+            ),
+            if (!done)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: CustomPaint(
+                    painter: _GlitchSlicesPainter(
+                      seed: step,
+                      color: zen.accent,
+                      partner: zen.accentSecondary,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _GlitchSlicesPainter extends CustomPainter {
+  const _GlitchSlicesPainter({
+    required this.seed,
+    required this.color,
+    required this.partner,
+  });
+
+  final int seed;
+  final Color color;
+  final Color partner;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final math.Random r = math.Random(seed * 31 + 7);
+    final Paint p = Paint();
+    // Scan lines over the whole page.
+    p.color = color.withValues(alpha: 0.10);
+    for (double y = 0; y < size.height; y += 4) {
+      canvas.drawRect(Rect.fromLTWH(0, y, size.width, 1), p);
+    }
+    // A few bright slices, shifted.
+    for (int i = 0; i < 4; i++) {
+      final double y = r.nextDouble() * size.height;
+      final double h = 3 + r.nextDouble() * 14;
+      final double dx = (r.nextDouble() - 0.5) * 40;
+      p.color = (i.isEven ? color : partner).withValues(alpha: 0.28);
+      canvas.drawRect(Rect.fromLTWH(dx, y, size.width, h), p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_GlitchSlicesPainter oldDelegate) =>
+      oldDelegate.seed != seed ||
+      oldDelegate.color != color ||
+      oldDelegate.partner != partner;
+}
+
+/// Light-trail page transition: the page slides in from the side while a
+/// bright streak of the accent races across it ahead of it.
+class ZenStreakPageTransitionsBuilder extends PageTransitionsBuilder {
+  const ZenStreakPageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+      return child;
+    }
+    final ZenColors zen = ZenColors.of(context);
+    final Animation<double> eased = animation.drive(
+      CurveTween(curve: Curves.easeOutExpo),
+    );
+    return AnimatedBuilder(
+      animation: animation,
+      child: child,
+      builder: (BuildContext context, Widget? page) {
+        final double v = eased.value;
+        final bool streak =
+            animation.value < 0.7 &&
+            animation.status != AnimationStatus.reverse;
+        return Stack(
+          fit: StackFit.passthrough,
+          children: <Widget>[
+            FractionalTranslation(
+              translation: Offset((1 - v) * 0.12, 0),
+              child: Opacity(opacity: v.clamp(0.0, 1.0), child: page),
+            ),
+            if (streak)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Align(
+                    alignment: Alignment(-1.4 + 2.8 * v, -0.2),
+                    child: FractionallySizedBox(
+                      widthFactor: 0.6,
+                      child: Container(
+                        height: 3,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: <Color>[
+                              zen.accentSecondary.withValues(alpha: 0),
+                              zen.accentSecondary,
+                              zen.accent,
+                            ],
+                          ),
+                          boxShadow: zen.neonGlow(zen.accent, radius: 12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Bubble page transition (the deep-sea look): the page swells in softly
+/// from a little smaller, with a light overshoot.
+class ZenBubblePageTransitionsBuilder extends PageTransitionsBuilder {
+  const ZenBubblePageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+      return child;
+    }
+    return FadeTransition(
+      opacity: animation.drive(CurveTween(curve: Curves.easeOut)),
+      child: ScaleTransition(
+        scale: animation.drive(
+          Tween<double>(
+            begin: 0.92,
+            end: 1,
+          ).chain(CurveTween(curve: Curves.easeOutBack)),
+        ),
+        child: child,
       ),
     );
   }

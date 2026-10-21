@@ -615,7 +615,12 @@ abstract final class ZenTheme {
   /// progress, menus) takes its shape, outline and lift from the look.
   static ThemeData build(ZenColors colors, ZenLook look) {
     final bool compactUi = !kIsWeb;
-    final bool bevel = look.borders == ZenBorderStyle.bevel;
+    final bool bevel = look.metal;
+    // Drawn looks (comics, pixel games): thick ink lines, hard shadows.
+    final bool inked =
+        look.borders == ZenBorderStyle.ink ||
+        look.borders == ZenBorderStyle.pixel;
+    final bool hard = look.elevation == ZenElevation.hard;
     final bool chrome = look.buttonFill == ZenButtonFill.chrome;
     final bool lineButtons = look.buttonFill == ZenButtonFill.line;
     final bool gradientButtons =
@@ -661,6 +666,9 @@ abstract final class ZenTheme {
       ZenPageMotion.soft => const ZenSoftPageTransitionsBuilder(),
       ZenPageMotion.neonWipe => const ZenNeonWipeTransitionsBuilder(),
       ZenPageMotion.stepped => const ZenSteppedPageTransitionsBuilder(),
+      ZenPageMotion.glitch => const ZenGlitchPageTransitionsBuilder(),
+      ZenPageMotion.streak => const ZenStreakPageTransitionsBuilder(),
+      ZenPageMotion.bubble => const ZenBubblePageTransitionsBuilder(),
     };
     if (pages != null && backdrop) {
       // The pages are see-through over the backdrop: the page below fades
@@ -787,16 +795,22 @@ abstract final class ZenTheme {
         textStyle: buttonText,
         elevation: 0,
         shape: buttonShape(),
-        backgroundBuilder: gradientButtons || lit
+        backgroundBuilder: gradientButtons || lit || hard
             ? (BuildContext context, Set<WidgetState> states, Widget? child) {
                 final bool off = states.contains(WidgetState.disabled);
+                final bool pressed = states.contains(WidgetState.pressed);
                 return DecoratedBox(
                   decoration: ShapeDecoration(
-                    shape: buttonShape(states.contains(WidgetState.pressed)),
+                    shape: buttonShape(pressed),
                     gradient: gradientButtons && !off
                         ? colors.accentGradient
                         : null,
-                    shadows: lit && !off
+                    // A hard shadow that the button presses into.
+                    shadows: off
+                        ? null
+                        : hard
+                        ? (pressed ? null : look.lift(colors))
+                        : lit
                         ? colors.neonGlow(colors.accent, radius: 16)
                         : null,
                   ),
@@ -805,6 +819,13 @@ abstract final class ZenTheme {
               }
             : null,
       ).copyWith(shape: buttonShapes);
+      if (inked) {
+        return style.copyWith(
+          side: WidgetStatePropertyAll<BorderSide>(
+            BorderSide(color: colors.outlineStrong, width: 2.5),
+          ),
+        );
+      }
       return lineButtons
           ? style.copyWith(
               side: WidgetStateProperty.resolveWith<BorderSide?>(
@@ -821,8 +842,14 @@ abstract final class ZenTheme {
       ZenChipStyle.outline =>
         lit ? colors.accent.withValues(alpha: 0.55) : colors.outlineStrong,
       ZenChipStyle.tag => colors.outline,
-      ZenChipStyle.pill ||
-      ZenChipStyle.bevel => lit ? colors.outlineStrong : colors.outlineSoft,
+      ZenChipStyle.cut => colors.accent.withValues(alpha: 0.6),
+      ZenChipStyle.pixel => colors.outlineStrong,
+      ZenChipStyle.pill || ZenChipStyle.bevel =>
+        inked
+            ? colors.outlineStrong
+            : lit
+            ? colors.outlineStrong
+            : colors.outlineSoft,
     };
 
     final ShapeBorder navIndicator = switch (look.nav) {
@@ -948,8 +975,8 @@ abstract final class ZenTheme {
           color: colors.accent,
           fontWeight: FontWeight.w600,
         ),
-        border: field(fieldLine),
-        enabledBorder: field(fieldLine),
+        border: field(fieldLine, width: inked ? 2 : 1),
+        enabledBorder: field(fieldLine, width: inked ? 2 : 1),
         disabledBorder: field(colors.outlineSoft),
         focusedBorder: lit && !underline
             ? ZenGlowInputBorder(
@@ -977,14 +1004,16 @@ abstract final class ZenTheme {
           minimumSize: buttonMinSize,
           padding: buttonPadding,
           textStyle: buttonText,
-          side: BorderSide(
-            color: lit
-                ? colors.accent.withValues(alpha: 0.6)
-                : look.borders == ZenBorderStyle.doubleLine
-                ? colors.outlineStrong
-                : colors.outline,
-            width: lit ? 1 : 1.2,
-          ),
+          side: inked
+              ? BorderSide(color: colors.outlineStrong, width: 2.5)
+              : BorderSide(
+                  color: lit
+                      ? colors.accent.withValues(alpha: 0.6)
+                      : look.borders == ZenBorderStyle.doubleLine
+                      ? colors.outlineStrong
+                      : colors.outline,
+                  width: lit ? 1 : 1.2,
+                ),
           shape: buttonShape(),
         ).copyWith(shape: buttonShapes),
       ),
@@ -1231,10 +1260,10 @@ abstract final class ZenTheme {
           : FloatingActionButtonThemeData(
               backgroundColor: colors.accent,
               foregroundColor: colors.onAccent,
-              elevation: look.elevation == ZenElevation.flat ? 0 : 2,
-              focusElevation: look.elevation == ZenElevation.flat ? 0 : 2,
-              hoverElevation: look.elevation == ZenElevation.flat ? 1 : 3,
-              highlightElevation: look.elevation == ZenElevation.flat ? 0 : 3,
+              elevation: look.elevation == ZenElevation.shadow ? 2 : 0,
+              focusElevation: look.elevation == ZenElevation.shadow ? 2 : 0,
+              hoverElevation: look.elevation == ZenElevation.shadow ? 3 : 1,
+              highlightElevation: look.elevation == ZenElevation.shadow ? 3 : 0,
               extendedTextStyle: TextStyle(
                 fontFamily: colors.typeface.sans,
                 fontWeight: FontWeight.w700,

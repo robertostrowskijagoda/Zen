@@ -471,7 +471,7 @@ class _SurfaceTopBar extends StatelessWidget {
                 minimumSize: const Size(0, 40),
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: context.zenRadius(999),
                   side: BorderSide(color: zen.outlineSoft),
                 ),
               ),
@@ -684,7 +684,7 @@ class _FloatingCallDock extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: zen.surface.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(32),
+        borderRadius: context.zenRadius(32),
         border: Border.all(color: zen.outlineSoft),
         boxShadow: <BoxShadow>[
           BoxShadow(
@@ -823,7 +823,7 @@ class _CallMediaStageState extends State<_CallMediaStage> {
                     }
                   : null,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: context.zenRadius(20),
                 child: SizedBox(
                   width: 104,
                   height: 148,
@@ -872,7 +872,7 @@ class _ScreenShareStage extends StatelessWidget {
     Widget thumb(RTCVideoRenderer renderer, {required bool mirror}) => Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: context.zenRadius(16),
         child: SizedBox(
           width: 96,
           height: 128,
@@ -989,7 +989,7 @@ class _ScreenShareStrip extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: zen.danger.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: context.zenRadius(16),
                 border: Border.all(color: zen.danger.withValues(alpha: 0.3)),
               ),
               child: Row(
@@ -1038,7 +1038,7 @@ class _ScreenShareStrip extends StatelessWidget {
                     ),
                     decoration: BoxDecoration(
                       color: zen.accent.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: context.zenRadius(16),
                     ),
                     child: Row(
                       children: <Widget>[

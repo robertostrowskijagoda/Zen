@@ -94,10 +94,10 @@ void main() {
             brightness,
           );
           final String where = '$palette / $brightness';
-          // A dark-only palette stays dark in the light mode.
+          // Every palette has a light and a dark variant.
           expect(
             ThemeData.estimateBrightnessForColor(colors.background),
-            palette.darkOnly ? Brightness.dark : brightness,
+            brightness,
             reason: '$where background',
           );
           expect(
@@ -145,18 +145,11 @@ void main() {
           // text still leaves body text readable.
           if (look.backdrop != ZenBackdrop.none) {
             final double a = ZenBackdropPainter.maxAlpha(look.backdrop);
-            final List<Color> marks = switch (look.backdrop) {
-              ZenBackdrop.rain => <Color>[
-                colors.accent,
-                Color.lerp(colors.accent, colors.textPrimary, 0.5)!,
-              ],
-              ZenBackdrop.grid => <Color>[
-                colors.accent,
-                colors.accentSecondary,
-              ],
-              ZenBackdrop.scanlines => <Color>[colors.accent],
-              ZenBackdrop.aurora || ZenBackdrop.none => colors.accentTrio,
-            };
+            final List<Color> marks = ZenBackdropPainter.marks(
+              look.backdrop,
+              colors,
+            );
+            expect(marks, isNotEmpty, reason: '$where marks');
             for (final Color mark in marks) {
               final Color under = Color.alphaBlend(
                 mark.withValues(alpha: a),

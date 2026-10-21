@@ -90,16 +90,190 @@ class ZenSectionBar extends StatelessWidget implements PreferredSizeWidget {
       key: const Key('section-bar'),
       actions: actions,
       bottom: bottom,
-      titleSpacing: look.header == ZenHeaderStyle.spectrum ? 12 : 20,
+      titleSpacing:
+          look.header == ZenHeaderStyle.spectrum ||
+              look.header == ZenHeaderStyle.lcd
+          ? 12
+          : 20,
       toolbarHeight: kToolbarHeight + 8,
       title: switch (look.header) {
         ZenHeaderStyle.bar => _bar(zen, look),
         ZenHeaderStyle.neonTube => _neonTube(zen),
-        ZenHeaderStyle.spectrum => _spectrum(zen),
+        ZenHeaderStyle.spectrum => _spectrum(zen, strip: true),
+        ZenHeaderStyle.lcd => _spectrum(zen, strip: false),
         ZenHeaderStyle.prompt => _prompt(zen),
         ZenHeaderStyle.brackets => _brackets(zen),
         ZenHeaderStyle.underline => _underline(zen),
+        ZenHeaderStyle.chrome => _chrome(zen),
+        ZenHeaderStyle.glitch => _glitch(zen),
+        ZenHeaderStyle.pixel => _pixel(zen),
+        ZenHeaderStyle.ornament => _ornament(zen),
+        ZenHeaderStyle.banner => _banner(zen),
       },
+    );
+  }
+
+  /// Wide-spaced capitals in a chrome gradient (sunset, vapour, hologram).
+  Widget _chrome(ZenColors zen) {
+    return ShaderMask(
+      blendMode: BlendMode.srcIn,
+      shaderCallback: (Rect b) => LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: <Color>[
+          zen.textPrimary,
+          zen.accentTertiary,
+          zen.accent,
+          zen.accentSecondary,
+        ],
+        stops: const <double>[0, 0.45, 0.55, 1],
+      ).createShader(b),
+      child: _titleText(
+        zen.display(
+          color: zen.textPrimary,
+          size: 23,
+          weight: FontWeight.w700,
+          letterSpacing: 3,
+        ),
+        upper: true,
+      ),
+    );
+  }
+
+  /// The title with two shifted colour ghosts (the city, the hacker).
+  Widget _glitch(ZenColors zen) {
+    return _titleText(
+      zen
+          .display(
+            color: zen.textPrimary,
+            size: 24,
+            weight: FontWeight.w700,
+            letterSpacing: 1.6,
+          )
+          .copyWith(
+            shadows: <Shadow>[
+              Shadow(
+                color: zen.accent.withValues(alpha: 0.85),
+                offset: const Offset(-2.5, 0),
+              ),
+              Shadow(
+                color: zen.accentTertiary.withValues(alpha: 0.85),
+                offset: const Offset(2.5, 0.5),
+              ),
+            ],
+          ),
+      upper: true,
+    );
+  }
+
+  /// Heavy capitals with a hard pixel shadow and a pixel block (arcade).
+  Widget _pixel(ZenColors zen) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: zen.accent,
+            boxShadow: <BoxShadow>[
+              BoxShadow(color: zen.accentSecondary, offset: const Offset(3, 3)),
+            ],
+          ),
+        ),
+        const SizedBox(width: 14),
+        Flexible(
+          child: _titleText(
+            zen
+                .display(
+                  color: zen.textPrimary,
+                  size: 23,
+                  weight: FontWeight.w800,
+                  letterSpacing: 2,
+                )
+                .copyWith(
+                  shadows: <Shadow>[
+                    Shadow(
+                      color: zen.accentSecondary,
+                      offset: const Offset(3, 3),
+                    ),
+                  ],
+                ),
+            upper: true,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// A glowing title between two little diamonds (fairy tale, brass).
+  Widget _ornament(ZenColors zen) {
+    Widget diamond() => Transform.rotate(
+      angle: 0.785398,
+      child: Container(
+        width: 7,
+        height: 7,
+        decoration: BoxDecoration(
+          color: zen.accent,
+          boxShadow: zen.neonGlow(zen.accent, radius: 8),
+        ),
+      ),
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        diamond(),
+        const SizedBox(width: 12),
+        Flexible(
+          child: _titleText(
+            zen
+                .display(
+                  color: zen.textPrimary,
+                  size: 25,
+                  weight: FontWeight.w600,
+                  letterSpacing: 1,
+                )
+                .copyWith(
+                  shadows: zen.glow > 0
+                      ? <Shadow>[
+                          Shadow(
+                            color: zen.accent.withValues(alpha: 0.55),
+                            blurRadius: 12,
+                          ),
+                        ]
+                      : null,
+                ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        diamond(),
+      ],
+    );
+  }
+
+  /// Capitals on a tilted, ink-framed banner (comics).
+  Widget _banner(ZenColors zen) {
+    return Transform.rotate(
+      angle: -0.035,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 3, 12, 4),
+        decoration: BoxDecoration(
+          color: zen.accent,
+          border: Border.all(color: zen.outlineStrong, width: 2.5),
+          boxShadow: <BoxShadow>[
+            BoxShadow(color: zen.outlineStrong, offset: const Offset(4, 4)),
+          ],
+        ),
+        child: _titleText(
+          zen.display(
+            color: zen.onAccent,
+            size: 21,
+            weight: FontWeight.w800,
+            letterSpacing: 1.2,
+          ),
+          upper: true,
+        ),
+      ),
     );
   }
 
@@ -182,8 +356,8 @@ class ZenSectionBar extends StatelessWidget implements PreferredSizeWidget {
     );
   }
 
-  Widget _titleText(TextStyle style) => Text(
-    title,
+  Widget _titleText(TextStyle style, {bool upper = false}) => Text(
+    upper ? title.toUpperCase() : title,
     key: const Key('section-title'),
     maxLines: 1,
     overflow: TextOverflow.ellipsis,
@@ -278,8 +452,9 @@ class ZenSectionBar extends StatelessWidget implements PreferredSizeWidget {
     );
   }
 
-  /// Retro: the title on an LCD strip, a spectrum analyzer beside it.
-  Widget _spectrum(ZenColors zen) {
+  /// Retro: the title on an LCD strip ([strip]: a spectrum analyzer
+  /// beside it).
+  Widget _spectrum(ZenColors zen, {required bool strip}) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
@@ -310,15 +485,17 @@ class ZenSectionBar extends StatelessWidget implements PreferredSizeWidget {
             ),
           ),
         ),
-        const SizedBox(width: 10),
-        Container(
-          padding: const EdgeInsets.all(4),
-          decoration: ShapeDecoration(
-            color: zen.surfaceSunk,
-            shape: ZenBevelBorder.of(zen, sunken: true),
+        if (strip) ...<Widget>[
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: ShapeDecoration(
+              color: zen.surfaceSunk,
+              shape: ZenBevelBorder.of(zen, sunken: true),
+            ),
+            child: const ZenSpectrumStrip(),
           ),
-          child: const ZenSpectrumStrip(),
-        ),
+        ],
       ],
     );
   }

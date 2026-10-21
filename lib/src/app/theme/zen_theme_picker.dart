@@ -178,16 +178,6 @@ class ZenThemeCard extends StatelessWidget {
                           ],
                         ),
                       ),
-                      if (palette.darkOnly)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 4, top: 1),
-                          child: Icon(
-                            Icons.dark_mode_rounded,
-                            size: 16,
-                            color: zen.textMuted,
-                            semanticLabel: t('tylko ciemny'),
-                          ),
-                        ),
                       if (selected)
                         Padding(
                           padding: const EdgeInsets.only(left: 4),
@@ -425,63 +415,110 @@ class _MiniHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final TextStyle title = zen.display(
-      color: look.header == ZenHeaderStyle.spectrum
+    final ZenHeaderStyle h = look.header;
+    final bool upper =
+        h == ZenHeaderStyle.chrome ||
+        h == ZenHeaderStyle.glitch ||
+        h == ZenHeaderStyle.pixel ||
+        h == ZenHeaderStyle.banner;
+    final bool lcd = h == ZenHeaderStyle.spectrum || h == ZenHeaderStyle.lcd;
+    TextStyle style = zen.display(
+      color: h == ZenHeaderStyle.banner
+          ? zen.onAccent
+          : lcd
           ? zen.accent
           : zen.textPrimary,
-      size: 14,
-      weight: FontWeight.w600,
+      size: upper ? 12 : 14,
+      weight: upper ? FontWeight.w800 : FontWeight.w600,
+      letterSpacing: upper ? 1.5 : 0,
     );
-    final List<Shadow>? glow = look.lit
-        ? <Shadow>[
-            Shadow(color: zen.accent.withValues(alpha: 0.7), blurRadius: 6),
-          ]
-        : null;
-    final Widget text = Text(
-      'Zen',
-      maxLines: 1,
-      style: title.copyWith(shadows: glow),
-    );
-    final Widget mark = switch (look.header) {
-      ZenHeaderStyle.bar || ZenHeaderStyle.neonTube => Container(
-        width: 3,
-        height: 13,
-        margin: const EdgeInsets.only(right: 6),
-        decoration: BoxDecoration(
-          color: zen.accent,
-          borderRadius: look.br(2),
-          boxShadow: zen.neonGlow(zen.accent, radius: 6),
-        ),
+    style = switch (h) {
+      ZenHeaderStyle.glitch => style.copyWith(
+        shadows: <Shadow>[
+          Shadow(color: zen.accent, offset: const Offset(-1.5, 0)),
+          Shadow(color: zen.accentTertiary, offset: const Offset(1.5, 0)),
+        ],
       ),
-      ZenHeaderStyle.prompt => Padding(
-        padding: const EdgeInsets.only(right: 5),
-        child: Text('>', style: title.copyWith(color: zen.accent)),
+      ZenHeaderStyle.pixel => style.copyWith(
+        shadows: <Shadow>[
+          Shadow(color: zen.accentSecondary, offset: const Offset(2, 2)),
+        ],
       ),
-      ZenHeaderStyle.spectrum => Container(
-        width: 14,
-        height: 12,
-        margin: const EdgeInsets.only(right: 6),
-        decoration: ShapeDecoration(
-          color: zen.surfaceSunk,
-          shape: ZenBevelBorder.of(zen, sunken: true),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: <Widget>[
-            for (final double h in <double>[6, 9, 4])
-              Container(width: 2, height: h, color: zen.accent),
-          ],
-        ),
+      ZenHeaderStyle.ornament ||
+      ZenHeaderStyle.neonTube ||
+      ZenHeaderStyle.brackets => style.copyWith(
+        shadows: zen.glow > 0
+            ? <Shadow>[
+                Shadow(color: zen.accent.withValues(alpha: 0.7), blurRadius: 6),
+              ]
+            : null,
       ),
-      ZenHeaderStyle.brackets ||
-      ZenHeaderStyle.underline => const SizedBox.shrink(),
+      _ => style,
     };
-    Widget header = Row(children: <Widget>[mark, text]);
-    if (look.header == ZenHeaderStyle.brackets) {
-      header = Row(
-        children: <Widget>[
-          Container(
+    Widget text = Text(upper ? 'ZEN' : 'Zen', maxLines: 1, style: style);
+    if (h == ZenHeaderStyle.chrome) {
+      text = ShaderMask(
+        blendMode: BlendMode.srcIn,
+        shaderCallback: (Rect b) => LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: <Color>[zen.textPrimary, zen.accent, zen.accentSecondary],
+        ).createShader(b),
+        child: text,
+      );
+    }
+    Widget diamond() => Transform.rotate(
+      angle: 0.785398,
+      child: Container(width: 5, height: 5, color: zen.accent),
+    );
+    return Row(
+      children: <Widget>[
+        switch (h) {
+          ZenHeaderStyle.bar || ZenHeaderStyle.neonTube => Container(
+            width: 3,
+            height: 13,
+            margin: const EdgeInsets.only(right: 6),
+            decoration: BoxDecoration(
+              color: zen.accent,
+              borderRadius: look.br(2),
+              boxShadow: zen.neonGlow(zen.accent, radius: 6),
+            ),
+          ),
+          ZenHeaderStyle.prompt => Padding(
+            padding: const EdgeInsets.only(right: 5),
+            child: Text('>', style: style.copyWith(color: zen.accent)),
+          ),
+          ZenHeaderStyle.pixel => Container(
+            width: 7,
+            height: 7,
+            margin: const EdgeInsets.only(right: 6),
+            color: zen.accent,
+          ),
+          ZenHeaderStyle.ornament => Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: diamond(),
+          ),
+          _ => const SizedBox.shrink(),
+        },
+        switch (h) {
+          ZenHeaderStyle.banner => Transform.rotate(
+            angle: -0.04,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: zen.accent,
+                border: Border.all(color: zen.outlineStrong, width: 1.5),
+                boxShadow: <BoxShadow>[
+                  BoxShadow(
+                    color: zen.outlineStrong,
+                    offset: const Offset(2, 2),
+                  ),
+                ],
+              ),
+              child: text,
+            ),
+          ),
+          ZenHeaderStyle.brackets => Container(
             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
             decoration: BoxDecoration(
               border: Border.all(color: zen.accent.withValues(alpha: 0.8)),
@@ -489,35 +526,38 @@ class _MiniHeader extends StatelessWidget {
             ),
             child: text,
           ),
-        ],
-      );
-    } else if (look.header == ZenHeaderStyle.underline) {
-      header = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          text,
-          Container(
-            margin: const EdgeInsets.only(top: 2),
-            width: 16,
-            height: 1,
-            color: zen.accent,
+          ZenHeaderStyle.spectrum || ZenHeaderStyle.lcd => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: ShapeDecoration(
+              color: zen.surfaceSunk,
+              shape: ZenBevelBorder.of(zen, sunken: true),
+            ),
+            child: text,
           ),
-        ],
-      );
-    } else if (look.header == ZenHeaderStyle.prompt) {
-      header = Row(
-        children: <Widget>[
-          mark,
-          text,
+          ZenHeaderStyle.underline => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              text,
+              Container(
+                margin: const EdgeInsets.only(top: 2),
+                width: 16,
+                height: 1,
+                color: zen.accent,
+              ),
+            ],
+          ),
+          _ => text,
+        },
+        if (h == ZenHeaderStyle.prompt)
           Container(
             margin: const EdgeInsets.only(left: 3),
             width: 6,
             height: 12,
             color: zen.accent,
           ),
-        ],
-      );
-    }
-    return header;
+        if (h == ZenHeaderStyle.ornament)
+          Padding(padding: const EdgeInsets.only(left: 6), child: diamond()),
+      ],
+    );
   }
 }

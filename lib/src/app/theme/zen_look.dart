@@ -41,6 +41,31 @@ enum ZenBorderStyle {
 
   /// A bevelled chrome frame.
   bevel,
+
+  /// Chamfered (cut) corners and a lit line.
+  cut,
+
+  /// Cut corners, a lit line and solder pads at the corners, like a
+  /// circuit board.
+  circuit,
+
+  /// A stepped pixel frame, thick like an old game.
+  pixel,
+
+  /// A thick dark ink line, like a drawn comic panel.
+  ink,
+
+  /// A fine double gold line with little ornaments at the corners.
+  filigree,
+
+  /// A bevelled metal plate with a rivet in each corner.
+  rivets,
+
+  /// An old desktop window: an outline and a colour bar along the top.
+  window,
+
+  /// A thin line shimmering in all colours (iridescent).
+  sheen,
 }
 
 /// What lifts raised things (the main button, menus, highlighted cards).
@@ -53,6 +78,9 @@ enum ZenElevation {
 
   /// A glow of the accent instead of a shadow.
   glow,
+
+  /// A hard, unblurred offset shadow (games, comics).
+  hard,
 }
 
 /// How rows of a list are separated.
@@ -89,6 +117,12 @@ enum ZenButtonShape {
 
   /// Chrome keys that press in.
   bevel,
+
+  /// Chamfered (cut) corners.
+  cut,
+
+  /// Stepped pixel corners.
+  pixel,
 }
 
 /// How the main (filled) button is painted.
@@ -119,6 +153,12 @@ enum ZenChipStyle {
 
   /// Little chrome keys.
   bevel,
+
+  /// Chamfered tags.
+  cut,
+
+  /// Stepped pixel tags.
+  pixel,
 }
 
 /// How the selected tab of the side rail is marked.
@@ -165,6 +205,48 @@ enum ZenBackdrop {
 
   /// Still, soft blooms of colour (behind glass panels).
   aurora,
+
+  /// Dense columns of signs running down, a few glitching.
+  cipher,
+
+  /// A neon floor grid with light trails racing to the horizon.
+  lightcycle,
+
+  /// A night sky in violet, twinkling stars and a falling sparkle.
+  fairy,
+
+  /// A striped sunset sun over a moving grid.
+  synthwave,
+
+  /// Slanted rain over a glowing city skyline.
+  city,
+
+  /// Blinking pixel stars in a curved old screen.
+  arcade,
+
+  /// A drifting star field in layers and nebula glow.
+  space,
+
+  /// A pastel sky, a banded sun and a grid floor.
+  vapor,
+
+  /// Deep water: light rays and glowing specks rising.
+  deepSea,
+
+  /// Printed halftone dots.
+  halftone,
+
+  /// Old paper and slowly turning gears.
+  steam,
+
+  /// Slow bands of shifting rainbow sheen.
+  holo,
+
+  /// Embers rising from glowing cracks.
+  embers,
+
+  /// Brushed metal.
+  brushed,
 }
 
 /// What stands next to the title of a main section ([ZenSectionBar]).
@@ -186,6 +268,24 @@ enum ZenHeaderStyle {
 
   /// A short fine rule under the title.
   underline,
+
+  /// Wide-spaced capitals in a chrome gradient.
+  chrome,
+
+  /// The title split into shifted colour ghosts.
+  glitch,
+
+  /// Heavy capitals with a hard pixel shadow.
+  pixel,
+
+  /// Glowing title between two little diamonds.
+  ornament,
+
+  /// Capitals on a tilted ink-framed banner.
+  banner,
+
+  /// The title on an LCD strip.
+  lcd,
 }
 
 /// How counts (unread messages, tile badges) are drawn.
@@ -205,7 +305,7 @@ enum ZenSectionStyle {
   /// Lit caps followed by a fading neon line.
   neonRule,
 
-  /// A tiny title bar: caps and pinstripes.
+  /// A tiny title bar: small caps on a bevelled strip.
   titleBar,
 
   /// A comment line of a terminal (`// LABEL`).
@@ -213,6 +313,15 @@ enum ZenSectionStyle {
 
   /// Small caps between fine rules.
   ruled,
+
+  /// A diamond, glowing caps and a fading gold line.
+  ornament,
+
+  /// A pixel block and heavy capitals with a hard shadow.
+  pixel,
+
+  /// Capitals stamped on an accent block.
+  stamp,
 }
 
 /// How a pushed screen comes in.
@@ -228,6 +337,15 @@ enum ZenPageMotion {
 
   /// A stepped, low-frame-rate fade.
   stepped,
+
+  /// A few glitchy flickers with shifted slices, then the page.
+  glitch,
+
+  /// A light streak racing across while the page slides in.
+  streak,
+
+  /// The page swells in softly, like a bubble.
+  bubble,
 }
 
 /// The component character of a palette, next to its colours
@@ -260,6 +378,7 @@ final class ZenLook extends ThemeExtension<ZenLook> {
     this.flickerOn = false,
     this.tabSweep = false,
     this.ambient = false,
+    this.navEqualizer = false,
   });
 
   /// Klasyczny (the default).
@@ -299,13 +418,15 @@ final class ZenLook extends ThemeExtension<ZenLook> {
     buttonFill: ZenButtonFill.chrome,
     chips: ZenChipStyle.bevel,
     nav: ZenNavStyle.bevel,
-    header: ZenHeaderStyle.spectrum,
+    backdrop: ZenBackdrop.brushed,
+    header: ZenHeaderStyle.lcd,
     numbers: ZenNumberStyle.led,
     sections: ZenSectionStyle.titleBar,
     pages: ZenPageMotion.stepped,
     corner: 0,
     tempo: 0.8,
     curve: Curves.linear,
+    navEqualizer: true,
   );
 
   final ZenSurfaceStyle surfaces;
@@ -344,6 +465,9 @@ final class ZenLook extends ThemeExtension<ZenLook> {
   /// Hero cards and empty states get a slow drifting field behind them.
   final bool ambient;
 
+  /// Tiny equalizer bars play in the selected tab of the rail.
+  final bool navEqualizer;
+
   static ZenLook of(BuildContext context) =>
       Theme.of(context).extension<ZenLook>() ?? classic;
 
@@ -356,7 +480,14 @@ final class ZenLook extends ThemeExtension<ZenLook> {
   bool get flat => surfaces == ZenSurfaceStyle.flat;
 
   /// Lit (glowing) outlines.
-  bool get lit => borders == ZenBorderStyle.glow;
+  bool get lit =>
+      borders == ZenBorderStyle.glow ||
+      borders == ZenBorderStyle.cut ||
+      borders == ZenBorderStyle.circuit;
+
+  /// A bevelled metal frame (chrome or riveted).
+  bool get metal =>
+      borders == ZenBorderStyle.bevel || borders == ZenBorderStyle.rivets;
 
   /// Square corners everywhere (avatars and badges too).
   bool get sharp => corner <= 0.05;
@@ -382,12 +513,22 @@ final class ZenLook extends ThemeExtension<ZenLook> {
         tone == null
             ? BorderSide.none
             : BorderSide(color: tone.withValues(alpha: 0.35)),
-      ZenBorderStyle.glow => BorderSide(
+      ZenBorderStyle.glow ||
+      ZenBorderStyle.cut ||
+      ZenBorderStyle.circuit => BorderSide(
         color: tone == null ? zen.outline : tone.withValues(alpha: 0.75),
+      ),
+      ZenBorderStyle.ink || ZenBorderStyle.pixel => BorderSide(
+        color: tone ?? zen.outlineStrong,
+        width: 2.5,
       ),
       ZenBorderStyle.hairline ||
       ZenBorderStyle.doubleLine ||
-      ZenBorderStyle.bevel => BorderSide(
+      ZenBorderStyle.bevel ||
+      ZenBorderStyle.rivets ||
+      ZenBorderStyle.filigree ||
+      ZenBorderStyle.window ||
+      ZenBorderStyle.sheen => BorderSide(
         color: tone != null
             ? tone.withValues(alpha: 0.35)
             : flat
@@ -408,13 +549,45 @@ final class ZenLook extends ThemeExtension<ZenLook> {
     final BorderRadius r = br(radius);
     return switch (borders) {
       ZenBorderStyle.bevel => ZenBevelBorder.of(zen, sunken: sunken),
+      ZenBorderStyle.rivets => ZenBevelBorder.of(
+        zen,
+        sunken: sunken,
+        rivets: true,
+      ),
       ZenBorderStyle.doubleLine => ZenDoubleBorder(
         borderRadius: r,
         color: tone ?? zen.outlineStrong,
         inner: (tone ?? zen.outline).withValues(alpha: 0.6),
       ),
+      ZenBorderStyle.filigree => ZenDoubleBorder(
+        borderRadius: r,
+        color: tone ?? zen.accent.withValues(alpha: 0.8),
+        inner: (tone ?? zen.accent).withValues(alpha: 0.35),
+        ornaments: true,
+      ),
+      ZenBorderStyle.cut || ZenBorderStyle.circuit => ZenCutBorder(
+        cut: radius >= 20 ? 12 : 8,
+        color: tone?.withValues(alpha: 0.85) ?? zen.outlineStrong,
+        pads: borders == ZenBorderStyle.circuit,
+      ),
+      ZenBorderStyle.pixel => ZenPixelBorder(color: tone ?? zen.outlineStrong),
+      ZenBorderStyle.window => ZenWindowBorder(
+        borderRadius: r,
+        color: tone ?? zen.outlineStrong,
+        bar: <Color>[zen.accent, zen.accentSecondary],
+      ),
+      ZenBorderStyle.sheen => ZenSheenBorder(
+        borderRadius: r,
+        colors: <Color>[
+          zen.accent,
+          zen.accentSecondary,
+          zen.accentTertiary,
+          zen.accent,
+        ],
+      ),
       ZenBorderStyle.none ||
       ZenBorderStyle.hairline ||
+      ZenBorderStyle.ink ||
       ZenBorderStyle.glow => RoundedRectangleBorder(
         borderRadius: r,
         side: outlineSide(zen, tone: tone),
@@ -424,7 +597,7 @@ final class ZenLook extends ThemeExtension<ZenLook> {
 
   /// The fill of a card-like panel.
   Color panelColor(ZenColors zen, {Color? tone, bool sunken = false}) {
-    if (sunken && (bevelled || flat)) {
+    if (sunken && (bevelled || flat || metal)) {
       return zen.surfaceSunk;
     }
     final double alpha = switch (surfaces) {
@@ -448,6 +621,9 @@ final class ZenLook extends ThemeExtension<ZenLook> {
     return switch (elevation) {
       ZenElevation.flat => null,
       ZenElevation.glow => zen.neonGlow(tone ?? zen.accent, radius: radius),
+      ZenElevation.hard => <BoxShadow>[
+        BoxShadow(color: zen.outlineStrong, offset: const Offset(4, 4)),
+      ],
       ZenElevation.shadow => <BoxShadow>[
         BoxShadow(
           color: const Color(0xFF000000).withValues(
@@ -471,7 +647,23 @@ final class ZenLook extends ThemeExtension<ZenLook> {
     return ShapeDecoration(
       color: panelColor(zen, tone: tone, sunken: sunken),
       shape: panelShape(zen, radius: radius, tone: tone, sunken: sunken),
-      shadows: lit && tone != null ? zen.neonGlow(tone, radius: 14) : null,
+      shadows: elevation == ZenElevation.hard
+          ? lift(zen)
+          : lit && tone != null
+          ? zen.neonGlow(tone, radius: 14)
+          : null,
+    );
+  }
+
+  /// [child] (a panel of [shape]) with the look's hard offset shadow under
+  /// it, if the look has one; soft shadows and glows come from Material.
+  Widget raise(ZenColors zen, ShapeBorder shape, Widget child) {
+    if (elevation != ZenElevation.hard) {
+      return child;
+    }
+    return DecoratedBox(
+      decoration: ShapeDecoration(shape: shape, shadows: lift(zen)),
+      child: child,
     );
   }
 
@@ -486,6 +678,11 @@ final class ZenLook extends ThemeExtension<ZenLook> {
         borderRadius: BorderRadius.circular(radius(12)),
       ),
       ZenButtonShape.square => const RoundedRectangleBorder(),
+      ZenButtonShape.cut => ZenCutBorder(cut: 8, color: zen.accent, width: 0),
+      ZenButtonShape.pixel => ZenPixelBorder(
+        color: zen.outlineStrong,
+        width: 0,
+      ),
     };
   }
 
@@ -502,12 +699,20 @@ final class ZenLook extends ThemeExtension<ZenLook> {
         borderRadius: BorderRadius.circular(radius(8)),
         side: s,
       ),
+      ZenChipStyle.cut => ZenCutBorder(cut: 6, color: s.color, width: s.width),
+      ZenChipStyle.pixel => ZenPixelBorder(
+        color: s.color,
+        width: s.width,
+        step: 2,
+      ),
     };
   }
 
   /// The corner radius of chips and pills.
   BorderRadius get chipRadius => switch (chips) {
-    ZenChipStyle.bevel => BorderRadius.zero,
+    ZenChipStyle.bevel ||
+    ZenChipStyle.cut ||
+    ZenChipStyle.pixel => BorderRadius.zero,
     ZenChipStyle.pill => BorderRadius.circular(radius(999)),
     ZenChipStyle.tag ||
     ZenChipStyle.outline => BorderRadius.circular(radius(8)),
@@ -525,10 +730,46 @@ final class ZenLook extends ThemeExtension<ZenLook> {
         : BorderRadius.circular(this.radius(radius));
     return switch (borders) {
       ZenBorderStyle.bevel => ZenBevelBorder.of(zen),
+      ZenBorderStyle.rivets => ZenBevelBorder.of(zen, rivets: true),
       ZenBorderStyle.doubleLine => ZenDoubleBorder(
         borderRadius: r,
         color: zen.outlineStrong,
         inner: zen.outline,
+      ),
+      ZenBorderStyle.filigree => ZenDoubleBorder(
+        borderRadius: r,
+        color: zen.accent.withValues(alpha: 0.8),
+        inner: zen.accent.withValues(alpha: 0.35),
+        ornaments: !topOnly,
+      ),
+      ZenBorderStyle.cut || ZenBorderStyle.circuit =>
+        topOnly
+            ? RoundedRectangleBorder(
+                side: BorderSide(color: zen.accent.withValues(alpha: 0.45)),
+              )
+            : ZenCutBorder(
+                cut: 14,
+                color: zen.accent.withValues(alpha: 0.6),
+                pads: borders == ZenBorderStyle.circuit,
+              ),
+      ZenBorderStyle.pixel => ZenPixelBorder(color: zen.outlineStrong),
+      ZenBorderStyle.ink => RoundedRectangleBorder(
+        borderRadius: r,
+        side: BorderSide(color: zen.outlineStrong, width: 2.5),
+      ),
+      ZenBorderStyle.window => ZenWindowBorder(
+        borderRadius: r,
+        color: zen.outlineStrong,
+        bar: <Color>[zen.accent, zen.accentSecondary],
+      ),
+      ZenBorderStyle.sheen => ZenSheenBorder(
+        borderRadius: r,
+        colors: <Color>[
+          zen.accent,
+          zen.accentSecondary,
+          zen.accentTertiary,
+          zen.accent,
+        ],
       ),
       ZenBorderStyle.glow => RoundedRectangleBorder(
         borderRadius: r,
@@ -554,15 +795,27 @@ final class ZenLook extends ThemeExtension<ZenLook> {
   /// The decoration of the side tab rail.
   Decoration railDecoration(ZenColors zen) {
     final Color edge = switch (borders) {
-      ZenBorderStyle.glow => zen.accent.withValues(alpha: 0.35),
-      ZenBorderStyle.bevel => zen.outlineStrong,
+      ZenBorderStyle.glow ||
+      ZenBorderStyle.cut ||
+      ZenBorderStyle.circuit => zen.accent.withValues(alpha: 0.35),
+      ZenBorderStyle.bevel ||
+      ZenBorderStyle.rivets ||
+      ZenBorderStyle.ink ||
+      ZenBorderStyle.pixel ||
+      ZenBorderStyle.window => zen.outlineStrong,
+      ZenBorderStyle.filigree => zen.accent.withValues(alpha: 0.5),
+      ZenBorderStyle.sheen => zen.accentSecondary.withValues(alpha: 0.5),
       ZenBorderStyle.doubleLine => zen.outline,
       ZenBorderStyle.none => zen.surfaceSunk,
       ZenBorderStyle.hairline => zen.outlineSoft,
     };
+    final bool thick =
+        borders == ZenBorderStyle.ink || borders == ZenBorderStyle.pixel;
     return BoxDecoration(
       color: bevelled ? zen.surface : zen.surfaceSunk,
-      border: Border(right: BorderSide(color: edge)),
+      border: Border(
+        right: BorderSide(color: edge, width: thick ? 2.5 : 1),
+      ),
       boxShadow: lit
           ? <BoxShadow>[
               BoxShadow(
@@ -670,6 +923,7 @@ final class ZenLook extends ThemeExtension<ZenLook> {
     bool? flickerOn,
     bool? tabSweep,
     bool? ambient,
+    bool? navEqualizer,
   }) {
     return ZenLook(
       surfaces: surfaces ?? this.surfaces,
@@ -693,6 +947,7 @@ final class ZenLook extends ThemeExtension<ZenLook> {
       flickerOn: flickerOn ?? this.flickerOn,
       tabSweep: tabSweep ?? this.tabSweep,
       ambient: ambient ?? this.ambient,
+      navEqualizer: navEqualizer ?? this.navEqualizer,
     );
   }
 
@@ -731,7 +986,8 @@ final class ZenLook extends ThemeExtension<ZenLook> {
       other.breathe == breathe &&
       other.flickerOn == flickerOn &&
       other.tabSweep == tabSweep &&
-      other.ambient == ambient;
+      other.ambient == ambient &&
+      other.navEqualizer == navEqualizer;
 
   @override
   int get hashCode => Object.hashAll(<Object?>[
@@ -756,6 +1012,7 @@ final class ZenLook extends ThemeExtension<ZenLook> {
     flickerOn,
     tabSweep,
     ambient,
+    navEqualizer,
   ]);
 }
 

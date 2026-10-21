@@ -418,7 +418,7 @@ class CallStateChip extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: zen.surfaceRaised.withValues(alpha: 0.8),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: context.zenRadius(999),
         border: Border.all(color: zen.outlineSoft),
       ),
       child: Padding(

@@ -133,76 +133,80 @@ class ZenTile extends StatelessWidget {
     final ShapeBorder shape = look.panelShape(zen, radius: 20);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Material(
-        color: look.panelColor(zen),
-        shape: shape,
-        child: InkWell(
-          customBorder: shape,
-          onTap: onTap,
-          child: Ink(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
-              child: Row(
-                children: <Widget>[
-                  ZenIconBadge(icon: icon, tone: tone),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: zen.textPrimary,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        if (subtitle != null &&
-                            subtitle!.isNotEmpty) ...<Widget>[
-                          const SizedBox(height: 3),
+      child: look.raise(
+        zen,
+        shape,
+        Material(
+          color: look.panelColor(zen),
+          shape: shape,
+          child: InkWell(
+            customBorder: shape,
+            onTap: onTap,
+            child: Ink(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+                child: Row(
+                  children: <Widget>[
+                    ZenIconBadge(icon: icon, tone: tone),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
                           Text(
-                            subtitle!,
-                            maxLines: 2,
+                            title,
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: zen.textSecondary,
-                              fontSize: 13.5,
-                              height: 1.3,
+                              color: zen.textPrimary,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (badge != null) ...<Widget>[
-                    const SizedBox(width: 8),
-                    // Never takes the title's room: a long badge shortens.
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 112),
-                      child:
-                          look.numbers == ZenNumberStyle.led &&
-                              int.tryParse(badge!) != null
-                          ? ZenCountBadge(int.parse(badge!), tone: tone)
-                          : ZenPill(
-                              text: badge!,
-                              tone: tone ?? zen.accent,
-                              filled: true,
+                          if (subtitle != null &&
+                              subtitle!.isNotEmpty) ...<Widget>[
+                            const SizedBox(height: 3),
+                            Text(
+                              subtitle!,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: zen.textSecondary,
+                                fontSize: 13.5,
+                                height: 1.3,
+                              ),
                             ),
+                          ],
+                        ],
+                      ),
                     ),
+                    if (badge != null) ...<Widget>[
+                      const SizedBox(width: 8),
+                      // Never takes the title's room: a long badge shortens.
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 112),
+                        child:
+                            look.numbers == ZenNumberStyle.led &&
+                                int.tryParse(badge!) != null
+                            ? ZenCountBadge(int.parse(badge!), tone: tone)
+                            : ZenPill(
+                                text: badge!,
+                                tone: tone ?? zen.accent,
+                                filled: true,
+                              ),
+                      ),
+                    ],
+                    const SizedBox(width: 6),
+                    trailing ??
+                        (onTap == null
+                            ? const SizedBox.shrink()
+                            : Icon(
+                                Icons.chevron_right_rounded,
+                                color: zen.textMuted,
+                              )),
                   ],
-                  const SizedBox(width: 6),
-                  trailing ??
-                      (onTap == null
-                          ? const SizedBox.shrink()
-                          : Icon(
-                              Icons.chevron_right_rounded,
-                              color: zen.textMuted,
-                            )),
-                ],
+                ),
               ),
             ),
           ),
@@ -234,61 +238,65 @@ class ZenGridTile extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final ZenLook look = ZenLook.of(context);
     final ShapeBorder shape = look.panelShape(zen);
-    return Material(
-      color: look.panelColor(zen),
-      shape: shape,
-      child: InkWell(
-        customBorder: shape,
-        onTap: onTap,
-        child: Ink(
-          decoration: look.filledBubbles
-              ? BoxDecoration(
-                  borderRadius: look.br(22),
-                  gradient: LinearGradient(
-                    colors: <Color>[
-                      tone.withValues(
-                        alpha: zen.gradient >= 1
-                            ? 0.13
-                            : 0.04 + 0.09 * zen.gradient,
-                      ),
-                      zen.surface,
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    stops: const <double>[0, 0.75],
+    return look.raise(
+      zen,
+      shape,
+      Material(
+        color: look.panelColor(zen),
+        shape: shape,
+        child: InkWell(
+          customBorder: shape,
+          onTap: onTap,
+          child: Ink(
+            decoration: look.filledBubbles
+                ? BoxDecoration(
+                    borderRadius: look.br(22),
+                    gradient: LinearGradient(
+                      colors: <Color>[
+                        tone.withValues(
+                          alpha: zen.gradient >= 1
+                              ? 0.13
+                              : 0.04 + 0.09 * zen.gradient,
+                        ),
+                        zen.surface,
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      stops: const <double>[0, 0.75],
+                    ),
+                  )
+                : null,
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  ZenIconBadge(icon: icon, tone: tone, size: 40),
+                  const Spacer(),
+                  Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: zen.textPrimary,
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.w700,
+                      height: 1.15,
+                    ),
                   ),
-                )
-              : null,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                ZenIconBadge(icon: icon, tone: tone, size: 40),
-                const Spacer(),
-                Text(
-                  title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: zen.textPrimary,
-                    fontSize: 15.5,
-                    fontWeight: FontWeight.w700,
-                    height: 1.15,
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: zen.textSecondary,
+                      fontSize: 12.5,
+                      height: 1.25,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: zen.textSecondary,
-                    fontSize: 12.5,
-                    height: 1.25,
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -411,6 +419,100 @@ class ZenSection extends StatelessWidget {
         ),
       );
     }
+    if (look.sections == ZenSectionStyle.ornament) {
+      // A diamond, glowing caps and a fading gold line.
+      return Padding(
+        padding: EdgeInsets.fromLTRB(4, top, 0, 8),
+        child: Row(
+          children: <Widget>[
+            Transform.rotate(
+              angle: 0.785398,
+              child: Container(width: 6, height: 6, color: zen.accent),
+            ),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                title.toUpperCase(),
+                style: zen.label(color: zen.accent).copyWith(letterSpacing: 2),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Container(
+                height: 1,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: <Color>[
+                      zen.accent.withValues(alpha: 0.6),
+                      zen.accent.withValues(alpha: 0),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            ?button,
+          ],
+        ),
+      );
+    }
+    if (look.sections == ZenSectionStyle.pixel) {
+      // A pixel block and heavy capitals with a hard shadow.
+      return Padding(
+        padding: EdgeInsets.fromLTRB(4, top, 0, 8),
+        child: Row(
+          children: <Widget>[
+            Container(width: 8, height: 8, color: zen.accent),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title.toUpperCase(),
+                style: zen
+                    .label(color: zen.textPrimary, weight: FontWeight.w800)
+                    .copyWith(
+                      letterSpacing: 1.6,
+                      shadows: <Shadow>[
+                        Shadow(
+                          color: zen.accentSecondary,
+                          offset: const Offset(2, 2),
+                        ),
+                      ],
+                    ),
+              ),
+            ),
+            ?button,
+          ],
+        ),
+      );
+    }
+    if (look.sections == ZenSectionStyle.stamp) {
+      // Capitals stamped on an accent block.
+      return Padding(
+        padding: EdgeInsets.fromLTRB(0, top, 0, 8),
+        child: Row(
+          children: <Widget>[
+            Flexible(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(8, 3, 10, 3),
+                decoration: BoxDecoration(
+                  color: zen.accent,
+                  border: look.borders == ZenBorderStyle.ink
+                      ? Border.all(color: zen.outlineStrong, width: 2)
+                      : null,
+                ),
+                child: Text(
+                  title.toUpperCase(),
+                  style: zen
+                      .label(color: zen.onAccent, weight: FontWeight.w800)
+                      .copyWith(letterSpacing: 1.4),
+                ),
+              ),
+            ),
+            const Spacer(),
+            ?button,
+          ],
+        ),
+      );
+    }
     final bool rule = look.sections == ZenSectionStyle.neonRule;
     final Text label = Text(
       title.toUpperCase(),
@@ -491,10 +593,12 @@ class ZenHero extends StatelessWidget {
     final Decoration decoration = switch (look.surfaces) {
       ZenSurfaceStyle.outlined => ShapeDecoration(
         color: zen.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: look.br(26),
-          side: BorderSide(color: t.withValues(alpha: 0.85)),
-        ),
+        shape: look.lit
+            ? look.panelShape(zen, radius: 26, tone: t)
+            : RoundedRectangleBorder(
+                borderRadius: look.br(26),
+                side: BorderSide(color: t.withValues(alpha: 0.85)),
+              ),
         shadows: zen.neonGlow(t, radius: 18),
       ),
       ZenSurfaceStyle.bevelled => ShapeDecoration(
@@ -862,17 +966,21 @@ class ZenGroup extends StatelessWidget {
     // and backgrounds on it.
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Material(
-        color: look.panelColor(zen),
-        shape: look.panelShape(zen),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          children: <Widget>[
-            for (int i = 0; i < children.length; i++) ...<Widget>[
-              if (i > 0) const ZenDivider(),
-              children[i],
+      child: look.raise(
+        zen,
+        look.panelShape(zen),
+        Material(
+          color: look.panelColor(zen),
+          shape: look.panelShape(zen),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: <Widget>[
+              for (int i = 0; i < children.length; i++) ...<Widget>[
+                if (i > 0) const ZenDivider(),
+                children[i],
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -936,7 +1044,7 @@ class ZenCard extends StatelessWidget {
         child: card,
       );
     }
-    return Padding(padding: margin, child: card);
+    return Padding(padding: margin, child: look.raise(zen, shape, card));
   }
 }
 
@@ -1036,7 +1144,7 @@ class ZenRailTabFrame extends StatelessWidget {
     final Color idleEdge = danger ? zen.danger.withValues(alpha: 0.30) : clear;
     switch (look.nav) {
       case ZenNavStyle.bevel:
-        return AnimatedContainer(
+        final Widget plate = AnimatedContainer(
           duration: duration,
           padding: padding,
           decoration: ShapeDecoration(
@@ -1045,12 +1153,26 @@ class ZenRailTabFrame extends StatelessWidget {
           ),
           child: child,
         );
+        if (!(selected && look.navEqualizer)) {
+          return plate;
+        }
+        // The player: a tiny equalizer plays in the pressed key.
+        return Stack(
+          children: <Widget>[
+            plate,
+            Positioned(
+              right: 4,
+              bottom: 4,
+              child: ZenEqualizerBars(color: hue),
+            ),
+          ],
+        );
       case ZenNavStyle.glow:
         return Stack(
           children: <Widget>[
             AnimatedContainer(
               duration: duration,
-              curve: look.curve,
+              curve: _WithinBounds(look.curve),
               padding: padding,
               decoration: BoxDecoration(
                 color: selected ? zen.background : clear,
@@ -1076,7 +1198,7 @@ class ZenRailTabFrame extends StatelessWidget {
         // A bar along the leading edge, a faint tint behind the glyph.
         return AnimatedContainer(
           duration: duration,
-          curve: look.curve,
+          curve: _WithinBounds(look.curve),
           padding: padding,
           decoration: BoxDecoration(
             color: selected ? hue.withValues(alpha: 0.08) : clear,
@@ -1090,7 +1212,7 @@ class ZenRailTabFrame extends StatelessWidget {
         // A sharp block with an outline, like a selected menu entry.
         return AnimatedContainer(
           duration: duration,
-          curve: look.curve,
+          curve: _WithinBounds(look.curve),
           padding: padding,
           decoration: BoxDecoration(
             color: selected ? hue.withValues(alpha: 0.16) : clear,
@@ -1102,7 +1224,7 @@ class ZenRailTabFrame extends StatelessWidget {
       case ZenNavStyle.pill:
         return AnimatedContainer(
           duration: duration,
-          curve: look.curve,
+          curve: _WithinBounds(look.curve),
           padding: padding,
           decoration: BoxDecoration(
             borderRadius: look.br(16),
@@ -1125,6 +1247,18 @@ class ZenRailTabFrame extends StatelessWidget {
         );
     }
   }
+}
+
+/// [curve] kept within 0..1. A springy look's curve (one that overshoots)
+/// would carry a glow past its end, to a negative blur, which may not be
+/// painted.
+class _WithinBounds extends Curve {
+  const _WithinBounds(this.curve);
+
+  final Curve curve;
+
+  @override
+  double transformInternal(double t) => curve.transform(t).clamp(0.0, 1.0);
 }
 
 /// A line between rows, in the look's divider style ([ZenDividerStyle]):
@@ -1227,7 +1361,7 @@ class _ZenSweepLine extends StatefulWidget {
 }
 
 class _ZenSweepLineState extends State<_ZenSweepLine>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   AnimationController? _sweep;
 
   @override

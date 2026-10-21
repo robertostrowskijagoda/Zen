@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -10,7 +11,7 @@ import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
 /// The pieces of the retro look (an old desktop music player): LED
-/// digits, an LCD spectrum analyzer and pinstriped title bars.
+/// digits, an LCD spectrum analyzer, an equalizer and title bars.
 
 /// [text] in seven-segment LED digits ('0'–'9', '+', '-' and spaces), the
 /// unlit segments faintly visible like on a real display.
@@ -383,8 +384,9 @@ class _SpectrumPainter extends CustomPainter {
       oldDelegate.peak != peak;
 }
 
-/// A tiny title bar: [title] in pixel caps between pinstripes, like the
-/// title of a player window.
+/// A tiny title bar: [title] in small caps on a bevelled strip, like the
+/// title of a player window (nothing else beside the title: the old
+/// pinstripes read as a stray control).
 class ZenTitleBar extends StatelessWidget {
   const ZenTitleBar(this.title, {this.trailing, super.key});
 
@@ -394,30 +396,17 @@ class ZenTitleBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    final Widget stripes = SizedBox(
-      height: 9,
-      child: CustomPaint(
-        painter: _PinstripePainter(
-          light: zen.outlineStrong,
-          dark: zen.surfaceSunk,
-        ),
-      ),
-    );
     return Container(
-      padding: const EdgeInsets.fromLTRB(6, 2, 4, 2),
+      padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
       decoration: ShapeDecoration(
         color: zen.surfaceRaised,
         shape: ZenBevelBorder.of(zen),
       ),
       child: Row(
         children: <Widget>[
-          SizedBox(width: 10, child: stripes),
-          const SizedBox(width: 6),
-          Flexible(
+          Expanded(
             child: Text(
               title.toUpperCase(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
               style: zen.mono(
                 color: zen.accentSecondary,
                 size: 11,
@@ -426,8 +415,6 @@ class ZenTitleBar extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 6),
-          Expanded(child: stripes),
           if (trailing != null) ...<Widget>[
             const SizedBox(width: 4),
             trailing!,
@@ -438,24 +425,99 @@ class ZenTitleBar extends StatelessWidget {
   }
 }
 
-class _PinstripePainter extends CustomPainter {
-  const _PinstripePainter({required this.light, required this.dark});
+/// Three tiny equalizer bars playing in the selected tab of the rail (the
+/// player look). A timer moves them eight times a second, so no frame is
+/// drawn in between; they stand still while the app is in the background,
+/// under reduced motion and in tests.
+class ZenEqualizerBars extends StatefulWidget {
+  const ZenEqualizerBars({required this.color, super.key});
 
-  final Color light;
-  final Color dark;
+  final Color color;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final Paint l = Paint()..color = light;
-    final Paint d = Paint()..color = dark;
-    for (double y = 0; y + 2 <= size.height; y += 3) {
-      canvas
-        ..drawRect(Rect.fromLTWH(0, y, size.width, 1), l)
-        ..drawRect(Rect.fromLTWH(0, y + 1, size.width, 1), d);
+  State<ZenEqualizerBars> createState() => _ZenEqualizerBarsState();
+}
+
+class _ZenEqualizerBarsState extends State<ZenEqualizerBars>
+    with WidgetsBindingObserver {
+  Timer? _timer;
+  int _frame = 3;
+  bool _allowed = false;
+  bool _foreground = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _allowed = ZenMotion.allowedIn(context);
+    _sync();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    setState(() {
+      _foreground = state == AppLifecycleState.resumed;
+      _sync();
+    });
+  }
+
+  /// Starts or stops the bars; the caller rebuilds.
+  void _sync() {
+    final bool animate = _allowed && _foreground;
+    if (animate && _timer == null) {
+      _timer = Timer.periodic(const Duration(milliseconds: 125), (_) {
+        if (mounted) {
+          setState(() => _frame++);
+        }
+      });
+    } else if (!animate && _timer != null) {
+      _timer!.cancel();
+      _timer = null;
     }
   }
 
   @override
-  bool shouldRepaint(_PinstripePainter oldDelegate) =>
-      oldDelegate.light != light || oldDelegate.dark != dark;
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: CustomPaint(
+        size: const Size(11, 10),
+        painter: _EqualizerPainter(frame: _frame, color: widget.color),
+      ),
+    );
+  }
+}
+
+class _EqualizerPainter extends CustomPainter {
+  const _EqualizerPainter({required this.frame, required this.color});
+
+  final int frame;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint p = Paint()..color = color;
+    for (int i = 0; i < 3; i++) {
+      final double level =
+          0.25 + 0.75 * (0.5 + 0.5 * math.sin(frame * (0.9 + i * 0.7) + i));
+      final double h = (size.height * level / 2).roundToDouble() * 2;
+      p.color = color.withValues(alpha: i == 1 ? 1 : 0.8);
+      canvas.drawRect(Rect.fromLTWH(i * 4.0, size.height - h, 3, h), p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_EqualizerPainter oldDelegate) =>
+      oldDelegate.frame != frame || oldDelegate.color != color;
 }

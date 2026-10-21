@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/theme/zen_palettes_wild.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
 /// The groups of the theme picker (Ustawienia → Wygląd).
 enum ZenThemeCategory {
   classic,
+  wild,
   toned,
   cool,
   elegant;
 
   String get label => switch (this) {
     ZenThemeCategory.classic => t('Klasyczne'),
+    ZenThemeCategory.wild => t('Odjechane'),
     ZenThemeCategory.toned => t('Stonowane'),
     ZenThemeCategory.cool => t('Cool'),
     ZenThemeCategory.elegant => t('Eleganckie'),
@@ -19,6 +22,7 @@ enum ZenThemeCategory {
 
   String get caption => switch (this) {
     ZenThemeCategory.classic => t('Czytelne, zwyczajne, do wszystkiego.'),
+    ZenThemeCategory.wild => t('Efekty, kształty i światło bez umiaru.'),
     ZenThemeCategory.toned => t('Ciche kolory, miękkie kształty.'),
     ZenThemeCategory.cool => t('Świecące linie, ekrany i maszyny.'),
     ZenThemeCategory.elegant => t('Szlachetne kolory, cienkie linie.'),
@@ -34,7 +38,8 @@ enum ZenThemeCategory {
 /// The palettes of Ustawienia → Wygląd: colours ([resolve]) and component
 /// character ([look]). Klasyczny is computed from the chosen accent
 /// ([ZenColors.resolve]); the others are hand-tuned, in a light and a dark
-/// variant where that makes sense ([AppPalette.darkOnly]). Every variant
+/// variant each (every theme has both, keeping its identity); the wild
+/// ones are in [ZenWildPalettes]. Every variant
 /// keeps the contrast the theme test checks (body text 4.5:1 on every
 /// surface, labels on the accent 4.5:1, faint text 3:1).
 abstract final class ZenPalettes {
@@ -52,13 +57,39 @@ abstract final class ZenPalettes {
       AppPalette.forest => dark ? _forestDark : _forestLight,
       AppPalette.mist => dark ? _mistDark : _mistLight,
       AppPalette.neon => dark ? _neonDark : _neonLight,
-      AppPalette.grid => _gridDark,
-      AppPalette.rain => _rainDark,
-      AppPalette.player => _retroDark,
-      AppPalette.phosphor => _phosphorDark,
+      AppPalette.grid => dark ? _gridDark : _gridLight,
+      AppPalette.rain => dark ? _rainDark : _rainLight,
+      AppPalette.player => dark ? _retroDark : _retroLight,
+      AppPalette.phosphor => dark ? _phosphorDark : _phosphorLight,
       AppPalette.dusk => dark ? _duskDark : _duskLight,
       AppPalette.onyx => dark ? _onyxDark : _onyxLight,
       AppPalette.pearl => dark ? _pearlDark : _pearlLight,
+      AppPalette.cipher =>
+        dark ? ZenWildPalettes.cipher : ZenWildPalettes.cipherLight,
+      AppPalette.lightcycle =>
+        dark ? ZenWildPalettes.lightcycle : ZenWildPalettes.lightcycleLight,
+      AppPalette.fairy =>
+        dark ? ZenWildPalettes.fairy : ZenWildPalettes.fairyLight,
+      AppPalette.synthwave =>
+        dark ? ZenWildPalettes.synthwave : ZenWildPalettes.synthwaveLight,
+      AppPalette.neonCity =>
+        dark ? ZenWildPalettes.neonCity : ZenWildPalettes.neonCityLight,
+      AppPalette.arcade =>
+        dark ? ZenWildPalettes.arcade : ZenWildPalettes.arcadeLight,
+      AppPalette.space =>
+        dark ? ZenWildPalettes.space : ZenWildPalettes.spaceLight,
+      AppPalette.vapor =>
+        dark ? ZenWildPalettes.vaporDark : ZenWildPalettes.vapor,
+      AppPalette.deepSea =>
+        dark ? ZenWildPalettes.deepSea : ZenWildPalettes.deepSeaLight,
+      AppPalette.comic =>
+        dark ? ZenWildPalettes.comicDark : ZenWildPalettes.comic,
+      AppPalette.steam =>
+        dark ? ZenWildPalettes.steamDark : ZenWildPalettes.steam,
+      AppPalette.holo =>
+        dark ? ZenWildPalettes.holo : ZenWildPalettes.holoLight,
+      AppPalette.volcano =>
+        dark ? ZenWildPalettes.volcano : ZenWildPalettes.volcanoLight,
     };
   }
 
@@ -78,6 +109,19 @@ abstract final class ZenPalettes {
     AppPalette.dusk ||
     AppPalette.onyx ||
     AppPalette.pearl => ZenThemeCategory.elegant,
+    AppPalette.cipher ||
+    AppPalette.lightcycle ||
+    AppPalette.fairy ||
+    AppPalette.synthwave ||
+    AppPalette.neonCity ||
+    AppPalette.arcade ||
+    AppPalette.space ||
+    AppPalette.vapor ||
+    AppPalette.deepSea ||
+    AppPalette.comic ||
+    AppPalette.steam ||
+    AppPalette.holo ||
+    AppPalette.volcano => ZenThemeCategory.wild,
   };
 
   /// The component character of [palette].
@@ -96,6 +140,19 @@ abstract final class ZenPalettes {
     AppPalette.dusk => _dusk,
     AppPalette.onyx => _onyx,
     AppPalette.pearl => _pearl,
+    AppPalette.cipher => ZenWildPalettes.cipherLook,
+    AppPalette.lightcycle => ZenWildPalettes.lightcycleLook,
+    AppPalette.fairy => ZenWildPalettes.fairyLook,
+    AppPalette.synthwave => ZenWildPalettes.synthwaveLook,
+    AppPalette.neonCity => ZenWildPalettes.neonCityLook,
+    AppPalette.arcade => ZenWildPalettes.arcadeLook,
+    AppPalette.space => ZenWildPalettes.spaceLook,
+    AppPalette.vapor => ZenWildPalettes.vaporLook,
+    AppPalette.deepSea => ZenWildPalettes.deepSeaLook,
+    AppPalette.comic => ZenWildPalettes.comicLook,
+    AppPalette.steam => ZenWildPalettes.steamLook,
+    AppPalette.holo => ZenWildPalettes.holoLook,
+    AppPalette.volcano => ZenWildPalettes.volcanoLook,
   };
 
   // Atrament: paper and ink, nearly sharp corners, flat panels with a
@@ -832,5 +889,116 @@ abstract final class ZenPalettes {
     concept: true,
     gradient: 0.75,
     toneSaturation: 0.42,
+  );
+
+  // Neonowa siatka, light: white floor, ink-cyan lines, an orange trace.
+  static const ZenColors _gridLight = ZenColors(
+    background: Color(0xFFF4FBFD),
+    surface: Color(0xFFFFFFFF),
+    surfaceRaised: Color(0xFFEAF6F9),
+    surfaceMuted: Color(0xFFDDEFF3),
+    surfaceSunk: Color(0xFFEEF8FA),
+    outline: Color(0xFFA9D9E3),
+    outlineSoft: Color(0xFFCFEAF0),
+    outlineStrong: Color(0xFF3E9DB0),
+    textPrimary: Color(0xFF03151A),
+    textSecondary: Color(0xFF25525C),
+    textMuted: Color(0xFF4E7680),
+    accent: Color(0xFF007A8C),
+    accentSecondary: Color(0xFFB85400),
+    accentTertiary: Color(0xFF005F6D),
+    accentSoft: Color(0xFFDDF3F7),
+    onAccent: Color(0xFFFFFFFF),
+    success: Color(0xFF007A55),
+    warning: Color(0xFF8F5A00),
+    danger: Color(0xFFC2261A),
+    concept: true,
+    glow: 0.6,
+    gradient: 0,
+    toneSaturation: 0.7,
+    duotone: true,
+  );
+
+  // Cyfrowy deszcz, light: dark green signs on pale phosphor paper.
+  static const ZenColors _rainLight = ZenColors(
+    background: Color(0xFFEEF7EC),
+    surface: Color(0xFFF8FCF6),
+    surfaceRaised: Color(0xFFE4F0E1),
+    surfaceMuted: Color(0xFFD8E8D4),
+    surfaceSunk: Color(0xFFE9F3E6),
+    outline: Color(0xFFB5D1AE),
+    outlineSoft: Color(0xFFCFE3CA),
+    outlineStrong: Color(0xFF5E8F55),
+    textPrimary: Color(0xFF0A1F0C),
+    textSecondary: Color(0xFF2E4F31),
+    textMuted: Color(0xFF4F6F52),
+    accent: Color(0xFF1F7A2E),
+    accentSecondary: Color(0xFF4F6B00),
+    accentTertiary: Color(0xFF007A55),
+    accentSoft: Color(0xFFDCEFD8),
+    onAccent: Color(0xFFFFFFFF),
+    success: Color(0xFF1F7A2E),
+    warning: Color(0xFF7A6200),
+    danger: Color(0xFFB3261E),
+    concept: true,
+    glow: 0.3,
+    gradient: 0,
+    toneSaturation: 0.6,
+    duotone: true,
+  );
+
+  // Odtwarzacz, light: a silver aluminium skin with reflective LCD wells.
+  static const ZenColors _retroLight = ZenColors(
+    background: Color(0xFFD9DCE1),
+    surface: Color(0xFFE8EAEE),
+    surfaceRaised: Color(0xFFF2F3F6),
+    surfaceMuted: Color(0xFFCFD3D9),
+    surfaceSunk: Color(0xFFC4D0B0),
+    outline: Color(0xFFA8ADB6),
+    outlineSoft: Color(0xFFBFC3CA),
+    outlineStrong: Color(0xFF6E7480),
+    textPrimary: Color(0xFF15171C),
+    textSecondary: Color(0xFF3A3F48),
+    textMuted: Color(0xFF5C626C),
+    accent: Color(0xFF2B5E12),
+    accentSecondary: Color(0xFF5C5E00),
+    accentTertiary: Color(0xFF9A4A00),
+    accentSoft: Color(0xFFD2DEC0),
+    onAccent: Color(0xFFFFFFFF),
+    success: Color(0xFF2B6E12),
+    warning: Color(0xFF7A5A00),
+    danger: Color(0xFFB02A1E),
+    concept: true,
+    gradient: 0.2,
+    toneSaturation: 0.5,
+    duotone: true,
+  );
+
+  // Fosfor, light: brown-amber type on cream printer paper.
+  static const ZenColors _phosphorLight = ZenColors(
+    background: Color(0xFFFBF4E6),
+    surface: Color(0xFFFFFBF2),
+    surfaceRaised: Color(0xFFF4EAD6),
+    surfaceMuted: Color(0xFFEADCC0),
+    surfaceSunk: Color(0xFFF6EDDB),
+    outline: Color(0xFFD9C39A),
+    outlineSoft: Color(0xFFE8D9BA),
+    outlineStrong: Color(0xFF9C7838),
+    textPrimary: Color(0xFF2A1800),
+    textSecondary: Color(0xFF5A3E10),
+    textMuted: Color(0xFF7A5C2A),
+    accent: Color(0xFF8A5300),
+    accentSecondary: Color(0xFF6E4A00),
+    accentTertiary: Color(0xFFA0430A),
+    accentSoft: Color(0xFFF5E5C3),
+    onAccent: Color(0xFFFFFFFF),
+    success: Color(0xFF4F6B00),
+    warning: Color(0xFF7A5200),
+    danger: Color(0xFFA8301C),
+    concept: true,
+    glow: 0.2,
+    gradient: 0,
+    toneSaturation: 0.55,
+    duotone: true,
   );
 }

@@ -247,7 +247,7 @@ class ZenPulsingDot extends StatefulWidget {
 }
 
 class _ZenPulsingDotState extends State<ZenPulsingDot>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   AnimationController? _clock;
 
   // Waveform parameters — redrawn only when the widget is recreated, so the
@@ -390,7 +390,7 @@ class ZenNeonFlicker extends StatefulWidget {
 }
 
 class _ZenNeonFlickerState extends State<ZenNeonFlicker>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   Timer? _quietTimer;
   Timer? _stepTimer;
   AnimationController? _clock;
@@ -615,7 +615,7 @@ class _RingJitter {
 }
 
 class _ZenPulseRingsState extends State<ZenPulseRings>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   AnimationController? _clock;
   late List<_RingJitter> _rings;
 
