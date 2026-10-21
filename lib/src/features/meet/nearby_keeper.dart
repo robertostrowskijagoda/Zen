@@ -25,11 +25,12 @@ final class NearbyKeeper {
   NearbyKeeper({
     required this.nearby,
     this.active,
-    Duration lookEvery = kNearbyLookEvery,
-    Duration lookFor = kNearbyLookFor,
+    Duration? lookEvery,
+    Duration? lookFor,
     this.tick = const Duration(minutes: 1),
     int Function()? now,
-  }) : policy = NearbyLookPolicy(every: lookEvery, window: lookFor),
+  }) : _every = lookEvery,
+       _for = lookFor,
        _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final NearbyService nearby;
@@ -38,8 +39,16 @@ final class NearbyKeeper {
   /// the background service looks instead).
   final bool Function()? active;
 
-  /// When a look runs and for how long.
-  final NearbyLookPolicy policy;
+  /// Fixed instead of the person's choice (tests).
+  final Duration? _every;
+  final Duration? _for;
+
+  /// When a look runs and for how long: as the person chose
+  /// ([MeetBook.nearbyLookMinutes], [MeetBook.nearbyLookSeconds]).
+  NearbyLookPolicy get policy => NearbyLookPolicy(
+    every: _every ?? Duration(minutes: meet.book.nearbyLookMinutes),
+    window: _for ?? Duration(seconds: meet.book.nearbyLookSeconds),
+  );
 
   Duration get lookEvery => policy.every;
   Duration get lookFor => policy.window;

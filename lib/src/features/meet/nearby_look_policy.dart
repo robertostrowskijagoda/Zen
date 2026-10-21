@@ -7,6 +7,26 @@ const Duration kNearbyLookEvery = Duration(minutes: 5);
 /// low-power scan opens one or two of its listening windows.
 const Duration kNearbyLookFor = Duration(seconds: 8);
 
+/// What the person may choose: minutes between looks ("Wyłączone" is the
+/// switch, [MeetBook.nearbyBackgroundScan]) and seconds one look lasts.
+const List<int> kNearbyLookEveryChoices = <int>[2, 5, 10, 15, 30];
+const List<int> kNearbyLookForChoices = <int>[4, 8, 15];
+
+/// [value] when it is one of [kNearbyLookEveryChoices], else the default.
+int nearbyLookMinutesOf(Object? value) =>
+    value is int && kNearbyLookEveryChoices.contains(value)
+    ? value
+    : kNearbyLookEvery.inMinutes;
+
+/// [value] when it is one of [kNearbyLookForChoices], else the default.
+int nearbyLookSecondsOf(Object? value) =>
+    value is int && kNearbyLookForChoices.contains(value)
+    ? value
+    : kNearbyLookFor.inSeconds;
+
+/// The battery the estimates are shown against.
+const int kTypicalBatteryMah = 3000;
+
 /// Below this battery level (per cent, not charging) no look runs.
 const int kNearbyLookMinBattery = 15;
 
@@ -173,3 +193,13 @@ final class NearbyLookStats {
       '$looks look(s), ${scannedMillis ~/ 1000} s scanning, skipped: '
       '${skipped.entries.map((MapEntry<NearbyLookSkip, int> e) => '${e.key.name} ${e.value}').join(', ')}';
 }
+
+/// [nearbyLookMilliampHoursPerDay] as a share of a [kTypicalBatteryMah]
+/// battery, in per cent.
+double nearbyLookBatteryPercentPerDay({
+  Duration every = kNearbyLookEvery,
+  Duration window = kNearbyLookFor,
+}) =>
+    nearbyLookMilliampHoursPerDay(every: every, window: window) /
+    kTypicalBatteryMah *
+    100;

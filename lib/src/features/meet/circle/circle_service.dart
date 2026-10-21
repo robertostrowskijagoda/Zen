@@ -8,6 +8,7 @@ import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/circle/circle_model.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
+import 'package:zen/src/features/meet/locked_reminders.dart';
 import 'package:zen/src/features/meet/meet_thread.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -458,6 +459,30 @@ final class CircleService extends ChangeNotifier {
     return last.$1;
   }
 
+  /// The last dinner, while "Spotkani?" is still asked about it: from its
+  /// start until [kCircleHowUntil] after, when this person did not say
+  /// "Nie dam rady".
+  DateTime? metPending(String id) {
+    final DinnerCircle? c = _circles[id];
+    final int nowMs = _now();
+    final (DateTime, CircleMember)? last = c?.lastDinner(nowMs);
+    if (c == null || last == null || !c.hasMember(_me)) {
+      return null;
+    }
+    final int since = nowMs - last.$1.millisecondsSinceEpoch;
+    return since > kCircleHowUntil.inMilliseconds ||
+            c.attendanceOf(_me, DinnerCircle.dayKey(last.$1)) ==
+                CircleAttendance.no
+        ? null
+        : last.$1;
+  }
+
+  /// Whom to ask "Spotkani?" about after the dinner on [day]: people there
+  /// who are not this person's friends yet.
+  List<(String, String)> newPeopleAt(String id, DateTime day) =>
+      _circles[id]?.newPeopleOn(day, me: _me, known: host.isFriend) ??
+      const <(String, String)>[];
+
   // ---- the small chat of a dinner ----
 
   static String threadKey(String id, DateTime day) =>
@@ -538,19 +563,7 @@ final class CircleService extends ChangeNotifier {
       if (how != null &&
           _shown.add('${c.id}|${DinnerCircle.dayKey(how)}|how')) {
         changed = true;
-        await host.notify(
-          RuntimeSystemNotification(
-            id: 'circle-how-${c.id}-${DinnerCircle.dayKey(how)}',
-            title: t('Jak było? {circle}', {'circle': c.name}),
-            body: t(
-              'Odpowiedz jednym stuknięciem. Zobacz też, kto gotuje '
-              'następnym razem.',
-            ),
-            createdAtMillis: nowMs,
-            category: RuntimeSystemNotificationCategory.social,
-            slotKey: 'circle:${c.id}',
-          ),
-        );
+        await host.notify(_howFor(c, DinnerCircle.dayKey(how)));
       }
     }
     if (changed) {
@@ -558,12 +571,20 @@ final class CircleService extends ChangeNotifier {
     }
   }
 
-  Future<void> _remind(DinnerCircle c, DateTime at, CircleMember cook) async {
+  Future<void> _remind(DinnerCircle c, DateTime at, CircleMember cook) =>
+      host.notify(_reminderFor(c, at, cook));
+
+  /// The reminder the day before the dinner at [at] (the cook gets the
+  /// count so far).
+  RuntimeSystemNotification _reminderFor(
+    DinnerCircle c,
+    DateTime at,
+    CircleMember cook,
+  ) {
     final String when = ZenFormat.time(at);
     final String day = DinnerCircle.dayKey(at);
-    final RuntimeSystemNotification notice;
     if (cook.address == _me) {
-      notice = RuntimeSystemNotification(
+      return RuntimeSystemNotification(
         id: 'circle-remind-${c.id}-$day',
         title: t('Jutro gotujesz: {circle}', {'circle': c.name}),
         body: circleCountText(c.headcountOn(at)),
@@ -571,22 +592,76 @@ final class CircleService extends ChangeNotifier {
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'circle:${c.id}',
       );
-    } else {
-      notice = RuntimeSystemNotification(
-        id: 'circle-remind-${c.id}-$day',
-        title: t('Jutro obiad: {circle}', {'circle': c.name}),
-        body: c.attendanceOf(_me, day) == null
-            ? t('O {time} gotuje {name}. Będziesz? Odpowiedz w aplikacji.', {
-                'time': when,
-                'name': cook.name,
-              })
-            : t('O {time} gotuje {name}.', {'time': when, 'name': cook.name}),
+    }
+    return RuntimeSystemNotification(
+      id: 'circle-remind-${c.id}-$day',
+      title: t('Jutro obiad: {circle}', {'circle': c.name}),
+      body: c.attendanceOf(_me, day) == null
+          ? t('O {time} gotuje {name}. Będziesz? Odpowiedz w aplikacji.', {
+              'time': when,
+              'name': cook.name,
+            })
+          : t('O {time} gotuje {name}.', {'time': when, 'name': cook.name}),
+      createdAtMillis: _now(),
+      category: RuntimeSystemNotificationCategory.social,
+      slotKey: 'circle:${c.id}',
+    );
+  }
+
+  RuntimeSystemNotification _howFor(DinnerCircle c, String day) =>
+      RuntimeSystemNotification(
+        id: 'circle-how-${c.id}-$day',
+        title: t('Jak było? {circle}', {'circle': c.name}),
+        body: t(
+          'Odpowiedz jednym stuknięciem. Zobacz też, kto gotuje '
+          'następnym razem.',
+        ),
         createdAtMillis: _now(),
         category: RuntimeSystemNotificationCategory.social,
         slotKey: 'circle:${c.id}',
       );
+
+  /// The reminders of the coming [ahead] worked out now, for the Android
+  /// background service to show while the app is locked or closed (it
+  /// cannot read the circles): the day before each dinner and "Jak było?"
+  /// after it, with the same ids as [tick] uses. Only those still ahead,
+  /// so the list stays the same between two calls.
+  List<LockedReminder> lockedReminders({
+    Duration ahead = const Duration(days: 8),
+  }) {
+    final int nowMs = _now();
+    final List<LockedReminder> out = <LockedReminder>[];
+    LockedReminder from(RuntimeSystemNotification n, int at) => LockedReminder(
+      id: n.id,
+      at: at,
+      title: n.title,
+      body: n.body,
+      slot: n.slotKey ?? '',
+    );
+    for (final DinnerCircle c in circles) {
+      for (final (DateTime at, CircleMember cook) in c.schedule(
+        nowMs,
+        count: 3,
+      )) {
+        final int start = at.millisecondsSinceEpoch;
+        if (start - nowMs > ahead.inMilliseconds) {
+          break;
+        }
+        final String day = DinnerCircle.dayKey(at);
+        final int remindAt = start - kCircleRemindBefore.inMilliseconds;
+        if (remindAt > nowMs && !_shown.contains('${c.id}|$day|remind')) {
+          out.add(from(_reminderFor(c, at, cook), remindAt));
+        }
+        final int howAt = start + kCircleHowAfter.inMilliseconds;
+        if (howAt > nowMs &&
+            c.attendanceOf(_me, day) != CircleAttendance.no &&
+            c.how[day]?[_me] == null) {
+          out.add(from(_howFor(c, day), howAt));
+        }
+      }
     }
-    await host.notify(notice);
+    out.sort((LockedReminder a, LockedReminder b) => a.at.compareTo(b.at));
+    return out.take(kLockedRemindersMax).toList();
   }
 
   // ---- the rest of a circle ----

@@ -7,6 +7,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/nearby_crypto.dart';
+import 'package:zen/src/features/meet/nearby_look_policy.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// "Chcę pogadać" and friends: what someone is up for right now.
@@ -621,6 +622,12 @@ final class MeetBook {
   /// friends met in person. On by default; the person can turn it off.
   bool nearbyBackgroundScan = true;
 
+  /// Minutes between those looks ([kNearbyLookEveryChoices]).
+  int nearbyLookMinutes = kNearbyLookEvery.inMinutes;
+
+  /// Seconds one look lasts ([kNearbyLookForChoices]).
+  int nearbyLookSeconds = kNearbyLookFor.inSeconds;
+
   /// What was last sent as the friend list (to send again only on change).
   String friendListSent = '';
 
@@ -748,6 +755,8 @@ final class MeetBook {
     if (friendAlarmKeys.isNotEmpty) 'fak': friendAlarmKeys,
     // Always written: a book without it (never chosen) means on.
     'bgScan': nearbyBackgroundScan,
+    'lkm': nearbyLookMinutes,
+    'lks': nearbyLookSeconds,
     'listSent': friendListSent,
     'ld': friendListDigests,
   };
@@ -836,6 +845,8 @@ final class MeetBook {
       }
     }
     book.nearbyBackgroundScan = json['bgScan'] != false;
+    book.nearbyLookMinutes = nearbyLookMinutesOf(json['lkm']);
+    book.nearbyLookSeconds = nearbyLookSecondsOf(json['lks']);
     book.friendListSent = json['listSent'] is String
         ? json['listSent'] as String
         : '';

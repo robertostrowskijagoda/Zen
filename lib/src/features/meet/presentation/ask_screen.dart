@@ -110,7 +110,7 @@ class _AskScreenState extends ConsumerState<AskScreen> {
       return;
     }
     final String? me = pyr.myKey;
-    final int balance = me == null ? 0 : pyr.state?.balanceOf(me) ?? 0;
+    final int balance = me == null ? 0 : pyr.balance;
     final String name = pyr.state?.members[key]?.name ?? answerSource(a.path);
     final (int, String)? amount = await askAmount(
       context,

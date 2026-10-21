@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/meet/circle/circle_service.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
+import 'package:zen/src/features/meet/locked_reminders.dart';
 import 'package:zen/src/features/meet/meet_thread.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -572,5 +573,91 @@ void main() {
       };
     expect(DinnerCircle.fromJson(bad)!.rsvp['2026-10-01'], isEmpty);
     expect(DinnerCircle.fromJson(bad)!.rsvp.containsKey('nie-data'), isFalse);
+  });
+
+  test('"Spotkani?" after a dinner: the people there who are new, until two '
+      'days after', () async {
+    final _World w = _World();
+    final DinnerCircle c = await w.circle();
+    final DateTime day = DateTime(2026, 10, 1, 19);
+    w.advance(1);
+    await w.ania.circles.setOpen(c.id, true);
+    w.advance(1);
+    await w.ania.circles.bringGuest(
+      c.id,
+      day,
+      name: 'e5',
+      address: w.edek.address,
+      vouch: true,
+    );
+    await w.dina.circles.rsvp(c.id, day, CircleAttendance.no);
+    // Bob knows neither Cela nor Edek.
+    w.bob.friendList
+      ..remove(w.cela.address)
+      ..remove(w.edek.address);
+    expect(w.bob.circles.metPending(c.id), isNull, reason: 'not yet');
+    for (final _Host h in w.net.values) {
+      h.clock = DateTime(2026, 10, 1, 21).millisecondsSinceEpoch;
+    }
+    expect(w.bob.circles.metPending(c.id), day);
+    expect(w.bob.circles.newPeopleAt(c.id, day), <(String, String)>[
+      (w.cela.address, 'c3'),
+      (w.edek.address, 'e5'),
+    ]);
+    // Who knows everyone has nobody new; who did not come is not asked.
+    expect(w.ania.circles.newPeopleAt(c.id, day), isEmpty);
+    expect(w.dina.circles.metPending(c.id), isNull);
+    for (final _Host h in w.net.values) {
+      h.clock = DateTime(2026, 10, 4).millisecondsSinceEpoch;
+    }
+    expect(w.bob.circles.metPending(c.id), isNull);
+  });
+
+  test('the reminders are worked out ahead for the locked background '
+      'service, with the ids the app uses, only those still to come', () async {
+    final _World w = _World();
+    final DinnerCircle c = await w.circle();
+    final DateTime day = DateTime(2026, 10, 1, 19);
+    await w.dina.circles.rsvp(c.id, day, CircleAttendance.no);
+    for (final _Host h in w.net.values) {
+      h.clock = DateTime(2026, 9, 28, 12).millisecondsSinceEpoch;
+    }
+    final List<LockedReminder> ania = w.ania.circles.lockedReminders();
+    expect(ania.map((LockedReminder r) => r.id), <String>[
+      'circle-remind-${c.id}-2026-10-01',
+      'circle-how-${c.id}-2026-10-01',
+    ]);
+    expect(ania.first.title, 'Jutro gotujesz: Czwartki');
+    expect(ania.first.at, DateTime(2026, 9, 30, 19).millisecondsSinceEpoch);
+    expect(ania.last.title, 'Jak było? Czwartki');
+    expect(ania.last.at, DateTime(2026, 10, 1, 22).millisecondsSinceEpoch);
+    // Dina said she will not come: no "Jak było?".
+    expect(
+      w.dina.circles.lockedReminders().map((LockedReminder r) => r.id),
+      <String>['circle-remind-${c.id}-2026-10-01'],
+    );
+    expect(w.edek.circles.lockedReminders(), isEmpty);
+    // Once its time passed, a reminder is no longer handed over.
+    for (final _Host h in w.net.values) {
+      h.clock = DateTime(2026, 9, 30, 20).millisecondsSinceEpoch;
+    }
+    // (The next week's dinner is within the eight days now.)
+    expect(
+      w.ania.circles.lockedReminders().map((LockedReminder r) => r.id),
+      <String>[
+        'circle-how-${c.id}-2026-10-01',
+        'circle-remind-${c.id}-2026-10-08',
+        'circle-how-${c.id}-2026-10-08',
+      ],
+    );
+    // Answered: no "Jak było?" for that dinner.
+    await w.ania.circles.rate(c.id, day, CircleHow.great);
+    expect(
+      w.ania.circles.lockedReminders().map((LockedReminder r) => r.id),
+      <String>[
+        'circle-remind-${c.id}-2026-10-08',
+        'circle-how-${c.id}-2026-10-08',
+      ],
+    );
   });
 }

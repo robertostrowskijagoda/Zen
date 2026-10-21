@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/encounters.dart';
+import 'package:zen/src/features/meet/locked_reminders.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
@@ -58,6 +59,9 @@ final class NearbyKit {
     this.friends = const <String, String>{},
     this.firstSlot = 0,
     this.adverts,
+    this.lookMinutes = 5,
+    this.lookSeconds = 8,
+    this.reminders = const <LockedReminder>[],
   });
 
   final int createdAt;
@@ -77,6 +81,15 @@ final class NearbyKit {
 
   /// Write down who was passed ("Zapisuj, kogo mijam").
   final bool record;
+
+  /// How often a look runs and how long ([MeetBook.nearbyLookMinutes],
+  /// [MeetBook.nearbyLookSeconds]).
+  final int lookMinutes;
+  final int lookSeconds;
+
+  /// Notifications to show at their time (a circle's dinner tomorrow, "Jak
+  /// było?"), worked out by the unlocked app.
+  final List<LockedReminder> reminders;
 
   /// Friend (normalised address) → what they gave this phone
   /// ([FriendNearbyKey]).
@@ -114,6 +127,12 @@ final class NearbyKit {
     if (alarms) 'al': true,
     if (look) 'lk': true,
     if (record) 'rec': true,
+    'lkm': lookMinutes,
+    'lks': lookSeconds,
+    if (reminders.isNotEmpty)
+      'rm': <Map<String, dynamic>>[
+        for (final LockedReminder r in reminders) r.toJson(),
+      ],
     'f': friends,
     if (adverts case final Uint8List a) ...<String, dynamic>{
       's': firstSlot,
@@ -165,6 +184,15 @@ final class NearbyKit {
       },
       firstSlot: firstSlot,
       adverts: adverts,
+      lookMinutes: nearbyLookMinutesOf(json['lkm']),
+      lookSeconds: nearbyLookSecondsOf(json['lks']),
+      reminders: <LockedReminder>[
+        if (json['rm'] is List)
+          for (final Object? r in (json['rm'] as List).take(
+            kLockedRemindersMax,
+          ))
+            if (LockedReminder.fromJson(r) case final LockedReminder x) x,
+      ],
     );
   }
 }
@@ -194,11 +222,15 @@ final class NearbyKitKeeper {
   NearbyKitKeeper({
     required this.meet,
     required this.write,
+    this.reminders,
     int Function()? now,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   final MeetService meet;
   final Future<void> Function(NearbyKit kit) write;
+
+  /// What the locked service is to remind of (circles' dinners).
+  final List<LockedReminder> Function()? reminders;
   final int Function() _now;
 
   String? _written;
@@ -252,7 +284,15 @@ final class NearbyKitKeeper {
     final String? private = visible ? await meet.nearbyPrivateKey() : null;
     final int slot = nearbySlot(_now());
     final int firstSlot = slot - slot % _slotsPerDay;
+    final List<LockedReminder> remind = <LockedReminder>[
+      ...?reminders?.call(),
+    ].take(kLockedRemindersMax).toList();
     final Map<String, dynamic> inputs = <String, dynamic>{
+      'lkm': book.nearbyLookMinutes,
+      'lks': book.nearbyLookSeconds,
+      'rm': <Map<String, dynamic>>[
+        for (final LockedReminder r in remind) r.toJson(),
+      ],
       'me': self,
       'vis': visible,
       'al': book.alarmNearby && visible,
@@ -293,6 +333,9 @@ final class NearbyKitKeeper {
         friends: friends,
         firstSlot: firstSlot,
         adverts: adverts,
+        lookMinutes: book.nearbyLookMinutes,
+        lookSeconds: book.nearbyLookSeconds,
+        reminders: remind,
       ),
     );
     _written = signature;
@@ -330,10 +373,13 @@ final class LockedNearby {
     Future<void> Function(List<String> keys)? alarmKeys,
     Future<EncounterPlace?> Function()? place,
     int Function()? now,
-    Duration lookEvery = kNearbyLookEvery,
-    Duration lookFor = kNearbyLookFor,
+    Duration? lookEvery,
+    Duration? lookFor,
     this.keepEvery = const Duration(minutes: 30),
-  }) : policy = NearbyLookPolicy(every: lookEvery, window: lookFor),
+  }) : policy = NearbyLookPolicy(
+         every: lookEvery ?? Duration(minutes: kit.lookMinutes),
+         window: lookFor ?? Duration(seconds: kit.lookSeconds),
+       ),
        _keep = keep,
        _notices = notices,
        _claimAlarms = claimAlarms,
@@ -397,6 +443,10 @@ final class LockedNearby {
 
   StreamSubscription<Map<Object?, Object?>>? _events;
   Timer? _lookTimer;
+  Timer? _remindTimer;
+
+  /// Reminders of the kit shown in this run.
+  final Set<String> _reminded = <String>{};
   bool _running = false;
   bool _claimed = false;
   bool _windowOpen = false;
@@ -457,6 +507,13 @@ final class LockedNearby {
         (_) => unawaitedLogged(lookNow(), context: 'Locked nearby: look'),
       );
     }
+    if (kit.reminders.isNotEmpty) {
+      await remindIfDue();
+      _remindTimer = Timer.periodic(
+        const Duration(minutes: 1),
+        (_) => unawaitedLogged(remindIfDue(), context: 'Locked reminders'),
+      );
+    }
     logZenMessage(
       'Locked nearby runs (shown: ${kit.visible}, alarm waves: ${kit.alarms}, '
       'looks: ${kit.look && kit.record}, ${_friends.length} friend key(s)).',
@@ -470,6 +527,8 @@ final class LockedNearby {
     _running = false;
     _lookTimer?.cancel();
     _lookTimer = null;
+    _remindTimer?.cancel();
+    _remindTimer = null;
     await _events?.cancel();
     _events = null;
     if (_claimed) {
@@ -485,6 +544,29 @@ final class LockedNearby {
       await radio.stopScan();
     }
     await keepEncounters();
+  }
+
+  /// Shows the kit's reminders whose time came (each once a run). Returns
+  /// how many it showed.
+  Future<int> remindIfDue() async {
+    final int at = _now();
+    int shown = 0;
+    for (final LockedReminder r in kit.reminders) {
+      if (r.dueAt(at) && _reminded.add(r.id)) {
+        shown++;
+        await _show(
+          RuntimeSystemNotification(
+            id: r.id,
+            title: r.title,
+            body: r.body,
+            createdAtMillis: at,
+            category: RuntimeSystemNotificationCategory.social,
+            slotKey: r.slot,
+          ),
+        );
+      }
+    }
+    return shown;
   }
 
   /// Runs [work] (this person's alarm wave, which looks around to find the

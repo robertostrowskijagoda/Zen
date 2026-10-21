@@ -8,7 +8,6 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
-import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
 /// "Za punkty" over the pyramid: the one place shared food meets the
 /// wallet. Read on every use, so a pyramid joined later counts at once;
@@ -45,10 +44,7 @@ final class PyramidFoodPoints implements FoodPoints {
   }) async {
     final PyramidService? p = _pyr;
     final String? me = p?.myKey;
-    if (p == null ||
-        me == null ||
-        amount <= 0 ||
-        (p.state?.balanceOf(me) ?? 0) < amount) {
+    if (p == null || me == null || amount <= 0 || p.balance < amount) {
       return null;
     }
     return (await p.tip(key, amount, memo: memo, pyramid: pyramid))?.id;
@@ -58,15 +54,7 @@ final class PyramidFoodPoints implements FoodPoints {
   bool received(String order, {required String from, required int amount}) {
     final String? me = myKey;
     return me != null &&
-        (_pyr?.state?.transfers.any(
-              (PyrTransferInfo x) =>
-                  x.id == order &&
-                  x.from == from &&
-                  x.to == me &&
-                  !x.conditional &&
-                  x.amount >= amount,
-            ) ??
-            false);
+        (_pyr?.receivedPayment(order, from: from, amount: amount) ?? false);
   }
 
   @override

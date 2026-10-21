@@ -791,6 +791,20 @@ void main() {
       MeetBook.fromJson(<String, dynamic>{'v': 1}).nearbyBackgroundScan,
       isTrue,
     );
+    // How often and how long follow the person's choice.
+    final NearbyKeeper chosen = NearbyKeeper(nearby: bob.nearby);
+    expect(chosen.lookEvery, kNearbyLookEvery);
+    expect(chosen.lookFor, kNearbyLookFor);
+    await bob.meet.setNearbyLook(minutes: 15, seconds: 4);
+    expect(chosen.lookEvery, const Duration(minutes: 15));
+    expect(chosen.lookFor, const Duration(seconds: 4));
+    await bob.meet.setNearbyLook(minutes: 7, seconds: 9);
+    expect(
+      chosen.lookEvery,
+      const Duration(minutes: 15),
+      reason: 'not offered',
+    );
+    await chosen.close();
     await keeper.close();
     await bob.nearby.close();
   });

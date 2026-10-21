@@ -14,6 +14,7 @@ import 'package:zen/src/features/meet/alarm_kit.dart';
 import 'package:zen/src/features/meet/alarm_sms.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/nearby_crypto.dart';
+import 'package:zen/src/features/meet/nearby_look_policy.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/friend_display_name.dart';
@@ -2066,6 +2067,18 @@ final class MeetService extends ChangeNotifier {
   /// The short look around every few minutes.
   Future<void> setNearbyBackgroundScan(bool on) =>
       _update<void>((MeetBook b) => b.nearbyBackgroundScan = on);
+
+  /// How often the background look runs and how long it lasts (only the
+  /// offered choices; anything else keeps what was set).
+  Future<void> setNearbyLook({int? minutes, int? seconds}) =>
+      _update<void>((MeetBook b) {
+        if (minutes != null && kNearbyLookEveryChoices.contains(minutes)) {
+          b.nearbyLookMinutes = minutes;
+        }
+        if (seconds != null && kNearbyLookForChoices.contains(seconds)) {
+          b.nearbyLookSeconds = seconds;
+        }
+      });
 
   Future<void> _send(String to, Map<String, dynamic> payload) async {
     try {

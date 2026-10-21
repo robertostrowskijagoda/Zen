@@ -1018,6 +1018,17 @@ class _SettingsScreen extends ConsumerWidget {
                         : t('Powiadomienia, mikrofon i kamera'),
                     onTap: () => unawaited(PermissionsScreen.open(context)),
                   ),
+                  // How often Bluetooth looks around in the background.
+                  if (Platform.isAndroid)
+                    _SettingsNavTile(
+                      key: const Key('settings-nav-nearby-look'),
+                      icon: Icons.radar_rounded,
+                      tone: ZenTone.places,
+                      title: t('Rozglądanie w tle'),
+                      subtitle: t('Bluetooth: jak często i jak długo'),
+                      pageTitle: t('Rozglądanie w tle'),
+                      pageChildren: const <Widget>[NearbyLookSettingsSection()],
+                    ),
                   _SettingsNavTile(
                     key: const Key('settings-nav-health'),
                     icon: Icons.health_and_safety_outlined,

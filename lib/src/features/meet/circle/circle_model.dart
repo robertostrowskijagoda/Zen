@@ -566,6 +566,29 @@ final class DinnerCircle {
     );
   }
 
+  /// People at the dinner on [day] that [me] may meet for the first time
+  /// ("Spotkani?"): members who did not say "Nie dam rady" and guests
+  /// brought with their address, apart from [me] and whoever [known] says
+  /// is a friend already. (address, name), in table order.
+  List<(String, String)> newPeopleOn(
+    DateTime day, {
+    required String me,
+    required bool Function(String address) known,
+  }) {
+    final String key = dayKey(day);
+    final Set<String> seen = <String>{_n(me)};
+    return <(String, String)>[
+      for (final CircleMember m in members)
+        if (attendanceOf(m.address, key) != CircleAttendance.no &&
+            !known(m.address) &&
+            seen.add(m.address))
+          (m.address, m.name),
+      for (final (String _, CircleGuest g) in guestsOn(day))
+        if (g.address case final String a when !known(a) && seen.add(a))
+          (a, g.name),
+    ];
+  }
+
   /// Who shares the shopping of the dinner on [day]: the members who said
   /// "Będę" (all members when nobody answered) and whoever paid.
   List<String> sharersOn(String day) {

@@ -16,6 +16,7 @@ import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/presentation/encounters_section.dart';
 import 'package:zen/src/features/meet/presentation/met_level_prompt.dart';
+import 'package:zen/src/features/meet/presentation/nearby_look_settings.dart';
 import 'package:zen/src/features/profile/presentation/mini_profile.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
@@ -356,7 +357,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                       title: Text(t('Rozglądaj się też w tle')),
                       subtitle: Text(
                         t(
-                          'Co 5 minut telefon na kilka sekund oszczędnie '
+                          'Co kilka minut telefon na kilka sekund oszczędnie '
                           'sprawdza, czy obok są znajomi, i zapisuje ich w '
                           '„Mijani”. Działa też przy zamkniętym Zen; nie przy '
                           'baterii poniżej 15%, w oszczędzaniu baterii ani we '
@@ -367,6 +368,8 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                           unawaited(meet.setNearbyBackgroundScan(v)),
                     ),
                   ),
+                  // How often and how long, with what it costs.
+                  NearbyLookSettingsTile(meet: meet),
                 ],
               ),
               Padding(

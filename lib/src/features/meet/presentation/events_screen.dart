@@ -1521,7 +1521,7 @@ class _AfterEvent extends ConsumerWidget {
             labelText: t('Kwota'),
             hintText: '0,00',
             helperText: t('Na koncie: {amount}', {
-              'amount': formatMoney(s.balanceOf(me)),
+              'amount': formatMoney(pyr.balance),
             }),
             prefixIcon: const Icon(Icons.payments_outlined),
           ),
@@ -1544,7 +1544,7 @@ class _AfterEvent extends ConsumerWidget {
     if (ok != true || value == null || value <= 0) {
       return;
     }
-    if (value > s.balanceOf(me)) {
+    if (value > pyr.balance) {
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,

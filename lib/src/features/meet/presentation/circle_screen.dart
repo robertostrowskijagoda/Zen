@@ -14,6 +14,7 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/presentation/circle_widgets.dart';
 import 'package:zen/src/features/meet/presentation/events_screen.dart';
 import 'package:zen/src/features/meet/presentation/food_screen.dart';
+import 'package:zen/src/features/meet/presentation/met_level_prompt.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
@@ -512,6 +513,29 @@ class CircleScreen extends ConsumerWidget {
     }
   }
 
+  /// "Spotkani?" for someone new at a dinner: an invitation to friends
+  /// ("Poznaliśmy się na obiedzie"), then how close.
+  Future<void> _met(
+    BuildContext context,
+    WidgetRef ref,
+    DinnerCircle c,
+    String address,
+    String name,
+  ) async {
+    await ref
+        .read(socialHubControllerProvider.notifier)
+        .sendFriendRequest(
+          peerAddress: address,
+          knownName: name,
+          message: t('Poznaliśmy się na obiedzie: {circle}', {
+            'circle': c.name,
+          }),
+        );
+    if (context.mounted) {
+      await showMetLevelPrompt(context, address: address, name: name);
+    }
+  }
+
   /// "Opuść kółko", after asking.
   Future<void> _leave(
     BuildContext context,
@@ -675,6 +699,11 @@ class CircleScreen extends ConsumerWidget {
             ? const <String, String>{}
             : c.items[DinnerCircle.dayKey(next)] ?? const <String, String>{};
         final DateTime? how = circles.howPending(c.id);
+        // "Spotkani?" for the people at the last dinner who are new.
+        final DateTime? metDay = circles.metPending(c.id);
+        final List<(String, String)> newPeople = metDay == null
+            ? const <(String, String)>[]
+            : circles.newPeopleAt(c.id, metDay);
         // "Kto komu ile": the last dinner (two weeks at most), else the
         // next one (shopping comes before it).
         final (DateTime, CircleMember)? last = c.lastDinner(circles.now);
@@ -783,6 +812,12 @@ class CircleScreen extends ConsumerWidget {
                           few: 'Czekamy na odpowiedź {n} osób.',
                           many: 'Czekamy na odpowiedź {n} osób.',
                         ),
+                ),
+              if (metDay != null && newPeople.isNotEmpty)
+                CircleNewPeopleCard(
+                  people: newPeople,
+                  onMet: (String address, String name) =>
+                      _met(context, ref, c, address, name),
                 ),
               if (how != null)
                 CircleHowCard(circle: c, service: circles, day: how)

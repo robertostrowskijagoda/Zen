@@ -50,6 +50,7 @@ import 'package:zen/src/features/meet/presentation/graph_screen.dart';
 import 'package:zen/src/features/meet/presentation/intro_widgets.dart';
 import 'package:zen/src/features/meet/presentation/meet_hub_screen.dart';
 import 'package:zen/src/features/meet/presentation/met_level_prompt.dart';
+import 'package:zen/src/features/meet/presentation/nearby_look_settings.dart';
 import 'package:zen/src/features/meet/presentation/nearby_screen.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
 import 'package:zen/src/features/permissions/presentation/permissions_screen.dart';

@@ -497,3 +497,81 @@ Future<Set<CircleDiet>?> showCircleDietsDialog(
     ),
   );
 }
+
+/// "Spotkani?" after a dinner: the people at the table who are not friends
+/// yet. [onMet] sends the invitation and asks how close (each side confirms
+/// on its own phone).
+class CircleNewPeopleCard extends StatefulWidget {
+  const CircleNewPeopleCard({
+    required this.people,
+    required this.onMet,
+    super.key,
+  });
+
+  /// (address, name).
+  final List<(String, String)> people;
+  final Future<void> Function(String address, String name) onMet;
+
+  @override
+  State<CircleNewPeopleCard> createState() => _CircleNewPeopleCardState();
+}
+
+class _CircleNewPeopleCardState extends State<CircleNewPeopleCard> {
+  final Set<String> _done = <String>{};
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    final List<(String, String)> left = <(String, String)>[
+      for (final (String, String) p in widget.people)
+        if (!_done.contains(p.$1)) p,
+    ];
+    if (left.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return ZenCard(
+      key: const Key('circle-new-people'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            t('Nowi przy stole'),
+            style: TextStyle(
+              color: zen.textPrimary,
+              fontWeight: FontWeight.w800,
+              fontSize: 15,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            t(
+              'Poznaliście się osobiście? Potwierdź tylko, jeśli byliście razem.',
+            ),
+            style: TextStyle(color: zen.textSecondary, fontSize: 13),
+          ),
+          for (final (String address, String name) in left)
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: zen.textPrimary),
+                  ),
+                ),
+                TextButton(
+                  key: Key('circle-met-$address'),
+                  onPressed: () async {
+                    setState(() => _done.add(address));
+                    await widget.onMet(address, name);
+                  },
+                  child: Text(t('Spotkani?')),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
