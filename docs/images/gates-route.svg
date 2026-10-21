@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="320" viewBox="0 0 780 320" role="img" aria-labelledby="title desc">
+  <title id="title">A route through gates</title>
+  <desc id="desc">You want to reach Ola, a friend of a friend of a friend. Ana opens her gate for free but asks for her consent; Bart's gate costs 5 points. Writing to Ola directly as a stranger would cost 20 points. The planner picks the cheapest way first, then the one with fewer consents to wait for, then the one with fewer gates. Each gate is paid only when its turn comes, held until the whole way is open, and given back if a later gate fails.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8b949e"/>
+    </marker>
+  </defs>
+  <g font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif" text-anchor="middle" fill="#ffffff">
+    <rect x="195" y="14" width="190" height="26" rx="13" fill="#b45309"/>
+    <text x="290" y="32" font-size="12" font-weight="600">gate: free, with consent</text>
+    <rect x="430" y="14" width="130" height="26" rx="13" fill="#b45309"/>
+    <text x="495" y="32" font-size="12" font-weight="600">gate: 5 points</text>
+
+    <rect x="20" y="56" width="130" height="56" rx="10" fill="#2563eb"/>
+    <text x="85" y="89" font-size="15" font-weight="700">You</text>
+    <rect x="225" y="56" width="130" height="56" rx="10" fill="#0f766e"/>
+    <text x="290" y="81" font-size="15" font-weight="700">Ana</text>
+    <text x="290" y="99" font-size="12">your friend</text>
+    <rect x="430" y="56" width="130" height="56" rx="10" fill="#0f766e"/>
+    <text x="495" y="81" font-size="15" font-weight="700">Bart</text>
+    <text x="495" y="99" font-size="12">Ana's friend</text>
+    <rect x="630" y="56" width="130" height="56" rx="10" fill="#15803d"/>
+    <text x="695" y="81" font-size="15" font-weight="700">Ola</text>
+    <text x="695" y="99" font-size="12">Bart's friend</text>
+
+    <g stroke="#8b949e" stroke-width="2.5">
+      <line x1="152" y1="84" x2="219" y2="84" marker-end="url(#arrow)"/>
+      <line x1="357" y1="84" x2="424" y2="84" marker-end="url(#arrow)"/>
+      <line x1="562" y1="84" x2="624" y2="84" marker-end="url(#arrow)"/>
+      <path d="M 85 114 C 85 170, 695 170, 695 118" fill="none" stroke-dasharray="8 6" marker-end="url(#arrow)"/>
+    </g>
+    <rect x="250" y="142" width="280" height="26" rx="13" fill="#57606a"/>
+    <text x="390" y="160" font-size="12">or a direct first message to Ola: 20 points</text>
+
+    <g text-anchor="start" font-size="12">
+      <rect x="20" y="196" width="740" height="52" rx="12" fill="#6d28d9"/>
+      <text x="36" y="218" font-size="14" font-weight="700">The planner: Ana → Bart, 5 points</text>
+      <text x="36" y="238">cheapest first, then fewer consents to wait for, then fewer gates · no limit on the number of gates</text>
+      <rect x="20" y="256" width="740" height="52" rx="12" fill="#57606a"/>
+      <text x="36" y="278" font-size="14" font-weight="700">Paid step by step</text>
+      <text x="36" y="298">each gate is paid when its turn comes, held until the whole way is open, given back if a later gate fails</text>
+    </g>
+  </g>
+</svg>

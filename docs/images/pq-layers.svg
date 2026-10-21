@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="440" viewBox="0 0 780 440" role="img" aria-labelledby="title desc">
+  <title id="title">Encryption layers around a message and a call</title>
+  <desc id="desc">A message is wrapped in layers. Outermost, the link to a public peer: TLS 1.3 or QUIC with the hybrid X25519MLKEM768 key exchange. Inside it the Yggdrasil session, classical X25519 and Ed25519. Inside that Zen's own session between two devices: ML-KEM-768 plus X25519, ChaCha20-Poly1305, device keys pinned. Inside, the content: records signed with Ed25519 plus ML-DSA-65, mailbox mail sealed once more with ML-KEM-768 plus X25519. A call has three layers: AES-128-GCM frame encryption with keys from a per-call hybrid exchange, WebRTC DTLS-SRTP, and every packet sealed by the 256-bit post-quantum relay layer. On the device, data is encrypted with AES-256-GCM under a key from Argon2id and the system keystore.</desc>
+  <g font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif">
+
+    <!-- A message -->
+    <rect x="20" y="20" width="460" height="400" rx="16" fill="#6e7781"/>
+    <text x="40" y="48" font-size="14" font-weight="700" fill="#ffffff">Link to a public peer (tls://, quic://, wss://)</text>
+    <text x="40" y="68" font-size="12" fill="#ffffff">TLS 1.3 with X25519MLKEM768 · hybrid post-quantum</text>
+
+    <rect x="40" y="84" width="420" height="320" rx="14" fill="#0f766e"/>
+    <text x="60" y="110" font-size="14" font-weight="700" fill="#ffffff">Yggdrasil mesh session</text>
+    <text x="60" y="130" font-size="12" fill="#ffffff">X25519 + Ed25519 · classical (routing only)</text>
+
+    <rect x="60" y="146" width="380" height="242" rx="12" fill="#6d28d9"/>
+    <text x="80" y="172" font-size="14" font-weight="700" fill="#ffffff">Zen session layer, per pair of devices</text>
+    <text x="80" y="192" font-size="12" fill="#ffffff">ML-KEM-768 + X25519 → ChaCha20-Poly1305</text>
+    <text x="80" y="210" font-size="12" fill="#ffffff">device keys pinned · no plaintext mode</text>
+
+    <rect x="80" y="226" width="340" height="146" rx="10" fill="#15803d"/>
+    <text x="100" y="252" font-size="14" font-weight="700" fill="#ffffff">The content</text>
+    <text x="100" y="274" font-size="12" fill="#ffffff">records signed Ed25519 + ML-DSA-65</text>
+    <text x="100" y="294" font-size="12" fill="#ffffff">(posts, profiles, devices, pyramid, releases)</text>
+    <text x="100" y="320" font-size="12" fill="#ffffff">mailbox mail and the locked inbox:</text>
+    <text x="100" y="340" font-size="12" fill="#ffffff">sealed again, ML-KEM-768 + X25519,</text>
+    <text x="100" y="358" font-size="12" fill="#ffffff">a key per message, KEM renewed daily</text>
+
+    <!-- A call -->
+    <rect x="500" y="20" width="260" height="250" rx="16" fill="#6d28d9"/>
+    <text x="520" y="48" font-size="14" font-weight="700" fill="#ffffff">A call: relay layer</text>
+    <text x="520" y="68" font-size="12" fill="#ffffff">every packet: ChaCha20-Poly1305,</text>
+    <text x="520" y="86" font-size="12" fill="#ffffff">256-bit, from the hybrid session</text>
+
+    <rect x="516" y="100" width="228" height="154" rx="12" fill="#57606a"/>
+    <text x="534" y="126" font-size="14" font-weight="700" fill="#ffffff">WebRTC DTLS-SRTP</text>
+    <text x="534" y="146" font-size="12" fill="#ffffff">classical, standard</text>
+
+    <rect x="532" y="160" width="196" height="78" rx="10" fill="#2563eb"/>
+    <text x="548" y="186" font-size="14" font-weight="700" fill="#ffffff">Frame encryption</text>
+    <text x="548" y="206" font-size="12" fill="#ffffff">AES-128-GCM, keys from a</text>
+    <text x="548" y="224" font-size="12" fill="#ffffff">per-call ML-KEM exchange</text>
+
+    <!-- At rest -->
+    <rect x="500" y="290" width="260" height="130" rx="16" fill="#b45309"/>
+    <text x="520" y="318" font-size="14" font-weight="700" fill="#ffffff">On the device</text>
+    <text x="520" y="340" font-size="12" fill="#ffffff">AES-256-GCM for data and files</text>
+    <text x="520" y="360" font-size="12" fill="#ffffff">key from your password (Argon2id)</text>
+    <text x="520" y="380" font-size="12" fill="#ffffff">and the system keystore</text>
+    <text x="520" y="400" font-size="12" fill="#ffffff">(symmetric: quantum-safe)</text>
+  </g>
+</svg>

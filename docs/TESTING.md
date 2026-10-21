@@ -148,6 +148,24 @@ Languages: the audit runs in Polish (tests do not load translations). Text
 length in other languages (German, Russian) and right-to-left layout (Arabic)
 currently have to be checked by hand: Settings → Language.
 
+### 4.1 Pictures for the user guide (`tool/ui_tour/docs_screens_test.dart`)
+
+```
+flutter test --no-pub tool/ui_tour/docs_screens_test.dart --update-goldens
+DOCS_SCREENS_ONLY=dark flutter test --no-pub tool/ui_tour/docs_screens_test.dart --update-goldens
+```
+
+Renders the screens shown in `docs/guide` in English, at phone size
+(390 × 844 dp, 2×), in the Classic theme light and dark, with sample data
+(posts, a conversation with every delivery icon, a pyramid with a history,
+a door code, a dating profile). It writes `docs/images/<screen>-light.png`
+and `docs/images/<screen>-dark.png` for `shell`, `graph`, `chat`, `feed`,
+`films`, `meet`, `neighbours-door`, `dating`, `pyramid`, `pyramid-tree`,
+`pyramid-history`, `wallet`, `settings` and `themes`; layout problems go to
+`scratch/docs_screens/<mode>.txt`. Run it after the translations are up to
+date (an untranslated text shows in Polish) and commit the pictures. The
+diagrams next to them (`docs/images/*.svg`) are drawn by hand.
+
 ## 5. Translations
 
 Texts in code are in Polish in `t('…')` and `tn(n, one: …, few: …, many: …)`
@@ -189,6 +207,15 @@ same way as `tool/i18n.dart`: each file has exactly the texts from `lib/`, and
 | Linux build | Ubuntu | `flutter build linux --release` (the bridge builds itself), the `YggStartNode` symbol in `libyggdrasil_bridge.so`, `libgstreamer-1.0` linked into `zen`, packaging (`desktop-file-validate`, `appstreamcli validate`, `build_deb.sh` + `dpkg-deb --info`), start under Xvfb — the app must still run after 20 s |
 | Windows on ARM build | `windows-11-arm` | llvm-mingw (checked against its SHA-256), `flutter build windows --release`, `yggdrasil_bridge.dll` present in the ARM64 build; not on pull requests; `continue-on-error` until the first green run |
 | macOS build | macOS | bridge (`build_macos.sh`), `flutter build macos --release`, the `_YggStartNode` symbol in `Zen.app`, a 20 s start; not on pull requests (more expensive minutes) |
+
+The *Analyze and test* and *Go bridge* jobs write a short report to the run's
+summary page (Actions → the run → Summary): format, analyzer issues, test
+counts (passed, failed, skipped) with the failed tests and their first error
+lines, and the Go packages and tests. `tool/ci/ci_summary.py` (Python 3,
+standard library only) turns `flutter test --file-reporter json:…`,
+`flutter analyze --write=…` and `go test -v` output into that Markdown; it
+never fails the job itself. The release workflow's *SHA256SUMS* job lists
+every release file with its size and checksum the same way.
 
 `release.yml` on a `v*` tag builds all the release files — Android (signed
 universal APK), Windows x64 and ARM64, Linux x64 and ARM64 as `tar.gz` and

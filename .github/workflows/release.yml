@@ -484,6 +484,11 @@ jobs:
           printf '%s\n' "$sums" > SHA256SUMS
           cat SHA256SUMS
 
+      # Every file with its size and SHA-256 on the run's summary page.
+      - name: Summary
+        if: ${{ !cancelled() }}
+        run: python3 tool/ci/ci_summary.py files --dir dist
+
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: zen-release

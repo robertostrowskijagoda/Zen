@@ -5,6 +5,8 @@
 # bridge builds itself inside them), the Linux packaging and a short start
 # of each app. Actions are pinned to commit SHAs (Dependabot updates them,
 # .github/dependabot.yml); the token is read-only and no secret is used.
+# The test jobs write a short report (format, analyzer, test counts, failed
+# tests) to the run's summary page with tool/ci/ci_summary.py.
 name: CI
 
 on:
@@ -43,13 +45,29 @@ jobs:
         run: flutter pub get
 
       - name: Format
+        id: format
         run: dart format --output=none --set-exit-if-changed lib test tool
 
       - name: Analyze
-        run: flutter analyze
+        id: analyze
+        run: flutter analyze | Tee-Object -FilePath analyze.log
 
+      # The usual output in the log, and the JSON events in a file for the
+      # summary below.
       - name: Test
-        run: flutter test
+        id: test
+        run: flutter test --file-reporter json:test-results.json
+
+      # Format, analyzer and test counts (with the failed tests) on the
+      # run's summary page; tool/ci/ci_summary.py never fails the job.
+      - name: Summary
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: >-
+          python tool/ci/ci_summary.py flutter
+          --format '${{ steps.format.outcome }}'
+          --analyze '${{ steps.analyze.outcome }}' --analyze-log analyze.log
+          --test '${{ steps.test.outcome }}' --tests test-results.json
 
   go:
     name: Go bridge
@@ -68,12 +86,27 @@ jobs:
           go-version-file: native/yggdrasil_bridge/go.mod
           cache-dependency-path: native/yggdrasil_bridge/go.sum
 
-      - name: Vet and test
+      - name: Vet
+        id: vet
+        shell: bash
         env:
           CGO_ENABLED: '1'
-        run: |
-          go vet ./...
-          go test -count=1 ./...
+        run: go vet ./...
+
+      - name: Test
+        id: test
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+        run: go test -count=1 -v ./... 2>&1 | tee go-test.log
+
+      - name: Summary
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: >-
+          python ../../tool/ci/ci_summary.py go
+          --vet '${{ steps.vet.outcome }}'
+          --test '${{ steps.test.outcome }}' --log go-test.log
 
   android-bridge:
     name: Go bridge for Android (3 ABIs)

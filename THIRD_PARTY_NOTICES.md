@@ -25,7 +25,7 @@ Flutter itself. The direct dependencies:
 
 | Package | Licence |
 |---|---|
-| Flutter SDK, flutter_localizations, intl, ffi, crypto, mime, path_provider, video_player, video_player_platform_interface, image_picker, local_auth, flutter_secure_storage | BSD-3-Clause |
+| Flutter SDK, flutter_localizations, intl, ffi, crypto, mime, path_provider, video_player, video_player_platform_interface, image_picker, local_auth, flutter_secure_storage, camera (camera_android_camerax, camera_avfoundation, camera_platform_interface) | BSD-3-Clause |
 | flutter_local_notifications, qr_flutter, video_player_win | BSD-3-Clause |
 | record | BSD-3-Clause |
 | flutter_riverpod (riverpod), file_picker, flutter_foreground_task, system_tray, window_manager (screen_retriever), flutter_webrtc (dart_webrtc, webrtc_interface), image, qr_code_dart_scan | MIT |
@@ -65,7 +65,7 @@ Apache-2.0, MPL-2.0 or Zlib (vector_math).
 
 | Asset | Licence |
 |---|---|
-| Fredoka, Hanken Grotesk, JetBrains Mono, Space Mono, DM Sans, VT323 (`assets/fonts`) | SIL Open Font License 1.1 |
+| Fredoka, Hanken Grotesk, JetBrains Mono, Space Mono, DM Sans (`assets/fonts`) | SIL Open Font License 1.1 |
 | Material Icons (the icon font of the user interface; `ic_stat_call.xml` and `ic_pip_hang_up.xml` in `android/app/src/main/res/drawable`) | Apache-2.0, Copyright Google LLC |
 
 ## Zen's own sounds and images

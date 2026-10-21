@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="420" viewBox="0 0 780 420" role="img" aria-labelledby="title desc">
+  <title id="title">How a message travels</title>
+  <desc id="desc">Three cases. The recipient is online: the message goes straight to their device, sealed end to end. The recipient is offline but has mailboxes: after 4 seconds a sealed copy goes to up to 6 trusted friends of the recipient, who hand it over when the recipient returns. No mailbox is reachable: the message waits in the sender's outbox and is retried for up to 14 days.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8b949e"/>
+    </marker>
+  </defs>
+  <g font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif" text-anchor="middle">
+
+    <!-- 1. Online -->
+    <rect x="20" y="8" width="150" height="24" rx="12" fill="#57606a"/>
+    <text x="95" y="25" font-size="12" font-weight="600" fill="#ffffff">1 · Recipient online</text>
+    <rect x="20" y="44" width="150" height="56" rx="10" fill="#2563eb"/>
+    <text x="95" y="77" font-size="15" font-weight="600" fill="#ffffff">You</text>
+    <rect x="610" y="44" width="150" height="56" rx="10" fill="#15803d"/>
+    <text x="685" y="70" font-size="15" font-weight="600" fill="#ffffff">Recipient</text>
+    <text x="685" y="88" font-size="12" fill="#ffffff">online</text>
+    <line x1="172" y1="72" x2="604" y2="72" stroke="#8b949e" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <rect x="270" y="58" width="236" height="28" rx="14" fill="#6d28d9"/>
+    <text x="388" y="77" font-size="13" font-weight="600" fill="#ffffff">direct · sealed end to end</text>
+
+    <!-- 2. Offline, mailboxes -->
+    <rect x="20" y="140" width="250" height="24" rx="12" fill="#57606a"/>
+    <text x="145" y="157" font-size="12" font-weight="600" fill="#ffffff">2 · Recipient offline, has mailboxes</text>
+    <rect x="20" y="176" width="150" height="56" rx="10" fill="#2563eb"/>
+    <text x="95" y="209" font-size="15" font-weight="600" fill="#ffffff">You</text>
+    <rect x="312" y="168" width="180" height="56" rx="10" fill="#a78bfa"/>
+    <rect x="306" y="172" width="180" height="56" rx="10" fill="#8b5cf6"/>
+    <rect x="300" y="176" width="180" height="56" rx="10" fill="#6d28d9"/>
+    <text x="390" y="200" font-size="15" font-weight="600" fill="#ffffff">Mailboxes</text>
+    <text x="390" y="219" font-size="12" fill="#ffffff">up to 6 trusted friends</text>
+    <rect x="610" y="176" width="150" height="56" rx="10" fill="#15803d"/>
+    <text x="685" y="202" font-size="15" font-weight="600" fill="#ffffff">Recipient</text>
+    <text x="685" y="220" font-size="12" fill="#ffffff">back online</text>
+    <line x1="172" y1="204" x2="294" y2="204" stroke="#8b949e" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <line x1="494" y1="204" x2="604" y2="204" stroke="#8b949e" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <rect x="150" y="244" width="166" height="26" rx="13" fill="#57606a"/>
+    <text x="233" y="262" font-size="12" fill="#ffffff">after 4 s: a sealed copy</text>
+    <rect x="470" y="244" width="160" height="26" rx="13" fill="#57606a"/>
+    <text x="550" y="262" font-size="12" fill="#ffffff">handed over on return</text>
+
+    <!-- 3. Offline, no mailbox -->
+    <rect x="20" y="290" width="300" height="24" rx="12" fill="#57606a"/>
+    <text x="170" y="307" font-size="12" font-weight="600" fill="#ffffff">3 · Recipient offline, no mailbox reachable</text>
+    <rect x="20" y="326" width="150" height="56" rx="10" fill="#b45309"/>
+    <text x="95" y="352" font-size="15" font-weight="600" fill="#ffffff">You</text>
+    <text x="95" y="370" font-size="12" fill="#ffffff">outbox on your device</text>
+    <rect x="610" y="326" width="150" height="56" rx="10" fill="#15803d"/>
+    <text x="685" y="352" font-size="15" font-weight="600" fill="#ffffff">Recipient</text>
+    <text x="685" y="370" font-size="12" fill="#ffffff">back online</text>
+    <line x1="172" y1="354" x2="604" y2="354" stroke="#8b949e" stroke-width="2.5" stroke-dasharray="8 6" marker-end="url(#arrow)"/>
+    <rect x="236" y="340" width="304" height="28" rx="14" fill="#57606a"/>
+    <text x="388" y="359" font-size="12" fill="#ffffff">retried 3 s, 10 s, 30 s … every 4 h, up to 14 days</text>
+  </g>
+</svg>

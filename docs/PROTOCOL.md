@@ -97,8 +97,14 @@ the WebRTC stack uses as a "relay candidate"; packets are forwarded to the peer
 as `[1 byte callId length][callId bytes][RTP/DTLS payload]` over port 54322.
 The bridge accepts relay packets only from the peer's address that was
 registered for that `callId`, and only from local sources on the device side.
-Media is protected by WebRTC's DTLS-SRTP and, on top of it, by frame-level
-end-to-end encryption with post-quantum keys (2.5.1).
+On the mesh every relay packet is a media frame (`M`) of the post-quantum
+session layer (1.5): the relay frame above is its plaintext, so the call id,
+RTP/RTCP headers, ICE and the DTLS handshake are sealed too (ChaCha20-Poly1305,
+256-bit key from the hybrid KEM, one AEAD per packet, 46 bytes overhead once
+the session is acknowledged, nothing buffered). A packet without a session yet
+is dropped, never sent in clear. Inside, media is protected by WebRTC's
+DTLS-SRTP and by frame-level end-to-end encryption (2.5.1; AES-128-GCM, the
+key size libwebrtc fixes).
 
 ### 1.4 Frame model [V]
 
@@ -132,33 +138,69 @@ is not sealed (no compatibility with older builds).
   code / QR (the address) already pins it. `suites` is a bit set (unknown
   bits are refused). The record stays Ed25519 only: the address commits to
   the Yggdrasil node key alone, which is Ed25519 and cannot change, so an
-  ML-DSA signature here would anchor nothing. A quantum attacker could
-  therefore pose as a node in real time; who a peer *is* in Zen (account,
-  devices, everything they sign) no longer rests on the node key but on the
-  hybrid signatures of 4.1.
-- **Wire** (the signal text, binary): `"ZPQ1"` and a kind:
-  `K` flags record (bit 0 = "send me yours"); `D` flags sid(16) counter(8)
-  [KEM ciphertext(1120) when flag bit 0] AEAD; `A` sid (session known);
-  `N` sid (session unknown here).
+  ML-DSA signature here would anchor nothing. A quantum attacker with the
+  node key could sign a record of its own; pins, challenges and the
+  `lg_hello` binding (below and 3.3) make that useless against anyone who
+  knew the device key before, and who a peer *is* in Zen (account,
+  devices, everything they sign) rests on the hybrid signatures of 4.1.
+- **Wire** (`"ZPQ1"` and a kind; signals on port 54321 before
+  fragmentation, media as the payload of a relay packet on port 54322):
+  - `K` flags(bit 0 want, bit 1 challenge) record [chid(16) ct(1120)]: the
+    sender's key record; with bit 1 a challenge for the recipient.
+  - `D` flags(bit 0 opening) sid(16) counter(8) [chid(16) ct(1120)] AEAD:
+    a signal.
+  - `M` the same layout: call media (only on the relay port; `D` only on
+    the signal port).
+  - `A` sid: the session is known here.
+  - `N` flags(bit 0 want, bit 1 challenge) sid(16) [chid(16) ct(1120)]:
+    the session (or the challenge it was opened with) is not known here.
+- **Challenges (sender authentication):** a node answering a key request
+  (`K` with "want") gives the asker a challenge: a fresh secret
+  encapsulated to the asker's device key with info
+  `"zen.pq.challenge.v1" | issuer | holder | chid`. It keeps up to 4 per
+  peer for 6 h; the holder starts sessions with a challenge younger than
+  4 h and asks for a new one after 2 h, so a rotation never waits.
 - **Sessions** are one-way, per ordered pair. The first send to a peer asks
-  for its record (`K`, ours included) and holds the frames (<= 64 per peer,
-  4 MiB, 20 s). Then one encapsulation to the peer's device key with info
-  `"zen.pq.session.v1" | sender | recipient | sid` gives the session key.
-  Frames carry the KEM ciphertext until the peer answers `A`; a receiver
-  that does not know a session answers `N` and the ciphertext goes along
-  again. Sessions rotate after 1 hour or 2^24 frames; a receiver keeps 4 per
-  peer and opens at most 16 new ones a minute per peer.
+  for its record and a challenge (`K` with "want", our record included) and
+  holds the frames (<= 64 per peer, 4 MiB, 20 s; media is never held). Then
+  one encapsulation to the peer's device key with info
+  `"zen.pq.session.v2" | sender | recipient | sid`; the keys are
+  `HKDF-SHA256(kemSecret | challengeSecret, info "zen.pq.keys.v2" | sender |
+  recipient | sid | chid)`, 64 bytes: a signal key and a media key, each with
+  its own counter and replay window. Only the holder of the recipient's
+  device key reads a session; only the holder of the sender's device key
+  (who opened the challenge) can start one the recipient takes as coming
+  from that address. Frames carry the opening (chid, ciphertext) until the
+  peer answers `A`; a receiver that does not know the session or the
+  challenge answers `N` with a fresh challenge (or "want" when it lacks
+  the sender's record) and the sender starts a new session. Sessions
+  rotate after 1 hour or 2^24 frames of either kind; a receiver keeps 4 per
+  peer and opens at most 16 new ones (sessions and challenges) a minute per
+  peer; KEM work other nodes can cause is capped at 200/s (burst 400).
+- **Pins:** the device key is pinned per address on first sight; a record
+  with another key for a pinned address is refused. New pins come at most
+  120 a minute; at 16384 the pin seen longest ago makes room. The app keeps
+  the pins (sealed, `runtime/yggdrasil.pins`) and hands them back after a
+  restart (`YggPqPinsJson` / `YggPqSetPinsJson`). It also pins keys others
+  vouched for before any contact (3.3: hybrid-signed hellos and device
+  records, friends' friend lists); with `keep` a different pin stays and is
+  reported as a conflict. Every received signal carries the fingerprint
+  (SHA-256 of the device public key, hex) of the sender's key
+  (`SignalTransportFrame.senderKey`); `YggGetNodeInfo` gives the own one as
+  `pqKey`.
 - **AEAD:** ChaCha20-Poly1305 under the session key, nonce `0^4 | counter`,
   associated data the frame header plus sender and recipient address.
   Counters are used once; the receiver refuses repeats and anything more
-  than 1024 behind (replay window).
-- **Cost:** KEM operations only at session start and rotation (~0.4 ms for
-  both sides on a test machine), never per message; per frame one AEAD
-  (~3.5 us for 1 KB seal + open).
+  than 1024 (media: 4096) behind (replay window). The AEAD of a known
+  session runs outside the endpoint lock, so a large signal never holds up
+  call media.
+- **Cost:** KEM operations only at session start, rotation and challenges,
+  never per message; per frame one AEAD (~3.5 us for 1 KB seal + open; a
+  1200-byte media packet ~4.6 us).
 - **Exempt:** the flat's doors (door nodes, `door_node.go`) keep plain
   signals - they never run a session layer; door frames are flat frames
   only, and knocks for mailbox doors are sealed by the app (`flat_seal`,
-  classical X25519). Call media (port 54322) has its own layer (2.5.1).
+  classical X25519).
 
 ### 1.6 Local links (`local_link*.go`, `lan_discovery.go`, `bluetooth_link*.go`) [P]
 
@@ -571,8 +613,18 @@ Rate limit 3000 messages/min; frames from non-friends are limited to 30/min per
 signature, certificate, space policy, revocation, clock) and every blob chunk
 against its hash; friends may push, strangers only answer what we asked.
 
-**Account and device frames** (`ledger_node.dart`): `lg_hello` {`cert`}
-introduces an account's device to a friend; `lg_keys` {`items`} gives audience
+**Account and device frames** (`ledger_node.dart`): `lg_hello` {`cert`, `p`:
+{`f` address, `k` device key fingerprint, `s` device signature over
+`"zen.hello.v2|" + f + "|" + k`}} introduces an account's device to a friend.
+The proof binds the address to the post-quantum device key of the session
+that carried the hello: a hello whose `k` is not the frame's `senderKey` is
+refused, the signed key is pinned (replacing the session's) when the hello
+is of the account known at that address, and the chat with that friend
+shows "Klucz urządzenia się nie zgadza". Device records (`device` in
+`acts`: {`address`, `name`, `pq`}) name the key too, and friend lists
+(`friend_list` items {`a`, `n`, `k`}) carry the keys friends proved, so
+friends' other devices and friends of friends are pinned before the first
+direct contact (1.5); `lg_keys` {`items`} gives audience
 keys; `lg_sibling` {`own`, `levels`} syncs the account's own devices;
 `lg_bridges` {`items`: signed bridge announcements} passes known mesh bridges;
 `lg_reach` {`id`, `uri`} / `lg_reach_ok` {`id`, `ok`} ask a friend to test that a
@@ -618,10 +670,17 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   key `k` and its fingerprint `pq`. The fold refuses a record when a
   signature of a member or of the power key carries another ML-DSA key than
   the records fixed for it (`pq`, `tpq`), so the power-key chain and every
-  member key are anchored back to the pinned genesis. `vreq` and `vote` are
-  signed **anonymously** with a linkable ring signature (LSAG over Ed25519,
-  `ring_signature.dart`): proves one of the ring signed; the same signer in
-  the same context gives the same key image. These stay classical (4.1).
+  member key are anchored back to the pinned genesis. `vreq` (asking for a
+  cell vote) is signed **anonymously** with a linkable ring signature (LSAG
+  over Ed25519, `ring_signature.dart`): proves one of the ring signed; the
+  same signer in the same context gives the same key image; classical (4.1).
+  The vote itself runs on one-time hybrid keys ("cards"): each member's
+  phone sends its card, ring-signed, to the other members of the cell only
+  (`pyr_card`, through a friend outside the cell); `ballot` lists the cards
+  (`toks`, sorted hybrid ids) and is signed by the members (hybrid) — each
+  signs only all cards it heard of, holding its own; it counts with at least
+  as many signers as cards. A `vote` is signed by one card (keyed form) and
+  counts once per card.
   `xfer` and `settle` need treasurer signatures (`ts`).
 - Frames: `pyr_hello` (pyramids kept and fingerprints), `pyr_ids` (ids of a
   differing bucket), `pyr_want`, `pyr_rec` (one new record, passed on),
@@ -693,13 +752,14 @@ mailbox mail and its attachment keys, the locked inbox. Symmetric keys are
 only halves; the exception is call frames, which WebRTC's frame transformer
 seals with AES-128-GCM (128-bit keys, about 64-bit strength against Grover).
 Signatures are hybrid post-quantum too (Ed25519 + ML-DSA-65, 4.1), except
-the ring signatures of anonymous votes, event tickets in QR codes and the
-handshakes listed in 4.1. Still classical, and readable later
-with a quantum computer by someone who stored them: dating boxes, PSI and "Yes"
-tokens (only the friends' phones a box passes through see them), door knocks
-for mailbox doors (`flat_seal`) and frames between doors, nearby Bluetooth
-hellos (one-time X25519; a hybrid key does not fit a Bluetooth write), and the
-local link handshake (LAN/Bluetooth; it carries already sealed signals).
+the ring signature of a request for a cell vote and the handshakes listed in
+4.1; event tickets are HMAC-based. Nearby Bluetooth hellos carry a one-time
+hybrid KEM key (in parts, one Bluetooth write each), the local link handshake
+mixes in ML-KEM-768, every door runs the session layer (1.5) and sealed knocks
+carry an inner layer keyed with the sticker's token or a hybrid key. Still
+classical, and readable later with a quantum computer by someone who stored
+them: dating boxes, PSI and "Yes" tokens (only the friends' phones a box
+passes through see them).
 
 ### 4.1 Signatures: hybrid Ed25519 + ML-DSA-65
 
@@ -781,16 +841,17 @@ ML-DSA.
   one hop), neighbours' flat profiles, frames, kick votes, key changes and
   reveals, dating vouches, releases, vetoes, the canary and `SHA256SUMS.sig`.
 - **Classical on purpose:**
-  - the linkable ring signatures (LSAG over Ed25519) of anonymous cell votes
-    (`vreq`, `vote`): there is no standard post-quantum linkable ring
-    signature. Risk only against a quantum computer: one available at the
-    time of a vote could forge a vote of the ring, and one available later
-    could tell from a recorded vote who cast it (the key image);
-  - event tickets and their live codes (QR codes at the door; a hybrid
-    signature does not fit one; they are checked during the event);
-  - Bluetooth adverts and hellos (MACs and one-time X25519 keys; a hybrid
-    signature does not fit), LAN discovery and the local link handshake
-    (the device key as X25519; they carry already sealed signals);
+  - the linkable ring signature (LSAG over Ed25519) of a request for a cell
+    vote (`vreq`) and of the card registrations inside a cell: there is no
+    standard post-quantum linkable ring signature. A quantum computer could
+    forge a request (start a vote) or tell later who asked; a cellmate with
+    one could tell whose card is whose. Votes and ballots are hybrid;
+  - event tickets and their live codes are HMACs with keys only the
+    organizer's phone and the guest's phone hold (no signature at all);
+  - Bluetooth adverts (hash chains and MACs); LAN discovery and the pair
+    secrets of local links (the device key as X25519: adverts can be
+    recognised and a new link sat in the middle of by a quantum computer
+    with both public keys; a recorded link stays shut, ML-KEM-768);
   - the Yggdrasil node key and the session layer's key record (1.5);
   - ordinary frames (messages, calls' signalling, acknowledgements) are not
     signed by Zen at all: they rely on the session layer's AEAD, keyed from
@@ -840,8 +901,16 @@ comes from additive changes and tolerant parsing:
 
 ## 6. Security properties and known limits
 
-- Source addresses are authenticated by the mesh; the app additionally gates
-  features by friendship (`ping` is not answered to strangers).
+- Source addresses are authenticated by the mesh and, above it, by the
+  post-quantum session layer (1.5: challenges and pinned device keys bound
+  to the hybrid identity by the `lg_hello` proof); the app additionally
+  gates features by friendship (`ping` is not answered to strangers).
+- A broken (Ed25519) node key lets an attacker take traffic for that
+  address (denial of service) but neither read it nor speak for the
+  address to anyone who pinned its device key; first contact with no pin
+  and no vouching friend is trust on first use.
+- Yggdrasil answers `debug_remoteGetPeers/Self/Tree` to any node (not
+  configurable): the keys of a node's direct peers are public.
 - Hostile input bounds: 2 MiB per signal, 64:1 inflate limit, fragment and inbox
   caps, per-/64 rate limits, JSON key and string caps in the parser, strict
   validation of ledger entries, pyramid records and blobs, media re-encoding.

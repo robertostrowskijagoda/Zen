@@ -6,29 +6,55 @@
 
 <p align="center">
   <b>A network of people who know each other.</b><br>
-  A messenger and social network with no servers, no ads and no algorithm.
+  A messenger and social network with no servers, no ads and no algorithm,
+  encrypted end to end and resistant to quantum computers.
 </p>
 
 <p align="center">
-  <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen.apk"><b>⬇ Download for Android</b></a>
+  <a href="https://github.com/robertostrowskijagoda/Zen/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/robertostrowskijagoda/Zen/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
+  <a href="https://github.com/robertostrowskijagoda/Zen/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/robertostrowskijagoda/Zen/release.yml?label=release%20build&logo=githubactions&logoColor=white" alt="Release build status"></a>
+  <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest"><img src="https://img.shields.io/github/v/release/robertostrowskijagoda/Zen?include_prereleases&sort=semver&label=latest%20release" alt="Latest release"></a>
+  <a href="https://github.com/robertostrowskijagoda/Zen/commits/main"><img src="https://img.shields.io/github/last-commit/robertostrowskijagoda/Zen?label=last%20commit" alt="Last commit"></a>
+  <br>
+  <a href="docs/SECURITY_MODEL.md"><img src="https://img.shields.io/badge/post--quantum-ML--KEM--768%20%2B%20ML--DSA--65-6d28d9" alt="Post-quantum: ML-KEM-768 and ML-DSA-65"></a>
+  <a href="#platforms"><img src="https://img.shields.io/badge/platforms-Android%20%C2%B7%20iOS%20%C2%B7%20Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-0f766e" alt="Platforms: Android, iOS, Windows, macOS, Linux"></a>
+  <a href="#building-from-source"><img src="https://img.shields.io/badge/Flutter-3.47.1-02569B?logo=flutter&logoColor=white" alt="Flutter 3.47.1"></a>
+  <a href="native/yggdrasil_bridge/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/robertostrowskijagoda/Zen?filename=native%2Fyggdrasil_bridge%2Fgo.mod&logo=go&logoColor=white&label=Go" alt="Go version"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-GPL--3.0--only-blue" alt="License: GPL-3.0-only"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen.apk"><b>⬇ Android</b></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip"><b>⬇ Download for Windows</b></a>
+  <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip"><b>⬇ Windows</b></a>
   &nbsp;·&nbsp;
   <a href="#iphone"><b>📱 iPhone</b></a>
   &nbsp;·&nbsp;
   <a href="#mac-linux"><b>💻 Mac, Linux</b></a>
   &nbsp;·&nbsp;
-  <a href="https://robertostrowskijagoda.github.io/Zen/"><b>📲 Open in the app</b></a>
+  <a href="docs/guide/README.md"><b>📖 User guide</b></a>
   &nbsp;·&nbsp;
   <a href="#support-zen"><b>💜 Support</b></a>
 </p>
 
 <p align="center">
-  <a href="#license"><img src="https://img.shields.io/badge/license-GPL--3.0--only-blue" alt="License: GPL-3.0-only"></a>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/graph-dark.png">
+    <img src="docs/images/graph-light.png" width="200" alt="The friend graph">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/chat-dark.png">
+    <img src="docs/images/chat-light.png" width="200" alt="A conversation with delivery icons">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/pyramid-tree-dark.png">
+    <img src="docs/images/pyramid-tree-light.png" width="200" alt="The pyramid">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/themes-dark.png">
+    <img src="docs/images/themes-light.png" width="200" alt="Themes">
+  </picture>
 </p>
-
-> The download buttons work once the first release is published (they point to
-> the latest release on GitHub).
 
 > **Did someone show you a QR code?** The code opens an invitation page: if you
 > have Zen, the page opens it right away with the invitation; if you don't, it
@@ -40,46 +66,97 @@
 > straight into the app → Open supported links**. From then on a code scanned
 > with the ordinary camera opens straight in Zen.
 
-<p align="center">
-  <img src="docs/img/graph.jpg" width="200" alt="Friend graph">
-  <img src="docs/img/inbox.jpg" width="200" alt="Inbox">
-  <img src="docs/img/neighbors.jpg" width="200" alt="Neighbours">
-  <img src="docs/img/alarm.jpg" width="200" alt="Alarm">
-</p>
-
 ## What it is
 
-Zen is a messenger and network for people who know each other — but without a
+Zen is a messenger and network for people who know each other, without a
 company in the middle. There is no server that sees everything, no ads and no
-algorithm deciding what you see. Messages, photos and posts go straight between
-your friends' phones and computers, encrypted, and your data stays on your device.
-(One exception: the GIF search uses an outside company, klipy.com — details in
-"Privacy and security".)
+algorithm deciding what you see. Messages, photos and posts go straight
+between your friends' phones and computers, encrypted, and your data stays on
+your device.
 
-Zen also aims to change how people decide shared matters: the **pyramid** is built
-from small cells of people who know each other in person — votes, trust and a
-common purse flow from the bottom up, with no headquarters that could be bribed or
-shut down.
+Zen also tries a new way of deciding shared matters: the **pyramid**, built
+from small cells of people who know each other in person, where votes, trust
+and a common purse flow from the bottom up, with no headquarters that could be
+bribed or shut down.
+
+## Post-quantum
+
+A quantum computer able to break today's public-key cryptography does not
+exist yet, but traffic recorded today could be decrypted once it does. Zen is
+built for that: **its key exchanges are hybrid ML-KEM-768 + X25519 and its
+lasting signatures hybrid Ed25519 + ML-DSA-65** (NIST FIPS 203 and 204), with
+the few exceptions listed below. A hybrid stays safe as long as either half
+holds.
+
+| Protected | How |
+|---|---|
+| Every signal between two devices: messages, sync, call set-up | a session per device pair, ML-KEM-768 + X25519, ChaCha20-Poly1305, no plaintext mode |
+| Offline mailboxes and the locked phone's inbox | sealed once more for the recipient's hybrid key |
+| Device identity | device keys pinned per address and bound to it by a hybrid signature |
+| Everything signed and kept: posts, profiles, devices, pyramid records and ballots, releases | Ed25519 + ML-DSA-65, valid only when both verify |
+| Calls | AES-128-GCM frames with per-call hybrid keys, inside a 256-bit ChaCha20-Poly1305 post-quantum relay layer |
+| Neighbours' doors, Bluetooth hellos, local link handshakes, dating boxes, food pickup addresses | ML-KEM-768 + X25519 |
+| Event tickets | hash-based (HMAC-SHA256), no signatures needed |
+| Links to public peers | TLS 1.3 with X25519MLKEM768 |
+| Data on your device | AES-256-GCM, a key from your password (Argon2id) |
+
+**Still classical, honestly:** the Yggdrasil node key and address (Ed25519,
+the mesh protocol itself; it routes, but no longer proves who you are), the
+anonymous *request* for a cell vote (a ring signature; the vote itself is
+post-quantum), the pair secret that lets friends' devices recognise each
+other on local links, the dating lantern and first match question (X25519),
+and the 128-bit AES key inside call frames (wrapped in the 256-bit layer).
+Why, and what an attacker could do: [Security model](docs/SECURITY_MODEL.md).
 
 ## What it can do
 
-- **Conversations** — chats, groups, voice notes, audio and video calls, encrypted from sender to recipient; screen sharing; a board tab in groups; GIFs from the klipy.com search (an outside company).
-- **Feed** — posts with photos, videos and audio recordings, only for the people you choose; you decide per profile field who sees it. Pyramid posts appear on the feed too, with filters (everything · friends · pyramid · country).
-- **Live meetings** — a "right now" status (a walk, coffee, *I urgently need help*), events, dinners through friends with food sharing in dinner circles (eat at the cook's or take away), a weekend plan.
-- **Friend graph** — who knows whom, including friends of friends; introductions through a mutual friend; zoom and clusters; extra modes (statuses, closeness, pyramid line, gate prices, shortest or cheapest route to a person with a route planner). Gates and message prices: a friend, or you, can leave the way free, set a price or ask for consent before someone writes or is introduced. "Open to meet" is an opt-in, off by default, that shows friends and their friends that you are open to dates and/or new friendships.
-- **Neighbours** — people from your building (a code on the door); a knock waits for a resident to accept it, and when no resident is online it is held sealed by friends' "mailbox doors" and handed over later. **Dating** through mutual friends with your intention (dates, new friends or both), interests and filters, and an on-demand location for a friend watching over your date.
-- **Alarm** — call your closest people with one move, with your location and confirmation of who saw it; it also works from a locked Android phone.
-- **People nearby** — over Bluetooth (Android), even without internet, with per-friend keys so nobody can fake another friend's presence, and a private "Mijani" log of friends you passed, built only from what "People nearby" already hears and kept on the phone for 30 days.
-- **Offline links** — friends' phones and computers near each other link directly with no internet: over the same Wi-Fi (on by default, only friends and your own devices find each other), Wi-Fi Direct (Android, Windows), Bluetooth (all platforms) and Apple's Multipeer (iPhone, Mac). The last three are off until you turn them on.
-- **Offline mailboxes** — photos, videos and files for a friend who is offline wait at their mailboxes (your mutual friends), encrypted, and arrive when they return.
-- **Pyramid** — one original pyramid built from cells of people who know each other. You join through a referral ("Polecenie") from a member, vote in your cell after 14 days or as soon as someone in the cell confirms they know you, chat in your cell's group chat and take part in advisory referenda called by the top. The top changes the rules (2 of 3, applied 24 hours later, within hard limits). Also: delegated trust, a common purse and points. Joining asks for your birth year (minors are accepted); your age shows in your pyramid profile, confirmed by the person who admitted you. People outside the pyramid can read the top's and the national section's posts that friends pass on.
-- **Account safety** — account recovery through trusted friends or a paper backup of the key; friendship levels (weak friend / friend / close friend) that decide who sees your friend list, statuses and group invitations.
-- **Post-quantum encryption** — every message and signal, offline mailbox, locked inbox and call frame is also protected with a hybrid key (ML-KEM-768 + X25519), and what Zen signs and keeps is signed with Ed25519 + ML-DSA-65. See "Privacy and security" for what is still classical.
-- **Looks and sounds** — light and dark themes plus the Neon and Retro looks, and Zen's own sounds for messages, calls, knocks and the alarm.
-- **Updates** — Zen checks GitHub for a new release and can update itself (see below); friends can also pass Zen on to each other.
-- **"Why is it not working?"** — a built-in diagnostic screen (network, background work, notifications, battery, clock, free space).
-- **21 languages** — Zen speaks the language of your phone or computer (English if it doesn't know it); change it in **Settings → Language**.
-- **Phone and computer** — Android (arm64, armv7, x86_64), iPhone, Windows (x64, ARM64), Linux (x64, arm64) and Mac; one account on several devices.
+- 💬 **[Chats and calls](docs/guide/chats-and-delivery.md):** chats, groups
+  with a board, voice notes, audio and video calls, screen sharing. Messages
+  for offline friends wait sealed with their trusted friends, and the icons
+  tell you exactly where a message is.
+- 🕸️ **[Friends and the graph](docs/guide/friends-and-graph.md):** friendship
+  levels that decide who sees what; a graph of who knows whom with a
+  timeline, bridges between your circles, *who's worth meeting*, full screen.
+- 📰 **[Feed and videos](docs/guide/feed-and-videos.md):** posts only for the
+  people you choose, and a short-video section, ordered on your own phone.
+- 🍲 **[Meeting people](docs/guide/meeting-people.md):** *right now*
+  statuses, events through friends with offline tickets, dinner circles,
+  sharing food, people nearby over Bluetooth, and an **alarm** that works
+  from a locked Android phone.
+- 🚪 **[Neighbours](docs/guide/neighbours.md):** a QR code on your door; a
+  knock rings every phone of the household, and waits with friends when
+  nobody is home.
+- ❤️ **[Dating](docs/guide/dating.md):** through friends, up to three steps
+  away, with a private match test that tells nobody else anything.
+- 🔺 **[The pyramid](docs/guide/pyramid.md):** cells of three, promotion one
+  level at a time, anonymous cell votes, referendums, a court with appeals, a
+  common wallet with a hard issuance limit, and an animated history.
+- 🚦 **[Introductions and gates](docs/guide/introductions-and-gates.md):**
+  reach people further away through friends, free or for points, with a route
+  planner.
+- 📡 **[Offline links](docs/guide/offline-links.md):** same Wi-Fi, Wi-Fi
+  Direct and Bluetooth: Zen without the internet.
+- 🎨 **[Themes](docs/guide/themes.md):** fourteen looks, from Classic to
+  Digital rain, light and dark.
+- 👥 **[Several accounts](docs/guide/getting-started.md#several-accounts-on-one-device)**
+  on one device, hidden ones included, and account recovery through trusted
+  friends or a paper backup.
+- ⚙️ **[Settings, public peers](docs/guide/settings-and-peers.md)** and
+  **[self-updates](docs/guide/updates.md)**, *Why isn't it working?*
+  diagnostics, and **21 languages**.
+
+## Platforms
+
+| System | Builds | Notes |
+|---|---|---|
+| Android | `Zen.apk` (arm64-v8a, armeabi-v7a, x86_64) | full feature set, background receiving while locked |
+| iPhone | `Zen-unsigned.ipa` (iOS 15+) | sideloaded; receives only while open |
+| Windows | `Zen-Windows.zip` (x64), `Zen-Windows-arm64.zip` | |
+| Linux | `.tar.gz`, `.deb` (x64, arm64), `.flatpak` (x64) | |
+| macOS | `Zen-macOS.zip` (12+, Apple Silicon and Intel) | |
+
+One account can run on several devices. Everything is on
+[GitHub Releases](https://github.com/robertostrowskijagoda/Zen/releases/latest).
 
 ## How to install
 
@@ -182,7 +259,7 @@ recording or camera. Offline links (Wi-Fi Direct on Windows, Bluetooth) work.
 
 ### From a friend
 
-Someone already has Zen? In the app: **Invite → Friend has no Zen?** — it will send you the app
+Someone already has Zen? In the app: **Invite → Friend doesn't have Zen?** — it will send you the app
 over Quick Share, Bluetooth or Wi-Fi, even without internet.
 
 ## Isn't it a virus? How to check
@@ -214,62 +291,41 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
 
 ## Privacy and security
 
-- There is no cloud account or phone number — your code is your address.
-- The legal texts are in English: the [privacy policy](docs/PRIVACY.md), the
-  [terms of use](docs/TERMS.md) and, for the technically minded, the
-  [protocol specification](docs/PROTOCOL.md). Zen has no age gate and asks no
-  one for their age, except the pyramid, which asks for the birth year at entry
-  (see below); Dating and the wallet never ask about age.
-- **Photos, videos and files from others are checked.** Zen unpacks and re-saves
-  every photo before showing it, so a "poisoned" photo never reaches the phone.
-  A video or recording must be a real video or recording, otherwise it stays an
-  ordinary file. Zen never opens files by itself, and warns before saving a
-  program (e.g. `.exe`, `.apk`).
-- **GIFs go through an outside company.** The GIF search uses
-  klipy.com: that company sees the phrase you type and your IP address. A GIF
-  a friend sent you is also fetched from klipy.com (and then klipy.com sees your
-  IP address), and GIFs do not go through the photo checks described above.
-  If you don't want that — don't use GIFs.
-- A friend's name comes from their profile — nobody can pose as "Mum" with a
-  name given in an invitation. Your own nickname (visible only to you)
-  appears under the name.
-- **Encryption, honestly.** Everything on the device is encrypted with your password
-  (AES-256-GCM, Argon2id). Every signal between devices, every offline-mailbox
-  message and the locked-phone inbox are sealed with a hybrid post-quantum key
-  (ML-KEM-768 + X25519), call audio and video frames are encrypted end to end
-  with keys from the same kind of exchange, and what Zen signs and keeps for
-  years (posts, account and device records, pyramid records, releases) carries
-  a hybrid signature, Ed25519 + ML-DSA-65. **Still classical:** the anonymous
-  ring signatures of cell votes, event QR tickets, Bluetooth and Wi-Fi
-  greetings, dating boxes, door knocks, the Yggdrasil node key, and call frames
-  use AES-128-GCM (the call screen says which protection a call has). Details
-  and limits: [SECURITY.md](SECURITY.md).
+- **No account, no phone number.** Your QR code is your address. Several
+  accounts can live on one device, and an account you keep off the list
+  can't be seen by anyone who picks the device up.
+- **Encryption, honestly:** see [Post-quantum](#post-quantum) above and the
+  [security model](docs/SECURITY_MODEL.md) for the threat model, the
+  classical exceptions and the limits.
+- **On the device** everything is encrypted with your password (AES-256-GCM,
+  Argon2id), biometric unlock uses keys held by the security hardware, and
+  sensitive screens (like the wallet) are protected from screenshots. Zen
+  detects debuggers and hooking tools and then refuses to move money.
 - **Locked phone.** On Android the background service works without your
-  password: it holds a separate background key and only kits made for it
-  (alarm, "People nearby", flat doors); what arrives while locked is stored
-  sealed and read only after you unlock.
-- **Location comes from the system itself** (GPS and the network provider on
-  Android, the operating system's service elsewhere), never from Google Play
-  services, and goes only where a feature says (an alarm, a date-safety request;
-  "Mijani" keeps a place rounded to about 100 m on the phone).
-- **Updates.** Except in the store build, Zen asks GitHub for the newest release
-  20 seconds after start and every 12 hours (GitHub sees your IP address and the
-  name "Zen"). On "Update" it downloads the file, checks it against the release's
-  `SHA256SUMS` and, on Android, against Zen's own signing certificate. The check of
-  the maintainers' signature (`SHA256SUMS.sig`) turns on once their keys are
-  pinned in the app, which is not the case yet.
-- **You decide who sees what.** Friendship levels (weak friend / friend / close
-  friend) and per-field profile visibility control who sees your friend list,
-  statuses and posts, and who may invite you to groups. Media downloads over
-  Wi-Fi only by default.
-- **Offline mailboxes** hold encrypted messages and attachments for friends who
-  are offline; they see only ciphertext, and attachment space per sender is limited.
-- **Recovering the account through trusted friends:** you choose a circle of up to 6 people, each
-  gets an encrypted piece of the key. If you lose your phone, your password and the help of
-  2 of them (after 24 hours) is enough, and without the password — 4 of them (after 7 days). One person
-  alone sees nothing. You can also keep a **paper backup** of the key.
-- When you share your screen in a call, system notifications are shown without
-  their content and a red bar reminds you that everything is visible.
+  password: it holds a separate background key and only small kits (alarm,
+  Nearby, doors); what arrives while locked is stored sealed until you
+  unlock.
+- **You decide who sees what:** friendship levels and per-field profile
+  visibility control who sees your friend list, statuses and posts, and who
+  may invite you to groups.
+- **Files from others are checked:** every photo is unpacked and saved again
+  before it is shown; a video or recording must really be one; Zen never
+  opens files by itself and warns before saving a program.
+- **GIFs go through an outside company**, KLIPY: it sees what you search for
+  and your IP address (also when you open a GIF a friend sent). Don't use
+  GIFs if you mind that.
+- **Location** comes from the system's own service (never Google Play
+  services) and goes only where a feature says (an alarm, a date-safety
+  request).
+- **Updates:** Zen asks GitHub for the newest release 20 seconds after start
+  and every 12 hours (GitHub sees your IP address), and checks a download
+  against `SHA256SUMS` and, on Android, Zen's signing certificate
+  ([details](docs/guide/updates.md)).
+- The legal texts: [privacy policy](docs/PRIVACY.md) and
+  [terms of use](docs/TERMS.md). Zen asks no one for their age, except the
+  pyramid, which asks for the birth year at entry.
+
+Found a vulnerability? Please report it privately: [SECURITY.md](SECURITY.md).
 
 ## What it runs on
 
@@ -280,7 +336,7 @@ devices that don't see the content. Zen adds its own (post-quantum) encryption o
 Those devices (including the public nodes Zen starts from) do see
 your IP address and your address in the network, that is, your invitation code — they
 don't see what you write. On top of that, the GIF search uses an outside company,
-klipy.com (above).
+KLIPY (above). The libraries Zen is built on: [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
 The app is written in Flutter (Android, iPhone, Windows, Linux, macOS),
 and the network bridge in Go. The texts come in 21 languages; the language is chosen
 automatically or in Settings → Language.
@@ -342,10 +398,18 @@ Silicon and Intel, macOS 12 or newer). It is not sandboxed (App Sandbox) —
 it runs system tools, e.g. `route` and `adb`; the reason is described
 in `macos/Runner/Release.entitlements`.
 
-More documentation: `docs/RELEASES.md` (releases and distribution),
-`docs/TESTING.md` (testing on many clients), `docs/PROTOCOL.md` (the protocol),
-`docs/PRIVACY.md` (privacy policy) and `docs/TERMS.md` (terms of use).
-Reporting a vulnerability: [SECURITY.md](SECURITY.md). History of changes: [CHANGELOG.md](CHANGELOG.md).
+## Documentation
+
+| | |
+|---|---|
+| [User guide](docs/guide/README.md) | how every part of Zen works, with pictures |
+| [Security model](docs/SECURITY_MODEL.md) | threats, encryption, post-quantum and classical parts, hardening, limits |
+| [Dependencies](docs/DEPENDENCIES.md) | libraries, platform APIs and their licences |
+| [Protocol](docs/PROTOCOL.md) | frames and records on the wire |
+| [Releases](docs/RELEASES.md) | signing, publishing, distribution |
+| [Testing](docs/TESTING.md) | the simulator, several clients, visual tours, CI |
+| [SECURITY.md](SECURITY.md) | reporting a vulnerability |
+| [CHANGELOG.md](CHANGELOG.md) | history of changes |
 
 ## Support Zen
 
@@ -385,7 +449,8 @@ distributed through F-Droid and IzzyOnDroid (not set up yet;
 repositories make from the unchanged source of a release may keep the name and
 icon (NOTICE, 3.3). The full license text is in [LICENSE](LICENSE); libraries
 keep their own licenses (in the app: About → Licenses; list of components in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), what each is used for in
+[docs/DEPENDENCIES.md](docs/DEPENDENCIES.md)).
 
 **F-Droid readiness:** the license fits, Zen uses no Google Play services and no
 tracker, and the Go bridge builds from source. Still missing: a build recipe

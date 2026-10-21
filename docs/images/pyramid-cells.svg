@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="470" viewBox="0 0 780 470" role="img" aria-labelledby="title desc">
+  <title id="title">The pyramid: cells of three and promotion one level at a time</title>
+  <desc id="desc">A binary tree of four levels. Every place has a head above it and two places below it; a head and the two people under them form a cell of three. The three people at the top form the top cell, which decides with 2 of 3 signatures. Gus, at the bottom, can rise only by swapping places with Chris, the head of his cell, when 2 of the 3 people of that cell sign; the next step up needs the cell above, and at least 7 days.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
+    </marker>
+  </defs>
+  <g font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif" text-anchor="middle">
+    <!-- cell outlines -->
+    <rect x="150" y="14" width="480" height="146" rx="22" fill="none" stroke="#8b949e" stroke-width="2" stroke-dasharray="7 6"/>
+    <rect x="12" y="198" width="192" height="144" rx="22" fill="none" stroke="#8b949e" stroke-width="2" stroke-dasharray="7 6"/>
+
+    <!-- edges -->
+    <g stroke="#8b949e" stroke-width="2">
+      <line x1="390" y1="57" x2="200" y2="113"/>
+      <line x1="390" y1="57" x2="580" y2="113"/>
+      <line x1="200" y1="147" x2="105" y2="203"/>
+      <line x1="200" y1="147" x2="295" y2="203"/>
+      <line x1="580" y1="147" x2="485" y2="203"/>
+      <line x1="580" y1="147" x2="675" y2="203"/>
+      <line x1="105" y1="237" x2="57" y2="293"/>
+      <line x1="105" y1="237" x2="153" y2="293"/>
+      <line x1="295" y1="237" x2="247" y2="293"/>
+      <line x1="295" y1="237" x2="343" y2="293"/>
+      <line x1="485" y1="237" x2="437" y2="293"/>
+      <line x1="485" y1="237" x2="533" y2="293"/>
+      <line x1="675" y1="237" x2="627" y2="293"/>
+      <line x1="675" y1="237" x2="723" y2="293"/>
+    </g>
+
+    <!-- level 1 and 2: the top -->
+    <g font-size="13" font-weight="600" fill="#ffffff">
+      <rect x="345" y="23" width="90" height="34" rx="17" fill="#6d28d9"/>
+      <text x="390" y="45">Olivia</text>
+      <rect x="155" y="113" width="90" height="34" rx="17" fill="#6d28d9"/>
+      <text x="200" y="135">Adam</text>
+      <rect x="535" y="113" width="90" height="34" rx="17" fill="#6d28d9"/>
+      <text x="580" y="135">Beth</text>
+
+      <!-- level 3 -->
+      <rect x="62" y="203" width="86" height="34" rx="17" fill="#0f766e"/>
+      <text x="105" y="225">Chris</text>
+      <rect x="252" y="203" width="86" height="34" rx="17" fill="#2563eb"/>
+      <text x="295" y="225">Dana</text>
+      <rect x="442" y="203" width="86" height="34" rx="17" fill="#2563eb"/>
+      <text x="485" y="225">Eli</text>
+      <rect x="632" y="203" width="86" height="34" rx="17" fill="#2563eb"/>
+      <text x="675" y="225">Fay</text>
+
+      <!-- level 4 -->
+      <rect x="20" y="293" width="74" height="34" rx="17" fill="#b45309"/>
+      <text x="57" y="315">Gus</text>
+      <rect x="116" y="293" width="74" height="34" rx="17" fill="#0f766e"/>
+      <text x="153" y="315">Hana</text>
+      <rect x="210" y="293" width="74" height="34" rx="17" fill="#2563eb"/>
+      <text x="247" y="315">Ivan</text>
+      <rect x="306" y="293" width="74" height="34" rx="17" fill="#2563eb"/>
+      <text x="343" y="315">Jade</text>
+      <rect x="400" y="293" width="74" height="34" rx="17" fill="#2563eb"/>
+      <text x="437" y="315">Kai</text>
+      <rect x="496" y="293" width="74" height="34" rx="17" fill="#2563eb"/>
+      <text x="533" y="315">Lena</text>
+      <rect x="590" y="293" width="74" height="34" rx="17" fill="#2563eb"/>
+      <text x="627" y="315">Max</text>
+      <rect x="686" y="293" width="74" height="34" rx="17" fill="#2563eb"/>
+      <text x="723" y="315">Nora</text>
+    </g>
+
+    <!-- promotion: Gus swaps with Chris -->
+    <path d="M 30 293 C 4 270, 20 232, 58 222" fill="none" stroke="#b45309" stroke-width="3" marker-end="url(#arrow)"/>
+
+    <!-- legend -->
+    <g text-anchor="start" font-size="12" fill="#ffffff">
+      <rect x="20" y="364" width="360" height="28" rx="14" fill="#6d28d9"/>
+      <text x="36" y="383">The top: 3 people, decisions need 2 of 3</text>
+      <rect x="400" y="364" width="360" height="28" rx="14" fill="#0f766e"/>
+      <text x="416" y="383">A cell: a head and the two people under them</text>
+      <rect x="20" y="402" width="740" height="28" rx="14" fill="#b45309"/>
+      <text x="36" y="421">Promotion: Gus swaps places with Chris when 2 of the 3 in their cell sign (or win a cell vote)</text>
+      <rect x="20" y="438" width="740" height="28" rx="14" fill="#57606a"/>
+      <text x="36" y="457">One level per step, the next one needs the cell above and at least 7 days · nobody drops out</text>
+    </g>
+  </g>
+</svg>

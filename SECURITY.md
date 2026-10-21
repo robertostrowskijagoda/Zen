@@ -43,61 +43,52 @@ someone distributes a fake as Zen, report it the same way.
 [README](README.md), in the section "Isn't it a virus? How to check", and in
 every release description; next to the release files there is `SHA256SUMS`.
 
-Related documents: [privacy policy](docs/PRIVACY.md), [terms](docs/TERMS.md),
-[protocol specification](docs/PROTOCOL.md).
+Related documents: [security model](docs/SECURITY_MODEL.md),
+[privacy policy](docs/PRIVACY.md), [terms](docs/TERMS.md),
+[protocol specification](docs/PROTOCOL.md),
+[dependencies](docs/DEPENDENCIES.md).
 
 ## Encryption in short
 
-Zen runs on the Yggdrasil mesh, whose own encryption (X25519, Ed25519, TLS)
-is classical. Zen adds layers of its own, so that traffic recorded today
-cannot be read, or records forged, later with a quantum computer. Details:
+The full picture, with the threat model and the limits, is in the
+[security model](docs/SECURITY_MODEL.md); the wire format in the
 [protocol specification](docs/PROTOCOL.md), sections 1.5, 2.5.1 and 4.
 
-**Post-quantum (hybrid) layers**
+Zen runs on the Yggdrasil mesh, whose own encryption (X25519, Ed25519) is
+classical. Zen adds layers of its own, so that traffic recorded today cannot
+be read, or records forged, later with a quantum computer:
 
-- **Signals between devices.** Every signal is sealed once more with a hybrid
-  key, ML-KEM-768 + X25519 ("X-Wing", Go's standard library), one session per
-  pair of devices, ChaCha20-Poly1305 per frame. There is no plaintext mode.
-- **Offline mailboxes and the Android locked inbox** use the same hybrid KEM;
-  mailbox attachments are chunked and sealed with a fresh symmetric key.
-- **Call media.** Audio, video and screen frames are encrypted end to end
-  (WebRTC frame encryption inside DTLS-SRTP) with keys from a hybrid ML-KEM
-  exchange in the call's offer and answer, rotated every 5 minutes and when
-  somebody joins or leaves a group call. If a device cannot do frame
-  encryption the call falls back to DTLS-SRTP and the call screen says so.
-- **Signatures.** Everything Zen signs to keep or pass on (account and device
-  records, ledger entries, pyramid records, attestations, release manifests,
-  `SHA256SUMS.sig`) carries a hybrid signature, Ed25519 + ML-DSA-65 (FIPS 204),
-  valid only when both halves verify. The ML-DSA key comes from the same seed
-  as the Ed25519 key, so key backups restore both; keys are referenced by
-  fingerprint and anchored in the records that introduce them (the pinned
-  genesis of the pyramid, device certificates, release maintainers).
-- **At rest:** AES-256-GCM, ChaCha20-Poly1305 and Argon2id with 256-bit keys.
+- **Key exchange:** hybrid ML-KEM-768 + X25519 (X-Wing through HPKE, Go's
+  standard library) for every signal between devices (a session per device
+  pair, ChaCha20-Poly1305, no plaintext mode), offline mailboxes, the Android
+  locked inbox, neighbours' doors, Bluetooth hellos, local link handshakes,
+  call keys, dating boxes and food pickup addresses.
+- **Signatures:** hybrid Ed25519 + ML-DSA-65 (FIPS 204), valid only when both
+  halves verify, on everything Zen signs to keep or pass on: account and
+  device records, ledger entries, pyramid records and ballots, the ledger
+  hello that binds a device's post-quantum key to its address, dating
+  profiles, release manifests, `SHA256SUMS.sig`.
+- **Device keys** are pinned per address; a record with another key for a
+  known address is rejected and the chat shows a warning.
+- **Calls:** AES-128-GCM frame encryption with per-call hybrid keys, inside
+  DTLS-SRTP, inside a 256-bit ChaCha20-Poly1305 relay layer of the two
+  devices' post-quantum session.
+- **Event tickets** are HMAC-based; **cell votes** use one-time hybrid cards.
+- **At rest:** AES-256-GCM under a key from your password (Argon2id) and the
+  system's security hardware.
 
-**What stays classical, on purpose or for lack of a standard**
+**Still classical:** the Yggdrasil node key and address; the anonymous
+*request* for a cell vote (a linkable ring signature, LSAG over Ed25519: there
+is no standard post-quantum one); the pair secrets of local links (X25519 of
+the two devices' keys); the dating lantern, first match question and lantern
+proof; the 128-bit AES key of call frames (libwebrtc offers no other). What an
+attacker with a quantum computer could do with each is described in the
+[security model](docs/SECURITY_MODEL.md#what-stays-classical-and-why).
 
-- the anonymous ring signatures (LSAG over Ed25519) of cell votes: there is no
-  standard post-quantum linkable ring signature;
-- event tickets in QR codes (a hybrid signature does not fit one code);
-- Bluetooth and LAN greetings and adverts, and the local-link handshake (they
-  carry already sealed signals);
-- dating boxes, the match test and "Yes" tokens (X25519 boxes between friends'
-  phones, inside the sealed signal layer);
-- door traffic: knocks for flat doors and mailbox doors and frames between
-  doors (X25519), and door nodes that run no session layer;
-- the Yggdrasil node key and the key record that binds a device's post-quantum
-  key to its mesh address;
-- **call frames use AES-128-GCM**, the only mode WebRTC's frame encryption
-  offers: against a quantum computer that is about 64-bit strength.
-
-Also true: ordinary frames are not signed by Zen at all (they rely on the
-session layer and the mesh source address), a metadata observer still sees who
-talks to whom and when, and the self-update checks the maintainers'
-signature only once their keys are pinned in the app (until then:
-`SHA256SUMS`, and on Android the signing certificate). The Android background
-service works without your password, with a separate background key and only
-the kits it needs (alarm, nearby, door); everything else waits sealed until
-you unlock. Reports about any of this are welcome.
+Also true: a metadata observer still sees who talks to whom and when, and the
+self-update checks the maintainers' signature only once their keys are
+pinned in the app (until then: `SHA256SUMS`, and on Android the signing
+certificate). Reports about any of this are welcome.
 
 ## What to expect
 
