@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
+import 'package:zen/src/features/feed/reaction_relay.dart';
 import 'package:zen/src/features/films/film_feed.dart';
 import 'package:zen/src/features/films/film_model.dart';
 import 'package:zen/src/features/films/film_pass.dart';
@@ -245,6 +246,27 @@ void main() {
       expect(far.fromFriendOfFriend, isTrue);
       expect(passedFilmIds(b.entriesOf(spaceKind: 'acts')), <String>{film.id});
 
+      // Ada likes and comments; Bob, who passed the film on, carries both to
+      // its author in a bundle.
+      await a.publish(kLikeKind, likeBody(film.id), spaceKind: 'acts');
+      await a.publish(
+        kCommentKind,
+        commentBody(film.id, 'Piękne'),
+        spaceKind: 'acts',
+      );
+      await _settle();
+      expect(await relayReactions(b, nameOf: names), greaterThan(0));
+      await _settle();
+      final FilmPost onCel = buildFilms(
+        NodeFilmLedgerView(c),
+        nameOf: names,
+      ).firstWhere((FilmPost f) => f.id == film.id);
+      expect(onCel.likes.map((FeedLiker l) => l.name), <String>[
+        'Ada (przez Bob)',
+      ]);
+      expect(onCel.comments.single.text, 'Piękne');
+      expect(onCel.comments.single.authorLabel, 'Ada (przez Bob)');
+
       // A changed caption inside a pass is refused.
       final Map<String, dynamic> forged = onBob.entry!.toCertifiedJson();
       forged['body'] = <String, dynamic>{
@@ -358,6 +380,46 @@ void main() {
       expect(info.displayHeight, 1920);
       expect(info.hasVideo, isTrue);
       expect(info.hasAudio, isTrue);
+    });
+
+    test('a turn is written into the index of a copy', () {
+      final Uint8List mvhd = _box('mvhd', <int>[
+        ...List<int>.filled(12, 0),
+        ..._u32(1000),
+        ..._u32(4000),
+        ...List<int>.filled(80, 0),
+      ]);
+      final Uint8List file = Uint8List.fromList(<int>[
+        ..._box('ftyp', 'isom'.codeUnits),
+        ..._box('moov', <int>[
+          ...mvhd,
+          ..._trak('soun', _tkhd(0, 0, List<int>.filled(9, 0))),
+          ..._trak(
+            'vide',
+            _tkhd(1280, 720, <int>[
+              0x10000,
+              0,
+              0,
+              0,
+              0x10000,
+              0,
+              0,
+              0,
+              0x40000000,
+            ]),
+          ),
+        ]),
+      ]);
+      expect(probeMp4(file)!.rotation, 0);
+      for (final int turn in <int>[90, 180, 270, 0]) {
+        final Uint8List turned = setMp4Rotation(file, turn);
+        expect(turned.length, file.length);
+        expect(probeMp4(turned)!.rotation, turn, reason: '$turn');
+        expect(probeMp4(turned)!.width, 1280);
+      }
+      expect(probeMp4(file)!.rotation, 0, reason: 'the original stays');
+      final Uint8List notFilm = Uint8List.fromList(List<int>.filled(32, 1));
+      expect(identical(setMp4Rotation(notFilm, 90), notFilm), isTrue);
     });
 
     test('anything else is not a film', () {

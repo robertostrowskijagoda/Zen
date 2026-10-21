@@ -248,3 +248,92 @@ int _rotation(ByteData data, int at) {
   }
   return 0;
 }
+
+/// [bytes] with the picture of its first video track turned [degrees]
+/// clockwise (0, 90, 180 or 270) when shown: the turn is written into the
+/// track header's matrix of a copy, nothing moves. [bytes] itself when it is
+/// not an MP4 / MOV file with a video track.
+Uint8List setMp4Rotation(Uint8List bytes, int degrees) {
+  final int turn = ((degrees % 360) + 360) % 360;
+  if (turn % 90 != 0) {
+    return bytes;
+  }
+  final ByteData data = ByteData.sublistView(bytes);
+  int pos = 0;
+  while (pos + 8 <= bytes.length) {
+    final _Head? head = _head(data, pos, bytes.length);
+    if (head == null) {
+      return bytes;
+    }
+    if (head.type == 'moov') {
+      final int? at = _videoTkhd(data, pos + head.header, pos + head.size);
+      if (at == null) {
+        return bytes;
+      }
+      final Uint8List out = Uint8List.fromList(bytes);
+      final ByteData w = ByteData.sublistView(out);
+      final int version = out[at];
+      final int matrixAt = at + (version == 1 ? 52 : 40);
+      if (matrixAt + 44 > pos + head.size) {
+        return bytes;
+      }
+      final int width = w.getUint32(matrixAt + 36) >> 16;
+      final int height = w.getUint32(matrixAt + 40) >> 16;
+      const int one = 0x10000;
+      final List<int> matrix = switch (turn) {
+        90 => <int>[0, one, 0, -one, 0, 0, height * one, 0, 0x40000000],
+        180 => <int>[
+          -one,
+          0,
+          0,
+          0,
+          -one,
+          0,
+          width * one,
+          height * one,
+          0x40000000,
+        ],
+        270 => <int>[0, -one, 0, one, 0, 0, 0, width * one, 0x40000000],
+        _ => <int>[one, 0, 0, 0, one, 0, 0, 0, 0x40000000],
+      };
+      for (int i = 0; i < 9; i++) {
+        w.setInt32(matrixAt + 4 * i, matrix[i]);
+      }
+      return out;
+    }
+    pos += head.size;
+  }
+  return bytes;
+}
+
+/// Where the payload of the first video track's `tkhd` starts in the
+/// `moov` payload from [start] to [end], or null.
+int? _videoTkhd(ByteData data, int start, int end) {
+  int pos = start;
+  while (pos + 8 <= end) {
+    final _Head? h = _head(data, pos, end);
+    if (h == null) {
+      return null;
+    }
+    if (h.type == 'trak') {
+      final int payload = pos + h.header;
+      final int boxEnd = pos + h.size;
+      final _Track? track = _track(data, payload, boxEnd, 1);
+      if (track != null && track.handler == 'vide') {
+        int inner = payload;
+        while (inner + 8 <= boxEnd) {
+          final _Head? t = _head(data, inner, boxEnd);
+          if (t == null) {
+            return null;
+          }
+          if (t.type == 'tkhd' && inner + t.header + 84 <= boxEnd) {
+            return inner + t.header;
+          }
+          inner += t.size;
+        }
+      }
+    }
+    pos += h.size;
+  }
+  return null;
+}

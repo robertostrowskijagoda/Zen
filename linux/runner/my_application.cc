@@ -7,6 +7,7 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "zen_media_player.h"
+#include "zen_video_bridge.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
@@ -104,6 +105,8 @@ static void my_application_activate(GApplication* application) {
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
   // video_player has no Linux backend: Zen's own, on GStreamer.
   zen_media_player_register(FL_PLUGIN_REGISTRY(view));
+  // Films: compressing (Zen's own H.264 encoder) and the recorder's camera.
+  zen_video_bridge_register(FL_PLUGIN_REGISTRY(view));
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

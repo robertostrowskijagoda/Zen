@@ -25,7 +25,7 @@ Flutter itself. The direct dependencies:
 
 | Package | Licence |
 |---|---|
-| Flutter SDK, flutter_localizations, intl, ffi, crypto, mime, path_provider, video_player, video_player_platform_interface, image_picker, local_auth, flutter_secure_storage, camera (camera_android_camerax, camera_avfoundation, camera_platform_interface) | BSD-3-Clause |
+| Flutter SDK, flutter_localizations, intl, ffi, crypto, mime, path_provider, video_player, video_player_platform_interface, image_picker, local_auth, flutter_secure_storage, camera (camera_android_camerax, camera_avfoundation, camera_platform_interface), camera_windows | BSD-3-Clause |
 | flutter_local_notifications, qr_flutter, video_player_win | BSD-3-Clause |
 | record | BSD-3-Clause |
 | flutter_riverpod (riverpod), file_picker, flutter_foreground_task, system_tray, window_manager (screen_retriever), flutter_webrtc (dart_webrtc, webrtc_interface), image, qr_code_dart_scan | MIT |
@@ -58,6 +58,8 @@ Apache-2.0, MPL-2.0 or Zlib (vector_math).
 | desugar_jdk_libs | Android | GPL-2.0 with the Classpath Exception; source: https://github.com/google/desugar_jdk_libs |
 | DKImagePickerController, DKPhotoGallery, SDWebImage, SwiftyGif (via file_picker) | iOS | MIT |
 | GTK, GLib, GStreamer, libsecret (system libraries) | Linux | LGPL-2.1+ |
+| OpenH264 2.4.1 (Zen's H.264 encoder for films, built from source into the app) | Linux | BSD-2-Clause (`assets/licenses/native/openh264.txt`); Cisco's H.264 patent licence covers only Cisco's own binaries, not this build |
+| ffmpeg (not shipped: run as a separate program when the computer has it, to decode a film GStreamer cannot) | Linux | LGPL-2.1+ / GPL-2.0+ (the system's copy) |
 | libayatana-appindicator3, libdbusmenu (copied into the Flatpak) | Linux Flatpak | LGPL-2.1 / LGPL-3.0; source: the Ubuntu packages of the same version |
 | libayatana-indicator3 (copied into the Flatpak) | Linux Flatpak | GPL-3.0; source: the Ubuntu package of the same version |
 

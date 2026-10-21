@@ -291,12 +291,14 @@ jobs:
 
       # Flutter's Linux toolchain; libsecret for flutter_secure_storage,
       # the app indicator for system_tray, GStreamer for audio and video
-      # (linux/runner/zen_media_player.cc), dpkg-dev for the .deb.
+      # (linux/runner/zen_media_player.cc), make and g++ for Zen's own H.264
+      # encoder (OpenH264, built from source), dpkg-dev for the .deb.
       - name: Build tools and libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
+            make g++ \
             libstdc++-12-dev libsecret-1-dev libayatana-appindicator3-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev dpkg-dev
 

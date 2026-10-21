@@ -269,6 +269,60 @@ List<FilmPost> buildFilms(
     }
   });
 
+  // Likes and comments from outside the circle, passed on in bundles by a
+  // friend (the friend who passed a film on, or its author): a bundle is
+  // only that friend's word, so they show as relayed by them, and people
+  // in the circle speak only for themselves.
+  final Set<String> commentIds = <String>{
+    for (final List<FeedComment> list in comments.values)
+      for (final FeedComment c in list) c.id,
+  };
+  view.friendAccounts.forEach((String address, String account) {
+    if (account == me) {
+      return;
+    }
+    final String via = friendNames[account] ?? nameOf(address);
+    String relayed(String name) => t('{name} (przez {via})', {
+      'name': name.trim().isEmpty ? t('Znajomy znajomego') : name.trim(),
+      'via': via,
+    });
+    readBundles(view.entriesOf(spaceKind: 'acts', ofAccount: account)).forEach((
+      String id,
+      PostReactions r,
+    ) {
+      if (!films.containsKey(id)) {
+        return;
+      }
+      for (final BundleLike l in r.likes) {
+        if (!friendNames.containsKey(l.account)) {
+          (likers[id] ??= <String, FeedLiker>{}).putIfAbsent(
+            l.account,
+            () => FeedLiker(
+              account: l.account,
+              name: relayed(l.name),
+              avatar: l.avatar,
+            ),
+          );
+        }
+      }
+      for (final BundleComment c in r.comments) {
+        if (friendNames.containsKey(c.account) || !commentIds.add(c.id)) {
+          continue;
+        }
+        (comments[id] ??= <FeedComment>[]).add(
+          FeedComment(
+            id: c.id,
+            authorLabel: relayed(c.name),
+            text: c.text,
+            millis: c.millis,
+            account: c.account,
+            avatar: c.avatar,
+          ),
+        );
+      }
+    });
+  });
+
   final Map<String, List<String>> replies = <String, List<String>>{};
   for (final FilmPost f in films.values) {
     final FilmReplyRef? to = f.replyTo;

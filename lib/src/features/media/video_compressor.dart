@@ -9,18 +9,21 @@ import 'package:flutter/services.dart';
 // hardware encoder (Android MediaCodec, Apple AVFoundation, Windows Media
 // Foundation) turns it into H.264 / AAC in an MP4, at most 720p and about
 // 2.5 Mb/s, cut to the chosen start and end. The native side
-// (ZenVideoBridge.kt, ZenVideoBridge.swift, video_bridge.cpp) answers on the
+// (ZenVideoBridge.kt, ZenVideoBridge.swift, video_bridge.cpp, and on Linux
+// zen_video_bridge.cc with Zen's own bundled H.264 encoder) answers on the
 // channel `zen/video`:
 //
 //  - `isAvailable`: whether this device can compress at all;
 //  - `compress` {input, output, startMs, endMs, maxShortSide, videoBitrate,
 //    audioBitrate}: writes `output` and answers {durationMs, width, height,
-//    bytes}; while it works it calls `progress` {fraction} back;
+//    bytes} and, where the bridge says so, `rotation` (the turn still to be
+//    written into the file's index) and `audio` (false: the film came out
+//    without sound); while it works it calls `progress` {fraction} back;
 //  - `cancel`: stops the running compression (it then fails "cancelled");
 //  - `thumbnail` {input, atMs, maxSide}: one frame as JPEG bytes, or null.
 //
-// Where there is no encoder (Linux), films go as they are, within the
-// limits ([VideoCompressor.available] is false).
+// Where the bridge cannot work (no decoder at all), films go as they are,
+// within the limits ([VideoCompressor.available] is false).
 
 /// The short side of a compressed film's picture (720p).
 const int kVideoTargetShortSide = 720;
@@ -108,6 +111,9 @@ VideoCompressionPlan planVideoCompression({
   return (width: even(width * scale), height: even(height * scale));
 }
 
+/// What a film's own index says about its picture.
+typedef VideoSource = ({int width, int height, int rotation});
+
 /// A compressed film on disk.
 @immutable
 final class CompressedVideo {
@@ -117,6 +123,8 @@ final class CompressedVideo {
     required this.bytes,
     this.width = 0,
     this.height = 0,
+    this.rotation = 0,
+    this.hasAudio = true,
   });
 
   final String path;
@@ -124,6 +132,13 @@ final class CompressedVideo {
   final int bytes;
   final int width;
   final int height;
+
+  /// Clockwise degrees the picture must still be turned when shown: the
+  /// bridge left it as stored and [setMp4Rotation] writes the turn.
+  final int rotation;
+
+  /// False when the sound could not be kept (no encoder for it).
+  final bool hasAudio;
 }
 
 /// Why a compression did not finish.
@@ -147,12 +162,15 @@ abstract interface class VideoCompressor {
 
   /// Writes [input] from [startMs] to [endMs] (`null`: to its end) as a
   /// compressed MP4 at [output], following [plan]. [onProgress] gets 0..1.
+  /// [source] is what the input's index says (size and turn), for a bridge
+  /// that cannot read it itself (Linux with ffmpeg).
   Future<CompressedVideo> compress({
     required String input,
     required String output,
     required VideoCompressionPlan plan,
     int startMs = 0,
     int? endMs,
+    VideoSource? source,
     void Function(double fraction)? onProgress,
   });
 
@@ -194,7 +212,7 @@ final class PlatformVideoCompressor implements VideoCompressor {
     if (_available != null) {
       return _available!;
     }
-    if (kIsWeb || Platform.isLinux) {
+    if (kIsWeb) {
       return _available = false;
     }
     try {
@@ -214,6 +232,7 @@ final class PlatformVideoCompressor implements VideoCompressor {
     required VideoCompressionPlan plan,
     int startMs = 0,
     int? endMs,
+    VideoSource? source,
     void Function(double fraction)? onProgress,
   }) async {
     if (!await available()) {
@@ -230,6 +249,11 @@ final class PlatformVideoCompressor implements VideoCompressor {
             'maxShortSide': plan.maxShortSide,
             'videoBitrate': plan.videoBitrate,
             'audioBitrate': plan.audioBitrate,
+            if (source != null) ...<String, Object?>{
+              'width': source.width,
+              'height': source.height,
+              'rotation': source.rotation,
+            },
           });
       if (out == null) {
         throw const VideoCompressionException('failed');
@@ -241,6 +265,8 @@ final class PlatformVideoCompressor implements VideoCompressor {
         bytes: (out['bytes'] as num?)?.toInt() ?? await file.length(),
         width: (out['width'] as num?)?.toInt() ?? 0,
         height: (out['height'] as num?)?.toInt() ?? 0,
+        rotation: (out['rotation'] as num?)?.toInt() ?? 0,
+        hasAudio: out['audio'] != false,
       );
     } on PlatformException catch (e) {
       throw VideoCompressionException(e.code, e.message ?? '');

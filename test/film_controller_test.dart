@@ -108,9 +108,13 @@ final class _FakeCompressor implements VideoCompressor {
     required VideoCompressionPlan plan,
     int startMs = 0,
     int? endMs,
+    VideoSource? source,
     void Function(double fraction)? onProgress,
   }) async {
-    calls.add('compress $startMs-$endMs ${plan.videoBitrate}');
+    calls.add(
+      'compress $startMs-$endMs ${plan.videoBitrate} '
+      '${source?.width}x${source?.height}',
+    );
     onProgress?.call(1);
     final Uint8List bytes = _film();
     await File(output).writeAsBytes(bytes);
@@ -185,7 +189,8 @@ void main() {
         ),
         onProgress: (FilmPublishStage stage, double _) => stages.add(stage),
       );
-      expect(encoder.calls, <String>['compress 2000-14500 2500000']);
+      // The bridge learns the picture's size from the file's own index.
+      expect(encoder.calls, <String>['compress 2000-14500 2500000 720x1280']);
       expect(stages, contains(FilmPublishStage.publishing));
       final FilmPost own = onBob.films[onBob.index];
       expect(own.isOwn, isTrue);

@@ -40,7 +40,7 @@ so every platform uses the same code.
 | `app_links` | `zen://` and invitation links | Apache-2.0 |
 | `path_provider` | app folders | BSD-3-Clause |
 | `file_picker`, `image_picker` | choosing files and photos | MIT, BSD-3-Clause |
-| `camera` | recording in the Videos section (Android, iOS) | BSD-3-Clause |
+| `camera`, `camera_windows` | recording in the Videos section (Android, iOS, Windows; macOS and Linux use Zen's own bridges) | BSD-3-Clause |
 | `image` | decoding and re-saving every received photo | MIT |
 | `video_player`, `video_player_platform_interface`, `video_player_win` | playing videos (Linux has Zen's own GStreamer backend) | BSD-3-Clause |
 | `record` | voice notes, alarm clips | BSD-3-Clause |
@@ -83,12 +83,23 @@ Development only: `flutter_test`, `integration_test`, `flutter_lints`.
 |---|---|
 | Android | Bluetooth LE advertising, scanning and GATT (Nearby, alarm wave, links); Wi-Fi Direct; Android Keystore and StrongBox; MediaCodec and MediaMuxer (video compression); the system location service (no Google Play services); a foreground service; `FLAG_SECURE`; the package installer (self-update); AndroidX Biometric; Tink (via `flutter_secure_storage`); AudioSwitch (via `flutter_webrtc`) |
 | iOS | Multipeer Connectivity (offline links); Keychain; LocalAuthentication; AVAssetExportSession; Core Location; process integrity checks |
-| macOS | Multipeer Connectivity; the Secure Enclave with Touch ID; Keychain; AVAssetExportSession; Core Location; window capture protection |
+| macOS | Multipeer Connectivity; the Secure Enclave with Touch ID; Keychain; AVAssetExportSession; AVCaptureSession (the films' camera); Core Location; window capture protection |
 | Windows | Media Foundation (video); WinRT Wi-Fi Direct and Bluetooth (RFCOMM); the TPM (Platform Crypto Provider) with Windows Hello; `WDA_EXCLUDEFROMCAPTURE`; the location API; heap and DLL-loading hardening |
-| Linux | BlueZ over D-Bus; GStreamer (playback); libsecret (GNOME Keyring or KWallet); libayatana-appindicator (tray); GTK |
+| Linux | BlueZ over D-Bus; GStreamer (playback; decoding films, the camera and the microphone for the Videos section; a system AAC encoder when one is installed); OpenH264 (Zen's own H.264 encoder, built from source with the app); ffmpeg when installed (a fallback decoder); libsecret (GNOME Keyring or KWallet); libayatana-appindicator (tray); GTK |
 
 System libraries keep their own licences (LGPL-2.1+ for GTK, GLib,
 GStreamer and libsecret; see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)).
+
+OpenH264 (BSD-2-Clause) is the one native library Zen builds from source
+for Linux (`linux/runner/CMakeLists.txt`): the release tarball of the tag
+in `ZEN_OPENH264_VERSION`, compiled without assembly and linked statically.
+Its SHA-256 is checked when `ZEN_OPENH264_SHA256` is set (a CMake cache
+entry, or the environment variable of that name for `flutter build`); record
+it once with `curl -sL https://github.com/cisco/openh264/archive/refs/tags/v2.4.1.tar.gz | sha256sum`.
+Films on Linux are written by Zen's own MP4 writer (`zen_film_codec.cc`);
+sound is copied when it is AAC, else encoded by a GStreamer AAC encoder
+(avenc_aac, fdkaacenc, voaacenc or faac) or ffmpeg when one is installed,
+and only without any of them does a film go without sound (the app says so).
 
 ## Fonts, icons and sounds
 

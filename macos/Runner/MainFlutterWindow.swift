@@ -23,6 +23,9 @@ class MainFlutterWindow: NSWindow {
     ZenIntegrityBridge.register(with: flutterViewController.engine.binaryMessenger)
     // Films of the "Filmy" section compressed and trimmed (AVFoundation).
     ZenVideoBridge.register(with: flutterViewController.engine.binaryMessenger)
+    // The recorder's own camera (AVCaptureSession, in ZenVideoBridge.swift).
+    ZenCameraBridge.register(
+      with: flutterViewController.registrar(forPlugin: "ZenCameraBridge"))
 
     super.awakeFromNib()
   }

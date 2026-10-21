@@ -325,7 +325,7 @@ class _FilmsScreenState extends ConsumerState<FilmsScreen>
     }
     final FilmRecording? rec = await FilmRecorderScreen.open(
       context,
-      camera: (widget.camera ?? PluginFilmCamera.new)(),
+      camera: (widget.camera ?? defaultFilmCamera)(),
       pickFile: widget.pickFile ?? pickFilmFile,
       replyToName: replyTo?.authorLabel,
     );
@@ -336,6 +336,7 @@ class _FilmsScreenState extends ConsumerState<FilmsScreen>
     if (!mounted) {
       return;
     }
+    bool silent = false;
     final bool published = await FilmEditorScreen.open(
       context,
       path: rec.path,
@@ -347,7 +348,15 @@ class _FilmsScreenState extends ConsumerState<FilmsScreen>
       replyToName: replyTo?.authorLabel,
       initialAudience: _audience,
       publish: (FilmDraft draft, FilmPublishProgress progress) async {
-        await backend.publish(draft, onProgress: progress);
+        await backend.publish(
+          draft,
+          onProgress: (FilmPublishStage stage, double fraction) {
+            if (stage == FilmPublishStage.silent) {
+              silent = true;
+            }
+            progress(stage, fraction);
+          },
+        );
         _audience = draft.audience;
       },
     );
@@ -356,7 +365,13 @@ class _FilmsScreenState extends ConsumerState<FilmsScreen>
       unawaited(File(rec.path).delete().then((_) {}, onError: (Object _) {}));
     }
     if (published) {
-      _say(t('Opublikowano.'));
+      _say(
+        silent
+            ? t(
+                'Opublikowano bez dźwięku: na tym komputerze nie ma kodera dźwięku.',
+              )
+            : t('Opublikowano.'),
+      );
     }
   }
 

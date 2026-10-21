@@ -209,3 +209,223 @@ final class ZenVideoBridge {
     return data as Data
   }
 }
+
+#if os(macOS)
+  /// The camera of the "Filmy" recorder on a Mac (`zen/camera`, see
+  /// film_camera_channel.dart): an AVCaptureSession with the camera and the
+  /// microphone; the live picture goes to Flutter as a texture
+  /// (AVCaptureVideoDataOutput), the recording to a temporary QuickTime file
+  /// (AVCaptureMovieFileOutput, both at once). The film is compressed
+  /// afterwards like any other (ZenVideoBridge).
+  ///
+  ///  - `lenses` → ["front"] (and "back" for a second camera, e.g. an
+  ///    external one), or [] without a camera;
+  ///  - `open` {lens} → {textureId, width, height};
+  ///  - `setTorch`: a Mac has no light; nothing happens;
+  ///  - `start`, `stop` → the recording's path, `close`.
+  final class ZenCameraBridge: NSObject, FlutterTexture,
+    AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureFileOutputRecordingDelegate
+  {
+    static func register(with registrar: FlutterPluginRegistrar) {
+      let bridge = ZenCameraBridge(textures: registrar.textures)
+      let channel = FlutterMethodChannel(
+        name: "zen/camera", binaryMessenger: registrar.messenger)
+      channel.setMethodCallHandler { call, result in
+        bridge.handle(call, result)
+      }
+      shared = bridge
+    }
+
+    private static var shared: ZenCameraBridge?
+
+    private let textures: FlutterTextureRegistry
+    private let queue = DispatchQueue(label: "zen.camera")
+    private let lock = NSLock()
+    private var session: AVCaptureSession?
+    private var movie: AVCaptureMovieFileOutput?
+    private var latest: CVPixelBuffer?
+    private var textureId: Int64 = 0
+    private var stopping: FlutterResult?
+
+    private init(textures: FlutterTextureRegistry) {
+      self.textures = textures
+      super.init()
+    }
+
+    private static func cameras() -> [AVCaptureDevice] {
+      var types: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera]
+      if #available(macOS 14.0, *) {
+        types.append(.external)
+      } else {
+        types.append(.externalUnknown)
+      }
+      return AVCaptureDevice.DiscoverySession(
+        deviceTypes: types, mediaType: .video, position: .unspecified
+      ).devices
+    }
+
+    private func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+      let args = call.arguments as? [String: Any] ?? [:]
+      switch call.method {
+      case "lenses":
+        let count = ZenCameraBridge.cameras().count
+        let names: [String] = Array(["front", "back"].prefix(min(count, 2)))
+        result(names)
+      case "open":
+        let lens = args["lens"] as? String ?? "front"
+        AVCaptureDevice.requestAccess(for: .video) { granted in
+          AVCaptureDevice.requestAccess(for: .audio) { _ in
+            DispatchQueue.main.async {
+              guard granted else {
+                result(FlutterError(code: "denied", message: "no camera permission", details: nil))
+                return
+              }
+              self.open(lens: lens, result: result)
+            }
+          }
+        }
+      case "setTorch":
+        result(nil)
+      case "start":
+        guard let movie = movie, !movie.isRecording else {
+          result(FlutterError(code: "failed", message: "camera closed", details: nil))
+          return
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+          "zen-film-\(UUID().uuidString).mov")
+        movie.startRecording(to: url, recordingDelegate: self)
+        result(nil)
+      case "stop":
+        guard let movie = movie, movie.isRecording else {
+          result(FlutterError(code: "failed", message: "not recording", details: nil))
+          return
+        }
+        stopping = result
+        movie.stopRecording()
+      case "close":
+        close()
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+
+    private func open(lens: String, result: @escaping FlutterResult) {
+      close()
+      let devices = ZenCameraBridge.cameras()
+      guard !devices.isEmpty else {
+        result(FlutterError(code: "failed", message: "no camera", details: nil))
+        return
+      }
+      let device = lens == "back" && devices.count > 1 ? devices[1] : devices[0]
+      let session = AVCaptureSession()
+      session.beginConfiguration()
+      if session.canSetSessionPreset(.hd1280x720) {
+        session.sessionPreset = .hd1280x720
+      }
+      guard let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input)
+      else {
+        result(FlutterError(code: "failed", message: "the camera cannot be opened", details: nil))
+        return
+      }
+      session.addInput(input)
+      if let mic = AVCaptureDevice.default(for: .audio),
+        let audio = try? AVCaptureDeviceInput(device: mic), session.canAddInput(audio)
+      {
+        session.addInput(audio)
+      }
+      let frames = AVCaptureVideoDataOutput()
+      frames.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+      frames.alwaysDiscardsLateVideoFrames = true
+      frames.setSampleBufferDelegate(self, queue: queue)
+      if session.canAddOutput(frames) {
+        session.addOutput(frames)
+      }
+      let movie = AVCaptureMovieFileOutput()
+      if session.canAddOutput(movie) {
+        session.addOutput(movie)
+      }
+      session.commitConfiguration()
+      self.session = session
+      self.movie = movie
+      textureId = textures.register(self)
+      let size = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
+      queue.async {
+        session.startRunning()
+      }
+      result(["textureId": textureId, "width": Int(size.width), "height": Int(size.height)])
+    }
+
+    private func close() {
+      if let movie = movie, movie.isRecording {
+        movie.stopRecording()
+      }
+      if let session = session {
+        queue.async {
+          session.stopRunning()
+        }
+      }
+      session = nil
+      movie = nil
+      if textureId != 0 {
+        textures.unregisterTexture(textureId)
+        textureId = 0
+      }
+      lock.lock()
+      latest = nil
+      lock.unlock()
+    }
+
+    func copyPixelBuffer() -> Unmanaged<CVPixelBuffer>? {
+      lock.lock()
+      defer { lock.unlock() }
+      guard let frame = latest else {
+        return nil
+      }
+      return Unmanaged.passRetained(frame)
+    }
+
+    func captureOutput(
+      _ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer,
+      from connection: AVCaptureConnection
+    ) {
+      guard let frame = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+        return
+      }
+      lock.lock()
+      latest = frame
+      lock.unlock()
+      DispatchQueue.main.async {
+        if self.textureId != 0 {
+          self.textures.textureFrameAvailable(self.textureId)
+        }
+      }
+    }
+
+    func fileOutput(
+      _ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL,
+      from connections: [AVCaptureConnection], error: Error?
+    ) {
+      DispatchQueue.main.async {
+        guard let result = self.stopping else {
+          return
+        }
+        self.stopping = nil
+        // A recording stopped by hand ends "with an error" that still has
+        // the whole file (AVErrorRecordingSuccessfullyFinishedKey).
+        let finished =
+          error == nil
+          || ((error as NSError?)?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool
+            ?? false)
+        if finished {
+          result(outputFileURL.path)
+        } else {
+          result(
+            FlutterError(
+              code: "failed", message: error?.localizedDescription ?? "recording failed",
+              details: nil))
+        }
+      }
+    }
+  }
+#endif

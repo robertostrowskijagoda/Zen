@@ -37,7 +37,15 @@ final class FilmDraft {
 }
 
 /// Where publishing a film is.
-enum FilmPublishStage { compressing, sealing, publishing }
+enum FilmPublishStage {
+  compressing,
+
+  /// Reported once when the film had to go without sound (no encoder for
+  /// it on this computer), so the person can be told.
+  silent,
+  sealing,
+  publishing,
+}
 
 typedef FilmPublishProgress =
     void Function(FilmPublishStage stage, double fraction);
@@ -83,9 +91,17 @@ Future<LogEntry> publishFilm(
   try {
     if (await compressor.available()) {
       output = await (temporaryPath ?? _temporaryFilmPath)();
+      final Mp4Info? original = await probeMp4File(File(draft.path));
       final CompressedVideo done = await compressor.compress(
         input: draft.path,
         output: output,
+        source: original == null
+            ? null
+            : (
+                width: original.width,
+                height: original.height,
+                rotation: original.rotation,
+              ),
         plan: planVideoCompression(
           durationMs: math.max(1, draft.trim.lengthMs),
         ),
@@ -94,7 +110,12 @@ Future<LogEntry> publishFilm(
         onProgress: (double f) =>
             onProgress?.call(FilmPublishStage.compressing, f),
       );
-      bytes = await File(done.path).readAsBytes();
+      final Uint8List raw = await File(done.path).readAsBytes();
+      // A bridge that leaves the picture as stored says how to turn it.
+      bytes = done.rotation == 0 ? raw : setMp4Rotation(raw, done.rotation);
+      if (!done.hasAudio) {
+        onProgress?.call(FilmPublishStage.silent, 1);
+      }
       frameSource = done.path;
       frameAt = 0;
       width = done.width;

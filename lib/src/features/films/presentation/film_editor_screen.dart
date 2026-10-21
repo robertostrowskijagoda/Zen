@@ -197,7 +197,8 @@ class _FilmEditorScreenState extends State<FilmEditorScreen> {
   }
 
   String _stageLabel(FilmPublishStage stage) => switch (stage) {
-    FilmPublishStage.compressing => t('Zmniejszanie filmu…'),
+    FilmPublishStage.compressing ||
+    FilmPublishStage.silent => t('Zmniejszanie filmu…'),
     FilmPublishStage.sealing => t('Szyfrowanie…'),
     FilmPublishStage.publishing => t('Publikowanie…'),
   };

@@ -10,6 +10,8 @@ add_executable(${BINARY_NAME}
   "main.cc"
   "my_application.cc"
   "zen_media_player.cc"
+  "zen_film_codec.cc"
+  "zen_video_bridge.cc"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )
 
@@ -39,3 +41,41 @@ else()
     "without audio and video playback (install libgstreamer1.0-dev and "
     "libgstreamer-plugins-base1.0-dev).")
 endif()
+
+# Films (zen_video_bridge.cc, zen_film_codec.cc): Zen's own H.264 encoder,
+# OpenH264 (BSD-2-Clause), built from source with the app so compressing
+# works on every Linux; no system package is needed. Plain C/C++ (no NASM,
+# USE_ASM=No), a static library linked into the app. Pinned to a release
+# tag; its tarball's SHA-256 is checked when ZEN_OPENH264_SHA256 (or the
+# environment variable of that name, as `flutter build` passes no CMake
+# options) holds it — record it there once (docs/DEPENDENCIES.md).
+include(ExternalProject)
+find_package(Threads REQUIRED)
+set(ZEN_OPENH264_VERSION "2.4.1" CACHE STRING "OpenH264 release built into Zen")
+set(ZEN_OPENH264_SHA256 "$ENV{ZEN_OPENH264_SHA256}" CACHE STRING
+  "SHA-256 of the OpenH264 release tarball (checked when set)")
+set(ZEN_OPENH264_URL
+  "https://github.com/cisco/openh264/archive/refs/tags/v${ZEN_OPENH264_VERSION}.tar.gz")
+if(ZEN_OPENH264_SHA256)
+  set(ZEN_OPENH264_HASH URL_HASH "SHA256=${ZEN_OPENH264_SHA256}")
+else()
+  set(ZEN_OPENH264_HASH "")
+  message(WARNING "ZEN_OPENH264_SHA256 is not set: OpenH264 "
+    "${ZEN_OPENH264_VERSION} is downloaded without checking its hash.")
+endif()
+find_program(ZEN_MAKE NAMES gmake make REQUIRED)
+ExternalProject_Add(zen_openh264
+  URL "${ZEN_OPENH264_URL}"
+  ${ZEN_OPENH264_HASH}
+  CONFIGURE_COMMAND ""
+  BUILD_IN_SOURCE TRUE
+  BUILD_COMMAND ${ZEN_MAKE} -j4 USE_ASM=No BUILDTYPE=Release libopenh264.a
+  INSTALL_COMMAND ""
+  BUILD_BYPRODUCTS "<SOURCE_DIR>/libopenh264.a"
+  LOG_BUILD TRUE
+)
+ExternalProject_Get_Property(zen_openh264 SOURCE_DIR)
+add_dependencies(${BINARY_NAME} zen_openh264)
+target_include_directories(${BINARY_NAME} SYSTEM PRIVATE "${SOURCE_DIR}/codec/api")
+target_link_libraries(${BINARY_NAME} PRIVATE
+  "${SOURCE_DIR}/libopenh264.a" Threads::Threads m)

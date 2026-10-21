@@ -46,12 +46,21 @@ const int _maxBundleBlocked = 200;
 /// bundles are written again: removed posts (their tombstones travel to
 /// friends of resharers), hidden comments, blocked people, further pages.
 const Set<String> kReactionRelayExtraKinds = <String>{
+  _filmKind,
+  _filmPassKind,
   kPostDeleteKind,
   kReshareDeleteKind,
   kCommentHideKind,
   kThreadBlockKind,
   kReactionsPageKind,
 };
+
+/// Films and passed-on films (`film_model.dart`, `film_pass.dart`): their
+/// likes and comments travel in bundles like a post's, so a friend of a
+/// friend who watched a film passed on to them reaches its author through
+/// the friend who passed it.
+const String _filmKind = 'film';
+const String _filmPassKind = 'film_pass';
 
 /// One liker or comment as a bundle carries it, with the writer's profile
 /// photo from their mini-profile when the bundle had room for it.
@@ -298,12 +307,21 @@ Future<int> relayReactions(
   // Posts to report on: own posts, and reshared ones with their author.
   final Map<String, String> postsAuthor = <String, String>{};
   for (final LogEntry e in node.entriesOf()) {
-    if (e.kind == kPostKind) {
+    if (e.kind == kPostKind || e.kind == _filmKind) {
       postsAuthor[e.id] = node.account;
     } else if (e.kind == kReshareKind) {
       final LogEntry? original = LogEntry.fromJson(e.body['entry']);
       if (original != null) {
         postsAuthor[original.id] = original.account;
+      }
+    }
+  }
+  for (final LogEntry e in node.entriesOf(spaceKind: 'acts')) {
+    final Object? fid = e.body['fid'];
+    if (e.kind == _filmPassKind && fid is String) {
+      final LogEntry? film = LogEntry.fromJson(e.body['film']);
+      if (film != null && film.id == fid) {
+        postsAuthor[fid] = film.account;
       }
     }
   }
