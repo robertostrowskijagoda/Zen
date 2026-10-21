@@ -9,6 +9,7 @@ import 'package:zen/src/features/account/multi/account_registry.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/account/multi/background_accounts.dart';
+import 'package:zen/src/features/account/multi/desktop_background.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
@@ -131,12 +132,21 @@ Future<void> _wipeAdditionalAccount(
 /// password do.
 Future<void> performZenDeviceWipe(WidgetRef ref) async {
   final ZenAccountScope account = ref.read(zenAccountProvider);
+  // A computer's tray nodes write into the folders about to go.
+  await ref.read(desktopBackgroundAccountsProvider).stop();
   final AppSecurityService security = ref.read(appSecurityServiceProvider);
   final ZenAccountRegistry registry = ref.read(zenAccountRegistryProvider);
   Future<void> destroyAllKeys() async {
     // The open account's own reset first (for the default account it also
     // destroys the hardware key; an additional one only drops its copy).
     await security.reset();
+    try {
+      // Every account's exported files, hidden ones too (the device's
+      // list of them goes with the rest of the secret store next).
+      await ExportedFilesIndex.deleteEveryAccount();
+    } on Object catch (error, stackTrace) {
+      logZenError('Deleting exported files failed', error, stackTrace);
+    }
     try {
       await const SecureStorageCredentialsStore.device().deleteEverything();
     } on Object catch (error, stackTrace) {

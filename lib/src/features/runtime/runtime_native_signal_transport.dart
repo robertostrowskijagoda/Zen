@@ -1273,8 +1273,8 @@ final class RuntimeBridgeBuildInfo {
   final String go;
 }
 
-/// The storage key the node config is sealed for.
-@visibleForTesting
+/// The storage key the node config is sealed for (also used when the
+/// config is sealed again under another key, e.g. the background key).
 const String kNodeConfigStorageKey = 'runtime/yggdrasil.config';
 
 Future<String> _loadOrCreateNodeConfig(

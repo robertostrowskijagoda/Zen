@@ -345,10 +345,24 @@ final class BackgroundAccountNode {
     if (!await support.exists()) {
       return null;
     }
-    Future<Directory> folder() async => support;
-    final AppSecurityCredentialsStore credentials = secrets.forAccount(
-      account.secret,
+    return openAt(
+      support: support,
+      credentials: secrets.forAccount(account.secret),
+      notices: notices,
+      waitTimeout: waitTimeout,
     );
+  }
+
+  /// The node of the account whose data is in [support] and whose entries
+  /// [credentials] reads (a computer's default account while its window is
+  /// locked, too).
+  static Future<BackgroundAccountNode?> openAt({
+    required Directory support,
+    required AppSecurityCredentialsStore credentials,
+    required RuntimeSystemNotificationService notices,
+    Duration waitTimeout = const Duration(seconds: 5),
+  }) async {
+    Future<Directory> folder() async => support;
     final FileBackgroundVault vault = FileBackgroundVault(
       supportDirectory: folder,
       credentials: credentials,

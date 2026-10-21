@@ -8,6 +8,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/multi/account_id.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/exported_files.dart';
 
 /// An account shown in the account list ("Pokazuj na liście kont"): only
 /// these are written down anywhere, and only because the person chose so.
@@ -225,6 +226,15 @@ final class ZenAccountRegistry {
   Future<void> wipeAccount(ZenAccountScope scope) async {
     if (scope.isDefault) {
       throw ArgumentError.value(scope, 'scope', 'Not an additional account');
+    }
+    try {
+      // The files it exported first, while its own list still names them.
+      await ExportedFilesIndex(
+        _secrets.forAccount(scope.secret),
+        _secrets.forDevice(),
+      ).deleteAll();
+    } on Object catch (error, stackTrace) {
+      logZenError('Deleting the account exports failed', error, stackTrace);
     }
     try {
       await _secrets.forAccount(scope.secret).deleteAccountEntries();

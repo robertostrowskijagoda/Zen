@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -15,11 +16,13 @@ import 'package:zen/src/features/account/multi/account_registry.dart';
 import 'package:zen/src/features/account/multi/account_scope.dart';
 import 'package:zen/src/features/account/multi/account_switch.dart';
 import 'package:zen/src/features/account/multi/background_accounts.dart';
+import 'package:zen/src/features/account/multi/desktop_background.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/hold_to_confirm_button.dart';
 import 'package:zen/src/features/security/unlock_throttle.dart';
+import 'package:zen/src/features/social/social_hub_controller.dart';
 
 /// What kind of account this is, in a few words.
 String zenAccountKindLabel(ZenAccountScope account) =>
@@ -822,10 +825,11 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
   bool? _background;
   bool _wiping = false;
 
-  /// Only the Android background service receives for accounts that are
-  /// not open.
+  /// The Android background service, or a computer's tray, receives for
+  /// accounts that are not open.
   static bool get _backgroundSupported =>
-      defaultTargetPlatform == TargetPlatform.android;
+      defaultTargetPlatform == TargetPlatform.android ||
+      zenDesktopBackgroundPlatform;
 
   @override
   void initState() {
@@ -881,7 +885,29 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
     if (value && !await _confirmBackground(account)) {
       return;
     }
+    final AppSecurityService security = ref.read(appSecurityServiceProvider);
+    final Future<Directory> Function() support = ref.read(
+      supportDirectoryResolverProvider,
+    );
+    // A computer seals the node again: with the background key (the tray
+    // runs it without the password), or back with the master key.
+    if (zenDesktopBackgroundPlatform && value) {
+      await applyDesktopBackgroundSetting(
+        account: account,
+        on: true,
+        security: security,
+        support: await support(),
+      );
+    }
     final bool done = await settings.setOn(account, value);
+    if (zenDesktopBackgroundPlatform && !value) {
+      await applyDesktopBackgroundSetting(
+        account: account,
+        on: false,
+        security: security,
+        support: await support(),
+      );
+    }
     if (!mounted) {
       return;
     }
@@ -915,24 +941,41 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  t(
-                    'Każde konto odbierające w tle to osobny węzeł sieci, '
-                    'który działa cały czas, gdy Zen jest zablokowany albo '
-                    'zamknięty. Telefon zużyje więcej baterii i danych.',
-                  ),
+                  zenDesktopBackgroundPlatform
+                      ? t(
+                          'Każde konto odbierające w tle to osobny węzeł '
+                          'sieci, który działa cały czas, gdy Zen jest '
+                          'zablokowany albo schowany w zasobniku. Komputer '
+                          'zużyje więcej prądu i danych.',
+                        )
+                      : t(
+                          'Każde konto odbierające w tle to osobny węzeł sieci, '
+                          'który działa cały czas, gdy Zen jest zablokowany albo '
+                          'zamknięty. Telefon zużyje więcej baterii i danych.',
+                        ),
                 ),
                 if (!account.isDefault) ...<Widget>[
                   const SizedBox(height: 12),
                   Text(
-                    t(
-                      'To konto przestaje być w pełni ukryte: ktoś z pełnym '
-                      'dostępem do tego telefonu (np. z uprawnieniami roota) '
-                      'może ustalić, że istnieje, i odczytać jego adres w '
-                      'sieci oraz listę osób, od których przyjmuje '
-                      'wiadomości. Rozmowy i reszta danych zostają '
-                      'zaszyfrowane hasłem. Powiadomienia tego konta są '
-                      'ogólne: bez nazw, treści i nazwy konta.',
-                    ),
+                    zenDesktopBackgroundPlatform
+                        ? t(
+                            'To konto przestaje być w pełni ukryte: każdy '
+                            'program działający na tym komputerze jako Ty może '
+                            'ustalić, że istnieje, i odczytać jego adres w '
+                            'sieci oraz listę osób, od których przyjmuje '
+                            'wiadomości. Rozmowy i reszta danych zostają '
+                            'zaszyfrowane hasłem. Powiadomienia tego konta są '
+                            'ogólne: bez nazw, treści i nazwy konta.',
+                          )
+                        : t(
+                            'To konto przestaje być w pełni ukryte: ktoś z pełnym '
+                            'dostępem do tego telefonu (np. z uprawnieniami roota) '
+                            'może ustalić, że istnieje, i odczytać jego adres w '
+                            'sieci oraz listę osób, od których przyjmuje '
+                            'wiadomości. Rozmowy i reszta danych zostają '
+                            'zaszyfrowane hasłem. Powiadomienia tego konta są '
+                            'ogólne: bez nazw, treści i nazwy konta.',
+                          ),
                     style: TextStyle(color: zen.warning),
                   ),
                 ],
@@ -1038,18 +1081,29 @@ class _AccountsScreenState extends ConsumerState<AccountsScreen> {
                       ? null
                       : (bool value) => unawaited(_setBackground(value)),
                   title: Text(t('Odbieraj w tle')),
-                  subtitle: Text(
-                    account.isDefault
-                        ? t(
-                            'Gdy Zen jest zablokowany albo zamknięty. Każde '
-                            'konto w tle zużywa więcej baterii.',
-                          )
-                        : t(
-                            'Gdy Zen jest zablokowany albo zamknięty. Zużywa '
-                            'więcej baterii, a ktoś z pełnym dostępem do '
-                            'telefonu mógłby ustalić, że to konto istnieje.',
-                          ),
-                  ),
+                  subtitle: Text(switch ((
+                    zenDesktopBackgroundPlatform,
+                    account.isDefault,
+                  )) {
+                    (true, true) => t(
+                      'Gdy Zen jest zablokowany albo w zasobniku. Każde '
+                      'konto w tle zużywa więcej prądu.',
+                    ),
+                    (true, false) => t(
+                      'Gdy Zen jest zablokowany albo w zasobniku. Zużywa '
+                      'więcej prądu, a programy na tym komputerze mogłyby '
+                      'ustalić, że to konto istnieje.',
+                    ),
+                    (false, true) => t(
+                      'Gdy Zen jest zablokowany albo zamknięty. Każde '
+                      'konto w tle zużywa więcej baterii.',
+                    ),
+                    (false, false) => t(
+                      'Gdy Zen jest zablokowany albo zamknięty. Zużywa '
+                      'więcej baterii, a ktoś z pełnym dostępem do '
+                      'telefonu mógłby ustalić, że to konto istnieje.',
+                    ),
+                  }),
                 ),
               ],
               const SizedBox(height: 12),
