@@ -9,6 +9,7 @@ import 'package:zen/src/features/relay/relay_crypto.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/hybrid_kem.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 part 'relay_engine_blobs.dart';
@@ -25,8 +26,8 @@ final class RelayFriend {
   final String address;
   final int lastSeenAtMillis;
 
-  /// How close this friend is (§8: 0 "Słaby znajomy", 1 "Znajomy", 2
-  /// "Przyjaciel"): free mailbox places go to the closest first (§7).
+  /// How close this friend is (0 "Słaby znajomy", 1 "Znajomy", 2
+  /// "Przyjaciel"): free mailbox places go to the closest first.
   final int closeness;
 }
 
@@ -252,11 +253,11 @@ const Set<String> kReliablePayloadTypes = <String>{
   'group_invite_ack',
   'group_leave',
   'group_message',
-  // Group board posts (§13); the sync between members is real-time.
+  // Group board posts; the sync between members is real-time.
   'group_post',
   'profile_update',
   'disappear_timer',
-  // Meeting features (§15–16): a friend offline now still gets them.
+  // Meeting features: a friend offline now still gets them.
   'intent',
   'alarm',
   'alarm_resp',
@@ -264,6 +265,8 @@ const Set<String> kReliablePayloadTypes = <String>{
   'alarm_ack',
   'nearby_key',
   'friend_list',
+  // "Open to meet" on the graph (graph/open_to_meet.dart).
+  'graph_open',
   'event',
   'event_rsvp',
   'event_pass',
@@ -276,16 +279,23 @@ const Set<String> kReliablePayloadTypes = <String>{
   'circle',
   'circle_swap',
   'circle_guest',
+  'food_offer',
+  'food_req',
+  'food_ans',
   'weekend_plan',
   'weekend_plan_ans',
-  // Contact economy (§24.1): introductions, letters, friend-list requests.
+  // Contact economy: introductions (gates), letters, friend-list requests,
+  // gate terms, how a way through gates ended, paid first messages.
   'intro_ask',
   'intro_fwd',
   'intro_ans',
   'intro_res',
-  // Pyramid (§20–24): records, co-signing, votes, payments, reports.
+  'intro_gate',
+  'intro_end',
+  'intro_pay',
+  'intro_paid',
+  // Pyramid: records, co-signing, votes, payments, reports.
   'pyr_rec',
-  'pyr_wantall',
   'pyr_recs',
   'pyr_prop',
   'pyr_sig',
@@ -295,9 +305,8 @@ const Set<String> kReliablePayloadTypes = <String>{
   'pyr_report',
   'pyr_appeal',
   'pyr_anon',
-  'pyr_fx',
   'pyr_nat',
-  // Dating (§19): only between friends; the content is sealed anyway.
+  // Dating: only between friends; the content is sealed anyway.
   'date_lantern',
   'date_back',
   'date_ask',
@@ -307,7 +316,7 @@ const Set<String> kReliablePayloadTypes = <String>{
   'date_safe',
   'date_safe_ok',
   'date_loc_req',
-  // Neighbours (§18): flats are usually not friends, so only directly.
+  // Neighbours: flats are usually not friends, so only directly.
   'flat_hello',
   'flat_nope',
   'flat_profile',
@@ -334,6 +343,9 @@ const Set<String> kReliablePayloadTypes = <String>{
 /// so neither its relays nor its key are known.
 const Set<String> _directOnlyPayloadTypes = <String>{
   'friend_request',
+  // A paid first message: to and from someone who is not a friend.
+  'intro_pay',
+  'intro_paid',
   'flat_hello',
   'flat_nope',
   'flat_profile',
@@ -552,8 +564,8 @@ final class RelayEngine {
 
   /// [payload] sealed now for [recipient], as one `rly_deposit` frame per
   /// mailbox the recipient chose: handed in later by a node that holds none
-  /// of this device's keys (the alarm kit of the locked Android service,
-  /// §16.3). The payload's [kReliableIdKey] becomes the envelope's id (`id`
+  /// of this device's keys (the alarm kit of the locked Android service).
+  /// The payload's [kReliableIdKey] becomes the envelope's id (`id`
   /// below). Nothing is queued here. Empty while this isolate does not own
   /// the relay state, or the recipient's key or mailboxes are not known.
   Future<List<({String mailbox, String id, Map<String, dynamic> frame})>>
@@ -568,7 +580,7 @@ final class RelayEngine {
       final String to = PeerShareCodec.normalizeAddress(recipient);
       final RelayIdentity? identity = state.identity;
       final RelayPeerInfo? info = state.peers[to];
-      final Uint8List? recipientKey = info?.publicKey;
+      final RelayPublicKeys? recipientKey = info?.keys;
       if (identity == null || info == null || recipientKey == null) {
         return none;
       }
@@ -922,6 +934,7 @@ final class RelayEngine {
     }
     final int version = (payload['v'] as num?)?.toInt() ?? 0;
     final Uint8List? publicKey = decodeRelayKey(payload['pk']);
+    final Uint8List? pqPublicKey = decodeHybridPublicKey(payload['pq']);
     final Object? token = payload['tk'];
     final RelayPeerInfo? known = state.peers[from];
     unawaited(
@@ -946,6 +959,7 @@ final class RelayEngine {
     state.peers[from] = RelayPeerInfo(
       address: from,
       publicKey: publicKey ?? known?.publicKey,
+      pqPublicKey: pqPublicKey ?? known?.pqPublicKey,
       relays: relays,
       version: version,
       updatedAtMillis: _now(),
@@ -995,6 +1009,8 @@ final class RelayEngine {
     return <String, dynamic>{
       'type': 'rly_announce',
       'pk': identity.publicKeyBase64,
+      if (identity.pqPublicKey != null)
+        'pq': base64Url.encode(identity.pqPublicKey!),
       'relays': state.currentRelays,
       'v': state.relaySetVersion,
       'tk': _depositToken(depositKey, recipient: _self, sender: to),
@@ -1061,7 +1077,7 @@ final class RelayEngine {
             final String a = PeerShareCodec.normalizeAddress(f.address);
             return friendAddresses.contains(a) && !kept.contains(a);
           }).toList()..sort((RelayFriend a, RelayFriend b) {
-            // "Przyjaciel" first (§7), then the most recently seen.
+            // "Przyjaciel" first, then the most recently seen.
             final int byLevel = b.closeness.compareTo(a.closeness);
             return byLevel != 0
                 ? byLevel
@@ -1723,7 +1739,7 @@ final class RelayEngine {
     RelayEnvelope envelope,
   ) async {
     try {
-      final Uint8List plaintext = await RelayCipher.open(
+      final Uint8List plaintext = await RelayCipher.openHybrid(
         recipient: identity,
         senderPublicKey: senderKey,
         box: envelope.box,
@@ -2020,7 +2036,7 @@ final class RelayEngine {
         continue;
       }
       final RelayPeerInfo? info = state.peers[entry.recipient];
-      final Uint8List? recipientKey = info?.publicKey;
+      final RelayPublicKeys? recipientKey = info?.keys;
       if (info == null || recipientKey == null) {
         continue;
       }
@@ -2084,7 +2100,7 @@ final class RelayEngine {
 
   Future<RelayEnvelope> _seal(
     RelayIdentity identity,
-    Uint8List recipientKey,
+    RelayPublicKeys recipientKey,
     RelayOutboxEntry entry,
   ) async {
     final Uint8List associatedData = RelayEnvelope.associatedDataFor(
@@ -2094,9 +2110,9 @@ final class RelayEngine {
       createdAtMillis: entry.createdAtMillis,
       expiresAtMillis: entry.expiresAtMillis,
     );
-    final RelaySealedBox box = await RelayCipher.seal(
+    final RelayHybridBox box = await RelayCipher.sealHybrid(
       sender: identity,
-      recipientPublicKey: recipientKey,
+      recipient: recipientKey,
       plaintext: Uint8List.fromList(utf8.encode(jsonEncode(entry.payload))),
       associatedData: associatedData,
     );
@@ -2371,7 +2387,10 @@ final class RelayEngine {
       return cached;
     }
     final RelayState loaded = await _store.load();
-    loaded.identity ??= await RelayIdentity.generate();
+    if (loaded.identity?.isHybrid != true) {
+      // Mail is sealed with the hybrid post-quantum key too.
+      loaded.identity = await RelayIdentity.generateHybrid();
+    }
     if (_active) {
       _state = loaded;
     }

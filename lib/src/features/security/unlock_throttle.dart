@@ -2,7 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 
-/// Slows down password guessing on the lock screen (Z2-9): the number of
+/// Slows down password guessing on the lock screen: the number of
 /// failed attempts lives in the secure storage, so restarting the app does
 /// not reset it, and from the fifth failure on every further one makes the
 /// wait twice as long, up to [maxDelay]. There is never a permanent

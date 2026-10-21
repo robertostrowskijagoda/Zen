@@ -6,7 +6,7 @@ import 'package:zen/src/features/security/app_security_service.dart';
 /// How long one confirmation opens the sensitive places.
 const Duration kSensitiveAccessGrace = Duration(seconds: 60);
 
-/// Remembers the last time the person proved who they are (§14.1 point 4),
+/// Remembers the last time the person proved who they are,
 /// so moving between two sensitive screens does not ask twice in a row.
 /// Locking the app forgets it.
 final class SensitiveAccessClock {

@@ -17,7 +17,7 @@ final Provider<AppSecurityService> appSecurityServiceProvider =
     });
 
 /// Whether the app insists on an app password before anything else
-/// (§14.1: required by default). Off in tests and previews; the real app
+/// (required by default). Off in tests and previews; the real app
 /// turns it on.
 final Provider<bool> appPasswordRequiredProvider = Provider<bool>(
   (Ref ref) => false,
@@ -85,7 +85,7 @@ const String appSecurityGifApiKeyStorageKey = 'zen_rewrite_gif_api_key';
 const String appSecurityUnlockFailuresStorageKey =
     'zen_rewrite_unlock_failures';
 
-/// The background key (hex, see `background_keys.dart`, §14.1).
+/// The background key (hex, see `background_keys.dart`).
 ///
 /// Not the master key and nothing derived from it: the Android background
 /// service reads it without the app password, and it opens only what the
@@ -191,7 +191,7 @@ final class FlutterSecureStorageBackend implements SecureKeyValueBackend {
 /// iOS / macOS keychain items: readable once the device has been unlocked
 /// after a restart (the background work needs them with the screen locked)
 /// and never moved to another device — left out of iCloud Keychain and of
-/// a backup restored elsewhere (S-7). The plugin's default
+/// a backup restored elsewhere. The plugin's default
 /// (`kSecAttrAccessibleWhenUnlocked`) travels with encrypted backups, and
 /// without a password the master key itself is in the keychain.
 const KeychainAccessibility kZenKeychainAccessibility =
@@ -464,7 +464,7 @@ abstract class AppSecurityService extends ChangeNotifier {
   /// asks for the fingerprint / face / Windows Hello itself.
   Future<bool> unlockWithBiometrics();
 
-  /// Re-confirms the person (§14.1 point 4) with the sealed key, without
+  /// Re-confirms the person with the sealed key, without
   /// changing the lock state. `false` when refused or unavailable.
   Future<bool> confirmWithBiometrics({required String reason});
 
@@ -529,7 +529,7 @@ sealed class _BaseAppSecurityService extends AppSecurityService {
 
   final AppSecurityCredentialsStore _credentialsStore;
 
-  /// Argon2id cost for new passwords (§14.1: copied files must not be easy
+  /// Argon2id cost for new passwords (copied files must not be easy
   /// to crack offline).
   final PasswordCost _cost;
   final PlatformKeyVault _vault;

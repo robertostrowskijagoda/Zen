@@ -3,12 +3,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart' as crypto;
-import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/features/security/app_security_crypto.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
+import 'package:zen/src/features/security/hybrid_kem.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
 
 const int _backgroundKeyBytes = 32;
@@ -157,18 +157,17 @@ final class BackgroundKeyProtector implements KeyedBinaryPayloadProtector {
   }
 }
 
-/// The inbox key pair (X25519) for [masterKey]: derived from it, so its
-/// private part exists only where the master key does — in the unlocked
-/// app. The background service gets only the public part.
-Future<SimpleKeyPair> inboxKeyPairFor(Uint8List masterKey) {
-  return X25519().newKeyPairFromSeed(securitySubkey(masterKey, 'inbox.x25519'));
+/// The inbox key pair (hybrid: ML-KEM-768 + X25519, hybrid_kem.dart) for
+/// [masterKey]: derived from it, so its private part exists only where the
+/// master key does — in the unlocked app. The background service gets only
+/// the public part.
+Future<HybridKeyPair> inboxKeyPairFor(Uint8List masterKey) {
+  return HybridKeyPair.fromSeed(securitySubkey(masterKey, 'inbox.hybrid'));
 }
 
 /// The public part of [inboxKeyPairFor].
 Future<Uint8List> inboxPublicKeyFor(Uint8List masterKey) async {
-  final SimpleKeyPair pair = await inboxKeyPairFor(masterKey);
-  final SimplePublicKey publicKey = await pair.extractPublicKey();
-  return Uint8List.fromList(publicKey.bytes);
+  return (await inboxKeyPairFor(masterKey)).publicKey;
 }
 
 /// How the background service treats a sender while the app is locked.
@@ -190,7 +189,7 @@ enum BackgroundContactKind {
 }
 
 /// What the app hands the background service to receive with while it is
-/// locked (§14.1): the public part of the inbox key, the people who count
+/// locked: the public part of the inbox key, the people who count
 /// as contacts, and the mailboxes (friends who hold this phone's mail) to
 /// ask for it. Addresses are given normalized
 /// (`PeerShareCodec.normalizeAddress`).
@@ -408,7 +407,7 @@ final class FileBackgroundVault implements BackgroundVault {
         return null;
       }
       final Uint8List publicKey = base64Url.decode(base64Url.normalize(pk));
-      if (publicKey.length != 32) {
+      if (publicKey.length != kHybridPublicKeyBytes) {
         return null;
       }
       Set<String> tags(Object? list) => <String>{
@@ -481,7 +480,7 @@ final class FileBackgroundVault implements BackgroundVault {
     if (files.isEmpty) {
       return 0;
     }
-    final SimpleKeyPair recipient = await inboxKeyPairFor(masterKey);
+    final HybridKeyPair recipient = await inboxKeyPairFor(masterKey);
     int delivered = 0;
     for (final File file in files) {
       final List<Uint8List> records = await readSealedInbox(file, recipient);

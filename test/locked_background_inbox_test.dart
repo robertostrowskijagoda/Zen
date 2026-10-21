@@ -1,8 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
@@ -14,10 +14,13 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
+import 'package:zen/src/features/security/hybrid_kem.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
 import 'package:zen/src/features/security/security_payload_protector.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
+
+import 'support/counting_kem.dart';
 
 // Not IPv6: kept as they are by the address normalization.
 const String _ada = 'ada.ygg';
@@ -26,6 +29,10 @@ const String _member = 'member.ygg';
 const String _stranger = 'stranger.ygg';
 const String _troll = 'troll.ygg';
 const String _mailbox = 'mailbox.ygg';
+
+/// 60 bytes sealed and framed: length, version, KEM ciphertext, nonce,
+/// the bytes and the tag.
+const int _framed60 = 4 + 1 + kHybridCiphertextBytes + 12 + 60 + 16;
 
 Uint8List _masterKey([int seed = 7]) =>
     Uint8List.fromList(List<int>.generate(32, (int i) => i + seed));
@@ -273,6 +280,38 @@ void main() {
       );
     });
 
+    test('records are sealed with the hybrid KEM, once per batch of '
+        'records, and opened with one decapsulation each', () async {
+      final CountingKem kem = CountingKem();
+      debugOverrideHybridKem(kem);
+      addTearDown(() => debugOverrideHybridKem(null));
+      final File file = File('${support.path}/inbox.zbox');
+      final SealedInboxWriter writer = SealedInboxWriter(
+        file: file,
+        recipientPublicKey: await inboxPublicKeyFor(_masterKey()),
+      );
+      for (int i = 0; i < 5; i++) {
+        expect(await writer.append(Uint8List.fromList(<int>[i])), isTrue);
+      }
+      expect(kem.encapsulations, 1, reason: 'no KEM operation per record');
+      expect(
+        await file.length(),
+        5 * (4 + 1 + kHybridCiphertextBytes + 12 + 1 + 16),
+      );
+      final List<Uint8List> records = await readSealedInbox(
+        file,
+        await inboxKeyPairFor(_masterKey()),
+      );
+      expect(records.map((Uint8List r) => r.single).toList(), <int>[
+        0,
+        1,
+        2,
+        3,
+        4,
+      ]);
+      expect(kem.decapsulations, 1);
+    });
+
     test('a record cut short by a killed write is cut off', () async {
       final File file = File('${support.path}/inbox.zbox');
       final Uint8List publicKey = await inboxPublicKeyFor(_masterKey());
@@ -295,7 +334,7 @@ void main() {
         recipientPublicKey: publicKey,
       );
       expect(await second.append(Uint8List.fromList(<int>[4, 5])), isTrue);
-      final SimpleKeyPair key = await inboxKeyPairFor(_masterKey());
+      final HybridKeyPair key = await inboxKeyPairFor(_masterKey());
       final List<Uint8List> records = await readSealedInbox(file, key);
       expect(records.map((Uint8List r) => r.toList()).toList(), <List<int>>[
         <int>[1, 2, 3],
@@ -307,7 +346,7 @@ void main() {
       final SealedInboxWriter writer = SealedInboxWriter(
         file: File('${support.path}/inbox.zbox'),
         recipientPublicKey: await inboxPublicKeyFor(_masterKey()),
-        maxFileBytes: 200,
+        maxFileBytes: _framed60 + 100,
       );
       expect(await writer.append(Uint8List(60)), isTrue);
       expect(await writer.append(Uint8List(60)), isFalse);
@@ -325,11 +364,10 @@ void main() {
       final SealedInboxWriter writer = SealedInboxWriter(
         file: file,
         recipientPublicKey: await inboxPublicKeyFor(_masterKey()),
-        maxFileBytes: 10000,
-        maxBytesPerSender: 300,
-        maxStrangerBytes: 200,
+        maxFileBytes: 10 * _framed60,
+        maxBytesPerSender: 2 * _framed60 + 50,
+        maxStrangerBytes: _framed60 + 50,
       );
-      // 60 bytes sealed and framed: 125.
       Future<bool> put(String? sender, {bool stranger = false}) =>
           writer.append(Uint8List(60), sender: sender, stranger: stranger);
       expect(await put('200::a'), isTrue);
@@ -346,7 +384,7 @@ void main() {
       // The app drains the inbox (takes the file away).
       await file.rename('${support.path}/drained.zbox');
       expect(await put('200::a'), isTrue);
-      expect(await file.length(), 125);
+      expect(await file.length(), _framed60);
     });
   });
 
@@ -482,7 +520,7 @@ void main() {
         inbox: SealedInboxWriter(
           file: await serviceVault.inboxFile(),
           recipientPublicKey: capability.inboxPublicKey,
-          maxBytesPerSender: 600,
+          maxBytesPerSender: 3000,
         ),
         notices: notices,
         mailboxPollInterval: Duration.zero,
@@ -687,6 +725,103 @@ void main() {
       );
     });
 
+    test('doors: knocks and neighbour flats\' frames are kept for the app, '
+        'never answered, once each and within a budget of their own', () async {
+      final Uint8List masterKey = _masterKey();
+      final BackgroundCapability capability = await publishFor(masterKey);
+      final StreamController<SignalTransportFrame> doors =
+          StreamController<SignalTransportFrame>.broadcast();
+      addTearDown(doors.close);
+      transport = MemorySignalTransport();
+      notices = MemoryRuntimeSystemNotificationService();
+      receiver = LockedReceiver(
+        transport: transport,
+        capability: capability,
+        inbox: SealedInboxWriter(
+          file: await serviceVault.inboxFile(),
+          recipientPublicKey: capability.inboxPublicKey,
+        ),
+        notices: notices,
+        doorFrames: doors.stream,
+        mailboxPollInterval: Duration.zero,
+      );
+      await receiver.start();
+      transport.sentSignals.clear();
+
+      SignalTransportFrame atDoor(String from, String type, String rid) =>
+          SignalTransportFrame(
+            from: from,
+            payload: <String, dynamic>{
+              'type': type,
+              '_rid': rid,
+              'b': <String, dynamic>{'n': 'Kowalscy spod 12'},
+            },
+            receivedAtMillis: 1000,
+            door: true,
+          );
+
+      final SignalTransportFrame knock = atDoor(
+        _stranger,
+        kFlatKnockType,
+        'k1',
+      );
+      await receiver.handleDoorFrame(knock);
+      await receiver.handleDoorFrame(knock);
+      expect(receiver.keptCount, 1, reason: 'a knock retried is kept once');
+      expect(
+        transport.sentSignals,
+        isEmpty,
+        reason: 'a door never says who runs it',
+      );
+      final RuntimeSystemNotification notice =
+          notices.activeNotifications.single;
+      expect(notice.category, RuntimeSystemNotificationCategory.social);
+      expect('${notice.title} ${notice.body}', isNot(contains('Kowalscy')));
+
+      // Only flat frames, never one that does not claim the door, never from
+      // the blocked.
+      await receiver.handleDoorFrame(atDoor(_stranger, 'message', 'm1'));
+      await receiver.handleDoorFrame(
+        SignalTransportFrame(
+          from: _stranger,
+          payload: const <String, dynamic>{'type': 'flat_msg', '_rid': 'x'},
+          receivedAtMillis: 1000,
+        ),
+      );
+      await receiver.handleDoorFrame(atDoor(_troll, 'flat_msg', 't1'));
+      expect(receiver.keptCount, 1);
+
+      // A sealed knock at a mailbox door run for a friend, as the node
+      // hands it over.
+      doors.add(atDoor(_mailbox, kFlatSealType, 's1'));
+      for (int i = 0; i < 200 && receiver.keptCount < 2; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(receiver.keptCount, 2);
+
+      // One door cannot fill the inbox.
+      for (int i = 0; i < 10; i++) {
+        await receiver.handleDoorFrame(atDoor('door.ygg', 'flat_msg', 'f$i'));
+      }
+      expect(receiver.keptCount, 2 + kLockedDoorFramesPerSender);
+      await receiver.stop();
+
+      // After unlock they come back as frames that came to a door: only the
+      // neighbours section sees them.
+      final List<SignalTransportFrame> delivered = <SignalTransportFrame>[];
+      await appVault.drain(
+        masterKey: masterKey,
+        settle: Duration.zero,
+        deliver: (Uint8List record) async {
+          delivered.add(decodeInboxFrame(record)!);
+        },
+      );
+      expect(delivered, hasLength(2 + kLockedDoorFramesPerSender));
+      expect(delivered.every((SignalTransportFrame f) => f.door), isTrue);
+      expect(delivered.first.payload['type'], kFlatKnockType);
+      expect(delivered.first.from, _stranger);
+    });
+
     test('a drain cut short is read again, before what came later', () async {
       final Uint8List masterKey = _masterKey();
       await startReceiver(await publishFor(masterKey));
@@ -731,6 +866,64 @@ void main() {
     expect(back.from, _ada);
     expect(back.receivedAtMillis, 42);
     expect(back.payload, frame.payload);
+    expect(back.door, isFalse);
     expect(decodeInboxFrame(Uint8List.fromList(<int>[1, 2])), isNull);
+    expect(
+      decodeInboxFrame(
+        encodeInboxFrame(
+          const SignalTransportFrame(
+            from: _ada,
+            payload: <String, dynamic>{'type': kFlatKnockType},
+            receivedAtMillis: 1,
+            door: true,
+          ),
+        ),
+      )!.door,
+      isTrue,
+    );
+  });
+
+  test('the door kit opens only in the background folder with the background '
+      'key, and keeps only well-formed door keys', () async {
+    final String doorKey = 'ab' * 32;
+    final String hosted = 'cd' * 32;
+    await lockedDoorKitFile(
+      supportDirectory: () async => support,
+      credentials: credentials,
+      createKey: true,
+    ).write(
+      LockedDoorKit(
+        doorKey: doorKey,
+        mailboxDoorKeys: <String>[hosted],
+      ).toJson(),
+    );
+    final String onDisk = await allBytesUnder(support);
+    expect(onDisk, isNot(contains(doorKey)));
+    expect(onDisk, isNot(contains(hosted)));
+    final LockedDoorKit kit = LockedDoorKit.fromJson(
+      await lockedDoorKitFile(
+        supportDirectory: () async => support,
+        credentials: credentials,
+      ).read(),
+    )!;
+    expect(kit.doorKey, doorKey);
+    expect(kit.mailboxDoorKeys, <String>[hosted]);
+    expect(
+      LockedDoorKit.fromJson(<String, dynamic>{
+        'v': 1,
+        'dk': 'not a key',
+        'mb': <Object?>['xyz', 3, hosted],
+      })!.mailboxDoorKeys,
+      <String>[hosted],
+    );
+    // Another background key (a wipe): nothing opens.
+    await credentials.delete(appSecurityBackgroundKeyStorageKey);
+    expect(
+      await lockedDoorKitFile(
+        supportDirectory: () async => support,
+        credentials: credentials,
+      ).read(),
+      isNull,
+    );
   });
 }

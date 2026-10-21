@@ -6,6 +6,7 @@ import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/hybrid_kem.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// A tiny in-memory mesh: nodes, an online set, a FIFO of datagrams.
@@ -365,6 +366,48 @@ void main() {
     expect(mesh.nodes[bob]!.receivedTexts, isEmpty);
   });
 
+  test('mail is sealed with the hybrid post-quantum key of the recipient, '
+      'and a changed KEM ciphertext is rejected', () async {
+    final _SimMesh mesh = await _meshWithRelays();
+    expect(
+      (await mesh.nodes[alice]!.state()).peers[bob]?.pqPublicKey,
+      hasLength(kHybridPublicKeyBytes),
+      reason: 'the announcement carries the hybrid key',
+    );
+    await mesh.goOffline(bob);
+    await mesh.nodes[alice]!.engine.submit(bob, _text('kwantowo'));
+    await mesh.advance(const Duration(seconds: 5));
+    int held = 0;
+    for (final String relay in helpers) {
+      final Map<String, Map<String, dynamic>>? mail =
+          (await mesh.nodes[relay]!.state()).mailbox[bob];
+      for (final Map<String, dynamic> envelope
+          in mail?.values ?? const <Map<String, dynamic>>[]) {
+        held += 1;
+        expect(envelope.containsKey('e'), isFalse);
+        expect(
+          base64Url.decode(envelope['q'] as String),
+          hasLength(kHybridCiphertextBytes),
+        );
+      }
+    }
+    expect(held, greaterThan(0));
+
+    mesh.interceptor = (String from, String to, Map<String, dynamic> p) {
+      if (p['type'] == 'rly_mail') {
+        for (final Object? item in p['items'] as List<dynamic>) {
+          final Map<String, dynamic> env = item! as Map<String, dynamic>;
+          final List<int> kem = base64Url.decode(env['q'] as String);
+          kem[7] ^= 0x01;
+          env['q'] = base64Url.encode(kem);
+        }
+      }
+      return p;
+    };
+    await mesh.goOnline(bob);
+    expect(mesh.nodes[bob]!.receivedTexts, isEmpty);
+  });
+
   test('a relay swapping the sender is rejected', () async {
     final _SimMesh mesh = await _meshWithRelays();
     await mesh.goOffline(bob);
@@ -523,7 +566,7 @@ void main() {
         'r': bob,
         'c': mesh.now,
         'x': mesh.now + 100000,
-        'e': base64Url.encode(List<int>.filled(32, 1)),
+        'q': base64Url.encode(List<int>.filled(kHybridCiphertextBytes, 1)),
         'n': base64Url.encode(List<int>.filled(12, 1)),
         'b': base64Url.encode(List<int>.filled(40, 1)),
       },
@@ -1414,7 +1457,7 @@ void main() {
   });
 
   test('a payload with its own retry life is dropped after it, and the life '
-      'is not sent along (knocks at mailbox doors, §18.2)', () async {
+      'is not sent along (knocks at mailbox doors)', () async {
     final _SimMesh mesh = await _meshWithRelays();
     await mesh.goOffline(bob);
     await mesh.nodes[alice]!.engine.submit(bob, <String, dynamic>{
@@ -1449,7 +1492,7 @@ Map<String, dynamic> _fakeEnvelope({
   'r': recipient,
   'c': now,
   'x': now + 100000000,
-  'e': base64Url.encode(List<int>.filled(32, 1)),
+  'q': base64Url.encode(List<int>.filled(kHybridCiphertextBytes, 1)),
   'n': base64Url.encode(List<int>.filled(12, 1)),
   'b': base64Url.encode(List<int>.filled(40, 1)),
 };

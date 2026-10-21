@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 
-/// S-7: keychain items get "this device only, after the first unlock";
+/// Keychain items get "this device only, after the first unlock";
 /// the items written before keep working and are moved over.
 void main() {
   setUp(SecureStorageCredentialsStore.debugForgetKeychainMove);

@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 
-/// What the phone says about itself (§14.1 point 12). A rooted or modified
+/// What the phone says about itself. A rooted or modified
 /// phone lets other apps read Zen's memory and files, so the person is
 /// warned; nothing is blocked — it is their phone.
 @immutable

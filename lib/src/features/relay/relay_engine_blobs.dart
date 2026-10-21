@@ -167,7 +167,7 @@ extension _RelayEngineBlobs on RelayEngine {
     return _blobs != null &&
         state.identity != null &&
         info != null &&
-        info.publicKey != null &&
+        info.keys != null &&
         _blobTargets(state, recipient, cipherBytes).isNotEmpty;
   }
 

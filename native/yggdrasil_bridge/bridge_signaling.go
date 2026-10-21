@@ -8,7 +8,6 @@ import "C"
 import (
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -36,8 +35,9 @@ func startPacketLoop(node *bridgeNode) {
 				fmt.Printf("[ZEN-GO] packet loop read error: %v\n", err)
 				consecutiveErrors++
 				// Permanent shutdown — stop the loop.
-				if strings.Contains(err.Error(), "closed") ||
-					strings.Contains(err.Error(), "use of closed") {
+				// ironwood reports "ErrClosed", the net package "use of
+				// closed network connection".
+				if strings.Contains(strings.ToLower(err.Error()), "closed") {
 					fmt.Printf("[ZEN-GO] packet loop stopping (closed)\n")
 					return
 				}
@@ -76,6 +76,11 @@ func startPacketLoop(node *bridgeNode) {
 				if !ok {
 					continue
 				}
+				// Only sealed signals carry anything (pq_session.go).
+				message, ok = node.openSignal(source, message)
+				if !ok {
+					continue
+				}
 				debugf("[ZEN-GO] signal reassembled from=%s msgLen=%d\n", source.String(), len(message))
 				// Never blocks, so relay (call audio/video) processing is not
 				// held up; over budget, older signals of the heaviest source
@@ -96,11 +101,6 @@ func startPacketLoop(node *bridgeNode) {
 }
 
 func sendSignal(node *bridgeNode, remoteAddress string, payload string) error {
-	localAddress := net.ParseIP(node.core.Address().String())
-	if localAddress == nil {
-		return errors.New("could not resolve local yggdrasil address")
-	}
-
 	destination := net.ParseIP(strings.TrimSpace(remoteAddress))
 	if destination == nil {
 		return fmt.Errorf("invalid remote yggdrasil address: %s", remoteAddress)
@@ -111,38 +111,11 @@ func sendSignal(node *bridgeNode, remoteAddress string, payload string) error {
 		return fmt.Errorf("signal payload is %d bytes, over the %d byte limit", len(payload), maxSignalPayloadBytes)
 	}
 
+	// Compressed first: sealed text no longer compresses.
 	wirePayload := buildSignalWirePayload(payload)
-
-	chunks := splitSignalPayloadRaw(wirePayload)
-	packetID := fmt.Sprintf("%d-%d", time.Now().UnixNano(), nextSignalPacket.Add(1))
-	debugf("[ZEN-GO] sendSignal to=%s chunks=%d rawLen=%d wireLen=%d\n",
-		remoteAddress, len(chunks), len(payload), len(wirePayload))
-	for index, chunk := range chunks {
-		envelopeBytes, err := json.Marshal(
-			signalEnvelope{
-				ID:      packetID,
-				Index:   index,
-				Total:   len(chunks),
-				Payload: chunk,
-			},
-		)
-		if err != nil {
-			return err
-		}
-
-		packet, err := buildYggPacket(localAddress, destination, yggSignalPort, envelopeBytes)
-		if err != nil {
-			return err
-		}
-
-		if _, err := node.iprwc.Write(packet); err != nil {
-			fmt.Printf("[ZEN-GO] sendSignal write error: %v\n", err)
-			return err
-		}
-	}
-
-	debugf("[ZEN-GO] sendSignal done\n")
-	return nil
+	debugf("[ZEN-GO] sendSignal to=%s rawLen=%d wireLen=%d\n",
+		remoteAddress, len(payload), len(wirePayload))
+	return node.sealAndSendSignal(destination, wirePayload)
 }
 
 func buildSignalWirePayload(payload string) string {

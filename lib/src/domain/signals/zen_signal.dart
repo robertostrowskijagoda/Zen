@@ -129,13 +129,13 @@ final class ZenSignal {
   /// Group calls: whether the sender's camera is on.
   final bool? cameraOn;
 
-  /// Disappearing messages (§14.1 point 10): the sender's timer for this
+  /// Disappearing messages: the sender's timer for this
   /// conversation, in seconds (0 = off). Carried by messages and by the
   /// `disappear_timer` signal.
   final int? disappearSeconds;
 
   /// A message to someone who is not a friend: the sender's mini-profile
-  /// (§9, `{n: name, av: photo}`), so the person written to sees who it is.
+  /// (`{n: name, av: photo}`), so the person written to sees who it is.
   final Map<String, dynamic>? miniProfile;
 
   ZenSignal withSender(String sender) {

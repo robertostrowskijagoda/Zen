@@ -8,7 +8,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-/// Turns the window's capture protection on and off (§14.1, point 6):
+/// Turns the window's capture protection on and off:
 /// Android `FLAG_SECURE` (no screenshots or recording, blank in the recent
 /// apps), Windows `WDA_EXCLUDEFROMCAPTURE` (left out of screenshots,
 /// recordings and screen sharing), macOS `NSWindow.sharingType = .none`
@@ -16,7 +16,7 @@ import 'package:zen/src/features/settings/app_settings_controller.dart';
 /// switch. Counted, so nested screens work.
 ///
 /// On Android the whole window stays protected while the setting is on
-/// ([acquireWholeWindow], S-9): the recent-apps preview is taken from
+/// ([acquireWholeWindow]): the recent-apps preview is taken from
 /// whatever screen is open when the app is left — the chat list with its
 /// previews too. On a computer it stays with the protected screens (which
 /// include the chat list, so in practice while it is open).

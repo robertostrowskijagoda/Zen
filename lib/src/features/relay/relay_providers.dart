@@ -57,7 +57,7 @@ List buildRelayTransportProviderOverrides({
         await transport.dispose();
         nodeRunning.dispose();
       });
-      // Friends with several devices look like one person (§6).
+      // Friends with several devices look like one person.
       return withAccountRouting(ref, transport);
     }),
   ];

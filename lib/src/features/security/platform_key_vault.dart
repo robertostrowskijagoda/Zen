@@ -7,7 +7,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/security/app_biometric_auth.dart';
 
 /// Keeps a secret (the app's master key, for biometric unlock) wrapped by a
-/// key that lives in the device's security hardware (§14.1, point 2):
+/// key that lives in the device's security hardware:
 ///
 /// * Android: an RSA key pair in the Android Keystore (StrongBox when the
 ///   phone has it). Wrapping needs only the public key; unwrapping needs

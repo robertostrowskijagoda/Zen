@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/features/relay/relay_crypto.dart';
+import 'package:zen/src/features/security/hybrid_kem.dart';
 
 /// One end-to-end sealed payload in transit through relays.
 @immutable
@@ -21,7 +22,9 @@ final class RelayEnvelope {
   final String recipient;
   final int createdAtMillis;
   final int expiresAtMillis;
-  final RelaySealedBox box;
+
+  /// Sealed with the hybrid post-quantum scheme ([RelayCipher.sealHybrid]).
+  final RelayHybridBox box;
 
   /// Everything a relay could be tempted to rewrite, bound into the AEAD.
   static Uint8List associatedDataFor({
@@ -47,7 +50,12 @@ final class RelayEnvelope {
   );
 
   int get approximateBytes =>
-      box.cipherText.length + id.length + sender.length + recipient.length + 96;
+      box.pqCiphertext.length +
+      box.cipherText.length +
+      id.length +
+      sender.length +
+      recipient.length +
+      96;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
@@ -55,7 +63,7 @@ final class RelayEnvelope {
     'r': recipient,
     'c': createdAtMillis,
     'x': expiresAtMillis,
-    'e': base64Url.encode(box.ephemeralPublicKey),
+    'q': base64Url.encode(box.pqCiphertext),
     'n': base64Url.encode(box.nonce),
     'b': base64Url.encode(box.cipherText),
   };
@@ -82,8 +90,8 @@ final class RelayEnvelope {
       return null;
     }
     try {
-      final Uint8List ephemeral = base64Url.decode(
-        base64Url.normalize(json['e'] as String),
+      final Uint8List pqCiphertext = base64Url.decode(
+        base64Url.normalize(json['q'] as String),
       );
       final Uint8List nonce = base64Url.decode(
         base64Url.normalize(json['n'] as String),
@@ -91,7 +99,9 @@ final class RelayEnvelope {
       final Uint8List body = base64Url.decode(
         base64Url.normalize(json['b'] as String),
       );
-      if (ephemeral.length != 32 || nonce.length != 12 || body.length < 16) {
+      if (pqCiphertext.length != kHybridCiphertextBytes ||
+          nonce.length != 12 ||
+          body.length < 16) {
         return null;
       }
       return RelayEnvelope(
@@ -100,8 +110,8 @@ final class RelayEnvelope {
         recipient: recipient,
         createdAtMillis: created.toInt(),
         expiresAtMillis: expires.toInt(),
-        box: RelaySealedBox(
-          ephemeralPublicKey: ephemeral,
+        box: RelayHybridBox(
+          pqCiphertext: pqCiphertext,
           nonce: nonce,
           cipherText: body,
         ),
@@ -118,6 +128,7 @@ final class RelayPeerInfo {
   const RelayPeerInfo({
     required this.address,
     this.publicKey,
+    this.pqPublicKey,
     this.relays = const <String>[],
     this.version = 0,
     this.updatedAtMillis = 0,
@@ -129,6 +140,18 @@ final class RelayPeerInfo {
 
   final String address;
   final Uint8List? publicKey;
+
+  /// The peer's hybrid post-quantum mailbox key (`rly_announce` `pq`).
+  final Uint8List? pqPublicKey;
+
+  /// Both keys mail for the peer is sealed with; `null` until both are known.
+  RelayPublicKeys? get keys {
+    final Uint8List? x25519 = publicKey;
+    final Uint8List? pq = pqPublicKey;
+    return x25519 == null || pq == null
+        ? null
+        : RelayPublicKeys(x25519: x25519, pq: pq);
+  }
 
   /// The friends this peer chose to hold its mail while it is offline.
   final List<String> relays;
@@ -155,6 +178,7 @@ final class RelayPeerInfo {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'a': address,
     if (publicKey != null) 'pk': base64Url.encode(publicKey!),
+    if (pqPublicKey != null) 'pq': base64Url.encode(pqPublicKey!),
     'rl': relays,
     'v': version,
     'u': updatedAtMillis,
@@ -172,6 +196,7 @@ final class RelayPeerInfo {
     return RelayPeerInfo(
       address: json['a'] as String,
       publicKey: decodeRelayKey(json['pk']),
+      pqPublicKey: decodeHybridPublicKey(json['pq']),
       relays: _stringList(json['rl']),
       version: (json['v'] as num?)?.toInt() ?? 0,
       updatedAtMillis: (json['u'] as num?)?.toInt() ?? 0,

@@ -44,8 +44,8 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
 
   /// "Po wyjściu z aplikacji": locks the set delay after the app left the
   /// screen, while it is still in the background — the master key and the
-  /// drawn screens do not wait in memory for the person to come back
-  /// (S-8). Where the system suspends the app (iOS) the timer cannot run;
+  /// drawn screens do not wait in memory for the person to come back.
+  /// Where the system suspends the app (iOS) the timer cannot run;
   /// the check on resume covers that.
   Timer? _backgroundLockTimer;
 
@@ -205,20 +205,20 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
     final AppSettings appSettings = ref.watch(appSettingsControllerProvider);
     final AppSecurityService security = ref.watch(appSecurityServiceProvider);
     _follow(security);
-    // §25.2: once, after the app password, the permissions and Bluetooth
+    // Once, after the app password, the permissions and Bluetooth
     // step (skipped where there is nothing to ask).
     final bool permissionsStep =
         ref.watch(permissionsSetupRequiredProvider) &&
         !appSettings.permissionsSetupDone &&
         ref.watch(permissionsPlatformProvider).hasAnything;
-    // §6.1, §6.3: then, once, the "Zabezpiecz konto" card.
+    // Then, once, the "Zabezpiecz konto" card.
     final bool accountStep =
         ref.watch(accountSecureStepRequiredProvider) &&
         ref.watch(ledgerNodeEnabledProvider) &&
         !appSettings.accountSecureOffered;
     // The whole app, lock screen included: Android keeps its window out of
-    // screenshots and the recent apps while the setting is on (S-9), and
-    // every touch, click or mouse move restarts the idle lock (S-8).
+    // screenshots and the recent apps while the setting is on, and
+    // every touch, click or mouse move restarts the idle lock.
     return SecureAppWindow(
       child: Listener(
         behavior: HitTestBehavior.translucent,
@@ -250,7 +250,7 @@ class _AppSecurityGateState extends ConsumerState<AppSecurityGate>
         if (!security.hasPassword &&
             ref.watch(appPasswordRequiredProvider) &&
             !ref.watch(appSettingsControllerProvider).allowNoAppPassword) {
-          // §14.1: an app password is required by default. Its own Navigator
+          // An app password is required by default. Its own Navigator
           // (the gate sits above the root one) so the setup questions can
           // open dialogs; it brings its own Overlay for the text fields.
           // Keyed: the next step's Navigator must not take over this one's
@@ -331,7 +331,7 @@ class _UnlockScreenState extends ConsumerState<_UnlockScreen> {
   bool _forgot = false;
   bool _wipeFailed = false;
 
-  /// How long the password must not be tried (Z2-9), counted down by [_tick].
+  /// How long the password must not be tried, counted down by [_tick].
   Duration _wait = Duration.zero;
   Timer? _tick;
 
@@ -937,7 +937,7 @@ class _GateError extends StatelessWidget {
   }
 }
 
-/// §14.1: before anything else, an app password. Without it the data key
+/// Before anything else, an app password. Without it the data key
 /// sits in the system's storage and anyone who gets into the phone can use
 /// it; with it, the files on disk are useless without the password.
 class _PasswordSetupScreen extends ConsumerStatefulWidget {

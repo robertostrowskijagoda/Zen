@@ -6,22 +6,27 @@ import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/security/app_security_crypto.dart';
+import 'package:zen/src/features/security/hybrid_kem.dart';
 
 /// The append-only inbox the Android background service writes while the
 /// app is locked (§14.1).
 ///
-/// Every record is sealed to the inbox's public key (X25519): a fresh
-/// ephemeral key per record, `HKDF-SHA256(DH(e, R), salt = e‖R)`, then
-/// AES-256-GCM with the record header as associated data. The service holds
-/// only the public key, so nothing it wrote can be read back without the
-/// master key (from which the private key is derived) — not by the
-/// service, not by whoever copies the files.
+/// Every record is sealed to the inbox's hybrid public key (ML-KEM-768 +
+/// X25519, hybrid_kem.dart): `(c, K)` is an encapsulation to it, the record
+/// key `HKDF-SHA256(K, salt = c, info = "zen.inbox.v2")`, then AES-256-GCM
+/// with the record header as associated data. The service holds only the
+/// public key, so nothing it wrote can be read back without the master key
+/// (from which the private key is derived) — not by the service, not by
+/// whoever copies the files, not later with a quantum computer. A writer
+/// encapsulates once for up to [kSealedInboxRecordsPerKem] records or
+/// [kSealedInboxKemLifetime] ([InboxSealKey]); each record still carries
+/// `c`, and a reader decapsulates each `c` once.
 ///
 /// File: `u32 little-endian length ‖ record`, repeated; record:
-/// `version ‖ ephemeral public key (32) ‖ nonce (12) ‖ ciphertext ‖ tag
-/// (16)`. A record cut short by a killed write is ignored by the reader and
-/// cut off by the next writer.
-const int kSealedInboxVersion = 1;
+/// `version ‖ KEM ciphertext (1120) ‖ nonce (12) ‖ ciphertext ‖ tag (16)`.
+/// A record cut short by a killed write is ignored by the reader and cut off
+/// by the next writer.
+const int kSealedInboxVersion = 2;
 
 /// Largest plaintext one record takes; a bigger frame is not kept (and so
 /// not acknowledged: its sender keeps it).
@@ -30,40 +35,76 @@ const int kSealedInboxMaxRecordBytes = 256 * 1024;
 /// Largest inbox file; past it nothing more is kept until the app drains.
 const int kSealedInboxMaxFileBytes = 32 * 1024 * 1024;
 
-const String _context = 'zen.inbox.v1';
+/// How many records, and for how long, one encapsulation seals.
+const int kSealedInboxRecordsPerKem = 256;
+const Duration kSealedInboxKemLifetime = Duration(hours: 1);
+
+const String _context = 'zen.inbox.v2';
 const int _lengthBytes = 4;
-const int _publicKeyBytes = 32;
-const int _headerBytes = 1 + _publicKeyBytes;
+const int _headerBytes = 1 + kHybridCiphertextBytes;
 
 /// Header, nonce and tag.
 const int _overheadBytes = _headerBytes + 12 + 16;
 const int _maxStoredRecordBytes = kSealedInboxMaxRecordBytes + _overheadBytes;
 
-final X25519 _x25519 = X25519();
 final Hkdf _hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
 
-/// [plaintext] sealed for [recipientPublicKey] (see the file comment).
+List<int> get _kemInfo => utf8.encode(_context);
+
+Future<Uint8List> _recordKey(Uint8List secret, Uint8List kemCiphertext) async {
+  final SecretKey key = await _hkdf.deriveKey(
+    secretKey: SecretKey(secret),
+    nonce: kemCiphertext,
+    info: utf8.encode(_context),
+  );
+  return Uint8List.fromList(await key.extractBytes());
+}
+
+/// One encapsulation to the inbox key and the record key it gives, used
+/// for a number of records.
+final class InboxSealKey {
+  InboxSealKey._(this.kemCiphertext, this._key, this.createdAt);
+
+  /// A fresh encapsulation to [recipientPublicKey].
+  static Future<InboxSealKey> make(Uint8List recipientPublicKey) async {
+    final HybridEncapsulation kem = await hybridKem.encapsulate(
+      recipientPublicKey,
+      info: _kemInfo,
+    );
+    return InboxSealKey._(
+      kem.ciphertext,
+      await _recordKey(kem.secret, kem.ciphertext),
+      DateTime.now(),
+    );
+  }
+
+  final Uint8List kemCiphertext;
+  final Uint8List _key;
+  final DateTime createdAt;
+  int _records = 0;
+
+  /// Whether it sealed its share of records or is too old.
+  bool get spent =>
+      _records >= kSealedInboxRecordsPerKem ||
+      DateTime.now().difference(createdAt) >= kSealedInboxKemLifetime;
+}
+
+/// [plaintext] sealed for [recipientPublicKey] (see the file comment),
+/// with [key] when given (a writer's current one), else a fresh one.
 Future<Uint8List> sealInboxRecord(
   Uint8List plaintext,
-  Uint8List recipientPublicKey,
-) async {
-  final SimpleKeyPair ephemeral = await _x25519.newKeyPair();
-  final Uint8List ephemeralPublic = Uint8List.fromList(
-    (await ephemeral.extractPublicKey()).bytes,
-  );
-  final SecretKey shared = await _x25519.sharedSecretKey(
-    keyPair: ephemeral,
-    remotePublicKey: SimplePublicKey(
-      recipientPublicKey,
-      type: KeyPairType.x25519,
-    ),
-  );
+  Uint8List recipientPublicKey, {
+  InboxSealKey? key,
+}) async {
+  final InboxSealKey sealKey =
+      key ?? await InboxSealKey.make(recipientPublicKey);
+  sealKey._records += 1;
   final Uint8List header = Uint8List(_headerBytes)
     ..[0] = kSealedInboxVersion
-    ..setRange(1, _headerBytes, ephemeralPublic);
+    ..setRange(1, _headerBytes, sealKey.kemCiphertext);
   final Uint8List sealed = await encryptSecurityBytes(
     plaintext,
-    await _recordKey(shared, ephemeralPublic, recipientPublicKey),
+    sealKey._key,
     aad: header,
   );
   final Uint8List record = Uint8List(_headerBytes + sealed.length);
@@ -74,11 +115,14 @@ Future<Uint8List> sealInboxRecord(
 }
 
 /// The plaintext of [record], or `null` when it does not open with
-/// [recipient] (another key, damage, not a record).
+/// [recipient] (another key, damage, not a record). [keys] keeps the record
+/// keys already derived (by KEM ciphertext), so one reading decapsulates
+/// each ciphertext once.
 Future<Uint8List?> openInboxRecord(
   Uint8List record,
-  SimpleKeyPair recipient,
-) async {
+  HybridKeyPair recipient, {
+  Map<String, Uint8List>? keys,
+}) async {
   if (record.length < _overheadBytes || record[0] != kSealedInboxVersion) {
     return null;
   }
@@ -86,40 +130,30 @@ Future<Uint8List?> openInboxRecord(
     final Uint8List header = Uint8List.fromList(
       record.sublist(0, _headerBytes),
     );
-    final Uint8List ephemeralPublic = Uint8List.fromList(
+    final Uint8List kemCiphertext = Uint8List.fromList(
       header.sublist(1, _headerBytes),
     );
-    final Uint8List recipientPublic = Uint8List.fromList(
-      (await recipient.extractPublicKey()).bytes,
-    );
-    final SecretKey shared = await _x25519.sharedSecretKey(
-      keyPair: recipient,
-      remotePublicKey: SimplePublicKey(
-        ephemeralPublic,
-        type: KeyPairType.x25519,
-      ),
-    );
-    return await decryptSecurityBytes(
+    final String id = base64Url.encode(kemCiphertext);
+    final Uint8List key =
+        keys?[id] ??
+        await _recordKey(
+          await hybridKem.decapsulate(
+            recipient.seed,
+            kemCiphertext,
+            info: _kemInfo,
+          ),
+          kemCiphertext,
+        );
+    final Uint8List plain = await decryptSecurityBytes(
       Uint8List.fromList(record.sublist(_headerBytes)),
-      await _recordKey(shared, ephemeralPublic, recipientPublic),
+      key,
       aad: header,
     );
+    keys?[id] = key;
+    return plain;
   } on Object {
     return null;
   }
-}
-
-Future<Uint8List> _recordKey(
-  SecretKey shared,
-  Uint8List ephemeralPublic,
-  Uint8List recipientPublic,
-) async {
-  final SecretKey key = await _hkdf.deriveKey(
-    secretKey: shared,
-    nonce: <int>[...ephemeralPublic, ...recipientPublic],
-    info: utf8.encode(_context),
-  );
-  return Uint8List.fromList(await key.extractBytes());
 }
 
 /// How many leading bytes of [bytes] are complete records.
@@ -142,7 +176,7 @@ int completeSealedInboxLength(Uint8List bytes) {
 /// that does not open (sealed for an earlier key, damaged) is skipped.
 Future<List<Uint8List>> readSealedInbox(
   File file,
-  SimpleKeyPair recipient,
+  HybridKeyPair recipient,
 ) async {
   if (!await file.exists()) {
     return const <Uint8List>[];
@@ -151,6 +185,7 @@ Future<List<Uint8List>> readSealedInbox(
   final ByteData view = ByteData.sublistView(bytes);
   final int end = completeSealedInboxLength(bytes);
   final List<Uint8List> out = <Uint8List>[];
+  final Map<String, Uint8List> keys = <String, Uint8List>{};
   int skipped = 0;
   int offset = 0;
   while (offset < end) {
@@ -159,7 +194,11 @@ Future<List<Uint8List>> readSealedInbox(
       bytes.sublist(offset + _lengthBytes, offset + _lengthBytes + length),
     );
     offset += _lengthBytes + length;
-    final Uint8List? plain = await openInboxRecord(record, recipient);
+    final Uint8List? plain = await openInboxRecord(
+      record,
+      recipient,
+      keys: keys,
+    );
     if (plain == null) {
       skipped += 1;
     } else {
@@ -195,6 +234,9 @@ final class SealedInboxWriter {
   /// The most strangers' records may take together until then.
   final int maxStrangerBytes;
   final Uint8List _recipient;
+
+  /// The encapsulation the records are sealed with now; renewed when spent.
+  InboxSealKey? _sealKey;
 
   /// Appends one after another, never two at once.
   Future<void> _queue = Future<void>.value();
@@ -242,7 +284,15 @@ final class SealedInboxWriter {
       return false;
     }
     final int length = await _currentLength();
-    final Uint8List record = await sealInboxRecord(plaintext, _recipient);
+    InboxSealKey? sealKey = _sealKey;
+    if (sealKey == null || sealKey.spent) {
+      sealKey = _sealKey = await InboxSealKey.make(_recipient);
+    }
+    final Uint8List record = await sealInboxRecord(
+      plaintext,
+      _recipient,
+      key: sealKey,
+    );
     final int size = _lengthBytes + record.length;
     final int grown = length + size;
     final int senderBytes = sender == null ? 0 : _bySender[sender] ?? 0;
