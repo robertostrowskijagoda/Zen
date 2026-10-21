@@ -17,11 +17,17 @@ import 'package:zen/src/core/crypto/ed25519_group.dart';
 /// — it never throws.
 ///
 /// Classical only: there is no standard post-quantum linkable ring
-/// signature, so the anonymous cell votes stay on Ed25519 while everything
-/// else is signed hybrid (hybrid_signature.dart). A quantum computer would
-/// break them in two ways: whoever holds one could forge a vote of a ring
-/// at the time of the vote, and could later work out from a recorded vote
-/// who cast it (the key image is the signer's secret times a hashed point).
+/// signature. So nothing that decides anything rests on it alone:
+///  - a cell vote is cast with a one-time hybrid key (a "card") listed on a
+///    ballot that the cell's members sign with their hybrid keys
+///    (PyramidState.ballotTokens); the ring signature only links the
+///    registrations of one member's card inside the cell, which never go
+///    into the records — a quantum computer can neither forge a vote nor
+///    tell later from the records who cast it;
+///  - the anonymous request for a vote stays ring-signed in the records: a
+///    quantum computer could forge one (start a vote nobody asked for) or
+///    work out later who asked (the key image is the signer's secret
+///    times a hashed point), but the vote itself is still decided by cards.
 final class RingSignature {
   const RingSignature({
     required this.c0,

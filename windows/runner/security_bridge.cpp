@@ -3,7 +3,9 @@
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
 #include <ncrypt.h>
+#include <tlhelp32.h>
 
+#include <cwctype>
 #include <memory>
 #include <string>
 #include <vector>
@@ -15,6 +17,7 @@
 namespace security_bridge {
 namespace {
 
+using flutter::EncodableList;
 using flutter::EncodableMap;
 using flutter::EncodableValue;
 
@@ -25,6 +28,7 @@ constexpr uint8_t kTpm = 'T';
 
 std::unique_ptr<flutter::MethodChannel<EncodableValue>> g_window_channel;
 std::unique_ptr<flutter::MethodChannel<EncodableValue>> g_vault_channel;
+std::unique_ptr<flutter::MethodChannel<EncodableValue>> g_integrity_channel;
 std::function<HWND()> g_window;
 
 const std::vector<uint8_t>* BytesArg(const flutter::MethodCall<EncodableValue>& call,
@@ -185,6 +189,57 @@ void HandleVault(const flutter::MethodCall<EncodableValue>& call,
   result->NotImplemented();
 }
 
+// ---- integrity -------------------------------------------------------
+
+// Whether a module of this process has one of marks in its name (lower
+// case): Frida's library, for one.
+bool ModuleNamed(const std::vector<std::wstring>& marks) {
+  HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+  if (snapshot == INVALID_HANDLE_VALUE) return false;
+  MODULEENTRY32W entry = {};
+  entry.dwSize = sizeof(entry);
+  bool found = false;
+  for (BOOL more = Module32FirstW(snapshot, &entry); more && !found;
+       more = Module32NextW(snapshot, &entry)) {
+    std::wstring name(entry.szModule);
+    for (auto& c : name) c = static_cast<wchar_t>(towlower(c));
+    for (const auto& mark : marks) {
+      if (name.find(mark) != std::wstring::npos) {
+        found = true;
+        break;
+      }
+    }
+  }
+  CloseHandle(snapshot);
+  return found;
+}
+
+// The answer of ZenSecurityBridge.kt's shape (device_integrity.dart): a
+// debugger attached (in this process or from another), Frida's library
+// loaded. Both mean someone is inside the process: the app then also
+// refuses payments and the pyramid's power key.
+EncodableMap Integrity() {
+  EncodableList reasons;
+  bool tampered = false;
+  BOOL remote = FALSE;
+  if (IsDebuggerPresent() ||
+      (CheckRemoteDebuggerPresent(GetCurrentProcess(), &remote) && remote)) {
+    reasons.push_back(EncodableValue("debugger"));
+    tampered = true;
+  }
+  if (ModuleNamed({L"frida", L"gum-js"})) {
+    reasons.push_back(EncodableValue("frida-loaded"));
+    tampered = true;
+  }
+  return EncodableMap{
+      {EncodableValue("rooted"), EncodableValue(false)},
+      {EncodableValue("reasons"), EncodableValue(reasons)},
+      {EncodableValue("debuggable"), EncodableValue(false)},
+      {EncodableValue("tampered"), EncodableValue(tampered)},
+      {EncodableValue("emulator"), EncodableValue(false)},
+  };
+}
+
 }  // namespace
 
 void Register(flutter::BinaryMessenger* messenger,
@@ -222,6 +277,19 @@ void Register(flutter::BinaryMessenger* messenger,
   g_vault_channel = std::make_unique<flutter::MethodChannel<EncodableValue>>(
       messenger, "zen/keyvault", &flutter::StandardMethodCodec::GetInstance());
   g_vault_channel->SetMethodCallHandler(HandleVault);
+  g_integrity_channel =
+      std::make_unique<flutter::MethodChannel<EncodableValue>>(
+          messenger, "zen/integrity",
+          &flutter::StandardMethodCodec::GetInstance());
+  g_integrity_channel->SetMethodCallHandler(
+      [](const flutter::MethodCall<EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<EncodableValue>> result) {
+        if (call.method_name() != "check") {
+          result->NotImplemented();
+          return;
+        }
+        result->Success(EncodableValue(Integrity()));
+      });
 }
 
 }  // namespace security_bridge

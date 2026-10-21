@@ -11,6 +11,7 @@ import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/hybrid_kem.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// Air between fake radios: what one shows, the others see.
@@ -396,17 +397,19 @@ void main() {
     expect(again.nearby.blockedCount, 0);
   });
 
-  test('visibility is remembered', () async {
-    final MeetBook book = MeetBook()..nearbyVisible = true;
+  test('visibility is on by default and remembered', () async {
+    expect(MeetBook().nearbyVisible, isTrue);
+    expect(MeetBook.fromJson(<String, dynamic>{'v': 1}).nearbyVisible, isTrue);
+    final MeetBook book = MeetBook()..nearbyVisible = false;
     expect(
       MeetBook.fromJson(jsonDecode(jsonEncode(book.toJson()))).nearbyVisible,
-      isTrue,
+      isFalse,
     );
     expect(
       MeetBook.fromJson(
         jsonDecode(jsonEncode(MeetBook().toJson())),
       ).nearbyVisible,
-      isFalse,
+      isTrue,
     );
   });
 
@@ -422,23 +425,26 @@ void main() {
         <String>[],
       );
       final _Radio spammer = _Radio(air, 'mac-spam');
-      final String key = base64Url.encode(List<int>.filled(32, 4));
+      final List<int> key = List<int>.filled(kHybridPublicKeyBytes, 4);
       String token(int i) => i.toRadixString(16).padLeft(32, '0');
-      Future<bool> hello(String sid, String from) => spammer.wave(
-        bob.radio.device,
-        Uint8List.fromList(
-          utf8.encode(
-            jsonEncode(<String, dynamic>{
-              'v': kNearbyHelloVersion,
-              'sid': sid,
-              'n': 'Zielony Lis',
-              't': from,
-              'e': key,
-              'm': 'x' * 5000,
-            }),
-          ),
-        ),
-      );
+      Future<void> hello(String sid, String from) async {
+        for (final Map<String, dynamic> w in <Map<String, dynamic>>[
+          ...nearbyParts(sid, 'h', key),
+          <String, dynamic>{
+            'v': kNearbyHelloVersion,
+            'sid': sid,
+            'n': 'Zielony Lis',
+            't': from,
+            'kh': nearbyPieceId(key),
+            'm': 'x' * 5000,
+          },
+        ]) {
+          await spammer.wave(
+            bob.radio.device,
+            Uint8List.fromList(utf8.encode(jsonEncode(w))),
+          );
+        }
+      }
 
       // One token: one hello until Bob answers, cut to size.
       for (int i = 0; i < 20; i++) {
@@ -608,5 +614,57 @@ void main() {
     expect(bob.nearby.friendOfToken(pairWave['t']), isNull);
     await bob.meet.onAlarmWave(pairWave, friend: 'ania', source: 'mac-c2');
     expect(bob.meet.book.alarm('falsz2'), isNull);
+  });
+
+  test('long pieces go in parts that each fit one Bluetooth write, and only '
+      'the piece a message names is put together', () {
+    final List<int> key = List<int>.generate(
+      kHybridPublicKeyBytes,
+      (int i) => i % 251,
+    );
+    final List<Map<String, dynamic>> parts = nearbyParts('abc', 'h', key);
+    expect(parts.length, lessThanOrEqualTo(kNearbyMaxParts));
+    for (final Map<String, dynamic> p in parts) {
+      expect(utf8.encode(jsonEncode(p)).length, lessThan(500));
+    }
+    final NearbyPieces pieces = NearbyPieces();
+    // In any order; a repeat changes nothing.
+    for (final Map<String, dynamic> p in parts.reversed) {
+      pieces.add(p, 0);
+    }
+    expect(pieces.take('abc', 'h', nearbyPieceId(key), 1), key);
+    expect(pieces.take('abc', 'h', nearbyPieceId(key), 1), isNull);
+
+    // Parts of another key under the same conversation do not stand in for
+    // the one the hello names.
+    final List<int> other = List<int>.filled(kHybridPublicKeyBytes, 9);
+    for (final Map<String, dynamic> p in nearbyParts('abc', 'h', other)) {
+      pieces.add(p, 2);
+    }
+    expect(pieces.take('abc', 'h', nearbyPieceId(key), 3), isNull);
+    // A part whose data was changed makes the piece fail its id.
+    final List<Map<String, dynamic>> bent = nearbyParts('xyz', 'r', key);
+    bent.first['d'] = 'A' * (bent.first['d'] as String).length;
+    for (final Map<String, dynamic> p in bent) {
+      expect(pieces.add(p, 4), isNull);
+    }
+    expect(pieces.take('xyz', 'r', nearbyPieceId(key), 5), isNull);
+    // Malformed parts are ignored.
+    expect(pieces.add(<String, dynamic>{...parts.first, 'k': 99}, 6), isNull);
+    expect(pieces.add(<String, dynamic>{...parts.first, 'w': 'x'}, 6), isNull);
+    // Unfinished pieces go after a while.
+    pieces.add(parts.first, 10);
+    for (final Map<String, dynamic> p in parts.skip(1)) {
+      pieces.add(p, 10 + kNearbyPieceLife.inMilliseconds + 1);
+    }
+    expect(
+      pieces.take(
+        'abc',
+        'h',
+        nearbyPieceId(key),
+        10 + kNearbyPieceLife.inMilliseconds + 2,
+      ),
+      isNull,
+    );
   });
 }

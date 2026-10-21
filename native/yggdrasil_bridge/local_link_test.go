@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/mlkem"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -278,7 +279,7 @@ func TestLocalHandshakeRefusesAnotherDevicesKey(t *testing.T) {
 
 func TestLocalHelloSaysNothingAboutTheDevices(t *testing.T) {
 	peers := []localPeer{testLocalPeer(t, 1), testLocalPeer(t, 2)}
-	ephemeral := make([]byte, 32)
+	ephemeral := make([]byte, localEphemeralSize)
 	_, _ = rand.Read(ephemeral)
 	one, _ := buildLocalHello(peers, ephemeral, rand.Reader)
 	_, selectors, err := parseLocalHello(one)
@@ -288,7 +289,7 @@ func TestLocalHelloSaysNothingAboutTheDevices(t *testing.T) {
 	if len(selectors) != 16 {
 		t.Fatalf("padded to 16 selectors, got %d", len(selectors))
 	}
-	other := make([]byte, 32)
+	other := make([]byte, localEphemeralSize)
 	_, _ = rand.Read(other)
 	two, _ := buildLocalHello(peers, other, rand.Reader)
 	_, again, _ := parseLocalHello(two)
@@ -299,6 +300,81 @@ func TestLocalHelloSaysNothingAboutTheDevices(t *testing.T) {
 	}
 	if _, _, err := parseLocalHello(append(one, 0)); err == nil {
 		t.Fatal("a hello with trailing bytes is refused")
+	}
+	if _, err := buildLocalHello(peers, ephemeral[:32], rand.Reader); err == nil {
+		t.Fatal("a hello carries both one-time keys")
+	}
+}
+
+// recordingConn keeps what was read from it.
+type recordingConn struct {
+	net.Conn
+	read *bytes.Buffer
+}
+
+func (c recordingConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	c.read.Write(p[:n])
+	return n, err
+}
+
+func TestLocalHandshakeIsHybridPostQuantum(t *testing.T) {
+	keyA, keyB := testNodeKey(t), testNodeKey(t)
+	forA, forB := testPair(t, keyA, keyB)
+	left, right := net.Pipe()
+	heard := &bytes.Buffer{}
+	type result struct {
+		session *localLinkSession
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		session, err := localLinkHandshake(right, []localPeer{forB}, keyB)
+		done <- result{session, err}
+	}()
+	a, errA := localLinkHandshake(recordingConn{left, heard}, []localPeer{forA}, keyA)
+	b := <-done
+	if errA != nil || b.err != nil {
+		t.Fatalf("handshake: %v / %v", errA, b.err)
+	}
+	defer a.conn.Close()
+	defer b.session.conn.Close()
+	// B's hello carries an ML-KEM-768 key, and a ciphertext follows it.
+	hello, err := readLocalFrame(heard, 1<<16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ephemeral, _, err := parseLocalHello(hello)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mlkem.NewEncapsulationKey768(ephemeral[32:]); err != nil {
+		t.Fatalf("the hello carries an ML-KEM-768 key: %v", err)
+	}
+	ciphertext, err := readLocalFrame(heard, 1<<16)
+	if err != nil || len(ciphertext) != mlkem.CiphertextSize768 {
+		t.Fatalf("a ciphertext of %d bytes follows: %v", len(ciphertext), err)
+	}
+}
+
+func TestLocalHandshakeRefusesABrokenKemKey(t *testing.T) {
+	keyA, keyB := testNodeKey(t), testNodeKey(t)
+	forA, forB := testPair(t, keyA, keyB)
+	left, right := net.Pipe()
+	defer left.Close()
+	defer right.Close()
+	go func() {
+		// B's selector for forged one-time keys whose ML-KEM half is no
+		// key at all (every coefficient out of range).
+		ephemeral := bytes.Repeat([]byte{0xff}, localEphemeralSize)
+		_, _ = rand.Read(ephemeral[:32])
+		hello, _ := buildLocalHello([]localPeer{forB}, ephemeral, rand.Reader)
+		_ = writeLocalFrame(right, hello)
+		_, _ = readLocalFrame(right, 1<<16)
+	}()
+	_, err := localLinkHandshake(left, []localPeer{forA}, keyA)
+	if err == nil || errors.Is(err, errLocalLinkStranger) {
+		t.Fatalf("a hello with a broken ML-KEM key must be refused, got %v", err)
 	}
 }
 

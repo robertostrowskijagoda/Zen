@@ -12,6 +12,15 @@ typedef _JsonCall = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _NativeFree = Void Function(Pointer<Utf8>);
 typedef _DartFree = void Function(Pointer<Utf8>);
 
+/// Overwrites the bytes of a native string (up to its terminating zero).
+void wipeNativeUtf8(Pointer<Utf8> text) {
+  if (text == nullptr) {
+    return;
+  }
+  final int length = text.length;
+  text.cast<Uint8>().asTypedList(length).fillRange(0, length, 0);
+}
+
 /// The three calls of the bridge (`pq_sign_exports.go`), synchronous.
 final class _SigCalls {
   _SigCalls(DynamicLibrary library)
@@ -33,7 +42,9 @@ final class _SigCalls {
     _ => verify,
   };
 
-  /// The bridge's JSON answer to [request].
+  /// The bridge's JSON answer to [request]. The native copy of the request
+  /// (it may carry a key's seed) is overwritten before it is freed; the
+  /// bridge does the same with its answer (`YggFreeString`).
   String call(String op, String request) {
     final Pointer<Utf8> native = request.toNativeUtf8();
     try {
@@ -44,6 +55,7 @@ final class _SigCalls {
         free(result);
       }
     } finally {
+      wipeNativeUtf8(native);
       malloc.free(native);
     }
   }

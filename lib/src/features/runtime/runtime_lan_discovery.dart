@@ -20,7 +20,11 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 // keys, then HKDF with both public keys). The bridge only uses it to make
 // adverts that the other device alone can recognise and to prove the pair
 // in the link handshake: strangers on the network learn nothing about who
-// is there, and cannot link.
+// is there, and cannot link. The link's own keys mix in a one-time
+// ML-KEM-768 exchange (local_link_handshake.go), so a recorded link stays
+// unreadable to a quantum computer; the pair secret itself stays classical
+// (X25519): with both devices' public keys and a quantum computer one could
+// recognise their adverts or sit in the middle of a new link.
 
 /// HKDF label of a pair's secret.
 const String kLocalLinkHkdfInfo = 'zen.local.v1';

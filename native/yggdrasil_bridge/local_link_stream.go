@@ -141,6 +141,13 @@ func (m *localLinkManager) apply(settings localLinkSettings) {
 		m.mu.Unlock()
 		return
 	}
+	// The link keys stay in RAM (never swapped out); the old ones are
+	// overwritten (handshakes under way work on copies).
+	old := m.settings.peers
+	if len(old) > 0 && (len(settings.peers) == 0 || &old[0] != &settings.peers[0]) {
+		releaseLocalPeers(old)
+	}
+	lockMemory(sliceBytes(settings.peers))
 	m.settings = settings
 	allowed := make(map[string]bool, len(settings.peers))
 	for _, peer := range settings.peers {

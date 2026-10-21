@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"crypto/hkdf"
 	"crypto/hmac"
+	"crypto/mlkem"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
@@ -27,24 +28,38 @@ import (
 // connection on the LAN, a Bluetooth socket) the same way, so neither needs
 // to know beforehand who is on the other side or who speaks first.
 //
-//  1. Each side sends a hello: a fresh X25519 key and, for every device it
-//     may link with, a selector HMAC(selKey, ephemeral key)[:8], shuffled
-//     and padded with random ones. Selectors are bound to that one
-//     ephemeral key, so they say nothing to anyone without the secret and
-//     cannot be replayed with another key.
-//  2. Each side looks for a selector it can make for the other's ephemeral
-//     key: that names the shared secret. None: a stranger, the stream is
+//  1. Each side sends a hello: fresh one-time keys — X25519 and an
+//     ML-KEM-768 encapsulation key — and, for every device it may link
+//     with, a selector HMAC(selKey, one-time keys)[:8], shuffled and
+//     padded with random ones. Selectors are bound to those one-time keys,
+//     so they say nothing to anyone without the secret and cannot be
+//     replayed with other keys.
+//  2. Each side looks for a selector it can make for the other's one-time
+//     keys: that names the shared secret. None: a stranger, the stream is
 //     closed and nothing else was said.
-//  3. Keys: HKDF(X25519(ephemerals), salt: the pair's link key, info: both
-//     hellos). A side without the pair's secret cannot get them.
-//  4. Each side's first encrypted record is its Yggdrasil public key; it
+//  3. Each side encapsulates a secret to the other's ML-KEM key and sends
+//     the ciphertext.
+//  4. Keys: HKDF(X25519(ephemerals) | the ML-KEM secret of the lower
+//     side | that of the higher side, salt: the pair's link key, info: both
+//     hellos and both ciphertexts). A side without the pair's secret cannot
+//     get them, and someone who recorded the stream cannot either, later,
+//     with a quantum computer: the stream is hybrid post-quantum (it
+//     carries signals already sealed by the session layer anyway). What
+//     stays classical is the pair's secret itself (X25519 of the two
+//     devices' keys, runtime_lan_discovery.dart): with a quantum computer
+//     and both devices' public keys one could recognise their adverts, or
+//     sit in the middle of a new link as it is made — not read one
+//     recorded before.
+//  5. Each side's first encrypted record is its Yggdrasil public key; it
 //     must hash to the mesh address the secret was given for.
 //
 // Then the stream carries AES-256-GCM records (length-prefixed, a counter
 // for nonce, one key per direction). Yggdrasil peers over it with that key
 // pinned and a password from the same handshake (localLinkSession).
 const (
-	localHandshakeVersion  = 1
+	localHandshakeVersion = 2
+	// The one-time keys of a hello: X25519, then ML-KEM-768.
+	localEphemeralSize     = 32 + mlkem.EncapsulationKeySize768
 	localSelectorSize      = 8
 	localHandshakeTimeout  = 8 * time.Second
 	localMaxSelectors      = localLinkMaxPeers + 64
@@ -70,8 +85,11 @@ func localSelector(peer *localPeer, ephemeral []byte) []byte {
 	return mac.Sum(nil)[:localSelectorSize]
 }
 
-// localHello is version, ephemeral key, count, selectors.
+// localHello is version, one-time keys, count, selectors.
 func buildLocalHello(peers []localPeer, ephemeral []byte, random io.Reader) ([]byte, error) {
+	if len(ephemeral) != localEphemeralSize {
+		return nil, fmt.Errorf("%w: one-time keys", errLocalLinkBadInput)
+	}
 	count := len(peers)
 	// Padded to a multiple of 16: the count says little.
 	padded := (count + 15) / 16 * 16
@@ -98,7 +116,7 @@ func buildLocalHello(peers []localPeer, ephemeral []byte, random io.Reader) ([]b
 		k := int(j.Int64())
 		selectors[i], selectors[k] = selectors[k], selectors[i]
 	}
-	hello := make([]byte, 0, 1+32+2+len(selectors)*localSelectorSize)
+	hello := make([]byte, 0, 1+localEphemeralSize+2+len(selectors)*localSelectorSize)
 	hello = append(hello, localHandshakeVersion)
 	hello = append(hello, ephemeral...)
 	hello = binary.BigEndian.AppendUint16(hello, uint16(len(selectors)))
@@ -109,17 +127,18 @@ func buildLocalHello(peers []localPeer, ephemeral []byte, random io.Reader) ([]b
 }
 
 func parseLocalHello(hello []byte) (ephemeral []byte, selectors map[string]bool, err error) {
-	if len(hello) < 1+32+2 || hello[0] != localHandshakeVersion {
+	const head = 1 + localEphemeralSize
+	if len(hello) < head+2 || hello[0] != localHandshakeVersion {
 		return nil, nil, fmt.Errorf("%w: hello", errLocalLinkBadInput)
 	}
-	ephemeral = hello[1:33]
-	count := int(binary.BigEndian.Uint16(hello[33:35]))
-	if count > localMaxSelectors || len(hello) != 35+count*localSelectorSize {
+	ephemeral = hello[1:head]
+	count := int(binary.BigEndian.Uint16(hello[head : head+2]))
+	if count > localMaxSelectors || len(hello) != head+2+count*localSelectorSize {
 		return nil, nil, fmt.Errorf("%w: hello selectors", errLocalLinkBadInput)
 	}
 	selectors = make(map[string]bool, count)
 	for i := 0; i < count; i++ {
-		start := 35 + i*localSelectorSize
+		start := head + 2 + i*localSelectorSize
 		selectors[string(hello[start:start+localSelectorSize])] = true
 	}
 	return ephemeral, selectors, nil
@@ -156,7 +175,11 @@ func localLinkHandshake(conn net.Conn, peers []localPeer, nodeKey ed25519.Public
 	if err != nil {
 		return nil, err
 	}
-	ephemeral := private.PublicKey().Bytes()
+	kem, err := mlkem.GenerateKey768()
+	if err != nil {
+		return nil, err
+	}
+	ephemeral := append(private.PublicKey().Bytes(), kem.EncapsulationKey().Bytes()...)
 	hello, err := buildLocalHello(peers, ephemeral, rand.Reader)
 	if err != nil {
 		return nil, err
@@ -165,7 +188,7 @@ func localLinkHandshake(conn net.Conn, peers []localPeer, nodeKey ed25519.Public
 	// sides writing first would wait for each other forever.
 	sent := make(chan error, 1)
 	go func() { sent <- writeLocalFrame(conn, hello) }()
-	remoteHello, err := readLocalFrame(conn, 3+32+localMaxSelectors*localSelectorSize)
+	remoteHello, err := readLocalFrame(conn, 3+localEphemeralSize+localMaxSelectors*localSelectorSize)
 	if err != nil {
 		return nil, err
 	}
@@ -186,11 +209,11 @@ func localLinkHandshake(conn net.Conn, peers []localPeer, nodeKey ed25519.Public
 	if peer == nil {
 		return nil, errLocalLinkStranger
 	}
-	remotePublic, err := ecdh.X25519().NewPublicKey(remoteEphemeral)
+	remotePublic, err := ecdh.X25519().NewPublicKey(remoteEphemeral[:32])
 	if err != nil {
 		return nil, err
 	}
-	shared, err := private.ECDH(remotePublic)
+	remoteKem, err := mlkem.NewEncapsulationKey768(remoteEphemeral[32:])
 	if err != nil {
 		return nil, err
 	}
@@ -198,18 +221,52 @@ func localLinkHandshake(conn net.Conn, peers []localPeer, nodeKey ed25519.Public
 	if order == 0 {
 		return nil, errors.New("local link: the stream talks to itself")
 	}
-	low, high := hello, remoteHello
-	if order > 0 {
-		low, high = remoteHello, hello
-	}
-	transcript := sha256.New()
-	transcript.Write([]byte("zen.local.v1"))
-	transcript.Write(low)
-	transcript.Write(high)
-	material, err := hkdf.Key(sha256.New, shared, peer.linkKey[:], "zen.local.v1 keys "+string(transcript.Sum(nil)), localKeyMaterialLength)
+	// The ML-KEM exchange: a secret for the other side, one from it.
+	mySecret, myCiphertext := remoteKem.Encapsulate()
+	defer clear(mySecret)
+	go func() { sent <- writeLocalFrame(conn, myCiphertext) }()
+	theirCiphertext, err := readLocalFrame(conn, mlkem.CiphertextSize768)
 	if err != nil {
 		return nil, err
 	}
+	if err := <-sent; err != nil {
+		return nil, err
+	}
+	if len(theirCiphertext) != mlkem.CiphertextSize768 {
+		return nil, fmt.Errorf("%w: ciphertext", errLocalLinkBadInput)
+	}
+	theirSecret, err := kem.Decapsulate(theirCiphertext)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(theirSecret)
+	shared, err := private.ECDH(remotePublic)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(shared)
+	low, high := hello, remoteHello
+	lowCiphertext, highCiphertext := myCiphertext, theirCiphertext
+	lowSecret, highSecret := mySecret, theirSecret
+	if order > 0 {
+		low, high = remoteHello, hello
+		lowCiphertext, highCiphertext = theirCiphertext, myCiphertext
+		lowSecret, highSecret = theirSecret, mySecret
+	}
+	transcript := sha256.New()
+	transcript.Write([]byte("zen.local.v2"))
+	transcript.Write(low)
+	transcript.Write(high)
+	transcript.Write(lowCiphertext)
+	transcript.Write(highCiphertext)
+	input := make([]byte, 0, len(shared)+len(lowSecret)+len(highSecret))
+	input = append(append(append(input, shared...), lowSecret...), highSecret...)
+	defer clear(input)
+	material, err := hkdf.Key(sha256.New, input, peer.linkKey[:], "zen.local.v2 keys "+string(transcript.Sum(nil)), localKeyMaterialLength)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(material[:64])
 	lowKey, highKey := material[0:32], material[32:64]
 	sendKey, recvKey := lowKey, highKey
 	if order > 0 {

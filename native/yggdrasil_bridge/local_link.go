@@ -78,6 +78,17 @@ type localPeer struct {
 	linkKey [32]byte
 }
 
+// releaseLocalPeers overwrites the keys of peers no longer used and lets
+// their memory be swapped again (memguard.go).
+func releaseLocalPeers(peers []localPeer) {
+	unlockMemory(sliceBytes(peers))
+	for i := range peers {
+		wipeBytes(peers[i].tagKey[:])
+		wipeBytes(peers[i].selKey[:])
+		wipeBytes(peers[i].linkKey[:])
+	}
+}
+
 func localSubKey(secret []byte, label string) [32]byte {
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(label))
@@ -94,6 +105,7 @@ func newLocalPeer(address, secretHex string, own bool) (localPeer, error) {
 		return localPeer{}, fmt.Errorf("%w: address %q", errLocalLinkBadInput, address)
 	}
 	secret, err := hex.DecodeString(strings.TrimSpace(secretHex))
+	defer wipeBytes(secret)
 	if err != nil || len(secret) != localLinkSecretSize {
 		return localPeer{}, fmt.Errorf("%w: secret for %s", errLocalLinkBadInput, ip)
 	}

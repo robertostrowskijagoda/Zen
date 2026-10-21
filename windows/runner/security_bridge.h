@@ -16,6 +16,9 @@
 //       biometric unlock (no DPAPI fallback). Windows Hello is asked on the
 //       Dart side first, and only when the person turned biometric unlock
 //       on; the TPM key itself has no UI policy (see security_bridge.cpp).
+//   "zen/integrity"  check -> {rooted, reasons, debuggable, tampered,
+//       emulator}: a debugger attached, Frida's library loaded
+//       (device_integrity.dart).
 namespace security_bridge {
 
 void Register(flutter::BinaryMessenger* messenger,

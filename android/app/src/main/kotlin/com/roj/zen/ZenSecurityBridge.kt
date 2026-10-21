@@ -36,7 +36,10 @@ import javax.crypto.spec.PSource
  *    public key; unwrapping needs the private key, which the Keystore
  *    releases only after a strong biometric check in the system prompt and
  *    which is destroyed when a new fingerprint or face is enrolled;
- *  - `zen/integrity`: signs of a rooted or modified phone (a warning only).
+ *  - `zen/integrity`: signs of a rooted or modified phone (a warning only),
+ *    and of someone inside this very process — a debugger, Frida, Xposed or
+ *    LSPosed hooks (device_integrity.dart then also refuses payments and the
+ *    pyramid's power key while they are there).
  */
 object ZenSecurityBridge {
     private const val TAG = "ZenSecurity"
@@ -331,10 +334,97 @@ object ZenSecurityBridge {
         }
         val debuggable =
             (activity.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        val rooted = reasons.isNotEmpty()
+        // Inside this process right now (each check on its own: one failing
+        // read says nothing about the others).
+        val tamper = mutableListOf<String>()
+        if (debuggerAttached()) tamper.add("debugger")
+        val maps = readText("/proc/self/maps")
+        if (maps != null) {
+            val lower = maps.lowercase()
+            if (FRIDA_MARKS.any { lower.contains(it) }) tamper.add("frida-loaded")
+            if (HOOK_MARKS.any { lower.contains(it) }) tamper.add("hooks")
+        }
+        if (!tamper.contains("hooks") && xposedLoaded()) tamper.add("hooks")
+        if (fridaPortOpen()) tamper.add("frida-port")
+        val emulator = looksLikeEmulator()
+        if (emulator) reasons.add("emulator")
+        reasons.addAll(tamper)
         return mapOf(
-            "rooted" to reasons.isNotEmpty(),
+            "rooted" to rooted,
             "reasons" to reasons,
             "debuggable" to debuggable,
+            "tampered" to tamper.isNotEmpty(),
+            "emulator" to emulator,
         )
+    }
+
+    /** Library names Frida leaves in a process it is inside. */
+    private val FRIDA_MARKS = listOf("frida", "gum-js-loop", "linjector")
+
+    /** Hooking frameworks' libraries in the process. */
+    private val HOOK_MARKS = listOf(
+        "xposedbridge", "libxposed", "liblspd", "lspd", "edxp", "libriru", "libsandhook",
+        "substrate", "libwhale", "libpine",
+    )
+
+    private fun readText(path: String): String? =
+        try {
+            File(path).readText()
+        } catch (_: Exception) {
+            null
+        }
+
+    /** A debugger: the VM's own, or any tracer of the process (TracerPid). */
+    private fun debuggerAttached(): Boolean {
+        if (android.os.Debug.isDebuggerConnected() || android.os.Debug.waitingForDebugger()) {
+            return true
+        }
+        val status = readText("/proc/self/status") ?: return false
+        val line = status.lineSequence().firstOrNull { it.startsWith("TracerPid:") } ?: return false
+        return line.substringAfter(':').trim().toIntOrNull()?.let { it != 0 } ?: false
+    }
+
+    /** Xposed's bridge class reachable from the app's class loader. */
+    private fun xposedLoaded(): Boolean {
+        val bridge = try {
+            Class.forName("de.robv.android.xposed.XposedBridge", false, ClassLoader.getSystemClassLoader())
+            true
+        } catch (_: Throwable) {
+            false
+        }
+        return bridge ||
+            Throwable().stackTrace.any { it.className.contains("xposed", ignoreCase = true) }
+    }
+
+    /** Frida's server listening on its default port (27042) on this device. */
+    private fun fridaPortOpen(): Boolean {
+        for (table in listOf("/proc/net/tcp", "/proc/net/tcp6")) {
+            val text = readText(table) ?: continue
+            for (line in text.lineSequence().drop(1)) {
+                val fields = line.trim().split(Regex("\\s+"))
+                if (fields.size < 4) continue
+                val port = fields[1].substringAfterLast(':')
+                // State 0A: listening.
+                if (port.equals("69A2", ignoreCase = true) && fields[3] == "0A") {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /** Hints of an emulator (a hint only, never a block). */
+    private fun looksLikeEmulator(): Boolean {
+        val fingerprint = Build.FINGERPRINT ?: ""
+        val hardware = Build.HARDWARE ?: ""
+        val product = Build.PRODUCT ?: ""
+        return fingerprint.startsWith("generic") ||
+            fingerprint.contains("emulator") ||
+            hardware.contains("goldfish") ||
+            hardware.contains("ranchu") ||
+            product.contains("sdk_gphone") ||
+            product.contains("emulator") ||
+            File("/dev/qemu_pipe").exists()
     }
 }

@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
-import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/meet/events/event_model.dart';
 import 'package:zen/src/features/meet/events/event_photo.dart';
 import 'package:zen/src/features/meet/events/event_service.dart';
@@ -78,7 +77,6 @@ Map<String, dynamic> invitation(
   organizerName: 'Ktoś',
   title: 'Impreza',
   startsAt: startsAt,
-  ticketKey: 'klucz',
   reach: reach,
   updatedAt: 1,
 ).toJson();
@@ -447,20 +445,43 @@ void main() {
       final String shot = (await kuba.events.ticketQr(e.id))!;
       tick(EventTicket.liveSlack + EventTicket.liveWindow);
       expect((await ania.events.checkIn(e.id, shot)).$1, CheckIn.expired);
-      // Nor a code signed by another phone.
+      // Nor a code made with another phone's pin.
       final EventTicket fresh = EventTicket.fromQr(
         (await kuba.events.ticketQr(e.id))!,
       )!;
-      final LedgerKeyPair other = await LedgerKeyPair.generate();
       final String faked = kubaTicket.toLiveQr(
         fresh.liveAt!,
-        b64(
-          await other.signClassical(
-            EventTicket.liveBytes(e.id, kubaTicket.guest, fresh.liveAt!),
-          ),
+        EventTicket.liveCodeOf(
+          randomBytes(EventTicket.pinBytes),
+          e.id,
+          kubaTicket.guest,
+          fresh.liveAt!,
         ),
       );
       expect((await ania.events.checkIn(e.id, faked)).$1, CheckIn.invalid);
+      // Nor a ticket whose tag was made without the organizer's key.
+      final EventTicket untagged = EventTicket(
+        eventId: e.id,
+        guest: kubaTicket.guest,
+        name: kubaTicket.name,
+        signature: EventTicket.tagOf(
+          randomBytes(32),
+          e.id,
+          kubaTicket.guest,
+          kubaTicket.name,
+          kubaTicket.pin,
+        ),
+        pin: kubaTicket.pin,
+      );
+      expect(
+        (await ania.events.checkIn(
+          e.id,
+          untagged.toLiveQr(fresh.liveAt!, fresh.proof!),
+        )).$1,
+        CheckIn.invalid,
+      );
+      // The whole live code fits a small QR code.
+      expect((await kuba.events.ticketQr(e.id))!.length, lessThan(400));
 
       // The live code from his own phone does, once.
       final String live = (await kuba.events.ticketQr(e.id))!;
