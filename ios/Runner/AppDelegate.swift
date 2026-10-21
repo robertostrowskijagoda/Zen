@@ -19,14 +19,18 @@ import UserNotifications
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    // Bluetooth and Multipeer links with friends nearby (§5.1 item 6).
+    // Bluetooth and Multipeer links with friends nearby.
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenLocalLinksBridge") {
       ZenLocalLinksBridge.register(with: registrar.messenger())
+    }
+    // Where the device is (the alarm), from Core Location.
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenLocationBridge") {
+      ZenLocationBridge.register(with: registrar.messenger())
     }
   }
 }
 
-/// §14.1 on iOS (S-7):
+/// Privacy on iOS:
 ///  - Zen's data stays out of iCloud and computer backups, as on Android
 ///    (`allowBackup=false`): the support folder, where every store and the
 ///    media vault live, is marked excluded at launch and each time the app

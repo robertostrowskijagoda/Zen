@@ -2,25 +2,40 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/meet/intro/gate_route.dart';
+import 'package:zen/src/features/meet/intro/gate_terms.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
+import 'package:zen/src/features/pyramid/pyramid_gate_wallet.dart';
+import 'package:zen/src/features/pyramid/pyramid_providers.dart';
+import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-// Messages to people who are not friends, in the ordinary chats (§13,
-// §24.1: consent is the currency). Anyone may write first, but:
-//  - each message carries the sender's mini-profile (§9: name and photo),
+// Messages to people who are not friends, in the ordinary chats
+// (consent is the currency). Anyone may write first, but:
+//  - each message carries the sender's mini-profile (name and photo),
 //    so the person written to sees who it is;
 //  - until the other side answers, at most [kStrangerMessagesBeforeReply]
 //    messages go (the sender's app counts, the receiver's app checks
 //    again), text only, each at most [kMaxStrangerMessageChars];
 //  - the person written to decides who may write first at all
-//    ([StrangerMessagesFrom], by default friends of friends), and a
-//    message request is answered by writing back, inviting to friends,
+//    ([StrangerMessagesFrom], by default friends of friends) and what a
+//    first message costs ([StrangerChatBook.price], pyramid points; 0 =
+//    free). The price is paid once per first contact, not per message:
+//    after it the usual limit of [kStrangerMessagesBeforeReply] messages
+//    before an answer holds, and an answer opens the conversation — a price
+//    per message would make every unanswered line cost, while the price is
+//    there to keep unwanted first contacts away;
+//  - someone a friend opened a gate to this person for (an introduction,
+//    see meet/intro/) may write first whatever the settings, as may
+//    someone who paid the price;
+//  - a message request is answered by writing back, inviting to friends,
 //    ignoring it or blocking the person.
 // Once both sides wrote, the conversation is open (still text only: files
 // and calls stay between friends).
@@ -37,6 +52,13 @@ const int kMaxStrangerChats = 50;
 
 /// New people who may start a conversation with this person in a day.
 const int kStrangerFirstContactsPerDay = 20;
+
+/// How long a gate or a paid first message lets someone start a
+/// conversation (and lets this person start one).
+const Duration kStrangerPassLife = Duration(days: 30);
+
+/// Passes kept at most (each way).
+const int kMaxStrangerPasses = 300;
 
 /// Who may write first without being a friend.
 enum StrangerMessagesFrom {
@@ -158,6 +180,39 @@ final class StrangerChat {
   };
 }
 
+/// Someone may start a conversation outside friends: a friend's gate
+/// opened the way ([via]), or the first message was paid ([paid]).
+@immutable
+final class StrangerPass {
+  const StrangerPass({required this.at, this.paid = false, this.via = ''});
+
+  final int at;
+  final bool paid;
+
+  /// The friend whose gate it was ('' when paid).
+  final String via;
+
+  bool aliveAt(int now) => now - at < kStrangerPassLife.inMilliseconds;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'at': at,
+    if (paid) 'p': true,
+    if (via.isNotEmpty) 'v': via,
+  };
+
+  static StrangerPass? fromJson(Object? json) {
+    if (json is! Map || json['at'] is! int) {
+      return null;
+    }
+    final Object? v = json['v'];
+    return StrangerPass(
+      at: json['at'] as int,
+      paid: json['p'] == true,
+      via: v is String && v.length <= 64 ? v : '',
+    );
+  }
+}
+
 /// Why a message to someone who is not a friend cannot go now.
 final class StrangerMessageRefused implements Exception {
   const StrangerMessageRefused(this.message);
@@ -168,13 +223,15 @@ final class StrangerMessageRefused implements Exception {
   String toString() => message;
 }
 
-/// The conversations with people who are not friends, and who may start
-/// one (see the top of this file).
-final class StrangerChatBook extends ChangeNotifier {
+/// The conversations with people who are not friends, who may start
+/// one and what a first message costs (see the top of this file).
+final class StrangerChatBook extends ChangeNotifier implements ContactPasses {
   StrangerChatBook({
     required this.disk,
     this.isFriendOfFriend,
     this.ownMiniProfile,
+    this.termsOf,
+    this.onPriceChanged,
     int Function()? now,
   }) : _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
 
@@ -184,9 +241,16 @@ final class StrangerChatBook extends ChangeNotifier {
   /// (from the friend lists friends share). Null: never.
   final bool Function(String address)? isFriendOfFriend;
 
-  /// This person's mini-profile (§9), as it goes with their messages to
+  /// This person's mini-profile, as it goes with their messages to
   /// people who are not friends.
   final MiniProfileTag? Function()? ownMiniProfile;
+
+  /// What writing first to [address] takes, as this phone can tell (their
+  /// published price, or closed). Null: never known.
+  final DirectTerms Function(String address)? termsOf;
+
+  /// This person changed who may write first or the price (to publish it).
+  final VoidCallback? onPriceChanged;
 
   final int Function() _now;
   static const String _key = 'chat/strangers';
@@ -194,9 +258,20 @@ final class StrangerChatBook extends ChangeNotifier {
   final Map<String, StrangerChat> _chats = <String, StrangerChat>{};
   final List<int> _firstContacts = <int>[];
   StrangerMessagesFrom _from = StrangerMessagesFrom.friendsOfFriends;
+  int _price = 0;
+
+  /// Who may start a conversation with this person (gates, paid).
+  final Map<String, StrangerPass> _passesIn = <String, StrangerPass>{};
+
+  /// Whom this person may start one with (gates opened, paid).
+  final Map<String, StrangerPass> _passesOut = <String, StrangerPass>{};
   Future<void>? _loading;
 
   StrangerMessagesFrom get from => _from;
+
+  /// What a first message from someone who is not a friend costs
+  /// (hundredths of a pyramid point; 0 = free).
+  int get price => _price;
 
   String _n(String address) => PeerShareCodec.normalizeAddress(address);
 
@@ -214,6 +289,8 @@ final class StrangerChatBook extends ChangeNotifier {
         (StrangerMessagesFrom f) => f.name == json['from'],
         orElse: () => StrangerMessagesFrom.friendsOfFriends,
       );
+      final Object? price = json['price'];
+      _price = price is int && price >= 0 && price <= kGateMaxPrice ? price : 0;
       final Object? firsts = json['first'];
       if (firsts is List) {
         _firstContacts
@@ -229,6 +306,22 @@ final class StrangerChatBook extends ChangeNotifier {
           }
         }
       }
+      void passes(Object? from, Map<String, StrangerPass> into) {
+        if (from is! Map) {
+          return;
+        }
+        for (final MapEntry<dynamic, dynamic> e in from.entries.take(
+          kMaxStrangerPasses,
+        )) {
+          final StrangerPass? p = StrangerPass.fromJson(e.value);
+          if (e.key is String && p != null) {
+            into[_n(e.key as String)] = p;
+          }
+        }
+      }
+
+      passes(json['in'], _passesIn);
+      passes(json['out'], _passesOut);
     } on Object catch (error, stack) {
       logZenError('Rozmowy z nieznajomymi: odczyt', error, stack);
     }
@@ -237,6 +330,25 @@ final class StrangerChatBook extends ChangeNotifier {
 
   Future<void> _save() async {
     notifyListeners();
+    final int now = _now();
+    for (final Map<String, StrangerPass> m in <Map<String, StrangerPass>>[
+      _passesIn,
+      _passesOut,
+    ]) {
+      m.removeWhere((String _, StrangerPass p) => !p.aliveAt(now));
+      while (m.length > kMaxStrangerPasses) {
+        m.remove(
+          m.entries
+              .reduce(
+                (
+                  MapEntry<String, StrangerPass> a,
+                  MapEntry<String, StrangerPass> b,
+                ) => a.value.at <= b.value.at ? a : b,
+              )
+              .key,
+        );
+      }
+    }
     try {
       await disk.write(
         _key,
@@ -244,11 +356,24 @@ final class StrangerChatBook extends ChangeNotifier {
           utf8.encode(
             jsonEncode(<String, dynamic>{
               'from': _from.name,
+              if (_price > 0) 'price': _price,
               // The day's budget of new strangers survives a restart.
               'first': _firstContacts,
               'chats': <Map<String, dynamic>>[
                 for (final StrangerChat c in _chats.values) c.toJson(),
               ],
+              if (_passesIn.isNotEmpty)
+                'in': <String, dynamic>{
+                  for (final MapEntry<String, StrangerPass> e
+                      in _passesIn.entries)
+                    e.key: e.value.toJson(),
+                },
+              if (_passesOut.isNotEmpty)
+                'out': <String, dynamic>{
+                  for (final MapEntry<String, StrangerPass> e
+                      in _passesOut.entries)
+                    e.key: e.value.toJson(),
+                },
             }),
           ),
         ),
@@ -278,7 +403,60 @@ final class StrangerChatBook extends ChangeNotifier {
     await load();
     _from = value;
     await _save();
+    onPriceChanged?.call();
   }
+
+  /// Sets the price of a first message ([value] hundredths; 0 = free).
+  Future<void> setPrice(int value) async {
+    await load();
+    _price = value.clamp(0, kGateMaxPrice);
+    await _save();
+    onPriceChanged?.call();
+  }
+
+  /// Whom [address] got in through ([StrangerPass]), if they may start a
+  /// conversation with this person now.
+  StrangerPass? passFrom(String address) {
+    final StrangerPass? p = _passesIn[_n(address)];
+    return p != null && p.aliveAt(_now()) ? p : null;
+  }
+
+  /// Whether this person may start a conversation with [address] now
+  /// whatever their settings say (a gate opened to them, or paid).
+  StrangerPass? passTo(String address) {
+    final StrangerPass? p = _passesOut[_n(address)];
+    return p != null && p.aliveAt(_now()) ? p : null;
+  }
+
+  @override
+  Future<void> letIn(
+    String address, {
+    required bool paid,
+    String via = '',
+  }) async {
+    await load();
+    _passesIn[_n(address)] = StrangerPass(
+      at: _now(),
+      paid: paid,
+      via: via.isEmpty ? '' : _n(via),
+    );
+    await _save();
+  }
+
+  @override
+  Future<void> mayWrite(String address, {required bool paid}) async {
+    await load();
+    _passesOut[_n(address)] = StrangerPass(at: _now(), paid: paid);
+    await _save();
+  }
+
+  @override
+  int? priceFrom(String address) => switch (_from) {
+    StrangerMessagesFrom.nobody => null,
+    StrangerMessagesFrom.friendsOfFriends =>
+      (isFriendOfFriend?.call(address) ?? false) ? _price : null,
+    StrangerMessagesFrom.everyone => _price,
+  };
 
   /// Why this person cannot write to [address] now, or `null` when they
   /// can ([text] is what they want to send).
@@ -291,6 +469,25 @@ final class StrangerChatBook extends ChangeNotifier {
       );
     }
     final StrangerChat? chat = chatWith(address);
+    if (chat == null && passTo(address) == null) {
+      // A first contact: their settings, as far as this phone knows them.
+      final DirectTerms terms =
+          termsOf?.call(address) ?? const DirectTerms.unknown();
+      if (terms.known && terms.closed) {
+        return t(
+          'Ta osoba nie przyjmuje pierwszych wiadomości od Ciebie. '
+          'Spróbuj przez bramy znajomych („Poproś o przedstawienie”).',
+        );
+      }
+      if (terms.known && terms.price > 0) {
+        return t(
+          'Pierwsza wiadomość do tej osoby kosztuje {price}. Zapłać '
+          'w grafie („Poproś o przedstawienie” → „Bezpośrednio”) albo '
+          'otwórz bramę przez znajomych.',
+          <String, Object?>{'price': formatPoints(terms.price)},
+        );
+      }
+    }
     if (chat != null &&
         !chat.open &&
         !chat.theyStarted &&
@@ -335,15 +532,15 @@ final class StrangerChatBook extends ChangeNotifier {
   bool admits(String address) {
     final StrangerChat? chat = chatWith(address);
     if (chat == null) {
+      // Introduced through a friend's gate, or paid: in, whatever the
+      // settings and the day's budget say.
+      if (passFrom(address) != null) {
+        return true;
+      }
       final int t = _now();
       _firstContacts.removeWhere((int at) => t - at > 24 * 3600 * 1000);
-      return switch (_from) {
-            StrangerMessagesFrom.nobody => false,
-            StrangerMessagesFrom.friendsOfFriends =>
-              isFriendOfFriend?.call(address) ?? false,
-            StrangerMessagesFrom.everyone => true,
-          } &&
-          _firstContacts.length < kStrangerFirstContactsPerDay;
+      final int? asked = priceFrom(address);
+      return asked == 0 && _firstContacts.length < kStrangerFirstContactsPerDay;
     }
     // An answer to this person's own message always comes in.
     return chat.open ||
@@ -363,7 +560,7 @@ final class StrangerChatBook extends ChangeNotifier {
     final String a = _n(address);
     final StrangerChat? chat = _chats[a];
     final int at = _now();
-    if (chat == null) {
+    if (chat == null && passFrom(a) == null) {
       _firstContacts.add(at);
     }
     _chats[a] = chat == null
@@ -430,20 +627,41 @@ final class StrangerChatBook extends ChangeNotifier {
   }
 }
 
-/// The conversations with people who are not friends (§13, §24.1).
+/// The conversations with people who are not friends.
 final Provider<StrangerChatBook> strangerChatsProvider =
     Provider<StrangerChatBook>((Ref ref) {
-      final StrangerChatBook book = StrangerChatBook(
+      // The pyramid only while it is switched on and already started.
+      PyramidService? pyramid() =>
+          ref.read(featureFlagsProvider).isEnabled(ZenFeature.pyramid) &&
+              ref.exists(pyramidServiceProvider)
+          ? ref.read(pyramidServiceProvider)
+          : null;
+      late final StrangerChatBook book;
+      book = StrangerChatBook(
         disk: ref.read(ledgerDiskProvider),
-        // Friends of friends, as far as friends share their lists (§9).
+        // Friends of friends, as far as friends share their lists.
         isFriendOfFriend: (String address) =>
             ref.read(meetServiceProvider).mutualFriends(address).isNotEmpty,
         ownMiniProfile: () {
           final LedgerNode? node = ref.read(ledgerNodeProvider);
           return node != null && node.isReady ? ownMiniProfile(node) : null;
         },
+        // Members publish their first-message price in the pyramid.
+        termsOf: (String address) => pyramidMessageTerms(pyramid(), address),
+        onPriceChanged: () => unawaitedLogged(
+          syncMessagePrice(pyramid(), strangerPriceLevels(book)),
+          context: 'Cena pierwszej wiadomości',
+        ),
       );
       unawaitedLogged(book.load(), context: 'Rozmowy z nieznajomymi');
       ref.onDispose(book.dispose);
       return book;
     });
+
+/// [book]'s settings as the pyramid's price list carries them.
+Map<String, int> strangerPriceLevels(StrangerChatBook book) =>
+    messagePriceLevels(
+      fof: book.from != StrangerMessagesFrom.nobody,
+      strangers: book.from == StrangerMessagesFrom.everyone,
+      price: book.price,
+    );

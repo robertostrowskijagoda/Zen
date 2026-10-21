@@ -6,7 +6,7 @@ import 'package:zen/src/core/utils/secure_clipboard.dart';
 
 /// Text that can be copied from a long-press / right-click menu. Used for
 /// chat bubbles and comments. With [onReport] the menu also has "Zgłoś"
-/// (§21.4) — for what others wrote.
+/// — for what others wrote.
 class CopyableText extends StatelessWidget {
   const CopyableText(
     this.text, {
@@ -51,7 +51,7 @@ class CopyableText extends StatelessWidget {
       ],
     );
     if (choice == 'copy') {
-      // Like every other copy from the app (§14.1, point 9): cleared from
+      // Like every other copy from the app: cleared from
       // the clipboard after a minute, unless something else was copied.
       await copyWithExpiry(text);
     } else if (choice == 'report') {

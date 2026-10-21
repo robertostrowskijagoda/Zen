@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/chat/disappearing_messages.dart';
 
-/// Picks the disappearing-messages timer of a conversation (§14.1 point
+/// Picks the disappearing-messages timer of a conversation (point
 /// 10). Returns the chosen seconds (0 = off), or `null` when cancelled.
 Future<int?> showDisappearingTimerDialog(
   BuildContext context, {

@@ -251,7 +251,7 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
       ),
     );
   }
-  // §21.4: last, so the everyday actions keep their places.
+  // Last, so the everyday actions keep their places.
   if (items.isNotEmpty) {
     items.add(const PopupMenuDivider());
   }
@@ -282,7 +282,7 @@ class _MessageBubble extends StatelessWidget {
 
   final ChatMessage message;
 
-  /// "Zgłoś" in the long-press menu of a message we received (§21.4).
+  /// "Zgłoś" in the long-press menu of a message we received.
   final VoidCallback? onReport;
 
   /// When non-null the bubble plays its fade-slide entrance with this
@@ -324,9 +324,11 @@ class _MessageBubble extends StatelessWidget {
 
     final bool outgoing = message.isOutgoing;
     // Text bubbles we send get the accent gradient; media we send sit on an
-    // accent-tinted surface so their own colours stay readable.
+    // accent-tinted surface so their own colours stay readable. A look with
+    // its own bubbles (lit outlines, bevels) draws them instead.
+    final ZenLook look = ZenLook.of(context);
     final bool isTextMessage = message.type == ChatMessageType.text;
-    final bool onGradient = outgoing && isTextMessage;
+    final bool onGradient = outgoing && isTextMessage && look.filledBubbles;
     final Color metaColor = onGradient
         ? zen.onAccent.withValues(alpha: 0.72)
         : zen.textMuted;
@@ -350,8 +352,11 @@ class _MessageBubble extends StatelessWidget {
       ),
     };
 
+    final BoxDecoration? themed = look.bubble(zen, outgoing: outgoing);
     final BoxDecoration decoration;
-    if (onGradient) {
+    if (themed != null) {
+      decoration = themed;
+    } else if (onGradient) {
       decoration = BoxDecoration(
         gradient: LinearGradient(
           colors: <Color>[

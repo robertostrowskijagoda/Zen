@@ -179,7 +179,7 @@ class _GroupConversationScreenState
     _composerController.clear();
     try {
       if (_boardTab) {
-        // A post on the group's board (§13), not a chat message.
+        // A post on the group's board, not a chat message.
         await ref.read(groupBoardServiceProvider).publish(widget.groupId, text);
         return;
       }
@@ -332,7 +332,7 @@ class _GroupConversationScreenState
         (SocialHubState state) => state.friends,
       ),
     );
-    // Messages the person reported are hidden behind a line (§21.4).
+    // Messages the person reported are hidden behind a line.
     final HiddenByMe hiddenByMe = ref.watch(hiddenByMeProvider);
     final AsyncValue<List<ChatMessage>> messagesAsync = ref.watch(
       groupMessagesProvider(widget.groupId),
@@ -727,7 +727,7 @@ class _GroupConversationScreenState
                                       height: 1.4,
                                       fontWeight: FontWeight.w500,
                                     ),
-                                    // §21.4: what others wrote can be reported.
+                                    // What others wrote can be reported.
                                     onReport: isSelf
                                         ? null
                                         : () => unawaited(

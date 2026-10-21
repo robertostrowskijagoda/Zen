@@ -526,7 +526,7 @@ void main() {
     expect(ania.intro.caseOf(c.id)!.befriendDue, isFalse);
   });
 
-  group('the asker signs what the middle friend passes on (S-17)', () {
+  group('the asker signs what the middle friend passes on', () {
     test('a signed introduction travels through the middle friend, kept '
         'in their store, and checks out', () async {
       final (net: _, :ania, :bartek, :celina, darek: _, ewa: _) =
@@ -611,7 +611,7 @@ void main() {
       expect(got.asker, ania.address);
 
       // Under another address (as for a letter from another device of the
-      // same account, §6): the words are Ania's, but whose address it is
+      // same account): the words are Ania's, but whose address it is
       // cannot be told here, so it is dropped.
       await bartek.send(
         celina.address,

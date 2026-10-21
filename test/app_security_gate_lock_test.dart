@@ -11,8 +11,8 @@ import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
 
-/// S-8: the background lock comes by itself, and a computer locks when
-/// nobody touches it. S-9: on Android the whole window stays protected.
+/// The background lock comes by itself, and a computer locks when
+/// nobody touches it. On Android the whole window stays protected.
 void main() {
   Future<MemoryAppSecurityService> pumpGate(
     WidgetTester tester, {

@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/theme/zen_concept.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -183,7 +184,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final bool isCallActive =
         activeCall != null && activeCall.status == CallSessionStatus.active;
     final bool hasAnyActiveCall = activeCall != null;
-    // Messages the person reported are hidden behind a line (§21.4).
+    // Messages the person reported are hidden behind a line.
     final HiddenByMe hiddenByMe = ref.watch(hiddenByMeProvider);
     final bool hasMessages = messages.asData?.value.isNotEmpty ?? false;
     final int messageCount = messages.asData?.value.length ?? 0;
@@ -550,7 +551,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                   ),
                 ),
               ),
-            // Someone who is not a friend (§13, §24.1).
+            // Someone who is not a friend.
             if (isStrangerConversation(friend, widget.peerAddress))
               StrangerChatBanner(address: widget.peerAddress, friend: friend),
             Expanded(

@@ -7,7 +7,9 @@ import 'package:zen/src/domain/signals/zen_signal.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
+import 'package:zen/src/features/meet/intro/gate_route.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 import 'package:zen/src/features/social/social_snapshot_store.dart';
@@ -80,6 +82,87 @@ void main() {
       await book.noteSent(_zed, 'cześć');
       expect(book.requests, isEmpty);
       expect(book.admits(_zed), isTrue);
+    });
+  });
+
+  group('the price of a first message', () {
+    test('0 is free; with a price nobody gets in unpaid; a payment or a '
+        'friend\'s gate lets in, also when closed', () async {
+      final MemoryLedgerDisk disk = MemoryLedgerDisk();
+      int now = 1000000;
+      int changed = 0;
+      final StrangerChatBook book = StrangerChatBook(
+        disk: disk,
+        now: () => now,
+        onPriceChanged: () => changed++,
+      );
+      await book.setFrom(StrangerMessagesFrom.everyone);
+      expect(book.priceFrom(_zed), 0);
+      expect(book.admits(_zed), isTrue);
+      await book.setPrice(500);
+      expect(changed, 2);
+      expect(book.priceFrom(_zed), 500);
+      expect(book.admits(_zed), isFalse);
+      await book.letIn(_zed, paid: true);
+      expect(book.passFrom(_zed)!.paid, isTrue);
+      expect(book.admits(_zed), isTrue);
+      expect(strangerPriceLevels(book), <String, int>{
+        'friend': 0,
+        'fof': 500,
+        'stranger': 500,
+      });
+
+      // Closed ("Nikt"): nobody may write first …
+      const String other = '200::2';
+      await book.setFrom(StrangerMessagesFrom.nobody);
+      expect(book.priceFrom(other), isNull);
+      expect(book.admits(other), isFalse);
+      expect(strangerPriceLevels(book), <String, int>{'friend': 0});
+      // … but someone a friend opened a gate for does.
+      await book.letIn(other, paid: false, via: '200::3');
+      expect(book.admits(other), isTrue);
+      expect(
+        book.passFrom(other)!.via,
+        PeerShareCodec.normalizeAddress('200::3'),
+      );
+
+      // Kept on disk; a month later the passes are gone.
+      final StrangerChatBook again = StrangerChatBook(
+        disk: disk,
+        now: () => now,
+      );
+      await again.load();
+      expect(again.price, 500);
+      expect(again.passFrom(other), isNotNull);
+      now += kStrangerPassLife.inMilliseconds + 1;
+      expect(again.passFrom(other), isNull);
+      expect(again.admits(other), isFalse);
+    });
+
+    test('writing first: as the other side published it — closed, a price, '
+        'free; once paid or through a gate, the usual limit', () async {
+      DirectTerms terms = const DirectTerms.unknown();
+      final StrangerChatBook book = StrangerChatBook(
+        disk: MemoryLedgerDisk(),
+        termsOf: (String _) => terms,
+      );
+      await book.load();
+      expect(book.refusalToSend(_zed, 'hej'), isNull);
+      terms = const DirectTerms.closed();
+      expect(book.refusalToSend(_zed, 'hej'), contains('nie przyjmuje'));
+      terms = const DirectTerms.price(300, payable: true);
+      expect(book.refusalToSend(_zed, 'hej'), contains('3 pkt'));
+      terms = const DirectTerms.price(0);
+      expect(book.refusalToSend(_zed, 'hej'), isNull);
+
+      // Paid once: then up to three before an answer, no price per message.
+      terms = const DirectTerms.price(300, payable: true);
+      await book.mayWrite(_zed, paid: true);
+      for (int i = 0; i < kStrangerMessagesBeforeReply; i++) {
+        expect(book.refusalToSend(_zed, 'hej'), isNull);
+        await book.noteSent(_zed, 'hej $i');
+      }
+      expect(book.refusalToSend(_zed, 'hej'), contains('Poczekaj'));
     });
   });
 

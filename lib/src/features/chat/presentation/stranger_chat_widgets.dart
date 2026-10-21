@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
@@ -9,9 +10,13 @@ import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
+import 'package:zen/src/features/meet/intro/gate_terms.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/profile/presentation/mini_profile.dart';
 import 'package:zen/src/features/profile/presentation/peer_avatar.dart';
+import 'package:zen/src/features/pyramid/presentation/pyramid_wallet.dart';
+import 'package:zen/src/features/pyramid/pyramid_providers.dart';
+import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -25,8 +30,8 @@ bool isStrangerConversation(FriendProfile? friend, String address) =>
     friend?.status != FriendRelationshipStatus.blocked &&
     isRoutablePeerAddress(address);
 
-/// The strip above a conversation with someone who is not a friend (§13,
-/// §24.1): who it is (their mini-profile), the limits, and what can be done
+/// The strip above a conversation with someone who is not a friend:
+/// who it is (their mini-profile), the limits, and what can be done
 /// with a message request: answer by writing, invite, ignore or block.
 class StrangerChatBanner extends ConsumerStatefulWidget {
   const StrangerChatBanner({
@@ -187,7 +192,7 @@ class _StrangerChatBannerState extends ConsumerState<StrangerChatBanner> {
   }
 }
 
-/// The chat list's part for people who are not friends (§13, §24.1):
+/// The chat list's part for people who are not friends:
 /// message requests first, then conversations this person started or
 /// answered. Nothing when there are none.
 class StrangerChatsSection extends ConsumerWidget {
@@ -267,15 +272,63 @@ class StrangerChatsSection extends ConsumerWidget {
   }
 }
 
-/// "Kto może napisać do mnie spoza znajomych" (§13, §24.1): a first
-/// message from anyone else does not come in at all.
+/// "Kto może napisać do mnie spoza znajomych" and what a first message
+/// costs: a first message from anyone else does not come in at all, and
+/// one that is not paid (when there is a price) neither. Someone a friend
+/// opened a gate for comes in whatever these say.
 class StrangerMessagesFromTile extends ConsumerWidget {
   const StrangerMessagesFromTile({super.key});
+
+  static Future<void> _editPrice(
+    BuildContext context,
+    StrangerChatBook book,
+  ) async {
+    final TextEditingController field = TextEditingController(
+      text: book.price == 0 ? '' : formatMoney(book.price),
+    );
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Text(t('Cena wiadomości od osób spoza znajomych')),
+        content: TextField(
+          key: const Key('stranger-price-field'),
+          controller: field,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: t('Punkty (puste albo 0 = za darmo)'),
+            prefixIcon: const Icon(Icons.toll_outlined),
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('Anuluj')),
+          ),
+          FilledButton(
+            key: const Key('stranger-price-save'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('Zapisz')),
+          ),
+        ],
+      ),
+    );
+    final int value = parseMoney(field.text) ?? 0;
+    disposeLater(field);
+    if (ok == true) {
+      await book.setPrice(value);
+    }
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ZenColors zen = ZenColors.of(context);
     final StrangerChatBook book = ref.watch(strangerChatsProvider);
+    // Prices are paid in the pyramid's points: only between members.
+    final bool member =
+        ref.watch(featureFlagsProvider).isEnabled(ZenFeature.pyramid) &&
+        ref.exists(pyramidServiceProvider) &&
+        ref.read(pyramidServiceProvider).isMember;
     return ListenableBuilder(
       listenable: book,
       builder: (BuildContext context, Widget? _) => Padding(
@@ -322,6 +375,48 @@ class StrangerMessagesFromTile extends ConsumerWidget {
                   ),
               ],
             ),
+            if (book.from != StrangerMessagesFrom.nobody) ...<Widget>[
+              const SizedBox(height: 12),
+              ListTile(
+                key: const Key('stranger-price'),
+                contentPadding: EdgeInsets.zero,
+                title: Text(t('Cena wiadomości od osób spoza znajomych')),
+                subtitle: Text(
+                  book.price == 0 ? t('za darmo') : formatPoints(book.price),
+                ),
+                trailing: TextButton(
+                  key: const Key('stranger-price-edit'),
+                  onPressed: () => unawaited(_editPrice(context, book)),
+                  child: Text(t('Zmień')),
+                ),
+              ),
+              Text(
+                t(
+                  'Płaci się raz, za pierwszy kontakt — potem jak zawsze do {n} '
+                  'wiadomości przed Twoją odpowiedzią, a odpowiedź otwiera '
+                  'rozmowę. Kogoś, komu znajomy otworzył do Ciebie bramę '
+                  '(przedstawienie), cena nie dotyczy.',
+                  <String, Object?>{'n': kStrangerMessagesBeforeReply},
+                ),
+                style: TextStyle(
+                  color: zen.textSecondary,
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
+              if (book.price > 0 && !member) ...<Widget>[
+                const SizedBox(height: 8),
+                ZenInfo(
+                  key: const Key('stranger-price-member'),
+                  icon: Icons.info_outline_rounded,
+                  text: t(
+                    'Cena działa tylko między członkami piramidy (punkty z '
+                    'portfela). Poza piramidą nikt jej nie zapłaci, więc '
+                    'pierwsze wiadomości dotrą tylko przez bramy znajomych.',
+                  ),
+                ),
+              ],
+            ],
           ],
         ),
       ),

@@ -34,7 +34,7 @@ int sanitizeDisappearSeconds(Object? raw) {
   return raw.clamp(60, kMaxDisappearSeconds);
 }
 
-/// The timeline store with disappearing messages (§14.1 point 10):
+/// The timeline store with disappearing messages:
 ///
 /// * a new message in a conversation with a timer gets its expiry (now +
 ///   the timer) as it is stored — whichever way it came (sent, received,

@@ -4,7 +4,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
   Widget _buildComposer(FriendProfile? friend) {
     final ZenColors zen = ZenColors.of(context);
     final bool canCompose = friend?.status == FriendRelationshipStatus.accepted;
-    // Someone who is not a friend: text only (§13, §24.1).
+    // Someone who is not a friend: text only.
     final bool canText =
         canCompose || isStrangerConversation(friend, widget.peerAddress);
     final bool idle = !_isRecordingVoice && !_isRecordingBusy;
@@ -102,7 +102,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                         : TextField(
                             key: const Key('conversation-composer-field'),
                             controller: _composerController,
-                            // Keyboard must not learn what you write (§14.1).
+                            // Keyboard must not learn what you write.
                             enableIMEPersonalizedLearning: false,
                             enabled: canText && !_isRecordingBusy,
                             minLines: 1,
@@ -184,35 +184,41 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                                       size: 20,
                                     ),
                                   )
-                                : IconButton.filled(
-                                    key: const Key('conversation-send-button'),
-                                    onPressed: onPressed,
-                                    style: IconButton.styleFrom(
-                                      backgroundColor: hasText
-                                          ? zen.accent
-                                          : zen.surfaceMuted,
-                                      foregroundColor: hasText
-                                          ? zen.onAccent
-                                          : zen.textSecondary,
-                                      disabledBackgroundColor: zen.surfaceMuted,
-                                      disabledForegroundColor: zen.textMuted
-                                          .withValues(alpha: 0.6),
-                                      padding: EdgeInsets.zero,
-                                      shape: const CircleBorder(),
-                                    ),
-                                    icon: _isRecordingBusy
-                                        ? SizedBox(
-                                            width: 16,
-                                            height: 16,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: zen.textSecondary,
+                                : ZenBreathingGlow(
+                                    active: hasText,
+                                    child: IconButton.filled(
+                                      key: const Key(
+                                        'conversation-send-button',
+                                      ),
+                                      onPressed: onPressed,
+                                      style: IconButton.styleFrom(
+                                        backgroundColor: hasText
+                                            ? zen.accent
+                                            : zen.surfaceMuted,
+                                        foregroundColor: hasText
+                                            ? zen.onAccent
+                                            : zen.textSecondary,
+                                        disabledBackgroundColor:
+                                            zen.surfaceMuted,
+                                        disabledForegroundColor: zen.textMuted
+                                            .withValues(alpha: 0.6),
+                                        padding: EdgeInsets.zero,
+                                        shape: const CircleBorder(),
+                                      ),
+                                      icon: _isRecordingBusy
+                                          ? SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: zen.textSecondary,
+                                              ),
+                                            )
+                                          : const Icon(
+                                              Icons.send_rounded,
+                                              size: 20,
                                             ),
-                                          )
-                                        : const Icon(
-                                            Icons.send_rounded,
-                                            size: 20,
-                                          ),
+                                    ),
                                   ),
                           ),
                         );

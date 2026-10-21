@@ -1,7 +1,7 @@
 part of 'social_hub_controller.dart';
 
-/// Messages to and from people who are not friends, in the ordinary chats
-/// (§13, §24.1; the rules are in `stranger_chats.dart`).
+/// Messages to and from people who are not friends, in the ordinary chats.
+/// (the rules are in `stranger_chats.dart`).
 mixin _SocialHubStrangersMixin on _SocialHubControllerBase {
   @override
   bool _isStrangerChatPeer(String address) {
@@ -16,7 +16,7 @@ mixin _SocialHubStrangersMixin on _SocialHubControllerBase {
   }
 
   /// The mini-profile to send with a message to someone who is not a
-  /// friend (§9); also checks the limits. Throws [StrangerMessageRefused].
+  /// friend; also checks the limits. Throws [StrangerMessageRefused].
   @override
   Future<Map<String, dynamic>> _strangerMessageMini(
     String peerAddress,
