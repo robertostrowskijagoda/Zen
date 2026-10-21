@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/domain/messages/message_delivery_status.dart';
 import 'package:zen/src/features/relay/relay_crypto.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
@@ -65,8 +66,14 @@ final class RelayConfig {
       Duration(minutes: 2),
       Duration(minutes: 10),
       Duration(minutes: 30),
+      Duration(hours: 1),
+      Duration(hours: 2),
+      Duration(hours: 4),
     ],
     this.depositRetryInterval = const Duration(minutes: 2),
+    this.depositRetryMaxInterval = const Duration(minutes: 30),
+    this.networkQuietGap = const Duration(minutes: 10),
+    this.maxTrackedMessages = 1000,
     this.announceRetryInterval = const Duration(minutes: 2),
     this.pollInterval = const Duration(minutes: 5),
     this.relaySyncInterval = const Duration(minutes: 10),
@@ -106,8 +113,27 @@ final class RelayConfig {
 
   /// How long a direct send may go unacknowledged before relays get a copy.
   final Duration depositAfter;
+
+  /// Waits between direct tries of one payload; the last one repeats. Any
+  /// sign of life from the recipient starts it over, so the long steps only
+  /// spare the battery while the recipient is really away.
   final List<Duration> directRetrySchedule;
+
+  /// Wait between deposit tries at a mailbox that did not confirm, for the
+  /// first ten minutes of a payload's life; it then grows step by step up to
+  /// [depositRetryMaxInterval]. A mailbox that shows up gets its copy at
+  /// once either way.
   final Duration depositRetryInterval;
+  final Duration depositRetryMaxInterval;
+
+  /// No frame at all for this long, then one arrives: the network was
+  /// probably gone (or changed), so everything queued is tried again now
+  /// instead of at the end of its backoff.
+  final Duration networkQuietGap;
+
+  /// Outgoing chat messages whose delivery is kept for the chat
+  /// ([RelayTrackedMessage]); settled ones go first.
+  final int maxTrackedMessages;
   final Duration announceRetryInterval;
   final Duration pollInterval;
   final Duration relaySyncInterval;
@@ -275,6 +301,7 @@ const Set<String> kReliablePayloadTypes = <String>{
   'event_thanks',
   'ask',
   'ask_answer',
+  'ask_passed',
   'table_wish',
   'circle',
   'circle_swap',
@@ -303,7 +330,6 @@ const Set<String> kReliablePayloadTypes = <String>{
   'pyr_pay',
   'pyr_paysig',
   'pyr_report',
-  'pyr_appeal',
   'pyr_anon',
   'pyr_nat',
   // Dating: only between friends; the content is sealed anyway.
@@ -316,6 +342,9 @@ const Set<String> kReliablePayloadTypes = <String>{
   'date_safe',
   'date_safe_ok',
   'date_loc_req',
+  'date_key',
+  'date_intro',
+  'date_intro_re',
   // Neighbours: flats are usually not friends, so only directly.
   'flat_hello',
   'flat_nope',
@@ -386,6 +415,10 @@ const int _maxReliableIdLength = 128;
 /// message of the *other* side (`message_ack`, `message_read`).
 const String _chatMessageType = 'message';
 
+/// A group chat message: tracked for the chat's (aggregated) status like a
+/// chat message, and reported once every member confirmed it or it expired.
+const String _groupMessageType = 'group_message';
+
 /// Delivery reports kept for the chat layer; the oldest go first.
 const int _maxDeliveryReports = 200;
 
@@ -455,9 +488,34 @@ final class RelayEngine {
   /// layer listens to this and takes the reports whenever it is above zero.
   final ValueNotifier<int> deliveryReportCount = ValueNotifier<int>(0);
 
+  /// Where outgoing chat messages are (see [RelayTrackedMessage]), for the
+  /// bubbles' delivery status. Updated whenever the queue changes, and when
+  /// a first try turns into waiting as time passes.
+  final ValueNotifier<RelayProgressSnapshot> progress =
+      ValueNotifier<RelayProgressSnapshot>(const RelayProgressSnapshot());
+
   /// Outbox ids already reported as [RelayDeliveryStatus.directOnly]. Memory
   /// only: after a restart the repeat is harmless (the chat applies it once).
   final Set<String> _reportedDirectOnly = <String>{};
+
+  /// Payloads queued but not yet sent: they go out right after the queue is
+  /// on the disk, so a crash in between never loses one that was tried.
+  final List<RelayOutboxEntry> _unsent = <RelayOutboxEntry>[];
+
+  /// Sealed envelopes per reliable id (and recipient key), so retries to
+  /// offline mailboxes do not run the post-quantum encapsulation again.
+  final Map<String, ({String key, Map<String, dynamic> envelope})> _sealed =
+      <String, ({String key, Map<String, dynamic> envelope})>{};
+  static const int _maxSealedCached = 64;
+
+  /// When the last frame of any kind arrived (0: none yet).
+  int _lastFrameAtMillis = 0;
+
+  /// Deposits ignore their spacing once (after a network change).
+  bool _depositsDueNow = false;
+
+  /// Whether the next tick should come soon (see [wantsFrequentTicks]).
+  bool _frequentTicks = true;
 
   RelayState? _state;
   bool _active = false;
@@ -516,6 +574,10 @@ final class RelayEngine {
       final RelayState state = await _load();
       _active = true;
       _refreshRelaySet(state);
+      // A new start of the node (an app start, a restart after the network
+      // changed): whatever waits is tried again on the next tick instead of
+      // at the end of its backoff.
+      _retryAllSoon(state, _now());
       await _save(state);
       logZenMessage(
         'Relay engine active: ${state.currentRelays.length} relays '
@@ -545,7 +607,8 @@ final class RelayEngine {
   // Outgoing
   // ---------------------------------------------------------------------------
 
-  /// Queues [payload] for reliable delivery and makes the first direct try.
+  /// Queues [payload] for reliable delivery and makes the first direct try,
+  /// once the queue holding it is on the disk.
   ///
   /// Never throws for transport problems: the payload is safely queued, and
   /// "the node is down right now" is exactly what the queue is for.
@@ -617,8 +680,8 @@ final class RelayEngine {
     });
   }
 
-  /// Puts [payload] into the outbox for [to] and makes the first direct try;
-  /// returns its reliable id. The caller saves.
+  /// Puts [payload] into the outbox for [to]; returns its reliable id. The
+  /// caller saves, and the first direct try goes out right after the save.
   Future<String> _enqueue(
     RelayState state,
     String to,
@@ -637,17 +700,275 @@ final class RelayEngine {
     final bool relayable =
         !_directOnlyPayloadTypes.contains(wire['type']) &&
         utf8.encode(jsonEncode(wire)).length <= config.maxRelayablePayloadBytes;
-    RelayOutboxEntry entry = RelayOutboxEntry(
-      rid: rid,
-      recipient: to,
-      payload: wire,
-      createdAtMillis: now,
-      expiresAtMillis: now + life,
-      relayable: relayable,
+    final RelayOutboxEntry entry = _scheduleNextDirect(
+      RelayOutboxEntry(
+        rid: rid,
+        recipient: to,
+        payload: wire,
+        createdAtMillis: now,
+        expiresAtMillis: now + life,
+        relayable: relayable,
+      ),
+      now,
     );
-    entry = await _attemptDirect(entry, now);
     state.outbox[rid] = entry;
+    _unsent.add(entry);
+    _track(state, entry, now);
     return rid;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Delivery of chat messages, for the chat's status
+  // ---------------------------------------------------------------------------
+
+  /// The chat message [payload] stands for, if its delivery is tracked: a
+  /// chat or group message, or the manifest of a chat attachment.
+  static String? _trackedIdOf(Map<String, dynamic> payload) {
+    final Object? type = payload['type'];
+    final bool tracked =
+        type == _chatMessageType ||
+        type == _groupMessageType ||
+        (type == kBlobManifestType &&
+            payload['k'] == RelayBlobKind.attachment.wire);
+    final Object? id = payload['msgId'];
+    return tracked && id is String && id.isNotEmpty ? id : null;
+  }
+
+  void _track(RelayState state, RelayOutboxEntry entry, int now) {
+    final String? id = _trackedIdOf(entry.payload);
+    if (id == null) {
+      return;
+    }
+    final Object? group = entry.payload['groupId'];
+    final RelayTrackedMessage tracked = state.tracked.putIfAbsent(
+      id,
+      () => RelayTrackedMessage(
+        messageId: id,
+        createdAtMillis: now,
+        groupId: entry.payload['type'] == _groupMessageType && group is String
+            ? group
+            : null,
+      ),
+    );
+    tracked.pending[entry.recipient] = entry.rid;
+    tracked.delivered.remove(entry.recipient);
+    tracked.expired.remove(entry.recipient);
+    tracked.settledAtMillis = 0;
+    _capTracked(state);
+  }
+
+  /// [entry] was confirmed by its recipient ([delivered]) or expired.
+  void _settleTracked(
+    RelayState state,
+    RelayOutboxEntry entry, {
+    required bool delivered,
+    required int now,
+  }) {
+    final String? id = _trackedIdOf(entry.payload);
+    final RelayTrackedMessage? tracked = id == null ? null : state.tracked[id];
+    if (tracked == null || tracked.pending[entry.recipient] != entry.rid) {
+      return;
+    }
+    tracked.pending.remove(entry.recipient);
+    (delivered ? tracked.delivered : tracked.expired).add(entry.recipient);
+    if (!tracked.isSettled) {
+      return;
+    }
+    tracked.settledAtMillis = now;
+    final String? groupId = tracked.groupId;
+    if (groupId == null) {
+      return; // a chat message has its own receipt (and expiry report)
+    }
+    state.deliveryReports.add(
+      RelayDeliveryReport(
+        rid: entry.rid,
+        recipient: entry.recipient,
+        messageId: tracked.messageId,
+        status: tracked.expired.isEmpty
+            ? RelayDeliveryStatus.delivered
+            : RelayDeliveryStatus.expired,
+        atMillis: now,
+        groupId: groupId,
+      ),
+    );
+    final int excess = state.deliveryReports.length - _maxDeliveryReports;
+    if (excess > 0) {
+      state.deliveryReports.removeRange(0, excess);
+    }
+  }
+
+  /// Keeps [RelayState.tracked] within [RelayConfig.maxTrackedMessages]:
+  /// settled messages go first, oldest first; and none outlives the time a
+  /// message may wait.
+  void _capTracked(RelayState state, {int? now}) {
+    if (now != null) {
+      final int keep = config.messageTtl.inMilliseconds;
+      state.tracked.removeWhere(
+        (String _, RelayTrackedMessage m) =>
+            (m.isSettled && now - m.settledAtMillis > keep) ||
+            now - m.createdAtMillis > keep * 2,
+      );
+    }
+    final int excess = state.tracked.length - config.maxTrackedMessages;
+    if (excess <= 0) {
+      return;
+    }
+    final List<RelayTrackedMessage> order = state.tracked.values.toList()
+      ..sort((RelayTrackedMessage a, RelayTrackedMessage b) {
+        if (a.isSettled != b.isSettled) {
+          return a.isSettled ? -1 : 1;
+        }
+        return a.createdAtMillis.compareTo(b.createdAtMillis);
+      });
+    for (final RelayTrackedMessage m in order.take(excess)) {
+      state.tracked.remove(m.messageId);
+    }
+  }
+
+  /// The mailboxes friends announced: canonical address → the friends that
+  /// hold its mail. Shared files of a friend (films) can be fetched from
+  /// them too, and a device sees here whom it serves as a mailbox.
+  Future<Map<String, List<String>>> announcedMailboxes() {
+    return _locked(() async {
+      final RelayState state = await _load();
+      return <String, List<String>>{
+        for (final RelayPeerInfo p in state.peers.values)
+          if (p.relays.isNotEmpty) p.address: List<String>.of(p.relays),
+      };
+    });
+  }
+
+  /// Who confirmed the chat message [messageId] (canonical addresses); for
+  /// sending it again only to whoever is still missing it.
+  Future<Set<String>> deliveredRecipientsOf(String messageId) {
+    return _locked(() async {
+      final RelayState state = await _load();
+      return Set<String>.of(
+        state.tracked[messageId]?.delivered ?? const <String>{},
+      );
+    });
+  }
+
+  RelayProgressSnapshot _progressOf(RelayState state, int now) {
+    final Map<String, MessageDeliveryProgress> messages =
+        <String, MessageDeliveryProgress>{};
+    for (final RelayTrackedMessage tracked in state.tracked.values) {
+      int sending = 0;
+      int waiting = 0;
+      int inMailboxes = 0;
+      int copies = 0;
+      bool heldBySelf = false;
+      tracked.pending.forEach((String recipient, String rid) {
+        final RelayOutboxEntry? entry = state.outbox[rid];
+        if (entry == null) {
+          sending++;
+          return;
+        }
+        final bool own = _holdsOwnCopy(state, entry);
+        final int held = _mailboxCopiesOf(entry) + (own ? 1 : 0);
+        if (held > 0) {
+          inMailboxes++;
+          copies += held;
+          heldBySelf = heldBySelf || own;
+        } else if (entry.directAttempts <= 1 &&
+            now - entry.createdAtMillis <
+                config.depositAfter.inMilliseconds * 2) {
+          sending++;
+        } else {
+          waiting++;
+        }
+      });
+      messages[tracked.messageId] = MessageDeliveryProgress(
+        recipients:
+            tracked.pending.length +
+            tracked.delivered.length +
+            tracked.expired.length,
+        delivered: tracked.delivered.length,
+        failed: tracked.expired.length,
+        sending: sending,
+        waitingHere: waiting,
+        inMailboxes: inMailboxes,
+        mailboxCopies: copies,
+        heldBySelf: heldBySelf,
+      );
+    }
+    return RelayProgressSnapshot(
+      ready: true,
+      messages: Map<String, MessageDeliveryProgress>.unmodifiable(messages),
+    );
+  }
+
+  /// Copies of [entry] that the recipient's other mailboxes confirmed.
+  static int _mailboxCopiesOf(RelayOutboxEntry entry) {
+    if (entry.blobId != null || entry.payload['type'] == kBlobManifestType) {
+      // Only useful where the whole blob is held too.
+      return entry.blobHeldBy.length;
+    }
+    return entry.depositedTo.length;
+  }
+
+  /// Whether this device holds [entry] for its recipient as one of the
+  /// recipient's own mailboxes.
+  bool _holdsOwnCopy(RelayState state, RelayOutboxEntry entry) {
+    if (state.mailbox[entry.recipient]?.containsKey(entry.rid) ?? false) {
+      return true;
+    }
+    final String? blobId = entry.blobId ?? _blobIdOfManifest(entry);
+    return blobId != null &&
+        state.outBlobs.containsKey(blobId) &&
+        (state.peers[entry.recipient]?.relays.contains(_self) ?? false);
+  }
+
+  static String? _blobIdOfManifest(RelayOutboxEntry entry) {
+    final Object? blobId = entry.payload['b'];
+    return entry.payload['type'] == kBlobManifestType && blobId is String
+        ? blobId
+        : null;
+  }
+
+  void _publishProgress(RelayState state) {
+    final RelayProgressSnapshot next = _progressOf(state, _now());
+    if (next != progress.value) {
+      progress.value = next;
+    }
+  }
+
+  /// Whether the periodic work should run at its short interval: a first
+  /// try or a deposit is due soon, attachments are moving, or frames came
+  /// in lately. Otherwise a slow tick does (see `ReliableSignalTransport`),
+  /// which spares the battery while everything just waits.
+  bool get wantsFrequentTicks => _frequentTicks;
+
+  bool _computeFrequentTicks(RelayState state, int now) {
+    const int soon = 30 * 1000;
+    if (_blobDeposits.isNotEmpty || _blobPulls.isNotEmpty) {
+      return true;
+    }
+    if (_lastFrameAtMillis > 0 && now - _lastFrameAtMillis < 60 * 1000) {
+      return true;
+    }
+    for (final RelayOutboxEntry entry in state.outbox.values) {
+      if (entry.nextDirectAttemptAtMillis - now < soon ||
+          now - entry.createdAtMillis <
+              config.depositAfter.inMilliseconds * 3) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Makes everything queued due now: on the next tick each payload is tried
+  /// directly and each mailbox that has not confirmed gets its copy.
+  void _retryAllSoon(RelayState state, int now) {
+    for (final RelayOutboxEntry entry in state.outbox.values.toList()) {
+      if (entry.nextDirectAttemptAtMillis > now) {
+        state.outbox[entry.rid] = entry.copyWith(
+          nextDirectAttemptAtMillis: now,
+        );
+      }
+    }
+    _depositsDueNow = true;
+    _frequentTicks = true;
   }
 
   /// Hands the chat layer what it must not keep believing about its queued
@@ -748,6 +1069,17 @@ final class RelayEngine {
       final String type = rawType is String ? rawType : '';
       final List<SignalTransportFrame> forward = <SignalTransportFrame>[];
       bool changed = false;
+      final int arrivedAt = _now();
+      if (_active &&
+          _lastFrameAtMillis > 0 &&
+          arrivedAt - _lastFrameAtMillis >=
+              config.networkQuietGap.inMilliseconds) {
+        // Nothing at all came in for a long while: the network was most
+        // likely gone or changed. Whatever waits goes out again now.
+        _retryAllSoon(state, arrivedAt);
+        changed = true;
+      }
+      _lastFrameAtMillis = arrivedAt;
       if (type.startsWith('rly_')) {
         changed = await _handleProtocolFrame(
           state,
@@ -833,11 +1165,21 @@ final class RelayEngine {
         final RelayOutboxEntry? entry = state.outbox[payload['rid']];
         if (entry != null && entry.recipient == from) {
           state.outbox.remove(entry.rid);
+          _sealed.remove(entry.rid);
           // Arrived after all: whatever was about to be said about it is stale.
           state.deliveryReports.removeWhere(
             (RelayDeliveryReport r) => r.rid == entry.rid,
           );
           _reportedDirectOnly.remove(entry.rid);
+          _settleTracked(state, entry, delivered: true, now: _now());
+          // Our own copy as one of the recipient's mailboxes is not needed
+          // any more either; remembered as delivered, so a co-relay's late
+          // copy is not taken in again.
+          _dropDelivered(
+            state,
+            recipient: entry.recipient,
+            ids: <String>[entry.rid],
+          );
           final String? blobId = entry.blobId;
           if (blobId != null) {
             // Its copy for the mailboxes is not needed any more.
@@ -1886,7 +2228,11 @@ final class RelayEngine {
       }
       if (changed) {
         await _save(state);
+      } else {
+        // First tries turn into "waiting" as time passes, unsaved.
+        _publishProgress(state);
       }
+      _frequentTicks = _computeFrequentTicks(state, _now());
     });
   }
 
@@ -1903,8 +2249,12 @@ final class RelayEngine {
         .toList(growable: false);
     for (final RelayOutboxEntry entry in lapsed) {
       state.outbox.remove(entry.rid);
+      _sealed.remove(entry.rid);
       _report(state, entry, RelayDeliveryStatus.expired, now);
+      _settleTracked(state, entry, delivered: false, now: now);
     }
+    final int trackedBefore = state.tracked.length;
+    _capTracked(state, now: now);
     _reportedDirectOnly.removeWhere(
       (String rid) => !state.outbox.containsKey(rid),
     );
@@ -1971,7 +2321,7 @@ final class RelayEngine {
         state.tombstones.length +
         state.seen.length +
         state.mailbox.values.fold<int>(0, (int s, Map m) => s + m.length);
-    return before != after;
+    return before != after || trackedBefore != state.tracked.length;
   }
 
   /// Forgets announcement confirmations of people who are no longer
@@ -1995,6 +2345,11 @@ final class RelayEngine {
     int now,
   ) async {
     await _sendQuietly(entry.recipient, entry.payload);
+    return _scheduleNextDirect(entry, now);
+  }
+
+  /// [entry] counted as tried now, with its next try on the backoff.
+  RelayOutboxEntry _scheduleNextDirect(RelayOutboxEntry entry, int now) {
     final List<Duration> schedule = config.directRetrySchedule;
     final Duration wait = schedule.isEmpty
         ? config.messageTtl
@@ -2012,6 +2367,10 @@ final class RelayEngine {
       return false;
     }
     final int now = _now();
+    final bool dueNow = onlyRelay == null && _depositsDueNow;
+    if (dueNow) {
+      _depositsDueNow = false;
+    }
     bool changed = false;
     for (final RelayOutboxEntry entry in state.outbox.values.toList()) {
       if (now - entry.createdAtMillis < config.depositAfter.inMilliseconds) {
@@ -2044,14 +2403,16 @@ final class RelayEngine {
           _servesRecipient(state, entry.recipient) &&
           !(state.mailbox[entry.recipient]?.containsKey(entry.rid) ?? false) &&
           !state.tombstones.containsKey('${entry.recipient}|${entry.rid}')) {
-        // The recipient chose this very device as one of its relays: keep a
-        // copy here like any other relay would.
-        final RelayEnvelope own = await _seal(identity, recipientKey, entry);
+        // The recipient chose this very device as one of its relays (a
+        // trusted friend holding its mail): keep a copy here like any other
+        // relay would, besides the one in the outbox. It is handed over
+        // when the recipient polls its mailboxes, and co-relays that were
+        // away catch up from it.
         state.mailbox.putIfAbsent(
           entry.recipient,
           () => <String, Map<String, dynamic>>{},
         )[entry.rid] = <String, dynamic>{
-          ...own.toJson(),
+          ...await _sealedEnvelope(identity, recipientKey, entry),
           if (info.depositToken != null) 'tk': info.depositToken,
           'hv': true,
           'ha': now,
@@ -2059,6 +2420,7 @@ final class RelayEngine {
         };
         changed = true;
       }
+      final int spacing = _depositSpacingOf(entry, now);
       final List<String> targets = info.relays
           .where(
             (String relay) =>
@@ -2067,16 +2429,16 @@ final class RelayEngine {
                 !entry.depositedTo.contains(relay) &&
                 (onlyRelay == null || relay == onlyRelay) &&
                 (onlyRelay != null ||
+                    dueNow ||
                     now - (entry.depositAttemptAtMillis[relay] ?? 0) >=
-                        config.depositRetryInterval.inMilliseconds),
+                        spacing),
           )
           .toList(growable: false);
       if (targets.isEmpty) {
         continue;
       }
-      final RelayEnvelope envelope = await _seal(identity, recipientKey, entry);
       final Map<String, dynamic> wire = <String, dynamic>{
-        ...envelope.toJson(),
+        ...await _sealedEnvelope(identity, recipientKey, entry),
         // Lets relays that do not know us see that the recipient does.
         if (info.depositToken != null) 'tk': info.depositToken,
       };
@@ -2096,6 +2458,47 @@ final class RelayEngine {
       changed = true;
     }
     return changed;
+  }
+
+  /// How long to wait before handing [entry] again to a mailbox that did
+  /// not confirm: [RelayConfig.depositRetryInterval] while it is young, then
+  /// longer the older it gets, up to [RelayConfig.depositRetryMaxInterval].
+  /// Mailboxes that come online get it at once (see [_onPeerSeen]).
+  int _depositSpacingOf(RelayOutboxEntry entry, int now) {
+    const int step = 10 * 60 * 1000;
+    final int base = config.depositRetryInterval.inMilliseconds;
+    final int age = max(0, now - entry.createdAtMillis);
+    return min(
+      config.depositRetryMaxInterval.inMilliseconds,
+      base * (1 + age ~/ step),
+    );
+  }
+
+  /// [entry] sealed for its recipient as envelope JSON, reused while the
+  /// recipient's key stays the same: a retry to a mailbox is the very same
+  /// envelope again.
+  Future<Map<String, dynamic>> _sealedEnvelope(
+    RelayIdentity identity,
+    RelayPublicKeys recipientKey,
+    RelayOutboxEntry entry,
+  ) async {
+    final String key = base64Url.encode(recipientKey.x25519);
+    final ({String key, Map<String, dynamic> envelope})? cached =
+        _sealed[entry.rid];
+    if (cached != null && cached.key == key) {
+      return cached.envelope;
+    }
+    final Map<String, dynamic> envelope = (await _seal(
+      identity,
+      recipientKey,
+      entry,
+    )).toJson();
+    _sealed.remove(entry.rid);
+    _sealed[entry.rid] = (key: key, envelope: envelope);
+    while (_sealed.length > _maxSealedCached) {
+      _sealed.remove(_sealed.keys.first);
+    }
+    return envelope;
   }
 
   Future<RelayEnvelope> _seal(
@@ -2177,6 +2580,21 @@ final class RelayEngine {
             e.recipient == to && !keepTypes.contains(e.payload['type']),
       );
       bool changed = state.outbox.length != before;
+      // Their messages are not on their way any more: nobody to wait for.
+      for (final RelayTrackedMessage tracked in state.tracked.values.toList()) {
+        final String? rid = tracked.pending[to];
+        if (rid != null && !state.outbox.containsKey(rid)) {
+          tracked.pending.remove(to);
+          if (tracked.pending.isEmpty &&
+              tracked.delivered.isEmpty &&
+              tracked.expired.isEmpty) {
+            state.tracked.remove(tracked.messageId);
+          } else if (tracked.isSettled) {
+            tracked.settledAtMillis = _now();
+          }
+          changed = true;
+        }
+      }
       for (final RelayBlobOut blob in state.outBlobs.values.toList()) {
         if (blob.recipient == to) {
           await _dropOutBlob(state, blob);
@@ -2402,6 +2820,17 @@ final class RelayEngine {
     if (_active) {
       _state = state;
     }
+    // On the disk now: first tries of what was just queued may go out.
+    if (_unsent.isNotEmpty) {
+      final List<RelayOutboxEntry> unsent = List<RelayOutboxEntry>.of(_unsent);
+      _unsent.clear();
+      for (final RelayOutboxEntry entry in unsent) {
+        if (state.outbox.containsKey(entry.rid)) {
+          await _sendQuietly(entry.recipient, entry.payload);
+        }
+      }
+    }
+    _publishProgress(state);
     overview.value = RelayOverview(
       isAutomatic: state.manualRelays == null,
       relays: List<String>.unmodifiable(state.currentRelays),

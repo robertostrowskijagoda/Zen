@@ -8,6 +8,7 @@ import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
+import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/relay/reliable_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
@@ -23,6 +24,21 @@ final Provider<RelayEngine?> relayEngineProvider = Provider<RelayEngine?>((
 ) {
   return null;
 });
+
+/// Where outgoing chat messages are on their way (see
+/// `RelayEngine.progress`), for the bubbles' delivery status. Not ready
+/// wherever store-and-forward is not wired up.
+final Provider<RelayProgressSnapshot> relayDeliveryProgressProvider =
+    Provider<RelayProgressSnapshot>((Ref ref) {
+      final RelayEngine? engine = ref.watch(relayEngineProvider);
+      if (engine == null) {
+        return const RelayProgressSnapshot();
+      }
+      void changed() => ref.invalidateSelf();
+      engine.progress.addListener(changed);
+      ref.onDispose(() => engine.progress.removeListener(changed));
+      return engine.progress.value;
+    });
 
 /// Overrides that put [ReliableSignalTransport] between the app and
 /// [runtime]. Used by both the UI isolate and the Android background service.

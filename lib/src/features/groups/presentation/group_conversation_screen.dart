@@ -6,7 +6,6 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
-import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/calls/ongoing_group_call.dart';
@@ -18,6 +17,7 @@ import 'package:zen/src/features/chat/disappearing_messages.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/disappearing_timer_dialog.dart';
+import 'package:zen/src/features/chat/presentation/message_delivery_badge.dart';
 import 'package:zen/src/features/groups/group_board.dart';
 import 'package:zen/src/features/groups/group_board_providers.dart';
 import 'package:zen/src/features/groups/presentation/group_board_view.dart';
@@ -610,7 +610,7 @@ class _GroupConversationScreenState
                                     color: zen.surfaceRaised.withValues(
                                       alpha: 0.85,
                                     ),
-                                    borderRadius: BorderRadius.circular(16),
+                                    borderRadius: context.zenRadius(16),
                                     border: Border.all(color: zen.outlineSoft),
                                   ),
                                   child: Padding(
@@ -656,6 +656,13 @@ class _GroupConversationScreenState
                             zen,
                             (msg.sender.hashCode & 0x7FFFFFFF) % 8,
                           );
+                          // The look's own bubbles, or the gradient ones.
+                          final ZenLook look = ZenLook.of(context);
+                          final BoxDecoration? themed = look.bubble(
+                            zen,
+                            outgoing: isSelf,
+                          );
+                          final bool onGradient = isSelf && themed == null;
                           final Widget bubble = Align(
                             alignment: isSelf
                                 ? Alignment.centerRight
@@ -667,38 +674,44 @@ class _GroupConversationScreenState
                                     (MediaQuery.of(context).size.width * 0.78)
                                         .clamp(160.0, 440.0),
                               ),
-                              decoration: isSelf
-                                  ? BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors: <Color>[
-                                          zen.accent,
-                                          Color.lerp(
-                                            zen.accent,
-                                            zen.accentSecondary,
-                                            0.35,
-                                          )!,
-                                        ],
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                      ),
-                                      borderRadius: ZenRadii.dropEnd,
-                                      boxShadow: <BoxShadow>[
-                                        BoxShadow(
-                                          color: zen.accent.withValues(
-                                            alpha: 0.18,
+                              decoration:
+                                  themed ??
+                                  (isSelf
+                                      ? BoxDecoration(
+                                          gradient: LinearGradient(
+                                            colors: <Color>[
+                                              zen.accent,
+                                              Color.lerp(
+                                                zen.accent,
+                                                zen.accentSecondary,
+                                                0.35,
+                                              )!,
+                                            ],
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
                                           ),
-                                          blurRadius: 12,
-                                          offset: const Offset(0, 4),
-                                        ),
-                                      ],
-                                    )
-                                  : BoxDecoration(
-                                      color: zen.surfaceRaised,
-                                      borderRadius: ZenRadii.drop,
-                                      border: Border.all(
-                                        color: zen.outlineSoft,
-                                      ),
-                                    ),
+                                          borderRadius: look.bubbleRadius(
+                                            outgoing: true,
+                                          ),
+                                          boxShadow: <BoxShadow>[
+                                            BoxShadow(
+                                              color: zen.accent.withValues(
+                                                alpha: 0.18,
+                                              ),
+                                              blurRadius: 12,
+                                              offset: const Offset(0, 4),
+                                            ),
+                                          ],
+                                        )
+                                      : BoxDecoration(
+                                          color: zen.surfaceRaised,
+                                          borderRadius: look.bubbleRadius(
+                                            outgoing: false,
+                                          ),
+                                          border: Border.all(
+                                            color: zen.outlineSoft,
+                                          ),
+                                        )),
                               padding: const EdgeInsets.fromLTRB(14, 9, 14, 10),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -720,7 +733,7 @@ class _GroupConversationScreenState
                                   CopyableText(
                                     msg.text,
                                     style: TextStyle(
-                                      color: isSelf
+                                      color: onGradient
                                           ? zen.onAccent
                                           : zen.textPrimary,
                                       fontSize: 15,
@@ -759,6 +772,18 @@ class _GroupConversationScreenState
                                             ),
                                           ),
                                   ),
+                                  // How far it got, over all members.
+                                  if (msg.isOutgoing)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: MessageDeliveryBadge(
+                                        message: msg,
+                                        conversationKey:
+                                            'group:${widget.groupId}',
+                                        isGroup: true,
+                                        onAccent: onGradient,
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
@@ -809,7 +834,7 @@ class _GroupConversationScreenState
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       color: zen.surfaceRaised,
-                      borderRadius: BorderRadius.circular(26),
+                      borderRadius: context.zenRadius(26),
                       border: Border.all(color: zen.outlineSoft),
                     ),
                     child: Row(

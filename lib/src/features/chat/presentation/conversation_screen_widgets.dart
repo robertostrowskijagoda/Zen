@@ -276,11 +276,16 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
+    required this.conversationKey,
     this.entranceDelay,
     this.onReport,
   });
 
   final ChatMessage message;
+
+  /// The conversation the message is in (the friend's address): where its
+  /// delivery status and "Ponów" act.
+  final String conversationKey;
 
   /// "Zgłoś" in the long-press menu of a message we received.
   final VoidCallback? onReport;
@@ -424,18 +429,23 @@ class _MessageBubble extends StatelessWidget {
                               fontWeight: FontWeight.w500,
                             ),
                           ),
-                          if (message.deliveryState !=
-                              ChatMessageDeliveryState.none) ...<Widget>[
+                          if (outgoing) ...<Widget>[
+                            const SizedBox(width: 2),
+                            // Icon by status; long press: its label, tap:
+                            // details, legend and "Ponów".
+                            MessageDeliveryBadge(
+                              message: message,
+                              conversationKey: conversationKey,
+                              onAccent: onGradient,
+                            ),
+                          ] else if (message.deliveryState ==
+                              ChatMessageDeliveryState.sending) ...<Widget>[
+                            // An attachment still coming in.
                             const SizedBox(width: 4),
                             Icon(
-                              _deliveryIcon(message.deliveryState),
+                              Icons.schedule_rounded,
                               size: 14,
-                              color: _deliveryColor(
-                                zen,
-                                message,
-                                message.deliveryState,
-                                onGradient: onGradient,
-                              ),
+                              color: zen.textMuted,
                             ),
                           ],
                         ],
@@ -464,39 +474,6 @@ class _MessageBubble extends StatelessWidget {
 
   String _timeLabel(int millis) {
     return ZenFormat.time(DateTime.fromMillisecondsSinceEpoch(millis));
-  }
-
-  IconData _deliveryIcon(ChatMessageDeliveryState state) {
-    return switch (state) {
-      ChatMessageDeliveryState.none => Icons.fiber_manual_record_rounded,
-      ChatMessageDeliveryState.sending => Icons.schedule_rounded,
-      ChatMessageDeliveryState.sent => Icons.done_rounded,
-      ChatMessageDeliveryState.delivered => Icons.done_all_rounded,
-      ChatMessageDeliveryState.failed => Icons.error_outline_rounded,
-    };
-  }
-
-  Color _deliveryColor(
-    ZenColors zen,
-    ChatMessage message,
-    ChatMessageDeliveryState state, {
-    bool onGradient = false,
-  }) {
-    if (onGradient) {
-      if (state == ChatMessageDeliveryState.failed) {
-        return zen.onAccent;
-      }
-      return message.isRead
-          ? zen.onAccent
-          : zen.onAccent.withValues(alpha: 0.72);
-    }
-    if (state == ChatMessageDeliveryState.failed) {
-      return zen.warning;
-    }
-    if (message.isOutgoing && message.isRead) {
-      return zen.accent;
-    }
-    return message.isOutgoing ? zen.textSecondary : zen.textMuted;
   }
 }
 

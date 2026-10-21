@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/domain/messages/message_delivery_status.dart';
 import 'package:zen/src/features/relay/relay_crypto.dart';
 import 'package:zen/src/features/security/hybrid_kem.dart';
 
@@ -223,6 +224,7 @@ final class RelayOutboxEntry {
     this.depositedTo = const <String>[],
     this.depositAttemptAtMillis = const <String, int>{},
     this.blobId,
+    this.blobHeldBy = const <String>[],
   });
 
   final String rid;
@@ -249,12 +251,18 @@ final class RelayOutboxEntry {
   /// copy for the mailboxes was cut into.
   final String? blobId;
 
+  /// Mailboxes holding every chunk of the blob that carries this payload
+  /// (its own blob, or for an attachment manifest the attachment): what
+  /// the chat counts as copies waiting with the recipient's friends.
+  final List<String> blobHeldBy;
+
   RelayOutboxEntry copyWith({
     int? directAttempts,
     int? nextDirectAttemptAtMillis,
     List<String>? depositedTo,
     Map<String, int>? depositAttemptAtMillis,
     String? blobId,
+    List<String>? blobHeldBy,
   }) {
     return RelayOutboxEntry(
       rid: rid,
@@ -270,6 +278,7 @@ final class RelayOutboxEntry {
       depositAttemptAtMillis:
           depositAttemptAtMillis ?? this.depositAttemptAtMillis,
       blobId: blobId ?? this.blobId,
+      blobHeldBy: blobHeldBy ?? this.blobHeldBy,
     );
   }
 
@@ -285,6 +294,7 @@ final class RelayOutboxEntry {
     'dep': depositedTo,
     'dat': depositAttemptAtMillis,
     if (blobId != null) 'blob': blobId,
+    if (blobHeldBy.isNotEmpty) 'bh': blobHeldBy,
   };
 
   static RelayOutboxEntry? fromJson(Object? json) {
@@ -315,12 +325,113 @@ final class RelayOutboxEntry {
       depositedTo: _stringList(json['dep']),
       depositAttemptAtMillis: attempts,
       blobId: json['blob'] is String ? json['blob'] as String : null,
+      blobHeldBy: _stringList(json['bh']),
     );
   }
 }
 
+/// Where one outgoing chat message is, per recipient: kept for the chat's
+/// delivery status (see `RelayEngine.progress`) while the message is on its
+/// way and for a while after, and to know whom a retry still has to reach.
+final class RelayTrackedMessage {
+  RelayTrackedMessage({
+    required this.messageId,
+    required this.createdAtMillis,
+    this.groupId,
+    this.settledAtMillis = 0,
+    Map<String, String>? pending,
+    Set<String>? delivered,
+    Set<String>? expired,
+  }) : pending = pending ?? <String, String>{},
+       delivered = delivered ?? <String>{},
+       expired = expired ?? <String>{};
+
+  /// The chat message id (`msgId` of the payload).
+  final String messageId;
+
+  /// For a group message: the group (its thread is `group:<id>`).
+  final String? groupId;
+  final int createdAtMillis;
+
+  /// When the last recipient was settled (delivered or expired); 0 while
+  /// any is pending.
+  int settledAtMillis;
+
+  /// Recipient -> reliable id of its outbox entry, while on its way.
+  final Map<String, String> pending;
+
+  /// Recipients that confirmed it.
+  final Set<String> delivered;
+
+  /// Recipients it expired for, unconfirmed.
+  final Set<String> expired;
+
+  bool get isSettled => pending.isEmpty;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'm': messageId,
+    if (groupId != null) 'g': groupId,
+    'c': createdAtMillis,
+    if (settledAtMillis > 0) 's': settledAtMillis,
+    if (pending.isNotEmpty) 'p': pending,
+    if (delivered.isNotEmpty) 'd': delivered.toList(),
+    if (expired.isNotEmpty) 'x': expired.toList(),
+  };
+
+  static RelayTrackedMessage? fromJson(Object? json) {
+    if (json is! Map || json['m'] is! String) {
+      return null;
+    }
+    final Map<String, String> pending = <String, String>{};
+    final Object? rawPending = json['p'];
+    if (rawPending is Map) {
+      rawPending.forEach((Object? recipient, Object? rid) {
+        if (recipient is String && rid is String) {
+          pending[recipient] = rid;
+        }
+      });
+    }
+    final Object? group = json['g'];
+    return RelayTrackedMessage(
+      messageId: json['m'] as String,
+      groupId: group is String && group.isNotEmpty ? group : null,
+      createdAtMillis: (json['c'] as num?)?.toInt() ?? 0,
+      settledAtMillis: (json['s'] as num?)?.toInt() ?? 0,
+      pending: pending,
+      delivered: _stringList(json['d']).toSet(),
+      expired: _stringList(json['x']).toSet(),
+    );
+  }
+}
+
+/// The relay layer's live view of outgoing chat messages, for the bubbles.
+@immutable
+final class RelayProgressSnapshot {
+  const RelayProgressSnapshot({
+    this.ready = false,
+    this.messages = const <String, MessageDeliveryProgress>{},
+  });
+
+  /// The queue has been loaded by the isolate that owns it: a message
+  /// missing from [messages] is really unknown to it.
+  final bool ready;
+
+  /// By chat message id.
+  final Map<String, MessageDeliveryProgress> messages;
+
+  @override
+  bool operator ==(Object other) =>
+      other is RelayProgressSnapshot &&
+      other.ready == ready &&
+      mapEquals(other.messages, messages);
+
+  @override
+  int get hashCode => Object.hash(ready, messages.length);
+}
+
 /// What the relay layer can tell the chat about a queued chat message that is
-/// not (or no longer) on its way the way the sender may assume.
+/// not (or no longer) on its way the way the sender may assume, and how a
+/// group message ended.
 enum RelayDeliveryStatus {
   /// Too large for friends' mailboxes (`RelayConfig.maxRelayablePayloadBytes`):
   /// it only reaches the recipient while both devices are online at the same
@@ -329,8 +440,13 @@ enum RelayDeliveryStatus {
   directOnly,
 
   /// Nobody acknowledged it within `RelayConfig.messageTtl` (14 days) and it
-  /// was dropped from the queue: it will not be delivered any more.
+  /// was dropped from the queue: it will not be delivered any more. For a
+  /// group message: at least one member never confirmed it.
   expired,
+
+  /// A group message every member confirmed (a chat message learns this
+  /// from the recipient's own receipt).
+  delivered,
 }
 
 /// One piece of delivery news about a queued chat message, kept in the stored
@@ -345,6 +461,7 @@ final class RelayDeliveryReport {
     required this.messageId,
     required this.status,
     required this.atMillis,
+    this.groupId,
   });
 
   /// The reliable id (`_rid`) of the queued payload.
@@ -358,12 +475,16 @@ final class RelayDeliveryReport {
   final RelayDeliveryStatus status;
   final int atMillis;
 
+  /// For a group message: the group, whose thread (`group:<id>`) holds it.
+  final String? groupId;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
     'rid': rid,
     'to': recipient,
     'mid': messageId,
     's': status.name,
     'at': atMillis,
+    if (groupId != null) 'g': groupId,
   };
 
   static RelayDeliveryReport? fromJson(Object? json) {
@@ -385,12 +506,14 @@ final class RelayDeliveryReport {
         status == null) {
       return null;
     }
+    final Object? group = json['g'];
     return RelayDeliveryReport(
       rid: rid,
       recipient: recipient,
       messageId: messageId,
       status: status,
       atMillis: (json['at'] as num?)?.toInt() ?? 0,
+      groupId: group is String && group.isNotEmpty ? group : null,
     );
   }
 }
@@ -416,7 +539,9 @@ final class RelayState {
     Map<String, RelayBlobOut>? outBlobs,
     Map<String, Map<String, RelayHeldBlob>>? heldBlobs,
     Map<String, RelayBlobIn>? inBlobs,
+    Map<String, RelayTrackedMessage>? tracked,
   }) : peers = peers ?? <String, RelayPeerInfo>{},
+       tracked = tracked ?? <String, RelayTrackedMessage>{},
        outBlobs = outBlobs ?? <String, RelayBlobOut>{},
        heldBlobs = heldBlobs ?? <String, Map<String, RelayHeldBlob>>{},
        inBlobs = inBlobs ?? <String, RelayBlobIn>{},
@@ -493,40 +618,45 @@ final class RelayState {
   /// Attachments for this device being collected: `sender|blobId` -> blob.
   final Map<String, RelayBlobIn> inBlobs;
 
-  String toJsonString({bool includeMailbox = true}) => jsonEncode(
-    <String, dynamic>{
-      'v': 1,
-      if (identity != null) 'id': identity!.toJson(),
-      'peers': peers.values.map((RelayPeerInfo p) => p.toJson()).toList(),
-      if (manualRelays != null) 'manual': manualRelays,
-      'cur': currentRelays,
-      'ver': relaySetVersion,
-      // Confirmations of announcements (deposit tokens, capabilities).
-      'ann': announcedVersions,
-      'out': outbox.values.map((RelayOutboxEntry e) => e.toJson()).toList(),
-      if (includeMailbox) 'mail': mailbox,
-      'tomb': tombstones,
-      'seen': seen,
-      if (seenFloorMillis > 0) 'sfl': seenFloorMillis,
-      if (seenFloors.isNotEmpty) 'sfls': seenFloors,
-      'swg': shareWithGroups,
-      if (deliveryReports.isNotEmpty)
-        'rep': deliveryReports
-            .map((RelayDeliveryReport r) => r.toJson())
-            .toList(),
-      if (blobQuotaBytes != null) 'bq': blobQuotaBytes,
-      if (outBlobs.isNotEmpty)
-        'bo': outBlobs.values.map((RelayBlobOut b) => b.toJson()).toList(),
-      if (heldBlobs.isNotEmpty)
-        'bh': <String, dynamic>{
-          for (final MapEntry<String, Map<String, RelayHeldBlob>> e
-              in heldBlobs.entries)
-            e.key: e.value.values.map((RelayHeldBlob b) => b.toJson()).toList(),
-        },
-      if (inBlobs.isNotEmpty)
-        'bi': inBlobs.values.map((RelayBlobIn b) => b.toJson()).toList(),
-    },
-  );
+  /// Outgoing chat messages and where they are, by chat message id.
+  final Map<String, RelayTrackedMessage> tracked;
+
+  String toJsonString({
+    bool includeMailbox = true,
+  }) => jsonEncode(<String, dynamic>{
+    'v': 1,
+    if (identity != null) 'id': identity!.toJson(),
+    'peers': peers.values.map((RelayPeerInfo p) => p.toJson()).toList(),
+    if (manualRelays != null) 'manual': manualRelays,
+    'cur': currentRelays,
+    'ver': relaySetVersion,
+    // Confirmations of announcements (deposit tokens, capabilities).
+    'ann': announcedVersions,
+    'out': outbox.values.map((RelayOutboxEntry e) => e.toJson()).toList(),
+    if (includeMailbox) 'mail': mailbox,
+    'tomb': tombstones,
+    'seen': seen,
+    if (seenFloorMillis > 0) 'sfl': seenFloorMillis,
+    if (seenFloors.isNotEmpty) 'sfls': seenFloors,
+    'swg': shareWithGroups,
+    if (deliveryReports.isNotEmpty)
+      'rep': deliveryReports
+          .map((RelayDeliveryReport r) => r.toJson())
+          .toList(),
+    if (blobQuotaBytes != null) 'bq': blobQuotaBytes,
+    if (outBlobs.isNotEmpty)
+      'bo': outBlobs.values.map((RelayBlobOut b) => b.toJson()).toList(),
+    if (heldBlobs.isNotEmpty)
+      'bh': <String, dynamic>{
+        for (final MapEntry<String, Map<String, RelayHeldBlob>> e
+            in heldBlobs.entries)
+          e.key: e.value.values.map((RelayHeldBlob b) => b.toJson()).toList(),
+      },
+    if (inBlobs.isNotEmpty)
+      'bi': inBlobs.values.map((RelayBlobIn b) => b.toJson()).toList(),
+    if (tracked.isNotEmpty)
+      'trk': tracked.values.map((RelayTrackedMessage m) => m.toJson()).toList(),
+  });
 
   static RelayState fromJsonString(String raw) {
     final Object? decoded = jsonDecode(raw);
@@ -609,6 +739,13 @@ final class RelayState {
                 .map(RelayBlobIn.fromJson)
                 .whereType<RelayBlobIn>())
           blob.scope: blob,
+      },
+      tracked: <String, RelayTrackedMessage>{
+        for (final RelayTrackedMessage message
+            in ((decoded['trk'] as List?) ?? const <Object?>[])
+                .map(RelayTrackedMessage.fromJson)
+                .whereType<RelayTrackedMessage>())
+          message.messageId: message,
       },
     );
   }

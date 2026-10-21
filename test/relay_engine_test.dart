@@ -2,6 +2,7 @@ import 'dart:collection';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zen/src/domain/messages/message_delivery_status.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
@@ -1353,11 +1354,6 @@ void main() {
         'type': 'message_ack',
         'msgId': 'm-cudza',
       });
-      await engine.submit(bob, <String, dynamic>{
-        'type': 'group_message',
-        'groupId': 'g',
-        'msgId': 'gm-1',
-      });
       await mesh.advance(const Duration(days: 15));
       expect((await mesh.nodes[alice]!.state()).outbox, isEmpty);
       expect(await engine.takeDeliveryReports(), isEmpty);
@@ -1479,6 +1475,252 @@ void main() {
     state = await mesh.nodes[alice]!.state();
     expect(state.outbox, isEmpty);
   });
+
+  group('queueing rules', () {
+    test('with the recipient offline and no mailboxes, the message waits '
+        'at the sender, survives a restart and arrives once', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      await mesh.nodes[bob]!.engine.setManualRelays(<String>[]);
+      await mesh.settle();
+      expect((await mesh.nodes[alice]!.state()).peers[bob]?.relays, isEmpty);
+      await mesh.goOffline(bob);
+
+      final RelayEngine sender = mesh.nodes[alice]!.engine;
+      await sender.submit(bob, _text('tylko u mnie'));
+      expect(sender.progress.value.messages['m-tylko u mnie']?.sending, 1);
+      await mesh.advance(const Duration(seconds: 5));
+      await mesh.advance(const Duration(minutes: 1));
+
+      MessageDeliveryProgress? progress =
+          sender.progress.value.messages['m-tylko u mnie'];
+      expect(progress?.waitingHere, 1);
+      expect(progress?.inMailboxes, 0);
+      expect((await mesh.nodes[alice]!.state()).outbox, hasLength(1));
+      for (final String helper in helpers) {
+        expect(
+          (await mesh.nodes[helper]!.state()).mailbox[bob],
+          isNull,
+          reason: helper,
+        );
+      }
+
+      // The app restarts: the queue and the status come back from the disk.
+      await mesh.goOffline(alice);
+      mesh.nodes[alice]!.restart();
+      await mesh.goOnline(alice);
+      final RelayEngine restarted = mesh.nodes[alice]!.engine;
+      expect((await mesh.nodes[alice]!.state()).outbox, hasLength(1));
+      expect(restarted.progress.value.ready, isTrue);
+      expect(
+        restarted.progress.value.messages['m-tylko u mnie']?.waitingHere,
+        1,
+      );
+
+      // Still retried, on a long backoff, while bob stays away.
+      await mesh.advance(const Duration(hours: 3));
+      expect((await mesh.nodes[alice]!.state()).outbox, hasLength(1));
+
+      await mesh.goOnline(bob);
+      await mesh.advance(const Duration(minutes: 5));
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['tylko u mnie']);
+      expect((await mesh.nodes[alice]!.state()).outbox, isEmpty);
+      progress = restarted.progress.value.messages['m-tylko u mnie'];
+      expect(progress?.delivered, 1);
+      expect(progress?.pending, 0);
+
+      // Later sightings do not bring it again.
+      await mesh.advance(const Duration(hours: 1));
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['tylko u mnie']);
+    });
+
+    test('a sender that is one of the recipient\'s trusted friends keeps a '
+        'copy in its own mailbox for it as well', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      await mesh.nodes[bob]!.engine.setManualRelays(<String>[
+        alice,
+        helpers[0],
+      ]);
+      await mesh.settle();
+      expect((await mesh.nodes[alice]!.state()).peers[bob]?.relays, <String>[
+        alice,
+        helpers[0],
+      ]);
+      await mesh.goOffline(bob);
+
+      final RelayEngine sender = mesh.nodes[alice]!.engine;
+      await sender.submit(bob, _text('u mnie też'));
+      await mesh.advance(const Duration(seconds: 5));
+
+      final RelayState aliceState = await mesh.nodes[alice]!.state();
+      final String rid = aliceState.outbox.keys.single;
+      expect(aliceState.mailbox[bob]?.keys, <String>[rid]);
+      expect(
+        (await mesh.nodes[helpers[0]]!.state()).mailbox[bob]?.keys,
+        <String>[rid],
+      );
+      final MessageDeliveryProgress? progress =
+          sender.progress.value.messages['m-u mnie też'];
+      expect(progress?.inMailboxes, 1);
+      expect(progress?.mailboxCopies, 2);
+      expect(progress?.heldBySelf, isTrue);
+
+      // The other mailbox is away: bob collects the sender's own copy.
+      await mesh.goOffline(helpers[0]);
+      await mesh.goOnline(bob);
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['u mnie też']);
+      final RelayState after = await mesh.nodes[alice]!.state();
+      expect(after.outbox, isEmpty);
+      expect(after.mailbox[bob], isNull, reason: 'dropped once delivered');
+      expect(sender.progress.value.messages['m-u mnie też']?.delivered, 1);
+    });
+
+    test('the chat sees a message go from sending to waiting here, to the '
+        'mailboxes, to delivered', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final List<String> bobRelays =
+          (await mesh.nodes[bob]!.state()).currentRelays;
+      await mesh.goOffline(bob);
+      for (final String relay in bobRelays) {
+        await mesh.goOffline(relay);
+      }
+      final RelayEngine sender = mesh.nodes[alice]!.engine;
+      MessageDeliveryProgress? current() =>
+          sender.progress.value.messages['m-po kolei'];
+
+      await sender.submit(bob, _text('po kolei'));
+      expect(current()?.sending, 1);
+      await mesh.advance(const Duration(seconds: 5));
+      await mesh.advance(const Duration(seconds: 10));
+      expect(current()?.waitingHere, 1);
+
+      await mesh.goOnline(bobRelays.first);
+      await mesh.advance(const Duration(minutes: 3));
+      expect(current()?.inMailboxes, 1);
+      expect(current()?.mailboxCopies, 1);
+
+      await mesh.goOnline(bob);
+      await mesh.settle();
+      expect(mesh.nodes[bob]!.receivedTexts, <String>['po kolei']);
+      expect(current()?.delivered, 1);
+      expect(current()?.pending, 0);
+    });
+
+    test('a group message adds up its members and is reported delivered '
+        'once every member has it', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final RelayEngine sender = mesh.nodes[alice]!.engine;
+      Map<String, dynamic> groupText() => <String, dynamic>{
+        'type': 'group_message',
+        'groupId': 'g',
+        'msgId': 'gm-1',
+        'text': 'Kto jedzie?',
+      };
+      await mesh.goOffline(bob);
+      await sender.submit(bob, groupText());
+      await sender.submit(helpers[6], groupText());
+      await mesh.settle();
+      MessageDeliveryProgress? progress =
+          sender.progress.value.messages['gm-1'];
+      expect(progress?.recipients, 2);
+      expect(progress?.delivered, 1);
+
+      await mesh.advance(const Duration(seconds: 5));
+      progress = sender.progress.value.messages['gm-1'];
+      expect(progress?.inMailboxes, 1);
+      expect(await sender.takeDeliveryReports(), isEmpty);
+
+      await mesh.goOnline(bob);
+      await mesh.settle();
+      progress = sender.progress.value.messages['gm-1'];
+      expect(progress?.delivered, 2);
+      expect(progress?.pending, 0);
+      final List<RelayDeliveryReport> reports = await sender
+          .takeDeliveryReports();
+      expect(reports, hasLength(1));
+      expect(reports.single.status, RelayDeliveryStatus.delivered);
+      expect(reports.single.groupId, 'g');
+      expect(reports.single.messageId, 'gm-1');
+      expect(await sender.deliveredRecipientsOf('gm-1'), <String>{
+        bob,
+        helpers[6],
+      });
+    });
+
+    test('a group message a member never confirmed is reported failed '
+        'after the retention window', () async {
+      final _SimMesh mesh = await _meshWithRelays();
+      final RelayEngine sender = mesh.nodes[alice]!.engine;
+      await mesh.goOffline(bob);
+      await sender.submit(bob, <String, dynamic>{
+        'type': 'group_message',
+        'groupId': 'g',
+        'msgId': 'gm-2',
+        'text': 'Halo?',
+      });
+      await mesh.advance(const Duration(days: 15));
+      final List<RelayDeliveryReport> reports = await sender
+          .takeDeliveryReports();
+      expect(reports.single.status, RelayDeliveryStatus.expired);
+      expect(reports.single.groupId, 'g');
+      expect(sender.progress.value.messages['gm-2']?.failed, 1);
+    });
+
+    test(
+      'a payload goes out only once the queue holding it is stored',
+      () async {
+        final _FlakyStore store = _FlakyStore();
+        final List<Map<String, dynamic>> sent = <Map<String, dynamic>>[];
+        final RelayEngine engine = RelayEngine(
+          store: store,
+          peers: _LonePeers(),
+          send: (String to, Map<String, dynamic> payload) async {
+            sent.add(payload);
+          },
+          clock: () => 1000000,
+        );
+        await engine.activate();
+        List<Object?> texts() => sent
+            .where((Map<String, dynamic> p) => p['type'] == 'message')
+            .map((Map<String, dynamic> p) => p['text'])
+            .toList();
+
+        store.failSaves = true;
+        await expectLater(
+          engine.submit(bob, _text('pierwsza')),
+          throwsStateError,
+        );
+        expect(texts(), isEmpty, reason: 'not on the disk, not sent');
+
+        store.failSaves = false;
+        await engine.submit(bob, _text('druga'));
+        expect(texts(), <String>['pierwsza', 'druga']);
+        expect((await store.load()).outbox, hasLength(2));
+      },
+    );
+
+    test('housekeeping slows down while everything just waits', () async {
+      int now = 1000000;
+      final RelayEngine engine = RelayEngine(
+        store: MemoryRelayStateStore(),
+        peers: _LonePeers(),
+        send: (String to, Map<String, dynamic> payload) async {},
+        clock: () => now,
+      );
+      await engine.activate();
+      await engine.tick();
+      expect(engine.wantsFrequentTicks, isFalse);
+
+      await engine.submit(bob, _text('czekam'));
+      await engine.tick();
+      expect(engine.wantsFrequentTicks, isTrue);
+
+      for (int i = 0; i < 6; i++) {
+        now += const Duration(hours: 1).inMilliseconds;
+        await engine.tick();
+      }
+      expect(engine.wantsFrequentTicks, isFalse);
+    });
+  });
 }
 
 Map<String, dynamic> _fakeEnvelope({
@@ -1496,3 +1738,37 @@ Map<String, dynamic> _fakeEnvelope({
   'n': base64Url.encode(List<int>.filled(12, 1)),
   'b': base64Url.encode(List<int>.filled(40, 1)),
 };
+
+/// A store whose writes can be made to fail (a full disk).
+final class _FlakyStore implements RelayStateStore {
+  final MemoryRelayStateStore _inner = MemoryRelayStateStore();
+  bool failSaves = false;
+
+  @override
+  Future<RelayState> load() => _inner.load();
+
+  @override
+  Future<void> save(RelayState state) async {
+    if (failSaves) {
+      throw StateError('disk full');
+    }
+    await _inner.save(state);
+  }
+}
+
+/// Alice with bob as her only friend.
+final class _LonePeers implements RelayPeerSource {
+  @override
+  bool get isReady => true;
+
+  @override
+  String get localAddress => alice;
+
+  @override
+  List<RelayFriend> acceptedFriends() => <RelayFriend>[
+    RelayFriend(address: bob),
+  ];
+
+  @override
+  List<RelayFriend> groupContacts() => const <RelayFriend>[];
+}

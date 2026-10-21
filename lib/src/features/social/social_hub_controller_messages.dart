@@ -52,12 +52,9 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         sentAtMillis: timestamp,
         miniProfile: mini,
       );
-      await _updateMessageDeliveryState(
-        peerAddress: peerAddress,
+      await _markMessageQueued(
+        conversationKey: peerAddress,
         messageId: messageId,
-        deliveryState: requiresDeliveryAck
-            ? ChatMessageDeliveryState.sent
-            : ChatMessageDeliveryState.delivered,
       );
     } catch (error, stackTrace) {
       logZenError('Sending local message failed', error, stackTrace);
@@ -205,12 +202,9 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           message: message,
           encoded: encoded,
         );
-        await _updateMessageDeliveryState(
-          peerAddress: peerAddress,
+        await _markMessageQueued(
+          conversationKey: peerAddress,
           messageId: messageId,
-          deliveryState: requiresDeliveryAck
-              ? ChatMessageDeliveryState.sent
-              : ChatMessageDeliveryState.delivered,
         );
       } else {
         await _queueOutgoingAttachmentTransfer(
@@ -232,6 +226,260 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     } finally {
       unawaited(_finalizeOutgoingMessage(peerAddress, timestamp));
     }
+  }
+
+  /// [messageId] is in the reliable queue now (on the disk, retried until
+  /// delivered): "sending" becomes "sent". Anything further along — a
+  /// receipt that already came back — stays as it is.
+  Future<void> _markMessageQueued({
+    required String conversationKey,
+    required String messageId,
+  }) async {
+    if (!ref.mounted) {
+      return;
+    }
+    final List<ChatMessage> thread = await _messageTimelineStore.load(
+      conversationKey,
+    );
+    final ChatMessage? message = thread
+        .where((ChatMessage m) => m.id == messageId)
+        .firstOrNull;
+    if (message?.deliveryState != ChatMessageDeliveryState.sending) {
+      return;
+    }
+    await _updateMessageDeliveryState(
+      peerAddress: conversationKey,
+      messageId: messageId,
+      deliveryState: ChatMessageDeliveryState.sent,
+    );
+  }
+
+  /// Sends one of this person's own messages again after it failed ("Nie
+  /// udało się — ponów"), under the same id: whoever gets it twice keeps one
+  /// copy. [conversationKey] is the friend's address or `group:<id>`; in a
+  /// group only the members who did not confirm it get it again.
+  Future<void> retryOutgoingMessage({
+    required String conversationKey,
+    required String messageId,
+  }) async {
+    final List<ChatMessage> thread = await _messageTimelineStore.load(
+      conversationKey,
+    );
+    final ChatMessage? message = thread
+        .where((ChatMessage m) => m.id == messageId)
+        .firstOrNull;
+    if (message == null ||
+        !message.isOutgoing ||
+        message.deliveryState == ChatMessageDeliveryState.delivered) {
+      return;
+    }
+    if (conversationKey.startsWith('group:')) {
+      await _retryGroupMessage(
+        conversationKey.substring('group:'.length),
+        message,
+      );
+      return;
+    }
+    final String peerAddress = conversationKey;
+    if (!isRoutablePeerAddress(peerAddress)) {
+      return;
+    }
+    await _updateMessageDeliveryState(
+      peerAddress: peerAddress,
+      messageId: messageId,
+      deliveryState: ChatMessageDeliveryState.sending,
+    );
+    try {
+      bool queued = true;
+      if (message.type == ChatMessageType.text) {
+        await _sendNetworkMessage(
+          peerAddress: peerAddress,
+          messageId: message.id,
+          text: message.text,
+          sentAtMillis: message.sentAtMillis,
+          // The same message again: no new message against the limits.
+          miniProfile: _isStrangerChatPeer(peerAddress)
+              ? _ownStrangerMini()
+              : null,
+        );
+      } else {
+        queued = await _resendAttachment(peerAddress, message);
+      }
+      if (queued) {
+        await _markMessageQueued(
+          conversationKey: peerAddress,
+          messageId: messageId,
+        );
+      }
+    } catch (error, stackTrace) {
+      logZenError('Sending a message again failed', error, stackTrace);
+      await _updateMessageDeliveryState(
+        peerAddress: peerAddress,
+        messageId: messageId,
+        deliveryState: ChatMessageDeliveryState.failed,
+      );
+      rethrow;
+    } finally {
+      unawaited(
+        _finalizeOutgoingMessage(
+          peerAddress,
+          DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
+    }
+  }
+
+  Map<String, dynamic> _ownStrangerMini() {
+    final MiniProfileTag mini =
+        ref.read(strangerChatsProvider).ownMiniProfile?.call() ??
+        MiniProfileTag(
+          name: ref.read(userProfileControllerProvider).displayName.trim(),
+        );
+    return mini.toJson();
+  }
+
+  /// The attachment of [message] again: inline through the reliable queue
+  /// when it is small enough (true), else as a transfer that waits for both
+  /// devices or the recipient's mailboxes (false: the transfer moves the
+  /// message's state on itself).
+  Future<bool> _resendAttachment(
+    String peerAddress,
+    ChatMessage message,
+  ) async {
+    final String? path = message.attachmentPath?.trim().isNotEmpty == true
+        ? message.attachmentPath!.trim()
+        : null;
+    Uint8List? bytes = message.attachmentBytes?.isNotEmpty == true
+        ? message.attachmentBytes
+        : null;
+    final int size =
+        message.attachmentSizeBytes ??
+        bytes?.length ??
+        (path == null ? 0 : await _mediaVault.length(path));
+    if (bytes == null && path != null && size > 0 && size <= 1024 * 1024) {
+      bytes = await _readAttachmentBytesFromPath(path);
+    }
+    if (bytes != null && bytes.isNotEmpty) {
+      try {
+        final EncodedChatAttachment encoded = await _attachmentTransport.encode(
+          bytes,
+          type: message.type,
+          mimeType: message.mimeType,
+          fileName: message.fileName ?? message.text,
+        );
+        await _sendNetworkAttachmentMessage(
+          peerAddress: peerAddress,
+          message: message,
+          encoded: encoded,
+        );
+        return true;
+      } on FormatException {
+        if (path == null) {
+          rethrow;
+        }
+      }
+    }
+    if (path == null) {
+      throw const FormatException('Attachment payload is unavailable.');
+    }
+    await _updateMessageDeliveryState(
+      peerAddress: peerAddress,
+      messageId: message.id,
+      deliveryState: ChatMessageDeliveryState.none,
+    );
+    await _queueOutgoingAttachmentTransfer(
+      peerAddress: peerAddress,
+      message: message,
+      attachmentPath: path,
+      attachmentSizeBytes: size,
+    );
+    return false;
+  }
+
+  Future<void> _retryGroupMessage(String groupId, ChatMessage message) async {
+    final GroupProfile? group = state.groups[groupId];
+    if (group == null || group.isInvitePending) {
+      return;
+    }
+    final String key = 'group:$groupId';
+    final RelayEngine? engine = ref.read(relayEngineProvider);
+    final Set<String> confirmed = engine == null
+        ? const <String>{}
+        : await engine.deliveredRecipientsOf(message.id);
+    await _updateMessageDeliveryState(
+      peerAddress: key,
+      messageId: message.id,
+      deliveryState: ChatMessageDeliveryState.sending,
+    );
+    await _sendGroupMessageToMembers(
+      group: group,
+      messageId: message.id,
+      text: message.text,
+      timestamp: message.sentAtMillis,
+      skip: confirmed,
+    );
+  }
+
+  /// Hands a group message to the reliable transport for every member but
+  /// this device (and those in [skip]) and waits until each copy is queued;
+  /// then it shows as sent (or delivered, with nobody else in the group).
+  /// Each member's copy is acknowledged, retried and left in that member's
+  /// mailboxes while it is offline; the group's status adds them up.
+  @override
+  Future<void> _sendGroupMessageToMembers({
+    required GroupProfile group,
+    required String messageId,
+    required String text,
+    required int timestamp,
+    required Set<String> skip,
+  }) async {
+    final String key = 'group:${group.id}';
+    final String senderDisplayName = ref
+        .read(userProfileControllerProvider)
+        .displayName;
+    final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
+    final int seconds = state.disappearSecondsFor(key);
+    final int? ttl = seconds > 0 ? seconds : null;
+    final List<Future<void>> sends = <Future<void>>[];
+    for (final String member in normalizedGroupMembers(group.memberAddresses)) {
+      if (localAddr.isNotEmpty &&
+          PeerShareCodec.addressesEqual(member, localAddr)) {
+        continue;
+      }
+      if (skip.any(
+        (String done) => PeerShareCodec.addressesEqual(done, member),
+      )) {
+        continue;
+      }
+      // Goes through the reliable transport (acked, retried, relayed to
+      // offline members); receivers drop repeat copies by message id.
+      sends.add(
+        _sendFriendLifecycleSignal(
+          peerAddress: member,
+          payload: <String, dynamic>{
+            'type': 'group_message',
+            'groupId': group.id,
+            'groupName': group.name,
+            'msgId': messageId,
+            'text': text,
+            'senderName': senderDisplayName,
+            'timestamp': timestamp,
+            'ttl': ?ttl,
+          },
+        ),
+      );
+    }
+    await Future.wait(sends);
+    if (sends.isEmpty && skip.isEmpty) {
+      // Nobody else in the group: nothing to wait for.
+      await _updateMessageDeliveryState(
+        peerAddress: key,
+        messageId: messageId,
+        deliveryState: ChatMessageDeliveryState.delivered,
+      );
+      return;
+    }
+    await _markMessageQueued(conversationKey: key, messageId: messageId);
   }
 
   Future<void> _finalizeOutgoingMessage(
@@ -715,6 +963,15 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           }
           final String messageId =
               signal.messageId ?? 'grp-in-$timestamp-${signal.sender}';
+          if (signal.messageId != null &&
+              await _timelineHasMessage(
+                peerAddress: 'group:${signal.groupId}',
+                messageId: messageId,
+              )) {
+            // The same message again (sent again after a retry, or both
+            // directly and from a mailbox): kept once.
+            return;
+          }
           await _adoptDisappearTimerOf(signal, timestamp);
           await _messageTimelineStore.append(
             'group:${signal.groupId}',

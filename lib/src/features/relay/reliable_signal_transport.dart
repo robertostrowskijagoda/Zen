@@ -24,6 +24,7 @@ final class ReliableSignalTransport implements SignalTransport {
     required SignalTransport delegate,
     required this.engine,
     this.tickInterval = const Duration(seconds: 5),
+    this.idleTickInterval = const Duration(seconds: 30),
     ValueListenable<bool>? nodeRunning,
   }) : _delegate = delegate,
        _nodeRunning = nodeRunning {
@@ -32,7 +33,15 @@ final class ReliableSignalTransport implements SignalTransport {
 
   final SignalTransport _delegate;
   final RelayEngine engine;
+
+  /// How often the engine's housekeeping runs while something is due soon
+  /// (a first try, a deposit, attachments moving, frames coming in)…
   final Duration tickInterval;
+
+  /// …and while everything just waits (recipients offline, copies with
+  /// their mailboxes, backoffs running): fewer wake-ups, which is what
+  /// matters for the battery while the app works in the background.
+  final Duration idleTickInterval;
 
   /// Whether this isolate's mesh node is up. The node can be stopped and
   /// started behind this wrapper's back (the Android background handoff
@@ -44,6 +53,7 @@ final class ReliableSignalTransport implements SignalTransport {
       StreamController<SignalTransportFrame>.broadcast();
   StreamSubscription<SignalTransportFrame>? _subscription;
   Timer? _ticker;
+  DateTime? _tickDueAt;
   bool _engineActive = false;
 
   @override
@@ -72,6 +82,8 @@ final class ReliableSignalTransport implements SignalTransport {
   }) async {
     if (isReliablePayload(payload)) {
       await engine.submit(remoteAddress, payload);
+      // Its mailboxes get a copy a few seconds from now if nobody answers.
+      _hurryTick();
       return;
     }
     final Map<String, dynamic> wire = payload.containsKey(kSendOnceKey)
@@ -103,6 +115,8 @@ final class ReliableSignalTransport implements SignalTransport {
     // Any frame at all means the node is up in this isolate.
     if (!_engineActive) {
       unawaitedLogged(_activateEngine(), context: 'Relay engine activation');
+    } else {
+      _hurryTick();
     }
     unawaitedLogged(
       engine.handleIncoming(frame).then((List<SignalTransportFrame> out) {
@@ -134,16 +148,57 @@ final class ReliableSignalTransport implements SignalTransport {
     }
     _engineActive = true;
     await engine.activate();
+    _scheduleTick(tickInterval);
+  }
+
+  /// Arms the next tick [delay] from now; each tick arms the one after it,
+  /// at the short or the idle interval as the engine needs.
+  void _scheduleTick(Duration delay) {
     _ticker?.cancel();
-    _ticker = Timer.periodic(tickInterval, (_) {
-      unawaitedLogged(engine.tick(), context: 'Relay engine tick failed');
+    _ticker = null;
+    _tickDueAt = null;
+    if (!_engineActive) {
+      return;
+    }
+    _tickDueAt = DateTime.now().add(delay);
+    _ticker = Timer(delay, () {
+      _ticker = null;
+      _tickDueAt = null;
+      unawaitedLogged(
+        engine.tick().whenComplete(() {
+          if (_engineActive && _ticker == null) {
+            _scheduleTick(_nextTickDelay());
+          }
+        }),
+        context: 'Relay engine tick failed',
+      );
     });
+  }
+
+  Duration _nextTickDelay() {
+    if (engine.wantsFrequentTicks || idleTickInterval <= tickInterval) {
+      return tickInterval;
+    }
+    return idleTickInterval;
+  }
+
+  /// Something was queued or came in: the next tick comes at the short
+  /// interval, not the idle one.
+  void _hurryTick() {
+    final DateTime? due = _tickDueAt;
+    if (!_engineActive || _ticker == null || due == null) {
+      return; // a tick is running and arms the next one itself
+    }
+    if (due.isAfter(DateTime.now().add(tickInterval))) {
+      _scheduleTick(tickInterval);
+    }
   }
 
   void _deactivateEngine() {
     _engineActive = false;
     _ticker?.cancel();
     _ticker = null;
+    _tickDueAt = null;
     engine.deactivate();
   }
 }

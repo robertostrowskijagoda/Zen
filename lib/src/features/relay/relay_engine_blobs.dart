@@ -479,9 +479,26 @@ extension _RelayEngineBlobs on RelayEngine {
       }
     }
     if (blob.isCompleteAt(from)) {
+      changed = _noteBlobHeldBy(state, blob, from) || changed;
       changed = await _maybeRetireOutBlob(state, blob) || changed;
     }
     return changed;
+  }
+
+  /// [relay] holds all of [blob]: the payload it carries counts as waiting
+  /// there (for the chat's delivery status).
+  bool _noteBlobHeldBy(RelayState state, RelayBlobOut blob, String relay) {
+    final String? rid = blob.kind == RelayBlobKind.payload
+        ? blob.ref
+        : blob.manifestRid;
+    final RelayOutboxEntry? entry = rid == null ? null : state.outbox[rid];
+    if (entry == null || entry.blobHeldBy.contains(relay)) {
+      return false;
+    }
+    state.outbox[entry.rid] = entry.copyWith(
+      blobHeldBy: <String>[...entry.blobHeldBy, relay],
+    );
+    return true;
   }
 
   Future<bool> _handleBlobRefused(
