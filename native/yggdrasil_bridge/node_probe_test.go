@@ -61,11 +61,11 @@ func TestApplyAndroidRuntimeConfigUsesCuratedPeersAndDisablesMulticast(t *testin
 	cfg := config.GenerateConfig()
 	cfg.Peers = []string{"tls://203.0.113.10:443?sni=stale"}
 	applyAndroidRuntimeConfig(cfg)
-	if len(cfg.Peers) != len(androidPublicPeers) {
+	if len(cfg.Peers) != len(androidBootstrapPeers()) {
 		t.Fatalf("stale peers were kept: %v", cfg.Peers)
 	}
-	if cfg.Peers[0] != androidPublicPeers[0] {
-		t.Fatalf("first peer = %q, want %q", cfg.Peers[0], androidPublicPeers[0])
+	if cfg.Peers[0] != androidBootstrapPeers()[0] {
+		t.Fatalf("first peer = %q, want %q", cfg.Peers[0], androidBootstrapPeers()[0])
 	}
 	if len(cfg.MulticastInterfaces) != 0 {
 		t.Fatalf("multicast should be disabled, got %#v", cfg.MulticastInterfaces)

@@ -168,6 +168,7 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     // Devices, not accounts: the ledger knows which device it talks to.
     transport: ref.read(meshTransportProvider),
     localAddress: () => ref.read(runtimeNodeSnapshotProvider).localAddress,
+    localSessionKey: () => ref.read(runtimeNodeRuntimeProvider).sessionKey,
     deviceName: thisDeviceName,
     // Group members who are not friends: their answer tells their account,
     // so their other devices count as them too.
@@ -194,6 +195,25 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     startSuspended: !inService && !kIsWeb && Platform.isAndroid,
     createIdentity: !inService,
   );
+  // Device keys proven by hybrid-signed hellos and named by friends'
+  // signed device records are pinned in the bridge (pq_session.go); a
+  // signed key that contradicts the session, or a pin, is warned about in
+  // the chat with that address.
+  final RuntimeNodeRuntime runtime = ref.read(runtimeNodeRuntimeProvider);
+  void warnKeyMismatch(String address) => unawaitedLogged(
+    ref
+        .read(socialHubControllerProvider.notifier)
+        .warnDeviceKeyMismatch(address),
+    context: 'Ostrzeżenie o kluczu urządzenia',
+  );
+  node
+    ..onSessionKeys = (Map<String, String> keys, {bool force = false}) {
+      runtime.vouchSessionKeys(keys, force: force);
+    }
+    ..onDeviceKeyMismatch = warnKeyMismatch;
+  final StreamSubscription<String> keyConflicts = runtime.sessionKeyConflicts
+      .listen(warnKeyMismatch);
+  ref.onDispose(keyConflicts.cancel);
   unawaitedLogged(node.start(), context: 'Start dziennika nie udał się');
   // Follows are signed entries; followers learn of them from hellos.
   final FollowLedger follows = FollowLedger.of(node);

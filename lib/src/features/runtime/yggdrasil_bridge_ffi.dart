@@ -49,6 +49,27 @@ abstract interface class NodeSignalBridge
   /// Which Yggdrasil and Go the library was built with:
   /// `{yggdrasil, go, os, arch}`.
   Map<String, dynamic> getBuildInfo();
+
+  /// The built-in public peers: `{peers: [{uri, country, stable,
+  /// encrypted}], custom}` (public_peers_exports.go).
+  Map<String, dynamic> defaultPublicPeers();
+
+  /// [requestJson] `{peers: [uri, ...]}` makes the user's list the public
+  /// peers of every node of this process, at once; `{peers: null}` goes back
+  /// to the built-in list. Returns `{applied, invalid, nodes}`.
+  Map<String, dynamic> setPublicPeers(String requestJson);
+
+  /// Checks [requestJson] `{peers: [uri, ...]}` (blocks up to a few
+  /// seconds: call it off the UI isolate). Returns `{results: [{uri,
+  /// reachable, latencyMs, key, keyMatches, error}]}`.
+  Map<String, dynamic> probePeers(String requestJson);
+
+  /// The device keys the node pinned per address: `{pins: {address:
+  /// fingerprint}, own}` (pq_session.go).
+  Map<String, dynamic> pqPins(int handle);
+
+  /// Adds pins kept from an earlier run: [pinsJson] `{pins: {...}}`.
+  Map<String, dynamic> setPqPins(int handle, String pinsJson);
 }
 
 /// Absolute paths the Windows build looks for the bridge DLL at, in order.
@@ -209,6 +230,25 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
       _matchLocalLinkAdvert = library
           .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
             'YggLocalLinkMatchJson',
+          ),
+      _defaultPublicPeers = library
+          .lookupFunction<_NativeNoArgCall, _DartNoArgCall>(
+            'YggDefaultPublicPeersJson',
+          ),
+      _setPublicPeers = library
+          .lookupFunction<_NativeStringArgCall, _DartStringArgCall>(
+            'YggSetPublicPeersJson',
+          ),
+      _probePeers = library
+          .lookupFunction<_NativeStringArgCall, _DartStringArgCall>(
+            'YggProbePeersJson',
+          ),
+      _pqPins = library.lookupFunction<_NativeIntArgCall, _DartIntArgCall>(
+        'YggPqPinsJson',
+      ),
+      _setPqPins = library
+          .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
+            'YggPqSetPinsJson',
           );
 
   final void Function(Pointer<Utf8>) _freeString;
@@ -236,6 +276,11 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
   final Pointer<Utf8> Function(int, Pointer<Utf8>) _closeLocalLink;
   final Pointer<Utf8> Function(int, Pointer<Utf8>) _localLinkAdvert;
   final Pointer<Utf8> Function(int, Pointer<Utf8>) _matchLocalLinkAdvert;
+  final Pointer<Utf8> Function() _defaultPublicPeers;
+  final Pointer<Utf8> Function(Pointer<Utf8>) _setPublicPeers;
+  final Pointer<Utf8> Function(Pointer<Utf8>) _probePeers;
+  final Pointer<Utf8> Function(int) _pqPins;
+  final Pointer<Utf8> Function(int, Pointer<Utf8>) _setPqPins;
 
   static YggdrasilBridgeFfi load() {
     final DynamicLibrary library = _openLibrary();
@@ -466,6 +511,38 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
   @override
   Map<String, dynamic> matchLocalLinkAdvert(int handle, String requestJson) =>
       _callWithString(_matchLocalLinkAdvert, handle, requestJson);
+
+  @override
+  Map<String, dynamic> defaultPublicPeers() =>
+      _extractMap(_readEnvelope(_defaultPublicPeers()));
+
+  @override
+  Map<String, dynamic> setPublicPeers(String requestJson) =>
+      _callWithStringOnly(_setPublicPeers, requestJson);
+
+  @override
+  Map<String, dynamic> probePeers(String requestJson) =>
+      _callWithStringOnly(_probePeers, requestJson);
+
+  @override
+  Map<String, dynamic> pqPins(int handle) =>
+      _extractMap(_readEnvelope(_pqPins(handle)));
+
+  @override
+  Map<String, dynamic> setPqPins(int handle, String pinsJson) =>
+      _callWithString(_setPqPins, handle, pinsJson);
+
+  Map<String, dynamic> _callWithStringOnly(
+    Pointer<Utf8> Function(Pointer<Utf8>) call,
+    String argument,
+  ) {
+    final Pointer<Utf8> native = argument.toNativeUtf8();
+    try {
+      return _extractMap(_readEnvelope(call(native)));
+    } finally {
+      malloc.free(native);
+    }
+  }
 
   Map<String, dynamic> _callWithString(
     Pointer<Utf8> Function(int, Pointer<Utf8>) call,

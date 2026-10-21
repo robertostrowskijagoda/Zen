@@ -486,9 +486,23 @@ final class LedgerReplicator {
 
   /// Starts fetching blob [id] from [sources] (e.g. whoever gave us the
   /// post, then the author's circle).
-  void fetchBlob(String id, List<String> sources) {
+  ///
+  /// With [firstChunks] only the manifest and that many pieces from the
+  /// start are fetched (the beginning of a film, ready to play at once);
+  /// the blob then stops being wanted, so nothing else of it is fetched
+  /// until someone asks for all of it. It never narrows a whole fetch
+  /// already under way.
+  void fetchBlob(String id, List<String> sources, {int? firstChunks}) {
     if (blobs.isComplete(id) || blobs.refused.contains(id) || sources.isEmpty) {
       return;
+    }
+    if (firstChunks == null) {
+      _headOnly.remove(id);
+    } else if (!blobs.wanted.contains(id) || _headOnly.containsKey(id)) {
+      if (_headHere(id, firstChunks)) {
+        return;
+      }
+      _headOnly[id] = firstChunks;
     }
     blobs.want(id);
     final List<String> known = _blobSources[id] ??= <String>[];
@@ -519,6 +533,14 @@ final class LedgerReplicator {
       _pendingChunks.remove(id);
       _requestBlob(id);
     }
+  }
+
+  /// Stops fetching blob [id] for now (a film scrolled past): the pieces
+  /// already here stay, and [fetchBlob] picks up where it stopped.
+  void pauseBlob(String id) {
+    _headOnly.remove(id);
+    _pendingChunks.remove(id);
+    blobs.markDone(id);
   }
 
   /// Asks again for whatever is still missing (call periodically).
@@ -556,8 +578,17 @@ final class LedgerReplicator {
         if (answered.contains(s)) s,
     ];
     final List<String> use = active.isEmpty ? sources : active;
+    final int? head = _headOnly[id];
+    if (head != null && _headHere(id, head)) {
+      _finishHead(id);
+      return;
+    }
     final List<String> missing = blobs
         .missingChunks(id)
+        .where(
+          (String c) =>
+              head == null || blobs.manifest(id)!.chunks.indexOf(c) < head,
+        )
         .take(chunksPerRequest * use.length)
         .toList();
     final Map<String, List<String>> perSource = <String, List<String>>{};
@@ -638,7 +669,10 @@ final class LedgerReplicator {
         final Set<String>? pending = _pendingChunks[id];
         pending?.remove(hash);
         _checkComplete(id);
-        if (blobs.wanted.contains(id) && (pending?.isEmpty ?? true)) {
+        final int? head = _headOnly[id];
+        if (head != null && _headHere(id, head)) {
+          _finishHead(id);
+        } else if (blobs.wanted.contains(id) && (pending?.isEmpty ?? true)) {
           _requestBlob(id);
         }
       }
@@ -648,6 +682,7 @@ final class LedgerReplicator {
   void _checkComplete(String id) {
     if (blobs.isComplete(id)) {
       blobs.markDone(id);
+      _headOnly.remove(id);
       _blobSources.remove(id);
       _blobRound.remove(id);
       _pendingChunks.remove(id);
@@ -655,6 +690,38 @@ final class LedgerReplicator {
       onBlobComplete?.call(id);
     }
   }
+
+  /// Blobs fetched only up to a number of pieces ([fetchBlob]'s
+  /// `firstChunks`).
+  final Map<String, int> _headOnly = <String, int>{};
+
+  /// Whether the manifest of [id] and its first [count] pieces are here.
+  bool _headHere(String id, int count) {
+    final BlobManifest? manifest = blobs.manifest(id);
+    if (manifest == null) {
+      return false;
+    }
+    final int n = count < manifest.chunks.length
+        ? count
+        : manifest.chunks.length;
+    for (int i = 0; i < n; i++) {
+      if (!blobs.backend.has(manifest.chunks[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// The beginning of [id] is here: it is not wanted any more.
+  void _finishHead(String id) {
+    _headOnly.remove(id);
+    _pendingChunks.remove(id);
+    blobs.markDone(id);
+    onBlobHead?.call(id);
+  }
+
+  /// Called when the beginning asked for with `firstChunks` arrived.
+  void Function(String blobId)? onBlobHead;
 
   Future<void> dispose() => _subscription.cancel();
 }

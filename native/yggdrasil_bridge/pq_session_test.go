@@ -216,15 +216,16 @@ func TestPQSessionRecoversWhenTheReceiverLostIt(t *testing.T) {
 	network.take(bIP)
 
 	// B starts again (a restart, the other process of the device): same
-	// key, no sessions.
+	// key, no sessions, no challenges.
+	network.clock = network.clock.Add(pqKeyRequestInterval)
 	network.add(2)
 	mustSend(t, a, bIP, "lost")
 	network.pump()
 	if got := network.take(bIP); len(got) != 0 {
 		t.Fatalf("a frame of a session B does not know opened: %q", got)
 	}
-	if a.peers[bIP.String()].send.acked {
-		t.Fatal("B's answer must put the ciphertext back in A's frames")
+	if a.peers[bIP.String()].send != nil {
+		t.Fatal("B's answer must make A start a new session")
 	}
 	mustSend(t, a, bIP, "again")
 	network.pump()

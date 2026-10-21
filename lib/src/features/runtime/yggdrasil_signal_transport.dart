@@ -261,6 +261,7 @@ final class YggdrasilSignalTransport implements SignalTransport {
         payload: payload,
         receivedAtMillis: DateTime.now().millisecondsSinceEpoch,
         door: result['door'] == true,
+        senderKey: result['key'] as String?,
       ),
     );
   }

@@ -1,10 +1,17 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"encoding/hex"
+	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Public Yggdrasil peers, refreshed from https://publicpeers.neilalexander.dev/
@@ -314,14 +321,24 @@ func selectAndroidBootstrapPeers(pool []publicPeer, count int) []string {
 	return candidates
 }
 
-// desktopPublicPeers spreads the desktop's connections over as many
-// countries as possible: one stable peer per country per round, TLS
-// preferred, no IPv6 literals (many homes have no IPv6).
+// desktopPublicPeers is what a desktop dials: the user's list when they
+// made one, else a spread over as many countries as possible — one stable
+// peer per country per round, TLS preferred, encrypted transports only,
+// one URI per host (two links to one node only take a slot), no IPv6
+// literals (many homes have no IPv6).
 func desktopPublicPeers(count int) []string {
-	schemeRank := map[string]int{"tls": 0, "quic": 1, "tcp": 2, "wss": 3, "ws": 4}
+	if uris, ok := firstUserPeers(maxUserPublicPeers); ok {
+		return uris
+	}
+	return builtInDesktopPeers(count)
+}
+
+// builtInDesktopPeers is the desktop's spread over the built-in pool.
+func builtInDesktopPeers(count int) []string {
+	schemeRank := map[string]int{"tls": 0, "quic": 1, "wss": 2}
 	byCountry := map[string][]string{}
 	countries := make([]string, 0)
-	for _, peer := range publicPeerPool {
+	for _, peer := range builtInPublicPeers() {
 		if _, ok := schemeRank[peerScheme(peer.uri)]; !ok || !peer.stable || peerHostIsIPv6Literal(peer.uri) {
 			continue
 		}
@@ -337,16 +354,23 @@ func desktopPublicPeers(count int) []string {
 		})
 	}
 	selected := make([]string, 0, count)
+	hosts := map[string]bool{}
 	for round := 0; len(selected) < count; round++ {
 		added := false
 		for _, country := range countries {
 			list := byCountry[country]
-			if round < len(list) {
-				selected = append(selected, list[round])
-				added = true
-				if len(selected) >= count {
-					break
-				}
+			if round >= len(list) {
+				continue
+			}
+			added = true
+			host := peerHost(list[round])
+			if hosts[host] {
+				continue
+			}
+			hosts[host] = true
+			selected = append(selected, list[round])
+			if len(selected) >= count {
+				break
 			}
 		}
 		if !added {
@@ -354,6 +378,14 @@ func desktopPublicPeers(count int) []string {
 		}
 	}
 	return selected
+}
+
+func peerHost(uri string) string {
+	parsed, err := url.Parse(strings.TrimSpace(uri))
+	if err != nil {
+		return uri
+	}
+	return strings.ToLower(parsed.Hostname())
 }
 
 // desktopRuntimePeers keeps peers the user or the app added that are not
@@ -388,4 +420,179 @@ func isLocalPeerURI(peer string) bool {
 	}
 	ip := net.ParseIP(parsed.Hostname())
 	return ip != nil && (ip.IsPrivate() || ip.IsLinkLocalUnicast())
+}
+
+// Encrypted transports. tls://, quic:// and wss:// links run TLS 1.3,
+// where Go negotiates the hybrid X25519MLKEM768 key exchange by default:
+// whoever watches the line (the ISP, a café network) sees neither which
+// Yggdrasil keys this node talks to (ironwood headers carry them in clear)
+// nor its routing traffic. tcp:// and ws:// carry all of that in clear, so
+// the app never picks them on its own; a user may still add one.
+var encryptedPeerSchemes = map[string]bool{"tls": true, "quic": true, "wss": true}
+
+func isEncryptedPeerURI(uri string) bool {
+	return encryptedPeerSchemes[peerScheme(uri)]
+}
+
+// builtInPublicPeers is the pool the app chooses from by itself: every
+// listed peer on an encrypted transport.
+func builtInPublicPeers() []publicPeer {
+	pool := make([]publicPeer, 0, len(publicPeerPool))
+	for _, peer := range publicPeerPool {
+		if isEncryptedPeerURI(peer.uri) {
+			pool = append(pool, peer)
+		}
+	}
+	return pool
+}
+
+// The public peers the user chose in the app (YggSetPublicPeersJson), in
+// their order; unset: the built-in pool.
+var userPublicPeers struct {
+	mu   sync.RWMutex
+	set  bool
+	uris []string
+}
+
+// Most of the user's peers a node dials at once.
+const maxUserPublicPeers = 32
+
+func setUserPublicPeers(uris []string, set bool) {
+	userPublicPeers.mu.Lock()
+	defer userPublicPeers.mu.Unlock()
+	userPublicPeers.set = set
+	userPublicPeers.uris = append([]string(nil), uris...)
+}
+
+func currentUserPublicPeers() ([]string, bool) {
+	userPublicPeers.mu.RLock()
+	defer userPublicPeers.mu.RUnlock()
+	return append([]string(nil), userPublicPeers.uris...), userPublicPeers.set
+}
+
+// activePublicPeerPool is what probing, the phone's starting set and the
+// desktop's selection come from: the user's list, or the built-in pool.
+func activePublicPeerPool() []publicPeer {
+	if uris, set := currentUserPublicPeers(); set {
+		pool := make([]publicPeer, 0, len(uris))
+		for _, uri := range uris {
+			pool = append(pool, publicPeer{uri: uri, stable: true})
+		}
+		return pool
+	}
+	return builtInPublicPeers()
+}
+
+func defaultPublicPeerURIs() []string {
+	return publicPeerURIs(activePublicPeerPool())
+}
+
+// firstUserPeers is the user's list (when set) cut to count, in the
+// user's order: what they chose is dialled as chosen.
+func firstUserPeers(count int) ([]string, bool) {
+	uris, set := currentUserPublicPeers()
+	if !set {
+		return nil, false
+	}
+	if len(uris) > count {
+		uris = uris[:count]
+	}
+	return uris, true
+}
+
+// Query options of a peer URI that Yggdrasil 0.5 understands.
+var peerURIOptions = map[string]bool{
+	"key": true, "priority": true, "password": true, "maxbackoff": true, "sni": true,
+}
+
+// validatePeerURI checks a peer URI as Yggdrasil 0.5.14 would dial it, but
+// stricter where Yggdrasil is lenient (a short ?key= is padded with zeros
+// there, an unknown option ignored), and returns it normalised.
+func validatePeerURI(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 512 {
+		return "", errors.New("empty or too long")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("not a URI: %w", err)
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	switch scheme {
+	case "tls", "quic", "tcp", "ws", "wss":
+	default:
+		return "", fmt.Errorf("unsupported transport %q", parsed.Scheme)
+	}
+	parsed.Scheme = scheme
+	if parsed.Opaque != "" || parsed.User != nil || parsed.Fragment != "" {
+		return "", errors.New("unexpected parts")
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return "", errors.New("no host")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsUnspecified() || ip.IsMulticast() || isYggNodeAddress(ip) || (ip.To4() == nil && ip.To16()[0]&0xfe == 0x02) {
+			return "", errors.New("not a dialable address")
+		}
+	}
+	port := parsed.Port()
+	if port == "" && (scheme == "tcp" || scheme == "tls" || scheme == "quic") {
+		return "", errors.New("no port")
+	}
+	if port != "" {
+		number, err := strconv.Atoi(port)
+		if err != nil || number < 1 || number > 65535 {
+			return "", errors.New("bad port")
+		}
+	}
+	if scheme != "ws" && scheme != "wss" && parsed.Path != "" && parsed.Path != "/" {
+		return "", errors.New("a path only goes with ws:// and wss://")
+	}
+	query := parsed.Query()
+	for name, values := range query {
+		if !peerURIOptions[name] {
+			return "", fmt.Errorf("unknown option %q", name)
+		}
+		if name != "key" && len(values) != 1 {
+			return "", fmt.Errorf("option %q given twice", name)
+		}
+	}
+	for _, key := range query["key"] {
+		decoded, err := hex.DecodeString(key)
+		if err != nil || len(decoded) != ed25519.PublicKeySize {
+			return "", errors.New("key must be 64 hex digits")
+		}
+	}
+	if value := query.Get("priority"); value != "" {
+		if _, err := strconv.ParseUint(value, 10, 8); err != nil {
+			return "", errors.New("priority must be 0-255")
+		}
+	}
+	if value := query.Get("password"); len(value) > 64 {
+		return "", errors.New("password longer than 64 bytes")
+	}
+	if value := query.Get("maxbackoff"); value != "" {
+		duration, err := time.ParseDuration(value)
+		if err != nil || duration < 5*time.Second {
+			return "", errors.New("maxbackoff must be a duration of 5s or more")
+		}
+	}
+	if value := query.Get("sni"); value != "" && net.ParseIP(value) != nil {
+		return "", errors.New("sni must be a name")
+	}
+	return parsed.String(), nil
+}
+
+// peerPinnedKeys are the ?key= values of a peer URI (lower case hex).
+func peerPinnedKeys(uri string) []string {
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return nil
+	}
+	keys := make([]string, 0, 1)
+	for _, key := range parsed.Query()["key"] {
+		keys = append(keys, strings.ToLower(key))
+	}
+	return keys
 }

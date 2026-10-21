@@ -2,6 +2,7 @@ package main
 
 /*
 #include <stdlib.h>
+#include <string.h>
 */
 import "C"
 
@@ -17,8 +18,15 @@ import (
 	"github.com/yggdrasil-network/yggdrasil-go/src/version"
 )
 
+// YggFreeString frees a string the bridge handed out, overwriting it first:
+// answers may carry secrets (a KEM secret, memguard.go).
+//
 //export YggFreeString
 func YggFreeString(pointer *C.char) {
+	if pointer == nil {
+		return
+	}
+	C.memset(unsafe.Pointer(pointer), 0, C.strlen(pointer))
 	C.free(unsafe.Pointer(pointer))
 }
 
@@ -255,6 +263,9 @@ func signalInboxResponse(message signalMessage) *C.char {
 	}
 	if message.Door {
 		data["door"] = true
+	}
+	if message.Key != "" {
+		data["key"] = message.Key
 	}
 	return responseOK(data)
 }

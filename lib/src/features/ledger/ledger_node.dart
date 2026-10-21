@@ -188,6 +188,7 @@ final class LedgerNode {
     this.createIdentity = true,
     BridgeProbe? reachProbe,
     this.localAddress,
+    this.localSessionKey,
     this.greetAlso,
   }) : _clock = clock ?? HlcClock(),
        _reachProbe = reachProbe ?? yggBridgeProbe,
@@ -288,6 +289,35 @@ final class LedgerNode {
 
   /// This device's own mesh address ('' while unknown).
   final String Function()? localAddress;
+
+  /// Fingerprint (hex) of this node's post-quantum device key ('' while
+  /// unknown): the hello signs it together with the address, binding the
+  /// session layer (pq_session.go) to this device's hybrid key.
+  final String Function()? localSessionKey;
+
+  /// Pins device keys (address → fingerprint) in the bridge: keys proven
+  /// by hybrid-signed hellos and named by friends' signed device records.
+  /// With `force` the key replaces a different pin (a known friend's
+  /// signed hello contradicts the session it came over).
+  void Function(Map<String, String> keys, {bool force})? onSessionKeys;
+
+  /// A hello signed by [address]'s device names another device key than
+  /// the session it came over: someone else holds that address's node key.
+  /// The hello is refused; the app warns in the chat.
+  void Function(String address)? onDeviceKeyMismatch;
+
+  /// Device keys proven or named per address (normalised), for the friend
+  /// list ([sessionKeyOf]). In memory: hellos and records bring them back.
+  final Map<String, String> _sessionKeys = <String, String>{};
+  static const int _maxSessionKeys = 5000;
+
+  /// Addresses already warned about, with when (a warning an hour at most).
+  final Map<String, int> _keyWarnedAt = <String, int>{};
+
+  /// The device key [address] proved in a hello signed by its hybrid
+  /// device key (or a friend's signed device record names), or null.
+  String? sessionKeyOf(String address) =>
+      _sessionKeys[PeerShareCodec.normalizeAddress(address)];
 
   /// Other addresses to greet now and then (group members who are not
   /// friends): their answer tells which account they belong to, so their
@@ -1307,6 +1337,14 @@ final class LedgerNode {
     if (n == _ownAddress) {
       return;
     }
+    // The device key it names: signed (hybrid) by the device, in a space of
+    // this account or a friend's. Pinned before any contact; a different
+    // pin already there stays and is reported.
+    final Object? pq = e.body['pq'];
+    if (pq is String && _sessionKeyPattern.hasMatch(pq)) {
+      _rememberSessionKey(n, pq);
+      onSessionKeys?.call(<String, String>{n: pq});
+    }
     // Only the newest record of a device counts (it may have moved).
     for (final _DeviceRef r in _devices.values) {
       if (r.device == e.device && r.at > e.hlc.millis) {
@@ -1396,16 +1434,23 @@ final class LedgerNode {
         last = e;
       }
     }
+    final String key = _ownSessionKey;
     if (last != null &&
         last.body['address'] == address &&
-        last.body['name'] == deviceName) {
+        last.body['name'] == deviceName &&
+        (key.isEmpty || last.body['pq'] == key)) {
       return;
     }
-    // Not [publish]: this also runs while starting.
+    // Not [publish]: this also runs while starting. The post-quantum
+    // device key goes along: friends pin it before they ever talk here.
     await author.append(
       accountSpace('acts', account),
       kDeviceRecordKind,
-      <String, dynamic>{'address': address, 'name': deviceName},
+      <String, dynamic>{
+        'address': address,
+        'name': deviceName,
+        if (key.isNotEmpty) 'pq': key,
+      },
     );
   }
 
@@ -1632,23 +1677,44 @@ final class LedgerNode {
     unawaitedLogged(() async {
       // Proves the device key holder is at this address (the certificate
       // alone is public and could be shown by anyone).
-      final Uint8List proof = await identity.deviceKey.sign(_proofBytes(me));
+      // ... and holds the post-quantum device key that seals this frame.
+      final String key = _ownSessionKey;
+      final Uint8List proof = await identity.deviceKey.sign(
+        _proofBytes(me, key),
+      );
       _send(friend, <String, dynamic>{
         ...?helloExtras?.call(normalized),
         if (_isFriend(friend)) 'caps': kZenCaps,
         'type': kLedgerHelloType,
         'cert': identity.certificate.toJson(),
-        'p': <String, dynamic>{'f': me, 's': b64(proof)},
+        'p': <String, dynamic>{
+          'f': me,
+          if (key.isNotEmpty) 'k': key,
+          's': b64(proof),
+        },
         if (reply) 'r': 1,
       });
     }(), context: 'Powitanie dziennika nie wyszło');
   }
 
-  static Uint8List _proofBytes(String from) =>
-      Uint8List.fromList(utf8.encode('zen.hello.v1|$from'));
+  /// What a hello's proof signs: the address and the post-quantum device
+  /// key fingerprint ('' when the node does not know it).
+  static Uint8List _proofBytes(String from, String sessionKey) =>
+      Uint8List.fromList(utf8.encode('zen.hello.v2|$from|$sessionKey'));
+
+  static final RegExp _sessionKeyPattern = RegExp(r'^[0-9a-f]{64}$');
+
+  String get _ownSessionKey {
+    final String key = (localSessionKey?.call() ?? '').toLowerCase();
+    return _sessionKeyPattern.hasMatch(key) ? key : '';
+  }
 
   /// Whether a hello really comes from the device in [cert]: signed by its
-  /// device key for the address it came from.
+  /// device key for the address it came from and for the post-quantum
+  /// device key whose session carried it ([SignalTransportFrame.senderKey]).
+  /// A signed key that is not the session's means someone else holds the
+  /// address's node key: refused, the signed key pinned when the hello is
+  /// of the account known at that address, and the app warned.
   Future<bool> _proven(
     SignalTransportFrame frame,
     DeviceCertificate cert,
@@ -1659,14 +1725,68 @@ final class LedgerNode {
     }
     final Object? f = p['f'];
     final Object? s = p['s'];
+    final Object? k = p['k'];
+    final String key = k is String ? k : '';
     if (f is! String ||
         s is! String ||
         f.isEmpty ||
+        (key.isNotEmpty && !_sessionKeyPattern.hasMatch(key)) ||
         PeerShareCodec.normalizeAddress(f) !=
             PeerShareCodec.normalizeAddress(frame.from)) {
       return false;
     }
-    return cert.verifyByDevice(_proofBytes(f), s);
+    if (!await cert.verifyByDevice(_proofBytes(f, key), s)) {
+      return false;
+    }
+    final String address = PeerShareCodec.normalizeAddress(frame.from);
+    final String? session = frame.senderKey?.toLowerCase();
+    if (session != null && session != key) {
+      if (key.isNotEmpty) {
+        _sessionKeyMismatch(address, cert, key);
+      }
+      return false;
+    }
+    if (key.isNotEmpty) {
+      _rememberSessionKey(address, key);
+      onSessionKeys?.call(<String, String>{address: key});
+    }
+    return true;
+  }
+
+  void _rememberSessionKey(String address, String key) {
+    if (!_sessionKeys.containsKey(address) &&
+        _sessionKeys.length >= _maxSessionKeys) {
+      _sessionKeys.remove(_sessionKeys.keys.first);
+    }
+    _sessionKeys[address] = key;
+  }
+
+  void _sessionKeyMismatch(
+    String address,
+    DeviceCertificate cert,
+    String signedKey,
+  ) {
+    logZenWarning(
+      'Dziennik: klucz urządzenia pod $address nie zgadza się z sesją.',
+    );
+    // The device signed its key: when it is the device (or account) this
+    // node knows there, that key is the one to trust, and the session that
+    // carried the hello is someone else's.
+    final _DeviceRef? device = _liveDevice(address);
+    final bool known =
+        _accounts[address] == cert.account ||
+        (device != null && device.device == cert.device) ||
+        cert.account == account;
+    if (known) {
+      _rememberSessionKey(address, signedKey);
+      onSessionKeys?.call(<String, String>{address: signedKey}, force: true);
+    }
+    final int now = _clock.wallMillis();
+    final int? warned = _keyWarnedAt[address];
+    if (warned == null || now - warned >= 3600 * 1000) {
+      _keyWarnedAt[address] = now;
+      onDeviceKeyMismatch?.call(address);
+    }
   }
 
   void _subscribePublic(String acc) {

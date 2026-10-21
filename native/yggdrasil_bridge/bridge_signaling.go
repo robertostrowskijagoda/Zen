@@ -88,6 +88,7 @@ func startPacketLoop(node *bridgeNode) {
 				dropped, queued := node.signalInbox.push(signalMessage{
 					From:    source.String(),
 					Payload: message,
+					Key:     node.signalKeyOf(source),
 				}, network)
 				if dropped > 0 || !queued {
 					fmt.Printf("[ZEN-GO] signal inbox over budget, dropped %d queued signal(s), queued new=%v from=%s len=%d\n",

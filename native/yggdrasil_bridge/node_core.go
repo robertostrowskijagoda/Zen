@@ -66,6 +66,7 @@ func createNode(configJSON string) (*bridgeNode, error) {
 			return !iprange.Contains(ip)
 		}),
 	}
+	options = append(options, nodeInfoPrivacyOptions()...)
 	if len(cfg.Peers) > 0 {
 		logger.Infof("starting node with %d outbound peers (first=%s)", len(cfg.Peers), cfg.Peers[0])
 	} else {
@@ -165,6 +166,7 @@ func createNode(configJSON string) (*bridgeNode, error) {
 	iprwc.SetMTU(mtu)
 
 	node := &bridgeNode{
+		publicPeers:    publicPeersOf(cfg.Peers),
 		core:           yggCore,
 		iprwc:          iprwc,
 		config:         cfg,
@@ -186,6 +188,17 @@ func createNode(configJSON string) (*bridgeNode, error) {
 	yggCore.RetryPeersNow()
 	node.startPeerNudge()
 	return node, nil
+}
+
+// nodeInfoPrivacyOptions: any node of the mesh may ask any other for its
+// NodeInfo. The node key is this person's address, so by default the
+// answer would tell everyone which system, architecture and Yggdrasil
+// version they run: nothing is answered beyond an empty object.
+func nodeInfoPrivacyOptions() []core.SetupOption {
+	return []core.SetupOption{
+		core.NodeInfoPrivacy(true),
+		core.NodeInfo(map[string]interface{}{}),
+	}
 }
 
 func (node *bridgeNode) startPeerNudge() {
@@ -306,7 +319,22 @@ func normalizeNodeState(handle int32, node *bridgeNode) map[string]any {
 		"peerPoolCount":       candidatePeerCount,
 		"selectedPeer":        selectedPeer,
 		"selectedPeerLatency": selectedPeerLatency,
+		"publicPeersCustom":   customPublicPeers(),
+		"pqKey":               node.ownSignalKey(),
 	}
+}
+
+// ownSignalKey is the fingerprint of this node's device key (pq_session.go),
+// "" before it can be made.
+func (node *bridgeNode) ownSignalKey() string {
+	if node.pqPlain {
+		return ""
+	}
+	endpoint, err := node.pqEndpointOf()
+	if err != nil {
+		return ""
+	}
+	return endpoint.ownFingerprint()
 }
 
 func buildPeerJSON(peers []core.PeerInfo) []peerJSON {

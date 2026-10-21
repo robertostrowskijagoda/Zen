@@ -198,8 +198,7 @@ func (node *bridgeNode) runRelayLoop(relay *relayState) {
 			// An ICE check the relay cannot verify yet: the peer still needs
 			// it (it teaches the peer's relay our credentials), but its sender
 			// gets nothing back until it proves itself.
-			check := append([]byte(nil), buffer[:count]...)
-			if err := sendRelay(node, relay.remoteIP, relay.callID, check); err != nil {
+			if err := sendRelay(node, relay.remoteIP, relay.callID, buffer[:count]); err != nil {
 				debugf("[ZEN-GO] relay %s: unadmitted check not sent: %v\n", relay.callID, err)
 			}
 			continue
@@ -227,13 +226,18 @@ func (node *bridgeNode) runRelayLoop(relay *relayState) {
 			}
 		}
 
-		payload := append([]byte(nil), buffer[:count]...)
-		if err := sendRelay(node, relay.remoteIP, relay.callID, payload); err != nil {
+		packet, err := buildRelayPacket(node, relay.remoteIP, relay.callID, buffer[:count])
+		if err != nil {
+			debugf("[ZEN-GO] relay %s: packet not sealed: %v\n", relay.callID, err)
+			continue
+		}
+		if _, err := node.iprwc.Write(packet); err != nil {
 			fmt.Printf("[ZEN-GO] relay %s: send to ygg failed: %v\n", relay.callID, err)
 		}
 		if outboundPacketOrdinal <= 2 {
-			payloadCopy := append([]byte(nil), payload...)
-			remoteIPCopy := append(net.IP(nil), relay.remoteIP...)
+			// The first packets again, while the mesh path warms up: the
+			// same sealed bytes, so a copy that arrives twice is dropped by
+			// the receiver's replay window.
 			callID := relay.callID
 			go func() {
 				for _, delay := range []time.Duration{
@@ -241,7 +245,7 @@ func (node *bridgeNode) runRelayLoop(relay *relayState) {
 					75 * time.Millisecond,
 				} {
 					time.Sleep(delay)
-					if err := sendRelay(node, remoteIPCopy, callID, payloadCopy); err != nil {
+					if _, err := node.iprwc.Write(packet); err != nil {
 						debugf("[ZEN-GO] relay %s: warm resend failed: %v\n", callID, err)
 					}
 				}
@@ -250,24 +254,38 @@ func (node *bridgeNode) runRelayLoop(relay *relayState) {
 	}
 }
 
+// sendRelay seals payload (a datagram of the local WebRTC) for the call's
+// relay at remoteIP and sends it over the mesh.
 func sendRelay(node *bridgeNode, remoteIP net.IP, callID string, payload []byte) error {
-	localAddress := net.ParseIP(node.core.Address().String())
-	if localAddress == nil {
-		return errors.New("could not resolve local yggdrasil address")
-	}
-
-	frame, err := buildRelayFrame(callID, payload)
+	packet, err := buildRelayPacket(node, remoteIP, callID, payload)
 	if err != nil {
 		return err
 	}
-
-	packet, err := buildYggPacket(localAddress, remoteIP, yggRelayPort, frame)
-	if err != nil {
-		return err
-	}
-
 	_, err = node.iprwc.Write(packet)
 	return err
+}
+
+// buildRelayPacket is the mesh packet that carries payload to the call's
+// relay at remoteIP: the relay frame, sealed by the post-quantum session
+// with that node (pq_session.go, a media frame: ChaCha20-Poly1305 with a
+// 256-bit key from the hybrid KEM, one AEAD per packet, nothing buffered).
+// Without a session yet the packet is dropped, never sent in clear; WebRTC
+// repeats what matters (ICE checks, DTLS) and the session is there after
+// one round trip.
+func buildRelayPacket(node *bridgeNode, remoteIP net.IP, callID string, payload []byte) ([]byte, error) {
+	localAddress := net.ParseIP(node.core.Address().String())
+	if localAddress == nil {
+		return nil, errors.New("could not resolve local yggdrasil address")
+	}
+	frame, err := buildRelayFrame(callID, payload)
+	if err != nil {
+		return nil, err
+	}
+	sealed, err := node.sealRelayFrame(remoteIP, frame)
+	if err != nil {
+		return nil, err
+	}
+	return buildYggPacket(localAddress, remoteIP, yggRelayPort, sealed)
 }
 
 func buildRelayFrame(callID string, payload []byte) ([]byte, error) {
@@ -298,7 +316,12 @@ func parseRelayFrame(payload []byte) (string, []byte, bool) {
 }
 
 func (node *bridgeNode) handleRelayPacket(source net.IP, payload []byte) {
-	callID, framePayload, ok := parseRelayFrame(payload)
+	// Only media sealed by a session of the sender is taken.
+	frame, ok := node.openRelayFrame(source, payload)
+	if !ok {
+		return
+	}
+	callID, framePayload, ok := parseRelayFrame(frame)
 	if !ok {
 		return
 	}

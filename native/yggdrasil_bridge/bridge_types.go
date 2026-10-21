@@ -49,6 +49,10 @@ type bridgeNode struct {
 	nudgeStopOnce      sync.Once
 	// Limits on the public peering port of a desktop bridge (peer_guard.go).
 	peerGuards []*peerListenGuard
+	// Which configured peers came from the public pool (the user's list or
+	// the built-in one), so a new list replaces exactly those; guarded by
+	// configMu.
+	publicPeers map[string]bool
 	// The flat's door, when the app runs one, the mailbox doors it runs
 	// for friends, by key, and the node carrying them (door_node.go).
 	door         *doorNode
@@ -89,6 +93,10 @@ type signalMessage struct {
 	Payload string `json:"payload"`
 	// It came to the flat's door, not to this node (door_node.go).
 	Door bool `json:"door,omitempty"`
+	// Fingerprint (SHA-256, hex) of the sender's device key, which sealed
+	// and authenticated the signal (pq_session.go); the app binds it to
+	// the sender's hybrid identity.
+	Key string `json:"key,omitempty"`
 }
 
 type signalEnvelope struct {
@@ -229,17 +237,20 @@ func debugf(format string, args ...any) {
 // application features (friendship, messages, calls); see
 // social_hub_controller_lifecycle_signal.dart. It is an authorization layer
 // on top of the mesh-level E2E encryption, not a replacement for it.
-// Call media (WebRTC) rides the local UDP relay and keeps its own DTLS-SRTP.
+// Call media (WebRTC) rides the local UDP relay: every relay packet is
+// sealed by the same post-quantum session layer (a media frame, 256-bit
+// ChaCha20-Poly1305 per packet), around WebRTC's own DTLS-SRTP and the
+// app's AES-GCM frame encryption (call_media_e2ee.dart).
 
-// Peer lists derived from publicPeerPool (public_peers.go):
+// Peer lists come from activePublicPeerPool (public_peers.go): the user's
+// own list when they made one in the app, else the built-in pool on
+// encrypted transports:
 //
-//   - defaultPublicPeers: every listed peer, the pool that probing and the
-//     runtime fall back on;
-//   - androidPublicPeers: the phone's starting set — TLS only, stable, IPv4
-//     literals first so Go does not need DNS (a long stale list of dead IPs
-//     used to occupy every outbound slot and left the phone on "Łączę...");
+//   - defaultPublicPeerURIs(): the pool that probing and the runtime fall
+//     back on;
+//   - androidBootstrapPeers(): the phone's starting set — TLS only, stable,
+//     IPv4 literals first so Go does not need DNS (a long stale list of dead
+//     IPs used to occupy every outbound slot and left the phone on
+//     "Łączę...");
 //   - desktopPublicPeers(): a desktop connects to every configured peer, so
 //     it gets a spread-out subset instead of the whole pool.
-var defaultPublicPeers = publicPeerURIs(publicPeerPool)
-
-var androidPublicPeers = selectAndroidBootstrapPeers(publicPeerPool, androidBootstrapPeerCount)

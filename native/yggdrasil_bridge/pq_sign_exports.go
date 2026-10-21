@@ -57,6 +57,7 @@ func YggSigPublicKeyJson(payload *C.char) *C.char {
 	if err != nil {
 		return responseError(err)
 	}
+	defer wipeBytes(seed)
 	key, err := zensig.PublicKeyOf(seed)
 	if err != nil {
 		return responseError(err)
@@ -81,6 +82,7 @@ func YggSigSignJson(payload *C.char) *C.char {
 	if err != nil {
 		return responseError(err)
 	}
+	defer wipeBytes(seed)
 	digest, err := sigBytes(request.Digest, zensig.DigestSize, "digest")
 	if err != nil {
 		return responseError(err)

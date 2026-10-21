@@ -66,6 +66,46 @@ func (node *bridgeNode) openSignal(source net.IP, wire string) (string, bool) {
 	return inflateSignalText(source.String(), string(plain))
 }
 
+// signalKeyOf is the fingerprint of the device key the signals of source
+// are sealed and authenticated with ("" unsealed or unknown): the app
+// binds it to the sender's hybrid identity.
+func (node *bridgeNode) signalKeyOf(source net.IP) string {
+	if node.pqPlain {
+		return ""
+	}
+	endpoint, err := node.pqEndpointOf()
+	if err != nil {
+		return ""
+	}
+	return endpoint.peerFingerprint(source)
+}
+
+// sealRelayFrame seals a relay frame (call media) for destination
+// (pq_session.go, kind 'M').
+func (node *bridgeNode) sealRelayFrame(destination net.IP, frame []byte) ([]byte, error) {
+	if node.pqPlain {
+		return frame, nil
+	}
+	endpoint, err := node.pqEndpointOf()
+	if err != nil {
+		return nil, err
+	}
+	return endpoint.sealMedia(destination, frame)
+}
+
+// openRelayFrame opens a relay packet from source: the relay frame, or
+// false for anything not sealed by a session of source.
+func (node *bridgeNode) openRelayFrame(source net.IP, payload []byte) ([]byte, bool) {
+	if node.pqPlain {
+		return payload, true
+	}
+	endpoint, err := node.pqEndpointOf()
+	if err != nil {
+		return nil, false
+	}
+	return endpoint.receiveMedia(source, payload)
+}
+
 // writeSignalWire splits a signal text into fragments and sends them from
 // the node's own address to destination.
 func (node *bridgeNode) writeSignalWire(destination net.IP, wire []byte) error {

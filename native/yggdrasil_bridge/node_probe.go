@@ -21,6 +21,14 @@ import (
 )
 
 func ensureDefaultRuntimeConfig(cfg *config.NodeConfig) {
+	// No TUN adapter, no admin socket (nothing on this device may steer
+	// the node), nothing told about this node to whoever asks
+	// (createNode also passes the privacy option to the core).
+	cfg.IfName = "none"
+	cfg.AdminListen = "none"
+	cfg.NodeInfoPrivacy = true
+	cfg.NodeInfo = nil
+	cfg.LogLookups = false
 	// Yggdrasil's multicast discovery stays off: its beacons carry this
 	// node's public key, which is also the person's Zen identity, so anyone
 	// on a café or office network could recognise (and follow) them. Devices
@@ -65,11 +73,14 @@ func countNonLoopbackPeers(peers []string) int {
 }
 
 func androidBootstrapPeers() []string {
-	return append([]string(nil), androidPublicPeers...)
+	if uris, ok := firstUserPeers(androidBootstrapPeerCount); ok {
+		return uris
+	}
+	return selectAndroidBootstrapPeers(publicPeerPool, androidBootstrapPeerCount)
 }
 
 func ipv4LiteralPublicPeers() []string {
-	peers := make([]string, 0, len(defaultPublicPeers))
+	peers := make([]string, 0, len(publicPeerPool))
 	for _, peer := range prioritizedPublicPeers() {
 		parsed, err := url.Parse(strings.TrimSpace(peer))
 		if err != nil {
@@ -85,7 +96,7 @@ func ipv4LiteralPublicPeers() []string {
 }
 
 func prioritizedPublicPeers() []string {
-	peers := append([]string(nil), defaultPublicPeers...)
+	peers := defaultPublicPeerURIs()
 	sort.SliceStable(peers, func(i, j int) bool {
 		si, sj := publicPeerScore(peers[i]), publicPeerScore(peers[j])
 		if si != sj {
@@ -126,8 +137,9 @@ func publicPeerScore(uri string) int {
 }
 
 func ensureRuntimePublicPeers(existing []string, limit int) []string {
-	peers := make([]string, 0, len(existing)+len(defaultPublicPeers))
-	seen := make(map[string]bool, len(existing)+len(defaultPublicPeers))
+	pool := defaultPublicPeerURIs()
+	peers := make([]string, 0, len(existing)+len(pool))
+	seen := make(map[string]bool, len(existing)+len(pool))
 	appendPeer := func(peer string) {
 		if peer == "" || seen[peer] {
 			return
@@ -144,7 +156,7 @@ func ensureRuntimePublicPeers(existing []string, limit int) []string {
 	if shouldUseConfiguredPeersOnly(existing) {
 		return peers
 	}
-	for _, peer := range defaultPublicPeers {
+	for _, peer := range pool {
 		appendPeer(peer)
 		if limit > 0 && len(peers) >= limit {
 			return peers[:limit]

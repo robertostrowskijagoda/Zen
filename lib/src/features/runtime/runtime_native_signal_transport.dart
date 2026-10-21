@@ -13,6 +13,8 @@ import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/runtime/local_link.dart';
+import 'package:zen/src/features/runtime/node_key_pins.dart';
+import 'package:zen/src/features/runtime/public_peers.dart';
 import 'package:zen/src/features/runtime/runtime_signal_codec.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/runtime/yggdrasil_bridge_ffi.dart';
@@ -263,6 +265,8 @@ final class RuntimeNodeSession {
     this.setMailboxDoors,
     this.sendFromDoor,
     this.localLinks,
+    this.sessionKey = '',
+    this.pinSessionKeys,
   });
 
   final SignalTransport transport;
@@ -291,6 +295,16 @@ final class RuntimeNodeSession {
 
   /// Direct links with devices nearby (local_link.dart).
   final LocalLinkNodeApi? localLinks;
+
+  /// Fingerprint (hex) of this node's post-quantum device key, which seals
+  /// and authenticates its signals (pq_session.go); '' without a bridge.
+  final String sessionKey;
+
+  /// Pins device keys (address → fingerprint) in the bridge; with `keep`, a
+  /// different pin already there stays. Returns the conflicts (address →
+  /// the pinned fingerprint).
+  final Map<String, String> Function(Map<String, String> pins, bool keep)?
+  pinSessionKeys;
 }
 
 /// Platforms that ship the Go bridge (a DLL, a .so, or linked into the iOS
@@ -569,6 +583,68 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   /// Mesh peers added at runtime; kept so they are re-added after the node
   /// restarts.
   final Set<String> _extraPeers = <String>{};
+
+  /// Device keys others vouched for (address → fingerprint): friends'
+  /// hybrid-signed device records and hellos, friends' friend lists. Kept
+  /// so they are pinned again after the node restarts.
+  final Map<String, String> _vouchedKeys = <String, String>{};
+  static const int _maxVouchedKeys = 20000;
+  final StreamController<String> _keyConflicts =
+      StreamController<String>.broadcast();
+  final Set<String> _reportedConflicts = <String>{};
+
+  /// Fingerprint of this node's post-quantum device key ('' while no node
+  /// runs): the ledger's hello signs it together with the address.
+  String get sessionKey => _session?.sessionKey ?? '';
+
+  /// Addresses where two sources disagree about the device key: the key
+  /// the node pinned is not the one a signed record names. Each address
+  /// once per run.
+  Stream<String> get sessionKeyConflicts => _keyConflicts.stream;
+
+  /// Pins [keys] (address → device key fingerprint) in the bridge before
+  /// any contact, so someone holding only an address's broken node key is
+  /// refused even on first contact. With [force] (a hybrid-signed hello
+  /// of a known friend contradicts the session) the key replaces whatever
+  /// was pinned; otherwise a different pin stays and is reported on
+  /// [sessionKeyConflicts]. Safe to call before the node is up.
+  void vouchSessionKeys(Map<String, String> keys, {bool force = false}) {
+    final Map<String, String> pins = <String, String>{};
+    keys.forEach((String address, String key) {
+      final String normalized = PeerShareCodec.normalizeAddress(address);
+      final String fingerprint = key.trim().toLowerCase();
+      if (normalized.isEmpty || fingerprint.length != 64) {
+        return;
+      }
+      if (!_vouchedKeys.containsKey(normalized) &&
+          _vouchedKeys.length >= _maxVouchedKeys) {
+        return;
+      }
+      _vouchedKeys[normalized] = fingerprint;
+      pins[normalized] = fingerprint;
+    });
+    if (pins.isNotEmpty) {
+      _pinNow(pins, keep: !force);
+    }
+  }
+
+  void _pinNow(Map<String, String> pins, {required bool keep}) {
+    final Map<String, String> Function(Map<String, String>, bool)? pin =
+        _session?.pinSessionKeys;
+    if (pin == null) {
+      return;
+    }
+    try {
+      for (final String address in pin(pins, keep).keys) {
+        final String normalized = PeerShareCodec.normalizeAddress(address);
+        if (_reportedConflicts.add(normalized) && !_keyConflicts.isClosed) {
+          _keyConflicts.add(normalized);
+        }
+      }
+    } on Object catch (error) {
+      logZenWarning('Device keys were not pinned: $error');
+    }
+  }
 
   /// Connects to [uris] as additional mesh peers (bridges from friends).
   /// Already added ones are skipped. Safe to call before the node is up.
@@ -895,6 +971,9 @@ final class RuntimeNodeRuntime extends ChangeNotifier
         for (final String uri in _extraPeers) {
           _addPeerNow(uri);
         }
+        if (_vouchedKeys.isNotEmpty) {
+          _pinNow(Map<String, String>.of(_vouchedKeys), keep: true);
+        }
         _applyDoorNow();
         _applyMailboxDoorsNow();
         _applyLocalLinksNow();
@@ -1042,6 +1121,10 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   @override
   void dispose() {
     _autoRecoveryEnabled = false;
+    unawaitedLogged(
+      _keyConflicts.close(),
+      context: 'Closing device key conflicts failed',
+    );
     _cancelRecoveryTimer();
     _snapshotRefreshTimer?.cancel();
     unawaitedLogged(
@@ -1075,8 +1158,20 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
     bridge,
     config.nodeConfigProtector,
   );
+  // The user's public peers (public_peers.dart) before the node dials any.
+  await applyStoredPublicPeers(bridge);
   final Map<String, dynamic> startResult = bridge.startNode(configJson);
   final int handle = _readNodeHandle(startResult);
+  // The device keys pinned in earlier runs, before any signal comes in.
+  final Directory runtimeDirectory = (await _runtimeConfigFile()).parent;
+  final NodeKeyPinKeeper pins = NodeKeyPinKeeper(
+    readPins: () => bridge.pqPins(handle),
+    writePins: (String pinsJson) => bridge.setPqPins(handle, pinsJson),
+    file: () => nodeKeyPinsFile(runtimeDirectory),
+    protector: config.nodeConfigProtector,
+  );
+  await pins.restore();
+  pins.start();
   final RuntimeTransportSnapshot initialSnapshot = _snapshotFromNodeInfo(
     startResult,
   );
@@ -1095,6 +1190,7 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
         fallbackPollInterval: config.fallbackPollInterval,
       ),
       onStop: () async {
+        await pins.stop();
         bridge.stopNode(handle);
       },
     ),
@@ -1114,7 +1210,30 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
           await encodeRuntimeSignalPayload(payload, doorCompressor),
         ),
     localLinks: BridgeLocalLinkApi(bridge, handle),
+    sessionKey: startResult['pqKey'] as String? ?? '',
+    pinSessionKeys: (Map<String, String> pins, bool keep) =>
+        sessionKeyConflictsFrom(
+          bridge.setPqPins(
+            handle,
+            jsonEncode(<String, Object?>{'pins': pins, 'keep': keep}),
+          ),
+        ),
   );
+}
+
+/// The conflicts in the bridge's answer to a pin request (`{taken,
+/// conflicts: {address: pinned}}`).
+@visibleForTesting
+Map<String, String> sessionKeyConflictsFrom(Map<String, dynamic> result) {
+  final Object? conflicts = result['conflicts'];
+  if (conflicts is! Map) {
+    return const <String, String>{};
+  }
+  return <String, String>{
+    for (final MapEntry<Object?, Object?> entry in conflicts.entries)
+      if (entry.key is String && entry.value is String)
+        entry.key as String: entry.value as String,
+  };
 }
 
 /// Which Yggdrasil and Go the bridge was built with, for the

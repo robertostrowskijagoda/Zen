@@ -38,11 +38,19 @@ final class SignalTransportFrame {
     required this.payload,
     required this.receivedAtMillis,
     this.door = false,
+    this.senderKey,
   });
 
   final String from;
   final Map<String, dynamic> payload;
   final int receivedAtMillis;
+
+  /// Fingerprint (SHA-256, hex) of the sender's post-quantum device key
+  /// that sealed and authenticated the frame (pq_session.go); null where
+  /// the transport has none. The bridge pins it per address on first
+  /// sight, so it never changes for [from]: a hybrid-signed hello that
+  /// names it ties the address to the sender's hybrid identity.
+  final String? senderKey;
 
   /// It came to the flat's door address (a knock on the door sticker, or
   /// a neighbour flat's frame), not to this phone's own address. Such
@@ -59,8 +67,9 @@ const String kFlatKnockType = 'flat_hello';
 const String kFlatSealType = 'flat_seal';
 
 /// The frames the doors take (door_node.go): at the flat's own door, knocks
-/// and everything between neighbour flats (`FlatTypes.viaDoor`); at a
-/// mailbox door, [kFlatSealType].
+/// and everything between neighbour flats (`FlatTypes.atDoor`), and sealed
+/// knocks naming it (a housemate's sticker lists it); at a mailbox door,
+/// [kFlatSealType] only.
 const Set<String> kFlatDoorTypes = <String>{
   kFlatKnockType,
   'flat_nope',
@@ -73,6 +82,7 @@ const Set<String> kFlatDoorTypes = <String>{
   'flat_newkey',
   'flat_reveal',
   'flat_ack',
+  'flat_card',
   kFlatSealType,
 };
 
@@ -151,6 +161,7 @@ class MemorySignalTransport implements SignalTransport {
     required Map<String, dynamic> payload,
     int? receivedAtMillis,
     bool door = false,
+    String? senderKey,
   }) async {
     if (!_started) {
       return;
@@ -162,6 +173,7 @@ class MemorySignalTransport implements SignalTransport {
         receivedAtMillis:
             receivedAtMillis ?? DateTime.now().millisecondsSinceEpoch,
         door: door,
+        senderKey: senderKey,
       ),
     );
   }

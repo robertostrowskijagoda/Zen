@@ -24,13 +24,37 @@ import 'package:zen/src/features/security/hybrid_kem.dart';
 // [kMediaKeyLookahead] keys of the sender's chain before the sender uses
 // them (frames name their key index), and keeps the previous key for
 // [kMediaKeyOverlap] after the sender moved on, for late frames.
+//
+// Key size. The frame transformer of libwebrtc (flutter_webrtc 1.6.2,
+// webrtc-sdk m137-m150, frame_crypto_transformer.h) always derives a
+// 128-bit AES key from the key material it is given
+// (`DeriveKeys(material, ratchetSalt, 128)`, HKDF-SHA256 or PBKDF2), so
+// the frames are AES-128-GCM whatever the material: the 32 bytes set here
+// carry the full 256-bit entropy of the chain, the cipher does not. The
+// strongest options it offers are used: AES-GCM (the other choice, CBC,
+// has no integrity), HKDF (PBKDF2 adds nothing to a random 256-bit key and
+// stalls the media thread), per-participant keys, no automatic ratchet on
+// decryption failures (an attacker could drive it), and no frame ever
+// passes unencrypted before the keys are in. Nothing else in the API sets
+// the key size, the cipher or the IV.
+//
+// 256 bits end to end come from the layer around it: every packet of a
+// call (RTP, RTCP, ICE, DTLS) travels through the bridge's call relay over
+// Yggdrasil and is sealed there per packet with ChaCha20-Poly1305 under a
+// 256-bit key from the hybrid ML-KEM-768 + X25519 session of the two
+// devices (native/yggdrasil_bridge/pq_session.go, media frames). So a
+// call's media has three layers: this frame encryption (keys from the
+// call's own KEM exchange, rotated every few minutes), WebRTC's DTLS-SRTP,
+// and the post-quantum relay layer, which also hides RTP headers, RTCP
+// and the DTLS handshake.
 
 /// How well the media of a call (or of one group-call leg) is protected.
 enum CallMediaSecurity {
   /// Keys are still being agreed.
   negotiating,
 
-  /// Frames sealed end to end with keys from the hybrid post-quantum KEM.
+  /// Frames sealed end to end with keys from the hybrid post-quantum KEM
+  /// (and every packet sealed again by the relay's 256-bit session).
   postQuantum,
 
   /// DTLS-SRTP only: this device or the other one has no frame encryption.
@@ -751,7 +775,8 @@ Future<void> rekeyMediaChannels(Iterable<MediaE2eeChannel?> others) =>
     ]);
 
 /// [MediaFrameCryptoBackend] over flutter_webrtc's FrameCryptor (Android,
-/// iOS, macOS, Windows, Linux). AES-GCM per frame, keys derived in the ring
+/// iOS, macOS, Windows, Linux). AES-GCM per frame (AES-128: libwebrtc
+/// fixes the key size, see the top of this file), keys derived in the ring
 /// with HKDF (PBKDF2 would stall the media thread on every `setKey`).
 final class WebRtcFrameCryptoBackend implements MediaFrameCryptoBackend {
   const WebRtcFrameCryptoBackend();
