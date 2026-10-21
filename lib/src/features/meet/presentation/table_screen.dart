@@ -11,7 +11,7 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/presentation/events_screen.dart';
 import 'package:zen/src/features/meet/table/table_service.dart';
 
-/// Stół na sześć (§17.4).
+/// Stół na sześć.
 class TableScreen extends ConsumerStatefulWidget {
   const TableScreen({super.key});
 

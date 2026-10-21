@@ -3,7 +3,7 @@ import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-/// "Dołączam" by default once this many people join (§17.6).
+/// "Dołączam" by default once this many people join.
 const int kPlanDefaultThreshold = 3;
 const int kPlanMinThreshold = 2;
 const int kPlanMaxThreshold = 20;
@@ -15,7 +15,7 @@ const int kPlanMaxPlace = 100;
 /// A plan stays on screen this long after its time, then fades.
 const Duration kPlanFadeAfter = Duration(hours: 6);
 
-/// Who sees a plan (§17.6).
+/// Who sees a plan.
 enum PlanReach {
   close,
   friends,
@@ -48,7 +48,7 @@ enum PlanAnswerKind {
       .firstOrNull;
 }
 
-/// "Wspólna sprawa" (§17.6): at most this many things on the list, each
+/// "Wspólna sprawa": at most this many things on the list, each
 /// wanted by at most [kPlanMaxNeedQty] people, text up to [kPlanMaxNeedLabel].
 const int kPlanMaxNeeds = 12;
 const int kPlanMaxNeedQty = 50;
@@ -192,10 +192,10 @@ final class PlanAnswer {
   }
 }
 
-/// "Plan na weekend" (§17.6): a light plan ("Sobota: rower nad Wisłą,
+/// "Plan na weekend": a light plan ("Sobota: rower nad Wisłą,
 /// 10:00, kto chętny?"). The organizer's phone holds the truth and sends
 /// everyone in reach the current copy; once [threshold] people join, it
-/// becomes an event (§17.1).
+/// becomes an event.
 @immutable
 final class WeekendPlan {
   const WeekendPlan({

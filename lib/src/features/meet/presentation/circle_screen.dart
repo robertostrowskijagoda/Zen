@@ -8,13 +8,16 @@ import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/meet/circle/circle_service.dart';
+import 'package:zen/src/features/meet/circle/food_providers.dart';
+import 'package:zen/src/features/meet/circle/food_service.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/presentation/events_screen.dart';
+import 'package:zen/src/features/meet/presentation/food_screen.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
-/// Kółka obiadowe (§17.3).
+/// Kółka obiadowe.
 class CirclesScreen extends ConsumerStatefulWidget {
   const CirclesScreen({super.key});
 
@@ -237,6 +240,7 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
   @override
   Widget build(BuildContext context) {
     final CircleService circles = ref.watch(circleServiceProvider);
+    final FoodService food = ref.watch(foodServiceProvider);
     final ZenColors zen = ZenColors.of(context);
     return Scaffold(
       key: const Key('circles-screen'),
@@ -247,7 +251,7 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
         label: Text(t('Nowe kółko')),
       ),
       body: ListenableBuilder(
-        listenable: circles,
+        listenable: Listenable.merge(<Listenable>[circles, food]),
         builder: (BuildContext context, Widget? _) {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
@@ -309,6 +313,24 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                         : null,
                     onTap: () => unawaited(CircleScreen.open(context, c.id)),
                   ),
+              ],
+              // Food shared within reach (also by friends from outside these
+              // circles, who have no circle screen here).
+              if (food.openCount() > 0) ...<Widget>[
+                ZenSection(t('Jedzenie do wzięcia')),
+                ZenTile(
+                  key: const Key('circles-food'),
+                  icon: Icons.takeout_dining_rounded,
+                  tone: zenTone(zen, 3),
+                  title: t('Podziel się jedzeniem'),
+                  subtitle: tn(
+                    food.openCount(),
+                    one: '{n} oferta teraz',
+                    few: '{n} oferty teraz',
+                    many: '{n} ofert teraz',
+                  ),
+                  onTap: () => unawaited(FoodScreen.open(context)),
+                ),
               ],
             ],
           );
@@ -588,6 +610,7 @@ class CircleScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
+              _FoodEntry(circleId: c.id, tone: tone),
               if (next != null) ...<Widget>[
                 ZenSection(
                   t('Kto co przynosi · {date}', {
@@ -856,6 +879,50 @@ String formatKitty(int cents) => ZenFormat.money(cents, grouped: false);
 String _initial(String name) {
   final String t = name.trim();
   return t.isEmpty ? '?' : t.characters.first.toUpperCase();
+}
+
+/// "Podziel się jedzeniem": the one way into shared food from a circle,
+/// with how many offers are open there and requests waiting for this
+/// person.
+class _FoodEntry extends ConsumerWidget {
+  const _FoodEntry({required this.circleId, required this.tone});
+
+  final String circleId;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final FoodService food = ref.watch(foodServiceProvider);
+    return ListenableBuilder(
+      listenable: food,
+      builder: (BuildContext context, Widget? _) {
+        final int open = food.openCount(circleId: circleId);
+        final int asks = food.pendingForMe;
+        return Padding(
+          padding: const EdgeInsets.only(top: 14),
+          child: ZenTile(
+            key: const Key('circle-food'),
+            icon: Icons.takeout_dining_rounded,
+            tone: tone,
+            title: t('Podziel się jedzeniem'),
+            subtitle: open == 0
+                ? t(
+                    'Zostało Ci jedzenie? Poczęstuj kółko — u siebie albo na wynos.',
+                  )
+                : tn(
+                    open,
+                    one: '{n} oferta teraz',
+                    few: '{n} oferty teraz',
+                    many: '{n} ofert teraz',
+                  ),
+            badge: asks > 0 ? asks.toString() : null,
+            onTap: () =>
+                unawaited(FoodScreen.open(context, circleId: circleId)),
+          ),
+        );
+      },
+    );
+  }
 }
 
 /// One dinner in the queue: date, who cooks, "swap" button.

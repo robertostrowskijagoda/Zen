@@ -21,7 +21,7 @@ const Duration kTableWishLife = Duration(days: 30);
 /// it against the person's own later changes).
 const Duration kTableClockSkew = Duration(minutes: 10);
 
-/// "Chcę na Stół na sześć" (§17.4): someone's city and the days they can.
+/// "Chcę na Stół na sześć": someone's city and the days they can.
 @immutable
 final class TableWish {
   const TableWish({
@@ -85,7 +85,7 @@ final class TableWish {
 
 String normalizeCity(String city) => city.trim().toLowerCase();
 
-/// Stół na sześć (§17.4): people who want to have dinner with friends of
+/// Stół na sześć: people who want to have dinner with friends of
 /// friends say so (city, days); it reaches their friends and the friends'
 /// friends. Whoever sets a table gets 5 guests picked from that, each
 /// connected to the host, knowing each other as little as possible.

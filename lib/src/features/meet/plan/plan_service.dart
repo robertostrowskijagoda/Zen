@@ -13,7 +13,7 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-/// Payload types of "Plan na weekend" (§17.6).
+/// Payload types of "Plan na weekend".
 abstract final class PlanTypes {
   /// The current copy of a plan: organizer → friends in reach, and (for
   /// friends of friends) one step further through each friend.
@@ -26,11 +26,11 @@ abstract final class PlanTypes {
   static const Set<String> all = <String>{plan, answer};
 }
 
-/// "Plan na weekend" (§17.6), the lightest of the meeting forms: a loose
+/// "Plan na weekend", the lightest of the meeting forms: a loose
 /// plan goes to close friends, friends, or friends of friends; they answer
 /// "Dołączam" or "Może" and everyone sees who is in (and through whom).
 /// When [WeekendPlan.threshold] people join, the organizer's phone turns it
-/// into an event (§17.1) for everyone who answered; without that it fades
+/// into an event for everyone who answered; without that it fades
 /// after its time.
 ///
 /// Every message goes between friends only: a friend of a friend answers

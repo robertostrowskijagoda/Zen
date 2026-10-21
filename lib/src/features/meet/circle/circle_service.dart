@@ -23,7 +23,7 @@ abstract final class CircleTypes {
 }
 
 /// A dinner circle has 4–8 members (people, or pairs when
-/// [DinnerCircle.pairs] is set), the host included (§17.3).
+/// [DinnerCircle.pairs] is set), the host included.
 const int kCircleMinMembers = 4;
 const int kCircleMaxMembers = 8;
 
@@ -76,7 +76,7 @@ final class KittyEntry {
 }
 
 /// Someone from outside the circle a member brings to one dinner
-/// ("kółko otwarte", §17.3): once a month per member.
+/// ("kółko otwarte"): once a month per member.
 @immutable
 final class CircleGuest {
   const CircleGuest({
@@ -137,7 +137,7 @@ final class CircleMember {
   Map<String, String> toJson() => <String, String>{'a': address, 'n': name};
 }
 
-/// Kółko obiadowe (§17.3): friends taking turns hosting a regular dinner.
+/// Kółko obiadowe: friends taking turns hosting a regular dinner.
 /// Any member may change it; the newest copy wins and goes to everyone.
 @immutable
 final class DinnerCircle {
@@ -613,7 +613,7 @@ final class CircleService extends ChangeNotifier {
   }
 
   /// Opens (or closes) the circle: once a month every member may bring
-  /// one person from outside (§17.3).
+  /// one person from outside.
   Future<void> setOpen(String id, bool open) async {
     final DinnerCircle? c = _circles[id];
     if (c == null || c.open == open) {

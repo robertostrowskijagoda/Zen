@@ -11,7 +11,7 @@ import 'package:zen/src/features/meet/plan/plan_model.dart';
 import 'package:zen/src/features/meet/plan/plan_service.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 
-/// "Plan na weekend" (§17.6) in the app.
+/// "Plan na weekend" in the app.
 final Provider<PlanService> planServiceProvider = Provider<PlanService>((
   Ref ref,
 ) {

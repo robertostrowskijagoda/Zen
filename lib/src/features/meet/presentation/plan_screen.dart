@@ -19,7 +19,7 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// The colour of "Plan na weekend".
 Color planTone(ZenColors zen) => zenTone(zen, 5);
 
-/// "Plan na weekend" (§17.6).
+/// "Plan na weekend".
 class PlanScreen extends ConsumerStatefulWidget {
   const PlanScreen({super.key});
 
