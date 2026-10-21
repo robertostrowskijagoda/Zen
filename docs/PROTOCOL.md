@@ -209,6 +209,19 @@ over any byte stream, with no internet. The app gives the bridge one 32-byte
 secret per device it may link with (HKDF over the X25519 form of both ledger
 device keys, label `zen.local.v1`); a stranger has none.
 
+- **Post-quantum pair secret:** two devices that may link (friends' or the
+  account's own) and reach each other over the mesh exchange `local_pair` signals
+  (`{type, d: sender device key, to: recipient device key, c: 32 random
+  bytes, h: base64url(SHA-256("zen.local.pair|" + c)[:16]) of the
+  contribution last heard}`), so they travel inside the hybrid session layer
+  (1.5); the sender's address must be the one a signed hello proved for
+  `d`. Once each side has the other's contribution and heard back
+  the hash of its own, the pair secret becomes HKDF-SHA256 (salt: the
+  classical secret, nonce: the two device keys sorted and joined with `|`,
+  info `zen.local.pq.v1`) of SHA-256(`"zen.local.pair.secret|"` + both
+  contributions ordered by device key). A new contribution (a reinstall)
+  starts a new pairing; until one completes, the classical secret is used.
+
 - **Transports:** the same Wi-Fi, cable or hotspot network (UDP beacons on
   port 39319 every 10 s while the app is used, 30 s otherwise, then TCP);
   a Wi-Fi Direct group (Android, Windows), which is only a network the LAN
@@ -410,12 +423,14 @@ service keeps the doors from its door kit and stores what arrives sealed.
 
 ### 2.8 Dating (`date_*`) [P]
 
-Only between friends, except the flooded lantern.
+Only between friends (lanterns and what travels back also across opened gates), except the flooded lantern.
 
 | type | Notes |
 |---|---|
-| `date_lantern` | `{id, hops, path, l}`: a lantern flooded to friends weekly by every phone, dating on or off, `kDatingMaxHops = 2` (`hops` starts at 1). `l` is `{v:4, k: one-off X25519 key, new every lantern}` (`DatingLantern`), about 55 bytes. |
-| `date_back` | A `DatingBox`-sealed message travelling back along `path`: to the lantern key, the match test `match` `{id, d, q: 6 blinded points}` and the profile request `fetch` `{id, a, b: the question's blinding secret as proof of fit}`; back, `match_re` `{id, a: answer id, r, o: 6 + 6 points, new owner secret each}` (`DatingMatch`, a DH private set intersection over intention (dates / new friends) and gender tags) and `prof` (the profile or a cover, padded to 4096-byte buckets, with `lp`, an HMAC proof from the lantern key); replies, "Yes" token. |
+| `date_lantern` | `{id, hops, path, l, g?}`: a lantern flooded to friends (and across opened gates, `g`) weekly by every phone, dating on or off, `kDatingMaxHops = 3` (`hops` starts at 2). `l` is `{v:5, h: SHA-256 of a one-off hybrid key (X25519 and ML-KEM-768 + X25519), new every lantern}` (`DatingLantern`), about 60 bytes. With `x` (`{by, nt, pk}`) it is a lantern made for an introduction, handed over by the matchmaker, never passed on. |
+| `date_back` | `{to, m?, box, ttl, n, g?, oa?}`, travelling back along `path`; `n` counts the phones it passed (the distance is not the asker's word), `oa` is the first phone's tag of the dating key the sender told it (`datingOriginTag`; `-` unknown). `box` is `{lk:1}` (ask a lantern for its keys) or `{lkr:{k,q}}` (the keys, checked against `h`), otherwise a hybrid `DatingBox` `{e, c, n, x}`: `match` `{id, pq}` (no wishes); `match_re` `{id, a, o: 18 offer bits, n: secret}` (the sealed offer, `DatingMatch`); `fetch` `{id, a, s: 18 wish bits, the proof of fit; none for a decoy}`; `prof` (the signed profile core or a cover, exactly 24 KiB, token `t`, `lp` = HMAC of the answer's secret); `part`/`part_re` (a photo or 6 vouches, exactly 64 KiB); `like` (KEM ciphertext + hybrid signature), `msg` (pair-key MAC), `mutual`, `intro_ask`/`intro_re`/`intro_l`. |
+| `date_key` | `{k, w?}`: this phone's dating key, to friends, group members and people across gates, dating on or off. |
+| `date_intro`, `date_intro_re` | A matchmaker asks a friend for a lantern for an introduction; the friend's phone answers alike with dating on or off. |
 | `date_ask`, `date_ask_re` | "What do you think about X?" and the answer, between friends. |
 | `date_vouch_req`, `date_vouch` | Ask for / give a few words for a profile. |
 | `date_safe`, `date_safe_ok`, `date_loc_req` | "I'm going on a date", "All OK", a one-shot location request. |
@@ -655,7 +670,8 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   fractions, no lone surrogates. `body.t` = kind, `body.py` = pyramid id, `body.at` = time (ms;
   a record dated more than 10 minutes ahead waits).
 - Kinds (`PyrT`): `genesis`, `found`, `hand`, `admit`, `swap`, `vreq`, `vote`,
-  `leave`, `fill`, `absent`, `remove`, `migrate`, `alive`, `addr`, `deleg`,
+  `roster`, `ballot`, `leave`, `fill`, `absent`, `remove`, `migrate`,
+  `alive`, `addr`, `deleg`,
   `revoke`, `ban`, `unban`, `decision`, `post`, `comment`, `natpost`,
   `natgrant`, `natpin`, `badge`, `known`, `ref`, `tally`, `const`, `emit`,
   `veto`, `xfer`, `settle`, `alarm`, `offer`. The genesis names the power key
@@ -670,17 +686,25 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   key `k` and its fingerprint `pq`. The fold refuses a record when a
   signature of a member or of the power key carries another ML-DSA key than
   the records fixed for it (`pq`, `tpq`), so the power-key chain and every
-  member key are anchored back to the pinned genesis. `vreq` (asking for a
-  cell vote) is signed **anonymously** with a linkable ring signature (LSAG
-  over Ed25519, `ring_signature.dart`): proves one of the ring signed; the
-  same signer in the same context gives the same key image; classical (4.1).
-  The vote itself runs on one-time hybrid keys ("cards"): each member's
-  phone sends its card, ring-signed, to the other members of the cell only
-  (`pyr_card`, through a friend outside the cell); `ballot` lists the cards
-  (`toks`, sorted hybrid ids) and is signed by the members (hybrid) — each
-  signs only all cards it heard of, holding its own; it counts with at least
-  as many signers as cards. A `vote` is signed by one card (keyed form) and
-  counts once per card.
+  member key are anchored back to the pinned genesis. Cell votes run on
+  one-time hybrid keys ("cards"): each member's phone sends its card to the
+  other members of the cell only (`pyr_card`, through a friend outside the
+  cell; `s` = the scope, `cell` for request cards), with a linkable ring
+  signature (LSAG over Ed25519, `ring_signature.dart`) bound to the scope,
+  so cellmates see one card per member but not whose; classical (4.1).
+  `ballot` lists a vote's cards (`toks`, sorted hybrid ids) and is signed by
+  the members (hybrid) — each signs only all cards it heard of, holding its
+  own; it counts with at least as many signers as cards. `roster` does the
+  same for a cell's request cards (`cell`, `head`, `by` = the voters now;
+  scope `roster:` + SHA-256(pyramid|cell|head|voters)[:32]); its cards are
+  made when a member first asks, it is signed once all cards are in or,
+  after 12 h, with at least two, and a later one for the same head and
+  voters counts only with more cards, holding every earlier one. `vreq`
+  (asking for a cell vote) is signed by one request card (keyed form, `by` =
+  the card) while the cell's head and voters are those of its roster, and
+  counted per card; a `vote` is signed by one ballot card and counts once
+  per card. Neither names a member; both are published through a friend
+  outside the cell.
   `xfer` and `settle` need treasurer signatures (`ts`).
 - Frames: `pyr_hello` (pyramids kept and fingerprints), `pyr_ids` (ids of a
   differing bucket), `pyr_want`, `pyr_rec` (one new record, passed on),
@@ -732,10 +756,10 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
 | Ledger entries | one hybrid device signature naming the device's ML-DSA key; the account-signed device certificate (kept apart, once per device) publishes it; SHA-256 ids; canonical JSON | `core/ledger` |
 | Ledger audiences | ChaCha20-Poly1305, 32-byte keys, nonce 12 bytes random, AAD `account|kid` | `audience_keys.dart` |
 | Nearby | masked hash-chain tokens (10-min slots) and alarm MAC (v6) with a per-friend pair key | `nearby_crypto.dart` |
-| Local links (offline) | adverts: Bloom filters of HMAC tags; handshake: ephemeral X25519, selectors, HKDF, AES-256-GCM records; secrets from the two devices' X25519 keys | `local_link*.go`, `runtime_lan_discovery.dart` |
+| Local links (offline) | adverts: Bloom filters of HMAC tags; handshake: ephemeral X25519 and ML-KEM-768, selectors, HKDF, AES-256-GCM records; secrets from the two devices' X25519 keys, mixed with contributions exchanged over the session layer once paired (1.6) | `local_link*.go`, `runtime_lan_discovery.dart` |
 | Locked Android service | background key (random, in the system key store, AES-256-GCM, AAD `zen.background.v1|<storage key>`) seals the kits (alarm, nearby, door) and the node config; contacts kept as keyed tags; the inbox is sealed to the master key's public hybrid inbox key, so the service cannot read it | `background_keys.dart`, `locked_receiver.dart`, `sealed_inbox.dart` |
 | Dating | `DatingBox`: two layers of the classical X25519 box (`zen.relay.v1`) with AAD `zen.date.v1` (inner by the sender's dating key, outer by a one-off key); profile answers are `DatingBox`es padded to 4096-byte buckets; "Yes" token `HMAC-SHA256(DH(me,them), "zen-date-like|" + sorted keys)`; every hop is inside the post-quantum session layer | `dating_crypto.dart` |
-| Pyramid | hybrid record and treasurer signatures, ML-DSA keys fixed by the records; LSAG ring signatures (classical) | `pyramid_record.dart`, `pyramid_state.dart`, `ring_signature.dart` |
+| Pyramid | hybrid record and treasurer signatures, ML-DSA keys fixed by the records; one-time hybrid cards for anonymous requests and votes; LSAG ring signatures (classical) only for card registration between cellmates | `pyramid_record.dart`, `pyramid_state.dart`, `ring_signature.dart` |
 | Recovery | Shamir secret sharing of the key among the recovery circle (up to 6 friends) [?] details | `core/ledger/shamir.dart`, `account/recovery_service.dart` |
 | Releases | hybrid maintainer signatures (maintainers pinned by hybrid id) and APK certificate check ("Podaj dalej") | `update/release.dart`, `apk_signature.dart` |
 
@@ -752,8 +776,8 @@ mailbox mail and its attachment keys, the locked inbox. Symmetric keys are
 only halves; the exception is call frames, which WebRTC's frame transformer
 seals with AES-128-GCM (128-bit keys, about 64-bit strength against Grover).
 Signatures are hybrid post-quantum too (Ed25519 + ML-DSA-65, 4.1), except
-the ring signature of a request for a cell vote and the handshakes listed in
-4.1; event tickets are HMAC-based. Nearby Bluetooth hellos carry a one-time
+the ring signature that registers a card between cellmates and the
+handshakes listed in 4.1; event tickets are HMAC-based. Nearby Bluetooth hellos carry a one-time
 hybrid KEM key (in parts, one Bluetooth write each), the local link handshake
 mixes in ML-KEM-768, every door runs the session layer (1.5) and sealed knocks
 carry an inner layer keyed with the sticker's token or a hybrid key. Still
@@ -841,17 +865,20 @@ ML-DSA.
   one hop), neighbours' flat profiles, frames, kick votes, key changes and
   reveals, dating vouches, releases, vetoes, the canary and `SHA256SUMS.sig`.
 - **Classical on purpose:**
-  - the linkable ring signature (LSAG over Ed25519) of a request for a cell
-    vote (`vreq`) and of the card registrations inside a cell: there is no
-    standard post-quantum linkable ring signature. A quantum computer could
-    forge a request (start a vote) or tell later who asked; a cellmate with
-    one could tell whose card is whose. Votes and ballots are hybrid;
+  - the linkable ring signature (LSAG over Ed25519) of the card
+    registrations inside a cell (`pyr_card`): there is no standard
+    post-quantum linkable ring signature. They travel only between
+    cellmates inside the session layer; a cellmate with a quantum computer
+    could tell whose card is whose or spoil a list (which then does not
+    count). Requests (`vreq`), votes, rosters and ballots are hybrid;
   - event tickets and their live codes are HMACs with keys only the
     organizer's phone and the guest's phone hold (no signature at all);
-  - Bluetooth adverts (hash chains and MACs); LAN discovery and the pair
-    secrets of local links (the device key as X25519: adverts can be
-    recognised and a new link sat in the middle of by a quantum computer
-    with both public keys; a recorded link stays shut, ML-KEM-768);
+  - Bluetooth adverts (hash chains and MACs); the pair secret of local
+    links until the two devices first meet over the mesh (the device key
+    as X25519: until then adverts can be recognised and a new link sat in
+    the middle of by a quantum computer with both public keys; a recorded
+    link stays shut, ML-KEM-768; afterwards the secret holds the
+    contributions exchanged over the session layer, 1.6);
   - the Yggdrasil node key and the session layer's key record (1.5);
   - ordinary frames (messages, calls' signalling, acknowledgements) are not
     signed by Zen at all: they rely on the session layer's AEAD, keyed from
@@ -882,7 +909,7 @@ comes from additive changes and tolerant parsing:
    new field or type. Old peers keep working because they ignore it.
 3. Where a format needs a version it has its own: ledger entry `v` (1; entries
    with a higher `v` are still stored and passed on; only this build's own checks
-   apply), dating lantern `v:4`, alarm wave `v:6`,
+   apply), dating lantern `v:5`, alarm wave `v:6`,
    BLE hello `v:7`, dating KDF/AAD labels `*.v1`, mailbox and inbox labels
    `*.v2`, the hybrid signature's `zen.sig.v1` and its ML-DSA derivation label
    `zen.sig.mldsa65.v1`, the session layer's `ZPQ1` and key record version 1, blob manifest

@@ -66,8 +66,9 @@ or X25519 holds. It protects:
 | Neighbours' doors | every door runs the same session layer; a sealed knock also has a second layer from the sticker's token (knock) or the knocker's hybrid key (answer) |
 | Nearby (Bluetooth) hellos and answers | a one-time ML-KEM-768 + X25519 key per hello, sent in chunks over GATT |
 | Local link handshakes (Wi-Fi, Wi-Fi Direct, Bluetooth) | both sides add a one-time ML-KEM-768 to the link key |
+| The pair secret of local links between friends' and own devices (adverts, handshake authentication) | each device sends 32 random bytes inside the sealed session above (`local_pair`, address checked against the proven device list); once both confirm, the secret is HKDF of the X25519 pair secret and both contributions, re-made after a reinstall |
 | Call keys | a fresh exchange in every call's offer and answer |
-| Dating boxes (answers, profiles, "Yes", messages, matchmaking) | a fresh encapsulation for every box, so boxes cannot be linked |
+| Dating: questions, answers, profiles, "Yes", messages, matchmaking | a fresh encapsulation for every box, so boxes cannot be linked; the weekly lantern is a SHA-256 commitment to a one-time hybrid key, and the match test is a sealed offer (no Diffie–Hellman) |
 | Food sharing pickup address | sealed for the accepted person's one-time hybrid key |
 
 ### Signatures: hybrid Ed25519 + ML-DSA-65
@@ -117,21 +118,24 @@ encryption falls back to DTLS-SRTP inside the relay layer.
   live code are HMAC-SHA256 values from secrets only the guest's phone and
   the organiser share (hash-based, so post-quantum). The organiser's phone
   checks them offline; a code is valid for 90 seconds, once.
-- **Cell votes** in the pyramid: the request to hold a vote is a ring
-  signature (anonymous among the cell). Each member's phone then registers a
-  **one-time hybrid key (a card)**; the ballot (the list of cards) is signed
-  by the members' hybrid keys and counts only with at least as many
-  signatures as cards; each vote is signed by a card, once. The decision is
-  post-quantum; only the anonymous request is classical.
+- **Cell votes** in the pyramid: each member's phone registers a **one-time
+  hybrid key (a card)** with its cellmates; the list of cards is signed by
+  the members' hybrid keys and counts only with at least as many signatures
+  as cards. The anonymous **request** for a vote is signed by a card from the
+  cell's request list (a roster made when someone first asks, for the
+  present head and voters; it waits up to 12 hours for an absent member);
+  the **vote** by a card from the vote's ballot, once. Both are hybrid
+  signatures: nobody outside the cell can forge them, and inside it nobody
+  learns whose card it was. Only the card registration between cellmates
+  uses a classical ring signature (below).
 
 ## What stays classical, and why
 
 | What | Why | What a quantum attacker could do |
 |---|---|---|
 | The Yggdrasil node key and address (Ed25519) | it is the mesh protocol itself | hijack or analyse routing (denial of service, traffic analysis); not read content, not pass the device key check |
-| The anonymous request for a cell vote (LSAG ring signature over Ed25519), and card registration inside the cell | there is no standard post-quantum linkable ring signature; unaudited lattice schemes were not used | forge a vote request (a nuisance, not a result); later tell who asked; in a cell of 2 to 3, a cellmate could tell whose card is whose |
-| The pair secret of local links (X25519 of the two devices' keys) | a post-quantum one would need an exchange over the network first | recognise two devices' adverts, or sit in the middle of a *new* link; recorded links stay unreadable |
-| The dating lantern, the first match question and the lantern proof | the private set intersection is built on X25519 | learn from a recorded test whether two keys matched |
+| Card registration inside a cell (LSAG ring signature over Ed25519), for vote and request cards | there is no standard post-quantum linkable ring signature; unaudited lattice schemes were not used; the registrations travel only between cellmates, inside the post-quantum session layer | nothing from recorded traffic; only a cellmate with a quantum computer could tell whose card is whose (in a cell of 2 to 3 anyone can guess anyway) or spoil a list (a member signs no list without its own card, so it fails rather than counts) |
+| The pair secret of local links, until the two devices first reach each other over the mesh (X25519 of their keys) | the post-quantum part is exchanged inside the sealed session, which needs that one contact | until then: recognise the two devices' adverts, or sit in the middle of a *new* link; recorded links stay unreadable |
 | Call frames (AES-128-GCM) | libwebrtc always derives a 128-bit key; changing it needs a fork of WebRTC on five platforms | about 64-bit strength against Grover's algorithm; still inside the 256-bit relay layer |
 | The link to a public peer over `tcp://` or `ws://` | the peer offers nothing better | see which mesh keys you talk to (Zen picks only `tls://`, `quic://`, `wss://` itself; their TLS 1.3 uses X25519MLKEM768) |
 

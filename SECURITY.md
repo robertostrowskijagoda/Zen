@@ -77,10 +77,11 @@ be read, or records forged, later with a quantum computer:
 - **At rest:** AES-256-GCM under a key from your password (Argon2id) and the
   system's security hardware.
 
-**Still classical:** the Yggdrasil node key and address; the anonymous
-*request* for a cell vote (a linkable ring signature, LSAG over Ed25519: there
-is no standard post-quantum one); the pair secrets of local links (X25519 of
-the two devices' keys); the dating lantern, first match question and lantern
+**Still classical:** the Yggdrasil node key and address; the registration
+of a voting card between cellmates (a linkable ring signature, LSAG over
+Ed25519: there is no standard post-quantum one; requests and votes are then
+signed by the cards, hybrid); the pair secrets of local links until two
+devices first meet over the mesh (X25519 of the two devices' keys); the dating lantern, first match question and lantern
 proof; the 128-bit AES key of call frames (libwebrtc offers no other). What an
 attacker with a quantum computer could do with each is described in the
 [security model](docs/SECURITY_MODEL.md#what-stays-classical-and-why).

@@ -93,19 +93,19 @@ holds.
 | Every signal between two devices: messages, sync, call set-up | a session per device pair, ML-KEM-768 + X25519, ChaCha20-Poly1305, no plaintext mode |
 | Offline mailboxes and the locked phone's inbox | sealed once more for the recipient's hybrid key |
 | Device identity | device keys pinned per address and bound to it by a hybrid signature |
-| Everything signed and kept: posts, profiles, devices, pyramid records and ballots, releases | Ed25519 + ML-DSA-65, valid only when both verify |
+| Everything signed and kept: posts, profiles, devices, pyramid records, ballots, anonymous vote requests and votes, releases | Ed25519 + ML-DSA-65, valid only when both verify |
 | Calls | AES-128-GCM frames with per-call hybrid keys, inside a 256-bit ChaCha20-Poly1305 post-quantum relay layer |
-| Neighbours' doors, Bluetooth hellos, local link handshakes, dating boxes, food pickup addresses | ML-KEM-768 + X25519 |
+| Neighbours' doors, Bluetooth hellos, local link handshakes and pair secrets, dating boxes, food pickup addresses | ML-KEM-768 + X25519 |
 | Event tickets | hash-based (HMAC-SHA256), no signatures needed |
 | Links to public peers | TLS 1.3 with X25519MLKEM768 |
 | Data on your device | AES-256-GCM, a key from your password (Argon2id) |
 
 **Still classical, honestly:** the Yggdrasil node key and address (Ed25519,
 the mesh protocol itself; it routes, but no longer proves who you are), the
-anonymous *request* for a cell vote (a ring signature; the vote itself is
-post-quantum), the pair secret that lets friends' devices recognise each
-other on local links, the dating lantern and first match question (X25519),
-and the 128-bit AES key inside call frames (wrapped in the 256-bit layer).
+ring signature that registers a voting card between cellmates (requests and
+votes themselves are signed post-quantum by those cards), the pair secret
+that lets devices recognise each other on local links until they first meet
+over the mesh, and the 128-bit AES key inside call frames (wrapped in the 256-bit layer).
 Why, and what an attacker could do: [Security model](docs/SECURITY_MODEL.md).
 
 ## What it can do
