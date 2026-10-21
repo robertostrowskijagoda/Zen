@@ -72,8 +72,8 @@ jobs:
         env:
           CGO_ENABLED: '1'
         run: |
-          go vet .
-          go test -count=1 .
+          go vet ./...
+          go test -count=1 ./...
 
   android-bridge:
     name: Go bridge for Android (3 ABIs)

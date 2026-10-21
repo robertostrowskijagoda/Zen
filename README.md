@@ -64,15 +64,19 @@ shut down.
 ## What it can do
 
 - **Conversations** — chats, groups, voice notes, audio and video calls, encrypted from sender to recipient; screen sharing; a board tab in groups; GIFs from the klipy.com search (an outside company).
-- **Feed** — posts with photos, videos and audio recordings, only for the people you choose; you decide per profile field who sees it.
-- **Live meetings** — a "right now" status (a walk, coffee, *I urgently need help*), events, dinners through friends, a weekend plan.
-- **Friend graph** — who knows whom, including friends of friends; introductions through a mutual friend; zoom and clusters.
-- **Neighbours** — people from your building (a code on the door); **dating** through mutual friends, with an on-demand location for a friend watching over your date.
-- **Alarm** — call your closest people with one move, with your location and confirmation of who saw it.
-- **People nearby** — over Bluetooth, even without internet, with per-friend keys so nobody can fake another friend's presence.
+- **Feed** — posts with photos, videos and audio recordings, only for the people you choose; you decide per profile field who sees it. Pyramid posts appear on the feed too, with filters (everything · friends · pyramid · country).
+- **Live meetings** — a "right now" status (a walk, coffee, *I urgently need help*), events, dinners through friends with food sharing in dinner circles (eat at the cook's or take away), a weekend plan.
+- **Friend graph** — who knows whom, including friends of friends; introductions through a mutual friend; zoom and clusters; extra modes (statuses, closeness, pyramid line, gate prices, shortest or cheapest route to a person with a route planner). Gates and message prices: a friend, or you, can leave the way free, set a price or ask for consent before someone writes or is introduced. "Open to meet" is an opt-in, off by default, that shows friends and their friends that you are open to dates and/or new friendships.
+- **Neighbours** — people from your building (a code on the door); a knock waits for a resident to accept it, and when no resident is online it is held sealed by friends' "mailbox doors" and handed over later. **Dating** through mutual friends with your intention (dates, new friends or both), interests and filters, and an on-demand location for a friend watching over your date.
+- **Alarm** — call your closest people with one move, with your location and confirmation of who saw it; it also works from a locked Android phone.
+- **People nearby** — over Bluetooth (Android), even without internet, with per-friend keys so nobody can fake another friend's presence, and a private "Mijani" log of friends you passed, built only from what "People nearby" already hears and kept on the phone for 30 days.
+- **Offline links** — friends' phones and computers near each other link directly with no internet: over the same Wi-Fi (on by default, only friends and your own devices find each other), Wi-Fi Direct (Android, Windows), Bluetooth (all platforms) and Apple's Multipeer (iPhone, Mac). The last three are off until you turn them on.
 - **Offline mailboxes** — photos, videos and files for a friend who is offline wait at their mailboxes (your mutual friends), encrypted, and arrive when they return.
-- **Pyramid** — grassroots voting, delegated trust, a common purse and points. Joining asks for your birth year (minors are accepted); your age shows in your pyramid profile, confirmed by the person who admitted you.
+- **Pyramid** — one original pyramid built from cells of people who know each other. You join through a referral ("Polecenie") from a member, vote in your cell after 14 days or as soon as someone in the cell confirms they know you, chat in your cell's group chat and take part in advisory referenda called by the top. The top changes the rules (2 of 3, applied 24 hours later, within hard limits). Also: delegated trust, a common purse and points. Joining asks for your birth year (minors are accepted); your age shows in your pyramid profile, confirmed by the person who admitted you. People outside the pyramid can read the top's and the national section's posts that friends pass on.
 - **Account safety** — account recovery through trusted friends or a paper backup of the key; friendship levels (weak friend / friend / close friend) that decide who sees your friend list, statuses and group invitations.
+- **Post-quantum encryption** — every message and signal, offline mailbox, locked inbox and call frame is also protected with a hybrid key (ML-KEM-768 + X25519), and what Zen signs and keeps is signed with Ed25519 + ML-DSA-65. See "Privacy and security" for what is still classical.
+- **Looks and sounds** — light and dark themes plus the Neon and Retro looks, and Zen's own sounds for messages, calls, knocks and the alarm.
+- **Updates** — Zen checks GitHub for a new release and can update itself (see below); friends can also pass Zen on to each other.
 - **"Why is it not working?"** — a built-in diagnostic screen (network, background work, notifications, battery, clock, free space).
 - **21 languages** — Zen speaks the language of your phone or computer (English if it doesn't know it); change it in **Settings → Language**.
 - **Phone and computer** — Android (arm64, armv7, x86_64), iPhone, Windows (x64, ARM64), Linux (x64, arm64) and Mac; one account on several devices.
@@ -137,7 +141,7 @@ Zen also runs on iPhone. It isn't in the App Store (that needs a paid Apple acco
 
 **What Zen can't do on iPhone** (iOS doesn't allow it):
 - it doesn't run in the background — messages and calls arrive only while Zen is open; there are no push notifications,
-- it doesn't broadcast over Bluetooth in the background like Android, so "People nearby" is Android-only,
+- "People nearby" (Bluetooth presence) is Android-only; offline links with friends use Apple's Multipeer while Zen is open,
 - it has to be refreshed every 7 days.
 
 **Won't work or not recommended:**
@@ -173,8 +177,8 @@ Anyway** (or in Terminal
 `xattr -dr com.apple.quarantine /Applications/Zen.app`). After an update macOS
 may ask for keychain access — choose **Always Allow**.
 
-On a computer there is no Bluetooth ("People nearby"), call recording or
-camera.
+On a computer there is no "People nearby" (Bluetooth presence), call
+recording or camera. Offline links (Wi-Fi Direct on Windows, Bluetooth) work.
 
 ### From a friend
 
@@ -229,7 +233,31 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
 - A friend's name comes from their profile — nobody can pose as "Mum" with a
   name given in an invitation. Your own nickname (visible only to you)
   appears under the name.
-- Messages are encrypted from sender to recipient, and everything on the device — with your password.
+- **Encryption, honestly.** Everything on the device is encrypted with your password
+  (AES-256-GCM, Argon2id). Every signal between devices, every offline-mailbox
+  message and the locked-phone inbox are sealed with a hybrid post-quantum key
+  (ML-KEM-768 + X25519), call audio and video frames are encrypted end to end
+  with keys from the same kind of exchange, and what Zen signs and keeps for
+  years (posts, account and device records, pyramid records, releases) carries
+  a hybrid signature, Ed25519 + ML-DSA-65. **Still classical:** the anonymous
+  ring signatures of cell votes, event QR tickets, Bluetooth and Wi-Fi
+  greetings, dating boxes, door knocks, the Yggdrasil node key, and call frames
+  use AES-128-GCM (the call screen says which protection a call has). Details
+  and limits: [SECURITY.md](SECURITY.md).
+- **Locked phone.** On Android the background service works without your
+  password: it holds a separate background key and only kits made for it
+  (alarm, "People nearby", flat doors); what arrives while locked is stored
+  sealed and read only after you unlock.
+- **Location comes from the system itself** (GPS and the network provider on
+  Android, the operating system's service elsewhere), never from Google Play
+  services, and goes only where a feature says (an alarm, a date-safety request;
+  "Mijani" keeps a place rounded to about 100 m on the phone).
+- **Updates.** Except in the store build, Zen asks GitHub for the newest release
+  20 seconds after start and every 12 hours (GitHub sees your IP address and the
+  name "Zen"). On "Update" it downloads the file, checks it against the release's
+  `SHA256SUMS` and, on Android, against Zen's own signing certificate. The check of
+  the maintainers' signature (`SHA256SUMS.sig`) turns on once their keys are
+  pinned in the app, which is not the case yet.
 - **You decide who sees what.** Friendship levels (weak friend / friend / close
   friend) and per-field profile visibility control who sees your friend list,
   statuses and posts, and who may invite you to groups. Media downloads over
@@ -248,7 +276,7 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
 Zen has no servers of its own. Devices connect through
 [**Yggdrasil**](https://yggdrasil-network.github.io/) — an open, encrypted mesh network
 in which every device has its own address and traffic goes directly or through other
-devices that don't see the content. Zen adds its own encryption on top.
+devices that don't see the content. Zen adds its own (post-quantum) encryption on top.
 Those devices (including the public nodes Zen starts from) do see
 your IP address and your address in the network, that is, your invitation code — they
 don't see what you write. On top of that, the GIF search uses an outside company,
@@ -314,11 +342,10 @@ Silicon and Intel, macOS 12 or newer). It is not sandboxed (App Sandbox) —
 it runs system tools, e.g. `route` and `adb`; the reason is described
 in `macos/Runner/Release.entitlements`.
 
-More documentation: `docs/PLAN.md` (the plan), `docs/STATUS.md` (state, known
-bugs, security audits), `docs/RELEASES.md` (releases and distribution),
+More documentation: `docs/RELEASES.md` (releases and distribution),
 `docs/TESTING.md` (testing on many clients), `docs/PROTOCOL.md` (the protocol),
-`docs/DPIA.md` (draft data protection impact assessment). Reporting a
-vulnerability: [SECURITY.md](SECURITY.md). History of changes: [CHANGELOG.md](CHANGELOG.md).
+`docs/PRIVACY.md` (privacy policy) and `docs/TERMS.md` (terms of use).
+Reporting a vulnerability: [SECURITY.md](SECURITY.md). History of changes: [CHANGELOG.md](CHANGELOG.md).
 
 ## Support Zen
 
@@ -357,4 +384,9 @@ distributed through F-Droid and IzzyOnDroid (not set up yet;
 [docs/RELEASES.md](docs/RELEASES.md), section 6.1). Builds that such
 repositories make from the unchanged source of a release may keep the name and
 icon (NOTICE, 3.3). The full license text is in [LICENSE](LICENSE); libraries
-keep their own licenses (in the app: About → Licenses).
+keep their own licenses (in the app: About → Licenses; list of components in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+
+**F-Droid readiness:** the license fits, Zen uses no Google Play services and no
+tracker, and the Go bridge builds from source. Still missing: a build recipe
+(Flutter + Go) and a build with the GitHub self-update switched off.

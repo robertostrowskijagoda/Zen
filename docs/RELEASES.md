@@ -1,10 +1,9 @@
 # Releases, signing and publishing
 
 How to release Zen on GitHub, what to sign with, how to check that a file is
-official, which channels to distribute it through (§4, §6: Android developer
+official, which channels to distribute it through (section 4, section 6: Android developer
 verification, stores, iPhone, costs and plan) and what to do about updates
-over the network. Integrity plan: §14.3 in `PLAN.md`; open distribution
-problems: `STATUS.md` §9.
+over the network.
 
 UI strings quoted below are the app's Polish labels (e.g. "Podaj dalej" =
 "Pass it on", the in-app way of handing Zen to a friend; "O aplikacji" =
@@ -68,8 +67,7 @@ UI strings quoted below are the app's Polish labels (e.g. "Podaj dalej" =
    ```
    keytool -list -v -keystore zen-release.jks -alias zen | findstr SHA256
    ```
-   The same fingerprint goes into the app as the pinned one (§14.3,
-   `kOfficialApkCertificatesSha256`). Easiest from a signed APK — the tool
+   The same fingerprint goes into the app as the pinned one (`kOfficialApkCertificatesSha256`). Easiest from a signed APK — the tool
    prints the fingerprint and writes it straight into
    `lib/src/features/update/apk_signature.dart`:
    ```
@@ -91,7 +89,7 @@ overwritten by one signed with a different key. Changing the package to
    / `kAppBuild` in `lib/src/app/app_version.dart` (a test checks that they
    match); the same number in the CHANGELOG heading and in the tag. The build
    number (`versionCode`) must increase.
-2. **Go bridge** builds itself (§3.1): `flutter build apk`, `windows`,
+2. **Go bridge** builds itself (section 3.1): `flutter build apk`, `windows`,
    `linux`, `macos` and `ios` rebuild it only when its sources changed. After
    changing `go.mod` (e.g. a new Yggdrasil version) refresh the licenses:
    `dart run tool/go_licenses.dart` (the test `go_licenses_test.dart` reminds
@@ -109,10 +107,10 @@ overwritten by one signed with a different key. Changing the package to
    `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
    — without them the workflow skips `Zen.apk` — and
    `ZEN_RELEASE_SIGNING_KEY`, the release signing key that signs
-   `SHA256SUMS` (§8.6; without it `SHA256SUMS.sig` is left out with a
+   `SHA256SUMS` (section 8.6; without it `SHA256SUMS.sig` is left out with a
    warning). The environment requires an
    approver (the maintainer) and has a rule for `v*` tags only; the key goes
-   only to a run of a `v*` tag after approval (audit S-6, described at the top
+   only to a run of a `v*` tag after approval (described at the top
    of `release.yml`). A manual run from a branch builds the other files as
    artifacts, without `Zen.apk` and without a release. **Windows ARM64 is
    experimental:** the `windows-arm64` job has `continue-on-error`, and until
@@ -157,12 +155,16 @@ overwritten by one signed with a different key. Changing the package to
      archives);
    - `LICENSE` and `NOTICE` — the GPL-3.0 text and the author's additional
      terms (GPL section 4 asks for a copy of the licence with every copy);
+   - `THIRD_PARTY_NOTICES.md` — the licences of the libraries, fonts, icons
+     and services (also next to `zen.exe` and `zen`; the texts are in the
+     app). Before a release, `dart run tool/check_licenses.dart` checks the
+     Dart packages' licences;
    - `SHA256SUMS` — checksums of all the files above (item 5);
    - `SHA256SUMS.sig` — `SHA256SUMS` and the version signed with the release
-     signing key (§8.6); the app checks it before updating itself.
+     signing key (section 8.6); the app checks it before updating itself.
 
    **Store variant** (Google Play, Galaxy Store) is **not** a release file; it
-   is built by hand with the `appStoreOnly` flavor (§6.2):
+   is built by hand with the `appStoreOnly` flavor (section 6.2):
    `flutter build appbundle --release --flavor appStoreOnly` (Play AAB),
    `flutter build apk --release --flavor appStoreOnly` (Galaxy Store). The
    copies named `Zen-APP-STORE-ONLY-do-not-install-manually.aab|apk` appear in
@@ -182,7 +184,7 @@ overwritten by one signed with a different key. Changing the package to
    `Get-FileHash -Algorithm SHA256 Zen.apk`). Anyone may redistribute copies, and the
    sums let people check that a copy is the official one, so they must accompany
    every release — also after replacing a file by hand they must be computed
-   and signed again (§8.6). The job runs only when the required builds
+   and signed again (section 8.6). The job runs only when the required builds
    succeeded (Windows, Linux, macOS, iOS; Android unless it was skipped).
    The attach job never replaces a file already attached (no `--clobber`)
    and stops if the release is already published; to redo a file, delete it
@@ -197,14 +199,15 @@ overwritten by one signed with a different key. Changing the package to
 8. **First release with `com.roj.zen`:** state in the description that it is a
    new app — the old one (`com.HuraganKodu.zen`) stays alongside with its
    data. The account moves via "Podłącz nowe urządzenie" ("Connect a new
-   device", §6.5) or recovery; then the old one can be uninstalled.
+   device", section 6.5) or recovery; then the old one can be uninstalled.
 
 ### 3.1. Go bridge (native/yggdrasil_bridge)
 
 - **Automatic:** Android — the Gradle task `buildGoBridge` (before
   `preBuild`), Windows — the CMake target `yggdrasil_bridge`. Both call
   `build_if_changed.ps1 -Target android|windows`, which computes a SHA-256 of
-  the sources (`*.go` without tests, `go.mod`, `go.sum`, the build script)
+  the sources (`*.go` and `internal/*/*.go` without tests, `go.mod`,
+  `go.sum`, the build script)
   and `go version`, and
   builds only when it differs from the one stored next to the library
   (`libyggdrasil_bridge.so.sha256`, `bin/yggdrasil_bridge.dll.sha256`; when
@@ -278,7 +281,7 @@ overwritten by one signed with a different key. Changing the package to
   Debians). The runner is single-instance via GApplication (required by
   app_links on Linux: a link from the browser reaches the running Zen); the
   test profile (`--zen-profile` / `ZEN_PROFILE`) still starts alongside.
-- **Flatpak:** only repackaged from the built bundle (§3 item 4, the file list);
+- **Flatpak:** only repackaged from the built bundle (section 3 item 4, the file list);
   a from-source Flatpak for Flathub (Flutter and Go dependencies collected
   offline in the manifest) is not done.
 
@@ -295,7 +298,7 @@ SideStore or AltStore sign it with the user's free Apple ID (README, section
 
 ## 4. Android: developer verification (2026–2027)
 
-State as of 15.10.2026 (sources: §6.6):
+State as of 15.10.2026 (sources: section 6.6):
 
 - On **certified** phones (with Google services) only apps whose package and
   signing key were registered by a verified developer will be installable and
@@ -319,10 +322,10 @@ State as of 15.10.2026 (sources: §6.6):
 
 **To do by the end of 2026 (~PLN 100):**
 
-1. **Key backup first** (§2 item 3): without the key the package cannot be
+1. **Key backup first** (section 2 item 3): without the key the package cannot be
    registered, and a lost key means no more updates.
 2. **Account for USD 25 once:** Play Console as a personal account (both the
-   verification account and the route to Google Play, §6.2) or Android
+   verification account and the route to Google Play, section 6.2) or Android
    Developer Console (outside Play only). Needed: a Google account with 2FA,
    a payment profile, an ID card, a document with an address (bill,
    statement), e-mail and phone.
@@ -343,10 +346,10 @@ State as of 15.10.2026 (sources: §6.6):
   `github.com/robertostrowskijagoda/`) or from a friend via "Podaj dalej"; may
   upload the file to virustotal.com; Android scans the app on install; the
   same signing key means a fake will not install "over" the real Zen.
-- In the app (§14.3): pinned fingerprint, "Oficjalna kopia" ("Official copy")
+- In the app: pinned fingerprint, "Oficjalna kopia" ("Official copy")
   in "O aplikacji", a red warning for every APK with a mismatching signature
   or sum, and a **signed manifest** with the donation link, author and
-  repository (§8.2) and a canary (§8.3).
+  repository (section 8.2) and a canary (section 8.3).
 - **Windows:** no Authenticode signature today, so SmartScreen shows "Windows
   protected your PC" (the README says what to click). Zen-Windows-arm64.zip is
   the same. To do: SignPath (free for open-source projects; Zen is
@@ -354,40 +357,39 @@ State as of 15.10.2026 (sources: §6.6):
 - **macOS:** ad hoc signature, no notarization — since macOS 15 the first
   launch only via "Open Anyway" in System Settings (or
   `xattr -dr com.apple.quarantine`). Eventually Developer ID and notarization
-  (Apple account, §6.3). **Linux:** unsigned (`.tar.gz`, `.deb` and `.flatpak`); sums in
+  (Apple account, section 6.3). **Linux:** unsigned (`.tar.gz`, `.deb` and `.flatpak`); sums in
   `SHA256SUMS`.
 
 ## 6. Distribution: channels and plan
 
 Research on channels, stores and law from 14–15.10.2026 — this is neither
-legal nor tax advice; uncertain places are marked. Summary and priorities:
-`STATUS.md` §9.
+legal nor tax advice; uncertain places are marked.
 
 ### 6.1 Channels
 
 | Channel | State | Notes |
 |---|---|---|
-| GitHub Releases | main channel | signed APK (arm64-v8a, armeabi-v7a, x86_64), desktop packages, `SHA256SUMS`; from 2027 only with a registered package (§4) |
+| GitHub Releases | main channel | signed APK (arm64-v8a, armeabi-v7a, x86_64), desktop packages, `SHA256SUMS`; from 2027 only with a registered package (section 4) |
 | "Podaj dalej" in the app | works | hotspot, Wi-Fi, Quick Share, USB from a computer; from 2027 as above, possibly only once online |
 | Obtainium | works, nothing to do | installs and updates straight from GitHub Releases; not a store — no review or license requirements. To do: a "Get it on Obtainium" button in the README and the key fingerprint to check (e.g. AppVerifier) |
 | Own F-Droid repository | possible | `fdroidserver` → static files on GitHub Pages; an address or QR to add in F-Droid, Droid-ify, Neo Store; no review |
 | F-Droid (main) and IzzyOnDroid | possible, not set up | the GPL-3.0 license meets their rule (OSI- or FSF-approved). F-Droid builds from source: it needs a build recipe (Flutter + the Go bridge) and the built-in updater off in that build; the GIF search (klipy.com) may get the "NonFreeNet" anti-feature. Such builds may keep the name and icon (`NOTICE`, 3.3) |
-| Google Play | possible, separate variant (§6.2) | personal account USD 25; new personal account: closed test with at least 12 testers for 14 days, then a production application (~7 days); name, surname and country public; targetSdk 36 for new apps and updates |
+| Google Play | possible, separate variant (section 6.2) | personal account USD 25; new personal account: closed test with at least 12 testers for 14 days, then a production application (~7 days); name, surname and country public; targetSdk 36 for new apps and updates |
 | Samsung Galaxy Store | possible, same variant | no fees, manual review; from 30.09.2026 a store participating in Google verification |
 | Huawei AppGallery | optional | Huawei phones without Google (Google verification does not apply); Zen uses no Google services — check on one phone |
 | Accrescent | not now | console for invited developers only, no self-update, package ID must match the author's domain (uncertain — the page may be outdated) |
 | Amazon, Aptoide, RuStore, Chinese stores | no | Amazon Appstore on Android closed since 20.08.2025; Aptoide — annual fee and a "piracy store" reputation; RuStore requires a VK ID, and VK is on the EU sanctions list (07.2026); China — ICP registration and a Chinese entity |
 | iPhone: SideStore / AltStore with a free Apple ID | works | `Zen-unsigned.ipa`; signing every 7 days, at most 3 apps, no background work |
-| iPhone: TestFlight, AltStore PAL, App Store | needs a USD 99/year account | §6.3 |
-| Windows | x64 ZIP and experimental ARM64 ZIP, no Authenticode | later MSIX and winget (§5) |
+| iPhone: TestFlight, AltStore PAL, App Store | needs a USD 99/year account | section 6.3 |
+| Windows | x64 ZIP and experimental ARM64 ZIP, no Authenticode | later MSIX and winget (section 5) |
 | Linux | `tar.gz` and `.deb`, x64 and ARM64; Flatpak (x64, repackaged bundle, attached to the release; not on Flathub) | AppImage and Snap optional |
-| macOS | ZIP with an ad hoc signature | Developer ID + notarization with the same account as iPhone (§6.3); official Homebrew only after notarization |
-| Repository mirror (e.g. Codeberg) | optional | in case GitHub is blocked; mirror addresses can be published in the signed manifest (§8.2) |
+| macOS | ZIP with an ad hoc signature | Developer ID + notarization with the same account as iPhone (section 6.3); official Homebrew only after notarization |
+| Repository mirror (e.g. Codeberg) | optional | in case GitHub is blocked; mirror addresses can be published in the signed manifest (section 8.2) |
 
 "Open straight in the app" (Android App Links) requires a file
 `/.well-known/assetlinks.json` at the domain root — the invitation page is in
 the subdirectory `robertostrowskijagoda.github.io/Zen/`, and there is
-deliberately no own domain. So the QR code opens the invitation page (§1
+deliberately no own domain. So the QR code opens the invitation page (section 1,
 item 2), which launches Zen through `intent://` or `zen://`; Zen recognizes
 the same code in the scanner, and after enabling "Open supported links" also
 links from the camera.
@@ -402,7 +404,7 @@ accident: the files are called
 data. Yggdrasil runs in Zen as a library, without `VpnService` (VPN would
 require an organization account).
 
-**Done (the `appStoreOnly` flavor, D12):**
+**Done (the `appStoreOnly` flavor):**
 
 - the manifest in `src/appStoreOnly` removes `REQUEST_INSTALL_PACKAGES` and
   removes the camouflage alias; the launcher label stays "Zen" (only the About
@@ -414,7 +416,7 @@ require an organization account).
 - flavors are active only for a task with a flavor (`--flavor appStoreOnly|full`)
   or with `-Pzen.flavors=true`, so a plain `flutter build apk` / `flutter run`
   works unchanged;
-- built by hand, not by `release.yml` (§3 item 4).
+- built by hand, not by `release.yml` (section 3 item 4).
 
 **Still to do** for the `appStoreOnly` variant:
 
@@ -466,7 +468,7 @@ section description in the store build.
     those countries;
   - **App Store** — full review: user content (filter before publishing,
     reports with a response, blocking, contact), no impression of an
-    "anonymous chat", dating as a side feature, names as in §6.2, the donation
+    "anonymous chat", dating as a side feature, names as in section 6.2, the donation
     link only in the US store, in-app account deletion, an encryption
     declaration (in France a separate declaration or a switch to CryptoKit);
   - **macOS** — Developer ID signature and notarization in CI (no content
@@ -517,11 +519,11 @@ section description in the store build.
 Now (October–December 2026):
 
 1. Stay with GitHub Releases; in the README an Obtainium button and the key
-   fingerprint with checking instructions (§2 item 4). Cost 0.
-2. Release key backup with Shamir (§2 item 3) — before registration.
+   fingerprint with checking instructions (section 2 item 4). Cost 0.
+2. Release key backup with Shamir (section 2 item 3) — before registration.
 3. Google account USD 25 and registration of `com.roj.zen` with the release
-   key (§4).
-4. The `appStoreOnly` variant (§6.2: built; the remaining items open) with the same
+   key (section 4).
+4. The `appStoreOnly` variant (section 6.2: built; the remaining items open) with the same
    package and key; closed test with 12 testers × 14 days; publication in
    Poland and the EU (+ English-speaking countries); then Galaxy Store with the
    same variant. About 3–6 weeks in total.
@@ -529,12 +531,11 @@ Now (October–December 2026):
    IPA, AltStore PAL for the EU in parallel; Developer ID and macOS
    notarization in CI.
 6. App Store once the TestFlight version stabilizes (Poland, EU, UK, USA).
-7. Linux: Flathub (a from-source Flatpak; `.deb`, audio/video playback and a release-file Flatpak are done, §3.2).
+7. Linux: Flathub (a from-source Flatpak; `.deb`, audio/video playback and a release-file Flatpak are done, section 3.2).
 8. Privacy policy and terms — required by the stores; with klipy.com and
    public Yggdrasil nodes. Drafts exist in `docs/PRIVACY.md` and
    `docs/TERMS.md` (not legal advice; to be reviewed by the maintainer),
-   with `docs/DPIA.md` (a draft impact assessment) and `docs/PROTOCOL.md`
-   (protocol specification from the code); "O aplikacji" links to the privacy
+   with `docs/PROTOCOL.md` (protocol specification from the code); "O aplikacji" links to the privacy
    policy and terms on GitHub.
 
 In 2027:
@@ -546,7 +547,7 @@ In 2027:
   Supreme Court ruling in Epic v. Apple (about 06.2027);
 - a foundation, if the project grows (organization account, fee waiver → Web
   Distribution in the EU);
-- F-Droid and IzzyOnDroid: possible since the GPL-3.0 license (§6.1).
+- F-Droid and IzzyOnDroid: possible since the GPL-3.0 license (section 6.1).
 
 ### 6.6 Sources
 
@@ -576,7 +577,7 @@ In 2027:
 
 - The link is in `kDonationUrl` (`lib/src/features/about/presentation/about_screen.dart`)
   and in the README: **https://buycoffee.to/zen** (since 14.10.2026). Change
-  it only in these two places — and in the signed manifest (§8.2): a copy whose
+  it only in these two places — and in the signed manifest (section 8.2): a copy whose
   `kDonationUrl` differs from the signed link shows a red warning.
 - Where to collect: buycoffee.to, Patronite, zrzutka.pl (BLIK, bank
   transfers); GitHub Sponsors, Liberapay, Ko-fi (abroad); Open Collective
@@ -591,7 +592,7 @@ In 2027:
   disputed. Unregistered activity in 2026: up to PLN 10,813.50 of revenue per
   quarter. A collection for one's own work is usually not a "public
   collection" within the meaning of the act. In store versions the donation
-  link has to be removed (§6.2, §6.3).
+  link has to be removed (section 6.2, section 6.3).
 - In the app the donation appears only in "O aplikacji" (at the top), with no
   nagging elsewhere. Good practices: a clear goal, short reports.
 
@@ -601,16 +602,21 @@ The mechanism from V1.10 is in the code but **disabled**: the maintainer key
 list `kReleaseMaintainers` in `lib/src/features/update/release.dart` is empty,
 so the app accepts no updates from the network. We do not want maintainers
 with separate keys; a proposed replacement (the same signing certificate +
-a higher `versionCode` + 7 days + a human's consent) is in §14.2, "Open
-decision".
+a higher `versionCode` + 7 days + a human's consent) is still to be decided.
 
 How it works today (if the list were not empty): a release is accepted when at
-least 2 of 3 maintainers signed it (Ed25519), 7 days passed since it was first
+least 2 of 3 maintainers signed it (hybrid Ed25519 + ML-DSA-65, both halves
+must hold), 7 days passed since it was first
 seen (any maintainer can hold it back in that time) and the human presses
 "Zainstaluj" ("Install") themselves. Files travel over the network like any
 other file (256 KB chunks), so a swapped copy is rejected.
 
-The tool `tool/zen_release.dart` (pure Dart):
+The tool `tool/zen_release.dart` (pure Dart; `keygen`, `pubkey`, `sign`,
+`verify` and `revoke` also need **Go**, the one that builds the bridge:
+signatures are made by `native/yggdrasil_bridge/cmd/zensig`, run with
+`go run`). A maintainer's public key is its **hybrid id**
+`<Ed25519 key>.<SHA-256 of the ML-DSA-65 key>` (89 characters), derived from
+the one seed in the key file:
 
 ```
 dart run tool/zen_release.dart keygen ~/zen-maintainer.key      # maintainer key
@@ -623,32 +629,31 @@ dart run tool/zen_release.dart bundle release.json zen-1.11.0.zenupdate \
     android=… windows=…
 dart run tool/zen_release.dart revoke --build 11 --why "Reason" \
     ~/zen-maintainer.key revoke-11.json                         # hold back
-dart run tool/zen_release.dart maintainers [--write] KEY1 KEY2 KEY3   # §8.1
+dart run tool/zen_release.dart maintainers [--write] ID1 ID2 ID3      # section 8.1
 dart run tool/zen_release.dart sums …                           # SHA256SUMS
-dart run tool/zen_release.dart canary …                         # §8.3
-dart run tool/zen_release.dart fingerprint APK|--keystore … [--write]   # §2 item 4
+dart run tool/zen_release.dart canary …                         # section 8.3
+dart run tool/zen_release.dart fingerprint APK|--keystore … [--write]   # section 2 item 4
 ```
 
 A `.zenupdate` (or just `release.json` or a hold-back file) is loaded in
 **Settings → Aktualizacje i Podaj dalej → Wczytaj aktualizację z pliku**
 ("Updates and Pass it on → Load an update from a file"); the app checks the
 signatures and tells friends about the new version. Argument parsing
-distinguishes option values containing "=" from file names. The tool will be
-reworked after the decision in §14.2.
+distinguishes option values containing "=" from file names.
 
 ### 8.1 Enabling (once there are maintainer keys)
 
 1. Each of the 3 maintainers, on their own offline computer:
    `dart run tool/zen_release.dart keygen ~/zen-maintainer.key` — sends the
-   others **only** the printed public key.
-2. `dart run tool/zen_release.dart maintainers --write KEY1 KEY2 KEY3` writes
+   others **only** the printed hybrid id.
+2. `dart run tool/zen_release.dart maintainers --write ID1 ID2 ID3` writes
    them into `kReleaseMaintainers` (without `--write` it only prints). From
    that build the app accepts releases with 2 of 3 signatures.
 3. At every release: `create` → `sign` with two keys → `verify` →
    `sums > SHA256SUMS` → `bundle`; attach the `.zenupdate` and `release.json`
    to the GitHub release.
 
-### 8.2 Signed donation link, author and mirrors (§14.3)
+### 8.2 Signed donation link, author and mirrors
 
 `create` adds to the manifest `official` (the donation link, author and
 repository — by default the same as in the app; change with `--donation`,
@@ -673,8 +678,8 @@ dart run tool/zen_release.dart verify canary.json
 ```
 
 Format: `{"m": {"t": "zen_canary", "app": "zen", "at", "until", "text"},
-"sigs": [{"k", "s"}]}` (an Ed25519 signature of the canonical JSON of `m`, as
-in a release). It is loaded like an update and passes from friend to friend
+"sigs": [{"k", "s"}]}` (`k` the maintainer's hybrid id, `s` its hybrid
+signature of the canonical JSON of `m`, as in a release). It is loaded like an update and passes from friend to friend
 (the `can` field in `zen_rel`); the app shows the text and,
 after `until`, a warning that the statement was not renewed. A new canary must
 be signed before `until` passes.
@@ -690,12 +695,12 @@ marker spreading by gossip is not done.
 
 ### 8.5 Updates from GitHub (on)
 
-Independent of §8: every build except the store one asks
+Independent of section 8: every build except the store one asks
 `api.github.com/repos/robertostrowskijagoda/Zen/releases/latest` 20 s after
 start and every 12 h (one GET, only the User-Agent `Zen`;
 `lib/src/features/update/github_update_service.dart`). A newer `v<version>`
 tag shows the bar "Jest nowa wersja X — warto zaktualizować" with
-"Aktualizuj": the platform's file from §3 (`Zen.apk`, `Zen-Windows.zip`,
+"Aktualizuj": the platform's file from section 3 (`Zen.apk`, `Zen-Windows.zip`,
 `Zen-Windows-arm64.zip`, `Zen-Linux-<arch>.tar.gz` / `.deb` / `.flatpak`,
 `Zen-macOS.zip`) is downloaded and must match the release's `SHA256SUMS` by
 name and sum. Android: the APK must also be signed with the installed app's
@@ -711,7 +716,7 @@ aplikację."; the closable bar shows it only after a second failed attempt
 only to `github.com`, `objects.githubusercontent.com` and
 `release-assets.githubusercontent.com` (HTTPS). `SHA256SUMS` comes from the
 same release as the file, so it protects against damage, not against a
-forged release; that is what the signature of §8.6 is for.
+forged release; that is what the signature of section 8.6 is for.
 
 ### 8.6 Signed SHA256SUMS (GitHub updates)
 
@@ -720,12 +725,13 @@ platforms; on Android in addition to the certificate check) installs a file
 only when the release also has `SHA256SUMS.sig`, signed with one of those
 keys, naming this version and this file with its SHA-256. Without that file,
 with a bad signature or another version, nothing is installed. While the
-list is empty (today) the app behaves as in §8.5 and "Aktualizacje i Podaj
+list is empty (today) the app behaves as in section 8.5 and "Aktualizacje i Podaj
 dalej" says that this build cannot check the author's signature yet.
 
-`SHA256SUMS.sig` has the format of a signed release, like the canary (§8.3):
+`SHA256SUMS.sig` has the format of a signed release, like the canary (section 8.3):
 `{"m": {"t": "zen_sums", "app": "zen", "version", "files": {name: sha256}},
-"sigs": [{"k", "s"}]}`. The `sign` job of `release.yml` makes it on every
+"sigs": [{"k", "s"}]}` (hybrid id and hybrid signature, as in section 8). The
+`sign` job of `release.yml` (with Go for the signature) makes it on every
 `v*` tag with the environment secret **`ZEN_RELEASE_SIGNING_KEY`** (in the
 `release` environment, so it waits for the same approval as the Android
 job); without the secret it is skipped with a warning. By hand:
@@ -740,11 +746,12 @@ dart run tool/zen_release.dart verify SHA256SUMS.sig
 One-time steps for the owner:
 
 1. `dart run tool/zen_release.dart keygen ~/zen-release.key` on your own
-   computer (outside the repository); it prints the public key. Back the
-   file up like the APK key (§2 item 3).
-2. `dart run tool/zen_release.dart maintainers --write <public key>` puts the
-   public key into `kReleaseMaintainers`; commit it. Builds from then on
-   require the signature. One key does not turn on network updates (§8:
+   computer (outside the repository, with Go installed); it prints the
+   key's hybrid id. Back the file up like the APK key (section 2 item 3): the one
+   seed in it is both the Ed25519 and the ML-DSA-65 key.
+2. `dart run tool/zen_release.dart maintainers --write <hybrid id>` puts the
+   hybrid id into `kReleaseMaintainers`; commit it. Builds from then on
+   require the signature. One key does not turn on network updates (section 8:
    they need 2 signatures from a list of at least 3).
 3. Settings → Environments → `release` → Environment secrets → add
    `ZEN_RELEASE_SIGNING_KEY` with the contents of `~/zen-release.key` (one

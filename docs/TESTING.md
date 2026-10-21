@@ -10,7 +10,8 @@ From fastest to most "real":
 4. **Visual audit** — all screens at several sizes.
 
 In addition: Go bridge tests (`go test` in `native/yggdrasil_bridge`,
-`test_native.ps1`), translation checks (section 5) and GitHub Actions on every
+`test_native.ps1`; among them the post-quantum session layer, local links, LAN
+discovery, Bluetooth and Wi-Fi Direct logic and the door node), translation checks (section 5) and GitHub Actions on every
 push (section 6).
 
 ## 1. Network simulator (`lib/src/dev/sim/sim_network.dart`)
@@ -34,7 +35,7 @@ A ready-made world: `test/support/pyramid_world.dart` (`PyramidWorld.six()`,
 |---|---|
 | `test/pyramid_core_test.dart` | ring signatures, rules, state assembly |
 | `test/pyramid_sim_test.dart` | admission, swap and anonymous voting, tree referendum, issuance + transfer + veto, report + crisis notice, chaos (30% loss, phones switched off, split → after healing everyone sees the same), forged records |
-| `test/pyramid_scenarios_test.dart` | delegations, immunity, dating ban, migration, absence, removal, constitution, national section, paid mailbox, announcement, merging pyramids |
+| `test/pyramid_scenarios_test.dart` | delegations, immunity, dating ban, migration, absence, removal, advisory referendum and rules changed by the top, national section, paid mailbox, announcement, "Polecenie", power key handover, cell chats |
 | `test/pyramid_security_test.dart`, `test/pyramid_attack_sim_test.dart` | attacks on the pyramid |
 | `test/dating_test.dart`, `test/neighbors_test.dart` | dating and neighbors on several phones |
 | `test/wire/golden_frames_test.dart` | protocol golden samples: frozen ping/pong frames (1.10.0 and 1.11), message, group_invite and a signed journal entry (fixed keys, fixed id). Never edit a sample to make a test pass — add a new one for a new format |
@@ -46,8 +47,12 @@ A ready-made world: `test/support/pyramid_world.dart` (`PyramidWorld.six()`,
 | `test/network_update_test.dart` | update over the network (disabled while `kReleaseMaintainers` is empty), loading from a file |
 | `test/store_build_test.dart` | the store build: only `appFlavor == 'appStoreOnly'` or `ZEN_STORE` make a store build, tests run as the direct build, the shared link defaults to the project page |
 | `test/about_screen_test.dart` | "O aplikacji" (About), including the Privacy policy and Terms tiles with GitHub links |
-
-Security regression tests: `STATUS.md` §4.4.
+| `test/hybrid_kem_test.dart`, `test/hybrid_signature_test.dart`, `test/relay_hybrid_cipher_test.dart`, `test/call_media_e2ee_test.dart`, `test/signature_overhead_test.dart` | post-quantum layers: hybrid KEM, hybrid signatures (both halves must verify, key pinning), mailbox sealing, call media key chains and rotation, size of signed records |
+| `test/pyramid_root_test.dart`, `test/pyramid_rules_v2_test.dart`, `test/pyramid_v2_service_test.dart`, `test/pyramid_feed_test.dart`, `test/pyramid_gate_wallet_test.dart` | pinned genesis and power-key handover, voting after 14 days or `known`, rules changed by the top with the 24 h delay, advisory referenda, cell chats, pyramid posts on the feed, gates paid in points |
+| `test/local_links_test.dart`, `test/native_stream_local_link_test.dart`, `test/runtime_lan_discovery_test.dart`, `test/offline_links_section_test.dart` | offline links with fake transports (settings, per-platform transports, secrets, status text) |
+| `test/alarm_kit_test.dart`, `test/nearby_background_test.dart`, `test/locked_background_inbox_test.dart`, `test/locked_signal_test.dart`, `test/neighbors_mailbox_door_test.dart` | the locked Android service: background key, alarm / nearby / door kits, sealed inbox, mailbox doors |
+| `test/encounters_test.dart`, `test/open_to_meet_test.dart`, `test/food_share_test.dart`, `test/graph_model_test.dart`, `test/dating_test.dart` | "Mijani", "open to meet", food sharing, graph modes and routes, dating intentions and filters |
+| `test/github_update_test.dart`, `test/sound_assets_test.dart` | GitHub release check and verified self-update, sound files |
 
 A new scenario: build a world, perform actions, `await w.net.run()`, check the
 state at a **different** person than the one who acted, and finally
@@ -187,7 +192,7 @@ same way as `tool/i18n.dart`: each file has exactly the texts from `lib/`, and
 
 `release.yml` on a `v*` tag builds all the release files — Android (signed
 universal APK), Windows x64 and ARM64, Linux x64 and ARM64 as `tar.gz` and
-`.deb`, macOS and iPhone (`RELEASES.md` §3). Linux, macOS and Windows on ARM
+`.deb`, macOS and iPhone (`RELEASES.md` section 3). Linux, macOS and Windows on ARM
 have not yet passed their first run — after pushing, check these jobs; if the
 Xvfb start proves unstable, building and the symbol check remain. The release
 job for Linux additionally checks the bridge and GStreamer linkage and runs
@@ -195,7 +200,9 @@ job for Linux additionally checks the bridge and GStreamer linkage and runs
 
 ## What this does not check
 
-- The simulator does not test Bluetooth or real Yggdrasil delays.
+- The simulator does not test Bluetooth, Wi-Fi Direct, Multipeer or real
+  Yggdrasil delays; offline links are tested with fake transports and in Go,
+  the radios themselves (Kotlin, Swift, C++ runners) only by hand.
 - The Android background service has few tests, the Kotlin code (BLE, calls)
   none.
 - App tests run in CI only on Windows; on Linux, macOS and Windows on ARM CI
@@ -206,7 +213,7 @@ job for Linux additionally checks the bridge and GStreamer linkage and runs
 - The Linux GStreamer player (`zen_media_player.cc`) is not tested beyond
   linking and starting; playback is checked by hand.
 - The Go bridge has no random-input tests (`go test -fuzz`), and the app no
-  "corrupted data sends no frame" test (`STATUS.md` A13).
+  "corrupted data sends no frame" test.
 - The harness works only in debug builds.
 - Apps on one computer share one link: network splits are tested in the
   simulator.

@@ -1,16 +1,3 @@
-<!--
-MAINTAINER NOTE: This is not legal advice; review with a lawyer. Draft written
-from how Zen 1.11.0 works (20.10.2026). Points to check: governing law and
-venue clause (section 13: Polish law is assumed because the author is in
-Poland; consumer law of the user's country may override it); the
-limitation-of-liability wording against mandatory consumer law; the DSA
-position of an app with no operator (docs/PLAN.md section 27 says
-a foundation with terms and a law-enforcement channel is safer later); the
-18+ dating rules; whether the name "pyramid" needs another label for stores.
-LICENSE (GPL-3.0) and NOTICE (its section 7 additional terms) are the binding
-licence texts; this document does not change them.
--->
-
 # Zen - Terms of Use
 
 *Version for Zen 1.11.0 - last updated 20 October 2026.*
@@ -178,6 +165,10 @@ Dating, neighbours, events and nearby features can lead to meeting strangers.
 People can lie about who they are and their age. Take normal precautions: meet
 in public places, tell a friend, use the date-safety feature, and leave if you
 feel unsafe. The author does not verify anyone.
+
+Food shared through dinner circles is a matter between the people involved.
+The author does not check the food, its safety, allergens or the people who
+cook or eat it; take the same care as with any meal from a stranger.
 
 ## 12. Donations
 

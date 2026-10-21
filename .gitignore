@@ -35,9 +35,6 @@ migrate_working_dir/
 # Logs
 *.log
 
-# Local working files (never part of the app)
-/scratch/
-
 # Release signing secrets: android/key.properties, the keystore it names,
 # and the network-update key (tool/zen_release.dart keygen)
 key.properties

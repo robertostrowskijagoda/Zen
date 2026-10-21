@@ -1,26 +1,6 @@
-<!--
-MAINTAINER NOTE (remove before publishing if you like):
-This is not legal advice; review with a lawyer. It is a plain-language draft
-written from how the code works in version 1.11.0 (20.10.2026). It makes no
-promise the app cannot keep: the author runs no servers and cannot see,
-change or delete what is on other people's devices. Points that most need a
-lawyer's eye: (1) whether the author counts as a "controller" or "joint
-controller" under the GDPR for an app that has no operator-side data at all;
-(2) special-category data (political opinions in the pyramid, sexual life and
-orientation in dating) and the explicit-consent wording; (3) the absence of
-any age gate (the owner's decision; docs/PLAN.md section 27) against the
-GDPR rules on children's consent (the age of digital consent is 13-16 in the
-EU) and against the Pyramid, which asks for a birth year and accepts minors;
-(4) the klipy.com paragraph - check Klipy's own
-terms and privacy policy before every release; (5) the contact route (no
-e-mail address is published yet - only GitHub). Keep this file, docs/TERMS.md
-and docs/DPIA.md in step with the code (see docs/PROTOCOL.md for what goes
-over the wire).
--->
-
 # Zen - Privacy Policy
 
-*Version for Zen 1.11.0 - last updated 20 October 2026.*
+*Version for Zen 1.11.0 - last updated 21 October 2026.*
 *The app's primary language is Polish; this document is in English. If a
 translation differs, ask on GitHub.*
 
@@ -37,12 +17,14 @@ privacy is weaker than people might expect.
   protected by your password and, where the system has one, the hardware key
   store (Android Keystore, Windows TPM, Secure Enclave).
 - **Other people's devices get what you send them.** Friends, groups and the
-  pyramids you join receive the content you share with them, and their copies
+  pyramid you join receive the content you share with them, and their copies
   are outside your control and the author's control.
 - **Network helpers see addresses, not content.** Zen runs on the Yggdrasil
   network. The nodes that carry your traffic can see your IP address and your
   network address, but not what you write.
-- **One third party is built in:** the GIF search uses klipy.com (section 6).
+- **Two outside services are contacted by the app itself:** the GIF search uses
+  klipy.com (section 6) and, except in the store build, Zen asks GitHub for the
+  newest release (section 7).
 - **No analytics, no advertising, no trackers.** Crash and diagnostic logs stay
   on your device.
 
@@ -76,6 +58,13 @@ Contact: see section 13.
 - **Features data:** statuses ("na teraz"), events, alarms (including location
   and recorded sound, if you use them), neighbours (flats), dating profile and
   decisions, pyramid records and balances, and the ledger of signed entries.
+- **"Mijani" (encounters log):** friends you passed and how many other
+  Zen phones were around, built only from what "People nearby" hears while it
+  scans (nothing scans for it), with the time and, if the phone had a recent
+  position, a place rounded to about 100 m. Strangers' tokens are kept in
+  memory for one 10-minute slot and only the largest hourly count is kept;
+  Bluetooth addresses are never kept. It stays on the phone, goes after 30
+  days and can be cleared at any time.
 - **Settings, the lock password hash parameters, the panic password** and
   similar.
 - **Diagnostic log:** a rolling text file (`zen-diagnostics.log`, trimmed to
@@ -90,10 +79,18 @@ available, by hardware-backed storage). **Exceptions:** media you export or
 save on purpose is saved as an ordinary file, and the language you chose is
 kept in a plain file (it is needed before you unlock). On Android, so that
 the phone can keep receiving while Zen is locked, this device's network
-identity and a list of keyed tags of your contacts are sealed with a
-separate key in the system's secure storage that opens without your
-password; what arrives while Zen is locked is stored sealed so that only
-your unlocked app can read it.
+identity, a list of keyed tags of your contacts, and what the alarm, "people
+nearby" and your flat's door need while Zen is locked (alarm recipients and
+the alarm's own key, your Bluetooth tokens for the next days, the keys
+friends gave you to recognise them nearby, the door keys) are sealed with a
+separate **background key** in the system's secure storage that opens
+without your password; what arrives while Zen is locked is stored sealed so
+that only your unlocked app can read it. This is a deliberate trade-off: someone
+who can extract both the app's data and that key (for example on a rooted or
+compromised phone) can read those small "kits" - who the alarm goes to, the
+alarm key (it signs alarm frames only), your Bluetooth tokens for the next
+days (not your private nearby key), the flat's door keys - but not your
+messages, posts or contacts' names, which stay under the password.
 
 ### 3.2 What other people receive
 
@@ -110,12 +107,15 @@ Everything below is sent device to device over the Yggdrasil network.
 | Calls | The other participants: call signalling and the media stream (WebRTC). Participants learn your network address and, through WebRTC, network details needed to connect. |
 | Post on your board | The ledger replicates your post to the devices of the chosen audience. Posts with the audience "Wszyscy znajomi", "Znajomi i przyjaciele" or "Tylko przyjaciele" are encrypted so only friends of a high enough level can read them; **public posts and public profile fields can be read by anyone who obtains them**, including people who follow you and anyone they were passed on to. The existence, time and size of entries and your account key are visible to anyone who holds the entry, even for encrypted posts. |
 | Offline mailboxes | Up to six friends you pick (or the app picks) hold **encrypted** copies of mail addressed to you for up to 14 days, including attachments (up to 24 MB each, within a per-sender quota). They see who it is from and to, size and time, not the content. |
-| Alarm | The friends chosen for alarms: your location (if allowed), a note, recorded sound, and delivery confirmations. Phones nearby may receive a signed Bluetooth "wave" (alarm id and time; only friends can tell whose it is). Tapping a map link opens openstreetmap.org in your browser with the coordinates. |
-| "People nearby" (Android) | If you turn it on, your phone advertises a token over Bluetooth that changes every 10 minutes; only friends can tell it is you. Anyone nearby can see that *a* Zen phone is there and its approximate signal strength. If you "wave", the person gets your pseudonym, your short text and your mesh address - not your account. |
-| Neighbours | Flat or building members you join: what you choose to reveal in that feature. |
-| Dating | Small "lanterns" (a one-off key and nothing else: no age, name, gender or preferences; the same shape whether or not you date) are passed up to two hops through friends' phones. A phone that sees a lantern runs a sealed match test; only if the two of you fit does it ask for the profile, which is sent sealed, so the phones on the way cannot read it. Dating never asks about your age. People who can read your profile see what you put in it. Your "Yes" is sent only as an unlinkable token; "No" sends nothing. |
-| Pyramid | When you join, you give your birth year, nationality and gender; the person who admits you signs that this is true. Members of the pyramid see your pseudonym, nationality and **age** in your pyramid profile (gender only if you choose to show it). Members also receive the signed records you create (votes, proposals, posts, payments, reports). Some votes and requests are signed anonymously within a ring of members. |
-| Introductions | The friend who introduces you and the person you are introduced to. |
+| Alarm | The friends chosen for alarms: your location (if allowed), a note, recorded sound, and delivery confirmations. Phones nearby may receive a signed Bluetooth "wave" (alarm id and time; only friends can tell whose it is). The location comes from the phone's own location service (never from Google Play services) and is sent only with an alarm or a date-safety request you or the friend triggered. Tapping a map link opens openstreetmap.org in your browser with the coordinates. |
+| "People nearby" (Android) | If you turn it on, your phone advertises a token over Bluetooth that changes every 10 minutes (together with the Bluetooth address); only friends can tell it is you, and they cannot show it to others in your place. Anyone nearby can see that *a* Zen phone is there and its approximate signal strength. If you "wave", the person gets your pseudonym, your short text and your mesh address - not your account. Friends' phones that hear you may note it in their own private "Mijani" log (section 3.1). |
+| Offline links | If you leave Wi-Fi discovery on (it is on by default) or turn on Wi-Fi Direct, Bluetooth or Apple Multipeer, your device broadcasts adverts so friends' and your own devices nearby can link with it without internet: on the local network a UDP beacon every 10-30 seconds, over Bluetooth an advertisement with a fixed Zen service id, over Wi-Fi Direct a service record (and, on a phone that hosts a group, the group's name and passphrase). An advert is a Bloom filter of tags only the right devices can test, with a new random salt every time, so strangers see random bytes; they can tell that *a* Zen device with local links is there and roughly how many devices it links with, not who you are. Strangers who join the same Wi-Fi network or group get no link and no data; the handshake proves a shared secret first. |
+| "Open to meet" | Off by default. If you turn it on (a prompt in the dating profile), your friends receive only your intention (dates, new friends or both), and they pass it on to their own friends, so your friends of friends may see a badge on the graph. People you exclude are listed as salted hashes, so friends who pass the flag on can skip them without learning who they are. Nothing else from the dating profile goes with it. |
+| Dinner circles: sharing food | A member's food offer (dish, portions, time window, photo, price or "free") goes to the circle and, if the cook chose, to friends or friends of friends. The place is told only to people the cook accepted; a friend who passes a request between a friend of a friend and the cook also sees the place in the answer. Who fed whom is kept only on the cook's and asker's own phones. |
+| Neighbours | Flat or building members you join: what you choose to reveal in that feature. A knock at a flat's door is held, when no resident is online, by up to six friends of a resident, sealed so that the friend learns neither who knocked nor which flat; if you let your friends run "mailbox doors", your phone does that for them (it holds ciphertext for up to 7 days). |
+| Dating | Your intention (dates, new friends or both) is part of the sealed match test and of your profile, and interests are part of the profile; the filters you set stay on your phone. Small "lanterns" (a one-off key and nothing else: no age, name, gender or preferences; the same shape whether or not you date) are passed up to two hops through friends' phones. A phone that sees a lantern runs a sealed match test; only if the two of you fit does it ask for the profile, which is sent sealed, so the phones on the way cannot read it. Dating never asks about your age. People who can read your profile see what you put in it. Your "Yes" is sent only as an unlinkable token; "No" sends nothing. |
+| Pyramid | When you join, you give your birth year, nationality and gender; the person who admits you signs that this is true. Members of the pyramid see your pseudonym, nationality and **age** in your pyramid profile (gender only if you choose to show it). Members also receive the signed records you create (votes, proposals, posts, payments, reports) and share a group chat with the members of their cell and of the cell below (no invitations; all of them see the messages). People outside the pyramid can read posts of the top and of the national section that their friends in the pyramid pass on (the author's pseudonym and the signed post). Votes in your cell are signed anonymously within a ring of members; that signature is classical, so a future quantum computer could in principle link a recorded vote to its signer. |
+| Introductions | The friend who introduces you and the person you are introduced to. Your gate terms (free or a price, consent) go to your friends; if you turn on "Pokazuj moje bramy dalej", your friends pass those terms and your friend list on to their friends, up to two steps. A price for a first message from outside your friends is published on your pyramid price list (members only). Paid gates and first messages are pyramid payments: pyramid members who hold the record can see the pseudonyms of payer and payee, the amount, the time and a label saying that it was a gate or a first message (not the message). A payment is held until the one paid keeps or returns it (or the payer takes it back after a deadline). |
 
 Anything you send can be copied, screenshotted, forwarded or kept by the
 recipient. Ledger entries are **signed and append-only**: other devices may keep
@@ -133,9 +133,9 @@ a copy of a post or record even after you delete it on your side (section 10).
 
 Zen has no servers of its own. To reach the mesh, the app connects to **public
 Yggdrasil peers** (a list shipped inside the app, taken from the community list
-at github.com/yggdrasil-network/public-peers), to nodes found by local-network
-discovery (off by default; if you turn it on, other devices on your Wi-Fi can
-see you), and to "bridges" run by Zen users. Desktop versions can accept
+at github.com/yggdrasil-network/public-peers), to devices found by local links (section 3.2, "Offline links": on the same Wi-Fi by
+default, only friends' and your own devices are linked), and to "bridges" run by
+Zen users. Desktop versions can accept
 incoming connections (UPnP / NAT-PMP) and thereby act as a bridge for others.
 
 What these operators can see:
@@ -159,9 +159,20 @@ your real IP from them.)
 - Traffic between two Zen devices is encrypted end to end by Yggdrasil (session
   keys derived from the nodes' keys), and each hop is additionally protected.
   A peer's identity is checked: a packet is accepted only if it really comes
-  from the sender's node address.
-- Mail held by a relay friend is sealed again for the recipient so the relay
-  cannot read it or change who sent it.
+  from the sender's node address. Yggdrasil's own cryptography is classical,
+  so Zen seals every signal once more with a hybrid post-quantum key
+  (ML-KEM-768 + X25519), meant to keep recorded traffic unreadable by a future
+  quantum computer.
+- Mail held by a relay friend, and the locked-phone inbox, are sealed with the
+  same kind of hybrid key, so the relay cannot read the mail or change who
+  sent it. Audio and video frames of calls are encrypted end to end on top of
+  WebRTC (keys from a hybrid exchange); they use AES-128-GCM, which is weaker
+  against a quantum computer than the rest.
+- What Zen signs and keeps (posts, records, releases) carries a hybrid
+  Ed25519 + ML-DSA-65 signature. Still classical: the anonymous votes' ring
+  signatures, event QR tickets, Bluetooth and Wi-Fi greetings and local-link
+  handshakes, dating boxes, door knocks and the Yggdrasil node key. See
+  SECURITY.md.
 - Posts for limited audiences, dating packages and some other data have their
   own encryption layers.
 - Metadata is not hidden from the other party or from network participants who
@@ -205,19 +216,26 @@ another Zen user.
   when you download Zen or open that page, under GitHub's own policy. An invite
   code in a link is placed after `#` and is therefore not sent to the server by
   your browser. Zen itself (except the store build) asks GitHub's API for the
-  latest release at start and every 12 hours, and downloads a release file
-  when you press "Aktualizuj"; GitHub then sees your IP address and the user
-  agent "Zen", nothing else.
+  latest release about 20 seconds after start and every 12 hours, and
+  downloads the release file (and its `SHA256SUMS`) when you press
+  "Aktualizuj"; GitHub then sees your IP address and the user agent "Zen" and
+  which release file you fetched, nothing else (no account, token or device
+  id). If GitHub cannot be reached, the app says so. Zen checks the downloaded
+  file against the release's checksums (and, on Android, against its own
+  signing certificate) before it installs it.
 - **Links you tap** (the Yggdrasil site, the public-peers list, maps) open in
   your browser and are governed by those sites.
 - **Operating system and stores.** Your phone vendor, the Android / iOS / Windows
   / macOS maker and, for iPhone, SideStore / AltStore and Apple, may collect
   data about installing and running apps. That is outside Zen.
-- **Phone permissions.** Zen asks for location (alarms, optional), Bluetooth
-  (nearby, optional), camera and microphone (calls, QR scan, recordings),
-  notifications, and a few system permissions (foreground service, full-screen
-  alarm, battery optimisation, installing updates from "Podaj dalej"). The data
-  is used on the device and sent only as described above.
+- **Phone permissions.** Zen asks for location (alarms, date safety, the
+  "Mijani" place; optional, also in the background if you allow it), Bluetooth
+  and nearby Wi-Fi devices (people nearby and offline links, optional), camera and
+  microphone (calls, QR scan, recordings), notifications, and a few system
+  permissions (foreground service, full-screen alarm, battery optimisation,
+  installing updates from "Podaj dalej" and the self-update). The data is
+  used on the device and sent only as described above. Older Android versions
+  require the location permission for Wi-Fi Direct (a system rule).
 
 ## 8. What Zen does *not* do
 
