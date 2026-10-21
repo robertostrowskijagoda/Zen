@@ -7,6 +7,9 @@ import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/meet/graph/gate_prices.dart';
+import 'package:zen/src/features/meet/graph/graph_providers.dart';
+import 'package:zen/src/features/meet/graph/open_to_meet.dart';
 import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/intro/intro_service.dart';
 import 'package:zen/src/features/meet/meet_book.dart';
@@ -90,6 +93,23 @@ MeetBook _book() => MeetBook()
     _lucja: 'Łucja',
     _bartek: 'Bartek',
   };
+
+/// Gate prices as the next feature will give them (made up for the test).
+final class _GatePrices extends ChangeNotifier implements GatePriceSource {
+  Map<String, GatePrice> _prices = const <String, GatePrice>{};
+
+  void set(Map<String, GatePrice> prices) {
+    _prices = prices;
+    notifyListeners();
+  }
+
+  @override
+  GatePrice? gateOf(String target, {String? via}) =>
+      _prices[via == null ? target : '$via>$target'];
+
+  @override
+  Listenable? get changes => this;
+}
 
 void main() {
   test('friends who know each other are linked once', () {
@@ -228,26 +248,44 @@ void main() {
     );
     expect(find.text('Poproszono'), findsOneWidget);
 
-    // Filters only for what there is data for.
-    await tester.ensureVisible(find.byKey(const Key('graph-filter-far')));
+    // Modes: the pyramid one only inside a pyramid.
+    for (final String m in <String>['friends', 'statuses', 'met', 'gates']) {
+      expect(find.byKey(Key('graph-mode-$m')), findsOneWidget);
+    }
+    expect(find.byKey(const Key('graph-mode-pyramid')), findsNothing);
+
+    // Filters in a sheet: circles off, then on again.
+    Future<void> tapInSheet(String key) async {
+      await tester.ensureVisible(find.byKey(Key(key)));
+      await tester.pump();
+      await tester.tap(find.byKey(Key(key)));
+      await tester.pump();
+    }
+
+    await tester.ensureVisible(find.byKey(const Key('graph-filters')));
     await tester.pump();
-    expect(find.byKey(const Key('graph-filter-far')), findsOneWidget);
-    expect(find.byKey(const Key('graph-filter-pyramid')), findsNothing);
-    expect(find.byKey(const Key('graph-filter-status')), findsNothing);
-    expect(find.byKey(const Key('graph-filter-nearby')), findsNothing);
-    await tester.tap(find.byKey(const Key('graph-filter-far')));
+    await tester.tap(find.byKey(const Key('graph-filters')));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byKey(const Key('graph-filters-sheet')), findsOneWidget);
+    expect(find.byKey(const Key('graph-nearby')), findsNothing);
+    await tapInSheet('graph-ring-2');
     expect(find.text('Widać: 2 z 5'), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const Key('graph-filter-friends')));
-    await tester.pump();
-    await tester.tap(find.byKey(const Key('graph-filter-friends')));
-    await tester.pump();
+    await tapInSheet('graph-ring-2');
+    await tapInSheet('graph-ring-4');
     expect(find.text('Widać: 3 z 5'), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const Key('graph-filter-all')));
-    await tester.pump();
-    await tester.tap(find.byKey(const Key('graph-filter-all')));
-    await tester.pump();
+    await tapInSheet('graph-mutual-1');
+    expect(
+      find.text('Widać: 1 z 5'),
+      findsOneWidget,
+      reason: 'only Bartek is on a friend\'s list',
+    );
+    await tapInSheet('graph-filters-clear');
     expect(find.byKey(const Key('graph-count')), findsNothing);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byKey(const Key('graph-filters-sheet')), findsNothing);
 
     // Search without Polish letters finds Łucja.
     await tester.ensureVisible(find.byKey(const Key('graph-search')));
@@ -270,12 +308,14 @@ void main() {
     expect(find.byKey(const Key('graph-letter')), findsOneWidget);
     expect(find.byKey(const Key('graph-opinion')), findsOneWidget);
 
-    // Asking Ania to introduce: consent is the currency (no pyramid here).
+    // Asking Ania to open the gate: she has not set a price (no pyramid
+    // here), so she decides; the dialog also shows the cheapest way.
     await tester.tap(find.byKey(const Key('graph-intro')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
     expect(find.byKey(const Key('intro-dialog')), findsOneWidget);
-    expect(find.byKey(const Key('intro-pyramid-note')), findsNothing);
+    expect(find.byKey(const Key('reach-plan')), findsOneWidget);
+    expect(find.byKey(const Key('reach-run')), findsNothing);
     await tester.enterText(find.byKey(const Key('intro-note')), 'Cześć!');
     await tester.tap(find.byKey(const Key('intro-send')));
     await tester.pump();
@@ -419,7 +459,7 @@ void main() {
       );
       await tester.pump();
     }
-    expect(scale(), lessThanOrEqualTo(8.0001));
+    expect(scale(), lessThanOrEqualTo(12.0001));
     for (int i = 0; i < 12; i++) {
       await tester.tap(
         find.byKey(const Key('graph-zoom-out')),
@@ -439,6 +479,150 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     expect(find.byKey(const Key('graph-person-sheet')), findsOneWidget);
     expect(find.byKey(const Key('graph-profile')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 5));
+  });
+  testWidgets('graph modes: legends, "open to meet" only for who opted in, '
+      'gates without data and with prices, the cheapest route', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(480, 2600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final _Host host = _Host(<String, String>{
+      _ania: 'Ania',
+      _bartek: 'Bartek',
+    });
+    final MeetService meet = MeetService(
+      host: host,
+      store: MeetStore(MemoryLedgerDisk()),
+    );
+    late final OpenToMeetService open;
+    await tester.runAsync(() async {
+      // Made outside the fake clock: its queue of work is a future, and
+      // one made in the fake zone would never go on in here.
+      open = OpenToMeetService(host: host, disk: MemoryLedgerDisk());
+      await meet.handle(_list(_ania, <String, String>{_xawery: 'Xawery'}));
+      // Ania opted in on her dating profile; Bartek did not.
+      await open.handle(
+        SignalTransportFrame(
+          from: _ania,
+          payload: <String, dynamic>{
+            'type': OpenToMeetService.frameType,
+            'o': 'd',
+            'xs': 's',
+          },
+          receivedAtMillis: 0,
+        ),
+      );
+    });
+    final _GatePrices prices = _GatePrices();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          socialHubAutoHydrateProvider.overrideWithValue(false),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              friends: <String, FriendProfile>{
+                _ania: _friend(_ania, 'Ania'),
+                _bartek: _friend(_bartek, 'Bartek'),
+              },
+            ),
+          ),
+          signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+          ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+          meetServiceProvider.overrideWithValue(meet),
+          openToMeetServiceProvider.overrideWithValue(open),
+          gatePriceSourceProvider.overrideWithValue(prices),
+          pyramidServiceProvider.overrideWithValue(
+            PyramidService(
+              host: MeetEventHost(host, address: () => '', name: () => 'Ja'),
+              disk: MemoryLedgerDisk(),
+            ),
+          ),
+        ],
+        child: MaterialApp(theme: ZenTheme.dark(), home: const GraphScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    Future<void> tapKey(Key key) async {
+      await tester.ensureVisible(find.byKey(key));
+      await tester.pump();
+      await tester.tap(find.byKey(key));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+
+    Future<void> closeSheet() async {
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+
+    Future<void> openFromSearch(String query, String address) async {
+      await tester.ensureVisible(find.byKey(const Key('graph-search')));
+      await tester.pump();
+      await tester.enterText(find.byKey(const Key('graph-search')), query);
+      await tester.pump();
+      await tapKey(Key('graph-hit-$address'));
+    }
+
+    expect(find.byKey(const Key('graph-legend-friends')), findsOneWidget);
+
+    // Statuses: the legend has the badge; only Ania's card has it.
+    await tapKey(const Key('graph-mode-statuses'));
+    expect(find.byKey(const Key('graph-legend-statuses')), findsOneWidget);
+    expect(find.byKey(const Key('graph-legend-open')), findsOneWidget);
+    await openFromSearch('ani', _ania);
+    expect(find.byKey(const Key('graph-open-pill')), findsOneWidget);
+    expect(find.text('Szuka: randki'), findsOneWidget);
+    await closeSheet();
+    await openFromSearch('bart', _bartek);
+    expect(find.byKey(const Key('graph-person-sheet')), findsOneWidget);
+    expect(find.byKey(const Key('graph-open-pill')), findsNothing);
+    await closeSheet();
+
+    // Met in person.
+    await tapKey(const Key('graph-mode-met'));
+    expect(find.byKey(const Key('graph-legend-met')), findsOneWidget);
+    expect(find.byKey(const Key('graph-legend-statuses')), findsNothing);
+
+    // Gates: no data yet, said so.
+    await tapKey(const Key('graph-mode-gates'));
+    expect(find.byKey(const Key('graph-gates-nodata')), findsOneWidget);
+    // Prices arrive (the source tells the graph).
+    prices.set(<String, GatePrice>{
+      _ania: const GatePrice.free(),
+      '$_ania>$_xawery': const GatePrice.price(500, shown: '5 zł'),
+    });
+    await tester.pump();
+    expect(find.byKey(const Key('graph-gates-nodata')), findsNothing);
+
+    // Route: a hint first, then the way to Xawery with its price.
+    await tapKey(const Key('graph-path-clear'));
+    await tapKey(const Key('graph-mode-route'));
+    expect(
+      find.text(
+        'Dotknij osoby na grafie albo wyszukaj ją, żeby zobaczyć drogę.',
+      ),
+      findsOneWidget,
+    );
+    await openFromSearch('xaw', _xawery);
+    expect(find.byKey(const Key('graph-gate')), findsOneWidget);
+    expect(find.text('5 zł'), findsWidgets);
+    await closeSheet();
+    expect(
+      find.text('Ty → Ania → Xawery\n2 kroki · płatne: 5 zł'),
+      findsOneWidget,
+    );
+    await tapKey(const Key('graph-goal-cheapest'));
+    expect(
+      find.text('Ty → Ania → Xawery\n2 kroki · płatne: 5 zł'),
+      findsOneWidget,
+    );
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 5));
