@@ -12,6 +12,7 @@ add_executable(${BINARY_NAME} WIN32
   "local_links_common.cpp"
   "location_bridge.cpp"
   "security_bridge.cpp"
+  "video_bridge.cpp"
   "wifi_direct_bridge.cpp"
   "flutter_window.cpp"
   "main.cpp"
@@ -44,6 +45,9 @@ target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "ole32.lib" "mmdevapi.lib")
 # Screen protection and the key vault (security_bridge.cpp).
 target_link_libraries(${BINARY_NAME} PRIVATE "ncrypt.lib" "crypt32.lib")
+# Films compressed with Media Foundation (video_bridge.cpp).
+target_link_libraries(${BINARY_NAME} PRIVATE "mfplat.lib" "mfreadwrite.lib"
+  "mfuuid.lib")
 # Local links (bluetooth_le_bridge.cpp, wifi_direct_bridge.cpp): C++/WinRT
 # (headers from the Windows SDK), Winsock for the loopback streams, the WLAN
 # and IP helper APIs to keep out of the normal Wi-Fi's way.
