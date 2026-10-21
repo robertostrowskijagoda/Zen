@@ -259,6 +259,28 @@ final class PyramidWorld {
     }
   }
 
+  /// Every member publishes the key private payments are sealed to
+  /// ([PyrT.sealKey]), and the records go round.
+  Future<void> sealKeys() async {
+    for (final SimPhone p in net.phones) {
+      if (p.online && pyr(p).isMember) {
+        await pyr(p).ledgerDuties();
+      }
+    }
+    await net.run();
+    await sync();
+  }
+
+  /// New money for [who]: the keys published, S proposes [amount], B
+  /// signs, and the emission's wait passes.
+  Future<void> fund(String who, int amount, {String why = 'Start'}) async {
+    await sealKeys();
+    await this['S'].emit(this[who].myKey!, amount, why);
+    await net.run();
+    await approve('B', PyrT.emit);
+    await net.advance(const Duration(hours: 25));
+  }
+
   Future<void> duties({int rounds = 4}) async {
     for (int i = 0; i < rounds; i++) {
       for (final SimPhone p in net.phones) {
@@ -282,7 +304,7 @@ final class PyramidWorld {
   static String fingerprint(PyramidState s) => _fingerprint(s);
 
   static String _fingerprint(PyramidState s) =>
-      '${s.describe()}|${s.applied.length}|${s.term}|${s.transfers.length}';
+      '${s.describe()}|${s.applied.length}|${s.term}';
 }
 
 /// The tree of [FoldWorld.make]: name, who admits them (right under

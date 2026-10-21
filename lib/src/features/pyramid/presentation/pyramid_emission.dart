@@ -38,7 +38,7 @@ class EmitChangeNotices extends StatelessWidget {
             key: Key('emit-change-${c.id}'),
             icon: Icons.campaign_rounded,
             tone: zen.warning,
-            title: t('Zapowiedziana zmiana limitu emisji'),
+            title: t('Zapowiedziana zmiana limitów'),
             text: pyrEmitChangeText(c),
           ),
           if (top)
@@ -65,7 +65,8 @@ class EmitChangeNotices extends StatelessWidget {
   }
 }
 
-/// The top changes the emission limit: a lower limit (or a longer wait)
+/// The top changes the emission limit, the wait and the payments a
+/// member may order a day: a lower limit (a longer wait, fewer payments)
 /// applies at once, after "Czy na pewno?" and holding the button; a
 /// higher one is announced to everybody and applies 30 days later.
 Future<void> changeEmissionLimit(
@@ -79,10 +80,13 @@ Future<void> changeEmissionLimit(
   final TextEditingController hours = TextEditingController(
     text: '${s.params.emitDelayHours}',
   );
+  final TextEditingController xfers = TextEditingController(
+    text: '${s.params.xferLimit}',
+  );
   final bool? ok = await showDialog<bool>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
-      title: Text(t('Limit emisji')),
+      title: Text(t('Limity')),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -127,6 +131,21 @@ Future<void> changeEmissionLimit(
                 prefixIcon: const Icon(Icons.schedule_rounded),
               ),
             ),
+            const SizedBox(height: 14),
+            TextField(
+              key: const Key('emit-xfers-field'),
+              controller: xfers,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: t('Przelewy na osobę dziennie'),
+                helperText: t(
+                  'Od {min} do {max}; chroni skarbników przed zalewem zleceń.',
+                  <String, Object?>{'min': kPyrMinXfers, 'max': kPyrMaxXfers},
+                ),
+                helperMaxLines: 3,
+                prefixIcon: const Icon(Icons.swap_horiz_rounded),
+              ),
+            ),
           ],
         ),
       ),
@@ -145,33 +164,38 @@ Future<void> changeEmissionLimit(
   );
   final int? newLimit = parseMoney(limit.text);
   final int? newHours = int.tryParse(hours.text.trim());
-  disposeLater(<TextEditingController>[limit, hours]);
+  final int? newXfers = int.tryParse(xfers.text.trim());
+  disposeLater(<TextEditingController>[limit, hours, xfers]);
   if (ok != true || !context.mounted) {
     return;
   }
   if (newLimit == null ||
       newHours == null ||
+      newXfers == null ||
       newHours < kPyrMinEmitDelayHours ||
-      newHours > kPyrMaxEmitDelayHours) {
-    snack(context, t('Podaj kwotę i liczbę godzin w granicach.'));
+      newHours > kPyrMaxEmitDelayHours ||
+      newXfers < kPyrMinXfers ||
+      newXfers > kPyrMaxXfers) {
+    snack(context, t('Podaj wartości w granicach.'));
     return;
   }
   final int? l = newLimit == s.params.emitLimit ? null : newLimit;
   final int? h = newHours == s.params.emitDelayHours ? null : newHours;
-  if (l == null && h == null) {
+  final int? x = newXfers == s.params.xferLimit ? null : newXfers;
+  if (l == null && h == null && x == null) {
     snack(context, t('Nic się nie zmienia.'));
     return;
   }
-  final bool lowers = pyr.emitRuleLowers(limit: l, delayHours: h);
+  final bool lowers = pyr.emitRuleLowers(limit: l, delayHours: h, xfers: x);
   final bool sure = lowers
       ? await confirmByHolding(
           context,
           body: t(
-            'Nowy limit: {limit} na 30 dni, emisja czeka {hours} h. Zmiana '
-            'obowiązuje od razu po podpisie drugiej osoby ze szczytu.',
+            'Nowe limity: {limit} na 30 dni, emisja czeka {hours} h, {xfers} przelewów na osobę dziennie. Zmiana obowiązuje od razu po podpisie drugiej osoby ze szczytu.',
             <String, Object?>{
               'limit': formatMoney(newLimit),
               'hours': newHours,
+              'xfers': newXfers,
             },
           ),
           action: t('Przytrzymaj, aby obniżyć limit'),
@@ -180,19 +204,18 @@ Future<void> changeEmissionLimit(
           context,
           t('Zapowiedzieć zmianę?'),
           t(
-            'Nowy limit: {limit} na 30 dni, emisja czeka {hours} h. Zmiana '
-            'zostanie ogłoszona wszystkim członkom i zacznie obowiązywać po '
-            '30 dniach. Do tego czasu szczyt może ją anulować.',
+            'Nowe limity: {limit} na 30 dni, emisja czeka {hours} h, {xfers} przelewów na osobę dziennie. Zmiana zostanie ogłoszona wszystkim członkom i zacznie obowiązywać po 30 dniach. Do tego czasu szczyt może ją anulować.',
             <String, Object?>{
               'limit': formatMoney(newLimit),
               'hours': newHours,
+              'xfers': newXfers,
             },
           ),
         );
   if (!sure) {
     return;
   }
-  await pyr.proposeEmitRule(limit: l, delayHours: h);
+  await pyr.proposeEmitRule(limit: l, delayHours: h, xfers: x);
   if (context.mounted) {
     snack(context, t('Potrzebny podpis drugiej osoby ze szczytu.'));
   }

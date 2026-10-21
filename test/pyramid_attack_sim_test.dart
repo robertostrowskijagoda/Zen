@@ -1,8 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:zen/src/core/crypto/ring_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/dev/sim/sim_network.dart';
+import 'package:zen/src/features/pyramid/pyramid_ledger.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
@@ -15,41 +15,28 @@ import 'support/pyramid_world.dart';
 void main() {
   const int hour = 3600 * 1000;
 
-  /// Emits [amount] to [who] (S proposes, B signs) and waits the 24 h.
-  Future<void> fund(PyramidWorld w, String who, int amount) async {
-    await w['S'].emit(w[who].myKey!, amount, 'Start');
-    await w.net.run();
-    await w.approve('B', PyrT.emit);
-    await w.net.advance(const Duration(hours: 25));
-  }
-
   test(
-    'junk from a friend is not kept: a broken ring, a forged ring, a time bomb, a strange pyramid',
+    'junk from a friend is not kept: a ring signature, a forged request, a time bomb, a strange pyramid',
     () async {
       final PyramidWorld w = await PyramidWorld.six();
       final PyramidService b1 = w['B1'];
       final String py = b1.current!;
       final LedgerKeyPair x = await LedgerKeyPair.generate();
-      final List<String> cell = <String>[
-        w['A'].myKey!,
-        w['A1'].myKey!,
-        w['A2'].myKey!,
-      ]..sort();
       final Map<String, dynamic> body = <String, dynamic>{
         't': PyrT.voteRequest,
         'py': py,
         'at': w.net.now,
-        'by': const <String>[],
+        'by': <String>[x.id],
         'cell': '0',
         'head': w['A'].myKey,
-        'ring': cell,
         'n': 'x',
       };
       Future<void> fromB(PyramidRecord r) => w.net['B'].send(
         w.net['B1'].address,
         <String, dynamic>{'type': PyramidTypes.record, 'r': r.toJson()},
       );
-      // A key image that is not base64 (it crashed the fold on every phone).
+      // A ring signature that does not even parse (it crashed the fold on
+      // every phone once; no record carries one any more).
       await w.net['B'].send(w.net['B1'].address, <String, dynamic>{
         'type': PyramidTypes.record,
         'r': <String, dynamic>{
@@ -61,21 +48,10 @@ void main() {
           },
         },
       });
-      // A well-formed ring signature by an outsider, claiming to be the cell.
-      final List<String> fakeRing = <String>[
-        x.id,
-        w['A1'].myKey!,
-        w['A2'].myKey!,
-      ]..sort();
-      final PyramidRecord outsider = PyramidRecord(
+      // A request signed by an outsider's card, claiming to be the cell.
+      final PyramidRecord outsider = await PyramidRecord(
         body: body,
-        ring: RingSignature.sign(
-          seed: x.seed,
-          ring: fakeRing.map((String k) => unb64(k, length: 32)!).toList(),
-          context: PyramidState.voteRequestContext(py, '0', w['A'].myKey!),
-          message: PyramidRecord(body: body).signedBytes,
-        ),
-      );
+      ).signedBy(x);
       await fromB(outsider);
       // Signed, but dated a day ahead.
       final PyramidRecord bomb = await PyramidRecord(
@@ -203,9 +179,8 @@ void main() {
         'py': s.current,
         'at': t0 - 25 * hour,
         'by': <String>[s.myKey!, w['B'].myKey!]..sort(),
-        'to': a1,
+        'rc': pyrEmitCommit(a1, 'wstecz'),
         'amount': 100000,
-        'why': 'Wstecz',
       },
     );
     final PyramidRecord signed = await w['B'].signAsMe(
@@ -230,7 +205,7 @@ void main() {
       contains('Emisja dotarła z opóźnieniem'),
     );
     // A1 cannot spend it yet: it is not in A1's account anywhere.
-    expect(w['A1'].state!.balanceOf(a1), 0);
+    expect(w['A1'].balance, 0);
     // The 30-day limit counts it from now, not in the window it is dated
     // in.
     expect(w['A'].state!.emittedWithin(w.net.now), 100000);
@@ -240,7 +215,7 @@ void main() {
     await w.net.run();
     for (final String who in <String>['S', 'B', 'A1', 'B1']) {
       expect(w[who].state!.emissions[e.id]!.vetoed, isTrue, reason: who);
-      expect(w[who].state!.balanceOf(a1), 0, reason: who);
+      expect(w[who].ledgerBalanceOf(a1), 0, reason: who);
     }
     expect(w.views().values.toSet(), hasLength(1));
   });
@@ -290,20 +265,20 @@ void main() {
     'a refund signed by the treasurers cannot be overtaken by an acceptance dated back',
     () async {
       final PyramidWorld w = await PyramidWorld.six();
-      await fund(w, 'A1', 100000);
+      await w.fund('A1', 100000);
       final String a1 = w['A1'].myKey!;
       final String b1 = w['B1'].myKey!;
       await w['A1'].pay(b1, 10000, condBy: b1, condUntil: w.net.now + 2 * hour);
       await w.net.run();
-      final PyrEscrow escrow = w['B1'].state!.escrows.values.single;
+      final PyrEscrow escrow = w['B1'].myEscrows.single;
       // Time is up: A1 takes the money back (most treasurers sign).
       await w.net.advance(const Duration(hours: 3));
       await w['A1'].settle(escrow.id, false);
       await w.net.run();
-      expect(w['S'].state!.escrows[escrow.id]!.settled, isFalse);
-      expect(w['S'].state!.balanceOf(a1), 100000);
-      // B1 signs an acceptance dated before the deadline and asks every
-      // treasurer: none signs a second settlement of the same payment.
+      expect(w['S'].escrowOf(escrow.id)!.settled, isFalse);
+      expect(w['S'].ledgerBalanceOf(a1), 100000);
+      // B1 signs an acceptance dated before the deadline and seals it to
+      // every treasurer: none signs a second settlement of one payment.
       final PyramidRecord late = await w['B1'].signAsMe(
         PyramidRecord(
           body: <String, dynamic>{
@@ -316,20 +291,20 @@ void main() {
           },
         ),
       );
-      final PyramidState st = w['B1'].state!;
-      for (final String t in st.treasurers) {
-        await w.net['B1'].send(st.members[t]!.addr, <String, dynamic>{
-          'type': PyramidTypes.pay,
+      for (final String t in w['B1'].state!.treasurers) {
+        await w['B1'].sendSealed(t, <String, dynamic>{
+          'k': 'ord',
           'r': late.toJson(),
         });
       }
       await w.net.run();
-      // Published without treasurers, it does not count.
-      await w['B1'].ingest(late);
+      expect(w['S'].ledgerIds, isNot(contains(late.id)));
+      // Never a public record either.
+      expect(await w['B1'].ingest(late), isFalse);
       await w.net.run();
-      expect(w['S'].state!.rejected[late.id], contains('skarbników'));
-      expect(w['S'].state!.balanceOf(b1), 0);
-      expect(w['S'].state!.balanceOf(a1), 100000);
+      expect(w['S'].keeps(late.id), isFalse);
+      expect(w['S'].ledgerBalanceOf(b1), 0);
+      expect(w['S'].ledgerBalanceOf(a1), 100000);
       expect(w.views().values.toSet(), hasLength(1));
     },
   );
@@ -338,7 +313,7 @@ void main() {
     'a paid message with a made-up payment never gets in; one paid to someone else neither',
     () async {
       final PyramidWorld w = await PyramidWorld.six();
-      await fund(w, 'A1', 100000);
+      await w.fund('A1', 100000);
       final String a1 = w['A1'].myKey!;
       final String b1 = w['B1'].myKey!;
       await w['B1'].setOffers(const <String, int>{'inbox': 500});
@@ -375,7 +350,7 @@ void main() {
       await w.net.run();
       expect(w['B1'].market.containsKey('cudza'), isFalse);
       expect(
-        w['S'].state!.escrows[toA.id]!.settled,
+        w['S'].escrowOf(toA.id)!.settled,
         isNull,
         reason: 'B1 cannot settle what is not its',
       );
@@ -532,7 +507,7 @@ void main() {
     'an order waiting for treasurers survives a restart and is sent again as it is',
     () async {
       final PyramidWorld w = await PyramidWorld.six();
-      await fund(w, 'A1', 10000);
+      await w.fund('A1', 10000);
       final String b1 = w['B1'].myKey!;
       // Most treasurers are away; what is sent to them is lost.
       const List<String> away = <String>['S', 'A', 'B', 'B1'];
@@ -561,9 +536,9 @@ void main() {
       await w.duties(rounds: 1);
       await w.sync();
       expect(w['A1'].pendingPayments, isEmpty);
-      expect(w['S'].state!.balanceOf(b1), 2500);
+      expect(w['S'].ledgerBalanceOf(b1), 2500);
       expect(
-        w['S'].state!.transfers.last.id,
+        w['B1'].myEntries.last.id,
         order.id,
         reason: 'the same order, not a new number',
       );

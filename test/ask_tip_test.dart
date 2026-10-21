@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/meet/ask/ask_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
-import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
 import 'support/pyramid_world.dart';
 
@@ -44,10 +43,7 @@ void main() {
     final String a1 = w['A1'].myKey!;
     final String b = w['B'].myKey!;
     final String a2 = w['A2'].myKey!;
-    await w['S'].emit(a1, 10000, 'Start');
-    await w.net.run();
-    await w.approve('B', PyrT.emit);
-    await w.net.advance(const Duration(hours: 25));
+    await w.fund('A1', 10000);
 
     // Answers are signed: the answerers have ledger keys.
     for (final String n in <String>['A', 'B', 'A2']) {
@@ -111,10 +107,11 @@ void main() {
     expect(order, isNotNull);
     await w.ask('A1').noteTip(q.id, answers.indexOf(fromB), 2500);
     await w.net.run();
-    final PyramidState st = w['S'].state!;
-    expect(st.balanceOf(b), 2500);
-    expect(st.balanceOf(a1), 7500);
-    expect(st.transfers.last.memo, 'Napiwek za odpowiedź');
+    // In the treasurers' ledger, and in the receipt B got.
+    expect(w['S'].ledgerBalanceOf(b), 2500);
+    expect(w['S'].ledgerBalanceOf(a1), 7500);
+    expect(w['B'].myEntries.last.memo, 'Napiwek za odpowiedź');
+    expect(w['B'].balance, 2500);
     expect(
       w
           .ask('A1')

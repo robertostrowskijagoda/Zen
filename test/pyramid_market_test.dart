@@ -9,14 +9,6 @@ import 'support/pyramid_world.dart';
 /// Money in the pyramid beyond plain transfers and moving a
 /// whole branch, on the simulated network.
 void main() {
-  /// Emits [amount] to [who] (S proposes, B signs) and waits the 24 h.
-  Future<void> fund(PyramidWorld w, String who, int amount) async {
-    await w['S'].emit(w[who].myKey!, amount, 'Start');
-    await w.net.run();
-    await w.approve('B', PyrT.emit);
-    await w.net.advance(const Duration(hours: 25));
-  }
-
   test(
     'market prices by acquaintance: the receiver decides the level',
     () async {
@@ -26,8 +18,8 @@ void main() {
       await w.sync();
       final String b1 = w['B1'].myKey!;
       final String zKey = w['Z'].myKey!;
-      await fund(w, 'A', 10000);
-      await fund(w, 'Z', 10000);
+      await w.fund('A', 10000);
+      await w.fund('Z', 10000);
 
       await w['B1'].setOffers(
         const <String, int>{'reshare': 50},
@@ -74,7 +66,7 @@ void main() {
       // Z's own payment of 1000 still waits for B1's answer: B1 returns it.
       await w['B1'].answerMarket(got['Dzień dobry']!.id, accept: false);
       await w.sync();
-      expect(w['Z'].state!.balanceOf(zKey), 10000);
+      expect(w['Z'].balance, 10000);
       z.friendSet.add(w.net['B1'].address);
       expect(w['Z'].priceToSend(b1, 'inbox').price, 100);
       expect(
@@ -90,11 +82,11 @@ void main() {
         isEmpty,
       );
       expect(
-        w['S'].state!.balanceOf(zKey),
+        w['S'].ledgerBalanceOf(zKey),
         10000,
         reason: 'the short payment went back',
       );
-      expect(w['S'].state!.balanceOf(b1), 0);
+      expect(w['S'].ledgerBalanceOf(b1), 0);
       expect(w.views().values.toSet(), hasLength(1));
     },
   );
@@ -107,7 +99,7 @@ void main() {
       final String a = w['A'].myKey!;
       final String s = w['S'].myKey!;
       final String b = w['B'].myKey!;
-      await fund(w, 'A1', 10000);
+      await w.fund('A1', 10000);
       await w['A'].setOffers(const <String, int>{'ad': 300});
       await w['B'].setOffers(const <String, int>{'ad': 300});
       await w.net.run();
@@ -124,7 +116,7 @@ void main() {
         isTrue,
       );
       await w.net.run();
-      expect(w['S'].state!.balanceOf(a1), 8500);
+      expect(w['S'].ledgerBalanceOf(a1), 8500);
       final PyrMarketMessage atA = w['A'].market.values.single;
       expect(atA.amount, 500);
       expect(atA.hops, 2);
@@ -143,11 +135,11 @@ void main() {
       expect(atB.amount, 500);
       await w['B'].answerMarket(atB.id, accept: true);
       await w.sync();
-      PyramidState st = w['B1'].state!;
-      expect(st.balanceOf(a), 500);
-      expect(st.balanceOf(s), 500);
-      expect(st.balanceOf(b), 500);
-      expect(st.balanceOf(a1), 8500);
+      final PyramidState st = w['B1'].state!;
+      expect(w['B1'].ledgerBalanceOf(a), 500);
+      expect(w['B1'].ledgerBalanceOf(s), 500);
+      expect(w['B1'].ledgerBalanceOf(b), 500);
+      expect(w['B1'].ledgerBalanceOf(a1), 8500);
       // Each one posted it to their branch.
       expect(
         st.posts.values.where(
@@ -173,9 +165,8 @@ void main() {
       );
       await w['S'].answerMarket(refuse.id, accept: false);
       await w.sync();
-      st = w['B1'].state!;
-      expect(st.balanceOf(a), 900);
-      expect(st.balanceOf(a1), 8100);
+      expect(w['B1'].ledgerBalanceOf(a), 900);
+      expect(w['B1'].ledgerBalanceOf(a1), 8100);
 
       // A third one: A tries to change the text on the way; S sees the
       // payment's text hash does not match, refuses, the rest goes back.
@@ -199,7 +190,7 @@ void main() {
         next: s,
       );
       await w.sync();
-      expect(w['S'].state!.escrows[hop!.id]!.to, s);
+      expect(w['S'].escrowOf(hop!.id)!.to, s);
       await w.net['A'].send(w.net['S'].address, <String, dynamic>{
         'type': PyramidTypes.dm,
         'id': 'podmiana',
@@ -214,10 +205,9 @@ void main() {
       await w.net.run();
       await w.sync();
       expect(w['S'].market.containsKey('podmiana'), isFalse);
-      st = w['B1'].state!;
-      expect(st.balanceOf(a), 1300);
-      expect(st.balanceOf(a1), 7700);
-      expect(st.escrows[hop.id]!.settled, isFalse);
+      expect(w['B1'].ledgerBalanceOf(a), 1300);
+      expect(w['B1'].ledgerBalanceOf(a1), 7700);
+      expect(w['B1'].escrowOf(hop.id)!.settled, isFalse);
       expect(w.views().values.toSet(), hasLength(1));
     },
   );

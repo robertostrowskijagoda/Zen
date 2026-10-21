@@ -346,12 +346,13 @@ final class PyrFeedAlarm {
 
 /// A change of the emission limit announced, in words for everybody.
 String pyrEmitChangeText(PyrEmitChange c) => t(
-  'Zapowiedziana zmiana limitu emisji: {old} → {limit} na 30 dni, emisja '
-  'czeka {hours} h. Obowiązuje od {date}, chyba że szczyt ją anuluje.',
+  'Zapowiedziana zmiana limitów: emisja {old} → {limit} na 30 dni, czeka {hours} h; przelewy {oldXfers} → {xfers} na osobę dziennie. Obowiązuje od {date}, chyba że szczyt ją anuluje.',
   <String, Object?>{
     'old': ZenFormat.money(c.oldLimit),
     'limit': ZenFormat.money(c.limit ?? c.oldLimit),
     'hours': c.delayHours ?? c.oldDelayHours,
+    'oldXfers': c.oldXfers,
+    'xfers': c.xfers ?? c.oldXfers,
     'date': ZenFormat.dateTime(
       DateTime.fromMillisecondsSinceEpoch(c.effectiveAt),
     ),

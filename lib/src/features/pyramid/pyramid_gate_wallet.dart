@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/features/meet/intro/gate_route.dart';
 import 'package:zen/src/features/meet/intro/gate_terms.dart';
 import 'package:zen/src/features/moderation/content_moderation.dart';
+import 'package:zen/src/features/pyramid/pyramid_ledger.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
@@ -41,15 +42,7 @@ final class PyramidGateWallet implements GateWallet {
       await _member?.provenKeyAt(address, wait: proofWait);
 
   @override
-  int get balance {
-    final PyramidService? p = _member;
-    final String? me = p?.myKey;
-    final PyramidState? s = p?.state;
-    if (p == null || me == null || s == null) {
-      return 0;
-    }
-    return s.balanceOf(me);
-  }
+  int get balance => _member?.balance ?? 0;
 
   @override
   Future<String?> hold(String to, int amount, {required String memo}) async {
@@ -69,7 +62,7 @@ final class PyramidGateWallet implements GateWallet {
 
   @override
   GateHold? held(String id) {
-    final PyrEscrow? e = _pyramid()?.state?.escrows[id];
+    final PyrEscrow? e = _pyramid()?.escrowOf(id);
     return e == null
         ? null
         : GateHold(

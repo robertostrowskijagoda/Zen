@@ -43,6 +43,7 @@ const List<String> kPyrVerdictKinds = <String>[
   'fraud',
   'noloan',
   'beware',
+  'ledger',
   'other',
 ];
 
@@ -51,6 +52,8 @@ String pyrVerdictLabel(String kind) => switch (kind) {
   'fraud' => t('Ostrzeżenie: oszust'),
   'noloan' => t('Zakaz pożyczania pieniędzy'),
   'beware' => t('Uważajcie na tę osobę'),
+  // A treasurer's statement of somebody's money that is wrong.
+  'ledger' => t('Błąd w rozliczeniu portfela'),
   _ => t('Inne'),
 };
 
@@ -237,8 +240,10 @@ final class PyrEmitChange {
     required this.effectiveAt,
     required this.oldLimit,
     required this.oldDelayHours,
+    required this.oldXfers,
     this.limit,
     this.delayHours,
+    this.xfers,
   });
 
   final String id;
@@ -249,9 +254,13 @@ final class PyrEmitChange {
   final int? limit;
   final int? delayHours;
 
+  /// Payments a member may order per day (null: unchanged).
+  final int? xfers;
+
   /// The values when it was announced.
   final int oldLimit;
   final int oldDelayHours;
+  final int oldXfers;
   bool cancelled = false;
   bool done = false;
 

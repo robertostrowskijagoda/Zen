@@ -100,14 +100,15 @@ Future<void> showComplaintDialog(
   BuildContext context,
   PyramidService pyr,
   PyramidState s,
-  String accused,
-) async {
+  String accused, {
+  String initialKind = 'fraud',
+}) async {
   final String? judge = pyr.firstJudgeOf(accused);
   if (judge == null) {
     snack(context, t('Nie ma kto rozpatrzyć tej skargi.'));
     return;
   }
-  String kind = 'fraud';
+  String kind = kPyrVerdictKinds.contains(initialKind) ? initialKind : 'fraud';
   final TextEditingController text = TextEditingController();
   final bool? ok = await showDialog<bool>(
     context: context,
@@ -140,6 +141,15 @@ Future<void> showComplaintDialog(
                   selected: kind == k,
                   onTap: () => set(() => kind = k),
                 ),
+              if (kind == 'ledger') ...<Widget>[
+                const SizedBox(height: 8),
+                ZenInfo(
+                  icon: Icons.lock_outline_rounded,
+                  text: t(
+                    'Skarga jest jawna, a przelewy prywatne: nie wpisuj kwot ani nazwisk.',
+                  ),
+                ),
+              ],
               const SizedBox(height: 10),
               TextField(
                 key: const Key('suit-text'),

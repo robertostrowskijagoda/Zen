@@ -71,6 +71,14 @@ void main() {
       w.net.setOnline(w.net['A1'], false);
       expect(await a2.requestElection('0'), isTrue);
       await w.net.run();
+      // The cell's request cards wait for A1 a while; then the two cards
+      // there make the roster and the request goes out by itself.
+      expect(a.state!.elections, isEmpty);
+      expect(a2.requestWaiting('0'), isTrue);
+      await w.net.advance(const Duration(hours: 13));
+      await w.duties();
+      expect(a2.requestWaiting('0'), isFalse);
+      expect(a.state!.rosters['0']!.tokens, hasLength(2));
       final PyrElection e = a.state!.elections.values.single;
       expect(e.tokens, isNull, reason: 'A1 has not sent its card yet');
       // A votes now: the vote waits for the ballot, and only once.
@@ -86,14 +94,13 @@ void main() {
       expect(seen.votes, hasLength(1));
       expect(a.voteWaiting(e.id), isFalse);
       expect(a.votedIn(e.id), isTrue);
-      // The records of the vote name no member and carry no ring
-      // signature; the ballot is signed by the two who sent cards.
+      // The records of the vote name no member; the ballot is signed by
+      // the two who sent cards.
       int votes = 0;
       for (final String id in w['S'].recordIds) {
         final PyramidRecord r = w['S'].recordOf(id)!;
         if (r.type == PyrT.vote) {
           votes++;
-          expect(r.ring, isNull);
           expect(r.signers.toSet().intersection(e.ring.toSet()), isEmpty);
         }
         if (r.type == PyrT.ballot && id == seen.ballot) {
@@ -162,35 +169,35 @@ void main() {
       final PyramidService s = w['S'];
       final String a1 = w['A1'].myKey!;
       final String b1 = w['B1'].myKey!;
+      await w.sealKeys();
       await s.emit(a1, 100000, 'Start');
       await w.net.run();
       await w.approve('B', PyrT.emit);
-      expect(w['A1'].state!.balanceOf(a1), 0, reason: 'not before 24 h');
+      expect(w['A1'].balance, 0, reason: 'not before 24 h');
       expect(w.net['A'].notificationTitles, contains('Emisja czeka 24 h'));
       await w.net.advance(const Duration(hours: 25));
-      expect(w['A1'].state!.balanceOf(a1), 100000);
+      expect(w['A1'].balance, 100000);
 
       expect(await w['A1'].pay(b1, 30000, memo: 'za rower'), isNotNull);
       await w.net.run();
-      final PyramidState st = w['B1'].state!;
-      expect(st.balanceOf(b1), 30000);
-      expect(st.balanceOf(a1), 70000);
+      expect(w['B1'].ledgerBalanceOf(b1), 30000);
+      expect(w['B1'].ledgerBalanceOf(a1), 70000);
       expect(w.net['B1'].notificationTitles, contains('Wpłata'));
 
       // Paying more than one has: no treasurer signs.
       await w['B1'].pay(a1, 999999);
       await w.net.run();
-      expect(w['B1'].state!.balanceOf(b1), 30000);
+      expect(w['B1'].balance, 30000);
       w['B1'].cancelPending(w['B1'].pendingPayments.single.id);
 
       // A conditional payment waits for the other side's word.
       await w['A1'].pay(b1, 10000, condBy: b1);
       await w.net.run();
-      final String escrowId = w['B1'].state!.escrows.keys.single;
-      expect(w['B1'].state!.balanceOf(b1), 30000);
+      final String escrowId = w['B1'].myEscrows.single.id;
+      expect(w['B1'].balance, 30000);
       await w['B1'].settle(escrowId, true);
       await w.net.run();
-      expect(w['S'].state!.balanceOf(b1), 40000);
+      expect(w['S'].ledgerBalanceOf(b1), 40000);
 
       // A second emission vetoed by the third member of the top.
       await s.emit(a1, 5000, 'Druga');
@@ -203,7 +210,7 @@ void main() {
       await w['A'].veto(emitId);
       await w.net.run();
       await w.net.advance(const Duration(hours: 25));
-      expect(w['S'].state!.balanceOf(a1), 60000);
+      expect(w['S'].ledgerBalanceOf(a1), 60000);
       expect(w.views().values.toSet(), hasLength(1));
     },
   );

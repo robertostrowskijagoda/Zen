@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/crypto/hybrid_signature.dart';
-import 'package:zen/src/core/crypto/ring_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 
@@ -37,6 +36,11 @@ abstract final class PyrT {
   /// who registered one, signed by the members themselves
   /// ([PyramidState.ballotTokens]).
   static const String ballot = 'ballot';
+
+  /// A cell's request cards: one one-time hybrid key per member who
+  /// registered one, signed by the members like a ballot; an anonymous
+  /// request for a vote is signed by one of them.
+  static const String roster = 'roster';
   static const String leave = 'leave';
   static const String fill = 'fill';
   static const String absent = 'absent';
@@ -63,6 +67,11 @@ abstract final class PyrT {
   static const String constitution = 'const';
   static const String emit = 'emit';
   static const String veto = 'veto';
+
+  /// A payment order and the settlement of a conditional payment: private
+  /// operations signed like records but never in the public log — they go
+  /// sealed between the payer, the one paid and the treasurers
+  /// (`pyramid_ledger.dart`).
   static const String transfer = 'xfer';
   static const String settle = 'settle';
   static const String alarm = 'alarm';
@@ -95,6 +104,10 @@ abstract final class PyrT {
   /// change that lets more money out announced to everybody and in force
   /// 30 days later, unless the top cancels it ([emitCancel]) before.
   static const String emitRule = 'emitrule';
+
+  /// A member's public hybrid KEM key: what their private payments,
+  /// receipts and balance statements are sealed to.
+  static const String sealKey = 'kemkey';
   static const String emitCancel = 'emitcancel';
 
   /// A member's complaint against another member ("Sąd"), judged first by
@@ -108,15 +121,12 @@ abstract final class PyrT {
   static const String appeal = 'appeal';
   static const String appealAnswer = 'appans';
 
-  /// Kinds signed anonymously with a ring signature.
-  static const Set<String> anonymous = <String>{voteRequest};
-
   /// Kinds published through a friend outside the cell, so the first phone
   /// to show them is not the author's: the anonymous request and the vote
   /// (signed by a one-time key on the cell's ballot).
   static const Set<String> relayed = <String>{voteRequest, vote};
 
-  /// Kinds most treasurers sign before they count.
+  /// Private kinds most treasurers sign before they count; never public.
   static const Set<String> treasured = <String>{transfer, settle};
 
   /// Kinds whose time starts a wait or counts against a limit (new rules
@@ -152,16 +162,16 @@ abstract final class PyrT {
     appealAnswer,
     address,
     vote,
+    voteRequest,
   };
 }
 
 /// One signed record. [body] is everything but the signatures; [sigs] maps
 /// signer key → hybrid signature of the canonical body (Ed25519 +
-/// ML-DSA-65, see hybrid_signature.dart); [ring] is a ring signature for
-/// the anonymous request of a cell vote (classical, see
-/// ring_signature.dart; the votes themselves are hybrid-signed by one-time
-/// keys, [PyrT.ballot]); [tsigs] are
-/// treasurers' hybrid signatures on a transfer or a settlement.
+/// ML-DSA-65, see hybrid_signature.dart) — for a cell vote's anonymous
+/// request and its votes, by one-time keys ("cards", [PyrT.roster],
+/// [PyrT.ballot]); [tsigs] are treasurers' hybrid signatures on a transfer
+/// or a settlement.
 ///
 /// A signature names the signer's ML-DSA key by fingerprint; the key is
 /// published by a keyed signature on the record that introduced it
@@ -172,13 +182,11 @@ final class PyramidRecord {
   const PyramidRecord({
     required this.body,
     this.sigs = const <String, String>{},
-    this.ring,
     this.tsigs = const <String, String>{},
   });
 
   final Map<String, dynamic> body;
   final Map<String, String> sigs;
-  final RingSignature? ring;
   final Map<String, String> tsigs;
 
   /// Canonical bytes and id, worked out once per record (sorting and
@@ -235,7 +243,6 @@ final class PyramidRecord {
   PyramidRecord withSig(String key, String sig) => PyramidRecord(
     body: body,
     sigs: <String, String>{...sigs, key: sig},
-    ring: ring,
     tsigs: tsigs,
   );
 
@@ -248,7 +255,6 @@ final class PyramidRecord {
       : PyramidRecord(
           body: body,
           sigs: sigs,
-          ring: ring,
           tsigs: <String, String>{...tsigs, key: sig},
         );
 
@@ -320,9 +326,7 @@ final class PyramidRecord {
   }
 
   /// Whether there is at least one signature and every one is valid and by
-  /// a listed candidate. How many are needed is the fold's business. An
-  /// anonymous record (no signatures) is checked against its ring by the
-  /// service, never here.
+  /// a listed candidate. How many are needed is the fold's business.
   Future<bool> verifySigners() async {
     if (sigs.isEmpty) {
       return false;
@@ -357,14 +361,13 @@ final class PyramidRecord {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'b': body,
     if (sigs.isNotEmpty) 's': sigs,
-    if (ring != null) 'r': ring!.toJson(),
     if (tsigs.isNotEmpty) 'ts': tsigs,
   };
 
   /// Parses a record; null for anything that could not be signed the same
   /// way on every phone: fractions, lone UTF-16 surrogates (two different
   /// texts with one hash), keys that are not text, too deep or too big, a
-  /// ring signature that does not parse, too many signatures.
+  /// ring signature (no record carries one any more), too many signatures.
   static PyramidRecord? fromJson(Object? json) {
     if (json is! Map || json['b'] is! Map) {
       return null;
@@ -397,18 +400,10 @@ final class PyramidRecord {
 
     final Map<String, String>? sigs = strings(json['s']);
     final Map<String, String>? tsigs = strings(json['ts']);
-    final RingSignature? ring = json['r'] == null
-        ? null
-        : RingSignature.fromJson(json['r']);
-    if (sigs == null || tsigs == null || (json['r'] != null && ring == null)) {
+    if (sigs == null || tsigs == null || json['r'] != null) {
       return null;
     }
-    final PyramidRecord r = PyramidRecord(
-      body: body,
-      sigs: sigs,
-      ring: ring,
-      tsigs: tsigs,
-    );
+    final PyramidRecord r = PyramidRecord(body: body, sigs: sigs, tsigs: tsigs);
     try {
       if (r.signedBytes.length > kPyrMaxRecordBytes) {
         return null;

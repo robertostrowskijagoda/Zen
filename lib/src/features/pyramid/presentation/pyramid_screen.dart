@@ -456,7 +456,10 @@ Future<void> showProposals(
                     ),
                     // Everything the signature decides, the record's own
                     // time first.
-                    for (final String line in pyr.recordDetails(p.record))
+                    for (final String line in pyr.recordDetails(
+                      p.record,
+                      extra: p.extra,
+                    ))
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
@@ -1460,7 +1463,18 @@ class _MeTab extends StatelessWidget {
                 ],
               ),
             ),
-          if (members.contains(me) && open.isEmpty && members.length >= 2)
+          if (open.isEmpty && pyr.requestWaiting(cell))
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                t(
+                  'Twoje żądanie wyjdzie samo, gdy telefony komórki '
+                  'przygotują karty.',
+                ),
+                style: TextStyle(color: zen.textSecondary, fontSize: 13),
+              ),
+            )
+          else if (members.contains(me) && open.isEmpty && members.length >= 2)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: TextButton.icon(

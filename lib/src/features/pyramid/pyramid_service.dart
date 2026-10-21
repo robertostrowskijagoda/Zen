@@ -22,6 +22,7 @@ import 'package:zen/src/features/meet/events/event_service.dart';
 import 'package:zen/src/features/moderation/content_moderation.dart';
 import 'package:zen/src/features/pyramid/pyramid_court.dart';
 import 'package:zen/src/features/pyramid/pyramid_feed.dart';
+import 'package:zen/src/features/pyramid/pyramid_ledger.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_record_log.dart';
 import 'package:zen/src/features/pyramid/pyramid_root.dart';
@@ -29,8 +30,14 @@ import 'package:zen/src/features/pyramid/pyramid_state.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/security/app_security_crypto.dart'
+    show decryptSecurityBytes, encryptSecurityBytes, securitySubkey;
 import 'package:zen/src/features/security/device_integrity.dart';
+import 'package:zen/src/features/security/hybrid_kem.dart'
+    show HybridEncapsulation, HybridKeyPair, decodeHybridPublicKey, hybridKem;
 import 'package:zen/src/features/social/peer_share_codec.dart';
+
+part 'pyramid_treasury.dart';
 
 abstract final class PyramidTypes {
   /// A new record, passed on.
@@ -53,9 +60,10 @@ abstract final class PyramidTypes {
   /// A referendum vote for one's cell head.
   static const String vote = 'pyr_vote';
 
-  /// A payment order for a treasurer, and the treasurer's signature.
-  static const String pay = 'pyr_pay';
-  static const String paySig = 'pyr_paysig';
+  /// A sealed message about money (an order, a treasurer's signature, a
+  /// statement, the treasurers' sync), for one member's KEM key only:
+  /// see `pyramid_treasury.dart`.
+  static const String priv = 'pyr_priv';
   static const String report = 'pyr_report';
 
   /// An anonymous record to publish on someone else's behalf.
@@ -99,8 +107,7 @@ abstract final class PyramidTypes {
     proposal,
     signature,
     vote,
-    pay,
-    paySig,
+    priv,
     report,
     anon,
     card,
@@ -113,10 +120,6 @@ const String kPyrPostsNotification = 'pyr-posts';
 
 /// Bluetooth wave version of a crisis announcement.
 const int kCrisisWaveVersion = 3;
-
-/// How old an order (or a settlement) a treasurer still signs: it may
-/// wait for treasurers who are offline, but not for ever.
-const int kPyrMaxOrderAgeMs = 7 * 24 * 3600 * 1000;
 
 /// A paid market message needs its payment to wait at least this long
 /// for the answer (else the payer could take it back while it is read).
@@ -148,6 +151,21 @@ const int kPyrCardResendMs = 10 * 60 * 1000;
 /// not come yet, and registrations per vote.
 const int kPyrEarlyCardVotes = 16;
 const int kPyrEarlyCardsPerVote = 8;
+
+/// How long a cell's members wait for every request card before they sign
+/// a roster of the cards there are (at least two): a member away does not
+/// stop the others from asking.
+const int kPyrRosterGraceMs = 12 * 3600 * 1000;
+
+/// What one-time cards are made for: a cell vote ([election]) or a cell's
+/// requests for a vote (its head and voters, [PyramidState.rosterScope]).
+typedef _CardScope = ({
+  String id,
+  String cell,
+  String head,
+  List<String> ring,
+  PyrElection? election,
+});
 
 /// How long the device at an address is taken to hold the pyramid key it
 /// proved holding there ([PyramidService.provenKeyAt]), and how long its
@@ -590,10 +608,6 @@ final class PyramidService extends ChangeNotifier {
   final Map<String, PyrOutsideVerdict> _outsideVerdicts =
       <String, PyrOutsideVerdict>{};
 
-  /// Ring signatures already checked (their cache keys), so a restart does
-  /// not redo minutes of curve arithmetic on a slow phone.
-  static const String _keyRingOk = 'pyramid/ring-ok';
-
   /// Pyramid posts friends passed on, apart from the rest.
   static const String _keyNational = 'pyramid/national';
 
@@ -640,7 +654,6 @@ final class PyramidService extends ChangeNotifier {
   /// When the handover waiting was last sent round.
   int _handoverSentAt = 0;
   final Map<String, PyramidRecord> _records = <String, PyramidRecord>{};
-  final Map<String, Set<String>> _tsigs = <String, Set<String>>{};
   final Map<String, Set<String>> _peers = <String, Set<String>>{};
   final Map<String, PyrProposal> proposals = <String, PyrProposal>{};
   final Map<String, PyramidRecord> _mine = <String, PyramidRecord>{};
@@ -649,8 +662,15 @@ final class PyramidService extends ChangeNotifier {
   final Map<String, Set<String>> _extraVotes = <String, Set<String>>{};
   final Map<String, int> myVotes = <String, int>{};
   final Map<String, String> _tallySent = <String, String>{};
+
+  /// Slots this person signed as a treasurer (one operation each; shared
+  /// with the person's other devices), and own orders and settlements
+  /// waiting for the treasurers.
   final Map<String, String> _signedOrders = <String, String>{};
   final Map<String, PyramidRecord> _payments = <String, PyramidRecord>{};
+
+  /// The private side of the money (see `pyramid_treasury.dart`).
+  late final _Treasury _treasury = _Treasury(this);
   final Map<String, PyrReport> inbox = <String, PyrReport>{};
   final Map<String, PyrReport> myReports = <String, PyrReport>{};
   final Map<String, PyrMarketMessage> market = <String, PyrMarketMessage>{};
@@ -701,6 +721,18 @@ final class PyramidService extends ChangeNotifier {
 
   /// [_cardSeeds] expanded (memory only).
   final Map<String, LedgerKeyPair> _cardPairs = <String, LedgerKeyPair>{};
+
+  /// Cells where this person asks for a vote, waiting for the cell's
+  /// request cards ([PyrT.roster]).
+  final Set<String> _pendingRequests = <String>{};
+
+  /// Request-card scopes this phone makes a card for (scope → cell): the
+  /// cells where it asks, or where another member started.
+  final Map<String, String> _rosterCells = <String, String>{};
+
+  /// When this phone first took part in a card scope (the wait before a
+  /// list of fewer cards is signed, [kPyrRosterGraceMs]).
+  final Map<String, int> _scopeSeen = <String, int>{};
 
   /// Registrations that came before their vote request (election id →
   /// messages), looked at again when it comes.
@@ -795,13 +827,7 @@ final class PyramidService extends ChangeNotifier {
     final PyramidRoot? r = root;
     return r == null
         ? null
-        : PyramidState.fold(
-            r.id,
-            _records.values,
-            now: _now(),
-            treasurerSigs: _tsigs,
-            late: _late,
-          );
+        : PyramidState.fold(r.id, _records.values, now: _now(), late: _late);
   }
 
   /// The pyramid, folded (again once a minute at most).
@@ -824,6 +850,9 @@ final class PyramidService extends ChangeNotifier {
   void _dirty() {
     _state = null;
   }
+
+  /// Tells listeners (for the money's part of this library).
+  void _changed() => notifyListeners();
 
   // ---- storage ----
 
@@ -978,26 +1007,8 @@ final class PyramidService extends ChangeNotifier {
           ..addAll(_ints(json['rd']));
         _loadCardState(json['cv']);
       }
+      await _treasury.load();
       final List<Object?>? logged = await _log.readAll();
-      try {
-        final List<int>? rawOk = await disk.read(_keyRingOk);
-        final Object? oks = rawOk == null
-            ? null
-            : jsonDecode(utf8.decode(rawOk));
-        final Object? keys = oks is Map ? oks['k'] : null;
-        final String? mac = keys is List ? _ringOkMac(keys) : null;
-        // Taken only with this phone's MAC: a planted list of "already
-        // verified" signatures would let forged records through.
-        if (keys is List && mac != null && oks is Map && oks['m'] == mac) {
-          for (final Object? k in keys) {
-            if (k is String && k.length == 64) {
-              RingSignature.remember(k, true);
-            }
-          }
-        }
-      } on Object {
-        // Only a cache: the checks are simply done again.
-      }
       // Reports from others: their own key.
       final List<int>? rawReports = await disk.read(_keyReports);
       Object? reportsJson;
@@ -1065,9 +1076,6 @@ final class PyramidService extends ChangeNotifier {
             _records[r.id] = r;
             // Checked when it came: its keys check what members sign next.
             r.fileKeys();
-            if (item['tv'] is List) {
-              _tsigs[r.id] = (item['tv'] as List).whereType<String>().toSet();
-            }
           }
         }
         // Memory is what is on disk now.
@@ -1156,6 +1164,9 @@ final class PyramidService extends ChangeNotifier {
       _recoveredAt = null;
       await disk.delete(keyRecovered);
       await _save();
+      // The wallet comes back from the treasurers: their signed statements
+      // and the operations behind them.
+      await _treasury.recovered();
       return;
     }
     if (_now() - at > kPyrRecoveryFollowMs) {
@@ -1236,6 +1247,8 @@ final class PyramidService extends ChangeNotifier {
     },
     'pend': _pendingVotes,
     'voted': _votedIn.toList(),
+    'req': _pendingRequests.toList(),
+    'rc': _rosterCells,
   };
 
   void _loadCardState(Object? json) {
@@ -1246,6 +1259,9 @@ final class PyramidService extends ChangeNotifier {
     _votedIn.clear();
     _cardMessages.clear();
     _cardSentAt.clear();
+    _pendingRequests.clear();
+    _rosterCells.clear();
+    _scopeSeen.clear();
     if (json is! Map) {
       return;
     }
@@ -1269,6 +1285,11 @@ final class PyramidService extends ChangeNotifier {
       }
     }
     _pendingVotes.addAll(_strs(json['pend']));
+    final Object? requests = json['req'];
+    if (requests is List) {
+      _pendingRequests.addAll(requests.whereType<String>());
+    }
+    _rosterCells.addAll(_strs(json['rc']));
     final Object? voted = json['voted'];
     if (voted is List) {
       _votedIn.addAll(voted.whereType<String>());
@@ -1359,14 +1380,6 @@ final class PyramidService extends ChangeNotifier {
       ),
     );
     if (records) {
-      final List<String> trusted = RingSignature.trustedKeys;
-      final String? mac = _ringOkMac(trusted);
-      if (mac != null) {
-        await disk.write(
-          _keyRingOk,
-          utf8.encode(jsonEncode(<String, Object>{'k': trusted, 'm': mac})),
-        );
-      }
       await _saveRecords();
     }
     notifyListeners();
@@ -1426,7 +1439,6 @@ final class PyramidService extends ChangeNotifier {
 
   Map<String, dynamic> _recordEntry(PyramidRecord r) => <String, dynamic>{
     'r': r.toJson(),
-    if (_tsigs[r.id] != null) 'tv': _tsigs[r.id]!.toList(),
   };
 
   /// The pyramid key from the account's seed, when there is one.
@@ -1581,9 +1593,6 @@ final class PyramidService extends ChangeNotifier {
     _records[r.id] = r;
     r.fileKeys();
     _recordsUnsaved.add(r.id);
-    if (PyrT.treasured.contains(r.type)) {
-      _tsigs[r.id] = r.tsigs.keys.toSet();
-    }
     final String content = _contentKey(r);
     _consent.remove(content);
     proposals.removeWhere(
@@ -1592,9 +1601,7 @@ final class PyramidService extends ChangeNotifier {
     );
     final List<String> stale = <String>[
       for (final MapEntry<String, PyramidRecord> e in _mine.entries)
-        if (e.key == r.id ||
-            (e.value.type != PyrT.transfer && _contentKey(e.value) == content))
-          e.key,
+        if (e.key == r.id || _contentKey(e.value) == content) e.key,
     ];
     for (final String id in stale) {
       _mine.remove(id);
@@ -1619,8 +1626,8 @@ final class PyramidService extends ChangeNotifier {
   /// The checked record to keep — merged with the copy already here — or
   /// null. In order of cost: not from the future, of a pyramid this phone
   /// keeps, then signatures one by one (only the valid ones are kept, so a
-  /// bad copy never blocks a good one), then a ring signature against its
-  /// ring.
+  /// bad copy never blocks a good one); an anonymous request only when a
+  /// roster of its cell lists its card.
   Future<PyramidRecord?> _check(PyramidRecord r) async {
     final int t = _now();
     if (r.at > t + kPyrMaxSkewMs) {
@@ -1630,26 +1637,17 @@ final class PyramidService extends ChangeNotifier {
     }
     // Only the pinned pyramid, and only while this phone keeps it; its
     // genesis is in the app, never taken from anybody.
+    // Payments are private: never kept with the public records.
     if (r.type == PyrT.genesis ||
+        PyrT.treasured.contains(r.type) ||
         current == null ||
         r.pyramid != current ||
         _followSince == null) {
       return null;
     }
     final PyramidRecord? had = _records[r.id];
-    if (PyrT.anonymous.contains(r.type)) {
-      await _verifyRingInBackground(r);
-      // Anonymous: no signatures, a ring signature that holds (a copy whose
-      // ring holds replaces one kept here whose ring does not).
-      if (r.sigs.isNotEmpty ||
-          r.ring == null ||
-          (had != null && _ringOk(had)) ||
-          !_ringOk(r)) {
-        return null;
-      }
-      return PyramidRecord(body: r.body, ring: r.ring);
-    }
-    if (r.ring != null) {
+    if (r.type == PyrT.voteRequest && !_onRoster(r)) {
+      // Not signed by a request card of the cell: nobody's to keep.
       return null;
     }
     final Map<String, String> ok = await PyramidRecord(
@@ -1659,141 +1657,38 @@ final class PyramidService extends ChangeNotifier {
           if (had == null || !had.sigs.containsKey(e.key)) e.key: e.value,
       },
     ).validSigs();
-    Map<String, String> tok = const <String, String>{};
-    if (PyrT.treasured.contains(r.type)) {
-      final Set<String> known = _tsigs[r.id] ?? const <String>{};
-      tok = await PyramidRecord(
-        body: r.body,
-        tsigs: <String, String>{
-          for (final MapEntry<String, String> e in r.tsigs.entries)
-            if (!known.contains(e.key)) e.key: e.value,
-        },
-      ).validTreasurerSigMap();
-    }
     if (had == null) {
-      return ok.isEmpty
-          ? null
-          : PyramidRecord(body: r.body, sigs: ok, tsigs: tok);
+      return ok.isEmpty ? null : PyramidRecord(body: r.body, sigs: ok);
     }
-    if (ok.isEmpty && tok.isEmpty) {
+    if (ok.isEmpty) {
       return null;
     }
-    final Set<String> known = _tsigs[had.id] ?? const <String>{};
     return PyramidRecord(
       body: had.body,
       sigs: <String, String>{...had.sigs, ...ok},
-      tsigs: <String, String>{
-        for (final MapEntry<String, String> e in had.tsigs.entries)
-          if (known.contains(e.key)) e.key: e.value,
-        ...tok,
-      },
     );
   }
 
-  /// Whether an anonymous request's ring signature holds against the ring
-  /// it names (the cell). The result is remembered for the folds.
-  ({
-    RingSignature ring,
-    List<Uint8List> points,
-    String context,
-    List<int> message,
-  })?
-  _ringInput(PyramidRecord r) {
-    final RingSignature? ring = r.ring;
-    if (ring == null || r.type != PyrT.voteRequest) {
-      return null;
+  /// Whether the anonymous request [r] names a card some roster of its
+  /// cell kept here lists ([PyrT.roster]; the fold checks the rest).
+  bool _onRoster(PyramidRecord r) {
+    final List<String> by = r.candidates;
+    if (by.length != 1) {
+      return false;
     }
-    final Object? keys = r.body['ring'];
-    final String context = PyramidState.voteRequestContext(
-      r.pyramid,
-      r.str('cell'),
-      r.str('head'),
-    );
-    if (keys is! List || keys.isEmpty || keys.length > RingSignature.maxRing) {
-      return null;
-    }
-    final List<Uint8List> points = <Uint8List>[];
-    for (final Object? k in keys) {
-      if (!PyramidRecord.isCanonicalKey(k)) {
-        return null;
+    final String card = '${by.first}.';
+    final String cell = r.str('cell');
+    for (final PyramidRecord x in _records.values) {
+      final Object? toks = x.body['toks'];
+      if (x.type == PyrT.roster &&
+          x.pyramid == r.pyramid &&
+          x.str('cell') == cell &&
+          toks is List &&
+          toks.any((Object? t) => t is String && t.startsWith(card))) {
+        return true;
       }
-      points.add(unb64(k, length: 32)!);
     }
-    return (
-      ring: ring,
-      points: points,
-      context: context,
-      message: r.signedBytes,
-    );
-  }
-
-  /// MAC of the cache of verified ring signatures, keyed with a secret of
-  /// this phone (derived from the pyramid identity seed); null without one.
-  String? _ringOkMac(List<Object?> keys) {
-    final Uint8List? seed = _seed;
-    if (seed == null) {
-      return null;
-    }
-    final List<int> macKey = crypto.Hmac(
-      crypto.sha256,
-      seed,
-    ).convert(utf8.encode('zen.pyramid.ring-ok')).bytes;
-    return crypto.Hmac(
-      crypto.sha256,
-      macKey,
-    ).convert(utf8.encode(jsonEncode(keys))).toString();
-  }
-
-  bool _ringOk(PyramidRecord r) {
-    final ({
-      RingSignature ring,
-      List<Uint8List> points,
-      String context,
-      List<int> message,
-    })?
-    input = _ringInput(r);
-    return input != null &&
-        input.ring.verify(
-          ring: input.points,
-          context: input.context,
-          message: input.message,
-        );
-  }
-
-  /// Works out a new ring signature off the UI thread (the curve
-  /// arithmetic takes long on a phone), so the checks that follow find the
-  /// answer ready.
-  Future<void> _verifyRingInBackground(PyramidRecord r) async {
-    final ({
-      RingSignature ring,
-      List<Uint8List> points,
-      String context,
-      List<int> message,
-    })?
-    input = _ringInput(r);
-    if (input == null) {
-      return;
-    }
-    final String key = input.ring.cacheKeyFor(
-      input.points,
-      input.context,
-      input.message,
-    );
-    if (RingSignature.known(key) != null) {
-      return;
-    }
-    try {
-      final RingSignature ring = input.ring;
-      final List<Uint8List> points = input.points;
-      final String context = input.context;
-      final List<int> message = input.message;
-      final bool ok = await Isolate.run(
-        () => ring.verify(ring: points, context: context, message: message),
-      );
-      RingSignature.remember(key, ok);
-    } on Object {
-      // Left to the synchronous check.
-    }
+    return false;
   }
 
   /// The content of a record without its time: the same proposal signed
@@ -1852,14 +1747,11 @@ final class PyramidService extends ChangeNotifier {
     return out;
   }
 
-  /// What this phone has of [r] besides its id: who signed it and which
-  /// treasurer signatures hold. In the sync digest, so a copy with fewer
-  /// signatures (e.g. passed on stripped) gets repaired.
+  /// What this phone has of [r] besides its id: who signed it. In the
+  /// sync digest, so a copy with fewer signatures (e.g. passed on
+  /// stripped) gets repaired.
   String _fp(PyramidRecord r) => sha256Hex(
-    utf8.encode(
-      '${(r.sigs.keys.toList()..sort()).join(',')}|'
-      '${((_tsigs[r.id] ?? const <String>{}).toList()..sort()).join(',')}',
-    ),
+    utf8.encode((r.sigs.keys.toList()..sort()).join(',')),
   ).substring(0, 8);
 
   Map<String, String> _digest(String py) => <String, String>{
@@ -2198,7 +2090,6 @@ final class PyramidService extends ChangeNotifier {
         r,
       ],
       now: max(_now(), r.at),
-      treasurerSigs: _tsigs,
       late: _late,
     );
     return trial.applied.contains(r.id);
@@ -2287,6 +2178,13 @@ final class PyramidService extends ChangeNotifier {
     final PyramidRecord signed = await p.record.signedBy(me);
     _agree(signed);
     await _save();
+    if (signed.type == PyrT.emit) {
+      // Who gets it, to the treasurers again (the proposer may be gone).
+      final PyrEmitNote? note = PyrEmitNote.fromJson(p.extra['emit']);
+      if (note != null && note.rc == signed.str('rc')) {
+        await _treasury.sendNote(note);
+      }
+    }
     if (_ready(signed, p.need)) {
       await ingest(signed);
     } else if (signed.type == PyrT.admit &&
@@ -2388,7 +2286,7 @@ final class PyramidService extends ChangeNotifier {
     final PyramidRecord signed = await r.signedBy(me);
     _agree(signed);
     await _save();
-    if (signed.type != PyrT.transfer && _ready(signed, need)) {
+    if (_ready(signed, need)) {
       await ingest(signed);
     }
     await _send(from, <String, dynamic>{
@@ -2443,41 +2341,87 @@ final class PyramidService extends ChangeNotifier {
     );
   }
 
-  /// Anonymous request for a new vote in a cell.
+  /// Anonymous request for a new vote in a cell: signed by this person's
+  /// request card of the cell ([PyrT.roster]) and published through a
+  /// friend outside the cell. While the cell has no cards for its present
+  /// head and voters, the members' phones make them first (the request
+  /// waits here, [requestWaiting], and goes out by itself). False when this
+  /// person cannot ask in the cell, or a vote is on there.
   Future<bool> requestElection(String cell) async {
     final PyramidState? s = state;
     final LedgerKeyPair? me = _identity;
-    final String? head = s?.occupant[cell];
-    if (s == null || me == null || head == null) {
+    final _CardScope? scope = s == null ? null : _rosterScopeOf(s, cell);
+    if (s == null ||
+        me == null ||
+        scope == null ||
+        !scope.ring.contains(me.id) ||
+        s.elections.values.any(
+          (PyrElection e) => e.cell == cell && !e.closed,
+        )) {
       return false;
     }
-    // The ring: those of the cell with a vote ([PyramidState.canVote]).
-    final List<String> ring = s.cellVoters(cell, _now())..sort();
-    if (!ring.contains(me.id) || ring.length < 2) {
-      return false;
-    }
-    final Map<String, dynamic> body = <String, dynamic>{
-      't': PyrT.voteRequest,
-      'py': s.id,
-      'at': _now(),
-      'by': const <String>[],
-      'cell': cell,
-      'head': head,
-      'ring': ring,
-      'n': _newId(),
-    };
-    final PyramidRecord unsigned = PyramidRecord(body: body);
-    final RingSignature sig = RingSignature.sign(
-      seed: me.seed,
-      ring: ring.map((String k) => unb64(k, length: 32)!).toList(),
-      context: PyramidState.voteRequestContext(s.id, cell, head),
-      message: unsigned.signedBytes,
-    );
-    await _publishAnonymously(
-      PyramidRecord(body: body, ring: sig),
-      avoid: ring,
-    );
+    _pendingRequests.add(cell);
+    _rosterCells[scope.id] = cell;
+    await _save();
+    await _cardDuties(s, me);
     return true;
+  }
+
+  /// Whether this person's request for a vote in [cell] waits for the
+  /// cell's cards.
+  bool requestWaiting(String cell) => _pendingRequests.contains(cell);
+
+  /// The request cards [cell] needs now: for its head and its voters.
+  _CardScope? _rosterScopeOf(PyramidState s, String cell) {
+    final String? head = s.occupant[cell];
+    if (head == null) {
+      return null;
+    }
+    final List<String> ring = s.cellVoters(cell, _now())..sort();
+    if (ring.length < 2) {
+      return null;
+    }
+    return (
+      id: PyramidState.rosterScope(s.id, cell, head, ring),
+      cell: cell,
+      head: head,
+      ring: ring,
+      election: null,
+    );
+  }
+
+  static _CardScope _electionScope(PyrElection e) => (
+    id: e.id,
+    cell: e.cell,
+    head: e.head,
+    ring: List<String>.of(e.ring)..sort(),
+    election: e,
+  );
+
+  /// Signs the request waiting for [scope]'s cell with this person's card,
+  /// once the cell's roster holds it, and publishes it through a friend.
+  Future<void> _sendRequest(PyramidState s, _CardScope scope) async {
+    final LedgerKeyPair card = await _cardKey(scope.id);
+    final PyrRoster? roster = s.rosters[scope.cell];
+    if (roster == null ||
+        roster.scope(s.id) != scope.id ||
+        roster.tokens[card.id] != card.pqId) {
+      return;
+    }
+    final PyramidRecord request = await PyramidRecord(
+      body: <String, dynamic>{
+        't': PyrT.voteRequest,
+        'py': s.id,
+        'at': _now(),
+        'by': <String>[card.id],
+        'cell': scope.cell,
+        'head': scope.head,
+        'n': _newId(),
+      },
+    ).signedBy(card);
+    _pendingRequests.remove(scope.cell);
+    await _save();
+    await _publishAnonymously(request, avoid: scope.ring);
   }
 
   /// Anonymous vote for the head of a cell: signed by this phone's card
@@ -2514,11 +2458,11 @@ final class PyramidService extends ChangeNotifier {
   /// Whether this person voted in [electionId] (from this phone).
   bool votedIn(String electionId) => _votedIn.contains(electionId);
 
-  /// This phone's one-time card for the vote [election] (made the first
-  /// time, kept until the vote closes).
-  Future<LedgerKeyPair> _cardKey(String election) async {
-    final String? stored = _cardSeeds[election];
-    final LedgerKeyPair? had = _cardPairs[election];
+  /// This phone's one-time card for [scope] (a vote, or a cell's requests;
+  /// made the first time, kept while the scope lasts).
+  Future<LedgerKeyPair> _cardKey(String scope) async {
+    final String? stored = _cardSeeds[scope];
+    final LedgerKeyPair? had = _cardPairs[scope];
     if (had != null && stored == b64(had.seed)) {
       return had;
     }
@@ -2527,18 +2471,18 @@ final class PyramidService extends ChangeNotifier {
         ? await LedgerKeyPair.fromSeed(seed)
         : await LedgerKeyPair.generate();
     if (seed == null) {
-      _cardSeeds[election] = b64(pair.seed);
+      _cardSeeds[scope] = b64(pair.seed);
       await _save();
     }
     if (_cardPairs.length >= kPyrEarlyCardVotes) {
       _cardPairs.clear();
     }
-    return _cardPairs[election] = pair;
+    return _cardPairs[scope] = pair;
   }
 
-  /// What a card's registration signs: the vote and the card.
-  static List<int> _cardBytes(String election, String card) =>
-      utf8.encode('zen-pyramid-card|$election|$card');
+  /// What a card's registration signs: the scope and the card.
+  static List<int> _cardBytes(String scope, String card) =>
+      utf8.encode('zen-pyramid-card|$scope|$card');
 
   Future<bool> _castVote(PyramidState s, PyrElection e, String choice) async {
     final LedgerKeyPair card = await _cardKey(e.id);
@@ -2566,15 +2510,43 @@ final class PyramidService extends ChangeNotifier {
     return true;
   }
 
-  /// The cell votes this person is in: makes and sends its card (again
-  /// every [kPyrCardResendMs] until the ballot is in), signs the ballot
-  /// once it heard every card (or, after a third of the vote's time, the
-  /// cards of at least two), casts a vote that waited for it, and forgets
-  /// the cards of closed votes.
+  /// The card scopes this person is in — open cell votes, and the request
+  /// cards of a cell where this person asks or whose members started
+  /// making them: makes and sends its card (again every
+  /// [kPyrCardResendMs] until it is listed), signs the list once it heard
+  /// every card (or, after a while, the cards of at least two), sends a
+  /// vote or a request that waited for it, and forgets the cards of what
+  /// is over.
   Future<void> _cardDuties(PyramidState s, LedgerKeyPair me) async {
-    final Set<String> open = <String>{
+    _pendingRequests.removeWhere(
+      (String cell) =>
+          _rosterScopeOf(s, cell) == null ||
+          s.elections.values.any(
+            (PyrElection e) => e.cell == cell && !e.closed,
+          ),
+    );
+    final List<_CardScope> scopes = <_CardScope>[
       for (final PyrElection e in s.elections.values)
-        if (!e.closed && e.ring.contains(me.id)) e.id,
+        if (!e.closed && e.ring.contains(me.id)) _electionScope(e),
+    ];
+    // Request cards: of a cell where this person asks, or of the very scope
+    // (head and voters) another member started.
+    final Set<String> rosterIds = <String>{};
+    for (final String cell in <String>{
+      ..._pendingRequests,
+      ..._rosterCells.values,
+    }) {
+      final _CardScope? scope = _rosterScopeOf(s, cell);
+      if (scope != null &&
+          scope.ring.contains(me.id) &&
+          (_pendingRequests.contains(cell) ||
+              _rosterCells.containsKey(scope.id)) &&
+          rosterIds.add(scope.id)) {
+        scopes.add(scope);
+      }
+    }
+    final Set<String> active = <String>{
+      for (final _CardScope scope in scopes) scope.id,
     };
     bool forgot = false;
     for (final String id in <String>{
@@ -2583,32 +2555,45 @@ final class PyramidService extends ChangeNotifier {
       ..._pendingVotes.keys,
       ..._ballotsSigned.keys,
       ..._votedIn,
+      ..._rosterCells.keys,
     }) {
-      if (!open.contains(id) && s.elections.containsKey(id)) {
+      if (!active.contains(id) &&
+          (s.elections.containsKey(id) || id.startsWith('roster:'))) {
         _cardSeeds.remove(id);
         _cards.remove(id);
         _pendingVotes.remove(id);
         _ballotsSigned.remove(id);
         _votedIn.remove(id);
+        _rosterCells.remove(id);
         _cardMessages.remove(id);
         _cardPairs.remove(id);
         _cardSentAt.remove(id);
+        _scopeSeen.remove(id);
         forgot = true;
       }
     }
     if (forgot) {
       await _save();
     }
-    for (final String id in open) {
-      final PyrElection e = s.elections[id]!;
-      if (e.tokens != null) {
+    for (final _CardScope scope in scopes) {
+      final String id = scope.id;
+      _scopeSeen.putIfAbsent(id, _now);
+      final PyrElection? e = scope.election;
+      if (e != null && e.tokens != null) {
         final String? choice = _pendingVotes[id];
         if (choice != null) {
           await _castVote(s, e, choice);
         }
         continue;
       }
-      final Map<String, dynamic> mine = await _cardMessage(s, e, me);
+      if (e == null && await _listedInRoster(s, scope)) {
+        if (_pendingRequests.contains(scope.cell)) {
+          await _sendRequest(s, scope);
+        }
+        await _signCards(s, scope, me);
+        continue;
+      }
+      final Map<String, dynamic> mine = await _cardMessage(s, scope, me);
       final Map<String, String> heard = _cards[id] ??= <String, String>{};
       if (heard[mine['i'] as String] != mine['tok']) {
         heard[mine['i'] as String] = mine['tok'] as String;
@@ -2621,51 +2606,64 @@ final class PyramidService extends ChangeNotifier {
       final int t = _now();
       if (t - (_cardSentAt[id] ?? 0) >= kPyrCardResendMs) {
         _cardSentAt[id] = t;
-        await _sendCard(s, e, mine);
+        await _sendCard(s, scope, mine);
       }
-      await _signBallot(s, e, me);
+      await _signCards(s, scope, me);
     }
   }
 
-  /// This phone's registration of its card for [e], ring-signed by the
+  /// Whether the cell's roster for [scope] lists this phone's card.
+  Future<bool> _listedInRoster(PyramidState s, _CardScope scope) async {
+    final PyrRoster? roster = s.rosters[scope.cell];
+    if (roster == null ||
+        roster.scope(s.id) != scope.id ||
+        !_cardSeeds.containsKey(scope.id)) {
+      return false;
+    }
+    final LedgerKeyPair card = await _cardKey(scope.id);
+    return roster.tokens[card.id] == card.pqId;
+  }
+
+  /// This phone's registration of its card for [scope], ring-signed by the
   /// cell (made once per run; the key image stays the same).
   Future<Map<String, dynamic>> _cardMessage(
     PyramidState s,
-    PyrElection e,
+    _CardScope scope,
     LedgerKeyPair me,
   ) async {
-    final Map<String, dynamic>? had = _cardMessages[e.id];
+    final Map<String, dynamic>? had = _cardMessages[scope.id];
     if (had != null) {
       return had;
     }
-    final String card = (await _cardKey(e.id)).hybridId;
+    final String card = (await _cardKey(scope.id)).hybridId;
     final RingSignature sig = RingSignature.sign(
       seed: me.seed,
-      ring: e.ring.map((String k) => unb64(k, length: 32)!).toList(),
-      context: PyramidState.tokenContext(e.id),
-      message: _cardBytes(e.id, card),
+      ring: scope.ring.map((String k) => unb64(k, length: 32)!).toList(),
+      context: PyramidState.tokenContext(scope.id),
+      message: _cardBytes(scope.id, card),
     );
-    return _cardMessages[e.id] = <String, dynamic>{
+    return _cardMessages[scope.id] = <String, dynamic>{
       'type': PyramidTypes.card,
       'py': s.id,
-      'e': e.id,
+      'e': scope.id,
+      if (scope.election == null) 'cell': scope.cell,
       'tok': card,
       'r': sig.toJson(),
       'i': sig.keyImage,
     };
   }
 
-  /// Sends [message] to the other members of [e]'s cell through a friend
-  /// outside the cell (straight to them when there is none), so the
+  /// Sends [message] to the other members of [scope]'s cell through a
+  /// friend outside the cell (straight to them when there is none), so the
   /// members do not see from where it came.
   Future<void> _sendCard(
     PyramidState s,
-    PyrElection e,
+    _CardScope scope,
     Map<String, dynamic> message,
   ) async {
     final String me = myKey ?? '';
     final List<String> to = <String>[
-      for (final String k in e.ring)
+      for (final String k in scope.ring)
         if (k != me && (s.members[k]?.addr ?? '').isNotEmpty)
           _n(s.members[k]!.addr),
     ];
@@ -2673,7 +2671,7 @@ final class PyramidService extends ChangeNotifier {
       return;
     }
     final Set<String> avoid = <String>{
-      for (final String k in e.ring)
+      for (final String k in scope.ring)
         if ((s.members[k]?.addr ?? '').isNotEmpty) _n(s.members[k]!.addr),
     };
     final List<String> relays = _pyramidFriends(
@@ -2694,28 +2692,37 @@ final class PyramidService extends ChangeNotifier {
   }
 
   /// A card registration: passed on for a friend (with `to`: only to the
-  /// members of that very vote's cell), or taken as a member of the cell —
-  /// when its ring signature holds, and only the first card per key image
-  /// (one per member) and per card.
+  /// members of that cell), or taken as a member of the cell — when its
+  /// ring signature holds, and only the first card per key image (one per
+  /// member) and per card. Request cards of a cell start this phone's own
+  /// (the cell makes them when one member asks).
   Future<void> _onCard(String from, Map<String, dynamic> p) async {
     final PyramidState? s = state;
     final String? me = myKey;
-    final Object? election = p['e'];
+    final Object? id = p['e'];
     final Object? card = p['tok'];
+    final Object? cell = p['cell'];
     final RingSignature? sig = RingSignature.fromJson(p['r']);
     if (s == null ||
         p['py'] != s.id ||
-        election is! String ||
+        id is! String ||
         card is! String ||
         sig == null ||
         parseHybridKeyId(card) == null) {
       return;
     }
-    final PyrElection? e = s.elections[election];
+    final PyrElection? e = s.elections[id];
+    _CardScope? scope;
+    if (e != null) {
+      scope = _electionScope(e);
+    } else if (cell is String) {
+      final _CardScope? roster = _rosterScopeOf(s, cell);
+      scope = roster?.id == id ? roster : null;
+    }
     final Object? to = p['to'];
     if (to != null) {
       // Passing it on for a friend: only to members of the pyramid (of
-      // the vote's cell once its request is here), and not for a vote
+      // the cell once this phone knows the scope), and not for a vote
       // that has its ballot or is over.
       if (from.isEmpty ||
           !host.isFriend(from) ||
@@ -2725,7 +2732,7 @@ final class PyramidService extends ChangeNotifier {
         return;
       }
       final Set<String> allowed = <String>{
-        for (final String k in e?.ring ?? s.members.keys)
+        for (final String k in scope?.ring ?? s.members.keys)
           if ((s.members[k]?.addr ?? '').isNotEmpty) _n(s.members[k]!.addr),
       };
       final Map<String, dynamic> plain = <String, dynamic>{...p}..remove('to');
@@ -2736,48 +2743,55 @@ final class PyramidService extends ChangeNotifier {
       }
       return;
     }
-    if (me == null) {
+    final LedgerKeyPair? identity = _identity;
+    if (me == null || identity == null) {
       return;
     }
-    if (e == null) {
-      // Its request has not come yet: kept for a while.
+    if (scope == null) {
+      // Its vote request (or the cell change it is for) has not come yet:
+      // kept for a while.
       if (_earlyCards.length >= kPyrEarlyCardVotes &&
-          !_earlyCards.containsKey(election)) {
+          !_earlyCards.containsKey(id)) {
         _earlyCards.remove(_earlyCards.keys.first);
       }
-      final List<Map<String, dynamic>> early = _earlyCards[election] ??=
+      final List<Map<String, dynamic>> early = _earlyCards[id] ??=
           <Map<String, dynamic>>[];
       if (early.length < kPyrEarlyCardsPerVote) {
         early.add(p);
       }
       return;
     }
-    if (e.closed || e.tokens != null || !e.ring.contains(me)) {
+    if ((e != null && (e.closed || e.tokens != null)) ||
+        !scope.ring.contains(me)) {
       return;
     }
-    final Map<String, String> heard = _cards[e.id] ??= <String, String>{};
+    final Map<String, String> heard = _cards[id] ??= <String, String>{};
     if (heard.containsKey(sig.keyImage) || heard.containsValue(card)) {
       return;
     }
     if (!await _ringHolds(
       sig,
-      e.ring.map((String k) => unb64(k, length: 32)!).toList(),
-      PyramidState.tokenContext(e.id),
-      _cardBytes(e.id, card),
+      scope.ring.map((String k) => unb64(k, length: 32)!).toList(),
+      PyramidState.tokenContext(id),
+      _cardBytes(id, card),
     )) {
       return;
     }
     if (heard.containsKey(sig.keyImage) ||
         heard.containsValue(card) ||
-        heard.length >= e.ring.length) {
+        heard.length >= scope.ring.length) {
       return;
     }
     heard[sig.keyImage] = card;
     await _save();
-    final LedgerKeyPair? id = _identity;
-    if (id != null) {
-      await _signBallot(s, e, id);
+    if (e == null && !_rosterCells.containsKey(id)) {
+      // Someone in the cell asks: this phone makes its request card too.
+      _rosterCells[id] = scope.cell;
+      await _save();
+      await _cardDuties(s, identity);
+      return;
     }
+    await _signCards(s, scope, identity);
   }
 
   /// Whether [sig] holds (off the UI thread; remembered).
@@ -2803,51 +2817,98 @@ final class PyramidService extends ChangeNotifier {
     }
   }
 
-  /// Signs the ballot of every card heard of for [e] — only when this
-  /// phone's own card is among them, all the cell's cards are in (or a
-  /// third of the vote's time has gone by and at least two are), and not
-  /// signed before. Every member who heard the same cards signs the same
-  /// record ([PyramidState.ballotTokens]); the signatures meet in it.
-  Future<void> _signBallot(
+  /// Signs the list of every card heard of for [scope] — only when this
+  /// phone's own card is among them, all the cell's cards are in (or, a
+  /// while later, at least two are: a third of a vote's time, or
+  /// [kPyrRosterGraceMs] for request cards), and not signed before. Every
+  /// member who heard the same cards signs the same record: a vote's
+  /// ballot is dated by the vote itself; a cell's roster is the one a
+  /// member made first, which the others sign too
+  /// ([PyramidState.ballotTokens]).
+  Future<void> _signCards(
     PyramidState s,
-    PyrElection e,
+    _CardScope scope,
     LedgerKeyPair me,
   ) async {
-    final String? mine = _cardSeeds.containsKey(e.id)
-        ? (await _cardKey(e.id)).hybridId
+    final String id = scope.id;
+    final String? mine = _cardSeeds.containsKey(id)
+        ? (await _cardKey(id)).hybridId
         : null;
     final List<String> cards =
-        (_cards[e.id]?.values.toSet().toList() ?? <String>[])..sort();
+        (_cards[id]?.values.toSet().toList() ?? <String>[])..sort();
     if (mine == null ||
         !cards.contains(mine) ||
         cards.length < 2 ||
-        cards.length > e.ring.length) {
+        cards.length > scope.ring.length) {
       return;
     }
-    final bool all = cards.length == e.ring.length;
-    final bool late = _now() >= e.start + (e.deadline - e.start) ~/ 3;
+    final PyrElection? e = scope.election;
+    final bool all = cards.length == scope.ring.length;
+    final bool late = e != null
+        ? _now() >= e.start + (e.deadline - e.start) ~/ 3
+        : _now() >= (_scopeSeen[id] ?? _now()) + kPyrRosterGraceMs;
     if (!all && !late) {
       return;
     }
     final String joined = cards.join(',');
-    final Set<String> signed = _ballotsSigned[e.id] ??= <String>{};
-    if (!signed.add(joined)) {
+    if (e != null) {
+      final Set<String> signed = _ballotsSigned[id] ??= <String>{};
+      if (!signed.add(joined)) {
+        return;
+      }
+      await _save();
+      final PyramidRecord ballot = await PyramidRecord(
+        body: <String, dynamic>{
+          't': PyrT.ballot,
+          'py': s.id,
+          // The same on every phone: the members' signatures meet in one
+          // record.
+          'at': e.start + 1,
+          'by': scope.ring,
+          'elect': e.id,
+          'toks': cards,
+        },
+      ).signedBy(me);
+      await ingest(ballot);
       return;
     }
-    await _save();
-    final PyramidRecord ballot = await PyramidRecord(
-      body: <String, dynamic>{
-        't': PyrT.ballot,
-        'py': s.id,
-        // The same on every phone: the members' signatures meet in one
-        // record.
-        'at': e.start + 1,
-        'by': List<String>.of(e.ring)..sort(),
-        'elect': e.id,
-        'toks': cards,
-      },
-    ).signedBy(me);
-    await ingest(ballot);
+    // A roster: every one listing exactly these cards gets this phone's
+    // signature (two members may have made one at once).
+    final List<PyramidRecord> made = <PyramidRecord>[
+      for (final PyramidRecord r in _records.values)
+        if (r.type == PyrT.roster &&
+            r.pyramid == s.id &&
+            r.str('cell') == scope.cell &&
+            r.str('head') == scope.head &&
+            r.body['toks'] is List &&
+            (r.body['toks'] as List).join(',') == joined)
+          r,
+    ];
+    final bool madeHere = (_ballotsSigned[id] ?? const <String>{}).contains(
+      joined,
+    );
+    if (made.isEmpty && !madeHere) {
+      (_ballotsSigned[id] ??= <String>{}).add(joined);
+      await _save();
+      made.add(
+        PyramidRecord(
+          body: <String, dynamic>{
+            't': PyrT.roster,
+            'py': s.id,
+            'at': _now(),
+            'by': scope.ring,
+            'cell': scope.cell,
+            'head': scope.head,
+            'toks': cards,
+          },
+        ),
+      );
+    }
+    for (final PyramidRecord r in made) {
+      if (!r.sigs.containsKey(me.id)) {
+        await ingest(await r.signedBy(me));
+      }
+    }
   }
 
   /// Hands an anonymous record to a friend outside [avoid] to publish, so
@@ -2996,6 +3057,7 @@ final class PyramidService extends ChangeNotifier {
     Map<String, dynamic> body, {
     String? via,
     List<String> alsoNeed = const <String>[],
+    Map<String, dynamic> extra = const <String, dynamic>{},
   }) async {
     final PyramidState? s = state;
     final String? k = myKey;
@@ -3007,12 +3069,14 @@ final class PyramidService extends ChangeNotifier {
         <String, dynamic>{...body, 'via': via},
         candidates: <String>[k, ...alsoNeed],
         need: 1 + min(2, alsoNeed.length),
+        extra: extra,
       );
     }
     return propose(
       body,
       candidates: <String>{...s.topCell, ...alsoNeed}.toList(),
       need: 2 + min(2, alsoNeed.length),
+      extra: extra,
     );
   }
 
@@ -3390,11 +3454,15 @@ final class PyramidService extends ChangeNotifier {
   }
 
   // ---- money ----
+  //
+  // Payments are private: an order goes sealed to the treasurers and never
+  // enters the records (`pyramid_ledger.dart`, `pyramid_treasury.dart`).
 
-  /// Pays [to]: an order to the treasurers, valid with a majority of them.
-  /// With [condBy], it waits for that person's word; with [share],
-  /// it is an announcement passed on through intermediaries, each keeping
-  /// [share], at most [hops] times after the first ([hash]: its text).
+  /// Pays [to]: an order sealed to the treasurers, valid once most of them
+  /// signed it; nobody else learns of it but [to]. With [condBy], it waits
+  /// for that person's word; with [share], it is an announcement passed on
+  /// through intermediaries, each keeping [share], at most [hops] times
+  /// after the first ([hash]: its text).
   Future<PyramidRecord?> pay(
     String to,
     int amount, {
@@ -3419,7 +3487,8 @@ final class PyramidService extends ChangeNotifier {
         amount > kPyrMaxAmount ||
         payer.isEmpty ||
         to.isEmpty ||
-        to == payer) {
+        to == payer ||
+        !s.isMember(to)) {
       return null;
     }
     if (_paymentWaiting(payer, s.id)) {
@@ -3443,12 +3512,13 @@ final class PyramidService extends ChangeNotifier {
         'from': payer,
         'to': to,
         'amount': amount,
-        'seq': s.account(payer).seq + 1,
+        'seq': _treasury.nextSeq(payer),
         'memo': memo,
         'cond': ?cond,
       },
     ).signedBy(me);
-    await _toTreasurers(order);
+    await _treasury.toTreasurers(order);
+    notifyListeners();
     return order;
   }
 
@@ -3458,174 +3528,8 @@ final class PyramidService extends ChangeNotifier {
         r.type == PyrT.transfer && r.str('from') == payer && r.pyramid == py,
   );
 
-  /// Sends a signed order (or settlement) to every treasurer of its
-  /// pyramid (this phone's own part directly). It is kept until most of
-  /// them have signed — also across a restart — and sent again as it is.
-  Future<void> _toTreasurers(PyramidRecord order) async {
-    final PyramidState? s = order.pyramid == current ? state : null;
-    final String? me = myKey;
-    if (s == null || me == null) {
-      return;
-    }
-    _payments[order.id] ??= order;
-    _resentAt[order.id] = _now();
-    await _save();
-    for (final String t in s.treasurers) {
-      final String addr = s.members[t]?.addr ?? '';
-      if (t == me) {
-        await _onPay(_n(host.ownAddress()), <String, dynamic>{
-          'r': order.toJson(),
-        });
-      } else if (addr.isNotEmpty) {
-        await _send(addr, <String, dynamic>{
-          'type': PyramidTypes.pay,
-          'r': order.toJson(),
-        });
-      }
-    }
-  }
-
-  /// A treasurer checks an order (or a settlement) against its own copy
-  /// and signs it: fresh (not from the future, at most a week old), never
-  /// two orders with the same number, never two settlements of one payment.
-  Future<void> _onPay(String from, Map<String, dynamic> p) async {
-    final LedgerKeyPair? me = _identity;
-    final PyramidRecord? order = PyramidRecord.fromJson(p['r']);
-    if (me == null ||
-        order == null ||
-        !PyrT.treasured.contains(order.type) ||
-        order.pyramid != current) {
-      return;
-    }
-    final PyramidState? s = state;
-    if (s == null || order.pyramid != s.id || !s.treasurers.contains(me.id)) {
-      return;
-    }
-    final int t = _now();
-    if (order.at > t + kPyrMaxSkewMs || t - order.at > kPyrMaxOrderAgeMs) {
-      return;
-    }
-    // From the device of whoever signed it (or this phone).
-    if (_n(from) != _n(host.ownAddress()) && !_fromSigner(from, order, s)) {
-      return;
-    }
-    if (!await order.verifySigners()) {
-      return;
-    }
-    final String? slot = order.type == PyrT.settle
-        ? _settleSlot(s, order, t)
-        : _orderSlot(s, order);
-    if (slot == null) {
-      return;
-    }
-    final String? already = _signedOrders[slot];
-    if (already != null && already != order.id) {
-      return;
-    }
-    _signedOrders[slot] = order.id;
-    await _save();
-    final String sig = b64(
-      await me.sign(PyramidRecord.treasurerBytes(order.id)),
-    );
-    if (_n(from) == _n(host.ownAddress())) {
-      await _onPaySig(<String, dynamic>{'id': order.id, 'k': me.id, 's': sig});
-    } else {
-      await _send(from, <String, dynamic>{
-        'type': PyramidTypes.paySig,
-        'id': order.id,
-        'k': me.id,
-        's': sig,
-      });
-    }
-  }
-
-  /// The number a payment order takes, when it is one to sign: the payer
-  /// signed it, it is the next number, the money is there (an emission
-  /// this phone saw late is not there before its whole veto time here,
-  /// [PyramidState.fold]).
-  String? _orderSlot(PyramidState s, PyramidRecord order) {
-    final String payer = order.str('from');
-    final int amount = order.integer('amount');
-    final PyrAccount acc = s.accounts[payer] ?? PyrAccount();
-    if (!s.canSpend(payer, order.signers) ||
-        order.integer('seq') != acc.seq + 1 ||
-        amount <= 0 ||
-        amount > kPyrMaxAmount) {
-      return null;
-    }
-    if (acc.balance < amount) {
-      return null;
-    }
-    return '$payer|${order.integer('seq')}';
-  }
-
-  /// The payment a settlement settles, when it is one to sign: by the one
-  /// whose word the payment waits for (an acceptance only while it waits),
-  /// or the payer's refund after the time.
-  String? _settleSlot(PyramidState s, PyramidRecord r, int t) {
-    final PyrEscrow? e = s.escrows[r.str('x')];
-    if (e == null || e.settled != null || r.at < e.at) {
-      return null;
-    }
-    final bool ok = r.body['ok'] == true;
-    final bool byCond = r.signers.contains(e.condBy);
-    final bool refund = !ok && s.canSpend(e.from, r.signers) && r.at >= e.until;
-    if (!byCond && !refund) {
-      return null;
-    }
-    if (ok && t > e.until + kPyrMaxSkewMs) {
-      return null;
-    }
-    return 'x|${e.id}';
-  }
-
   /// Whether this phone first saw emission [id] late.
   bool seenLate(String id) => _late.containsKey(id);
-
-  /// A treasurer's signature for an order waiting here: only a valid one
-  /// is added, and one already kept is never replaced (whoever sends a
-  /// different one for the same treasurer).
-  Future<void> _onPaySig(Map<String, dynamic> p) async {
-    final Object? id = p['id'];
-    final Object? k = p['k'];
-    final Object? sig = p['s'];
-    final PyramidRecord? order = id is String ? _payments[id] : null;
-    if (order == null ||
-        k is! String ||
-        sig is! String ||
-        order.tsigs.containsKey(k)) {
-      return;
-    }
-    final PyramidState? s = order.pyramid == current ? state : null;
-    if (s == null) {
-      return;
-    }
-    final Map<String, String> fresh = await PyramidRecord(
-      body: order.body,
-      tsigs: <String, String>{k: sig},
-    ).validTreasurerSigMap();
-    if (fresh.isEmpty) {
-      return;
-    }
-    // The order may have changed while the signature was checked.
-    final PyramidRecord? now = _payments[order.id];
-    if (now == null || now.tsigs.containsKey(k)) {
-      return;
-    }
-    final PyramidRecord clean = PyramidRecord(
-      body: now.body,
-      sigs: now.sigs,
-      tsigs: <String, String>{...now.tsigs, ...fresh},
-    );
-    _payments[order.id] = clean;
-    if (clean.tsigs.keys.where(s.treasurers.contains).length >=
-        s.treasurerMajority) {
-      _payments.remove(order.id);
-      _resentAt.remove(order.id);
-      await ingest(clean);
-    }
-    await _save();
-  }
 
   /// Payments waiting for treasurers.
   List<PyramidRecord> get pendingPayments => <PyramidRecord>[
@@ -3633,21 +3537,19 @@ final class PyramidService extends ChangeNotifier {
       if (r.type == PyrT.transfer) r,
   ];
 
+  /// Stops sending order [id] (the treasurers who signed it keep their
+  /// signature: its number stays taken only if most of them did).
   void cancelPending(String id) {
     _payments.remove(id);
     _resentAt.remove(id);
-    if (_mine[id]?.type == PyrT.transfer) {
-      _mine.remove(id);
-      _mineNeed.remove(id);
-    }
     unawaited(_save());
     notifyListeners();
   }
 
   /// Settles a conditional payment; for an announcement, [next] is the
   /// one person it goes on to (with the rest of the money). Like a
-  /// transfer, it goes to the treasurers, who sign one settlement per
-  /// payment; it counts once most of them have.
+  /// payment, it goes sealed to the treasurers, who sign one settlement
+  /// per payment; it counts once most of them have.
   Future<PyramidRecord?> settle(
     String transferId,
     bool ok, {
@@ -3677,13 +3579,167 @@ final class PyramidService extends ChangeNotifier {
         if (ok && next != null) 'next': next,
       },
     ).signedBy(me);
-    await _toTreasurers(r);
+    await _treasury.toTreasurers(r);
+    notifyListeners();
     return r;
   }
 
-  Future<PyramidRecord?> emit(String to, int amount, String why) => topDecision(
-    <String, dynamic>{'t': PyrT.emit, 'to': to, 'amount': amount, 'why': why},
-  );
+  /// New money for member [to] ([why]: for what), signed by the top. The
+  /// record shows only the amount and a commitment to who gets it; who and
+  /// why go sealed to the treasurers and to [to] ([PyrEmitNote]), and to
+  /// the top who sign it.
+  Future<PyramidRecord?> emit(String to, int amount, String why) async {
+    final PyramidState? s = state;
+    if (s == null || !s.isMember(to) || amount <= 0) {
+      return null;
+    }
+    final String salt = _newId(32);
+    final PyrEmitNote note = PyrEmitNote(
+      rc: pyrEmitCommit(to, salt),
+      to: to,
+      salt: salt,
+      why: _cut(why.trim(), 500),
+    );
+    final PyramidRecord? r = await topDecision(
+      <String, dynamic>{'t': PyrT.emit, 'amount': amount, 'rc': note.rc},
+      extra: <String, dynamic>{'emit': note.toJson()},
+    );
+    if (r != null) {
+      await _treasury.sendNote(note);
+    }
+    return r;
+  }
+
+  // ---- the private ledger, as this phone has it ----
+
+  /// This person's balance: from the statements most treasurers signed
+  /// and what came since (a treasurer: from its own ledger).
+  int get balance {
+    final String? me = myKey;
+    return me == null ? 0 : _treasury.balanceOf(me);
+  }
+
+  /// The balance of [key] in this phone's ledger (tests; only a
+  /// treasurer's ledger knows everybody's).
+  @visibleForTesting
+  int ledgerBalanceOf(String key) {
+    final PyramidState? s = state;
+    return s == null ? 0 : _treasury.view(s).balanceOf(key);
+  }
+
+  /// The next number of [key]'s account in this phone's ledger (tests).
+  @visibleForTesting
+  int ledgerSeqOf(String key) {
+    final PyramidState? s = state;
+    return s == null ? 0 : _treasury.view(s).seqOf(key);
+  }
+
+  /// The operations this phone's ledger keeps (tests: what a phone knows).
+  @visibleForTesting
+  Set<String> get ledgerIds => _treasury.ledger.ops.keys.toSet();
+
+  /// Emission notes this phone keeps (tests).
+  @visibleForTesting
+  Set<String> get ledgerNotes => _treasury.ledger.notes.keys.toSet();
+
+  /// Runs the money's periodic duties now (tests).
+  @visibleForTesting
+  Future<void> ledgerDuties() => _treasury.duties();
+
+  /// Sends [json] sealed to member [to] as a private money message
+  /// (tests: what a modified app could send).
+  @visibleForTesting
+  Future<void> sendSealed(String to, Map<String, dynamic> json) =>
+      _treasury.sendTo(to, json);
+
+  /// Asks the treasurers for this person's statement now.
+  Future<void> refreshStatement() => _treasury.askStatements(force: true);
+
+  /// Conditional payment [id] as this phone knows it (to, or from, this
+  /// person), or null.
+  PyrEscrow? escrowOf(String id) {
+    final PyramidState? s = state;
+    return s == null ? null : _treasury.view(s).escrows[id];
+  }
+
+  /// Conditional payments that concern this person.
+  List<PyrEscrow> get myEscrows {
+    final PyramidState? s = state;
+    final String? me = myKey;
+    if (s == null || me == null) {
+      return const <PyrEscrow>[];
+    }
+    return <PyrEscrow>[
+      for (final PyrEscrow e in _treasury.view(s).escrows.values)
+        if (e.from == me || e.to == me || e.condBy == me) e,
+    ];
+  }
+
+  /// This person's history (newest last).
+  List<PyrLedgerEntry> get myEntries {
+    final PyramidState? s = state;
+    final String? me = myKey;
+    if (s == null || me == null) {
+      return const <PyrLedgerEntry>[];
+    }
+    return <PyrLedgerEntry>[
+      for (final PyrLedgerEntry e in _treasury.view(s).entries)
+        if (e.from == me || e.to == me) e,
+    ];
+  }
+
+  /// Whether order [id] paid this person outright (not waiting for
+  /// anybody's word) and counts: from [from], at least [amount], when
+  /// given.
+  bool receivedPayment(String id, {String? from, int amount = 0}) {
+    final String? me = myKey;
+    return myEntries.any(
+      (PyrLedgerEntry e) =>
+          e.id == id &&
+          e.to == me &&
+          e.kind == PyrEntryKind.payment &&
+          (from == null || e.from == from) &&
+          e.amount >= amount,
+    );
+  }
+
+  /// Each treasurer's latest statement of this person's account.
+  Map<String, PyrStatement> get statements =>
+      Map<String, PyrStatement>.unmodifiable(_treasury.statements);
+
+  /// The statement most treasurers agree on, if any.
+  PyrStatement? get agreedStatement {
+    final PyramidState? s = state;
+    return s == null ? null : _treasury.agreed(s);
+  }
+
+  /// Treasurers whose latest statement differs from the one most of them
+  /// signed (or who signed one while there is no majority).
+  List<String> get disagreeingTreasurers {
+    final PyramidState? s = state;
+    if (s == null) {
+      return const <String>[];
+    }
+    final PyrStatement? agreed = _treasury.agreed(s);
+    return <String>[
+      for (final PyrStatement st in _treasury.statements.values)
+        if (s.treasurers.contains(st.by) &&
+            (agreed == null || st.agreement != agreed.agreement))
+          st.by,
+    ]..sort();
+  }
+
+  /// Treasurers this phone caught signing two operations for one slot,
+  /// with the operations.
+  Map<String, List<String>> get ledgerCheaters {
+    final PyramidState? s = state;
+    return s == null
+        ? const <String, List<String>>{}
+        : _treasury.view(s).cheaters;
+  }
+
+  /// Whether this person keeps the whole private ledger (a treasurer).
+  bool get isTreasurer => _treasury.isTreasurer;
 
   /// Whether this person may still veto [e]: one of those who could when
   /// it was signed, within its waiting time — counted from when it reached
@@ -3717,30 +3773,38 @@ final class PyramidService extends ChangeNotifier {
 
   // ---- the emission limit ----
 
-  /// Whether a new emission limit ([limit], in hundredths) and wait
-  /// ([delayHours]) only lower what may be emitted: such a change applies
-  /// at once; any other waits [kPyrEmitChangeWaitMs].
-  bool emitRuleLowers({int? limit, int? delayHours}) {
+  /// Whether a new emission limit ([limit], in hundredths), wait
+  /// ([delayHours]) and daily payments per member ([xfers]) only lower
+  /// what may happen: such a change applies at once; any other waits
+  /// [kPyrEmitChangeWaitMs].
+  bool emitRuleLowers({int? limit, int? delayHours, int? xfers}) {
     final PyrParams? p = state?.params;
     if (p == null) {
       return false;
     }
     return (limit ?? p.emitLimit) <= p.emitLimit &&
-        (delayHours ?? p.emitDelayHours) >= p.emitDelayHours;
+        (delayHours ?? p.emitDelayHours) >= p.emitDelayHours &&
+        (xfers ?? p.xferLimit) <= p.xferLimit;
   }
 
-  /// A new emission limit and/or wait before an emission counts, signed
-  /// by the top (2 of 3): lower at once; anything that lets more money out
-  /// is announced to everybody and applies 30 days later, unless the top
-  /// cancels it meanwhile ([cancelEmitChange]).
-  Future<PyramidRecord?> proposeEmitRule({int? limit, int? delayHours}) async {
-    if (limit == null && delayHours == null) {
+  /// A new emission limit, wait before an emission counts and/or number
+  /// of payments a member may order a day ([xfers], [kPyrMinXfers] to
+  /// [kPyrMaxXfers]), signed by the top (2 of 3): lower at once; anything
+  /// that lets more out is announced to everybody and applies 30 days
+  /// later, unless the top cancels it meanwhile ([cancelEmitChange]).
+  Future<PyramidRecord?> proposeEmitRule({
+    int? limit,
+    int? delayHours,
+    int? xfers,
+  }) async {
+    if (limit == null && delayHours == null && xfers == null) {
       return null;
     }
     return topDecision(<String, dynamic>{
       't': PyrT.emitRule,
       'limit': ?limit,
       'delayH': ?delayHours,
+      'xfers': ?xfers,
     });
   }
 
@@ -3788,7 +3852,7 @@ final class PyramidService extends ChangeNotifier {
         s.isMember(me) &&
         s.isMember(key) &&
         (pyramid == null || pyramid.isEmpty || pyramid == s.id) &&
-        s.balanceOf(me) > 0;
+        balance > 0;
   }
 
   /// A tip: an ordinary payment with a title.
@@ -4127,7 +4191,7 @@ final class PyramidService extends ChangeNotifier {
           continue;
         }
         final Object? payment = p['x'];
-        if (payment is String && state?.escrows[payment] == null) {
+        if (payment is String && escrowOf(payment) == null) {
           _marketHeld.add(h);
           continue;
         }
@@ -4193,7 +4257,7 @@ final class PyramidService extends ChangeNotifier {
     final String level = levelOfAddress(from) ?? 'stranger';
     final bool closed = kind == 'inbox' && closedTo(me, level);
     final int asked = s.priceFor(me, kind, level) ?? 0;
-    final PyrEscrow? escrow = payment == null ? null : s.escrows[payment];
+    final PyrEscrow? escrow = payment == null ? null : escrowOf(payment);
     if (payment != null && escrow == null) {
       // The payment has not reached this phone yet: the message waits for
       // it. One that never comes (made up) never gets the message in.
@@ -4329,7 +4393,7 @@ final class PyramidService extends ChangeNotifier {
     }
     final PyramidState? s = state;
     final String? me = myKey;
-    final PyrEscrow? held = m.payment == null ? null : s?.escrows[m.payment];
+    final PyrEscrow? held = m.payment == null ? null : escrowOf(m.payment!);
     final bool mayGoOn =
         m.kind == 'ad' && m.hops > 0 && (held == null || held.hops > 0);
     final String? onward =
@@ -5973,7 +6037,6 @@ final class PyramidService extends ChangeNotifier {
           py,
           <PyramidRecord>[..._records.values, r],
           now: max(nowMs, r.at),
-          treasurerSigs: _tsigs,
           late: _late,
         );
         valid = trial.alarms.any((PyrAlarm a) => a.id == r.id);
@@ -6110,10 +6173,13 @@ final class PyramidService extends ChangeNotifier {
         await _onVote(from, p);
       case PyramidTypes.card:
         await _onCard(from, p);
-      case PyramidTypes.pay:
-        await _onPay(from, p);
-      case PyramidTypes.paySig:
-        await _onPaySig(p);
+      case PyramidTypes.priv:
+        // Sealed: only from a member's device (opening costs work).
+        final PyramidState? s = state;
+        if (s != null &&
+            s.members.values.any((PyrMember m) => _n(m.addr) == from)) {
+          await _treasury.onFrame(p);
+        }
       case PyramidTypes.report:
         await _onReport(from, p);
       case PyramidTypes.dm:
@@ -6511,10 +6577,6 @@ final class PyramidService extends ChangeNotifier {
                 'name': name(r.str('k')),
                 'head': name(r.str('to')),
               }),
-      PyrT.transfer => t('Przelew {amount} dla {name}', {
-        'amount': formatMoney(r.integer('amount')),
-        'name': name(r.str('to')),
-      }),
       PyrT.delegate => t('Delegacja „{power}” dla {name}', {
         'power': r.str('power'),
         'name': name(r.str('to')),
@@ -6527,10 +6589,10 @@ final class PyramidService extends ChangeNotifier {
       PyrT.decision => t('Decyzja w sprawie zgłoszenia'),
       PyrT.referendum => t('Referendum: {question}', {'question': r.str('q')}),
       PyrT.constitution => t('Zmiana zasad piramidy'),
-      PyrT.emit => t('Emisja {amount} dla {name}', {
+      PyrT.emit => t('Emisja {amount}', {
         'amount': formatMoney(r.integer('amount')),
-        'name': name(r.str('to')),
       }),
+      PyrT.sealKey => t('Klucz do prywatnych płatności'),
       PyrT.alarm => t('Ogłoszenie alarmowe: {text}', {'text': r.str('text')}),
       PyrT.natPin =>
         r.body['on'] == false
@@ -6542,7 +6604,7 @@ final class PyramidService extends ChangeNotifier {
       }),
       PyrT.badge =>
         r.body['off'] == true ? t('Ukrycie odznaki płci') : t('Odznaka płci'),
-      PyrT.emitRule => t('Zmiana limitu emisji'),
+      PyrT.emitRule => t('Zmiana limitów emisji i przelewów'),
       PyrT.emitCancel => t('Anulowanie zapowiedzianej zmiany limitu emisji'),
       PyrT.suit => t('Skarga przeciw {name}', {'name': name(r.str('k'))}),
       PyrT.verdict =>
@@ -6583,9 +6645,13 @@ final class PyramidService extends ChangeNotifier {
 
   /// What a signer sees besides the headline: the record's own time (with
   /// a warning when it is far from now) and every field that decides what
-  /// it does — who pays whom, a delegation's reach, limit and end, a
-  /// referendum's reach and end, new rules, where a newcomer goes.
-  List<String> recordDetails(PyramidRecord r) {
+  /// it does — who gets an emission (from the proposal's sealed [extra]),
+  /// a delegation's reach, limit and end, a referendum's reach and end,
+  /// new rules, where a newcomer goes.
+  List<String> recordDetails(
+    PyramidRecord r, {
+    Map<String, dynamic> extra = const <String, dynamic>{},
+  }) {
     final PyramidState? s = state;
     final int nowMs = _now();
     String name(Object? k) {
@@ -6598,8 +6664,6 @@ final class PyramidService extends ChangeNotifier {
               ? m['n'] as String
               : _short(k));
     }
-
-    String account(String a) => name(a);
 
     String scope(Object? json) {
       final Map<dynamic, dynamic> m = json is Map
@@ -6639,46 +6703,6 @@ final class PyramidService extends ChangeNotifier {
       out.add(t('Przez delegację: {id}', {'id': _short(via)}));
     }
     switch (r.type) {
-      case PyrT.transfer:
-        out
-          ..add(
-            t('Z: {from} → do: {to}', {
-              'from': account(r.str('from')),
-              'to': account(r.str('to')),
-            }),
-          )
-          ..add(
-            t('Kwota: {amount} · numer zlecenia {seq}', {
-              'amount': formatMoney(r.integer('amount')),
-              'seq': r.integer('seq'),
-            }),
-          );
-        if (r.str('memo').isNotEmpty) {
-          out.add(t('Tytuł: {memo}', {'memo': r.str('memo')}));
-        }
-        final Object? cond = r.body['cond'];
-        if (cond is Map) {
-          out.add(
-            cond['until'] is int
-                ? t('Warunek: decyduje {name}, zwrot po {time}', {
-                    'name': name(cond['by']),
-                    'time': _when(cond['until'] as int),
-                  })
-                : t('Warunek: decyduje {name}, zwrot po 7 dniach', {
-                    'name': name(cond['by']),
-                  }),
-          );
-        }
-      case PyrT.settle:
-        out.add(
-          r.body['ok'] == true
-              ? t('Rozliczenie: przyjęcie płatności {id}', {
-                  'id': _short(r.str('x')),
-                })
-              : t('Rozliczenie: zwrot płatności {id}', {
-                  'id': _short(r.str('x')),
-                }),
-        );
       case PyrT.delegate:
         out
           ..add(
@@ -6763,12 +6787,19 @@ final class PyramidService extends ChangeNotifier {
             }),
           );
       case PyrT.emit:
+        // Who gets it is only in the sealed note that came with the
+        // proposal; the record shows a commitment.
+        final PyrEmitNote? note = PyrEmitNote.fromJson(extra['emit']);
         out.add(
-          t('Dla: {name} · {amount} · uzasadnienie: {why}', {
-            'name': name(r.str('to')),
-            'amount': formatMoney(r.integer('amount')),
-            'why': r.str('why'),
-          }),
+          note != null && note.rc == r.str('rc')
+              ? t('Dla: {name} · {amount} · uzasadnienie: {why}', {
+                  'name': name(note.to),
+                  'amount': formatMoney(r.integer('amount')),
+                  'why': note.why,
+                })
+              : t('Kwota: {amount} · odbiorcę znają tylko skarbnicy', {
+                  'amount': formatMoney(r.integer('amount')),
+                }),
         );
       case PyrT.alarm:
         out.add(
@@ -6808,17 +6839,26 @@ final class PyramidService extends ChangeNotifier {
         final int hours = r.body['delayH'] is int
             ? r.integer('delayH')
             : p?.emitDelayHours ?? kPyrMinEmitDelayHours;
-        out.add(
-          t('Limit emisji: {limit} na 30 dni · emisja czeka {hours} h', {
-            'limit': formatMoney(limit),
-            'hours': hours,
-          }),
-        );
-        if (p != null && (limit > p.emitLimit || hours < p.emitDelayHours)) {
+        final int xfers = r.body['xfers'] is int
+            ? r.integer('xfers')
+            : p?.xferLimit ?? kPyrDefaultXfers;
+        out
+          ..add(
+            t('Limit emisji: {limit} na 30 dni · emisja czeka {hours} h', {
+              'limit': formatMoney(limit),
+              'hours': hours,
+            }),
+          )
+          ..add(
+            t('Przelewy: najwyżej {count} na osobę dziennie', {'count': xfers}),
+          );
+        if (p != null &&
+            (limit > p.emitLimit ||
+                hours < p.emitDelayHours ||
+                xfers > p.xferLimit)) {
           out.add(
             t(
-              'Więcej pieniędzy: zapowiedź dla wszystkich, obowiązuje po 30 '
-              'dniach.',
+              'Podniesienie limitu: zapowiedź dla wszystkich, obowiązuje po 30 dniach.',
             ),
           );
         }
@@ -6918,24 +6958,6 @@ final class PyramidService extends ChangeNotifier {
     if (identity != null) {
       await _cardDuties(s, identity);
     }
-    for (final PyrTransferInfo x in s.transfers) {
-      if (x.to == me && nowMs - x.at < 7 * 24 * 3600 * 1000) {
-        await tell(
-          'pay-${x.id}',
-          t('Wpłata'),
-          x.memo.isEmpty
-              ? t('{amount} od {name}', {
-                  'amount': formatMoney(x.amount),
-                  'name': s.members[x.from]?.name ?? x.from,
-                })
-              : t('{amount} od {name} — {memo}', {
-                  'amount': formatMoney(x.amount),
-                  'name': s.members[x.from]?.name ?? x.from,
-                  'memo': x.memo,
-                }),
-        );
-      }
-    }
     for (final PyrEmission e in s.emissions.values) {
       if (seenLate(e.id) && canVeto(e)) {
         // It reached this phone after its own time: maybe back-dated past
@@ -6944,14 +6966,9 @@ final class PyramidService extends ChangeNotifier {
         await tell(
           'emit-late-${e.id}',
           t('Emisja dotarła z opóźnieniem'),
-          t(
-            '{amount} dla {name} — możliwe antydatowanie. Możesz ją '
-            'zawetować.',
-            {
-              'amount': formatMoney(e.amount),
-              'name': s.members[e.to]?.name ?? '?',
-            },
-          ),
+          t('{amount} — możliwe antydatowanie. Możesz ją zawetować.', {
+            'amount': formatMoney(e.amount),
+          }),
           cat: RuntimeSystemNotificationCategory.alarm,
         );
       } else if (!e.done && !e.vetoed && e.vetoers.contains(me)) {
@@ -6971,14 +6988,14 @@ final class PyramidService extends ChangeNotifier {
     for (final PyrEmitChange c in s.pendingEmitChanges) {
       await tell(
         'emitchange-${c.id}',
-        t('Zapowiedziana zmiana limitu emisji'),
+        t('Zapowiedziana zmiana limitów'),
         t(
-          'Od {date}: limit {limit} na 30 dni, emisja czeka {hours} h. Szczyt '
-          'może ją do tego czasu anulować.',
+          'Od {date}: limit emisji {limit} na 30 dni, emisja czeka {hours} h, przelewy {xfers} na osobę dziennie. Szczyt może ją do tego czasu anulować.',
           {
             'date': _when(c.effectiveAt),
             'limit': formatMoney(c.limit ?? c.oldLimit),
             'hours': c.delayHours ?? c.oldDelayHours,
+            'xfers': c.xfers ?? c.oldXfers,
           },
         ),
         cat: RuntimeSystemNotificationCategory.alarm,
@@ -7097,17 +7114,9 @@ final class PyramidService extends ChangeNotifier {
     }
     final int t = _now();
     _consent.removeWhere((String _, int until) => until <= t);
-    // Orders and settlements still waiting for treasurers go out again as
-    // they are (every half hour), until they count or are a week old.
-    for (final PyramidRecord r in _payments.values.toList()) {
-      if (_records.containsKey(r.id) || t - r.at > kPyrMaxOrderAgeMs) {
-        _payments.remove(r.id);
-        _resentAt.remove(r.id);
-        await _save();
-      } else if (t - (_resentAt[r.id] ?? 0) > 30 * 60 * 1000) {
-        await _toTreasurers(r);
-      }
-    }
+    // The private money: the KEM key published, orders resent, the
+    // statement asked for, the treasurers' ledger synced.
+    await _treasury.duties();
     await _retryHeld();
     await _sumDuties(s, me);
     // A report without a decision climbs one step every

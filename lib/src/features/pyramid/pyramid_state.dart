@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:math';
-import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show immutable, visibleForTesting;
+import 'package:flutter/foundation.dart'
+    show immutable, listEquals, visibleForTesting;
 import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/crypto/hybrid_signature_core.dart';
@@ -87,6 +87,16 @@ const int kPyrRiseCooldownMs = 7 * 24 * 3600 * 1000;
 /// applies at once.
 const int kPyrEmitChangeWaitMs = 30 * 24 * 3600 * 1000;
 
+/// Payments one member may order per day: by default, and the hard
+/// bounds the top sets it within ([PyrT.emitRule], like the emission
+/// limit: higher only 30 days after it is announced).
+const int kPyrDefaultXfers = 30;
+const int kPyrMinXfers = 5;
+const int kPyrMaxXfers = 200;
+
+/// A day.
+const int kPyrDayMs = 24 * 3600 * 1000;
+
 /// The wait before an emission counts, during which the rest of the top
 /// may veto it: never shorter than a day.
 const int kPyrMinEmitDelayHours = 24;
@@ -109,6 +119,7 @@ final class PyrParams {
     this.treasurerDepth = 3,
     this.emitLimit = 100000000,
     this.emitDelayHours = 24,
+    this.xferLimit = kPyrDefaultXfers,
     this.electionHours = 72,
     this.reportEscalateHours = 48,
   });
@@ -128,6 +139,10 @@ final class PyrParams {
   /// once, higher 30 days after it is announced.
   int emitLimit;
   int emitDelayHours;
+
+  /// Payments one member may order per day ([kPyrDayMs]): the private
+  /// treasurers' work stays bounded. Changes like the emission limit.
+  int xferLimit;
   int electionHours;
   int reportEscalateHours;
 
@@ -138,6 +153,7 @@ final class PyrParams {
     'treasurerDepth': treasurerDepth,
     'emitLimit': emitLimit,
     'emitDelayHours': emitDelayHours,
+    'xferLimit': xferLimit,
     'electionHours': electionHours,
     'reportEscalateHours': reportEscalateHours,
   };
@@ -146,6 +162,7 @@ final class PyrParams {
   static const Set<String> emissionFields = <String>{
     'emitLimit',
     'emitDelayHours',
+    'xferLimit',
   };
 
   /// Takes the fields of [json] it knows, each clamped to its hard
@@ -169,6 +186,7 @@ final class PyrParams {
         kPyrMinEmitDelayHours,
         kPyrMaxEmitDelayHours,
       );
+      xferLimit = v('xferLimit', xferLimit, kPyrMinXfers, kPyrMaxXfers);
     }
     electionHours = v('electionHours', electionHours, 24, 24 * 30);
     reportEscalateHours = v(
@@ -224,10 +242,42 @@ final class PyrMember {
   /// Device address for pyramid traffic (votes, payments, reports).
   String addr;
 
+  /// The member's public hybrid KEM key ([PyrT.sealKey], base64url):
+  /// what private payments, receipts and statements are sealed to.
+  String kem = '';
+
   /// Every device address the member ever had (what they signed): a
   /// verdict shows on the profile at each, so a new address hides nothing.
   final Set<String> addrs = <String>{};
   bool active = true;
+}
+
+/// A cell's request cards ([PyrT.roster]): one-time hybrid keys of its
+/// voters for one head, nobody's identity; an anonymous request for a vote
+/// is signed by one of them.
+final class PyrRoster {
+  PyrRoster({
+    required this.id,
+    required this.cell,
+    required this.head,
+    required this.ring,
+    required this.tokens,
+  });
+
+  /// The roster record that counted.
+  final String id;
+  final String cell;
+  final String head;
+
+  /// The cell's voters it is for (sorted).
+  final List<String> ring;
+
+  /// Card (Ed25519 id) → fingerprint of its ML-DSA key.
+  final Map<String, String> tokens;
+
+  /// The scope its cards are made for ([PyramidState.rosterScope]).
+  String scope(String pyramid) =>
+      PyramidState.rosterScope(pyramid, cell, head, ring);
 }
 
 final class PyrElection {
@@ -435,9 +485,8 @@ final class PyrTally {
 final class PyrEmission {
   PyrEmission({
     required this.id,
-    required this.to,
+    required this.rc,
     required this.amount,
-    required this.why,
     required this.term,
     required this.at,
     required this.signedAt,
@@ -447,9 +496,11 @@ final class PyrEmission {
   });
 
   final String id;
-  final String to;
+
+  /// Who gets it, only as a commitment ([pyrEmitCommit]): the recipient
+  /// and the reason go sealed to the treasurers ([PyrEmitNote]).
+  final String rc;
   final int amount;
-  final String why;
   final int term;
 
   /// When it counts from: its own time, or when this phone first saw it
@@ -490,129 +541,6 @@ final class PyrParamsChange {
   final int effectiveAt;
   bool done = false;
 }
-
-/// Money of one account, by term: spent oldest first.
-final class PyrAccount {
-  final List<List<int>> buckets = <List<int>>[];
-  int seq = 0;
-
-  int get balance => buckets.fold(0, (int a, List<int> b) => pyrAdd(a, b[1]));
-
-  void credit(int term, int amount) {
-    if (amount <= 0) {
-      return;
-    }
-    for (final List<int> b in buckets) {
-      if (b[0] == term) {
-        b[1] = pyrAdd(b[1], amount);
-        return;
-      }
-    }
-    buckets
-      ..add(<int>[term, min(amount, kPyrMaxBalance)])
-      ..sort((List<int> a, List<int> b) => a[0].compareTo(b[0]));
-  }
-
-  void creditAll(List<List<int>> parts) {
-    for (final List<int> p in parts) {
-      credit(p[0], p[1]);
-    }
-  }
-
-  /// Takes [amount], oldest term first; returns the parts taken.
-  List<List<int>> debit(int amount) {
-    int left = amount;
-    final List<List<int>> taken = <List<int>>[];
-    for (final List<int> b in buckets) {
-      if (left == 0) {
-        break;
-      }
-      final int t = min(b[1], left);
-      if (t > 0) {
-        b[1] -= t;
-        left -= t;
-        taken.add(<int>[b[0], t]);
-      }
-    }
-    buckets.removeWhere((List<int> b) => b[1] == 0);
-    return taken;
-  }
-}
-
-final class PyrEscrow {
-  PyrEscrow({
-    required this.id,
-    required this.from,
-    required this.to,
-    required this.amount,
-    required this.parts,
-    required this.condBy,
-    required this.until,
-    this.memo = '',
-    this.share = 0,
-    this.hops = 0,
-    this.hash,
-    this.parent,
-    this.at = 0,
-  });
-
-  final String id;
-
-  /// When the money was put aside (no settlement may be dated before).
-  final int at;
-
-  /// Who paid (also for every later hop of an announcement: the money is
-  /// still theirs until somebody keeps it, and comes back to them).
-  final String from;
-  final String to;
-  final int amount;
-  final List<List<int>> parts;
-  final String condBy;
-  final int until;
-  final String memo;
-
-  /// An announcement passed on through intermediaries: each one who
-  /// accepts keeps [share] and may pass the rest on to one next person
-  /// while [hops] > 0; 0 = an ordinary conditional payment.
-  final int share;
-  final int hops;
-
-  /// Hash of the announcement's text, so nobody on the way can change it.
-  final String? hash;
-
-  /// The escrow of the hop before (announcements).
-  final String? parent;
-  bool? settled;
-
-  /// What happened to the rest at settling (announcements): the escrow of
-  /// the next hop, or null when it went back to the payer.
-  String? next;
-
-  bool get isChain => share > 0;
-}
-
-final class PyrTransferInfo {
-  PyrTransferInfo({
-    required this.id,
-    required this.from,
-    required this.to,
-    required this.amount,
-    required this.at,
-    this.memo = '',
-    this.conditional = false,
-  });
-
-  final String id;
-  final String from;
-  final String to;
-  final int amount;
-  final int at;
-  final String memo;
-  final bool conditional;
-}
-
-/// At most this many intermediaries pass one announcement on.
-const int kMaxAdHops = 5;
 
 /// Levels of acquaintance a price can depend on, from the receiver's
 /// point of view.
@@ -693,9 +621,14 @@ final class PyramidState {
   final Map<String, List<List<int>>> _levels = <String, List<List<int>>>{};
   final Map<String, PyrElection> elections = <String, PyrElection>{};
 
-  /// Anonymous vote requests per cell and key image (harassment counter).
+  /// Anonymous vote requests per cell and request card (harassment
+  /// counter: one card is one member, nobody knows whom).
   final Map<String, Map<String, int>> requestCounts =
       <String, Map<String, int>>{};
+
+  /// The request cards of each cell ([PyrT.roster]), for its present head
+  /// and voters.
+  final Map<String, PyrRoster> rosters = <String, PyrRoster>{};
   final Map<String, PyrDelegation> delegations = <String, PyrDelegation>{};
   final Map<String, PyrBan> bans = <String, PyrBan>{};
   final Map<String, String> decisions = <String, String>{};
@@ -765,16 +698,12 @@ final class PyramidState {
   final Map<int, int> termStart = <int, int>{1: 0};
   final Map<int, int> emittedInTerm = <int, int>{};
   final Map<String, PyrEmission> emissions = <String, PyrEmission>{};
-  final Map<String, PyrAccount> accounts = <String, PyrAccount>{};
-  final Map<String, PyrEscrow> escrows = <String, PyrEscrow>{};
-  final List<PyrTransferInfo> transfers = <PyrTransferInfo>[];
 
-  /// "from|seq" → transfer id → treasurers who signed it.
-  final Map<String, Map<String, Set<String>>> _ordersSigned =
-      <String, Map<String, Set<String>>>{};
-
-  /// Treasurers caught signing two orders with the same number.
-  final Map<String, List<String>> cheaters = <String, List<String>>{};
+  /// The treasurers through time: from when each set holds (the oldest
+  /// first). Payments are private (`pyramid_ledger.dart`): a payment
+  /// counts with the signatures of most of the treasurers of its time.
+  final List<(int, List<String>)> treasurerEras = <(int, List<String>)>[];
+  bool _treasurersDirty = true;
   final List<PyrAlarm> alarms = <PyrAlarm>[];
 
   /// Member → kind → price (the highest of its levels, when it has
@@ -932,12 +861,61 @@ final class PyramidState {
   }
 
   /// The treasurers now.
-  List<String> get treasurers => <String>[
-    for (final MapEntry<String, String> e in occupant.entries)
-      if (e.key.length <= params.treasurerDepth) e.value,
-  ]..sort();
+  List<String> get treasurers => _treasurersNow();
 
   int get treasurerMajority => treasurers.length ~/ 2 + 1;
+
+  /// The treasurers now: the places down to [PyrParams.treasurerDepth],
+  /// walked from the top (a few dozen lookups, however big the pyramid).
+  List<String> _treasurersNow() {
+    final List<String> out = <String>[];
+    List<String> level = <String>[''];
+    for (int d = 0; d <= params.treasurerDepth && level.isNotEmpty; d++) {
+      final List<String> next = <String>[];
+      for (final String p in level) {
+        if (!_exists(p)) {
+          continue;
+        }
+        final String? k = occupant[p];
+        if (k != null) {
+          out.add(k);
+        }
+        next.addAll(PyrPath.children(p));
+      }
+      level = next;
+    }
+    return out..sort();
+  }
+
+  /// The treasurers at [at]: those of the era it falls in (the first one
+  /// for anything before it).
+  List<String> treasurersAt(int at) {
+    List<String> out = const <String>[];
+    for (final (int from, List<String> set) in treasurerEras) {
+      if (from > at && out.isNotEmpty) {
+        break;
+      }
+      out = set;
+    }
+    return out;
+  }
+
+  /// Since when the treasurers now are the treasurers.
+  int get treasurerEraStart =>
+      treasurerEras.isEmpty ? 0 : treasurerEras.last.$1;
+
+  /// Notes a new era when the tree (or the depth) changed who they are.
+  void _noteTreasurers(int at) {
+    if (!_treasurersDirty) {
+      return;
+    }
+    _treasurersDirty = false;
+    final List<String> now = _treasurersNow();
+    if (treasurerEras.isNotEmpty && listEquals(treasurerEras.last.$2, now)) {
+      return;
+    }
+    treasurerEras.add((at, now));
+  }
 
   /// Who leads the national section of [nat], if anybody: the
   /// highest member of [nat] (no minimum number of people anywhere), then
@@ -1009,10 +987,6 @@ final class PyramidState {
         b.datingKey!,
   };
 
-  PyrAccount account(String key) => accounts[key] ??= PyrAccount();
-
-  int balanceOf(String key) => accounts[key]?.balance ?? 0;
-
   /// The price [key] asks for [kind] from someone of [level] (null = not
   /// offered, 0 = free). Unknown level → the highest price.
   int? priceFor(String key, String kind, String? level) {
@@ -1022,10 +996,6 @@ final class PyramidState {
     }
     return offers[key]?[kind];
   }
-
-  /// Only the owner of [account] spends from it.
-  bool canSpend(String account, Iterable<String> signers) =>
-      account.isNotEmpty && signers.contains(account);
 
   /// The newest sum published for the branch at [path] in [r] (by
   /// whoever held that place then).
@@ -1163,8 +1133,9 @@ final class PyramidState {
 
   // ---- folding ----
 
-  /// Folds [records] (already checked: every listed signer signed, and
-  /// [treasurerSigs] holds the treasurer signatures that verified).
+  /// Folds [records] (already checked: every listed signer signed).
+  /// Payments are not among them: they are private, between the payer,
+  /// the one paid and the treasurers (`pyramid_ledger.dart`).
   ///
   /// Records are applied in the order of their own time. Nothing can make
   /// a phone's clock the judge of somebody else's record (that would split
@@ -1172,8 +1143,6 @@ final class PyramidState {
   /// - a revocation works from its time on and lists the acts of the
   ///   delegate it knew about; an act dated before the revocation but not
   ///   on its list was made up later and does not count (a second pass);
-  /// - money waits for most treasurers, who sign only fresh orders and one
-  ///   settlement per payment;
   /// - a record of [PyrT.timed] that reached this phone late ([late]: id →
   ///   when this phone first saw it, [kPyrLateMs]) counts from then: new
   ///   rules a day after that, an emission's veto time and its 30-day limit
@@ -1187,7 +1156,6 @@ final class PyramidState {
     String pyramidId,
     Iterable<PyramidRecord> records, {
     required int now,
-    Map<String, Set<String>> treasurerSigs = const <String, Set<String>>{},
     Map<String, int> late = const <String, int>{},
   }) {
     final List<PyramidRecord> list = <PyramidRecord>[
@@ -1207,22 +1175,13 @@ final class PyramidState {
       pyramidId,
       list,
       now,
-      treasurerSigs,
       const <String, Set<String>>{},
       const <String>{},
       times,
     );
     final Map<String, Set<String>> witnessed = s._witnessIfLate();
     if (witnessed.isNotEmpty) {
-      s = _runClean(
-        pyramidId,
-        list,
-        now,
-        treasurerSigs,
-        witnessed,
-        s._poison,
-        times,
-      );
+      s = _runClean(pyramidId, list, now, witnessed, s._poison, times);
     }
     return s;
   }
@@ -1266,7 +1225,6 @@ final class PyramidState {
     String pyramidId,
     List<PyramidRecord> list,
     int now,
-    Map<String, Set<String>> treasurerSigs,
     Map<String, Set<String>> witnessed,
     Set<String> poison,
     Map<String, int> times,
@@ -1274,15 +1232,7 @@ final class PyramidState {
     Set<String> bad = poison;
     int round = 0;
     while (true) {
-      final PyramidState s = _run(
-        pyramidId,
-        list,
-        now,
-        treasurerSigs,
-        witnessed,
-        bad,
-        times,
-      );
+      final PyramidState s = _run(pyramidId, list, now, witnessed, bad, times);
       if (s._threw.isEmpty || ++round > 8) {
         return s;
       }
@@ -1327,7 +1277,6 @@ final class PyramidState {
     String pyramidId,
     List<PyramidRecord> list,
     int now,
-    Map<String, Set<String>> treasurerSigs,
     Map<String, Set<String>> witnessed,
     Set<String> poison,
     Map<String, int> times,
@@ -1359,7 +1308,7 @@ final class PyramidState {
       }
       String? why;
       try {
-        why = s._apply(r, treasurerSigs[r.id] ?? const <String>{});
+        why = s._apply(r);
         debugAfterApply?.call(r);
       } on Object {
         // A malformed record never breaks the pyramid: it does not count,
@@ -1367,7 +1316,9 @@ final class PyramidState {
         why = 'błędny rekord';
         s._threw.add(r.id);
       }
-      s._noteHead(at);
+      s
+        .._noteHead(at)
+        .._noteTreasurers(at);
       if (why == null) {
         if (proposal != null) {
           proposalsDone.add(proposal);
@@ -1435,15 +1386,12 @@ final class PyramidState {
                 a.effectiveAt.compareTo(b.effectiveAt),
           );
     for (final PyrEmission e in ready) {
+      // The treasurers credit it, privately, to whom its note names.
       e.done = true;
-      account(e.to).credit(e.term, e.amount);
       history.add(
         PyrHistory(
           e.effectiveAt,
-          t('Emisja {amount} dla {name}', {
-            'amount': pyrMoney(e.amount),
-            'name': _name(e.to),
-          }),
+          t('Emisja {amount}', {'amount': pyrMoney(e.amount)}),
           e.id,
         ),
       );
@@ -1464,6 +1412,8 @@ final class PyramidState {
         ..apply(c.params)
         ..version += 1;
       _natLead.clear();
+      _treasurersDirty = true;
+      _noteTreasurers(c.effectiveAt);
       history.add(
         PyrHistory(
           c.effectiveAt,
@@ -1482,14 +1432,18 @@ final class PyramidState {
           );
     for (final PyrEmitChange c in raises) {
       c.done = true;
-      _setEmission(c.limit, c.delayHours);
+      _setEmission(c.limit, c.delayHours, c.xfers);
       history.add(
         PyrHistory(
           c.effectiveAt,
-          t('Limit emisji po 30 dniach: {limit}, czekanie {hours} h', {
-            'limit': pyrMoney(params.emitLimit),
-            'hours': params.emitDelayHours,
-          }),
+          t(
+            'Limity po 30 dniach: emisja {limit}, czekanie {hours} h, przelewy {xfers} na dzień',
+            {
+              'limit': pyrMoney(params.emitLimit),
+              'hours': params.emitDelayHours,
+              'xfers': params.xferLimit,
+            },
+          ),
           c.id,
         ),
       );
@@ -1497,10 +1451,11 @@ final class PyramidState {
   }
 
   /// The emission limit and wait from now on (null: unchanged).
-  void _setEmission(int? limit, int? delayHours) {
+  void _setEmission(int? limit, int? delayHours, int? xfers) {
     params
       ..emitLimit = limit ?? params.emitLimit
       ..emitDelayHours = delayHours ?? params.emitDelayHours
+      ..xferLimit = xfers ?? params.xferLimit
       ..version += 1;
   }
 
@@ -1551,6 +1506,7 @@ final class PyramidState {
     final String? p = position[key];
     (_levels[key] ??= <List<int>>[]).add(<int>[_clock, p?.length ?? -1]);
     moves.add(PyrMove(_causeAt, _cause, key, p));
+    _treasurersDirty = true;
     // The tree changed: national sections are worked out again.
     _natLead.clear();
   }
@@ -1641,27 +1597,30 @@ final class PyramidState {
   /// Why a signature of [r] does not count: it carries another ML-DSA key
   /// than its signer's (a forged Ed25519 half paired with the forger's own
   /// ML-DSA key). Null when every known signer's key matches.
-  String? _pqMismatch(PyramidRecord r, Set<String> tsigs) {
+  String? _pqMismatch(PyramidRecord r) {
     for (final String k in r.sigs.keys) {
       final String? want = _pqOf(k);
       if (want != null && r.pqIdOf(k) != want) {
         return 'podpis innym kluczem ML-DSA niż klucz osoby';
       }
     }
-    for (final String k in tsigs) {
-      final String? want = _pqOf(k);
-      if (want != null && r.pqIdOf(k, treasurer: true) != want) {
-        return 'podpis skarbnika innym kluczem ML-DSA';
-      }
-    }
     return null;
   }
 
+  /// Whether the signature [key] made on private [r] (as its signer, or
+  /// with [treasurer] as a treasurer) carries the ML-DSA key [key] was
+  /// admitted with — a forged Ed25519 half with the forger's own ML-DSA
+  /// key does not count.
+  bool pqHolds(PyramidRecord r, String key, {bool treasurer = false}) {
+    final String? want = _pqOf(key);
+    return want != null && r.pqIdOf(key, treasurer: treasurer) == want;
+  }
+
   /// Applies one record; returns why it does not count, or null.
-  String? _apply(PyramidRecord r, Set<String> tsigs) {
+  String? _apply(PyramidRecord r) {
     final Map<String, dynamic> b = r.body;
     final List<String> by = r.signers;
-    final String? keyMismatch = _pqMismatch(r, tsigs);
+    final String? keyMismatch = _pqMismatch(r);
     if (keyMismatch != null) {
       return keyMismatch;
     }
@@ -1829,6 +1788,8 @@ final class PyramidState {
         return _voteRequest(r);
       case PyrT.ballot:
         return _ballot(r);
+      case PyrT.roster:
+        return _roster(r);
       case PyrT.vote:
         return _vote(r);
       case PyrT.leave:
@@ -2239,8 +2200,9 @@ final class PyramidState {
         return null;
       case PyrT.emit:
         final int amount = r.integer('amount');
-        final String to = r.str('to');
-        if (!_twoOfTop(r) || amount <= 0 || to.isEmpty) {
+        // Who gets it stays private: only a commitment is public.
+        final String rc = r.str('rc');
+        if (!_twoOfTop(r) || amount <= 0 || !_isHash(rc)) {
           return 'emisja: 2 z 3 szczytu';
         }
         if (amount > kPyrMaxAmount) {
@@ -2259,9 +2221,8 @@ final class PyramidState {
         final List<String> signers = by.where(topCell.contains).toList();
         emissions[r.id] = PyrEmission(
           id: r.id,
-          to: to,
+          rc: rc,
           amount: amount,
-          why: _clip(r.str('why'), 500),
           term: term,
           at: since,
           signedAt: r.at,
@@ -2299,41 +2260,9 @@ final class PyramidState {
         );
         return null;
       case PyrT.transfer:
-        return _transfer(r, tsigs);
       case PyrT.settle:
-        final PyrEscrow? e = escrows[r.str('x')];
-        if (e == null || e.settled != null) {
-          return 'nie ma czego rozliczyć';
-        }
-        if (r.at < e.at) {
-          return 'rozliczenie sprzed płatności';
-        }
-        final bool ok = b['ok'] == true;
-        final bool byCond = by.contains(e.condBy);
-        final bool refundByPayer =
-            !ok && canSpend(e.from, by) && r.at >= e.until;
-        if (!byCond && !refundByPayer) {
-          return 'rozlicza odbiorca warunku albo płacący po terminie';
-        }
-        // Like a transfer: most treasurers sign it, and an honest one signs
-        // one settlement per payment — so a late acceptance dated before a
-        // refund (or the other way round) cannot get in.
-        _evidence('x|${e.id}', r.id, tsigs);
-        final int validT = tsigs.where(treasurers.contains).length;
-        if (validT < treasurerMajority) {
-          return 'za mało podpisów skarbników ($validT z ${treasurers.length})';
-        }
-        e.settled = ok;
-        if (!ok) {
-          account(e.from).creditAll(e.parts);
-          return null;
-        }
-        if (!e.isChain) {
-          account(e.to).creditAll(e.parts);
-          return null;
-        }
-        _settleHop(e, r);
-        return null;
+        // Payments never go into the public records.
+        return 'przelewy są prywatne';
       case PyrT.alarm:
         final Map<dynamic, dynamic> scope = b['scope'] is Map
             ? b['scope'] as Map
@@ -2418,6 +2347,19 @@ final class PyramidState {
         return _known(r);
       case PyrT.emitRule:
         return _emitRule(r);
+      case PyrT.sealKey:
+        // The member's public hybrid KEM key: private payments are sealed
+        // to it.
+        final PyrMember? m = members[r.str('k')];
+        final String kem = r.str('kem');
+        if (m == null || by.length != 1 || by.first != m.key) {
+          return 'nie członek';
+        }
+        if (kem.length < 1600 || kem.length > 1700) {
+          return 'zły klucz';
+        }
+        m.kem = kem;
+        return null;
       case PyrT.emitCancel:
         return _emitCancel(r);
       case PyrT.suit:
@@ -2445,31 +2387,44 @@ final class PyramidState {
     }
     final Object? l = r.body['limit'];
     final Object? d = r.body['delayH'];
+    final Object? x = r.body['xfers'];
     if ((l != null && l is! int) ||
         (d != null && d is! int) ||
-        (l == null && d == null)) {
+        (x != null && x is! int) ||
+        (l == null && d == null && x == null)) {
       return 'zła zmiana limitu emisji';
     }
     final int? limit = l is int ? l.clamp(0, kPyrMaxAmount) : null;
     final int? delay = d is int
         ? d.clamp(kPyrMinEmitDelayHours, kPyrMaxEmitDelayHours)
         : null;
+    final int? xfers = x is int ? x.clamp(kPyrMinXfers, kPyrMaxXfers) : null;
     final int newLimit = limit ?? params.emitLimit;
     final int newDelay = delay ?? params.emitDelayHours;
-    if (newLimit == params.emitLimit && newDelay == params.emitDelayHours) {
+    final int newXfers = xfers ?? params.xferLimit;
+    if (newLimit == params.emitLimit &&
+        newDelay == params.emitDelayHours &&
+        newXfers == params.xferLimit) {
       return 'nic się nie zmienia';
     }
+    // More money out, or more payments a day for the treasurers to sign.
     final bool raises =
-        newLimit > params.emitLimit || newDelay < params.emitDelayHours;
+        newLimit > params.emitLimit ||
+        newDelay < params.emitDelayHours ||
+        newXfers > params.xferLimit;
     if (!raises) {
-      _setEmission(limit, delay);
+      _setEmission(limit, delay, xfers);
       history.add(
         PyrHistory(
           r.at,
-          t('Obniżono limit emisji: {limit}, czekanie {hours} h', {
-            'limit': pyrMoney(params.emitLimit),
-            'hours': params.emitDelayHours,
-          }),
+          t(
+            'Obniżono limity: emisja {limit}, czekanie {hours} h, przelewy {xfers} na dzień',
+            {
+              'limit': pyrMoney(params.emitLimit),
+              'hours': params.emitDelayHours,
+              'xfers': params.xferLimit,
+            },
+          ),
           r.id,
         ),
       );
@@ -2485,16 +2440,18 @@ final class PyramidState {
       effectiveAt: since + kPyrEmitChangeWaitMs,
       oldLimit: params.emitLimit,
       oldDelayHours: params.emitDelayHours,
+      oldXfers: params.xferLimit,
       limit: limit,
       delayHours: delay,
+      xfers: xfers,
     );
     history.add(
       PyrHistory(
         r.at,
-        t('Zapowiedziano zmianę limitu emisji: {limit}, czekanie {hours} h', {
-          'limit': pyrMoney(newLimit),
-          'hours': newDelay,
-        }),
+        t(
+          'Zapowiedziano zmianę limitów: emisja {limit}, czekanie {hours} h, przelewy {xfers} na dzień',
+          {'limit': pyrMoney(newLimit), 'hours': newDelay, 'xfers': newXfers},
+        ),
         r.id,
       ),
     );
@@ -3115,6 +3072,10 @@ final class PyramidState {
 
   static String _clip(String s, int n) => s.length > n ? s.substring(0, n) : s;
 
+  /// A SHA-256 in hex (a commitment).
+  static bool _isHash(String s) =>
+      s.length == 64 && RegExp(r'^[0-9a-f]+$').hasMatch(s);
+
   /// The most device addresses one member keeps.
   static const int kPyrMaxAddrs = 64;
 
@@ -3134,71 +3095,6 @@ final class PyramidState {
   /// Every device address [key] had in the pyramid.
   Set<String> addressesOf(String key) =>
       members[key]?.addrs ?? const <String>{};
-
-  /// One intermediary of an announcement accepted: it keeps its
-  /// share; the rest waits for the next person it names (who accepts or
-  /// returns it), or goes back to the payer when there is nobody next.
-  void _settleHop(PyrEscrow e, PyramidRecord r) {
-    final int keep = min(e.share, e.amount);
-    final List<List<int>> kept = <List<int>>[];
-    final List<List<int>> rest = <List<int>>[];
-    int left = keep;
-    for (final List<int> p in e.parts) {
-      final int t = min(left, p[1]);
-      left -= t;
-      if (t > 0) {
-        kept.add(<int>[p[0], t]);
-      }
-      if (p[1] - t > 0) {
-        rest.add(<int>[p[0], p[1] - t]);
-      }
-    }
-    account(e.to).creditAll(kept);
-    final int restAmount = e.amount - keep;
-    if (restAmount <= 0) {
-      return;
-    }
-    final String next = r.str('next');
-    // Never back to anybody already on the way (no loops through the same
-    // people collecting a share twice).
-    if (e.hops > 0 &&
-        next.isNotEmpty &&
-        isMember(next) &&
-        !_onChain(e, next) &&
-        !escrows.containsKey(r.id)) {
-      escrows[r.id] = PyrEscrow(
-        id: r.id,
-        at: r.at,
-        from: e.from,
-        to: next,
-        amount: restAmount,
-        parts: rest,
-        condBy: next,
-        until: r.at + 7 * 24 * 3600 * 1000,
-        memo: e.memo,
-        share: e.share,
-        hops: e.hops - 1,
-        hash: e.hash,
-        parent: e.id,
-      );
-      e.next = r.id;
-      return;
-    }
-    account(e.from).creditAll(rest);
-  }
-
-  /// Whether [key] paid for or already got a hop of the announcement [e].
-  bool _onChain(PyrEscrow e, String key) {
-    PyrEscrow? x = e;
-    int guard = 0;
-    while (x != null && guard++ < kMaxAdHops + 2) {
-      if (x.to == key || x.from == key) {
-        return true;
-      }
-      x = x.parent == null ? null : escrows[x.parent];
-    }
-    return false;
-  }
 
   /// A member from a record: the key in its one canonical spelling (an
   /// alias would make a second identity of the same person, e.g. a banned
@@ -3265,8 +3161,15 @@ final class PyramidState {
     );
   }
 
-  static String voteRequestContext(String pyramid, String cell, String head) =>
-      'vreq|$pyramid|$cell|$head';
+  /// What a cell's request cards are made for: the pyramid, the cell, its
+  /// head and its voters — a new head or a changed cell needs new ones.
+  static String rosterScope(
+    String pyramid,
+    String cell,
+    String head,
+    List<String> ring,
+  ) =>
+      'roster:${sha256Hex(utf8.encode('$pyramid|$cell|$head|${(List<String>.of(ring)..sort()).join(',')}')).substring(0, 32)}';
 
   /// What the ring signature of a voting card's registration is bound to
   /// (PyramidService: cards go to the cell only, never into the records).
@@ -3298,36 +3201,83 @@ final class PyramidState {
     return out;
   }
 
-  static Uint8List _key(String b64key) =>
-      unb64(b64key, length: 32) ?? Uint8List(32);
+  /// The cell's request cards: as a ballot ([_ballot]), for the cell's
+  /// voters and head right now. A later roster of the same cell and
+  /// voters counts only with more cards (a member who came back); a new
+  /// head or other voters need a new one.
+  String? _roster(PyramidRecord r) {
+    final String cell = r.str('cell');
+    final String head = r.str('head');
+    final List<String> ring = cellVoters(cell, r.at)..sort();
+    final List<String> listed = List<String>.of(r.candidates)..sort();
+    if (occupant[cell] != head || ring.length < 2) {
+      return 'zła komórka';
+    }
+    if (listed.join(',') != ring.join(',')) {
+      return 'karty podpisuje komórka';
+    }
+    final Map<String, String>? cards = ballotTokens(r.body['toks']);
+    if (cards == null || cards.length < 2 || cards.length > ring.length) {
+      return 'złe karty do żądań';
+    }
+    final List<String> by = r.signers;
+    if (!by.every(ring.contains)) {
+      return 'karty podpisuje komórka';
+    }
+    if (by.length < cards.length) {
+      return 'za mało podpisów pod kartami';
+    }
+    final PyrRoster? had = rosters[cell];
+    if (had != null &&
+        had.head == head &&
+        had.ring.join(',') == ring.join(',') &&
+        (cards.length <= had.tokens.length ||
+            !had.tokens.keys.every(cards.containsKey))) {
+      return 'karty komórki już są';
+    }
+    rosters[cell] = PyrRoster(
+      id: r.id,
+      cell: cell,
+      head: head,
+      ring: ring,
+      tokens: cards,
+    );
+    return null;
+  }
 
+  /// An anonymous request for a vote: signed by one of the cell's request
+  /// cards ([PyrT.roster]) — a member, nobody knows which — while the cell
+  /// is still the one the cards were made for. The card counts its
+  /// requests ("the same person asks for the 5th time").
   String? _voteRequest(PyramidRecord r) {
     final String cell = r.str('cell');
     final String head = r.str('head');
-    final RingSignature? ring = r.ring;
-    // The ring is the cell's members who vote ([canVote]).
-    final List<String> members = cellVoters(cell, r.at);
-    final List<String> claimed = r.body['ring'] is List
-        ? (r.body['ring'] as List).whereType<String>().toList()
-        : const <String>[];
-    if (ring == null || occupant[cell] != head || members.length < 2) {
+    final PyrRoster? roster = rosters[cell];
+    final List<String> members = cellVoters(cell, r.at)..sort();
+    if (roster == null ||
+        occupant[cell] != head ||
+        roster.head != head ||
+        members.length < 2) {
       return 'zła komórka';
     }
-    if (!(claimed.length == members.length &&
-        claimed.toSet().containsAll(members))) {
-      return 'pierścień to nie głosujący tej komórki';
+    if (members.join(',') != roster.ring.join(',')) {
+      return 'skład komórki się zmienił';
     }
-    if (!ring.verify(
-      ring: claimed.map(_key).toList(),
-      context: voteRequestContext(id, cell, head),
-      message: r.signedBytes,
-    )) {
-      return 'zły podpis pierścieniowy';
+    final List<String> by = r.signers;
+    final List<String> listed = r.candidates;
+    if (by.length != 1 || listed.length != 1 || listed.first != by.first) {
+      return 'żądanie podpisuje jedna karta';
     }
-    // Key images are canonical (checked on parsing), so one person is one
-    // entry here, whatever spelling they try.
+    final String card = by.first;
+    final String? pq = roster.tokens[card];
+    if (pq == null) {
+      return 'karta spoza komórki';
+    }
+    if (r.pqIdOf(card) != pq) {
+      return 'karta z innym kluczem ML-DSA';
+    }
     final Map<String, int> counter = requestCounts[cell] ??= <String, int>{};
-    counter[ring.keyImage] = (counter[ring.keyImage] ?? 0) + 1;
+    counter[card] = (counter[card] ?? 0) + 1;
     final bool open = elections.values.any(
       (PyrElection e) => e.cell == cell && !e.closed,
     );
@@ -3336,7 +3286,7 @@ final class PyramidState {
         id: r.id,
         cell: cell,
         head: head,
-        ring: claimed,
+        ring: roster.ring,
         deadline: r.at + params.electionHours * 3600 * 1000,
         start: r.at,
       );
@@ -3463,6 +3413,7 @@ final class PyramidState {
       _termChange(at);
     }
     _noteHead(at);
+    _noteTreasurers(at);
     history.add(
       PyrHistory(
         at,
@@ -3871,99 +3822,6 @@ final class PyramidState {
       counts: counts,
       at: r.at,
       kids: kidIds,
-    );
-    return null;
-  }
-
-  /// Evidence of a treasurer signing two orders for one [slot].
-  void _evidence(String slot, String recordId, Set<String> tsigs) {
-    final Map<String, Set<String>> signed = _ordersSigned[slot] ??=
-        <String, Set<String>>{};
-    signed[recordId] = tsigs;
-    for (final MapEntry<String, Set<String>> other in signed.entries) {
-      if (other.key == recordId) {
-        continue;
-      }
-      for (final String t in tsigs.intersection(other.value)) {
-        (cheaters[t] ??= <String>[]).addAll(<String>[other.key, recordId]);
-      }
-    }
-  }
-
-  String? _transfer(PyramidRecord r, Set<String> tsigs) {
-    final String from = r.str('from');
-    final String to = r.str('to');
-    final int amount = r.integer('amount');
-    final int seq = r.integer('seq');
-    if (amount <= 0 ||
-        amount > kPyrMaxAmount ||
-        seq <= 0 ||
-        from.isEmpty ||
-        to.isEmpty ||
-        from == to) {
-      return 'zły przelew';
-    }
-    if (!r.signers.contains(from)) {
-      return 'brak podpisu płacącego';
-    }
-    // Evidence of a treasurer signing two orders with one number.
-    _evidence('$from|$seq', r.id, tsigs);
-    final List<String> current = treasurers;
-    final int valid = tsigs.where(current.contains).length;
-    if (valid < treasurerMajority) {
-      return 'za mało podpisów skarbników ($valid z ${current.length})';
-    }
-    final PyrAccount acc = account(from);
-    if (seq != acc.seq + 1) {
-      return 'zły numer kolejny';
-    }
-    if (acc.balance < amount) {
-      // Signed by most treasurers, but the money is no longer there (e.g.
-      // an emission vetoed later): the number is used up all the same, so
-      // the account is not stuck on an order nobody will sign again.
-      acc.seq = seq;
-      return 'za mało środków';
-    }
-    acc.seq = seq;
-    final List<List<int>> parts = acc.debit(amount);
-    final Object? cond = r.body['cond'];
-    if (cond is Map && cond['by'] is String) {
-      // An announcement through intermediaries: the share must fit.
-      final int share = cond['share'] is int
-          ? (cond['share'] as int).clamp(0, amount)
-          : 0;
-      final int hops = cond['hops'] is int
-          ? (cond['hops'] as int).clamp(0, kMaxAdHops - 1)
-          : 0;
-      escrows[r.id] = PyrEscrow(
-        id: r.id,
-        at: r.at,
-        from: from,
-        to: to,
-        amount: amount,
-        parts: parts,
-        condBy: cond['by'] as String,
-        until: cond['until'] is int
-            ? cond['until'] as int
-            : r.at + 7 * 24 * 3600 * 1000,
-        memo: _clip(r.str('memo'), 300),
-        share: share,
-        hops: share > 0 ? hops : 0,
-        hash: cond['h'] is String ? cond['h'] as String : null,
-      );
-    } else {
-      account(to).creditAll(parts);
-    }
-    transfers.add(
-      PyrTransferInfo(
-        id: r.id,
-        from: from,
-        to: to,
-        amount: amount,
-        at: r.at,
-        memo: _clip(r.str('memo'), 300),
-        conditional: cond is Map,
-      ),
     );
     return null;
   }

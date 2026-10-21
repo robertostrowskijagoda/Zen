@@ -1,11 +1,9 @@
-import 'dart:typed_data';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/crypto/hybrid_signature.dart';
-import 'package:zen/src/core/crypto/ring_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_wallet.dart';
+import 'package:zen/src/features/pyramid/pyramid_ledger.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
@@ -51,6 +49,49 @@ Map<String, dynamic> member(
   'yr': 1990,
   'dc': 'x',
 };
+
+/// The request cards of cell '0' (A, with A1 and A2 under it), signed by
+/// [signers].
+Future<PyramidRecord> rosterRec(
+  Six w,
+  List<LedgerKeyPair> cards,
+  List<LedgerKeyPair> signers, {
+  int at = t0 + day - 1000,
+}) async {
+  PyramidRecord r = PyramidRecord(
+    body: <String, dynamic>{
+      't': PyrT.roster,
+      'py': w.py,
+      'at': at,
+      'by': <String>[w.a.id, w.a1.id, w.a2.id]..sort(),
+      'cell': '0',
+      'head': w.a.id,
+      'toks': <String>[for (final LedgerKeyPair c in cards) c.hybridId]..sort(),
+    },
+  );
+  for (final LedgerKeyPair k in signers) {
+    r = await r.signedBy(k);
+  }
+  return r;
+}
+
+/// A request for a vote in cell '0', signed by the request card [card].
+Future<PyramidRecord> requestRec(
+  Six w,
+  LedgerKeyPair card,
+  int at, {
+  String n = 'n1',
+}) => PyramidRecord(
+  body: <String, dynamic>{
+    't': PyrT.voteRequest,
+    'py': w.py,
+    'at': at,
+    'by': <String>[card.id],
+    'cell': '0',
+    'head': w.a.id,
+    'n': n,
+  },
+).signedBy(card);
 
 /// [head] admits [who] right under itself, at [slot].
 Future<PyramidRecord> admitRec(
@@ -120,64 +161,28 @@ final class Six {
     ]);
   }
 
-  /// Records with the treasurer signatures [treasurersSigned] made; [fold]
-  /// takes these copies in place of the unsigned ones.
-  final Map<String, PyramidRecord> _treasured = <String, PyramidRecord>{};
+  PyramidState fold(Iterable<PyramidRecord> more, {int now = t0 + 400 * day}) =>
+      PyramidState.fold(py, <PyramidRecord>[...records, ...more], now: now);
 
-  /// Every treasurer (all six are) signs each of [rs]; who signed which,
-  /// as the service hands the fold the signatures that verified.
-  Future<Map<String, Set<String>>> treasurersSigned(
-    Iterable<PyramidRecord> rs,
-  ) async {
-    for (final PyramidRecord r in rs) {
-      PyramidRecord signed = r;
-      for (final LedgerKeyPair k in all) {
-        signed = signed.withTreasurerSig(
-          k.id,
-          b64(await k.sign(PyramidRecord.treasurerBytes(r.id))),
-        );
-      }
-      _treasured[r.id] = signed;
-    }
-    return <String, Set<String>>{
-      for (final PyramidRecord r in rs)
-        r.id: <String>{for (final LedgerKeyPair k in all) k.id},
-    };
-  }
-
-  PyramidState fold(
-    Iterable<PyramidRecord> more, {
-    int now = t0 + 400 * day,
-    Map<String, Set<String>> tsigs = const <String, Set<String>>{},
-  }) => PyramidState.fold(
-    py,
-    <PyramidRecord>[
-      ...records,
-      for (final PyramidRecord r in more) _treasured[r.id] ?? r,
-    ],
-    now: now,
-    treasurerSigs: tsigs,
-  );
-
+  /// An emission to [to], who stays private: a commitment in the record.
   Future<PyramidRecord> emit(
     int at,
     LedgerKeyPair to,
     int amount, {
     List<LedgerKeyPair>? by,
   }) => rec(PyrT.emit, py, at, by ?? <LedgerKeyPair>[s, a], <String, dynamic>{
-    'to': to.id,
+    'rc': pyrEmitCommit(to.id, 'sol-$at'),
     'amount': amount,
-    'why': 'x',
   });
 
+  /// A payment order: private, never a public record.
   Future<PyramidRecord> pay(
     int at,
     LedgerKeyPair from,
     LedgerKeyPair to,
     int amount,
-    int seq, {
-    Map<String, dynamic>? cond,
-  }) => rec(
+    int seq,
+  ) => rec(
     PyrT.transfer,
     py,
     at,
@@ -188,22 +193,7 @@ final class Six {
       'amount': amount,
       'seq': seq,
       'memo': '',
-      'cond': ?cond,
     },
-  );
-
-  Future<PyramidRecord> settle(
-    int at,
-    LedgerKeyPair by,
-    String escrow,
-    bool ok, {
-    String? next,
-  }) => rec(
-    PyrT.settle,
-    py,
-    at,
-    <LedgerKeyPair>[by],
-    <String, dynamic>{'x': escrow, 'ok': ok, 'next': ?next},
   );
 }
 
@@ -221,61 +211,76 @@ void main() {
   });
 
   group('anonymous records (C1, H1)', () {
-    Future<(Map<String, dynamic>, RingSignature)> request(
-      LedgerKeyPair signer,
-      int at,
-    ) async {
-      final List<String> ring = <String>[w.a.id, w.a1.id, w.a2.id]..sort();
-      final Map<String, dynamic> body = <String, dynamic>{
-        't': PyrT.voteRequest,
-        'py': w.py,
-        'at': at,
-        'by': const <String>[],
-        'cell': '0',
-        'head': w.a.id,
-        'ring': ring,
-        'n': 'n1',
-      };
-      final RingSignature sig = RingSignature.sign(
-        seed: signer.seed,
-        ring: ring.map((String k) => unb64(k, length: 32)!).toList(),
-        context: PyramidState.voteRequestContext(w.py, '0', w.a.id),
-        message: PyramidRecord(body: body).signedBytes,
-      );
-      return (body, sig);
-    }
+    late List<LedgerKeyPair> requestCards;
+
+    setUp(() async {
+      requestCards = <LedgerKeyPair>[
+        for (int i = 0; i < 3; i++) await LedgerKeyPair.generate(),
+      ];
+    });
 
     test(
-      'a ring with a key image that is not base64 is skipped, the pyramid stays',
+      'a request for a vote is signed by a request card of the cell',
       () async {
-        final (Map<String, dynamic> body, RingSignature good) = await request(
-          w.a1,
+        final PyramidRecord roster = await rosterRec(
+          w,
+          requestCards,
+          <LedgerKeyPair>[w.a, w.a1, w.a2],
+        );
+        final PyramidRecord req = await requestRec(
+          w,
+          requestCards[1],
           t0 + day,
         );
-        final PyramidRecord junk = PyramidRecord(
-          body: body,
-          ring: RingSignature(
-            c0: good.c0,
-            s: good.s,
-            keyImage: '%%% not base64 %%%',
-          ),
+        final PyramidState st = w.fold(<PyramidRecord>[roster, req]);
+        expect(st.rosters['0']!.tokens, hasLength(3));
+        expect(st.elections[req.id]!.ring, hasLength(3));
+        // The same card asks again: counted per card, nobody named.
+        final PyramidRecord again = await requestRec(
+          w,
+          requestCards[1],
+          t0 + day + 10,
+          n: 'n2',
         );
-        // This threw a FormatException out of the fold on every phone.
-        final PyramidState st = w.fold(<PyramidRecord>[junk]);
-        expect(st.members, hasLength(6));
-        expect(st.rejected[junk.id], isNotNull);
-        expect(st.elections, isEmpty);
-        // The genuine one counts.
+        final PyramidState st2 = w.fold(<PyramidRecord>[roster, req, again]);
+        expect(st2.requestCounts['0']!.values.single, 2);
         expect(
-          w.fold(<PyramidRecord>[
-            PyramidRecord(body: body, ring: good),
-          ]).elections,
-          hasLength(1),
+          st2.requestCounts['0']!.keys.toSet().intersection(<String>{
+            w.a.id,
+            w.a1.id,
+            w.a2.id,
+          }),
+          isEmpty,
         );
-        // And a malformed one does not even parse.
+
+        // No roster: no request; a card from outside the roster: none.
+        final PyramidRecord lone = await requestRec(
+          w,
+          requestCards[0],
+          t0 + day,
+        );
+        expect(w.fold(<PyramidRecord>[lone]).rejected[lone.id], 'zła komórka');
+        final LedgerKeyPair stranger = await LedgerKeyPair.generate();
+        final PyramidRecord outside = await requestRec(w, stranger, t0 + day);
+        final PyramidState st3 = w.fold(<PyramidRecord>[roster, outside]);
+        expect(st3.rejected[outside.id], 'karta spoza komórki');
+        expect(st3.elections, isEmpty);
+        // Signed by a member's own key instead: not a card.
+        final PyramidRecord named = await rec(
+          PyrT.voteRequest,
+          w.py,
+          t0 + day,
+          <LedgerKeyPair>[w.a1],
+          <String, dynamic>{'cell': '0', 'head': w.a.id, 'n': 'x'},
+        );
+        expect(
+          w.fold(<PyramidRecord>[roster, named]).rejected[named.id],
+          'karta spoza komórki',
+        );
+        // A record with a ring signature does not even parse any more.
         expect(
           PyramidRecord.fromJson(<String, dynamic>{
-            'b': body,
+            'b': req.body,
             'r': <String, dynamic>{
               'c': '1',
               's': <String>['1', '1', '1'],
@@ -287,17 +292,60 @@ void main() {
       },
     );
 
+    test('a roster needs as many members signing as it has cards, and a '
+        'later one of the same cell counts only with more cards', () async {
+      final PyramidRecord short = await rosterRec(
+        w,
+        requestCards,
+        <LedgerKeyPair>[w.a, w.a1],
+      );
+      expect(
+        w.fold(<PyramidRecord>[short]).rejected[short.id],
+        'za mało podpisów pod kartami',
+      );
+      final PyramidRecord foreign = await rosterRec(
+        w,
+        requestCards.sublist(0, 2),
+        <LedgerKeyPair>[w.a, w.b],
+      );
+      expect(
+        w.fold(<PyramidRecord>[foreign]).rejected[foreign.id],
+        'karty podpisuje komórka',
+      );
+      // Two cards (one member away), then all three.
+      final PyramidRecord two = await rosterRec(
+        w,
+        requestCards.sublist(0, 2),
+        <LedgerKeyPair>[w.a, w.a1],
+      );
+      final PyramidRecord three = await rosterRec(
+        w,
+        requestCards,
+        <LedgerKeyPair>[w.a, w.a1, w.a2],
+        at: t0 + day - 500,
+      );
+      final PyramidRecord other = await rosterRec(
+        w,
+        <LedgerKeyPair>[requestCards[0], requestCards[2]],
+        <LedgerKeyPair>[w.a, w.a2],
+        at: t0 + day - 400,
+      );
+      final PyramidState st = w.fold(<PyramidRecord>[two, three, other]);
+      expect(st.rosters['0']!.id, three.id);
+      expect(st.rejected[other.id], 'karty komórki już są');
+    });
+
     group('cell votes on one-time cards', () {
       late PyramidRecord req;
       late List<LedgerKeyPair> cards;
       late List<String> ring;
 
       setUp(() async {
-        final (Map<String, dynamic> body, RingSignature sig) = await request(
-          w.a1,
-          t0 + day,
+        // The cell's request cards come with the pyramid here.
+        w.records.add(
+          await rosterRec(w, requestCards, <LedgerKeyPair>[w.a, w.a1, w.a2]),
         );
-        req = PyramidRecord(body: body, ring: sig);
+        req = await requestRec(w, requestCards[1], t0 + day);
         ring = <String>[w.a.id, w.a1.id, w.a2.id]..sort();
         cards = <LedgerKeyPair>[
           for (int i = 0; i < 3; i++) await LedgerKeyPair.generate(),
@@ -734,7 +782,6 @@ void main() {
         expect(st.emissions[e.id]!.vetoed, isTrue);
         expect(st.rejected[v2.id], 'nie ma czego zawetować');
         expect(st.emittedInTerm[1], 0, reason: 'lowered once, not twice');
-        expect(st.balanceOf(w.a1.id), 0);
       },
     );
 
@@ -757,15 +804,14 @@ void main() {
       );
       final PyramidState st = w.fold(<PyramidRecord>[e, before, late]);
       expect(st.emissions[e.id]!.vetoed, isFalse);
-      expect(st.balanceOf(w.a1.id), 5000);
+      expect(st.emissions[e.id]!.done, isTrue);
     });
 
     test('a fresh copy of the same proposal counts once', () async {
       const int at = t0 + day;
       final Map<String, dynamic> fields = <String, dynamic>{
-        'to': w.a1.id,
+        'rc': pyrEmitCommit(w.a1.id, 'x'),
         'amount': 700,
-        'why': 'x',
         'pn': 'propozycja-1',
       };
       final PyramidRecord first = await rec(
@@ -791,141 +837,24 @@ void main() {
       );
       final PyramidState st = w.fold(<PyramidRecord>[first, copy, other]);
       expect(st.rejected[copy.id], contains('już weszła'));
-      expect(st.balanceOf(w.a1.id), 1400);
+      expect(st.emissions.keys, unorderedEquals(<String>[first.id, other.id]));
     });
   });
 
-  group('money (T7, T3, ad chains)', () {
-    test(
-      'an order most treasurers signed uses its number even when the money went away',
-      () async {
-        const int at = t0 + day;
-        final PyramidRecord e1 = await w.emit(at, w.a1, 1000);
-        final PyramidRecord e2 = await w.emit(at + 60000, w.a1, 500);
-        final PyramidRecord x1 = await w.pay(at + 25 * h, w.a1, w.b1, 1200, 1);
-        // A veto of e2, inside its wait: x1 is no longer covered.
-        final PyramidRecord v = await rec(
-          PyrT.veto,
-          w.py,
-          at + h,
-          <LedgerKeyPair>[w.b],
-          <String, dynamic>{'emit': e2.id},
-        );
-        final PyramidRecord x2 = await w.pay(at + 26 * h, w.a1, w.b1, 300, 2);
-        final PyramidState st = w.fold(<PyramidRecord>[
-          e1,
-          e2,
-          x1,
-          v,
-          x2,
-        ], tsigs: await w.treasurersSigned(<PyramidRecord>[x1, x2]));
-        expect(st.rejected[x1.id], 'za mało środków');
-        expect(
-          st.accounts[w.a1.id]!.seq,
-          2,
-          reason: 'the account is not stuck at number 1',
-        );
-        expect(st.applied, contains(x2.id));
-        expect(st.balanceOf(w.a1.id), 700);
-        expect(st.balanceOf(w.b1.id), 300);
-      },
-    );
-
-    test(
-      'a settlement counts only with most treasurers; a refund only after the time',
-      () async {
-        const int at = t0 + day;
-        final PyramidRecord e = await w.emit(at, w.a1, 2000);
-        final PyramidRecord x = await w.pay(
-          at + 25 * h,
-          w.a1,
-          w.b1,
-          1000,
-          1,
-          cond: <String, dynamic>{'by': w.b1.id, 'until': at + 30 * h},
-        );
-        // B1 accepts late, dated before the payer's refund, with no treasurer
-        // signatures (honest treasurers signed the refund already).
-        final PyramidRecord lateOk = await w.settle(
-          at + 28 * h,
-          w.b1,
-          x.id,
-          true,
-        );
-        final PyramidRecord earlyRefund = await w.settle(
-          at + 29 * h,
-          w.a1,
-          x.id,
-          false,
-        );
-        final PyramidRecord refund = await w.settle(
-          at + 31 * h,
-          w.a1,
-          x.id,
-          false,
-        );
-        final PyramidState st = w.fold(
-          <PyramidRecord>[e, x, lateOk, earlyRefund, refund],
-          tsigs: await w.treasurersSigned(<PyramidRecord>[
-            x,
-            earlyRefund,
-            refund,
-          ]),
-        );
-        expect(st.rejected[lateOk.id], contains('skarbników'));
-        expect(st.rejected[earlyRefund.id], contains('po terminie'));
-        expect(st.escrows[x.id]!.settled, isFalse);
-        expect(st.balanceOf(w.a1.id), 2000);
-        expect(st.balanceOf(w.b1.id), 0);
-      },
-    );
-
-    test(
-      'an announcement never goes back to someone already on its way',
-      () async {
-        const int at = t0 + day;
-        final PyramidRecord e = await w.emit(at, w.a1, 1000);
-        final PyramidRecord x = await w.pay(
-          at + 25 * h,
-          w.a1,
-          w.a,
-          300,
-          1,
-          cond: <String, dynamic>{
-            'by': w.a.id,
-            'until': at + 30 * day,
-            'share': 100,
-            'hops': 2,
-            'h': 'tekst',
-          },
-        );
-        final PyramidRecord s1 = await w.settle(
-          at + 26 * h,
-          w.a,
-          x.id,
-          true,
-          next: w.s.id,
-        );
-        // S passes it back to A, who would keep a second share.
-        final PyramidRecord s2 = await w.settle(
-          at + 27 * h,
-          w.s,
-          s1.id,
-          true,
-          next: w.a.id,
-        );
-        final PyramidState st = w.fold(<PyramidRecord>[
-          e,
-          x,
-          s1,
-          s2,
-        ], tsigs: await w.treasurersSigned(<PyramidRecord>[x, s1, s2]));
-        expect(st.escrows[s2.id], isNull);
-        expect(st.balanceOf(w.a.id), 100);
-        expect(st.balanceOf(w.s.id), 100);
-        expect(st.balanceOf(w.a1.id), 800);
-      },
-    );
+  group('money (T7)', () {
+    test('a payment is never a public record, whoever signs it', () async {
+      const int at = t0 + day;
+      final PyramidRecord e = await w.emit(at, w.a1, 1000);
+      final PyramidRecord x = await w.pay(at + 25 * h, w.a1, w.b1, 300, 1);
+      final PyramidRecord signed = x.withTreasurerSig(
+        w.s.id,
+        b64(await w.s.sign(PyramidRecord.treasurerBytes(x.id))),
+      );
+      final PyramidState st = w.fold(<PyramidRecord>[e, x, signed]);
+      expect(st.rejected[x.id], 'przelewy są prywatne');
+      expect(st.applied, isNot(contains(x.id)));
+      expect(st.emissions[e.id]!.done, isTrue);
+    });
   });
 
   group('delegations (M2, M3, T4)', () {
@@ -1269,28 +1198,15 @@ void main() {
 
     test('a vote dated before its request does not count', () async {
       final List<String> ring = <String>[w.a.id, w.a1.id, w.a2.id]..sort();
-      final List<Uint8List> points = ring
-          .map((String k) => unb64(k, length: 32)!)
-          .toList();
-      final Map<String, dynamic> reqBody = <String, dynamic>{
-        't': PyrT.voteRequest,
-        'py': w.py,
-        'at': t0 + day,
-        'by': const <String>[],
-        'cell': '0',
-        'head': w.a.id,
-        'ring': ring,
-        'n': 'n1',
-      };
-      final PyramidRecord req = PyramidRecord(
-        body: reqBody,
-        ring: RingSignature.sign(
-          seed: w.a2.seed,
-          ring: points,
-          context: PyramidState.voteRequestContext(w.py, '0', w.a.id),
-          message: PyramidRecord(body: reqBody).signedBytes,
-        ),
+      final List<LedgerKeyPair> requestCards = <LedgerKeyPair>[
+        for (int i = 0; i < 3; i++) await LedgerKeyPair.generate(),
+      ];
+      final PyramidRecord roster = await rosterRec(
+        w,
+        requestCards,
+        <LedgerKeyPair>[w.a, w.a1, w.a2],
       );
+      final PyramidRecord req = await requestRec(w, requestCards[2], t0 + day);
       final LedgerKeyPair c1 = await LedgerKeyPair.generate();
       final LedgerKeyPair c2 = await LedgerKeyPair.generate();
       PyramidRecord ballot = PyramidRecord(
@@ -1315,6 +1231,7 @@ void main() {
         },
       ).signedBy(c1);
       final PyramidState st = w.fold(<PyramidRecord>[
+        roster,
         req,
         ballot,
         vote,
@@ -1329,28 +1246,11 @@ void main() {
       const int at = t0 + day;
       final PyramidRecord huge = await w.emit(at, w.a1, 1 << 62);
       final PyramidRecord fine = await w.emit(at + 60000, w.a1, 5000);
-      final PyramidRecord giant = await w.pay(
-        at + 25 * h,
-        w.a1,
-        w.b1,
-        1 << 62,
-        1,
-      );
-      final PyramidRecord minus = await w.pay(at + 26 * h, w.a1, w.b1, -9, 1);
-      final PyramidRecord ok = await w.pay(at + 27 * h, w.a1, w.b1, 1000, 1);
-      final PyramidState st = w.fold(<PyramidRecord>[
-        huge,
-        fine,
-        giant,
-        minus,
-        ok,
-      ], tsigs: await w.treasurersSigned(<PyramidRecord>[giant, minus, ok]));
+      final PyramidState st = w.fold(<PyramidRecord>[huge, fine]);
       expect(st.rejected[huge.id], isNotNull);
-      expect(st.rejected[giant.id], 'zły przelew');
-      expect(st.rejected[minus.id], 'zły przelew');
-      expect(st.applied, contains(ok.id));
-      expect(st.balanceOf(w.a1.id), 4000);
-      expect(st.balanceOf(w.b1.id), 1000);
+      expect(st.applied, contains(fine.id));
+      expect(st.emittedWithin(at + h), 5000);
+      // Transfers out of range: see pyramid_ledger_test.dart.
     });
 
     test('sums stop at the ceiling instead of wrapping around', () {

@@ -6,8 +6,10 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
+import 'package:zen/src/features/pyramid/presentation/pyramid_court_view.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_emission.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_screen.dart';
+import 'package:zen/src/features/pyramid/pyramid_ledger.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
@@ -719,26 +721,137 @@ class PyramidWallet extends StatelessWidget {
     ),
   );
 
+  /// One line of the history: what came in (+), what went out (−), and
+  /// what only waits or went back (no sign).
+  Widget _entry(ZenColors zen, PyrLedgerEntry e) {
+    final bool incoming = e.to == me;
+    final int sign = switch (e.kind) {
+      PyrEntryKind.payment => incoming ? 1 : -1,
+      PyrEntryKind.emission => 1,
+      PyrEntryKind.hold => incoming ? 0 : -1,
+      PyrEntryKind.kept => incoming ? 1 : 0,
+      PyrEntryKind.returned => incoming ? 1 : 0,
+    };
+    final String who = switch (e.kind) {
+      PyrEntryKind.emission => t('z emisji'),
+      _ when incoming => t('od {name}', <String, Object?>{
+        'name': pyrAccountName(s, e.from),
+      }),
+      _ => t('dla {name}', <String, Object?>{'name': pyrAccountName(s, e.to)}),
+    };
+    final String what = switch (e.kind) {
+      PyrEntryKind.hold => t('(warunkowo)'),
+      PyrEntryKind.kept => t('przyjęta'),
+      PyrEntryKind.returned => t('zwrot'),
+      _ => '',
+    };
+    final Color color = sign > 0
+        ? zen.success
+        : sign < 0
+        ? zen.danger
+        : zen.textMuted;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      child: Row(
+        children: <Widget>[
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color.withValues(alpha: 0.14),
+            ),
+            child: Icon(
+              sign > 0
+                  ? Icons.south_west_rounded
+                  : sign < 0
+                  ? Icons.north_east_rounded
+                  : Icons.hourglass_empty_rounded,
+              size: 18,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  who,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: zen.textPrimary,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                SelectableText(
+                  <String>[
+                    if (e.memo.isNotEmpty) e.memo,
+                    if (what.isNotEmpty) what,
+                    pyrDate(e.at),
+                  ].join(' · '),
+                  style: TextStyle(
+                    color: zen.textMuted,
+                    fontSize: 12,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${sign > 0
+                ? '+'
+                : sign < 0
+                ? '−'
+                : ''}${formatMoney(e.amount)}',
+            style: TextStyle(
+              color: sign > 0 ? zen.success : zen.textPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final Color tone = pyrTone(zen);
-    final PyrAccount acc = s.accounts[me] ?? PyrAccount();
+    final int balance = pyr.balance;
     final int now = pyr.now;
-    final List<PyrEscrow> toAnswer = s.escrows.values
+    final List<PyrEscrow> escrows = pyr.myEscrows;
+    final List<PyrEscrow> toAnswer = escrows
         .where((PyrEscrow e) => e.settled == null && e.condBy == me)
         .toList();
     final List<PyrEmission> emissionRows = s.emissions.values.toList();
-    final List<PyrEscrow> refundable = s.escrows.values
+    final List<PyrEscrow> refundable = escrows
         .where(
           (PyrEscrow e) => e.settled == null && e.from == me && now >= e.until,
         )
         .toList();
-    final List<PyrTransferInfo> mine = s.transfers
-        .where((PyrTransferInfo x) => x.from == me || x.to == me)
-        .toList()
-        .reversed
-        .toList();
+    final List<PyrLedgerEntry> mine = pyr.myEntries.reversed.toList();
+    final bool treasurer = s.treasurers.contains(me);
+    final PyrStatement? agreed = pyr.agreedStatement;
+    final int agreeing = agreed == null
+        ? 0
+        : pyr.statements.values
+              .where(
+                (PyrStatement st) =>
+                    s.treasurers.contains(st.by) &&
+                    st.agreement == agreed.agreement,
+              )
+              .length;
+    final List<String> disagreeing = treasurer
+        ? const <String>[]
+        : pyr.disagreeingTreasurers;
+    final Map<String, List<String>> cheaters = pyr.ledgerCheaters;
     final List<PyrMarketMessage> market = pyr.market.values.toList()
       ..sort((PyrMarketMessage a, PyrMarketMessage b) => b.at.compareTo(a.at));
     final bool top = s.topCell.contains(me);
@@ -795,7 +908,7 @@ class PyramidWallet extends StatelessWidget {
                         style: zen.label(color: zen.textSecondary),
                       ),
                     ),
-                    if (s.treasurers.contains(me))
+                    if (treasurer)
                       ZenPill(
                         text: t('skarbnik'),
                         tone: zen.success,
@@ -808,25 +921,24 @@ class PyramidWallet extends StatelessWidget {
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    formatMoney(acc.balance),
+                    formatMoney(balance),
                     style: zen.display(color: zen.textPrimary, size: 44),
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  acc.buckets.isEmpty
-                      ? t('Konto należy do Twojej tożsamości w piramidzie.')
-                      : t('Z kadencji: {list}', <String, Object?>{
-                          'list': acc.buckets
-                              .map(
-                                (List<int> b) =>
-                                    t('K{term}: {amount}', <String, Object?>{
-                                      'term': b[0],
-                                      'amount': formatMoney(b[1]),
-                                    }),
-                              )
-                              .join(', '),
-                        }),
+                  treasurer
+                      ? t('Z Twojej kopii księgi skarbników.')
+                      : agreed == null
+                      ? t('Czeka na wyciąg od skarbników.')
+                      : t(
+                          'Wyciąg potwierdziło {count} z {total} skarbników · {date}',
+                          <String, Object?>{
+                            'count': agreeing,
+                            'total': s.treasurers.length,
+                            'date': pyrDate(agreed.at),
+                          },
+                        ),
                   style: TextStyle(
                     color: zen.textSecondary,
                     fontSize: 13,
@@ -854,11 +966,64 @@ class PyramidWallet extends StatelessWidget {
                       icon: const Icon(Icons.sell_rounded),
                       label: Text(t('Mój cennik')),
                     ),
+                    if (!treasurer)
+                      OutlinedButton.icon(
+                        key: const Key('pyr-statement'),
+                        onPressed: () {
+                          unawaited(pyr.refreshStatement());
+                          snack(context, t('Poproszono skarbników o wyciąg.'));
+                        },
+                        icon: const Icon(Icons.receipt_long_rounded),
+                        label: Text(t('Wyciąg')),
+                      ),
                   ],
                 ),
               ],
             ),
           ),
+          // Treasurers who state another balance than most of them: the
+          // person may take it to the court.
+          if (disagreeing.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            ZenCard(
+              tone: zen.danger,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  ZenInfo(
+                    icon: Icons.report_gmailerrorred_rounded,
+                    tone: zen.danger,
+                    title: t('Skarbnicy podają różne salda'),
+                    text: <String>[
+                      for (final String k in disagreeing)
+                        '• ${pyrWho(s, k)}: ${formatMoney(pyr.statements[k]?.balance ?? 0)}',
+                    ].join('\n'),
+                  ),
+                  const SizedBox(height: 8),
+                  _buttons(<Widget>[
+                    for (final String k in disagreeing.take(3))
+                      OutlinedButton(
+                        key: Key('pyr-dispute-$k'),
+                        onPressed: () => unawaited(
+                          showComplaintDialog(
+                            context,
+                            pyr,
+                            s,
+                            k,
+                            initialKind: 'ledger',
+                          ),
+                        ),
+                        child: Text(
+                          t('Zgłoś spór: {name}', <String, Object?>{
+                            'name': s.members[k]?.name ?? '?',
+                          }),
+                        ),
+                      ),
+                  ]),
+                ],
+              ),
+            ),
+          ],
           if (pyr.pendingPayments.isNotEmpty) ...<Widget>[
             ZenSection(t('W drodze')),
             ZenGroup(
@@ -1159,74 +1324,7 @@ class PyramidWallet extends StatelessWidget {
           else
             ZenGroup(
               children: <Widget>[
-                for (final PyrTransferInfo x in mine.take(100))
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-                    child: Row(
-                      children: <Widget>[
-                        Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: (x.to == me ? zen.success : zen.danger)
-                                .withValues(alpha: 0.14),
-                          ),
-                          child: Icon(
-                            x.to == me
-                                ? Icons.south_west_rounded
-                                : Icons.north_east_rounded,
-                            size: 18,
-                            color: x.to == me ? zen.success : zen.danger,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Text(
-                                x.to == me
-                                    ? t('od {name}', <String, Object?>{
-                                        'name': pyrAccountName(s, x.from),
-                                      })
-                                    : t('dla {name}', <String, Object?>{
-                                        'name': pyrAccountName(s, x.to),
-                                      }),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: zen.textPrimary,
-                                  fontSize: 14.5,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '${x.memo}${x.conditional ? ' ${t('(warunkowo)')}' : ''} · ${pyrDate(x.at)}',
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: zen.textMuted,
-                                  fontSize: 12,
-                                  height: 1.3,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${x.to == me ? '+' : '−'}${formatMoney(x.amount)}',
-                          style: TextStyle(
-                            color: x.to == me ? zen.success : zen.textPrimary,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                for (final PyrLedgerEntry e in mine.take(100)) _entry(zen, e),
               ],
             ),
           ZenSection(
@@ -1291,7 +1389,7 @@ class PyramidWallet extends StatelessWidget {
                     onPressed: () =>
                         unawaited(changeEmissionLimit(context, pyr, s)),
                     icon: const Icon(Icons.tune_rounded),
-                    label: Text(t('Zmień limit emisji')),
+                    label: Text(t('Zmień limity')),
                   ),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
@@ -1332,7 +1430,7 @@ class PyramidWallet extends StatelessWidget {
                       }
                       final String? why = await askText(
                         context,
-                        title: t('Uzasadnienie (jawne)'),
+                        title: t('Uzasadnienie (dla skarbników i odbiorcy)'),
                       );
                       if (why == null || !context.mounted) {
                         return;
@@ -1382,13 +1480,11 @@ class PyramidWallet extends StatelessWidget {
                           : zen.warning,
                       size: 36,
                     ),
-                    title: t('{amount} dla {name} · K{term}', <String, Object?>{
+                    title: t('{amount} · K{term}', <String, Object?>{
                       'amount': formatMoney(e.amount),
-                      'name': s.members[e.to]?.name ?? '?',
                       'term': e.term,
                     }),
                     subtitle: <String>[
-                      e.why,
                       if (e.vetoed)
                         t('zawetowana')
                       else if (e.done)
@@ -1413,7 +1509,7 @@ class PyramidWallet extends StatelessWidget {
                   ),
               ],
             ),
-          if (s.cheaters.isNotEmpty) ...<Widget>[
+          if (cheaters.isNotEmpty) ...<Widget>[
             const SizedBox(height: 8),
             ZenInfo(
               icon: Icons.warning_amber_rounded,
@@ -1421,7 +1517,7 @@ class PyramidWallet extends StatelessWidget {
               title: t(
                 'Dowody: skarbnik podpisał dwa przelewy z tym samym numerem',
               ),
-              text: s.cheaters.keys
+              text: cheaters.keys
                   .map((String k) => '• ${pyrWho(s, k)}')
                   .join('\n'),
             ),
@@ -1430,22 +1526,22 @@ class PyramidWallet extends StatelessWidget {
           ZenInfo(
             icon: Icons.account_balance_rounded,
             tone: tone,
-            text: tn(
-              s.treasurers.length,
-              one:
-                  'Skarbnicy: {n} najwyżej postawiona osoba; przelew jest '
-                  'ważny przy {need} podpisie. Skarbnicy widzą przelewy, jak '
-                  'bank.',
-              few:
-                  'Skarbnicy: {n} najwyżej postawione osoby; przelew jest '
-                  'ważny przy {need} podpisach. Skarbnicy widzą przelewy, jak '
-                  'bank.',
-              many:
-                  'Skarbnicy: {n} najwyżej postawionych osób; przelew jest '
-                  'ważny przy {need} podpisach. Skarbnicy widzą przelewy, jak '
-                  'bank.',
-              args: <String, Object?>{'need': s.treasurerMajority},
-            ),
+            text: <String>[
+              tn(
+                s.treasurers.length,
+                one:
+                    'Skarbnicy: {n} najwyżej postawiona osoba; przelew jest ważny przy {need} podpisie.',
+                few:
+                    'Skarbnicy: {n} najwyżej postawione osoby; przelew jest ważny przy {need} podpisach.',
+                many:
+                    'Skarbnicy: {n} najwyżej postawionych osób; przelew jest ważny przy {need} podpisach.',
+                args: <String, Object?>{'need': s.treasurerMajority},
+              ),
+              t(
+                'Przelewy są prywatne: widzą je tylko obie strony i skarbnicy, inni nie wiedzą nawet, że były. Najwyżej {count} przelewów na osobę dziennie.',
+                <String, Object?>{'count': s.params.xferLimit},
+              ),
+            ].join('\n\n'),
           ),
         ],
       ),

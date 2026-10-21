@@ -13,14 +13,6 @@ import 'support/pyramid_world.dart';
 /// Money and the inboxes of the pyramid: reports only from members and
 /// within limits, treasurer signatures never replaced.
 void main() {
-  /// Emits [amount] to [who] (S proposes, B signs) and waits the 24 h.
-  Future<void> fund(PyramidWorld w, String who, int amount) async {
-    await w['S'].emit(w[who].myKey!, amount, 'Start');
-    await w.net.run();
-    await w.approve('B', PyrT.emit);
-    await w.net.advance(const Duration(hours: 25));
-  }
-
   Map<String, dynamic> stored(PyramidService s, String key) =>
       jsonDecode(utf8.decode((s.disk as MemoryLedgerDisk).files[key]!))
           as Map<String, dynamic>;
@@ -86,9 +78,10 @@ void main() {
     );
   });
 
-  test('a stranger cannot erase or replace a treasurer signature', () async {
+  test('a forged treasurer signature is never taken, a real one never '
+      'replaced', () async {
     final PyramidWorld w = await PyramidWorld.six();
-    await fund(w, 'A1', 10000);
+    await w.fund('A1', 10000);
     final String b1 = w['B1'].myKey!;
     // Most treasurers are away: the order waits with A1's and A2's.
     const List<String> away = <String>['S', 'A', 'B', 'B1'];
@@ -100,13 +93,20 @@ void main() {
     await w.net.run();
     final String a2 = w['A2'].myKey!;
     final String good = w['A1'].pendingPayments.single.tsigs[a2]!;
+    // A stranger's frames are not even opened.
     final SimPhone z = w.add('Z');
     await w['Z'].load();
+    await z.send(w.net['A1'].address, <String, dynamic>{
+      'type': PyramidTypes.priv,
+      'c': 'x',
+      'b': 'y',
+    });
+    // A member seals forged signatures (of A2, of S) to A1.
     for (final String k in <String>[a2, w['S'].myKey!]) {
-      await z.send(w.net['A1'].address, <String, dynamic>{
-        'type': PyramidTypes.paySig,
+      await w['A2'].sendSealed(w['A1'].myKey!, <String, dynamic>{
+        'k': 'tsig',
         'id': order!.id,
-        'k': k,
+        'by': k,
         's': b64(List<int>.filled(64, 7)),
       });
     }
@@ -126,6 +126,8 @@ void main() {
     await w.net.advance(const Duration(minutes: 31));
     await w.duties(rounds: 1);
     await w.sync();
-    expect(w['S'].state!.balanceOf(b1), 2500);
+    expect(w['S'].ledgerBalanceOf(b1), 2500);
+    expect(w['B1'].balance, 2500);
+    expect(w['A1'].pendingPayments, isEmpty);
   });
 }

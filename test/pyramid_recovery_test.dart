@@ -6,6 +6,7 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/dev/sim/sim_network.dart';
 import 'package:zen/src/features/account/paper_backup.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
+import 'package:zen/src/features/pyramid/pyramid_ledger.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -56,15 +57,16 @@ void main() {
       key,
     );
 
-    // Money for A: S emits, B co-signs, the veto time passes.
-    await w['S'].emit(key, 4000, 'Start');
-    await w.net.run();
-    await w.approve('B', PyrT.emit);
-    await w.net.advance(const Duration(hours: 25));
+    // Money for A: S emits, B co-signs, the veto time passes; A pays A1.
+    await w.fund('A', 4000);
     await w.sync();
-    final int balance = w['S'].state!.balanceOf(key);
-    expect(balance, 4000);
-    expect(w['A'].state!.balanceOf(key), balance);
+    expect(w['S'].ledgerBalanceOf(key), 4000);
+    expect(w['A'].balance, 4000);
+    expect(await w['A'].pay(w['A1'].myKey!, 1000, memo: 'Obiad'), isNotNull);
+    await w.net.run();
+    final int balance = w['S'].ledgerBalanceOf(key);
+    expect(balance, 3000);
+    expect(w['A'].balance, balance);
     expect(w['A'].myData['g'], 'k');
 
     // A's phone is gone for good.
@@ -90,7 +92,6 @@ void main() {
     await w.sync();
 
     expect(again.isMember, isTrue);
-    expect(again.state!.balanceOf(key), balance);
     expect(again.state!.levelOf(key), w['S'].state!.levelOf(key));
     // The data confirmed at entry is found again from the commitment.
     expect(again.myData['by'], 1991);
@@ -105,6 +106,21 @@ void main() {
       PeerShareCodec.normalizeAddress(w['S'].state!.members[key]!.addr),
       back.address,
     );
+    // The wallet comes back from the treasurers: their signed statements
+    // and the operations behind them.
+    await w.net.advance(const Duration(minutes: 6));
+    await w.duties(rounds: 1);
+    expect(again.agreedStatement, isNotNull);
+    expect(again.balance, balance);
+    expect(
+      again.myEntries.map((PyrLedgerEntry e) => e.memo),
+      contains('Obiad'),
+    );
+    // The next order takes the next number.
+    final PyramidRecord? next = await again.pay(w['A2'].myKey!, 500);
+    expect(next!.integer('seq'), 2);
+    await w.net.run();
+    expect(w['S'].ledgerBalanceOf(key), balance - 500);
   });
 
   test('a recovered account that never was a member stops keeping the '

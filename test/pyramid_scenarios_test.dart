@@ -260,14 +260,10 @@ void main() {
 
   test('the paid inbox and a free reshare between members', () async {
     final PyramidWorld w = await PyramidWorld.six();
-    final PyramidService s = w['S'];
     final String a1 = w['A1'].myKey!;
     final String b1 = w['B1'].myKey!;
 
-    await s.emit(a1, 100000, 'Start');
-    await w.net.run();
-    await w.approve('B', PyrT.emit);
-    await w.net.advance(const Duration(hours: 25));
+    await w.fund('A1', 100000);
 
     await w['B1'].setOffers(<String, int>{'inbox': 500, 'reshare': 0});
     await w.net.run();
@@ -276,11 +272,11 @@ void main() {
     await w.net.run();
     final PyrMarketMessage got = w['B1'].market.values.single;
     expect(got.amount, 500);
-    expect(w['B1'].state!.balanceOf(b1), 0, reason: 'held until B1 answers');
+    expect(w['B1'].balance, 0, reason: 'held until B1 answers');
     await w['B1'].answerMarket(got.id, accept: true);
     await w.net.run();
-    expect(w['S'].state!.balanceOf(b1), 500);
-    expect(w['S'].state!.balanceOf(a1), 99500);
+    expect(w['S'].ledgerBalanceOf(b1), 500);
+    expect(w['S'].ledgerBalanceOf(a1), 99500);
 
     // A reshare on order: A1's own signed public post, which B1
     // sees before deciding and shares with B1's friends; paid after.
@@ -327,7 +323,7 @@ void main() {
     await w['B1'].answerMarket(reshare.id, accept: true);
     await w.net.run();
     expect(LogEntry.fromJson(w.reshared['B1']!.single)!.id, post.id);
-    expect(w['S'].state!.balanceOf(b1), 800);
+    expect(w['S'].ledgerBalanceOf(b1), 800);
     expect(
       w['A2'].state!.posts,
       isEmpty,

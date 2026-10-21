@@ -12,18 +12,10 @@ import 'support/pyramid_world.dart';
 /// network: conditional payments the one paid keeps or returns, and the
 /// first-message price on the price list by level of acquaintance.
 void main() {
-  /// Emits [amount] to [who] (S proposes, B signs) and waits the 24 h.
-  Future<void> fund(PyramidWorld w, String who, int amount) async {
-    await w['S'].emit(w[who].myKey!, amount, 'Start');
-    await w.net.run();
-    await w.approve('B', PyrT.emit);
-    await w.net.advance(const Duration(hours: 25));
-  }
-
   test('a gate\'s payment waits, then is kept or returned; the payer takes '
       'it back only after its time', () async {
     final PyramidWorld w = await PyramidWorld.six();
-    await fund(w, 'A1', 10000);
+    await w.fund('A1', 10000);
     final PyramidGateWallet a1 = PyramidGateWallet(() => w['A1']);
     final PyramidGateWallet b1 = PyramidGateWallet(() => w['B1']);
     final String a1Key = w['A1'].myKey!;
@@ -45,7 +37,8 @@ void main() {
     expect(await b1.settle(kept, keep: true), isTrue);
     await w.net.run();
     await w.sync();
-    expect(w['S'].state!.balanceOf(b1Key), 500);
+    expect(w['S'].ledgerBalanceOf(b1Key), 500);
+    expect(b1.balance, 500);
     expect(b1.held(kept)!.settled, isTrue);
 
     final String? returned = await a1.hold(b1Key, 300, memo: 'Wiadomość');
@@ -54,7 +47,7 @@ void main() {
     expect(await b1.settle(returned!, keep: false), isTrue);
     await w.net.run();
     await w.sync();
-    expect(w['S'].state!.balanceOf(a1Key), 9500);
+    expect(w['S'].ledgerBalanceOf(a1Key), 9500);
 
     // Nobody answers: the payer takes it back after the time.
     final String? quiet = await a1.hold(b1Key, 200, memo: 'Brama');
@@ -71,7 +64,7 @@ void main() {
     await w.net.run();
     await w.sync();
     expect(a1.held(quiet)!.settled, isFalse);
-    expect(w['S'].state!.balanceOf(a1Key), 9500);
+    expect(w['S'].ledgerBalanceOf(a1Key), 9500);
   });
 
   test('points go to an address only once the device there proved the key: '

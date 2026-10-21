@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/features/pyramid/pyramid_ledger.dart';
 import 'package:zen/src/features/pyramid/pyramid_record.dart';
 import 'package:zen/src/features/pyramid/pyramid_state.dart';
 
@@ -189,7 +190,7 @@ final class World {
     py,
     at,
     <LedgerKeyPair>[s, a],
-    <String, dynamic>{'to': to.id, 'amount': amount, 'why': 'x'},
+    <String, dynamic>{'rc': pyrEmitCommit(to.id, 's$at'), 'amount': amount},
   );
 }
 
@@ -513,9 +514,8 @@ void main() {
         at + 2 * h,
         <LedgerKeyPair>[w.s, w.a],
         <String, dynamic>{
-          'to': w.a1.id,
+          'rc': pyrEmitCommit(w.a1.id, 'r1'),
           'amount': 3 * limit,
-          'why': 'x',
           'ref': 'r1',
         },
       );
@@ -540,7 +540,7 @@ void main() {
       expect(st.rejected[byRef.id], contains('limit'));
       expect(st.rejected[stillSoon.id], contains('limit'));
       expect(st.applied, contains(later.id));
-      expect(st.balanceOf(w.a1.id), 3 * limit);
+      expect(st.emissions[later.id]!.amount, 3 * limit);
     });
   });
 
