@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show appFlavor;
+import 'package:zen/src/app/zen_web.dart';
 
 /// Whether this is the store build of the app (Google Play, Galaxy Store):
 /// `flutter build appbundle --flavor appStoreOnly` (Android), or
@@ -27,5 +28,5 @@ bool isStoreBuildFor({required String? flavor, bool define = false}) =>
 /// build can point elsewhere with `--dart-define=ZEN_STORE_URL=…`.
 const String kStoreShareUrl = String.fromEnvironment(
   'ZEN_STORE_URL',
-  defaultValue: 'https://robertostrowskijagoda.github.io/Zen/',
+  defaultValue: kZenPagesBase,
 );

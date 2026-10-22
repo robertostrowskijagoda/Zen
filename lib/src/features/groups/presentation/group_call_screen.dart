@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -180,7 +179,7 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
               child: Column(
                 children: <Widget>[
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 8, 16, 12),
+                    padding: const EdgeInsetsDirectional.fromSTEB(8, 8, 16, 12),
                     child: Row(
                       children: <Widget>[
                         IconButton(
@@ -414,12 +413,12 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
   /// encrypted store by itself, also when the call ends while recording.
   Future<void> _toggleRecording(GroupCallMedia media, String label) async {
     if (!media.isRecording) {
-      final Directory temp = await mediaTemporaryDirectory();
-      await media.startRecording(
-        '${temp.path}/zen_rec_${DateTime.now().millisecondsSinceEpoch}'
-        '.${media.recordingExtension}',
-        label: label,
+      // A random name in a private folder: nobody can put a link there.
+      final String path = await newTemporaryMediaPath(
+        prefix: 'zen_rec_',
+        extension: '.${media.recordingExtension}',
       );
+      await media.startRecording(path, label: label);
       return;
     }
     final String? path = await media.stopRecording();
@@ -708,51 +707,55 @@ class _ParticipantTile extends StatelessWidget {
                 ),
               )
             else
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Container(
-                    width: 64,
-                    height: 64,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        colors: <Color>[
-                          tone,
-                          Color.lerp(tone, zen.accentSecondary, 0.4)!,
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
+              // Scales down in the smallest tiles (many people, large text).
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Container(
+                      width: 64,
+                      height: 64,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          colors: <Color>[
+                            tone,
+                            Color.lerp(tone, zen.accentSecondary, 0.4)!,
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                      ),
+                      child: Text(
+                        name.isNotEmpty
+                            ? name.characters.first.toUpperCase()
+                            : '?',
+                        style: zen.display(
+                          color: ZenColors.foregroundFor(tone),
+                          size: 26,
+                          weight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                    child: Text(
-                      name.isNotEmpty
-                          ? name.characters.first.toUpperCase()
-                          : '?',
-                      style: zen.display(
-                        color: ZenColors.foregroundFor(tone),
-                        size: 26,
-                        weight: FontWeight.w600,
+                    if (stateLabel != null) ...<Widget>[
+                      const SizedBox(height: 10),
+                      Text(
+                        stateLabel,
+                        style: TextStyle(
+                          color: zen.textSecondary,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
-                    ),
-                  ),
-                  if (stateLabel != null) ...<Widget>[
-                    const SizedBox(height: 10),
-                    Text(
-                      stateLabel,
-                      style: TextStyle(
-                        color: zen.textSecondary,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+                    ],
                   ],
-                ],
+                ),
               ),
             if (renderScreen && renderVideo)
-              Positioned(
-                right: 8,
+              PositionedDirectional(
+                end: 8,
                 top: 8,
                 child: ClipRRect(
                   borderRadius: context.zenRadius(12),
@@ -772,25 +775,32 @@ class _ParticipantTile extends StatelessWidget {
                 ),
               ),
             if (sharingScreen)
-              Positioned(
+              PositionedDirectional(
                 top: 8,
-                left: 8,
-                child: Container(
-                  key: const Key('group-call-sharing-badge'),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: zen.accent.withValues(alpha: 0.85),
-                    borderRadius: context.zenRadius(999),
-                  ),
-                  child: Text(
-                    isSelf ? t('Udostępniasz ekran') : t('Udostępnia ekran'),
-                    style: TextStyle(
-                      color: zen.onAccent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
+                start: 8,
+                // Clear of the camera thumbnail (72 dp) when it is shown.
+                end: renderScreen && renderVideo ? 88 : 8,
+                child: Align(
+                  alignment: AlignmentDirectional.topStart,
+                  child: Container(
+                    key: const Key('group-call-sharing-badge'),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: zen.accent.withValues(alpha: 0.85),
+                      borderRadius: context.zenRadius(999),
+                    ),
+                    child: Text(
+                      isSelf ? t('Udostępniasz ekran') : t('Udostępnia ekran'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: zen.onAccent,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                 ),
@@ -800,6 +810,7 @@ class _ParticipantTile extends StatelessWidget {
               bottom: 8,
               right: 8,
               child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: <Widget>[
                   Flexible(
                     child: Container(
@@ -823,7 +834,6 @@ class _ParticipantTile extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const Spacer(),
                   if (isSelf && isMuted)
                     Container(
                       padding: const EdgeInsets.all(4),

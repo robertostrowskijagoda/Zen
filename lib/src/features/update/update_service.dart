@@ -171,7 +171,10 @@ final class UpdateService extends ChangeNotifier {
     try {
       final Uint8List? raw = await host.disk.read(_bookKey);
       if (raw != null) {
-        book.restore(jsonDecode(utf8.decode(raw)));
+        final Object? json = jsonDecode(utf8.decode(raw));
+        // A newer build's book stays as it is (saves are skipped).
+        heldAsNewerOn(host.disk, _bookKey, json, current: 1);
+        book.restore(json);
       }
     } on Object catch (error, stack) {
       logZenError('Odczyt aktualizacji', error, stack);

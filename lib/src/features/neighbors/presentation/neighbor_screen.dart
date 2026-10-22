@@ -62,6 +62,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       builder: (BuildContext context) => Padding(
         padding: EdgeInsets.fromLTRB(
           16,
@@ -83,17 +84,29 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                 Text(item.text, style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 if (thread.isEmpty)
-                  Text(
-                    t('Zapytajcie o szczegóły — odpisze ktoś z domowników.'),
-                  ),
-                for (final FlatMessage m in thread)
-                  Align(
-                    alignment: m.mine
-                        ? Alignment.centerRight
-                        : Alignment.centerLeft,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: Text(m.by.isEmpty ? m.text : '${m.by}: ${m.text}'),
+                  Text(t('Zapytajcie o szczegóły — odpisze ktoś z domowników.'))
+                else
+                  // Newest at the bottom, next to the field; the thread
+                  // scrolls when it no longer fits above the keyboard.
+                  Flexible(
+                    child: ListView(
+                      key: const Key('flat-invite-chat-thread'),
+                      reverse: true,
+                      shrinkWrap: true,
+                      children: <Widget>[
+                        for (final FlatMessage m in thread.reversed)
+                          Align(
+                            alignment: m.mine
+                                ? AlignmentDirectional.centerEnd
+                                : AlignmentDirectional.centerStart,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 3),
+                              child: Text(
+                                m.by.isEmpty ? m.text : '${m.by}: ${m.text}',
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 const SizedBox(height: 8),
@@ -140,6 +153,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
           final ZenColors zen = ZenColors.of(context);
           final Color tone = neighborsTone(zen);
           return AlertDialog(
+            scrollable: true,
             title: Text(item.text),
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -223,6 +237,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         icon: const Icon(Icons.badge_rounded),
         title: Text(
           t('Pokazać Twój profil „{name}”?', {'name': f.profile.name}),
@@ -279,9 +294,15 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
     }
     final FlatDoorCode? code = FlatDoorCode.parse(text);
     if (code == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(t('To nie jest kod mieszkania.'))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            FlatDoorCode.isNewer(text)
+                ? t('Ten kod jest z nowszej wersji Zen. Zaktualizuj aplikację.')
+                : t('To nie jest kod mieszkania.'),
+          ),
+        ),
+      );
       return;
     }
     await _service.scanDoor(code);
@@ -328,6 +349,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
         final bool? ok = await showDialog<bool>(
           context: context,
           builder: (BuildContext context) => AlertDialog(
+            scrollable: true,
             icon: Icon(
               Icons.person_remove_rounded,
               color: ZenColors.of(context).danger,
@@ -499,7 +521,7 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                               if (!f.following) ...<Widget>[
                                 const SizedBox(height: 10),
                                 Align(
-                                  alignment: Alignment.centerLeft,
+                                  alignment: AlignmentDirectional.centerStart,
                                   child: ZenPill(
                                     text: t('Wyciszeni'),
                                     tone: zen.textMuted,
@@ -704,14 +726,14 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                               final bool onFill = m.mine && themed == null;
                               return Align(
                                 alignment: m.mine
-                                    ? Alignment.centerRight
-                                    : Alignment.centerLeft,
+                                    ? AlignmentDirectional.centerEnd
+                                    : AlignmentDirectional.centerStart,
                                 child: Container(
-                                  margin: EdgeInsets.only(
+                                  margin: EdgeInsetsDirectional.only(
                                     top: 3,
                                     bottom: 3,
-                                    left: m.mine ? 48 : 0,
-                                    right: m.mine ? 0 : 48,
+                                    start: m.mine ? 48 : 0,
+                                    end: m.mine ? 0 : 48,
                                   ),
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 14,
@@ -726,20 +748,21 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                                         color: m.mine
                                             ? tone
                                             : zen.surfaceRaised,
-                                        borderRadius: BorderRadius.only(
-                                          topLeft: Radius.circular(
-                                            look.radius(18),
-                                          ),
-                                          topRight: Radius.circular(
-                                            look.radius(18),
-                                          ),
-                                          bottomLeft: Radius.circular(
-                                            look.radius(m.mine ? 18 : 6),
-                                          ),
-                                          bottomRight: Radius.circular(
-                                            look.radius(m.mine ? 6 : 18),
-                                          ),
-                                        ),
+                                        borderRadius:
+                                            BorderRadiusDirectional.only(
+                                              topStart: Radius.circular(
+                                                look.radius(18),
+                                              ),
+                                              topEnd: Radius.circular(
+                                                look.radius(18),
+                                              ),
+                                              bottomStart: Radius.circular(
+                                                look.radius(m.mine ? 18 : 6),
+                                              ),
+                                              bottomEnd: Radius.circular(
+                                                look.radius(m.mine ? 6 : 18),
+                                              ),
+                                            ),
                                         border: m.mine
                                             ? null
                                             : Border.all(
@@ -792,7 +815,12 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
                   child: SafeArea(
                     top: false,
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                      padding: const EdgeInsetsDirectional.fromSTEB(
+                        12,
+                        8,
+                        8,
+                        8,
+                      ),
                       child: Row(
                         children: <Widget>[
                           Expanded(

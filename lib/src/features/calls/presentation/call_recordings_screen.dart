@@ -91,6 +91,7 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
       await showDialog<void>(
         context: context,
         builder: (BuildContext dialog) => AlertDialog(
+          scrollable: true,
           title: Text(t('Rozmowa: {name}', {'name': rec.peer})),
           content: rec.isAudioOnly
               // Sound only (a computer or an iPhone): nothing to look at.
@@ -165,6 +166,7 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
     final bool? sure = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
+        scrollable: true,
         title: Text(t('Usunąć nagranie?')),
         content: Text(
           t('Rozmowa z: {name}, {date}.', {

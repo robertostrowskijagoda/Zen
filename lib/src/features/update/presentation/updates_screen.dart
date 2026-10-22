@@ -284,7 +284,7 @@ class _UpdatesScreenState extends ConsumerState<UpdatesScreen> {
                 const SizedBox(height: 6),
                 FittedBox(
                   fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
+                  alignment: AlignmentDirectional.centerStart,
                   child: Text(
                     'Zen $kAppVersion',
                     maxLines: 1,

@@ -112,7 +112,10 @@ void main() {
     await openForgot(tester);
 
     expect(find.textContaining('klucz konta, rozmowy, pliki'), findsOneWidget);
-    expect(find.textContaining('kopii zapasowej klucza'), findsOneWidget);
+    // Every way the account comes back, by the names used elsewhere.
+    expect(find.textContaining('z drugiego urządzenia'), findsOneWidget);
+    expect(find.textContaining('kopii całego konta'), findsOneWidget);
+    expect(find.textContaining('z kopii klucza'), findsOneWidget);
     expect(find.textContaining('kręgu odzyskiwania'), findsOneWidget);
     expect(find.textContaining('nie da się cofnąć'), findsOneWidget);
     // Nothing here tells whether a panic password exists.

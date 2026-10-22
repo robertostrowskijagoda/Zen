@@ -7,19 +7,18 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/app/zen_web.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
 
 /// The install page on GitHub Pages (`tool/pages/install`): the steps for
 /// every system, the downloads and, for iPhone, the one-tap SideStore
 /// source.
-const String kInstallPageUrl =
-    'https://robertostrowskijagoda.github.io/Zen/install/';
+const String kInstallPageUrl = '${kZenPagesBase}install/';
 
 /// The AltStore / SideStore source of the latest release (`apps.json`,
 /// made by `.github/workflows/pages.yml`).
-const String kSideStoreSourceUrl =
-    'https://robertostrowskijagoda.github.io/Zen/apps.json';
+const String kSideStoreSourceUrl = '${kZenPagesBase}apps.json';
 
 /// The systems Zen is installed on, each with its own steps.
 enum InstallSystem {
@@ -171,9 +170,9 @@ List<String> installNotesFor(InstallSystem system) => switch (system) {
   InstallSystem.iphone => <String>[
     t(
       'iPhone nie pozwala aplikacji instalować innych aplikacji, dlatego '
-      'potrzebny jest SideStore i raz komputer. Potem SideStore sam '
-      'odświeża Zen co 7 dni: wystarczy czasem otworzyć go z włączonym '
-      'LocalDevVPN.',
+      'potrzebny jest SideStore i raz komputer. Podpis Zen wygasa po 7 '
+      'dniach: raz w tygodniu włącz LocalDevVPN, otwórz SideStore i stuknij '
+      '„Odśwież”. Zen przypomni o tym 2 dni wcześniej.',
     ),
     t(
       'Darmowe Apple ID: 3 takie aplikacje naraz (SideStore się liczy). '
@@ -283,7 +282,7 @@ class _InstallGuideScreenState extends State<InstallGuideScreen> {
               if (step.command != null)
                 Container(
                   margin: const EdgeInsets.only(top: 6),
-                  padding: const EdgeInsets.only(left: 10),
+                  padding: const EdgeInsetsDirectional.only(start: 10),
                   decoration: BoxDecoration(
                     color: zen.surfaceSunk,
                     borderRadius: context.zenRadius(12),
@@ -347,7 +346,7 @@ class _InstallGuideScreenState extends State<InstallGuideScreen> {
                   const SizedBox(height: 8),
                   _link(zen, kInstallPageUrl, const Key('install-copy-page')),
                   Align(
-                    alignment: Alignment.centerLeft,
+                    alignment: AlignmentDirectional.centerStart,
                     child: TextButton.icon(
                       key: const Key('install-open-page'),
                       onPressed: () => unawaited(_openPage()),

@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 
 abstract interface class RelayStateStore {
@@ -25,13 +27,45 @@ abstract interface class RelayBlobStore {
   Future<void> deleteBlobChunk(String key);
 }
 
+/// Outbox payloads whose JSON is at least this long (an attachment) are
+/// kept in a file of their own (`relay/out/<id>`), written once, instead of
+/// inside `relay/state`.
+const int kRelayInlinePayloadChars = 4 * 1024;
+
+/// The most bytes of payloads the outbox holds (big payloads only: small
+/// ones, like receipts, always fit). Past it a new message is refused with
+/// [RelayOutboxFullException] instead of growing the queue without end.
+const int kRelayOutboxMaxBytes = 32 * 1024 * 1024;
+
+/// A message did not fit into the outbox ([kRelayOutboxMaxBytes]): too much
+/// is still waiting for recipients who have been offline. The chat shows
+/// the message as not sent.
+final class RelayOutboxFullException implements Exception {
+  const RelayOutboxFullException();
+
+  @override
+  String toString() => t(
+    'Kolejka wysyłki jest pełna. Poczekaj, aż znajomi odbiorą to, '
+    'co czeka, i spróbuj ponownie.',
+  );
+}
+
+/// The format of `relay/state` written and read.
+const int kRelayStateFormat = 1;
+
 /// Relay state in the app's (optionally encrypted) binary store.
 ///
-/// Split in two so a busy relay does not rewrite megabytes per message:
+/// Split so a busy relay does not rewrite megabytes per message:
 ///
-/// * `relay/state` — identity, relay directory, outbox, receipts (small);
+/// * `relay/state` — identity, relay directory, outbox entries, receipts
+///   (small);
+/// * `relay/out/<id>` — the payload of a big outbox entry (an attachment),
+///   written once when it is queued and deleted when it leaves;
 /// * `relay/mail/<peer>` — ciphertext held for one friend, written only when
 ///   that friend's mail actually changed.
+///
+/// Every file is written aside and moved into place ([FileBinaryStore]);
+/// payloads go first, so the state never names one that is not on disk.
 ///
 /// Both the UI isolate and the Android background service use this store;
 /// only the one owning the mesh node writes, and it reloads when it takes the
@@ -45,19 +79,65 @@ final class FileRelayStateStore implements RelayStateStore, RelayBlobStore {
   /// Last content written or read per key; unchanged documents are skipped.
   final Map<String, String> _lastContent = <String, String>{};
 
+  /// Outbox entries whose payload is in a file of its own on disk.
+  final Set<String> _payloadFiles = <String>{};
+
   String _mailKey(String recipient) =>
       'relay/mail/${base64Url.encode(utf8.encode(recipient)).replaceAll('=', '')}';
+
+  static String _payloadKey(String rid) =>
+      'relay/out/${base64Url.encode(utf8.encode(rid)).replaceAll('=', '')}';
 
   @override
   Future<RelayState> load() async {
     _lastContent.clear();
+    _payloadFiles.clear();
     final String? core = await _readString(storageKey);
     if (core == null) {
       return RelayState();
     }
+    final Object? decoded;
     try {
-      final RelayState state = RelayState.fromJsonString(core);
-      final Object? decoded = jsonDecode(core);
+      decoded = jsonDecode(core);
+    } on FormatException catch (error, stackTrace) {
+      return _fresh(error, stackTrace);
+    }
+    if (store.heldAsNewer(storageKey, decoded, current: kRelayStateFormat)) {
+      // A newer build's state (its identity, its queue): kept as it is.
+      // Starting fresh here would announce a new identity to every friend.
+      throw NewerFormatException(
+        storageKey,
+        found: (decoded as Map)['v'],
+        supported: kRelayStateFormat,
+      );
+    }
+    try {
+      if (decoded is Map && decoded['out'] is List) {
+        final List<Object?> out = <Object?>[];
+        for (final Object? item in decoded['out'] as List) {
+          if (item is Map && item['pf'] != null && item['rid'] is String) {
+            final String rid = item['rid'] as String;
+            final String? raw = await _readString(
+              _payloadKey(rid),
+              remember: false,
+            );
+            final Object? payload = raw == null ? null : jsonDecode(raw);
+            if (payload is! Map) {
+              // Its payload is gone: nothing left to send.
+              continue;
+            }
+            _payloadFiles.add(rid);
+            out.add(<String, dynamic>{
+              ...Map<String, dynamic>.from(item),
+              'p': payload,
+            });
+          } else {
+            out.add(item);
+          }
+        }
+        decoded['out'] = out;
+      }
+      final RelayState state = RelayState.fromJson(decoded);
       final List<String> recipients = decoded is Map && decoded['mbx'] is List
           ? (decoded['mbx'] as List).whereType<String>().toList()
           : const <String>[];
@@ -83,15 +163,15 @@ final class FileRelayStateStore implements RelayStateStore, RelayBlobStore {
       }
       return state;
     } catch (error, stackTrace) {
-      // A corrupt file must not take messaging down; start over (the
-      // identity is regenerated and re-announced to every friend).
-      logZenError(
-        'Relay state is unreadable; starting fresh',
-        error,
-        stackTrace,
-      );
-      return RelayState();
+      return _fresh(error, stackTrace);
     }
+  }
+
+  RelayState _fresh(Object error, StackTrace stackTrace) {
+    // A corrupt file must not take messaging down; start over (the
+    // identity is regenerated and re-announced to every friend).
+    logZenError('Relay state is unreadable; starting fresh', error, stackTrace);
+    return RelayState();
   }
 
   @override
@@ -109,11 +189,42 @@ final class FileRelayStateStore implements RelayStateStore, RelayBlobStore {
       _lastContent.remove(stale);
       await store.delete(stale);
     }
-    final Map<String, dynamic> core =
-        jsonDecode(state.toJsonString(includeMailbox: false))
-            as Map<String, dynamic>;
-    core['mbx'] = state.mailbox.keys.toList();
-    await _writeIfChanged(storageKey, jsonEncode(core));
+    // Big payloads apart: written once (before the state that names them).
+    final Map<String, String> newPayloads = <String, String>{};
+    Map<String, dynamic> outboxEntry(RelayOutboxEntry entry) {
+      final Map<String, dynamic> json = entry.toJson();
+      if (!_payloadFiles.contains(entry.rid)) {
+        final String payload = jsonEncode(entry.payload);
+        if (payload.length < kRelayInlinePayloadChars) {
+          return json;
+        }
+        newPayloads[entry.rid] = payload;
+      }
+      return json
+        ..remove('p')
+        ..['pf'] = 1;
+    }
+
+    final String core = state.toJsonString(
+      includeMailbox: false,
+      outboxEntry: outboxEntry,
+      extra: <String, dynamic>{'mbx': state.mailbox.keys.toList()},
+    );
+    for (final MapEntry<String, String> payload in newPayloads.entries) {
+      await store.write(
+        _payloadKey(payload.key),
+        Uint8List.fromList(utf8.encode(payload.value)),
+      );
+      _payloadFiles.add(payload.key);
+    }
+    await _writeIfChanged(storageKey, core);
+    // Payloads of entries that left the outbox.
+    for (final String rid in _payloadFiles.toList()) {
+      if (!state.outbox.containsKey(rid)) {
+        _payloadFiles.remove(rid);
+        await store.delete(_payloadKey(rid));
+      }
+    }
   }
 
   // Blob chunks live next to the state as one file each: `relay/blob/<key>`.
@@ -137,13 +248,15 @@ final class FileRelayStateStore implements RelayStateStore, RelayBlobStore {
     _lastContent[key] = content;
   }
 
-  Future<String?> _readString(String key) async {
+  Future<String?> _readString(String key, {bool remember = true}) async {
     final Uint8List? bytes = await store.read(key);
     if (bytes == null || bytes.isEmpty) {
       return null;
     }
     final String content = utf8.decode(bytes);
-    _lastContent[key] = content;
+    if (remember) {
+      _lastContent[key] = content;
+    }
     return content;
   }
 }

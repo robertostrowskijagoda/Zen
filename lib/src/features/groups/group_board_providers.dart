@@ -19,7 +19,7 @@ final class AppGroupBoardHost implements GroupBoardHost {
   String ownAddress() => ref.read(runtimeNodeSnapshotProvider).localAddress;
 
   @override
-  String ownName() => ref.read(userProfileControllerProvider).displayName;
+  String ownName() => ref.read(userProfileControllerProvider).publicName;
 
   @override
   List<String>? membersOf(String groupId) {

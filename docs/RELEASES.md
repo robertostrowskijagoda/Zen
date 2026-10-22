@@ -31,10 +31,14 @@ UI strings quoted below are the app's Polish labels (e.g. "Podaj dalej" =
    `https://robertostrowskijagoda.github.io/Zen/#CODE` (the code without
    dashes, after the `#`; the browser does not send that part to the server,
    so nobody knows who invites whom). The page opens Zen with the code, and
-   whoever does not have Zen sees download buttons. The address is in
-   `PeerShareCodec.invitePageUrl`
-   (`lib/src/features/social/peer_share_codec.dart`); renaming the repository
-   or the account breaks printed codes.
+   whoever does not have Zen sees download buttons. Every web address of the
+   project is in one place, `lib/src/app/zen_web.dart`; renaming the
+   repository or the account breaks printed codes. **An own domain** is
+   prepared there: set `kZenOwnDomain` (the pages must already be served
+   there and the GitHub Pages address must keep answering) and add the host
+   to the invitation link filter in `android/app/src/main/AndroidManifest.xml`,
+   **before** the first public invitation or door sticker. New links then
+   use the domain, and every build reads both addresses.
 
    **Publishing the page:** the workflow `.github/workflows/pages.yml`
    publishes `tool/pages/` on every change to `main`. Once in GitHub:
@@ -43,6 +47,13 @@ UI strings quoted below are the app's Polish labels (e.g. "Podaj dalej" =
 3. Enable Issues in the repository settings; description: "A network of people
    who know each other — a messenger without servers, ads or an algorithm"
    (the repository description is in Polish).
+4. **Contributions:** `CONTRIBUTING.md` (checks to run, and the contributor
+   licence grant: GPL-3.0-only for everyone plus an additional licence to
+   the maintainer that allows store distribution, with the promise that
+   every such version is also published as GPL source) and
+   `.github/pull_request_template.md` with a required consent box. The
+   grant is to be reviewed by a lawyer before the first outside
+   contribution is merged.
 
 ## 2. Signing key (once and for all)
 
@@ -88,7 +99,12 @@ overwritten by one signed with a different key. Changing the package to
 **In short** (the details follow in items 1–8):
 
 1. Make sure `main` is green in CI and the "Unreleased" part of
-   `CHANGELOG.md` says what is new.
+   `CHANGELOG.md` says what is new. For **1.12.0 only**: run
+   `flutter test test/format_fixtures_test.dart` once outside CI (or with
+   `ZEN_WRITE_FORMAT_FIXTURES=1`) and commit `test/fixtures/formats/1.12.0/`
+   — the samples of every stored and sent format that later versions must
+   still read. Never change those files afterwards; in CI a missing sample
+   fails the test.
 2. `dart run tool/release.dart prepare 1.12.0` (on a clean `main`). It runs
    `dart format`, `flutter analyze`, `flutter test` and `go test`
    (`--skip-checks` skips them when CI already ran them on this commit),
@@ -100,7 +116,9 @@ overwritten by one signed with a different key. Changing the package to
    iOS, macOS and Windows take them from `pubspec.yaml`), turns "Unreleased"
    into "1.12.0 — <date>", commits, and makes the annotated tag `v1.12.0`.
    It never pushes. `--build N` picks the build number, `--no-tag` stops
-   before the commit.
+   before the commit. It refuses while `kReleaseMaintainers` or
+   `kOfficialApkCertificatesSha256` is empty; `--allow-unpinned-keys` is
+   only for a test release (with a loud warning).
 3. `git push origin HEAD && git push origin v1.12.0`. Approve the `release`
    environment when GitHub asks (the APK key and the signing key).
    `release.yml` refuses a tag that differs from the version in
@@ -112,7 +130,16 @@ overwritten by one signed with a different key. Changing the package to
    --require-signature` (names, `SHA256SUMS` against every file, the format
    and the signatures of `SHA256SUMS.sig`; signatures need Go). The GitHub
    JSON of the draft can be checked too: `--github-json release.json`.
-5. Publish the draft. This starts `pages.yml`, which refreshes the install
+5. Before publishing, upload `Zen-Windows.zip`, `Zen-Windows-arm64.zip` and
+   `yggdrasil_bridge.dll` to VirusTotal. Report every Microsoft detection at
+   https://www.microsoft.com/wdsi/filesubmission (Software developer →
+   Incorrectly detected) and other vendors' through their forms; publish
+   only when Defender no longer flags the files.
+6. A release that breaks compatibility with older builds: raise
+   `kMinPeerVersion` (`lib/src/app/peer_version.dart`, sent as `minv` in
+   ping and pong) and/or put a line `zen-min: X.Y.Z` in the release
+   description; older builds then show "update to X.Y.Z or newer".
+7. Publish the draft. This starts `pages.yml`, which refreshes the install
    page data and the SideStore / AltStore source (`apps.json`) for the new
    `Zen-unsigned.ipa`. Builds then find the release within 12 hours.
 
@@ -136,8 +163,10 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
 3. **Building:** pushing a tag `v<version>` runs
    `.github/workflows/release.yml`: Android (a separate job) and Windows x64
    on `windows-latest`, Windows ARM64 on `windows-11-arm`, Linux x64 on
-   `ubuntu-latest`, Linux ARM64 on `ubuntu-24.04-arm`, macOS on
-   `macos-latest` and iPhone (`ios.yml`, called from `release.yml`). Each job
+   `ubuntu-22.04`, Linux ARM64 on `ubuntu-22.04-arm` (section 3.4), the
+   Flatpak, checksums, signing and attaching on `ubuntu-24.04`, macOS on
+   `macos-latest` and iPhone (`ios.yml`, called from `release.yml`). No
+   Linux job uses the moving `ubuntu-latest` label. Each job
    stores its files as an artifact; the second-to-last job gathers them and
    computes `SHA256SUMS`, and the last one attaches everything to the draft
    release. The APK signing key is in the secrets of the **`release`
@@ -147,10 +176,18 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    — without them the workflow skips `Zen.apk` — and
    `ZEN_RELEASE_SIGNING_KEY`, the release signing key that signs
    `SHA256SUMS` (section 8.6; without it `SHA256SUMS.sig` is left out with a
-   warning). The environment requires an
-   approver (the maintainer) and has a rule for `v*` tags only; the key goes
-   only to a run of a `v*` tag after approval (described at the top
-   of `release.yml`). A manual run from a branch builds the other files as
+   warning). Only the `android` and `sign` jobs use the environment. It
+   requires an approver (the maintainer) and has a rule for `v*` tags
+   only; the keys go only to a run of a `v*` tag after approval (described
+   at the top of `release.yml`). The workflow's token is read-only
+   (`permissions: {}` at the top, `contents: read` per job); only the
+   `attach` job, for tags, may write. The `checksums` job, which has no
+   environment, fails the run when any signing secret
+   (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+   `ANDROID_KEY_PASSWORD`, `ZEN_RELEASE_SIGNING_KEY`) is also visible as a
+   repository or organization secret: the keys must live only in the
+   environment. Environments with required reviewers are free for public
+   repositories. A manual run from a branch builds the other files as
    artifacts, without `Zen.apk` and without a release. **Windows ARM64 is
    experimental:** the `windows-arm64` job has `continue-on-error`, and until
    its first green run a failure leaves out only `Zen-Windows-arm64.zip`;
@@ -163,7 +200,12 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
      x86_64 (ChromeOS, emulators); no x86 (Flutter has no x86 release
      engine);
    - `Zen-Windows.zip` — the zipped folder
-     `build/windows/x64/runner/Release`;
+     `build/windows/x64/runner/Release`, with the Microsoft Visual C++
+     runtime (`msvcp140*.dll`, `vcruntime140*.dll`) copied next to
+     `zen.exe` by `tool/ci/copy_vc_runtime.ps1` from the Visual Studio
+     redistributable folder; `tool/ci/check_windows_bundle.py` reads the
+     import tables of every `.exe`/`.dll` and fails when one needs a runtime
+     library that is not in the folder;
    - `Zen-Windows-arm64.zip` — the zipped folder
      `build/windows/arm64/runner/Release` (experimental, see item 3);
    - `Zen-Linux-x64.tar.gz`, `Zen-Linux-arm64.tar.gz` — the folder
@@ -177,12 +219,16 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
    - `Zen-Linux-x64.flatpak` — the x64 bundle above packaged by the `flatpak`
      job with `linux/packaging/com.roj.zen.yml` (a repackaging of the built
      `Zen-Linux-x64.tar.gz`, not a build from source; runtime
-     `org.gnome.Platform` 48, which is based on `org.freedesktop.Platform`
-     and adds GTK 3; `libayatana-appindicator3` and its libraries are copied
-     from the runner into the package). Sandbox: network, Wayland/X11,
+     `org.gnome.Platform` 51, which is based on `org.freedesktop.Platform`
+     and adds GTK 3 — raise it with every GNOME release, March and
+     September; `libayatana-appindicator3` and its libraries are copied
+     from the runner into the package; the bundle names the Flathub
+     repository for the runtime). Sandbox: network, Wayland/X11,
      PulseAudio, all devices (camera), secret service, notifications, tray.
-     Install: `flatpak install --user ./Zen-Linux-x64.flatpak`. Not on Flathub
-     (that needs a from-source build); ARM64 is not built;
+     Install and update: `flatpak install --user ./Zen-Linux-x64.flatpak`
+     (inside the Flatpak the app does not download updates, it shows this
+     command and the release page). Not on Flathub (that needs a
+     from-source build); ARM64 is not built;
    - `Zen-macOS.zip` — `build/macos/Build/Products/Release/Zen.app` packed with
      `ditto -c -k --keepParent` (universal: Apple Silicon and Intel;
      ad hoc signature, no notarization — on first launch use "Open Anyway"
@@ -265,6 +311,13 @@ older signed version installs nothing); `tool/ci/test_release_source.py`
   `abiFilters`) — an option if the APK gets too big, but self-update and
   "Podaj dalej" assume a single file. CI (`android-bridge` in `ci.yml`) builds
   all three ABIs and checks the `YggStartNode` export.
+- **16 KB memory pages:** the build scripts link every ABI with
+  `-Wl,-z,max-page-size=16384`, and `tool/ci/check_page_alignment.py` checks
+  that every 64-bit `.so` has all its `PT_LOAD` segments aligned to at least
+  16 KB and that in the APK each uncompressed `.so` starts on a 16 KB
+  boundary (as `zipalign -P 16`). CI runs it on the bridge, the release job
+  on the finished `Zen.apk`. `bridge_tools.ps1` picks the newest NDK by
+  version number, not by name.
 - **Without Go** (or without NDK / a C compiler) the existing library is used
   with a warning; without it the build aborts, saying what is missing.
   `ZEN_SKIP_GO_BRIDGE=1` skips the check. Automatic rebuilding of the `.so`
@@ -336,6 +389,53 @@ SideStore or AltStore sign it with the user's free Apple ID (README, section
 "iPhone"). App identifier: `com.roj.zen`. iOS 15+. Locally on a Mac:
 `build_ios.sh`, then `flutter build ios --release --no-codesign`.
 
+### 3.4. Build checks, pins and reproducibility
+
+- **Linux baseline.** Linux is built on Ubuntu 22.04 (glibc 2.35, libstdc++
+  3.4.30), so the files run on Ubuntu 22.04+, Debian 12+ and Linux Mint 21+.
+  `tool/ci/check_linux_abi.sh <bundle> 2.35 3.4.30` reads every ELF file
+  with `objdump -T` and fails when one needs a newer `GLIBC_` or
+  `GLIBCXX_` symbol (release, both architectures, and CI). The CI job
+  `deb-install` installs the CI `.deb` (`--no-install-recommends`) in
+  `ubuntu:22.04`, `ubuntu:24.04`, `ubuntu:26.04`, `debian:12` and
+  `debian:13` containers and checks `ldd` for missing libraries, which also
+  proves that the `t64` library names of newer systems satisfy the
+  dependencies. The `.desktop` and AppStream checks run in the `packaging`
+  job (Ubuntu 24.04). **GitHub retires the `ubuntu-22.04` images in April
+  2027** (with brownouts before): by then move the Linux jobs into an
+  `ubuntu:22.04` / `debian:12` container, or raise the baseline together
+  with the README.
+- **libwebrtc.** `flutter_webrtc` downloads the prebuilt libwebrtc for
+  Windows and Linux (`libwebrtc.m150.7871.03`) without a checksum of its
+  own. `tool/ci/check_libwebrtc.py <platform> <bundle>` hashes the library
+  in the finished bundle and the downloaded ZIP and compares them with
+  `tool/ci/libwebrtc.sha256` (`<sha256>  <version>/<platform>/<file>`): a
+  difference fails the build, a missing pin only warns and prints the line
+  to paste. Pin the lines after the first trusted build (compare the ZIP's
+  sum with one downloaded independently), then add `--strict` in
+  `release.yml` so a missing pin fails too. Repeat after every
+  `flutter_webrtc` bump. Tests: `tool/ci/test_check_libwebrtc.py`.
+- **Go.** `go.mod` has a `toolchain` line (go1.26.10, the latest 1.26
+  security fix); `actions/setup-go` with `go-version-file` takes it, and
+  `ios.yml` reads it too. Dependabot does not raise `toolchain`: bump it by
+  hand with every Go 1.26.x release. The CI job `govulncheck`
+  (`golang.org/x/vuln/cmd/govulncheck`, pinned version) reports known
+  vulnerabilities in the bridge's modules and in Go itself; it turns CI red
+  until the module or toolchain is raised.
+- **Dependencies locked.** Every `flutter pub get` in `ci.yml`,
+  `release.yml` and `ios.yml` uses `--enforce-lockfile`: exactly the
+  packages and hashes of `pubspec.lock`.
+- **Reproducible:** the Linux `.tar.gz` and `.deb` (`SOURCE_DATE_EPOCH` =
+  the commit's time, sorted names, no owners, `gzip -n`), the Dart
+  dependencies (lockfile with hashes) and Go (`-trimpath`, the toolchain
+  from `go.mod`). **Not reproducible:** the Windows and macOS ZIPs (file
+  times), the macOS ad hoc signature and the APK (signature). Check: build
+  the same tag twice and compare with `sha256sum`. Full reproducibility
+  (F-Droid) would also need reproducible Flutter and Go builds.
+- Python tests of these tools run in CI: `tool/ci/test_ci_checks.py` (ELF and
+  APK alignment, PE imports, glibc, pinned runners, the environment),
+  `tool/ci/test_release_source.py`, `tool/ci/test_check_libwebrtc.py`.
+
 ## 4. Android: developer verification (2026–2027)
 
 State as of 15.10.2026 (sources: section 6.6):
@@ -391,9 +491,13 @@ State as of 15.10.2026 (sources: section 6.6):
   or sum, and a **signed manifest** with the donation link, author and
   repository (section 8.2) and a canary (section 8.3).
 - **Windows:** no Authenticode signature today, so SmartScreen shows "Windows
-  protected your PC" (the README says what to click). Zen-Windows-arm64.zip is
-  the same. To do: SignPath (free for open-source projects; Zen is
-  GPL-3.0) or Azure Trusted Signing.
+  protected your PC" (the README says what to click), and **Smart App
+  Control** on Windows 11 blocks Zen with no "Run anyway" (the README and
+  the install page explain turning it off, with its cost). Antivirus
+  programs may flag new unsigned files (section 3, step 5).
+  Zen-Windows-arm64.zip is the same. The lasting fix is code signing:
+  SignPath Foundation (free for open-source projects; Zen is GPL-3.0) or
+  Azure Trusted Signing.
 - **macOS:** ad hoc signature, no notarization — since macOS 15 the first
   launch only via "Open Anyway" in System Settings (or
   `xattr -dr com.apple.quarantine`). Eventually Developer ID and notarization
@@ -422,17 +526,31 @@ legal nor tax advice; uncertain places are marked.
 | iPhone: SideStore / AltStore with a free Apple ID | works | `Zen-unsigned.ipa`; signing every 7 days, at most 3 apps, no background work |
 | iPhone: TestFlight, AltStore PAL, App Store | needs a USD 99/year account | section 6.3 |
 | Windows | x64 ZIP and experimental ARM64 ZIP, no Authenticode | later MSIX and winget (section 5) |
-| Linux | `tar.gz` and `.deb`, x64 and ARM64; Flatpak (x64, repackaged bundle, attached to the release; not on Flathub) | AppImage and Snap optional |
+| Linux | `tar.gz` and `.deb`, x64 and ARM64 (Ubuntu 22.04+, Debian 12+, Mint 21+; glibc 2.35+); Flatpak (x64, repackaged bundle, attached to the release; not on Flathub) | AppImage and Snap optional; Flathub and Fedora would refuse the from-source OpenH264 (section 6.1.1) |
 | macOS | ZIP with an ad hoc signature | Developer ID + notarization with the same account as iPhone (section 6.3); official Homebrew only after notarization |
 | Repository mirror (e.g. Codeberg) | optional | in case GitHub is blocked; mirror addresses can be published in the signed manifest (section 8.2) |
 
 "Open straight in the app" (Android App Links) requires a file
 `/.well-known/assetlinks.json` at the domain root — the invitation page is in
-the subdirectory `robertostrowskijagoda.github.io/Zen/`, and there is
-deliberately no own domain. So the QR code opens the invitation page (section 1,
-item 2), which launches Zen through `intent://` or `zen://`; Zen recognizes
-the same code in the scanner, and after enabling "Open supported links" also
-links from the camera.
+the subdirectory `robertostrowskijagoda.github.io/Zen/`. So the QR code opens
+the invitation page (section 1, item 2), which launches Zen through
+`intent://` or `zen://`; Zen recognizes the same code in the scanner, and
+after enabling "Open supported links" also links from the camera. An own
+domain (section 1, item 2) would allow App Links later; it has to be set
+before the first public invitations, because printed codes keep their
+address.
+
+#### 6.1.1 Video codec patents
+
+On Linux Zen contains the H.264 encoder OpenH264, built from source; Cisco's
+patent licence covers only the binaries Cisco itself distributes, so this
+build is not covered by it. On Windows, macOS, iOS and Android Zen uses the
+system's codecs. The practical risk is small (a free app; the AVC pool
+charges no royalties up to 100,000 units a year; some patents have
+expired), but Flathub and Fedora would not accept such a package: a Flathub
+variant would have to download Cisco's binary on first use (as Firefox
+does) or use the system's GStreamer encoder. AAC-LC (vo-aacenc): negligible
+risk.
 
 ### 6.2 Store variant of Android (Google Play, Galaxy Store)
 
@@ -474,7 +592,18 @@ listing, not app changes):
 
 1. background service: a declared type (`connectedDevice`; `phoneCall`,
    `camera`, `microphone` only during a call) instead of `specialUse`, and a
-   video for reviewers;
+   video for reviewers. This is an explicit exception to "no store-only
+   changes": a separate override in
+   `android/app/src/appStoreOnly/AndroidManifest.xml`
+   (`tools:replace="android:foregroundServiceType"`). Declarations also
+   for the `mediaProjection` service type (screen sharing in a call; FGS
+   declaration and a video) and `location` (foreground/background location
+   declaration and a video);
+1a. `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`: Play allows it only for listed
+   cases; justify it as a peer-to-peer messenger without a push server and
+   fill in the form (risk of rejection). `SYSTEM_ALERT_WINDOW`: a
+   declaration, or remove it in the store manifest with
+   `tools:node="remove"`;
 2. `USE_FULL_SCREEN_INTENT`: a "calls" declaration; the alarm asks for special
    access and has a fallback (a loud notification);
 3. location only in the foreground or one background feature (alarm), with a
@@ -502,7 +631,17 @@ changes are planned.
   (`tool/ci/release_source.py`) for the latest published release's
   `Zen-unsigned.ipa`, and the install page `/install/`; publishing a release
   refreshes both (the release event starts a run on `main`, since the
-  `github-pages` environment deploys only from it).
+  `github-pages` environment deploys only from it). The source is built from
+  that release's own IPA: downloaded only from GitHub hosts, checked against
+  the release's `SHA256SUMS` and size, and its permission texts, version and
+  build number read from the IPA's `Info.plist` (fallback: `Info.plist` at
+  the release tag; without either, a source with no app). A checksum
+  mismatch stops the deployment. The install page data (`release.json`)
+  carries the APK certificate fingerprint pinned in `apk_signature.dart` at
+  the tag; the fingerprint of the released `Zen.apk` (from `apksigner`) must
+  match it, or Pages is not deployed.
+  The free Apple ID signature lasts 7 days; Zen reads its expiry date from
+  the installed profile and reminds the user in Chats 2 days before.
 - **Individual Apple Developer account — USD 99/year** (seller: the author's
   name). It gives:
   - **TestFlight** — public link, up to 10,000 testers, the first build gets a
@@ -736,8 +875,12 @@ be signed before `until` passes.
 
 ### 8.4 Versions of friends
 
-Ping and pong to accepted friends carry `ver`, `build` and `caps`
-(`lib/src/app/peer_version.dart`). When friends have a newer version, Settings
+Ping and pong to accepted friends carry `ver`, `build`, `caps` and `minv`,
+the oldest version the sender still talks to (`kMinPeerVersion` in
+`lib/src/app/peer_version.dart`). A build older than a friend's `minv` (or
+than `zen-min` of the latest GitHub release) shows a red tile "Ta wersja
+Zen nie jest już obsługiwana" ("This version of Zen is no longer
+supported") above the bar below. When friends have a newer version, Settings
 shows a quiet bar "Znajomi mają nowszą wersję Zen (X)" ("Friends have a newer
 version of Zen") leading to "Aktualizacje i Podaj dalej". The version is the
 friend's own claim and affects nothing security-related. A signed release
@@ -748,7 +891,16 @@ marker spreading by gossip is not done.
 Independent of section 8: every build except the store one asks
 `api.github.com/repos/robertostrowskijagoda/Zen/releases/latest` 20 s after
 start and every 12 h (one GET, only the User-Agent `Zen`;
-`lib/src/features/update/github_update_service.dart`). A newer `v<version>`
+`lib/src/features/update/github_update_service.dart`). It sends
+`If-None-Match` with the last `ETag`, so an unchanged answer (304) costs no
+rate limit. On an error it retries after GitHub's `Retry-After` (or the
+`x-ratelimit-reset` time when `x-ratelimit-remaining` is 0) plus a minute,
+otherwise after 15 min, 30, 60… up to 12 h, and shows when; a good answer
+clears the backoff. A 404 is its own state ("no published release of Zen
+on GitHub"), not "up to date". A line `zen-min: X.Y.Z` in the release
+description is the oldest version still supported (section 3, step 6).
+Inside a Flatpak nothing is downloaded: the card shows the
+`flatpak install` command and opens the release page. A newer `v<version>`
 tag shows the bar "Jest nowa wersja X — warto zaktualizować" with
 "Aktualizuj": the platform's file from section 3 (`Zen.apk`, `Zen-Windows.zip`,
 `Zen-Windows-arm64.zip`, `Zen-Linux-<arch>.tar.gz` / `.deb` / `.flatpak`,
@@ -757,8 +909,7 @@ name and sum. Android: the APK must also be signed with the installed app's
 certificate, then the system installer asks. Windows / Linux tar.gz / macOS:
 unpacked next to the app's folder, a helper script swaps the folders after
 Zen exits and starts the new version; where the folder is not writable
-(Program Files, `/opt/zen`, Flatpak) the file is saved to Downloads and
-shown. iOS: only the bar. When github.com cannot be reached (network error,
+(Program Files, `/opt/zen`) the file is saved to Downloads and shown. iOS: only the bar. When github.com cannot be reached (network error,
 TLS, timeout — not an HTTP error answer), "Updates" says "Nie mogę sprawdzić
 aktualizacji, strona github jest niedostępna. Możliwe, że ktoś zwalcza tę
 aplikację."; the closable bar shows it only after a second failed attempt

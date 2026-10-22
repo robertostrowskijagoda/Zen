@@ -16,6 +16,7 @@ import 'package:zen/src/core/ledger/ledger_store.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/health/clock_skew_tracker.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
@@ -195,7 +196,7 @@ final class LedgerNode {
     this.localAddress,
     this.localSessionKey,
     this.greetAlso,
-  }) : _clock = clock ?? HlcClock(),
+  }) : _clock = clock ?? HlcClock(wallClock: friendsAgreedTime),
        _reachProbe = reachProbe ?? yggBridgeProbe,
        bridges = bridges ?? BridgeBook(),
        autoDownloadMedia = autoDownloadMedia ?? _always,
@@ -600,15 +601,26 @@ final class LedgerNode {
     if (!createIdentity && !await LedgerIdentity.exists(disk)) {
       throw StateError(t('Brak tożsamości dziennika na tym urządzeniu.'));
     }
-    identity = await LedgerIdentity.loadOrCreate(disk, deviceName: deviceName);
+    final LedgerIdentity? existing = await LedgerIdentity.read(disk);
+    LedgerIdentity loaded =
+        existing ??
+        await LedgerIdentity.loadOrCreate(disk, deviceName: deviceName);
+    await store.directory.addCertificate(loaded.certificate);
+    await archive.open(store, blobs);
+    if (existing != null && archive.lostOwnLog(loaded.writer)) {
+      // Our own log did not come back whole: entries others hold may be
+      // missing here, and writing on would number new ones like them (a
+      // fork everyone refuses for good). A new log goes on cleanly.
+      logZenWarning('Własny dziennik niepełny; zaczynam nowy.');
+      loaded = await loaded.withNewWriter(disk);
+    }
+    identity = loaded;
     author = LedgerAuthor(
       deviceKey: identity.deviceKey,
       certificate: identity.certificate,
       store: store,
       writer: identity.writer,
     );
-    await store.directory.addCertificate(identity.certificate);
-    await archive.open(store, blobs);
     await _loadPeers();
     await _loadFollowing();
     await _loadKeys();
@@ -2042,7 +2054,8 @@ final class LedgerNode {
         }
         final List<String> ids = _mediaIdsOf(e);
         if (!ids.any(
-          (String id) => !blobs.isComplete(id) && !blobs.refused.contains(id),
+          (String id) =>
+              !blobs.isComplete(id) && !blobs.refusedFor(id, e.account),
         )) {
           continue;
         }
@@ -2083,6 +2096,14 @@ final class LedgerNode {
       ..._knownFriends(),
     ];
     for (final String id in ids) {
+      if (e.account != account) {
+        // Remembered as brought by this writer: only their removal (or
+        // the storage limits) may drop it later, never someone else
+        // naming it.
+        blobs
+          ..allowFor(id, e.account)
+          ..noteFetchFor(id, e.account);
+      }
       replicator.fetchBlob(id, sources.toSet().toList());
     }
   }
@@ -2285,7 +2306,10 @@ final class LedgerNode {
     final Uint8List? raw = await disk.read(_keyringKey);
     if (raw != null) {
       try {
-        keyring.restore(jsonDecode(utf8.decode(raw)));
+        final Object? json = jsonDecode(utf8.decode(raw));
+        // A newer build's keys stay as they are (saves are skipped).
+        heldAsNewerOn(disk, _keyringKey, json, current: 1);
+        keyring.restore(json);
       } on FormatException {
         logZenWarning('Klucze odbiorców są uszkodzone.');
       }
@@ -2507,7 +2531,10 @@ final class LedgerNode {
       return;
     }
     try {
-      bridges.restore(jsonDecode(utf8.decode(raw)));
+      final Object? json = jsonDecode(utf8.decode(raw));
+      // A newer build's book stays as it is (saves are skipped).
+      heldAsNewerOn(disk, _bridgesKey, json, current: 1);
+      bridges.restore(json);
     } on FormatException {
       logZenWarning('Książka mostów jest uszkodzona; zaczynam od zera.');
     }
@@ -2599,4 +2626,17 @@ final class _ReachWait {
   final Set<String> answered = <String>{};
   final Completer<ReachResult> done = Completer<ReachResult>();
   int noes = 0;
+}
+
+/// This phone's clock, pulled back to its friends' when it runs more than
+/// [ClockSkewTracker.warnThreshold] ahead of them (a clock set forward, by
+/// hand or by a game): entries dated in friends' future would wait at every
+/// friend until their time comes (they take nothing over ten minutes
+/// ahead), and every later entry of the log behind them.
+int friendsAgreedTime() {
+  final int now = DateTime.now().millisecondsSinceEpoch;
+  final Duration? skew = ClockSkewTracker.instance.estimate;
+  return skew != null && skew < -ClockSkewTracker.warnThreshold
+      ? now + skew.inMilliseconds
+      : now;
 }

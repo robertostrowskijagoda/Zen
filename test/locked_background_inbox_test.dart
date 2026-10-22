@@ -10,6 +10,7 @@ import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/runtime/lifecycle_snapshot.dart';
 import 'package:zen/src/features/runtime/android_background_runtime.dart';
 import 'package:zen/src/features/runtime/locked_receiver.dart';
+import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
@@ -560,6 +561,42 @@ void main() {
       expect(transport.sentSignals.single.remoteAddress, _ada);
       expect(transport.sentSignals.single.payload['type'], 'pong');
       expect(transport.sentSignals.single.payload['state'], 'background');
+      expect(receiver.keptCount, 0);
+    });
+
+    test('answers a friend\'s pings at most every few minutes and keeps '
+        'no "away"', () async {
+      int clock = 1000000;
+      final BackgroundCapability capability = await publishFor(_masterKey());
+      transport = MemorySignalTransport();
+      notices = MemoryRuntimeSystemNotificationService();
+      receiver = LockedReceiver(
+        transport: transport,
+        capability: capability,
+        inbox: SealedInboxWriter(
+          file: await serviceVault.inboxFile(),
+          recipientPublicKey: capability.inboxPublicKey,
+        ),
+        notices: notices,
+        mailboxPollInterval: Duration.zero,
+        now: () => clock,
+      );
+      await receiver.start();
+      transport.sentSignals.clear();
+      int pongs() => transport.sentSignals
+          .where((sent) => sent.payload['type'] == 'pong')
+          .length;
+      await receive(_ada, <String, dynamic>{'type': 'ping'});
+      expect(pongs(), 1);
+      // The next ping, one interval later: no answer needed yet.
+      clock += const Duration(minutes: 2, seconds: 30).inMilliseconds;
+      await receive(_ada, <String, dynamic>{'type': 'ping'});
+      expect(pongs(), 1);
+      clock += const Duration(minutes: 2, seconds: 30).inMilliseconds;
+      await receive(_ada, <String, dynamic>{'type': 'ping'});
+      expect(pongs(), 2);
+      expect(kLockedPongEvery, lessThan(kPresenceOfflineAfter));
+      await receive(_ada, <String, dynamic>{'type': kPresenceAwayType});
       expect(receiver.keptCount, 0);
     });
 

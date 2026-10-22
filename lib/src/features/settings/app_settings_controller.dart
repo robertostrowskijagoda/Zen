@@ -189,6 +189,14 @@ final class AppSettingsController extends Notifier<AppSettings> {
     await _save(state.copyWith(paperBackupDone: value));
   }
 
+  /// The one-time card or reminder [id] was shown or dismissed.
+  Future<void> markTipSeen(String id) async {
+    if (state.seenTips.contains(id)) {
+      return;
+    }
+    await _save(state.copyWith(seenTips: <String>{...state.seenTips, id}));
+  }
+
   /// The terms, the privacy policy and the licence notice of [version]
   /// were accepted (on the first start, or again after they changed).
   Future<void> acceptLegalDocuments(String version, {DateTime? at}) async {

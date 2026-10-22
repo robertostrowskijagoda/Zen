@@ -149,7 +149,12 @@ class FlatItemCard extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final Color tone = flatItemTone(zen, kind);
     return ZenCard(
-      padding: EdgeInsets.fromLTRB(14, 12, trailing.isEmpty ? 14 : 4, 12),
+      padding: EdgeInsetsDirectional.fromSTEB(
+        14,
+        12,
+        trailing.isEmpty ? 14 : 4,
+        12,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -214,6 +219,7 @@ Future<String?> scanOrPaste(
   final String? text = await showDialog<String>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
+      scrollable: true,
       title: Text(title),
       content: SizedBox(
         width: 400,
@@ -258,6 +264,7 @@ Future<void> knockOnFlatDoor(
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(
           t('Zapukać do „{name}”?', <String, Object?>{'name': code.name}),
         ),
@@ -691,9 +698,15 @@ class _FlatHome extends ConsumerWidget {
     }
     final FlatDoorCode? code = FlatDoorCode.parse(text);
     if (code == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(t('To nie jest kod mieszkania.'))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            FlatDoorCode.isNewer(text)
+                ? t('Ten kod jest z nowszej wersji Zen. Zaktualizuj aplikację.')
+                : t('To nie jest kod mieszkania.'),
+          ),
+        ),
+      );
       return;
     }
     await _knock(context, code);
@@ -777,24 +790,30 @@ class _FlatHome extends ConsumerWidget {
     final String? action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
+      useSafeArea: true,
       builder: (BuildContext sheet) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            ListTile(
-              key: const Key('flat-photo-pick'),
-              leading: const Icon(Icons.photo_library_rounded),
-              title: Text(has ? t('Zmień zdjęcie') : t('Dodaj zdjęcie')),
-              subtitle: Text(t('Zobaczą je sąsiedzi (małe, bez danych GPS).')),
-              onTap: () => Navigator.of(sheet).pop('pick'),
-            ),
-            if (has)
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
               ListTile(
-                leading: const Icon(Icons.delete_outline_rounded),
-                title: Text(t('Usuń zdjęcie')),
-                onTap: () => Navigator.of(sheet).pop('remove'),
+                key: const Key('flat-photo-pick'),
+                leading: const Icon(Icons.photo_library_rounded),
+                title: Text(has ? t('Zmień zdjęcie') : t('Dodaj zdjęcie')),
+                subtitle: Text(
+                  t('Zobaczą je sąsiedzi (małe, bez danych GPS).'),
+                ),
+                onTap: () => Navigator.of(sheet).pop('pick'),
               ),
-          ],
+              if (has)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline_rounded),
+                  title: Text(t('Usuń zdjęcie')),
+                  onTap: () => Navigator.of(sheet).pop('remove'),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -874,7 +893,7 @@ class _FlatHome extends ConsumerWidget {
           key: const Key('flat-header'),
           tone: tone,
           onTap: () => unawaited(_edit(context)),
-          padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
+          padding: const EdgeInsetsDirectional.fromSTEB(16, 16, 12, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
@@ -893,8 +912,8 @@ class _FlatHome extends ConsumerWidget {
                         clipBehavior: Clip.none,
                         children: <Widget>[
                           FlatAvatar(profile: p),
-                          Positioned(
-                            right: -4,
+                          PositionedDirectional(
+                            end: -4,
                             bottom: -4,
                             child: Container(
                               padding: const EdgeInsets.all(3),
@@ -1269,7 +1288,7 @@ class _FlatHome extends ConsumerWidget {
           ZenCard(
             key: Key('flat-neighbor-${f.profile.label}'),
             onTap: () => unawaited(NeighborScreen.open(context, f.key)),
-            padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+            padding: const EdgeInsetsDirectional.fromSTEB(14, 12, 10, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
@@ -1304,18 +1323,19 @@ class _FlatHome extends ConsumerWidget {
                 if (service.keyRival(f.key) != null) ...<Widget>[
                   const SizedBox(height: 8),
                   Align(
-                    alignment: Alignment.centerLeft,
+                    alignment: AlignmentDirectional.centerStart,
                     child: ZenPill(
                       text: t('Dwa różne nowe klucze — sprawdź'),
                       tone: zen.warning,
                       icon: Icons.warning_amber_rounded,
+                      maxLines: 3,
                     ),
                   ),
                 ],
                 if (!f.weScanned) ...<Widget>[
                   const SizedBox(height: 10),
                   Align(
-                    alignment: Alignment.centerRight,
+                    alignment: AlignmentDirectional.centerEnd,
                     child: FilledButton.tonalIcon(
                       key: Key('flat-confirm-${f.profile.label}'),
                       onPressed: () =>
@@ -1410,7 +1430,7 @@ class _OwnItems extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 20, 0, 6),
+            padding: const EdgeInsetsDirectional.fromSTEB(4, 20, 0, 6),
             child: Row(
               children: <Widget>[
                 Expanded(

@@ -62,6 +62,7 @@ class _FollowersSheetState extends State<FollowersSheet> {
     final bool? sure = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
+        scrollable: true,
         title: Text(t('Zablokować: {name}?', {'name': name})),
         content: Text(
           t(

@@ -61,6 +61,7 @@ class _AskScreenState extends ConsumerState<AskScreen> {
     final String? text = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Odpowiedz')),
         content: TextField(
           key: const Key('ask-answer-text'),
@@ -330,11 +331,13 @@ class _AskScreenState extends ConsumerState<AskScreen> {
                                           color: zen.success,
                                         ),
                                         const SizedBox(width: 6),
-                                        Text(
-                                          t('Podpisana przez autora'),
-                                          style: TextStyle(
-                                            color: zen.textMuted,
-                                            fontSize: 12,
+                                        Flexible(
+                                          child: Text(
+                                            t('Podpisana przez autora'),
+                                            style: TextStyle(
+                                              color: zen.textMuted,
+                                              fontSize: 12,
+                                            ),
                                           ),
                                         ),
                                       ],

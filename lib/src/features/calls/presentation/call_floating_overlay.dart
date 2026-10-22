@@ -178,7 +178,7 @@ class _FloatingCallChipState extends ConsumerState<_FloatingCallChip> {
                 }
               },
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 6, 6, 6),
+                padding: const EdgeInsetsDirectional.fromSTEB(8, 6, 6, 6),
                 child: Row(
                   children: <Widget>[
                     Container(

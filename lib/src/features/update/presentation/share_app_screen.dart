@@ -207,6 +207,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
     final bool? go = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
+        scrollable: true,
         key: const Key('share-app-signature-warning'),
         icon: Icon(Icons.gpp_bad_rounded, color: zen.danger),
         title: Text(
@@ -855,7 +856,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
               ),
           if (_source != null && !_source!.own) _signatureInfo(zen),
           Align(
-            alignment: Alignment.centerLeft,
+            alignment: AlignmentDirectional.centerStart,
             child: TextButton.icon(
               key: const Key('share-app-pick'),
               onPressed: () => unawaited(_pickApk()),
@@ -1113,7 +1114,7 @@ class _ShareAppScreenState extends ConsumerState<ShareAppScreen> {
                   ),
                 ),
               Align(
-                alignment: Alignment.centerLeft,
+                alignment: AlignmentDirectional.centerStart,
                 child: TextButton.icon(
                   onPressed: () => unawaited(_refreshDevices()),
                   icon: const Icon(Icons.refresh_rounded),

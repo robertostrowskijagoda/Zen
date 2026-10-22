@@ -32,12 +32,14 @@ final class GithubRedirectException implements Exception {
 
 /// GETs [uri] and follows redirects by hand, only to [isGithubUri]
 /// addresses and at most [kMaxGithubRedirects] times, each step within
-/// [timeout]. Throws [ArgumentError] when [uri] itself is not such an
-/// address and [GithubRedirectException] for a redirect anywhere else.
+/// [timeout]. [headers] go with the first request only (e.g.
+/// `If-None-Match`). Throws [ArgumentError] when [uri] itself is not such
+/// an address and [GithubRedirectException] for a redirect anywhere else.
 Future<HttpClientResponse> getFromGithub(
   HttpClient client,
   Uri uri, {
   required Duration timeout,
+  Map<String, String> headers = const <String, String>{},
 }) async {
   if (!isGithubUri(uri)) {
     throw ArgumentError.value(uri, 'uri', 'HTTPS to GitHub only');
@@ -46,6 +48,9 @@ Future<HttpClientResponse> getFromGithub(
   for (int hop = 0; ; hop++) {
     final HttpClientRequest request = await client.getUrl(at).timeout(timeout);
     request.followRedirects = false;
+    if (hop == 0) {
+      headers.forEach(request.headers.set);
+    }
     final HttpClientResponse response = await request.close().timeout(timeout);
     if (!response.isRedirect) {
       return response;

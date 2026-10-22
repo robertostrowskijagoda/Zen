@@ -456,6 +456,7 @@ class _VoiceRecordDialogState extends State<_VoiceRecordDialog> {
     final String seconds = (elapsed.inSeconds % 60).toString().padLeft(2, '0');
     final String time = '${elapsed.inMinutes}:$seconds';
     return AlertDialog(
+      scrollable: true,
       key: const Key('voice-record-dialog'),
       icon: Icon(Icons.mic_rounded, color: _failed ? zen.warning : zen.accent),
       title: Text(_failed ? t('Brak dostępu do mikrofonu.') : t('Nagrywanie…')),

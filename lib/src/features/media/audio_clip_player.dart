@@ -192,7 +192,7 @@ class _AudioClipPlayerState extends State<AudioClipPlayer> {
     ];
     return Container(
       key: const Key('audio-clip'),
-      padding: const EdgeInsets.fromLTRB(8, 8, 14, 8),
+      padding: const EdgeInsetsDirectional.fromSTEB(8, 8, 14, 8),
       decoration: BoxDecoration(
         color: zen.surfaceSunk,
         borderRadius: context.zenRadius(18),

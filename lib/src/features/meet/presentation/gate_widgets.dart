@@ -145,7 +145,7 @@ class _GatePlanStepsState extends State<GatePlanSteps> {
         else ...<Widget>[
           for (int i = 0; i < GatePlanSteps.shownEnds; i++) row(i),
           Align(
-            alignment: Alignment.centerLeft,
+            alignment: AlignmentDirectional.centerStart,
             child: TextButton.icon(
               key: const Key('gate-steps-more'),
               onPressed: () => setState(() => _open = true),
@@ -1037,7 +1037,7 @@ class GateSettingsTile extends ConsumerWidget {
                   ),
                 ),
               Align(
-                alignment: Alignment.centerLeft,
+                alignment: AlignmentDirectional.centerStart,
                 child: TextButton.icon(
                   key: const Key('gate-add-free'),
                   onPressed: () => unawaited(addFree()),

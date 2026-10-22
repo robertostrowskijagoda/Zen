@@ -39,6 +39,9 @@ const List<String> kReleaseMaintainers = <String>[];
 
 const String kReleaseApp = 'zen';
 
+/// Most entries in a release's `files` (only valid ones are used).
+const int kMaxReleaseFiles = 64;
+
 /// Payload type on the mesh: `{type, rel?, rev?}`.
 const String kReleaseOfferType = 'zen_rel';
 
@@ -300,6 +303,7 @@ final class ReleaseManifest {
     this.official,
     this.mirrors = const <String>[],
     this.extra = const <String, Object?>{},
+    this.rawFiles,
   });
 
   final String version;
@@ -319,6 +323,18 @@ final class ReleaseManifest {
   /// Fields this version does not know, kept so that the signature of a
   /// manifest written by a newer tool still verifies.
   final Map<String, Object?> extra;
+
+  /// The `files` list exactly as received (with entries this build skips:
+  /// another platform's new kind of file, a size it does not take), so the
+  /// signature still verifies; `null` for a manifest made here.
+  final List<Object?>? rawFiles;
+
+  /// The oldest Zen this release still supports (`min`, kept in [extra]),
+  /// when it names one.
+  String? get minVersion {
+    final Object? min = extra['min'];
+    return min is String && min.length <= 30 ? min : null;
+  }
 
   static const Set<String> _known = <String>{
     't',
@@ -342,9 +358,9 @@ final class ReleaseManifest {
     'build': build,
     'at': publishedAt,
     'notes': notes,
-    'files': <Map<String, dynamic>>[
-      for (final ReleaseFile f in files) f.toJson(),
-    ],
+    'files':
+        rawFiles ??
+        <Map<String, dynamic>>[for (final ReleaseFile f in files) f.toJson()],
     if (official != null) 'official': official!.toJson(),
     if (mirrors.isNotEmpty) 'mirrors': mirrors,
     ...extra,
@@ -372,17 +388,30 @@ final class ReleaseManifest {
         (notes != null && (notes is! String || notes.length > 4000)) ||
         files is! List ||
         files.isEmpty ||
-        files.length > 10) {
+        files.length > kMaxReleaseFiles) {
       return null;
     }
+    // An entry this build does not take (a newer tool's new kind of file,
+    // a second file for one platform) is skipped, not a reason to miss the
+    // update: only this platform's own file has to be right.
     final List<ReleaseFile> parsed = <ReleaseFile>[];
     for (final Object? f in files) {
       final ReleaseFile? file = ReleaseFile.fromJson(f);
-      if (file == null ||
-          parsed.any((ReleaseFile p) => p.platform == file.platform)) {
+      if (file != null &&
+          !parsed.any((ReleaseFile p) => p.platform == file.platform)) {
+        parsed.add(file);
+      }
+    }
+    if (parsed.isEmpty) {
+      return null;
+    }
+    try {
+      // Signed as received: must encode the same way (no fractions…).
+      if (canonicalJson(files).length > 64 * 1024) {
         return null;
       }
-      parsed.add(file);
+    } on ArgumentError {
+      return null;
     }
     OfficialInfo? official;
     if (json['official'] != null) {
@@ -427,6 +456,7 @@ final class ReleaseManifest {
         (mirrors as List<Object?>?)?.cast<String>() ?? const <String>[],
       ),
       extra: Map<String, Object?>.unmodifiable(extra),
+      rawFiles: List<Object?>.unmodifiable(files),
     );
   }
 }

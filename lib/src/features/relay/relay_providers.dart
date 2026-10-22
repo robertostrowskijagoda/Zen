@@ -40,6 +40,12 @@ final Provider<RelayProgressSnapshot> relayDeliveryProgressProvider =
       return engine.progress.value;
     });
 
+/// Whether this device is online most of the time and so makes a good
+/// mailbox for friends: a computer (Zen in the tray) or Android (the
+/// background service). An iPhone receives only while Zen is open.
+bool get zenDeviceStaysOnline =>
+    !kIsWeb && defaultTargetPlatform != TargetPlatform.iOS;
+
 /// Overrides that put [ReliableSignalTransport] between the app and
 /// [runtime]. Used by both the UI isolate and the Android background service.
 List buildRelayTransportProviderOverrides({
@@ -58,6 +64,7 @@ List buildRelayTransportProviderOverrides({
           final RelayBlobStore blobs => blobs,
           _ => null,
         },
+        staysOnline: zenDeviceStaysOnline,
       );
     }),
     signalTransportProvider.overrideWith((Ref ref) {

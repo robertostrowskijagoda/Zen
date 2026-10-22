@@ -1,8 +1,6 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:zen/src/core/ledger/ledger_archive.dart';
-import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/circle_backup.dart';
@@ -179,26 +177,12 @@ Future<AccountArchiveBuild> buildAccountArchive(
 
 /// The key of segment [segment] of the log of [writer] in [space].
 String accountLogKey(String space, String writer, int segment) =>
-    'ledger/log-${sha256Hex(utf8.encode('$space|$writer')).substring(0, 32)}'
-    '-$segment';
+    LedgerArchive.logKeyOf(space, writer, segment);
 
 /// The account's log (posts, gallery, films, public profile): its index
-/// (only the logs of the parts chosen), certificates, segments and — with
-/// media — the pieces of its files.
+/// (only the logs of the parts chosen), certificates, segments, file lists
+/// and — with media — the pieces of its files ([LedgerArchive.exportFiles]).
 Future<void> _collectLedger(LedgerDisk disk, AccountArchiveBuilder b) async {
-  final Uint8List? rawIndex = await disk.read(LedgerArchive.indexKey);
-  if (rawIndex == null) {
-    return;
-  }
-  final Object? index;
-  try {
-    index = jsonDecode(utf8.decode(rawIndex));
-  } on FormatException {
-    return;
-  }
-  if (index is! Map) {
-    return;
-  }
   bool allowed(String space) => switch (space.split('/').first) {
     // Copies of this account's chats for its own devices.
     'own' => b.has(AccountScope.chats),
@@ -206,54 +190,13 @@ Future<void> _collectLedger(LedgerDisk disk, AccountArchiveBuilder b) async {
     'private' => b.has(AccountScope.contacts),
     _ => true,
   };
-
-  final List<Map<String, dynamic>> logs = <Map<String, dynamic>>[];
-  for (final Object? log in (index['logs'] as List<dynamic>? ?? <dynamic>[])) {
-    if (log is! Map ||
-        log['s'] is! String ||
-        log['w'] is! String ||
-        log['n'] is! int ||
-        !allowed(log['s'] as String)) {
-      continue;
-    }
-    logs.add(Map<String, dynamic>.from(log));
-    final String space = log['s'] as String;
-    final String writer = log['w'] as String;
-    for (int seg = 0; seg * kAccountLogSegment < (log['n'] as int); seg++) {
-      final String key = accountLogKey(space, writer, seg);
-      final Uint8List? data = await disk.read(key);
-      if (data != null) {
-        b.raw[key] = b.addBytes(data);
-      }
-    }
-  }
-  final Map<String, dynamic> filtered = Map<String, dynamic>.from(index)
-    ..['logs'] = logs;
-  final Object? blobs = index['blobs'];
-  if (blobs is Map) {
-    final List<String> chunks = <String>[
-      if (b.has(AccountScope.media))
-        for (final Object? h
-            in (blobs['chunks'] as List<dynamic>? ?? <dynamic>[]))
-          if (h is String) h,
-    ];
-    filtered['blobs'] = <String, dynamic>{
-      ...Map<String, dynamic>.from(blobs),
-      'chunks': chunks,
-    };
-    for (final String h in chunks) {
-      final String key = DiskBlobChunkBackend.keyOf(h);
-      final Uint8List? data = await disk.read(key);
-      if (data != null) {
-        b.raw[key] = b.addBytes(data);
-      }
-    }
-  }
-  b.raw[LedgerArchive.indexKey] = b.addBytes(
-    Uint8List.fromList(utf8.encode(jsonEncode(filtered))),
+  final Map<String, Uint8List> files = await LedgerArchive.exportFiles(
+    disk,
+    keepSpace: allowed,
+    withPieces: b.has(AccountScope.media),
+    segmentSize: kAccountLogSegment,
   );
-  final Uint8List? certs = await disk.read(LedgerArchive.certificatesKey);
-  if (certs != null) {
-    b.raw[LedgerArchive.certificatesKey] = b.addBytes(certs);
-  }
+  files.forEach((String key, Uint8List data) {
+    b.raw[key] = b.addBytes(data);
+  });
 }

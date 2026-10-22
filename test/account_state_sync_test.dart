@@ -281,4 +281,49 @@ void main() {
     await a.sync.stop();
     await b.sync.stop();
   });
+
+  test('a field an older build does not keep is held, and after its '
+      'update it takes the value instead of sending its default', () async {
+    final _Net net = _Net();
+    final _Device a = _Device(net, 'dev-a', <String, Object?>{'theme': 'x'});
+    final Set<String> unknownToB = <String>{'extra'};
+    final _Device b = _Device(net, 'dev-b', <String, Object?>{
+      'theme': 'x',
+    }, drop: unknownToB);
+    await a.sync.start();
+    await b.sync.start();
+    await _settle(<_Device>[a, b]);
+    a.settings.change((Map<String, Object?> s) => s['extra'] = 7);
+    await _settle(<_Device>[a, b]);
+    expect(b.settings.state.containsKey('extra'), isFalse);
+    // Held on disk, not taken for a deletion (by its unit, like every
+    // other unit of the saved state).
+    final Map<String, dynamic> saved =
+        jsonDecode(utf8.decode((await b.disk.read('account/sync/state'))!))
+            as Map<String, dynamic>;
+    expect(
+      (saved['h'] as Map<String, dynamic>)['settings'],
+      flattenAccountState(<String, Object?>{'extra': 7}),
+    );
+
+    // B is updated: its settings now know the field, at its default.
+    await b.sync.stop();
+    unknownToB.clear();
+    b.settings.state['extra'] = 0;
+    final AccountStateSync updated = AccountStateSync(
+      channel: b.channel,
+      disk: b.disk,
+      domains: <AccountSyncDomain>[b.settings, b.circles],
+      delay: const Duration(milliseconds: 1),
+      scanEvery: const Duration(hours: 1),
+    );
+    await updated.start();
+    await updated.flush();
+    await _settle(<_Device>[a]);
+    await updated.flush();
+    expect(b.settings.state['extra'], 7, reason: 'the held value went in');
+    expect(a.settings.state['extra'], 7, reason: 'the default did not win');
+    await a.sync.stop();
+    await updated.stop();
+  });
 }

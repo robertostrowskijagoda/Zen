@@ -8,6 +8,7 @@ Future<void> showStoreShareDialog(BuildContext context) {
   return showDialog<void>(
     context: context,
     builder: (BuildContext dialog) => AlertDialog(
+      scrollable: true,
       key: const Key('store-share-dialog'),
       icon: const Icon(Icons.volunteer_activism_rounded),
       title: Text(t('Podaj Zen dalej')),

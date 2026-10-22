@@ -55,7 +55,8 @@ class PowerPressCounter(
  *
  * Dart turns it on while the person allows it; a receiver for screen on/off
  * then counts presses for as long as the process lives (the foreground
- * service keeps it alive with the app closed). A completed shortcut vibrates
+ * service keeps it alive with the app closed). Screen on/off wakes the
+ * phone by itself; a completed shortcut holds it awake for a minute. A completed shortcut vibrates
  * and goes to exactly one engine, so the alarm starts once: the background
  * service while it runs the network (the app is away), otherwise the app,
  * otherwise whichever engine still listens.
@@ -170,6 +171,9 @@ object ZenAlarmShortcut {
             return
         }
         val sink = target.sink ?: return
+        // The last press may have turned the screen off: the phone stays
+        // awake while the alarm goes out.
+        ZenPower.hold(context.applicationContext, "alarm-shortcut", 60_000)
         try {
             sink.success(mapOf("type" to "power", "at" to System.currentTimeMillis()))
         } catch (error: Exception) {

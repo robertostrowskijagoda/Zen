@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
@@ -177,6 +178,21 @@ abstract final class PyrT {
 /// published by a keyed signature on the record that introduced it
 /// ([signsWithKeys]) and looked up in [HybridKeyBook], where the service
 /// files the keys of the records it keeps ([fileKeys]).
+/// The version of the pyramid's rules this build applies. A record (the
+/// genesis, or the one from which changed rules hold) carries `rv` when it
+/// needs newer rules; a build that does not know them stops applying
+/// records there ([PyramidState.rulesTooNew]) and asks to be updated,
+/// rather than working out who sits where and who has what differently
+/// from newer phones. Records of these rules carry no `rv`.
+const int kPyramidRulesVersion = 1;
+
+/// What the pyramid shows (and why nothing is signed) while it follows
+/// rules this build does not know.
+String get pyramidUpdateNeededText => t(
+  'Zaktualizuj Zen, żeby widzieć piramidę: działa już według nowszych '
+  'zasad.',
+);
+
 @immutable
 final class PyramidRecord {
   const PyramidRecord({
@@ -264,6 +280,8 @@ final class PyramidRecord {
   /// outside it too.
   bool get signsWithKeys =>
       PyrT.keyed.contains(type) ||
+      // A kind a newer build added says so itself.
+      body['wk'] == true ||
       (type == PyrT.post && (integer('lvl') == 0 || body['all'] == true)) ||
       (type == PyrT.delegate && str('power') == 'posts');
 

@@ -28,7 +28,7 @@ final class AccountRestoreRow {
 String accountRestoreMethodLabel(AccountRestoreMethod m) => switch (m) {
   AccountRestoreMethod.device => t('Inne urządzenie'),
   AccountRestoreMethod.backupFile => t('Plik kopii'),
-  AccountRestoreMethod.circle => t('Krąg zaufanych'),
+  AccountRestoreMethod.circle => t('Krąg odzyskiwania'),
   AccountRestoreMethod.paperKey => t('Kartka z kluczem'),
   AccountRestoreMethod.keyFile => t('Plik klucza'),
 };
@@ -81,11 +81,11 @@ List<AccountRestoreRow> accountRestoreRows() => <AccountRestoreRow>[
 Map<int, String> accountRestoreNotes() => <int, String>{
   1: t('Plik kopii: wraca to, co zaznaczysz przy jej tworzeniu.'),
   2: t(
-    'Po kartce lub pliku klucza reszta wraca z kopii u kręgu, jeśli ją '
+    'Po kartce lub pliku klucza reszta wraca z kopii u znajomych, jeśli ją '
     'masz.',
   ),
-  3: t('Teksty rozmów są w kopii u kręgu, jeśli je tam włączysz.'),
-  4: t('Bez zdjęć: kopia u kręgu jest mała.'),
+  3: t('Teksty rozmów są w kopii u znajomych, jeśli je tam włączysz.'),
+  4: t('Bez zdjęć: kopia u znajomych jest mała.'),
   5: t('Miejsce w piramidzie i portfel potwierdzają osoby z piramidy.'),
   6: t(
     'Ustawienia konta tak; ustawienia urządzenia (blokada, łączność, '
@@ -149,7 +149,7 @@ class AccountRestoreInfoScreen extends StatelessWidget {
             Text(
               t(
                 'Konto wraca na kilka sposobów. Najwięcej daje drugie '
-                'urządzenie albo plik kopii zapasowej; krąg zaufanych i '
+                'urządzenie albo plik kopii całego konta; krąg odzyskiwania i '
                 'klucz pomogą, gdy nie masz żadnego z nich.',
               ),
               style: TextStyle(color: zen.textSecondary, height: 1.4),
@@ -221,24 +221,25 @@ class AccountRestoreInfoScreen extends StatelessWidget {
                 'kółka, piramidę, a także kopię mieszkania. Pliki idą przez '
                 'Wi-Fi (przez dane komórkowe, gdy „Media tylko przez Wi-Fi” '
                 'jest wyłączone). Na starym urządzeniu: Konto i '
-                'odzyskiwanie → Przenieś na inne urządzenie; na nowym: '
+                'odzyskiwanie → Dodaj drugie urządzenie lub przenieś konto; '
+                'na nowym: '
                 'Odzyskaj z innego urządzenia i zeskanuj kod. Przerwane '
                 'przenoszenie wznowisz od miejsca, w którym stanęło.',
               ),
             ),
             _Way(
               icon: Icons.save_alt_rounded,
-              title: t('Plik kopii'),
+              title: t('Kopia całego konta (plik)'),
               text: t(
-                'Konto i odzyskiwanie → Utwórz kopię zapasową. Wybierasz, co '
+                'Konto i odzyskiwanie → Utwórz kopię całego konta. Wybierasz, co '
                 'ma się w niej znaleźć; plik jest zaszyfrowany hasłem, '
                 'którego nikt poza Tobą nie zna — bez hasła nie otworzy go '
-                'nikt, także Ty. Przywracasz przez „Mam backup”.',
+                'nikt, także Ty. Przywracasz przez „Mam kopię”.',
               ),
             ),
             _Way(
               icon: Icons.groups_2_outlined,
-              title: t('Krąg zaufanych'),
+              title: t('Krąg odzyskiwania'),
               text: t(
                 'Osoby z kręgu oddają kawałki klucza: z hasłem konta po '
                 '24 h, bez hasła po 7 dniach. Potem z ich kopii wracają '

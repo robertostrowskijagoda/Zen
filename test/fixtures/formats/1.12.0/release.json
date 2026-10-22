@@ -1,0 +1,21 @@
+{
+  "format": "release",
+  "written": "1.12.0",
+  "manifest": {
+    "t": "zen_release",
+    "app": "zen",
+    "version": "1.12.0",
+    "build": 12,
+    "at": 1790000000000,
+    "notes": "",
+    "files": [
+      {
+        "p": "android",
+        "name": "Zen.apk",
+        "size": 1000,
+        "blob": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ]
+  }
+}

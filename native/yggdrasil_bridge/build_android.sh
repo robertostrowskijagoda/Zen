@@ -81,8 +81,12 @@ for abi in $abis; do
   out="$project/android/app/src/main/jniLibs/$abi"
   mkdir -p "$out"
   echo "Go bridge: building android/$abi"
+  # 16 KB pages (Android 15+ devices, required by Google Play): Go's linker
+  # does not choose the page size, the NDK's does (16 KB only from r28), so
+  # it is asked for explicitly; tool/ci/check_page_alignment.py checks it.
   env GOOS=android GOARCH="$goarch" GOARM="$goarm" CGO_ENABLED=1 CC="$bin/$clang" \
-    go build -trimpath -buildmode=c-shared -ldflags='-s -w -checklinkname=0' \
+    go build -trimpath -buildmode=c-shared \
+    -ldflags='-s -w -checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384' \
     -o "$out/libyggdrasil_bridge.so" .
   if [ -x "$bin/llvm-strip" ]; then
     "$bin/llvm-strip" --strip-unneeded "$out/libyggdrasil_bridge.so"

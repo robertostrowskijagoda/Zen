@@ -75,7 +75,7 @@ void main() {
       expect(held.mailboxCopies, 3);
       expect(
         messageDeliveryLabel(held),
-        'Czeka na odbiór u zaufanych znajomych odbiorcy (3)',
+        'Czeka w skrzynkach u znajomych odbiorcy (3)',
       );
       expect(
         _stage(
@@ -248,7 +248,7 @@ void main() {
       'Wysyłanie…',
       'Czeka u Ciebie — odbiorca offline',
       'Czeka u Ciebie — dojdzie, gdy oboje będziecie online',
-      'Czeka na odbiór u zaufanych znajomych odbiorcy (N)',
+      'Czeka w skrzynkach u znajomych odbiorcy (N)',
       'Wysłano',
       'Dostarczono',
       'Przeczytano',
@@ -306,13 +306,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('message-delivery-details')), findsOneWidget);
     expect(
-      find.text('Czeka na odbiór u zaufanych znajomych odbiorcy (2)'),
+      find.text('Czeka w skrzynkach u znajomych odbiorcy (2)'),
       findsOneWidget,
     );
     expect(
-      find.text(
-        'Jedną z kopii trzymasz Ty — jesteś zaufanym znajomym odbiorcy.',
-      ),
+      find.text('Jedną z kopii trzymasz Ty — jesteś skrzynką odbiorcy.'),
       findsOneWidget,
     );
     expect(find.byKey(const Key('message-delivery-legend')), findsOneWidget);
@@ -353,5 +351,30 @@ void main() {
     await tester.pumpAndSettle();
     expect(retries, 1);
     expect(find.byKey(const Key('message-delivery-details')), findsNothing);
+  });
+
+  test('an iPhone says it sends only while Zen is open', () {
+    expect(
+      messageDeliveryStageLabel(MessageDeliveryStage.waitingHere, iPhone: true),
+      'Czeka na Twoim iPhonie — odbiorca offline',
+    );
+    expect(
+      messageDeliveryExplanation(
+        MessageDeliveryStage.waitingHere,
+        iPhone: true,
+      ),
+      contains('gdy Zen będzie otwarty, a odbiorca w sieci'),
+    );
+    expect(
+      messageDeliveryExplanation(
+        MessageDeliveryStage.waitingHere,
+        iPhone: false,
+      ),
+      contains('jest ponawiana, aż dotrze'),
+    );
+    expect(
+      messageDeliveryExplanation(MessageDeliveryStage.sent, iPhone: true),
+      isNot(contains('będzie ponawiana, aż dotrze')),
+    );
   });
 }

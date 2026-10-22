@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// Most payloads the locked service keeps delivering.
@@ -179,7 +180,7 @@ final class LockedOutbox {
   final Map<String, Set<String>> _depositedTo = <String, Set<String>>{};
   final Map<String, int> _lastSentTo = <String, int>{};
   StreamSubscription<SignalTransportFrame>? _subscription;
-  Timer? _timer;
+  WakeTimer? _timer;
   int _round = 0;
   bool _running = false;
 
@@ -215,13 +216,15 @@ final class LockedOutbox {
         ? const Duration(hours: 1)
         : schedule[min(_round, schedule.length - 1)];
     _timer?.cancel();
-    _timer = Timer(wait, () {
+    // An alarm: the round runs also while the phone sleeps, which stays
+    // awake for the sends.
+    _timer = ZenWake.after('locked-outbox', wait, () {
       _round++;
       unawaitedLogged(
         runRound().whenComplete(_schedule),
         context: 'Locked outbox round failed',
       );
-    });
+    }, hold: const Duration(seconds: 20));
   }
 
   /// One round: every payload to its recipient and to the mailboxes that

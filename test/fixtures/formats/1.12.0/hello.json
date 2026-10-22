@@ -1,0 +1,16 @@
+{
+  "format": "hello",
+  "written": "1.12.0",
+  "hello": {
+    "ver": "1.11.0",
+    "build": 11,
+    "caps": [
+      "ledger1",
+      "relay1",
+      "group_call1",
+      "disappear1",
+      "meet1"
+    ],
+    "minv": "1.11.0"
+  }
+}

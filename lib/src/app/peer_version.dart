@@ -14,6 +14,13 @@ const List<String> kZenCaps = <String>[
   'meet1',
 ];
 
+/// The oldest Zen this build still talks to, sent as `minv` in every ping
+/// and pong. Raised only when a change breaks talking to older builds (a
+/// protocol fix that cannot stay compatible); never above [kAppVersion]
+/// (a test checks it). A friend whose Zen is older is told to update
+/// instead of quietly missing messages.
+const String kMinPeerVersion = '1.11.0';
+
 /// Most capability names taken from one peer.
 const int kMaxPeerCaps = 32;
 
@@ -29,6 +36,7 @@ Map<String, dynamic> versionHello() => <String, dynamic>{
   'ver': kAppVersion,
   'build': kAppBuild,
   'caps': kZenCaps,
+  'minv': kMinPeerVersion,
 };
 
 /// What a friend said about their app in a ping or pong.
@@ -41,6 +49,7 @@ final class PeerVersion {
     required this.version,
     this.build,
     this.caps = const <String>[],
+    this.minVersion,
   });
 
   /// `major.minor.patch`.
@@ -48,7 +57,16 @@ final class PeerVersion {
   final int? build;
   final List<String> caps;
 
+  /// The oldest Zen the peer still talks to (`minv`), when it said.
+  final String? minVersion;
+
   bool hasCap(String cap) => caps.contains(cap);
+
+  /// Whether the peer no longer talks to a Zen as old as [ours].
+  bool refuses(String ours) {
+    final String? min = minVersion;
+    return min != null && compareAppVersions(ours, min) < 0;
+  }
 
   /// Reads `ver` / `build` / `caps` from a ping or pong; `null` when the
   /// peer sent no (valid) version.
@@ -58,10 +76,18 @@ final class PeerVersion {
       return null;
     }
     final Object? build = payload['build'];
+    final Object? minv = payload['minv'];
     return PeerVersion(
       version: ver,
       build: build is int && build >= 0 && build < 1 << 31 ? build : null,
       caps: capsFromPayload(payload['caps']),
+      // Never above the peer's own version (that would be nonsense).
+      minVersion:
+          minv is String &&
+              isValidAppVersion(minv) &&
+              compareAppVersions(minv, ver) <= 0
+          ? minv
+          : null,
     );
   }
 }

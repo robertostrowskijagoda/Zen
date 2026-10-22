@@ -7,6 +7,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 
 /// This installation's account and device keys.
@@ -209,6 +210,25 @@ final class LedgerIdentity {
     }
   }
 
+  /// This identity with a fresh [writer], saved: for a device whose own
+  /// log could not be read back whole. Writing on under the old writer
+  /// would number new entries like the lost ones, and everyone who holds
+  /// those would see two histories (a fork) and refuse the log for good.
+  Future<LedgerIdentity> withNewWriter(LedgerDisk disk) async {
+    final LedgerIdentity renewed = LedgerIdentity._(
+      account: account,
+      accountKey: _accountKey,
+      deviceKey: deviceKey,
+      certificate: certificate,
+      writer: randomId(),
+      pyramidSeed: pyramidSeed,
+      wrapped: _wrapped,
+      selfKey: _selfKey,
+    );
+    await renewed._save(disk);
+    return renewed;
+  }
+
   Future<void> _save(LedgerDisk disk) async {
     final PasswordWrappedSeed? w = wrapped;
     await disk.write(
@@ -244,6 +264,16 @@ final class LedgerIdentity {
     }
     if (json is! Map) {
       return null;
+    }
+    if (formatAgeOf(json['v'], current: _wrappedVersion) == FormatAge.newer) {
+      // A newer build's identity: kept as it is and never replaced by a
+      // fresh one (that would be a different account).
+      holdNewerOn(disk, storageKey);
+      throw NewerFormatException(
+        storageKey,
+        found: json['v'],
+        supported: _wrappedVersion,
+      );
     }
     final Uint8List? deviceSeed = unb64(json['device'], length: 32);
     final DeviceCertificate? cert = DeviceCertificate.fromJson(json['cert']);

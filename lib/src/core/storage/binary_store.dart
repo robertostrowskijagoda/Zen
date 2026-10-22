@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/core/storage/storage_health.dart';
 import 'package:zstandard/zstandard.dart';
 
@@ -165,7 +166,8 @@ final class BinaryCodec {
     return envelope;
   }
 
-  /// The payload of [envelope]; a [FormatException] for anything but a
+  /// The payload of [envelope]; a [NewerFormatException] for an envelope
+  /// a newer build wrote, a [FormatException] for anything else but a
   /// well-formed envelope of [currentVersion].
   Future<Uint8List> decode(Uint8List envelope) async {
     if (envelope.length < _headerLength) {
@@ -173,6 +175,13 @@ final class BinaryCodec {
     }
     _validateMagic(envelope);
     final int version = envelope[4];
+    if (version > currentVersion) {
+      throw NewerFormatException(
+        'binary envelope',
+        found: version,
+        supported: currentVersion,
+      );
+    }
     if (version != currentVersion) {
       throw FormatException('Unsupported binary envelope version: $version.');
     }
@@ -326,10 +335,43 @@ final class FileBinaryStore {
 
   final Map<String, Future<void>> _writeLocks = <String, Future<void>>{};
 
+  /// Keys (canonical) whose file a newer build wrote: never written over or
+  /// deleted while this build runs ([holdNewer]).
+  final Set<String> _heldNewer = <String>{};
+
   static BinaryStoreNameKeySource? _nameKeySourceOf(Object? protector) =>
       protector is BinaryStoreNameKeySource ? protector : null;
 
+  /// Keeps the file of [key] exactly as it is: a newer build wrote it in a
+  /// format this one cannot read. Writes and deletes of [key] are skipped
+  /// from now on (the app works with defaults for it), and
+  /// [ZenFormatGuard] tells the user to update.
+  void holdNewer(String key) {
+    final String canonical = _canonicalKey(key);
+    if (_heldNewer.add(canonical)) {
+      ZenFormatGuard.instance.noteNewer(canonical);
+    }
+  }
+
+  /// Whether [key] is held by [holdNewer].
+  bool isHeldNewer(String key) => _heldNewer.contains(_canonicalKey(key));
+
+  /// Whether the JSON document [json] read from [key] names (in `v`) a
+  /// format above [current]; the key is then held ([holdNewer]) and the
+  /// caller reads it as missing.
+  bool heldAsNewer(String key, Object? json, {required int current}) {
+    if (jsonFormatAge(json, current: current) != FormatAge.newer) {
+      return false;
+    }
+    holdNewer(key);
+    return true;
+  }
+
   Future<File> write(String key, Uint8List payload) async {
+    if (_heldNewer.contains(_canonicalKey(key))) {
+      logZenWarning('Zapis pominięty: plik zapisała nowsza wersja Zen.');
+      return _fileFor(key);
+    }
     final _StorePlace place = await _placeOf(key);
     return _locked(place.canonicalKey, () => _writeLocked(place, payload));
   }
@@ -473,11 +515,29 @@ final class FileBinaryStore {
   /// Removes `*.tmp` files under the store older than [olderThan]: what a
   /// write killed between creating and moving its file leaves behind.
   /// Returns how many were removed.
+  ///
+  /// The walk over every file runs at most once per [every] (a marker file
+  /// in the store remembers when): starts stay quick with many files.
   Future<int> sweepOrphanTemporaries({
     Duration olderThan = kOrphanTemporaryAge,
+    Duration every = Duration.zero,
   }) async {
     if (!await rootDirectory.exists()) {
       return 0;
+    }
+    if (every > Duration.zero) {
+      final File marker = File(
+        '${rootDirectory.path}${Platform.pathSeparator}.swept',
+      );
+      try {
+        if (await marker.exists() &&
+            DateTime.now().difference(await marker.lastModified()) < every) {
+          return 0;
+        }
+        await marker.writeAsString('', flush: true);
+      } on FileSystemException {
+        // Sweep anyway.
+      }
     }
     final DateTime cutoff = DateTime.now().subtract(olderThan);
     int removed = 0;
@@ -512,6 +572,11 @@ final class FileBinaryStore {
       if (primary != null) {
         return primary;
       }
+    } on NewerFormatException {
+      // Not damaged: written by a newer build. Kept as it is (an older
+      // backup would be saved over it).
+      holdNewer(key);
+      rethrow;
     } catch (error) {
       // Fall through to the backup: an unreadable primary is exactly what the
       // backup is for, and reporting "nothing stored" would let the caller
@@ -567,6 +632,9 @@ final class FileBinaryStore {
   }
 
   Future<void> delete(String key) async {
+    if (_heldNewer.contains(_canonicalKey(key))) {
+      return;
+    }
     final _StorePlace place = await _placeOf(key);
     await _deleteWithExtras(place.file);
   }
@@ -660,9 +728,12 @@ final class FileBinaryStore {
     final String rootPath = _normalizedFileSystemPath(
       rootDirectory.absolute.path,
     );
+    // In one of 256 subfolders (by the name's first two hex digits): tens
+    // of thousands of files in one folder slow every listing down.
     final File hidden = File(
       _normalizedFileSystemPath(
-        '$rootPath$separator$kHiddenNamesFolder$separator$name.zenbin',
+        '$rootPath$separator$kHiddenNamesFolder$separator'
+        '${name.substring(0, 2)}$separator$name.zenbin',
       ),
     );
     return _StorePlace(canonicalKey: canonical, file: hidden);

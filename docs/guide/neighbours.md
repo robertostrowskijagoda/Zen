@@ -64,9 +64,11 @@ Each phone keeps its own resident key and its own first name in the flat
 (**Your name in the flat**); messages to neighbours are signed with that
 name, never with the account name.
 
-**Leave** on one phone makes the others create a new household key, a new
-sticker secret and new doors: the phone that left can no longer sign or read
-anything. (Reprint the sticker.) To remove a phone that will not leave,
+**Unlink this phone** (for example when someone moves out alone) makes the
+others create a new household key, a new sticker secret and new doors: the
+unlinked phone can no longer sign or read anything. (Reprint the sticker.)
+On the last phone of a flat the same button says that the flat's profile,
+neighbours and their messages will be gone. To remove a phone that will not leave,
 housemates vote; a majority of the others decides. In a household of **two**,
 the other resident is asked first: **I agree** removes the phone at once,
 **I disagree** keeps it, and with no answer for 7 days it is removed. Both
@@ -89,7 +91,11 @@ switch to it by themselves and ignore the old door from then on; the old
 phone stops when it hears about the move and never takes the flat back on
 its own. Print a new sticker: the old one leads to the old door. After
 cutting off a lost device in **Settings → Devices**, Zen offers the move at
-once. A restored backup also brings the flat back as such a copy.
+once. A restored full account copy also brings the flat back as such a copy.
+
+**Newer stickers.** A sticker printed by a newer Zen still scans as long
+as it carries what this version understands; when the newer version marks
+it as not readable by older ones, the scanner asks you to update Zen.
 
 **Show my profile.** In a neighbour's screen a resident can reveal their own
 Zen account (never the other housemates') to make friends.

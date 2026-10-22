@@ -5,6 +5,7 @@ import 'package:zen/src/app/theme/zen_backdrop.dart';
 import 'package:zen/src/app/theme/zen_concept.dart';
 import 'package:zen/src/app/theme/zen_motion.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
@@ -271,7 +272,6 @@ void main() {
                 ZenFadeSlide(child: Text('Motion')),
                 ZenNeonFlicker(color: Colors.amber, child: Text('Neon')),
                 ZenPressable(child: Text('Pressable')),
-                ZenNeonGlitchText(text: 'Glitch'),
               ],
             ),
           ),
@@ -281,7 +281,6 @@ void main() {
       expect(find.text('Motion'), findsOneWidget);
       expect(find.text('Neon'), findsOneWidget);
       expect(find.text('Pressable'), findsOneWidget);
-      expect(find.text('Glitch'), findsOneWidget);
     });
 
     testWidgets('motion widgets run their live waveforms without error', (
@@ -307,11 +306,6 @@ void main() {
                   child: Icon(Icons.phone),
                 ),
                 ZenNeonFlicker(color: Colors.amber, child: Text('Neon')),
-                ZenNeonGlitchText(
-                  text: 'GLITCH',
-                  minQuietSeconds: 0,
-                  maxQuietSeconds: 1,
-                ),
               ],
             ),
           ),
@@ -329,6 +323,121 @@ void main() {
       // Unmount so no perpetual ticker or flicker timer outlives the test.
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
+      expect(ZenMotion.clockRunning, isFalse);
+    });
+
+    testWidgets('the status dot is still and pulses briefly when it turns on', (
+      WidgetTester tester,
+    ) async {
+      final bool previous = ZenMotion.enabled;
+      ZenMotion.enabled = true;
+      addTearDown(() => ZenMotion.enabled = previous);
+      final ValueNotifier<bool> online = ValueNotifier<bool>(true);
+      addTearDown(online.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ZenTheme.dark(AppSettings.defaultAccentTheme, AppPalette.rain),
+          home: Scaffold(
+            body: ValueListenableBuilder<bool>(
+              valueListenable: online,
+              builder: (BuildContext context, bool on, Widget? _) =>
+                  ZenStatusDot(on: on),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      // Online and shown: nothing animates.
+      expect(ZenMotion.clockRunning, isFalse);
+
+      online.value = false;
+      await tester.pump();
+      online.value = true;
+      await tester.pump();
+      expect(ZenMotion.clockRunning, isTrue, reason: 'a brief pulse');
+      await tester.pump(kZenBriefPulse + const Duration(milliseconds: 100));
+      await tester.pump();
+      expect(ZenMotion.clockRunning, isFalse, reason: 'still again');
+
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('perpetual motion respects "remove animations" and stops in '
+        'an inactive window', (WidgetTester tester) async {
+      final bool previous = ZenMotion.enabled;
+      ZenMotion.enabled = true;
+      addTearDown(() => ZenMotion.enabled = previous);
+      Widget app({required bool reduced}) => MaterialApp(
+        home: MediaQuery(
+          data: MediaQueryData(disableAnimations: reduced),
+          child: const Scaffold(
+            body: Column(
+              children: <Widget>[
+                ZenAnimatedDots(size: 4),
+                ZenPulsingDot(color: Colors.green),
+                ZenPulseRings(color: Colors.blue, child: Icon(Icons.phone)),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(app(reduced: true));
+      await tester.pump();
+      expect(ZenMotion.clockRunning, isFalse);
+
+      await tester.pumpWidget(app(reduced: false));
+      await tester.pump();
+      expect(ZenMotion.clockRunning, isTrue);
+
+      // A computer's window behind others (or the app in the background).
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      expect(ZenMotion.clockRunning, isFalse);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      expect(ZenMotion.clockRunning, isTrue);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(ZenMotion.clockRunning, isFalse);
+    });
+
+    testWidgets('the neon lamp flickers once, then on a new count only', (
+      WidgetTester tester,
+    ) async {
+      final bool previous = ZenMotion.enabled;
+      ZenMotion.enabled = true;
+      addTearDown(() => ZenMotion.enabled = previous);
+      Widget lamp(int count) => MaterialApp(
+        home: Scaffold(
+          body: ZenNeonFlicker(
+            color: Colors.amber,
+            trigger: count,
+            child: Text('$count'),
+          ),
+        ),
+      );
+
+      // While a burst plays, the lamp draws in a layer of its own.
+      final Finder flickering = find.descendant(
+        of: find.byType(ZenNeonFlicker),
+        matching: find.byType(RepaintBoundary),
+      );
+      await tester.pumpWidget(lamp(1));
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(flickering, findsOneWidget, reason: 'a burst when it appears');
+      // A burst lasts well under three seconds; then it glows still.
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump(const Duration(seconds: 3));
+      expect(flickering, findsNothing);
+      await tester.pump(const Duration(seconds: 30));
+      expect(flickering, findsNothing, reason: 'no bursts on its own');
+
+      await tester.pumpWidget(lamp(2));
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(flickering, findsOneWidget, reason: 'a new count');
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpWidget(const SizedBox.shrink());
     });
 
     testWidgets('CallFloatingOverlay renders child when no active call', (

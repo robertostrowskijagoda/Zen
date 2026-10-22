@@ -138,6 +138,90 @@ void main() {
     },
   );
 
+  test('long in the background the app drops to receive-only', () {
+    final DateTime left = DateTime(2026, 10, 22, 12);
+    expect(shouldDropToReceiveOnly(backgroundSince: null, now: left), isFalse);
+    expect(
+      shouldDropToReceiveOnly(
+        backgroundSince: left,
+        now: left.add(const Duration(minutes: 4)),
+      ),
+      isFalse,
+    );
+    expect(
+      shouldDropToReceiveOnly(
+        backgroundSince: left,
+        now: left.add(kAndroidReceiveOnlyAfter),
+      ),
+      isTrue,
+    );
+    // A clock set back does not count as time in the background.
+    expect(
+      shouldDropToReceiveOnly(
+        backgroundSince: left,
+        now: left.subtract(const Duration(hours: 1)),
+      ),
+      isFalse,
+    );
+  });
+
+  testWidgets(
+    'unlocked but long in the background ("Nigdy"), the node goes to the '
+    'receive-only service anyway',
+    (WidgetTester tester) async {
+      final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
+      final _FakeAndroidBackgroundServiceController service =
+          _FakeAndroidBackgroundServiceController();
+      final MemoryAppSecurityService security = MemoryAppSecurityService(
+        settings: const AppSettings(lockMode: AppLockMode.never),
+        hasPassword: true,
+        locked: false,
+      );
+      addTearDown(runtime.dispose);
+      await runtime.start();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            ..._bridgeOverrides(
+              service: service,
+              runtime: runtime,
+              security: security,
+              vault: _FakeBackgroundVault(),
+            ),
+            androidReceiveOnlyAfterProvider.overrideWithValue(Duration.zero),
+          ],
+          child: const MaterialApp(
+            home: AndroidBackgroundRuntimeBridge(child: SizedBox.shrink()),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(service.modes.last, AndroidBackgroundRuntimeMode.standby);
+      expect(runtime.snapshot.serviceRunning, isTrue);
+
+      final ProviderContainer container = ProviderScope.containerOf(
+        tester.element(find.byType(AndroidBackgroundRuntimeBridge)),
+      );
+      await container
+          .read(socialHubControllerProvider.notifier)
+          .setLifecycle(
+            const LifecycleSnapshot(
+              visibility: AppVisibilityState.background,
+              generation: 2,
+              capturedAtMillis: 1,
+            ),
+          );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(security.isLocked, isFalse);
+      expect(service.modes.last, AndroidBackgroundRuntimeMode.active);
+      expect(runtime.snapshot.serviceRunning, isFalse);
+    },
+  );
+
   testWidgets(
     'after unlock the app takes the node back and drains the inbox into it',
     (WidgetTester tester) async {

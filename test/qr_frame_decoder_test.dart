@@ -153,6 +153,37 @@ void main() {
     expect(camera.calls.last, 'close');
   });
 
+  testWidgets('the camera goes off while the window is hidden', (
+    WidgetTester tester,
+  ) async {
+    // No code ever: it would keep looking.
+    final _FrameCamera camera = _FrameCamera(null);
+    await _open(tester, camera);
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(camera.calls.first, 'open front');
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(camera.calls.last, 'close');
+    final int frames = camera.calls.where((String c) => c == 'frame').length;
+    await tester.pump(const Duration(seconds: 1));
+    expect(
+      camera.calls.where((String c) => c == 'frame').length,
+      frames,
+      reason: 'no pictures taken while hidden',
+    );
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(camera.calls.where((String c) => c == 'open front'), hasLength(2));
+    expect(
+      camera.calls.where((String c) => c == 'frame').length,
+      greaterThan(frames),
+    );
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('without a camera a copied code can be pasted', (
     WidgetTester tester,
   ) async {

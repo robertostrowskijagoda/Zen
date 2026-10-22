@@ -106,9 +106,13 @@ class _CallCompactLayerState extends ConsumerState<CallCompactLayer> {
 /// hang up) and can be dragged; in Android's picture-in-picture the system
 /// draws the buttons.
 class CallCompactView extends ConsumerStatefulWidget {
-  const CallCompactView({required this.session, super.key});
+  const CallCompactView({required this.session, this.interactive, super.key});
 
   final CallSession session;
+
+  /// Whether the view draws its own buttons; by default only on a
+  /// computer (Android's picture-in-picture has the system's).
+  final bool? interactive;
 
   @override
   ConsumerState<CallCompactView> createState() => _CallCompactViewState();
@@ -118,7 +122,8 @@ class _CallCompactViewState extends ConsumerState<CallCompactView> {
   Timer? _ticker;
 
   bool get _interactive =>
-      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+      widget.interactive ??
+      (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS));
 
   @override
   void initState() {
@@ -168,6 +173,17 @@ class _CallCompactViewState extends ConsumerState<CallCompactView> {
                 media.remoteRenderer?.srcObject != null
             ? media.remoteRenderer
             : null;
+        // Over the remote video the type stays white on a shadow
+        // (see ZenFixed); otherwise it follows the theme.
+        final TextStyle status = TextStyle(
+          color: remote != null ? ZenFixed.onPhoto : zen.textSecondary,
+          fontSize: 12.5,
+          fontWeight: FontWeight.w600,
+          fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+          shadows: remote != null
+              ? const <Shadow>[Shadow(blurRadius: 4)]
+              : null,
+        );
         return Stack(
           fit: StackFit.expand,
           children: <Widget>[
@@ -182,34 +198,41 @@ class _CallCompactViewState extends ConsumerState<CallCompactView> {
               )
             else
               Center(
-                child: _Who(session: s, zen: zen),
+                child: _Who(session: s, zen: zen, buttons: _interactive),
               ),
             Positioned(
               left: 8,
               top: 6,
               right: 8,
-              child: Text(
-                remote != null
-                    ? '${s.displayName} · ${_status(s)}'
-                    : _status(s),
-                key: const Key('call-compact-status'),
-                textAlign: remote != null ? TextAlign.start : TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                // Over the remote video the type stays white on a shadow
-                // (see ZenFixed); otherwise it follows the theme.
-                style: TextStyle(
-                  color: remote != null ? ZenFixed.onPhoto : zen.textSecondary,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  fontFeatures: const <FontFeature>[
-                    FontFeature.tabularFigures(),
-                  ],
-                  shadows: remote != null
-                      ? const <Shadow>[Shadow(blurRadius: 4)]
-                      : null,
-                ),
-              ),
+              // Over the video: the name gives way, the time always shows.
+              child: remote != null
+                  ? Row(
+                      children: <Widget>[
+                        Flexible(
+                          child: Text(
+                            s.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: status,
+                          ),
+                        ),
+                        Text(
+                          ' · ${_status(s)}',
+                          key: const Key('call-compact-status'),
+                          maxLines: 1,
+                          style: status,
+                        ),
+                      ],
+                    )
+                  : Text(
+                      _status(s),
+                      key: const Key('call-compact-status'),
+                      textAlign: TextAlign.center,
+                      // Longer translations of "connecting" wrap.
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: status,
+                    ),
             ),
             if (_interactive)
               Positioned(
@@ -232,60 +255,95 @@ class _CallCompactViewState extends ConsumerState<CallCompactView> {
 }
 
 class _Who extends StatelessWidget {
-  const _Who({required this.session, required this.zen});
+  const _Who({required this.session, required this.zen, required this.buttons});
 
   final CallSession session;
   final ZenColors zen;
 
+  /// Whether the view's own buttons sit under it (room is kept for them).
+  final bool buttons;
+
   @override
   Widget build(BuildContext context) {
     final String name = session.displayName.trim();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 22, 12, 52),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Container(
-            width: 44,
-            height: 44,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                colors: <Color>[
-                  zen.accent,
-                  Color.lerp(zen.accent, zen.accentSecondary, 0.5)!,
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: session.isGroup
-                ? Icon(Icons.groups_rounded, color: zen.onAccent)
-                : Text(
-                    name.isEmpty ? '?' : name.characters.first.toUpperCase(),
-                    style: zen.display(
-                      color: zen.onAccent,
-                      size: 20,
-                      weight: FontWeight.w600,
-                    ),
-                  ),
-          ),
-          const SizedBox(width: 10),
-          Flexible(
-            child: Text(
-              name.isEmpty ? t('Rozmowa') : name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: zen.textPrimary,
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
+    final Widget avatar = Container(
+      width: 44,
+      height: 44,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          colors: <Color>[
+            zen.accent,
+            Color.lerp(zen.accent, zen.accentSecondary, 0.5)!,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
       ),
+      child: session.isGroup
+          ? Icon(Icons.groups_rounded, color: zen.onAccent)
+          : Text(
+              name.isEmpty ? '?' : name.characters.first.toUpperCase(),
+              style: zen.display(
+                color: zen.onAccent,
+                size: 20,
+                weight: FontWeight.w600,
+              ),
+            ),
+    );
+    final TextStyle style = TextStyle(
+      color: zen.textPrimary,
+      fontSize: 15,
+      fontWeight: FontWeight.w700,
+    );
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints box) {
+        // Android's picture-in-picture can be ~108 dp wide: the name goes
+        // under the picture, on one line, instead of beside it.
+        final bool narrow = box.maxWidth < 160;
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            narrow ? 6 : 12,
+            22,
+            narrow ? 6 : 12,
+            buttons ? 52 : 8,
+          ),
+          child: narrow
+              ? Column(
+                  key: const Key('call-compact-who-narrow'),
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Flexible(
+                      child: FittedBox(fit: BoxFit.scaleDown, child: avatar),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      name.isEmpty ? t('Rozmowa') : name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: style,
+                    ),
+                  ],
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    avatar,
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        name.isEmpty ? t('Rozmowa') : name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: style,
+                      ),
+                    ),
+                  ],
+                ),
+        );
+      },
     );
   }
 }

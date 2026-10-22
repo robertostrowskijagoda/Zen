@@ -26,11 +26,50 @@ enum ZenIntegrityBridge {
     channel.setMethodCallHandler { call, result in
       if call.method == "check" {
         result(check())
+      } else if call.method == "signingExpiry" {
+        if let millis = signingExpiry() {
+          result(NSNumber(value: millis))
+        } else {
+          result(nil)
+        }
       } else {
         result(FlutterMethodNotImplemented)
       }
     }
     self.channel = channel
+  }
+
+  /// When the provisioning profile this build was signed with expires
+  /// (milliseconds since the epoch): a sideloaded Zen (SideStore, a free
+  /// Apple ID) stops opening then unless it is refreshed. `nil` where the
+  /// app carries no profile (App Store, the simulator, the Mac).
+  static func signingExpiry() -> Int64? {
+    #if os(iOS)
+      guard
+        let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+        let data = try? Data(contentsOf: url)
+      else {
+        return nil
+      }
+      // A signed CMS envelope around a plain XML property list.
+      guard let start = data.range(of: Data("<?xml".utf8)),
+        let end = data.range(of: Data("</plist>".utf8), in: start.lowerBound..<data.endIndex)
+      else {
+        return nil
+      }
+      let plist = data.subdata(in: start.lowerBound..<end.upperBound)
+      guard
+        let object = try? PropertyListSerialization.propertyList(
+          from: plist, options: [], format: nil),
+        let profile = object as? [String: Any],
+        let expires = profile["ExpirationDate"] as? Date
+      else {
+        return nil
+      }
+      return Int64(expires.timeIntervalSince1970 * 1000)
+    #else
+      return nil
+    #endif
   }
 
   private static let fridaMarks = ["frida", "gum-js-loop", "linjector"]

@@ -15,9 +15,15 @@ or from a friend.
 |---|---|---|
 | Android (arm64, armv7, x86_64) | `Zen.apk`, straight from the page | download, open, **Install** |
 | iPhone (iOS 15+) | **SideStore**, with the "Add Zen source" link | 8 short steps, a computer once |
-| Windows x64 / ARM64 | `Zen-Windows.zip` / `Zen-Windows-arm64.zip` | unpack, run `zen.exe` |
-| macOS 12+ | `Zen-macOS.zip` | drag to Applications, right-click → **Open** |
-| Linux x64 / arm64 | `.deb`, Flatpak (x64), `.tar.gz` | one command |
+| Windows x64 / ARM64 | `Zen-Windows.zip` / `Zen-Windows-arm64.zip` | unpack, run `zen.exe` (the Visual C++ runtime is inside) |
+| macOS 12+ | `Zen-macOS.zip` | drag to Applications; first launch: **Privacy & Security → Open Anyway** |
+| Linux x64 / arm64 | `.deb`, Flatpak (x64), `.tar.gz` | one command; Ubuntu 22.04, Debian 12, Mint 21 or newer (glibc 2.35+), elsewhere the Flatpak |
+
+**Windows 11 with Smart App Control** blocks unsigned apps with no *Run
+anyway*. Zen is not code-signed yet, so either use it on another device or
+turn Smart App Control off (Windows Security → App & browser control →
+Smart App Control settings → Off), which lowers protection for the whole
+computer.
 
 **iPhone in short.** An iPhone app cannot install other apps, so Zen goes
 through SideStore. Once, with a computer and a cable: install
@@ -25,8 +31,12 @@ through SideStore. Once, with a computer and a cable: install
 SideStore on the phone, turn on **Developer Mode** and trust your Apple ID.
 Then, on the phone, add the Zen source
 (`https://robertostrowskijagoda.github.io/Zen/apps.json`, one tap on the
-install page) and tap **Install**. SideStore refreshes Zen every 7 days by
-itself. A free Apple ID allows 3 such apps at a time (SideStore counts).
+install page) and tap **Install**. With a free Apple ID the signature
+**expires after 7 days**: once a week turn on LocalDevVPN, open SideStore
+and tap **Refresh** (your data stays). Zen reminds you in Chats 2 days
+before. A free Apple ID allows 3 such apps at a time (SideStore counts).
+On iPhone Zen receives and sends only while it is open (see
+[Chats](chats-and-delivery.md#iphone)).
 AltStore PAL (EU) takes only apps notarized by Apple, so it can't install
 Zen yet.
 
@@ -43,35 +53,55 @@ to the install page and the same steps for every system.
    app is in Polish (the English licence notice stays binding). You tick
    *I accept…* and tap **I accept and continue**. Without that nothing is
    created on the device. When a document changes later, Zen asks again.
-2. **The password.** It encrypts everything Zen keeps on the device. You can
-   also unlock with biometrics. *No password* is possible for the default
-   account, but not recommended.
-3. **Permissions.** Notifications, Bluetooth, location for the alarm: each
-   is asked for when it is needed and explained.
+2. **The app password.** It encrypts everything Zen keeps on this device and
+   unlocks Zen here. You can also unlock with biometrics. *No password* is
+   possible for the default account, but not recommended.
+3. **Permissions.** On top: notifications, Bluetooth (on, and visible
+   nearby), full-screen alerts and not being put to sleep. Microphone,
+   camera, location and exact alarms sit folded under *More permissions
+   (optional)*: Zen asks for them the first time a feature needs them.
+   Location in the background is only in Settings.
 4. **Your identity** is created by itself: a key pair that is your address in
    the network. Your QR code is that address.
 5. **How do you start?** *New account* goes on to the next step. If you
-   already have an account, pick *I have a backup* (a backup file, a paper
-   key or a key file), *Recover from another device* or *Recover through
-   the trusted circle* (see below).
-6. **Secure your account.** Choose a recovery circle or make a paper backup
-   (below). Do it early: there is no "forgot password" e-mail.
+   already have an account, pick *I have a copy* (a full account copy, a
+   paper key or a key file), *Recover from another device* or *Recover with
+   the circle's help* (see below).
+6. **Your name.** *How should friends see you?* The name goes to the people
+   you invite and to your groups; you can change it later in your profile.
+   *Skip* is possible, but friends then see your code ("Zen 1A2B-3C4D-5E6F")
+   instead of a name.
+7. **Secure your account.** Make a **key copy** first (paper or a file; below).
+   The recovery circle is available from 4 friends: once you have them,
+   Zen reminds you once in Chats (*Set up circle* / *Not now*) and in
+   Settings, also when you already have a key copy. Do it early: there is
+   no "forgot password" e-mail.
 
 To add a friend, open **Settings** (tap the bar at the top) → **Invite**,
 show your QR code and let your friend scan it, or the other way round.
 Computers scan with their camera too; without one, paste the code from the
-clipboard.
+clipboard. **Copy invitation** copies a ready message with your link ("Add
+me in Zen: … No Zen yet? This link shows how to install it."), **Copy code
+only** just the code; a pasted whole message works in *I have someone's
+code* too. Your invitation code is your public address, not a secret, so
+it stays in the clipboard (secrets such as the key or a transfer code are
+cleared after 60 seconds).
 
 ## Locking
 
 - **Lock now** sits in the top bar once you have a password.
 - Zen locks itself after a while in the background (Settings → Privacy and
   security).
-- A **panic password** typed on the lock screen quietly erases the data
-  instead of opening it.
+- An **emergency wipe password** typed on the lock screen quietly erases
+  the data instead of opening it (Settings → Security). It is not the
+  alarm's *duress PIN*, which erases nothing.
 - While Zen is locked on Android, a small background service still receives
   messages, the alarm and door knocks. It cannot read them: they are kept
   sealed until you unlock.
+- **Battery (Android).** After 5 minutes in the background Zen only
+  receives, with or without the lock: no presence pings, scans or sync
+  until you come back. With *Auto-lock* set to *Never*, on close, on
+  restart or longer than 5 minutes, the settings page says so.
 
 ## Several accounts on one device
 
@@ -107,33 +137,37 @@ from a decoy (it holds more files), but not read it.
 
 ## Getting your account back
 
+The account comes back in several ways. A second device or a full account
+copy brings the most; the recovery circle and the key copy help when you
+have neither.
+
 | Way | What you need | Wait |
 |---|---|---|
 | Another device of the account | that device, switched on | none |
-| Backup file | the file (all its parts) and its password | none |
-| Recovery circle, with password | your password and 2 of up to 6 trusted friends | 24 hours |
+| Full account copy (file) | the file (all its parts) and its password | none |
+| Recovery circle, with password | your account password and 2 of the 4 to 6 friends in your circle | 24 hours |
 | Recovery circle, no password | 4 of the circle | 7 days |
-| Paper backup or key file | the paper (or file) | none |
+| Key copy (paper or file) | the paper (or the file and its password) | none |
 
 What comes back (also in the app: Account and recovery → *What can be
 recovered and how*):
 
-| Part of the account | Other device | Backup file | Circle | Paper key / key file |
+| Part of the account | Other device | Full account copy | Circle | Key copy |
 |---|---|---|---|---|
 | Account key | yes | yes | yes | yes |
-| Friends and groups | yes | if chosen | yes | from the circle copy² |
-| Conversations (text) | yes | if chosen | if in the circle copy³ | from the circle copy² |
+| Friends and groups | yes | if chosen | yes | from the copy with friends² |
+| Conversations (text) | yes | if chosen | if in the copy with friends³ | from the copy with friends² |
 | Attachments and media | yes | if chosen | no | no |
-| Profile and gallery | yes | if chosen | without photos⁴ | from the circle copy² |
-| Settings | account settings⁶ | if chosen | yes | from the circle copy² |
+| Profile and gallery | yes | if chosen | without photos⁴ | from the copy with friends² |
+| Settings | account settings⁶ | if chosen | yes | from the copy with friends² |
 | Pyramid and wallet | yes | if chosen | confirmed by the pyramid⁵ | confirmed by the pyramid⁵ |
-| Dating | yes | if chosen | without photos⁴ | from the circle copy² |
-| Neighbours (household) | yes | if chosen | yes | from the circle copy² |
-| Meetings and circles | yes | if chosen | no | no |
+| Dating | yes | if chosen | without photos⁴ | from the copy with friends² |
+| Neighbours (household) | yes | if chosen | yes | from the copy with friends² |
+| Meetings and dinner circles | yes | if chosen | no | no |
 | Films | yes | if chosen | no | no |
 
-² if you have a copy at your circle. ³ unless you turned conversation text
-off for it. ⁴ the circle copy is small. ⁵ your place and wallet come back
+² if you have a copy with friends. ³ unless you turned conversation text
+off for it. ⁴ the copy with friends is small. ⁵ your place and wallet come back
 when people of the pyramid confirm them. ⁶ the account's settings (look,
 sounds, privacy of notifications and screens, GIFs, cleanup, who may
 invite you to groups); each device keeps its own lock, connections,
@@ -157,7 +191,9 @@ what waits comes as soon as it may. So any other device of the account
 can bring the whole account back.
 
 **From another device.** On the device that has the account: Account and
-recovery → **Move to another device**. It shows a QR code. On the new
+recovery → **Add a second device or move the account** (the screen is
+called *Second device*). This device stays on the account: afterwards
+both have Zen and both get messages. It shows a QR code. On the new
 device choose **Recover from another device** and scan it (or paste it).
 Both screens show the same six digits; check them and tap **Allow** on the
 old device. Everything moves — the key, friends and groups, conversations
@@ -170,9 +206,14 @@ progress on both devices and a summary at the end; if
 it stops, start again and it goes on from where it stopped. The code only
 works once, only for someone who sees your screen, and everything after it
 is end-to-end encrypted. On a device that already has the same account
-the same steps fill in what it lacks (nothing is deleted).
+the same steps fill in what it lacks (nothing is deleted). Both devices
+need the same version of Zen; otherwise both screens say so. Giving the
+old device away? Remove the account from it (Settings → *Delete this
+account from this device*) or unlink it in **Devices** on the new one;
+otherwise it keeps receiving your messages.
 
-**Backup file.** Account and recovery → **Create a backup**. Tick what goes
+**Full account copy (file).** Account and recovery → **Create a full
+account copy**. Tick what goes
 in (the account and its keys are always in it): friends and groups,
 conversations (text), attachments and media, profile and gallery,
 settings, pyramid and wallet, dating, neighbours, meetings and circles,
@@ -180,19 +221,50 @@ films. The screen shows the estimated size. The file is encrypted with the
 password you choose (Argon2id and AES-256-GCM); without it nobody can open
 it, you included. A copy larger than 1 GB is saved in parts
 (`.zenbackup`, `.zenbackup.2`…) — keep them together. To restore, choose
-**I have a backup** on the first start or later in Account and recovery.
+**I have a copy** on the first start or later in Account and recovery.
 On the same account the data is merged (nothing is deleted); a copy of a
 different account is refused on a device that already has an account with
-data.
+data. A copy made by a newer Zen asks you to update first.
 
-Each person in the circle holds an encrypted piece of your key. One piece
-alone reveals nothing. During the wait your old devices get an alarm and
-can stop the recovery. A recovered account also gets its place and wallet
-in the pyramid back (from the records friends keep).
+**Key copy (paper or file).** Account and recovery → **Key copy**: a paper
+with a code (56 characters, also as a QR code) or a key file with a
+password. It brings the account back on a new phone even when nobody of
+the circle can help. Friends, groups and conversation texts then come from
+the copy with friends, if you have one; photos and files from chats do
+not. Whoever has the paper, or the file and its password, has your
+account: never give them to anyone.
 
-**The copy at your circle.** Each person of your recovery circle also keeps
-an encrypted copy of your data (Settings → Account and recovery → "Copy at
-the circle"): profile, friends and groups, friendship levels, settings,
+**The recovery circle.** Account and recovery → recovery circle:
+
+1. **Choose 4 to 6 people** you trust and can meet or call. Your close
+   friends and friends are ticked by default (casual friends are not); you
+   can tick anyone. With fewer than 4 friends the button stays off and Zen
+   reminds you once you have them.
+2. Set your **account password** (it may be the same as your app
+   password). Each chosen person gets an encrypted piece of your key; one
+   piece alone reveals nothing.
+3. **Who holds the keys** lists the names, with a tick for those whose
+   device confirmed. **Save the list to print** writes a short text file
+   with their names, their invitation codes, your account fingerprint and
+   what to do; keep it with your key copy.
+4. **On a new phone:** *Recover with the circle's help*. The screen shows
+   **this device's code** (a code and a QR code, not a secret). Type or scan
+   the codes of two people of your circle: their devices get a
+   notification and a card *Someone asks for help recovering an account*.
+5. **A helper** checks, ideally in person or on the phone (compare the
+   account fingerprint), that it is really you, and taps **Help**; the new
+   device's code is already filled in (they can also scan its QR code under
+   *Help recover*). A wrong code is refused at once.
+6. After 24 hours type your account password. Without the password four
+   people are needed and 7 days.
+
+During the wait your old devices get an alarm and a notification and can
+stop the recovery. A recovered account also gets its place and wallet in
+the pyramid back (from the records friends keep).
+
+**The copy with friends.** Each person of your recovery circle also keeps
+an encrypted copy of your data (Settings → Account and recovery → *Copy
+with friends*): profile, friends and groups, friendship levels, settings,
 pyramid and wallet, your household (flat key, your resident key, its
 profile, household members' names; not the door key or the neighbours),
 your dating profile and its settings, and — unless you turn it off — the
@@ -213,9 +285,16 @@ need your password, so choose a long one.
 
 ## Removing data
 
-- **Reset data** (Settings) removes the current account from this device.
+- **Delete this account from this device** (Settings → Advanced) removes the
+  open account's chats, invitations, settings and keys from this device and
+  restarts Zen clean. Other accounts on the device stay, and the account
+  keeps working on its other devices. When the account has neither a key
+  copy nor a recovery circle, the confirmation says in red that it could
+  not be recovered and offers **Make a copy first**.
 - **I don't remember the password — start over** on the lock screen and the
-  panic password of the default account remove *every* account on the
-  device, the keystore entries and the files.
+  emergency wipe password of the default account remove *every* account on
+  the device, the keystore entries and the files. The account comes back
+  only from a second device, a full account copy, a key copy or the
+  recovery circle.
 
 [Back to the guide](README.md)

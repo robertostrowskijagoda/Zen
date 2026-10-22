@@ -16,8 +16,12 @@ macOS, the unsigned iPhone file), writes `SHA256SUMS` with the checksum of
 each, signs that list (`SHA256SUMS.sig`, once the signing key is set up)
 and attaches everything to a draft
 release, which the maintainer checks and publishes by hand. The Android APK
-is signed with the release key, which only a tag run can use, after an
-approval. Details: [RELEASES.md](../RELEASES.md).
+is signed with the release key, which only a tag run can use, after the
+maintainer approves it. Every build uses exactly the locked package
+versions, the Linux files are checked to run on Ubuntu 22.04 and newer, the
+Windows ZIPs carry the Visual C++ runtime, and the Android libraries are
+aligned for phones with 16 KB memory pages. Details:
+[RELEASES.md](../RELEASES.md).
 
 ## How Zen updates itself
 
@@ -29,9 +33,25 @@ approval. Details: [RELEASES.md](../RELEASES.md).
   on Android also that it is signed with the same certificate as the
   installed app. Then the system installer asks (Android), or a helper
   swaps the folders after Zen closes (Windows, Linux tarball, macOS). Where
-  Zen's folder is not writable (Program Files, `/opt`, Flatpak) the file is
-  saved to Downloads. On iPhone there is only the bar; SideStore installs
-  the update from the Zen source (below).
+  Zen's folder is not writable (Program Files, `/opt`) the file is saved to
+  Downloads. On iPhone there is only the bar; SideStore installs the update
+  from the Zen source (below).
+- **Flatpak** updates outside the app: the card shows the command
+  (`flatpak install --user ./Zen-Linux-x64.flatpak`) and **Open release
+  page**; nothing is downloaded inside the sandbox.
+- **When GitHub limits requests** (it allows only so many an hour from one
+  address), Zen says so and shows when it tries again: as late as GitHub
+  asks, otherwise after 15 minutes, then 30, 60 and longer, up to 12 hours.
+  An unchanged answer costs nothing (Zen sends what it saw last time). If
+  the repository has no published release (deleted or blocked), the card
+  says so instead of "up to date"; a newer version can still come from a
+  friend.
+- **A version too old.** Each release can name the oldest Zen it still
+  works with, and friends' apps say the same in their hello. When your Zen
+  is below that, a red tile above the "new version" bar asks you to update
+  to that version or newer. Data written by a newer Zen (for example after
+  you went back to an older build) is left untouched, and a bar asks you to
+  update to use it.
 - Once the maintainers' keys are pinned in the app, an update is installed
   only when `SHA256SUMS.sig` carries their hybrid signature (Ed25519 +
   ML-DSA-65) for this version and file. Until then the update screen says
@@ -46,9 +66,11 @@ GitHub Pages serves the **[install page](https://robertostrowskijagoda.github.io
 fingerprint) and **`apps.json`**, a SideStore / AltStore source. Both are
 rebuilt by the *Pages* workflow every time a release is published (and once
 a day): the source names the latest release's `Zen-unsigned.ipa`, its
-version, date and size. SideStore checks the source, offers the update, and
-signs the file with the person's own Apple ID; it also refreshes the app
-every 7 days.
+version, date, size and checksum, and the permissions read from that very
+file. SideStore checks the source, offers the update, and signs the file
+with the person's own Apple ID. With a free Apple ID that signature expires
+after 7 days: once a week turn on LocalDevVPN, open SideStore and tap
+**Refresh**. Zen shows a reminder in Chats 2 days before the date.
 
 ## Pass it on
 
@@ -82,6 +104,7 @@ already.
   the store signs it, it also skips the check of its own signing
   certificate.
 - On iPhone Zen updates through SideStore (the source above), not by itself.
+- The Flatpak is updated by hand (above).
 - `SHA256SUMS` from the same release protects against a damaged download,
   not against a forged release; that is what the signature is for, once it
   is pinned.

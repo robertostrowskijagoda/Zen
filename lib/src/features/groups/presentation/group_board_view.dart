@@ -104,6 +104,7 @@ class _GroupBoardViewState extends State<GroupBoardView> {
     final String? changed = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Edytuj post')),
         content: TextField(
           key: const Key('group-board-edit-field'),
@@ -136,6 +137,7 @@ class _GroupBoardViewState extends State<GroupBoardView> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Usunąć post z tablicy?')),
         content: Text(t('Zniknie u wszystkich uczestników grupy.')),
         actions: <Widget>[
@@ -192,7 +194,7 @@ class _GroupBoardViewState extends State<GroupBoardView> {
         return Container(
           key: Key('group-board-post-${post.id}'),
           margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.fromLTRB(14, 8, 4, 12),
+          padding: const EdgeInsetsDirectional.fromSTEB(14, 8, 4, 12),
           decoration: BoxDecoration(
             color: zen.surfaceRaised,
             borderRadius: context.zenRadius(18),
@@ -252,7 +254,7 @@ class _GroupBoardViewState extends State<GroupBoardView> {
               ),
               if (post.media != null)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(0, 6, 10, 4),
+                  padding: const EdgeInsetsDirectional.fromSTEB(0, 6, 10, 4),
                   child: _BoardPhoto(
                     key: Key('group-board-photo-${post.id}'),
                     bytes: _photoOf(post),
@@ -260,7 +262,7 @@ class _GroupBoardViewState extends State<GroupBoardView> {
                 ),
               if (post.text.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(right: 10),
+                  padding: const EdgeInsetsDirectional.only(end: 10),
                   child: CopyableText(
                     post.text,
                     style: TextStyle(

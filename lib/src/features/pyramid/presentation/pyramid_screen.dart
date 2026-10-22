@@ -16,6 +16,7 @@ import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_court_view.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_decisions.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_emission.dart';
+import 'package:zen/src/features/pyramid/presentation/pyramid_join_help.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_national.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_power.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_timeline_view.dart';
@@ -201,6 +202,7 @@ Future<String?> askText(
   final String? out = await showDialog<String>(
     context: context,
     builder: (BuildContext context) => AlertDialog(
+      scrollable: true,
       title: Text(title),
       content: TextField(
         controller: c,
@@ -236,6 +238,7 @@ Future<bool> confirm(BuildContext context, String title, String body) async =>
     await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(title),
         content: Text(body),
         actions: <Widget>[
@@ -278,6 +281,26 @@ class PyramidScreen extends ConsumerWidget {
             body: SelectionArea(child: _JoinView(pyr: pyr)),
           );
         }
+        if (s.rulesTooNew != null) {
+          // The pyramid follows rules this build does not know: shown
+          // nothing it would work out differently from newer phones.
+          return Scaffold(
+            key: const Key('pyramid-screen'),
+            appBar: ZenSectionBar(title: t('Piramida')),
+            body: SelectionArea(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    pyramidUpdateNeededText,
+                    key: const Key('pyramid-update-needed'),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
         final bool power =
             s.topCell.contains(me) ||
             s.delegations.values.any(
@@ -301,7 +324,7 @@ class PyramidScreen extends ConsumerWidget {
               actions: <Widget>[
                 if (pyr.proposals.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.only(right: 4),
+                    padding: const EdgeInsetsDirectional.only(end: 4),
                     child: IconButton(
                       key: const Key('pyr-proposals'),
                       tooltip: t('Do podpisania'),
@@ -553,7 +576,7 @@ Future<void> showProposals(
                     ),
                     const SizedBox(height: 10),
                     Align(
-                      alignment: Alignment.centerRight,
+                      alignment: AlignmentDirectional.centerEnd,
                       child: Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -875,6 +898,9 @@ class _JoinViewState extends ConsumerState<_JoinView> {
           ),
           const SizedBox(height: 10),
         ],
+        // How to get in, and who of the friends could invite.
+        PyramidJoinHelp(state: browsing),
+        const SizedBox(height: 8),
         FilledButton.icon(
           key: const Key('pyr-join'),
           style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
@@ -1053,7 +1079,7 @@ class _Stat extends StatelessWidget {
       children: <Widget>[
         FittedBox(
           fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
+          alignment: AlignmentDirectional.centerStart,
           child: Text(value, style: zen.display(color: tone, size: 26)),
         ),
         const SizedBox(height: 2),
@@ -1221,12 +1247,12 @@ class _MeTab extends StatelessWidget {
         ) ??
         0;
     return ZenCard(
-      padding: const EdgeInsets.fromLTRB(16, 14, 8, 12),
+      padding: const EdgeInsetsDirectional.fromSTEB(16, 14, 8, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsetsDirectional.only(end: 8),
             child: Row(
               children: <Widget>[
                 ZenIconBadge(icon: Icons.hub_rounded, tone: tone, size: 34),
@@ -1374,7 +1400,7 @@ class _MeTab extends StatelessWidget {
             ),
           if (requests > 0)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsetsDirectional.only(end: 8),
               child: ZenInfo(
                 icon: Icons.campaign_outlined,
                 tone: zen.warning,
@@ -1392,7 +1418,7 @@ class _MeTab extends StatelessWidget {
             ),
           for (final PyrElection e in open)
             Container(
-              margin: const EdgeInsets.fromLTRB(0, 8, 8, 4),
+              margin: const EdgeInsetsDirectional.fromSTEB(0, 8, 8, 4),
               padding: const EdgeInsets.all(12),
               decoration: ZenLook.of(
                 context,
@@ -1784,7 +1810,7 @@ class _MeTab extends StatelessWidget {
                 Container(
                   width: 2,
                   height: 14,
-                  margin: const EdgeInsets.only(left: 14),
+                  margin: const EdgeInsetsDirectional.only(start: 14),
                   color: tone.withValues(alpha: 0.35),
                 ),
               ],
@@ -2560,15 +2586,15 @@ class _HistoryTab extends StatelessWidget {
         return Stack(
           children: <Widget>[
             if (!(first && last))
-              Positioned(
-                left: 7,
+              PositionedDirectional(
+                start: 7,
                 top: first ? 18.0 : 0.0,
                 bottom: last ? null : 0,
                 height: last ? 18.0 : null,
                 child: Container(width: 2, color: tone.withValues(alpha: 0.30)),
               ),
-            Positioned(
-              left: 1,
+            PositionedDirectional(
+              start: 1,
               top: 12,
               child: Container(
                 width: 14,
@@ -2581,7 +2607,7 @@ class _HistoryTab extends StatelessWidget {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.only(left: 30, bottom: 10),
+              padding: const EdgeInsetsDirectional.only(start: 30, bottom: 10),
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),

@@ -1,8 +1,8 @@
 # Chats, delivery and calls
 
 > Messages go straight from your device to your friend's. When your friend is
-> offline, sealed copies wait with their trusted friends, or on your own
-> device, until they come back.
+> offline, sealed copies wait in mailboxes on their friends' devices, or on
+> your own device, until they come back.
 
 <p align="center">
   <picture>
@@ -55,8 +55,8 @@
 
 Reactions, edits and deletions travel like messages (queue, mailboxes) to
 everyone in the chat and to your other devices, without notifications.
-What a new device copies from your other devices, and the circle backup,
-keep each message as it is now: edited, deleted (only the note), with its
+What a new device copies from your other devices, and the copy with
+friends, keep each message as it is now: edited, deleted (only the note), with its
 reactions and reply.
 
 ## Files in groups
@@ -84,7 +84,7 @@ reactions and reply.
 1. **Your friend is online.** The message goes straight to their device,
    sealed end to end.
 2. **Your friend is offline but has mailboxes.** Every device picks up to 6
-   trusted friends who keep its mail. After 4 seconds without an answer, a
+   friends whose devices keep its mail. After 4 seconds without an answer, a
    sealed copy goes to those mailboxes; they hand it over when your friend
    is back. A mailbox sees only ciphertext.
 3. **No mailbox can be reached.** The message waits in the outbox on your
@@ -94,7 +94,37 @@ reactions and reply.
 
 Every message is written to disk before the first attempt, so nothing is
 lost if the app or the phone stops in between. Duplicates (a direct copy and
-a mailbox copy) are recognised and shown once.
+a mailbox copy) are recognised and shown once. The outbox holds up to 32 MB
+of waiting messages; when it is full, a new message is marked not sent and
+you can try again once friends have picked up what waits.
+
+**Which friends keep your mail.** A mailbox is only useful when it is
+online while you are not. Each device tells its friends whether it
+usually stays online (a computer with Zen in the tray, an Android phone
+with the background service; an iPhone does not). Zen then picks, in this
+order: friends (not casual friends) with such a device seen in the last few
+days, close friends before friends, then whoever was seen most recently. A
+chosen mailbox stays, unless it has been silent for 3 days while someone
+fresher is around, or a friend with an always-online device appears (then
+the mailbox seen longest ago is swapped). One computer with Zen in the tray
+(or an Android phone) can be the mailbox for a whole group of friends;
+*Invite* says so too.
+
+### iPhone
+
+iOS does not let Zen run in the background. On an iPhone:
+
+- messages and calls **arrive only while Zen is open**; until then they wait
+  with the sender or in your mailboxes on friends' devices;
+- messages you write **go out only while Zen is open**: lock the phone
+  right after sending and the message waits on the iPhone (*Waiting on your
+  iPhone, recipient offline*) until you open Zen again;
+- friends pick an iPhone as their mailbox only after devices that stay
+  online.
+
+Chats show this once on an iPhone (**Got it** closes it), and *Why isn't it
+working?* lists it. It works best when someone in your group of friends
+has Zen on a computer or on Android.
 
 ## What the icons mean
 
@@ -104,8 +134,8 @@ and **Retry**.
 | Icon | Label | Meaning |
 |---|---|---|
 | clock | Sending… | the first direct attempt is under way |
-| outbox | Waiting on your phone, recipient offline | only this device has a copy and keeps trying |
-| mailbox | Waiting for pickup with the recipient's trusted friends (N) | N sealed copies wait in mailboxes |
+| outbox | Waiting on your phone, recipient offline | only this device has a copy and keeps trying (on an iPhone: *Waiting on your iPhone*, tried again only while Zen is open) |
+| mailbox | Waiting in the recipient's mailboxes with friends (N) | N sealed copies wait in mailboxes; if you are one of them, the details say so |
 | one tick | Sent | in the queue, nothing more is known yet |
 | two ticks | Delivered | the recipient's device confirmed it |
 | two ticks, coloured | Read | the recipient opened it (one-to-one chats) |
@@ -175,8 +205,15 @@ Linux `.wav`. On Linux it needs PulseAudio or PipeWire.
   some frames) but keeps playing.
 - Dropping files shows no highlight while you drag (the system reports only
   the drop).
-- On iPhone Zen receives only while it is open (iOS does not allow it to run
-  in the background).
+- On iPhone Zen receives and sends only while it is open (iOS does not allow
+  it to run in the background; [above](#iphone)).
+- While an Android phone sleeps (Doze), mail from the mailboxes can come a
+  few minutes late.
 - Read receipts exist only in one-to-one chats.
+- **Presence.** Zen tells friends it is there only while it is on the
+  screen: when you open it, every few minutes while it stays open, and
+  "leaving" when it goes to the background. The chat header shows *online
+  now*, *in the background*, or after a week of silence *online N days
+  ago* (after a month: *over a month ago*).
 
 [Back to the guide](README.md)

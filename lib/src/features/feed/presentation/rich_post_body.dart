@@ -157,11 +157,11 @@ class _RichPostBodyState extends State<RichPostBody> {
           ),
         ),
         RichBlockType.quote => Container(
-          padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
+          padding: const EdgeInsetsDirectional.fromSTEB(12, 4, 8, 4),
           decoration: BoxDecoration(
             color: zen.accent.withValues(alpha: 0.06),
-            border: Border(
-              left: BorderSide(
+            border: BorderDirectional(
+              start: BorderSide(
                 color: zen.accent.withValues(alpha: 0.6),
                 width: 3,
               ),

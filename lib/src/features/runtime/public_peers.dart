@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/runtime/yggdrasil_bridge_ffi.dart';
 
 // The public Yggdrasil peers the user can edit (Ustawienia → Publiczne
@@ -227,12 +228,57 @@ final class PublicPeer {
 }
 
 /// The list as kept: the user's own ([custom]), or none (the built-in one).
+///
+/// Kept with the built-in list it was made from ([base]), so an update's
+/// new built-in peers still come in, and built-in peers the update dropped
+/// (and the user never changed) go ([mergedWith]): one change by the user
+/// does not freeze the list for good while public peers come and go.
 @immutable
 final class PublicPeerList {
-  const PublicPeerList({required this.custom, required this.peers});
+  const PublicPeerList({
+    required this.custom,
+    required this.peers,
+    this.base = const <PublicPeer>[],
+  });
 
   final bool custom;
   final List<PublicPeer> peers;
+
+  /// The built-in peers when the list was saved (empty: not known).
+  final List<PublicPeer> base;
+
+  /// This list over the built-in list of this build ([builtIn]): new
+  /// built-in peers are added as built in, built-in peers no longer built
+  /// in are dropped unless the user changed them, and what the user
+  /// removed stays removed.
+  PublicPeerList mergedWith(List<PublicPeer> builtIn) {
+    if (base.isEmpty || builtIn.isEmpty) {
+      return this;
+    }
+    final Map<String, PublicPeer> before = <String, PublicPeer>{
+      for (final PublicPeer p in base) p.uri: p,
+    };
+    final Set<String> now = <String>{for (final PublicPeer p in builtIn) p.uri};
+    final List<PublicPeer> merged = <PublicPeer>[
+      for (final PublicPeer p in peers)
+        if (now.contains(p.uri) ||
+            before[p.uri] == null ||
+            before[p.uri]!.enabled != p.enabled)
+          p,
+    ];
+    final Set<String> have = <String>{for (final PublicPeer p in merged) p.uri};
+    for (final PublicPeer p in builtIn) {
+      if (!before.containsKey(p.uri) && have.add(p.uri)) {
+        merged.add(p);
+      }
+    }
+    final PublicPeerList list = PublicPeerList(
+      custom: custom,
+      peers: merged,
+      base: builtIn,
+    );
+    return list.active.isEmpty ? this : list;
+  }
 
   /// The URIs the node dials, in order.
   List<String> get active => <String>[
@@ -243,13 +289,22 @@ final class PublicPeerList {
   Map<String, Object?> toJson() => <String, Object?>{
     'v': 1,
     'peers': <Object?>[for (final PublicPeer peer in peers) peer.toJson()],
+    if (base.isNotEmpty)
+      'base': <Object?>[for (final PublicPeer peer in base) peer.toJson()],
   };
 
   /// A kept list, or null when [json] is not one (or has no peer on).
   static PublicPeerList? fromJson(Object? json) {
-    if (json is! Map || json['v'] != 1 || json['peers'] is! List) {
+    if (json is! Map ||
+        !isReadableFormat(json, current: 1) ||
+        json['peers'] is! List) {
       return null;
     }
+    final Object? rawBase = json['base'];
+    final List<PublicPeer> base = <PublicPeer>[
+      if (rawBase is List)
+        for (final Object? entry in rawBase) ?PublicPeer.fromJson(entry),
+    ];
     final List<PublicPeer> peers = <PublicPeer>[];
     final Set<String> seen = <String>{};
     for (final Object? entry in json['peers'] as List<Object?>) {
@@ -258,7 +313,11 @@ final class PublicPeerList {
         peers.add(peer);
       }
     }
-    final PublicPeerList list = PublicPeerList(custom: true, peers: peers);
+    final PublicPeerList list = PublicPeerList(
+      custom: true,
+      peers: peers,
+      base: base,
+    );
     return list.active.isEmpty ? null : list;
   }
 }
@@ -448,7 +507,8 @@ Future<void> applyStoredPublicPeers(
     return;
   }
   try {
-    FfiPublicPeersBridge(bridge).apply(list.active);
+    final FfiPublicPeersBridge peers = FfiPublicPeersBridge(bridge);
+    peers.apply(list.mergedWith(peers.builtIn()).active);
   } on Object catch (error) {
     logZenWarning('The public peer list was not applied: $error');
   }
@@ -544,7 +604,7 @@ final class PublicPeersController extends Notifier<PublicPeersState> {
     state = state.copyWith(
       loaded: true,
       custom: kept != null,
-      peers: kept?.peers ?? _builtIn,
+      peers: kept?.mergedWith(_builtIn).peers ?? _builtIn,
     );
   }
 
@@ -624,7 +684,11 @@ final class PublicPeersController extends Notifier<PublicPeersState> {
   }
 
   Future<String?> _commit(List<PublicPeer> peers) async {
-    final PublicPeerList list = PublicPeerList(custom: true, peers: peers);
+    final PublicPeerList list = PublicPeerList(
+      custom: true,
+      peers: peers,
+      base: _builtIn,
+    );
     if (list.active.isEmpty) {
       return t('Zostaw włączony co najmniej jeden węzeł.');
     }

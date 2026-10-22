@@ -7,6 +7,10 @@
 - **SideStore / AltStore source** (`apps.json`), rebuilt from the latest published release by the Pages workflow (version, date, size, `Zen-unsigned.ipa`, permissions from `Info.plist`). The release run fails without the iPhone file.
 - In the app: **Settings → Invite → Friend doesn't have Zen? → How to install Zen on another phone / computer**: a QR code to the install page and the steps per system.
 - **`tool/release.dart`** (`check`, `prepare <version>`, `verify <folder>`): checks that the release workflow still produces every file the in-app updater expects, sets the version everywhere, moves these notes under the new version, commits and tags (it never pushes), and verifies downloaded release files against `SHA256SUMS` and its signature. CI runs `check` on every push; the release run fails when the tag differs from the version in the build.
+- **Linux files run on Ubuntu 22.04, Debian 12, Mint 21 and newer** (glibc 2.35+): built on Ubuntu 22.04 with a check of every library, and the `.deb` is test-installed on Ubuntu 22.04–26.04 and Debian 12–13 in CI. The Flatpak moves to GNOME 51 and shows how to update instead of downloading.
+- **Windows ZIPs carry the Visual C++ runtime**, checked file by file; the README explains Smart App Control and false antivirus alarms.
+- **Safer release builds:** signing keys only in an approved, tag-only environment (the run stops if they leak into repository secrets); locked Dart packages, a pinned Go toolchain and `govulncheck`; pinned libwebrtc checksums; 16 KB page alignment of the Android libraries; reproducible Linux archives; the iPhone source is built from the release's own IPA and checksum.
+- **`CONTRIBUTING.md`** with a contributor licence grant and a pull request template.
 
 ### Documentation and GitHub
 - **User guide** (`docs/guide`): one short page per area with diagrams and light and dark screenshots made from the app by `tool/ui_tour/docs_screens_test.dart`.
@@ -26,20 +30,29 @@
 - **Yggdrasil:** no NodeInfo answers, no admin socket, only encrypted peer links (TLS 1.3 with X25519MLKEM768), strict peer address checks.
 - **Memory and tampering:** secrets are wiped after use and link keys kept in locked memory; debuggers, Frida, hooking frameworks, injected libraries and re-signed copies are detected on every platform, and then transfers and the pyramid power key are blocked.
 - Still classical: the Yggdrasil node key, the voting card registration, the pair secret of local links before devices first meet over the mesh, and the 128-bit AES key inside call frames (see `docs/SECURITY_MODEL.md`).
+- **Private temporary media:** plain media files that must exist for a moment go to a folder only you can open (0700, files 0600, random names) in the app's own cache instead of a shared `/tmp`, and are cleared at start and exit.
+- **Comments can no longer delete other files:** Zen remembers which author's entry brought each file, so deleting a comment removes only its own pictures, and storage limits touch only post and comment pictures.
+- **Huge pictures are refused before decoding** (128 MiB of memory or 40 megapixels, read from the header), and big ones decode off the main thread.
 
 ### Accounts and recovery
 - **Several accounts on one device**, each a separate person (keys, mesh address, password, data, notifications). Accounts kept off the list open with their ID and password; decoy folders and hashed keystore names hide how many there are. Switching from the avatar menu; removing one account or all of them.
 - **Receive in the background** per account (Android, and computers in the tray), with a battery and hiding warning; notifications of extra accounts are generic.
-- **Copy at the circle:** each person of the recovery circle keeps an encrypted copy (up to 10 MB) of the profile, friends, groups, levels, settings, pyramid, wallet, household, dating profile and, by default, the text of conversations. After recovery Zen fetches and restores it by itself.
+- **Copy with friends:** each person of the recovery circle keeps an encrypted copy (up to 10 MB) of the profile, friends, groups, levels, settings, pyramid, wallet, household, dating profile and, by default, the text of conversations. After recovery Zen fetches and restores it by itself.
 - A recovered account gets its **pyramid place, wallet and power key** back.
+- **Recovery circle you choose:** 4 to 6 friends (casual friends not suggested), a list of who holds the keys with confirmations and a printable list with their codes; a new phone shows a code and QR instead of an address, and helpers get a notification with **Help** already filled in.
+- **First start:** a step for your name (friends no longer see "Me"), a key copy first and a reminder to set up the circle once you have 4 friends; optional permissions folded away.
+- **Clear names:** *App password*, *Account password*, *Emergency wipe password*, the alarm's *Duress PIN*; *Key copy*, *Full account copy*, *Copy with friends*, *Add a second device or move the account*; *Delete this account from this device* warns when the account has no copy.
+- **iPhone:** a reminder 2 days before the 7-day signature expires.
 
 ### Chats and delivery
 - **Full chats, also in groups and pyramid cell chats:** photos, videos, files, voice notes and GIFs; **reactions, replies, editing (24 h), forwarding and delete for everyone**. Group files up to 64 KB travel in the message; larger ones, up to 24 MB, are sealed once and fetched from the sender or other members. A photo on the group **Board**.
 - **GIF files** from the gallery or disk stay animated (metadata removed, up to 8 MB); Android keyboard GIFs arrive animated; a GIF that won't play can go as a file.
 - **Drag and drop and paste** (Ctrl/⌘+V) of photos, GIFs, videos and files into chats, the post editor and the gallery on Windows, macOS and Linux; on iPhone, **Paste image from clipboard** for keyboard GIFs.
 - **Outbox:** every reliable message is written to disk before the first attempt and retried on a battery-friendly schedule for up to 14 days, also after a restart; mailbox copies after 4 seconds; large payloads split across mailboxes; new posts and comments reach offline friends through their mailboxes. On a locked Android phone a sealed copy of the queue keeps sending.
-- **Delivery icons** under every message (sending, waiting on your phone, waiting with the recipient's trusted friends, sent, delivered, read, failed) with details and **Retry**; groups show *Delivered d of n*.
+- **Delivery icons** under every message (sending, waiting on your phone, waiting in the recipient's mailboxes, sent, delivered, read, failed) with details and **Retry**; groups show *Delivered d of n*.
 - **GIF search switch** (Settings → Messages and calls → GIFs): off, Zen sends nothing to KLIPY and hides the GIF button.
+- **Mailboxes prefer devices that stay online** (computers in the tray, Android) and replace ones silent for 3 days; the outbox is capped at 32 MB.
+- **Honest iPhone delivery:** labels, a one-time card and *Why isn't it working?* say that an iPhone sends and receives only while Zen is open. **Copy invitation** copies a message with your link; the invitation code no longer vanishes from the clipboard.
 - **GIFs always play:** event, food, flat, avatar and cover pictures keep a GIF animated (made smaller when needed, never flattened to one frame); on iPhone, **Paste image** in the text menu takes a keyboard GIF in chats, comments and posts.
 - **Call recording on every system:** iPhone, iPad and Mac (`.m4a`, the call and the microphone through flutter_webrtc's audio hooks) and Linux (`.wav`, only Zen's own sound and the microphone through PulseAudio / PipeWire) join Android and Windows.
 
@@ -60,7 +73,7 @@
 
 ### Graph, introductions and gates
 - **Gates with three prices** (close friends, friends, further away; each may be free) and an **Open for free** list; routes through any number of gates, the cheapest first.
-- Graph **timeline**, **trust map**, **who's worth meeting**, **bridges and lonely islands**, **long ago**, private circle names, the answer path of *Ask the network*, a snapshot without personal data, **full screen**; **add friends of friends** without a code.
+- Graph **timeline**, **trust map**, **who's worth meeting**, **bridges and lonely islands**, **long ago**, private names for groups of friends, the answer path of *Ask the network*, a snapshot without personal data, **full screen**; **add friends of friends** without a code.
 
 ### Meeting people and Nearby
 - **Nearby** visible by default; a cheap look around in the background every 5 minutes (adjustable in **Settings → App → Looking around in the background**, Android), also with Zen locked. **Nearby on computers** with Bluetooth LE (Windows and Linux broadcast and look; a Mac only looks). The Nearby icon shows only where it works.
@@ -86,11 +99,26 @@
 - A new **About** with its own pages and **network census**: about how many people use Zen (an anonymous estimate) and the exact number in the pyramid.
 - **Public peers editor** (add, remove, switch off, check, pin key, restore defaults); selectable text across the app; settings rows that wrap instead of cutting text.
 - Media download over mobile data is on by default; the *Experimental features* screen and the unused notification delay setting are gone.
+- **Nothing cut off:** every dialog and sheet scrolls above the keyboard, on small and split screens and with large text; tested in German, Russian and Arabic at 320 dp.
+- **Right-to-left layouts** (Arabic): paddings, alignments, bubbles and badges follow the reading direction; graph labels too.
+- **Zen on GitHub** in Settings and at the top of About.
+- **Pyramid and Wallet for non-members** explain how to join through a friend who is a member and list friends who are.
 
 ### Updates and store build
 - **GitHub release check and self-update:** at start and every 12 hours; the download is checked against `SHA256SUMS` (and Zen's signing certificate on Android), and against the maintainers' signature once their keys are pinned. Updates from friends over the network stay off until then, and the Updates screen says so.
 - **The store build** (`appStoreOnly`, Google Play and Galaxy Store) is the same app with three forced differences: no self-update, no handing on of the APK (a link instead) and no launcher disguise. It also skips the check of its own signing certificate, since the store signs it.
 - Built-in location (system service, no Google Play services) and Zen's own sounds.
+
+### Battery
+- **No permanent wake lock:** the Android background service wakes the phone only for short, timed moments (Nearby looks, mailbox polls, reminders, calls), and after 5 minutes in the background Zen only receives.
+- **Fewer connections and pings:** a phone keeps 4 public peers instead of 16 (swapped when one fails); presence pings go only to friends, only while Zen is on screen, every 2.5 minutes.
+- **Calmer screens:** status dots and neon effects pulse briefly on a change instead of all the time, animations run at a low frame rate and stop when hidden; videos pause off screen.
+- **Computers on battery** stop bridging for others and keep 4 public peers; the battery estimate for looking around now counts the phone's wake-up time.
+
+### Compatibility between versions
+- **Data from a newer Zen is never overwritten:** every stored format has a version and is kept as is when it is newer; unknown fields survive a rewrite; a bar asks to update. Samples of all 1.12.0 formats are kept as tests.
+- **Oldest supported version** (`minv` in hellos, `zen-min:` in a release) shows "update" instead of silently missing messages; moving an account between different versions says so; pyramid records of newer rules stop the pyramid with an update notice.
+- **Ledger checkpoints** prepared, so logs can be shortened later without breaking 1.12.0; certificates and file lists are stored in smaller files.
 
 ## 1.11.0 — 20.10.2026
 

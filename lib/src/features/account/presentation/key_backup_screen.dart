@@ -16,13 +16,14 @@ import 'package:zen/src/features/account/account_secure_providers.dart';
 import 'package:zen/src/features/account/key_file.dart';
 import 'package:zen/src/features/account/key_file_io.dart';
 import 'package:zen/src/features/account/paper_backup.dart';
+import 'package:zen/src/features/account/presentation/recovery_circle_list.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-/// "Kopia zapasowa klucza": the two ways to back up the account key,
+/// "Kopia klucza": the two ways to back up the account key,
 /// on one screen. (a) an encrypted file protected by a password the person
 /// types twice; (b) the key shown as a code (14 groups of four and a QR) to
 /// write down or scan on a new phone. Opens only after the app password is
@@ -246,10 +247,12 @@ class _KeyBackupScreenState extends ConsumerState<KeyBackupScreen> {
         tone: zen.danger,
         title: t('Kto to ma, ten ma Twoje konto'),
         text: t(
-          'Kopia klucza przywraca samo konto — Twoją tożsamość — na nowym '
-          'telefonie. Nie przywraca czatów ani historii. Kto ma plik kopii '
-          'i jego hasło albo kod klucza, ma Twoje konto, więc nikomu ich '
-          'nie dawaj. Zen nigdy nie poprosi Cię o nie.',
+          'Kopia klucza przywraca konto — Twoją tożsamość — na nowym '
+          'telefonie. Znajomi, grupy i teksty rozmów wracają potem z kopii '
+          'u znajomych, jeśli ją masz; zdjęć i plików z rozmów nie przywróci '
+          '(to robi kopia całego konta). Kto ma plik kopii i jego hasło albo '
+          'kod klucza, ma Twoje konto, więc nikomu ich nie dawaj. Zen nigdy '
+          'nie poprosi Cię o nie.',
         ),
       ),
       ZenCard(
@@ -355,6 +358,30 @@ class _KeyBackupScreenState extends ConsumerState<KeyBackupScreen> {
           ],
         ),
       ),
+      // Who to ask on a new phone: kept with the paper key.
+      ZenCard(
+        key: const Key('key-backup-circle'),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            _title(zen, t('Lista osób z kręgu')),
+            const SizedBox(height: 4),
+            Text(
+              t(
+                'Zapisz albo wydrukuj ją i trzymaj z kopią klucza: na nowym '
+                'telefonie będzie wiadomo, kogo poprosić o pomoc.',
+              ),
+              style: TextStyle(
+                color: zen.textSecondary,
+                fontSize: 13.5,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const RecoveryCircleMembersView(),
+          ],
+        ),
+      ),
     ],
   );
 
@@ -423,7 +450,7 @@ class _KeyBackupScreenState extends ConsumerState<KeyBackupScreen> {
     return SecureScreen(
       child: Scaffold(
         key: const Key('key-backup-screen'),
-        appBar: AppBar(title: Text(t('Kopia zapasowa klucza'))),
+        appBar: AppBar(title: Text(t('Kopia klucza'))),
         body: SafeArea(top: false, child: body),
       ),
     );
@@ -541,9 +568,10 @@ class _PaperBackupViewState extends State<PaperBackupView> {
     ZenInfo(
       icon: Icons.history_edu_rounded,
       text: t(
-        'Z klucza odzyskasz samo konto na nowym telefonie. Znajomych '
-        'i grupy odzyskasz tylko z kręgiem odzyskiwania, a historii '
-        'czatów i portfela nie odzyska nic.',
+        'Z klucza odzyskasz konto na nowym telefonie. Znajomi, grupy, '
+        'profil i teksty rozmów wrócą z kopii u znajomych, jeśli ją masz. '
+        'Miejsce w piramidzie i portfel wrócą, gdy potwierdzą je osoby '
+        'z piramidy. Zdjęć i plików z rozmów nie przywróci.',
       ),
     ),
     const SizedBox(height: 8),

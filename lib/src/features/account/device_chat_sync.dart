@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/account/account_media.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
@@ -471,6 +472,10 @@ final class DeviceChatSync {
       return;
     }
     final Object? bundle = jsonDecode(utf8.decode(raw));
+    if (jsonFormatAge(bundle, current: 1) == FormatAge.newer) {
+      // Sent by a newer Zen on another device of the account.
+      ZenFormatGuard.instance.noteNewer('account/history');
+    }
     if (bundle is! Map || bundle['v'] != 1) {
       return;
     }

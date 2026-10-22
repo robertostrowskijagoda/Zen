@@ -270,7 +270,30 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
       if (_platform.hasBluetooth) {
         children.add(_visibility(zen, s));
       }
-      if (optional.isNotEmpty) {
+      if (widget.firstStart && optional.isNotEmpty) {
+        // The first start stays short: what is asked when first needed
+        // waits behind one line; "in the background" only in Settings.
+        children.add(
+          ExpansionTile(
+            key: const Key('permissions-more'),
+            shape: const Border(),
+            collapsedShape: const Border(),
+            tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+            childrenPadding: EdgeInsets.zero,
+            title: Text(t('Więcej zgód (opcjonalnie)')),
+            subtitle: Text(
+              t(
+                'Mikrofon, aparat, położenie, dokładne alarmy. Zen zapyta '
+                'o nie przy pierwszym użyciu — możesz to pominąć.',
+              ),
+            ),
+            children: <Widget>[
+              for (final ZenPermission p in optional)
+                if (p != ZenPermission.backgroundLocation) _step(zen, s, p),
+            ],
+          ),
+        );
+      } else if (optional.isNotEmpty) {
         children
           ..add(ZenSection(t('Opcjonalnie')))
           ..add(
@@ -430,7 +453,7 @@ class _PermissionsPanelState extends ConsumerState<PermissionsPanel>
     return ZenCard(
       key: Key('permissions-row-${_kebab(p)}'),
       tone: highlighted ? zen.accent : null,
-      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 14, 12, 14),
       child: Row(
         children: <Widget>[
           ZenIconBadge(

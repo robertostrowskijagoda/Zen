@@ -222,6 +222,38 @@ final class RuntimeTransportSnapshot {
       health == RuntimeTransportHealth.active ||
       health == RuntimeTransportHealth.syncing;
 
+  /// Equal snapshots tell nobody anything: the node is read every few
+  /// seconds, and only a change rebuilds what shows it.
+  @override
+  bool operator ==(Object other) =>
+      other is RuntimeTransportSnapshot &&
+      other.health == health &&
+      other.peers == peers &&
+      other.activeTransfers == activeTransfers &&
+      other.latencyMs == latencyMs &&
+      other.throughputMbps == throughputMbps &&
+      other.inboxLimitMb == inboxLimitMb &&
+      other.localAddress == localAddress &&
+      other.routingEntries == routingEntries &&
+      other.peerPoolCount == peerPoolCount &&
+      other.selectedPeer == selectedPeer &&
+      other.errorMessage == errorMessage;
+
+  @override
+  int get hashCode => Object.hash(
+    health,
+    peers,
+    activeTransfers,
+    latencyMs,
+    throughputMbps,
+    inboxLimitMb,
+    localAddress,
+    routingEntries,
+    peerPoolCount,
+    selectedPeer,
+    errorMessage,
+  );
+
   RuntimeTransportSnapshot copyWith({
     RuntimeTransportHealth? health,
     int? peers,
@@ -342,6 +374,21 @@ SignalTransport buildDefaultSignalTransport({
   );
 }
 
+/// [configJson] with the number of public peers a phone node should dial
+/// (the bridge takes the key out again before it reads the config). Never
+/// stored: only what goes to the bridge at start.
+@visibleForTesting
+String withNodePeerTarget(String configJson, int? peerTarget) {
+  if (peerTarget == null || peerTarget <= 0) {
+    return configJson;
+  }
+  final Object? decoded = jsonDecode(configJson);
+  if (decoded is! Map<String, dynamic>) {
+    return configJson;
+  }
+  return jsonEncode(<String, dynamic>{...decoded, 'ZenPeerTarget': peerTarget});
+}
+
 @visibleForTesting
 String normalizeRuntimeNodeConfig(
   String configJson, {
@@ -356,6 +403,14 @@ String normalizeRuntimeNodeConfig(
   }
   return jsonEncode(decoded);
 }
+
+/// How often the node's state is read: while it has no peer yet, while Zen
+/// is on the screen, and otherwise (the app in the background, the
+/// background service). Signals do not wait for it: they come as they
+/// arrive.
+const Duration kRuntimeRefreshConnecting = Duration(seconds: 2);
+const Duration kRuntimeRefreshOnScreen = Duration(seconds: 10);
+const Duration kRuntimeRefreshUnseen = Duration(minutes: 1);
 
 @visibleForTesting
 final class LazySignalTransport implements SignalTransport {
@@ -1057,8 +1112,37 @@ final class RuntimeNodeRuntime extends ChangeNotifier
   }
 
   void _setSnapshot(RuntimeTransportSnapshot value) {
+    if (value == _snapshot) {
+      return;
+    }
     _snapshot = value;
     notifyListeners();
+  }
+
+  /// Whether Zen is on the screen ([setOnScreen]); the node is read often
+  /// only then.
+  bool _onScreen = false;
+  VoidCallback? _refreshSoon;
+
+  /// Zen came on the screen (or left it): the node is read every
+  /// [kRuntimeRefreshOnScreen] then, every [kRuntimeRefreshUnseen]
+  /// otherwise (the background service's node too), and every
+  /// [kRuntimeRefreshConnecting] while it has no peer yet.
+  void setOnScreen(bool onScreen) {
+    if (onScreen == _onScreen) {
+      return;
+    }
+    _onScreen = onScreen;
+    if (onScreen) {
+      _refreshSoon?.call();
+    }
+  }
+
+  Duration get _refreshInterval {
+    if (!_snapshot.serviceRunning || _snapshot.peers == 0) {
+      return kRuntimeRefreshConnecting;
+    }
+    return _onScreen ? kRuntimeRefreshOnScreen : kRuntimeRefreshUnseen;
   }
 
   void _startSnapshotRefreshLoop(RuntimeNodeSession session, int token) {
@@ -1104,18 +1188,38 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       }
     }
 
-    unawaitedLogged(
-      refreshOnce(),
-      context: 'Runtime snapshot refresh task failed',
-    );
-    _snapshotRefreshTimer = Timer.periodic(const Duration(seconds: 2), (
-      Timer _,
-    ) {
+    bool live() => token == _lifecycleToken && identical(_session, session);
+
+    void scheduleNext() {
+      _snapshotRefreshTimer?.cancel();
+      if (!live()) {
+        _snapshotRefreshTimer = null;
+        return;
+      }
+      _snapshotRefreshTimer = Timer(_refreshInterval, () {
+        unawaitedLogged(
+          refreshOnce().whenComplete(scheduleNext),
+          context: 'Runtime snapshot refresh task failed',
+        );
+      });
+    }
+
+    // Back on the screen: read now, then at the screen's pace.
+    _refreshSoon = () {
+      if (!live()) {
+        return;
+      }
+      _snapshotRefreshTimer?.cancel();
+      _snapshotRefreshTimer = null;
       unawaitedLogged(
-        refreshOnce(),
+        refreshOnce().whenComplete(scheduleNext),
         context: 'Runtime snapshot refresh task failed',
       );
-    });
+    };
+    unawaitedLogged(
+      refreshOnce().whenComplete(scheduleNext),
+      context: 'Runtime snapshot refresh task failed',
+    );
   }
 
   @override
@@ -1161,7 +1265,9 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
   );
   // The user's public peers (public_peers.dart) before the node dials any.
   await applyStoredPublicPeers(bridge);
-  final Map<String, dynamic> startResult = bridge.startNode(configJson);
+  final Map<String, dynamic> startResult = bridge.startNode(
+    withNodePeerTarget(configJson, config.peerTarget),
+  );
   final int handle = _readNodeHandle(startResult);
   // The device keys pinned in earlier runs, before any signal comes in.
   final Directory runtimeDirectory = (await _runtimeConfigFile(
@@ -1543,11 +1649,17 @@ int _readSelectedPeerLatencyMs(Map<String, dynamic> payload) {
 
 final class RuntimeSignalBootstrapConfig {
   RuntimeSignalBootstrapConfig({
-    this.waitTimeout = const Duration(seconds: 5),
+    this.waitTimeout = const Duration(seconds: 30),
     this.nodeConfigProtector,
     this.fallbackPollInterval = const Duration(seconds: 1),
     this.supportDirectory,
+    this.peerTarget,
   });
+
+  /// How many public peers a phone node dials at once; `null`: the
+  /// bridge's own number (4). The extra accounts the background service
+  /// receives for ask for fewer (phone_peers.go in the bridge).
+  final int? peerTarget;
 
   /// The folder of the account whose node this is; `null`: the account
   /// open in this isolate. Set for the other accounts the background

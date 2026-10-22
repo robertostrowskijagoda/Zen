@@ -595,7 +595,7 @@ class PyramidWallet extends StatelessWidget {
                       ),
                     ),
                   Align(
-                    alignment: Alignment.centerLeft,
+                    alignment: AlignmentDirectional.centerStart,
                     child: FilterChip(
                       label: Text(t('Różne ceny wg znajomości')),
                       selected: byLevel.contains(k.key),
@@ -671,7 +671,7 @@ class PyramidWallet extends StatelessWidget {
     Widget? trailing,
     Color? titleColor,
   }) => Padding(
-    padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+    padding: const EdgeInsetsDirectional.fromSTEB(14, 10, 10, 10),
     child: Row(
       children: <Widget>[
         leading,
@@ -712,7 +712,7 @@ class PyramidWallet extends StatelessWidget {
   );
 
   Widget _buttons(List<Widget> children) => Align(
-    alignment: Alignment.centerRight,
+    alignment: AlignmentDirectional.centerEnd,
     child: Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -919,7 +919,7 @@ class PyramidWallet extends StatelessWidget {
                 const SizedBox(height: 10),
                 FittedBox(
                   fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
+                  alignment: AlignmentDirectional.centerStart,
                   child: Text(
                     formatMoney(balance),
                     style: zen.display(color: zen.textPrimary, size: 44),

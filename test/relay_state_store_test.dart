@@ -4,10 +4,12 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/storage/binary_store.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/relay/relay_crypto.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 
 void main() {
   late Directory tempDir;
@@ -180,11 +182,120 @@ void main() {
     });
   });
 
+  group('outbox payloads', () {
+    RelayOutboxEntry entry(String rid, String text) => RelayOutboxEntry(
+      rid: rid,
+      recipient: 'p',
+      payload: <String, dynamic>{'type': 'message', 'text': text},
+      createdAtMillis: 1,
+      expiresAtMillis: 2,
+      relayable: false,
+    );
+
+    test('a big one lives in a file of its own, written once and removed '
+        'with its entry', () async {
+      final FileRelayStateStore store = FileRelayStateStore(store: binary);
+      final String big = 'x' * (kRelayInlinePayloadChars + 10);
+      final RelayState state = RelayState(
+        outbox: <String, RelayOutboxEntry>{
+          'small': entry('small', 'hej'),
+          'big': entry('big', big),
+        },
+      );
+      await store.save(state);
+      final String core = utf8.decode((await binary.read('relay/state'))!);
+      expect(core, contains('hej'));
+      expect(core, isNot(contains('xxxxxxxxxx')));
+
+      final RelayState loaded = await FileRelayStateStore(store: binary).load();
+      expect(loaded.outbox['big']!.payload['text'], big);
+      expect(loaded.outbox['small']!.payload['text'], 'hej');
+
+      state.outbox.remove('big');
+      await store.save(state);
+      final RelayState after = await FileRelayStateStore(store: binary).load();
+      expect(after.outbox.keys, <String>['small']);
+      final List<String> files = <String>[];
+      await for (final FileSystemEntity e in tempDir.list(recursive: true)) {
+        if (e is File && e.path.contains('${Platform.pathSeparator}out')) {
+          files.add(e.path);
+        }
+      }
+      expect(
+        files.where((String f) => f.endsWith('.zenbin')),
+        isEmpty,
+        reason: 'the payload file went with its entry',
+      );
+    });
+
+    test('the queue refuses a big message once it holds too much', () async {
+      final RelayEngine engine = RelayEngine(
+        store: MemoryRelayStateStore(),
+        peers: _OnePeer(),
+        send: (String to, Map<String, dynamic> payload) async {},
+        clock: () => 1000000,
+      );
+      await engine.activate();
+      final String chunk = 'y' * (4 * 1024 * 1024);
+      Object? refused;
+      for (int i = 0; i < 12 && refused == null; i++) {
+        try {
+          await engine.submit(_peer, <String, dynamic>{
+            'type': 'message',
+            'msgId': 'm$i',
+            'text': chunk,
+          });
+        } on RelayOutboxFullException catch (error) {
+          refused = error;
+        }
+      }
+      expect(refused, isA<RelayOutboxFullException>());
+      // Small frames (receipts) still go.
+      await engine.submit(_peer, <String, dynamic>{
+        'type': 'message',
+        'msgId': 'small',
+        'text': 'ok',
+      });
+    });
+  });
+
+  test('a newer build\'s state is kept as it is, not started afresh', () async {
+    addTearDown(ZenFormatGuard.instance.reset);
+    final Uint8List newer = Uint8List.fromList(
+      utf8.encode(jsonEncode(<String, Object>{'v': 99, 'id': 'kept'})),
+    );
+    await binary.write('relay/state', newer);
+    final FileRelayStateStore store = FileRelayStateStore(store: binary);
+    await expectLater(store.load(), throwsA(isA<NewerFormatException>()));
+    expect(binary.isHeldNewer('relay/state'), isTrue);
+    await store.save(RelayState());
+    expect(await binary.read('relay/state'), newer);
+    expect(ZenFormatGuard.instance.newerAreas, contains('relay'));
+  });
+
   test('a corrupt file starts fresh instead of failing', () async {
     await binary.write('relay/state', Uint8List.fromList('{nope'.codeUnits));
     final RelayState state = await FileRelayStateStore(store: binary).load();
     expect(state.outbox, isEmpty);
   });
+}
+
+final String _peer = PeerShareCodec.normalizeAddress('200::b');
+
+final class _OnePeer implements RelayPeerSource {
+  @override
+  bool get isReady => true;
+
+  @override
+  String get localAddress => PeerShareCodec.normalizeAddress('200::a');
+
+  @override
+  List<RelayFriend> acceptedFriends() => <RelayFriend>[
+    RelayFriend(address: _peer),
+  ];
+
+  @override
+  List<RelayFriend> groupContacts() => const <RelayFriend>[];
 }
 
 final class _PassThroughCompressor implements BinaryCompressor {

@@ -186,7 +186,9 @@ class _Bubble extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final bool mine = message.mine;
     return Align(
-      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: mine
+          ? AlignmentDirectional.centerEnd
+          : AlignmentDirectional.centerStart,
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: MediaQuery.of(context).size.width * 0.78,

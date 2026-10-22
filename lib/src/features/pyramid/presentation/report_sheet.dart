@@ -243,6 +243,7 @@ Future<bool> _confirmDelete(BuildContext context) async =>
     await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Usunąć z urządzenia?')),
         content: Text(t('Tej kopii nie da się przywrócić.')),
         actions: <Widget>[

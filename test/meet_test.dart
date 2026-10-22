@@ -199,7 +199,7 @@ void main() {
     final AlarmRecord seen = cyryl.service.book.alarm(alarm.id)!;
     expect(seen.isActive, isFalse);
     expect(seen.duress, isTrue);
-    expect(cyryl.shown.last.title, contains('PIN-em panicznym'));
+    expect(cyryl.shown.last.title, contains('PIN-em przymusu'));
     expect(cyryl.shown.last.category, RuntimeSystemNotificationCategory.alarm);
 
     // A real one.

@@ -349,7 +349,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     final MiniProfileTag mini =
         ref.read(strangerChatsProvider).ownMiniProfile?.call() ??
         MiniProfileTag(
-          name: ref.read(userProfileControllerProvider).displayName.trim(),
+          name: ref.read(userProfileControllerProvider).publicName.trim(),
         );
     return mini.toJson();
   }
@@ -458,7 +458,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     final String key = 'group:${group.id}';
     final String senderDisplayName = ref
         .read(userProfileControllerProvider)
-        .displayName;
+        .publicName;
     final String localAddr = ref.read(runtimeNodeSnapshotProvider).localAddress;
     final int seconds = state.disappearSecondsFor(key);
     final int? ttl = seconds > 0 ? seconds : null;

@@ -43,6 +43,7 @@ class _LegalConsentStageState extends ConsumerState<LegalConsentStage> {
     final bool? close = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Bez akceptacji nie można korzystać z Zen')),
         content: Text(
           t(
@@ -203,7 +204,7 @@ class _DocumentTile extends StatelessWidget {
     return ZenCard(
       key: Key('legal-consent-open-${document.name}'),
       onTap: onTap,
-      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 12, 10, 12),
       child: Row(
         children: <Widget>[
           ZenIconBadge(

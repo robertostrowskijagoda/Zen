@@ -282,7 +282,7 @@ func TestBuiltInListingPutsWhatThisDeviceDialsFirst(t *testing.T) {
 	listing := builtInPeerListing()
 	chosen := builtInDesktopPeers(desktopPublicPeerCount)
 	if isPhoneOS() {
-		chosen = selectAndroidBootstrapPeers(publicPeerPool, androidBootstrapPeerCount)
+		chosen = selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize)
 	}
 	if len(listing) != len(builtInPublicPeers()) {
 		t.Fatalf("%d listed, %d built in", len(listing), len(builtInPublicPeers()))

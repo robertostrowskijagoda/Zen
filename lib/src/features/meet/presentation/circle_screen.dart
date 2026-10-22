@@ -136,7 +136,7 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 10, 0, 0),
+                    padding: const EdgeInsetsDirectional.fromSTEB(4, 10, 0, 0),
                     child: Text(
                       t(
                         'Każdy dostanie zaproszenie i sam zdecyduje: '
@@ -159,14 +159,16 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                     onChanged: (bool v) => set(() => pairs = v),
                   ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 14, 0, 4),
+                    padding: const EdgeInsetsDirectional.fromSTEB(4, 14, 0, 4),
                     child: Text(
-                      pairs ? t('KTO (4–8 PAR)') : t('KTO (4–8 OSÓB LUB PAR)'),
+                      pairs
+                          ? t('KTO: 3–7 PAR (Z WAMI 4–8)')
+                          : t('KTO: 3–7 ZNAJOMYCH (Z TOBĄ 4–8)'),
                       style: zen.label(color: zen.textMuted),
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 0, 0, 4),
+                    padding: const EdgeInsetsDirectional.fromSTEB(4, 0, 0, 4),
                     child: Text(
                       DinnerCircle.validSize(chosen.length + 1)
                           ? t('W kółku: {n} (z Tobą)', {'n': chosen.length + 1})
@@ -257,6 +259,13 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
     final CircleService circles = ref.watch(circleServiceProvider);
     final FoodService food = ref.watch(foodServiceProvider);
     final ZenColors zen = ZenColors.of(context);
+    // With fewer than three friends there is nobody to cook with yet.
+    final int friends = ref.watch(
+      socialHubControllerProvider.select(
+        (SocialHubState s) => s.acceptedFriends.length,
+      ),
+    );
+    final bool enoughFriends = friends >= kCircleMinMembers - 1;
     return Scaffold(
       key: const Key('circles-screen'),
       appBar: AppBar(title: Text(t('Kółka obiadowe'))),
@@ -303,9 +312,24 @@ class _CirclesScreenState extends ConsumerState<CirclesScreen> {
                     icon: Icons.ramen_dining_rounded,
                     tone: zenTone(zen, 3),
                     title: t('Nie masz jeszcze kółka'),
-                    text: t('Zaproś 4–8 znajomych i ustalcie dzień tygodnia.'),
+                    text: enoughFriends
+                        ? t(
+                            'Zaproś 3–7 znajomych (razem z Tobą 4–8 osób) '
+                            'i ustalcie dzień tygodnia.',
+                          )
+                        : t(
+                            'Kółko to 4–8 osób razem z Tobą, więc potrzebujesz '
+                            'co najmniej {min} znajomych. Masz {n}.',
+                            <String, Object?>{
+                              'min': kCircleMinMembers - 1,
+                              'n': friends,
+                            },
+                          ),
                     action: FilledButton.icon(
-                      onPressed: () => unawaited(_create()),
+                      key: const Key('circles-empty-create'),
+                      onPressed: enoughFriends
+                          ? () => unawaited(_create())
+                          : null,
                       icon: const Icon(Icons.add_rounded),
                       label: Text(t('Załóż kółko')),
                     ),
@@ -394,6 +418,7 @@ class CircleScreen extends ConsumerWidget {
     final String? v = await showDialog<String>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(title),
         content: TextField(
           controller: c,
@@ -470,6 +495,7 @@ class CircleScreen extends ConsumerWidget {
     final bool? vouch = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Ręczysz za {name}?', {'name': who})),
         content: Text(
           t(
@@ -547,6 +573,7 @@ class CircleScreen extends ConsumerWidget {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Opuścić kółko „{name}”?', {'name': c.name})),
         content: Text(
           t(
@@ -594,6 +621,7 @@ class CircleScreen extends ConsumerWidget {
       context: context,
       builder: (BuildContext context) => StatefulBuilder(
         builder: (BuildContext context, StateSetter set) => AlertDialog(
+          scrollable: true,
           title: Text(t('Zaproś do kółka')),
           content: SizedBox(
             width: 380,
@@ -1013,7 +1041,7 @@ class CircleScreen extends ConsumerWidget {
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Align(
-                        alignment: Alignment.centerLeft,
+                        alignment: AlignmentDirectional.centerStart,
                         child: FilledButton.tonalIcon(
                           key: const Key('circle-bring-guest'),
                           onPressed: () =>
@@ -1271,7 +1299,7 @@ class _ScheduleRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 8, 8, 8),
       child: Row(
         children: <Widget>[
           ZenIconBadge(

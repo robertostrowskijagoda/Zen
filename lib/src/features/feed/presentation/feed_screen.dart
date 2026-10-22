@@ -388,7 +388,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                 for (final String address in node.followedAddresses.toList())
                   ListTile(
                     dense: true,
-                    contentPadding: const EdgeInsets.only(left: 4),
+                    contentPadding: const EdgeInsetsDirectional.only(start: 4),
                     leading: Icon(
                       Icons.person_outline_rounded,
                       color: ZenColors.of(dialog).accent,
@@ -521,6 +521,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         context: context,
         isScrollControlled: true,
         showDragHandle: true,
+        useSafeArea: true,
         builder: (BuildContext sheet) {
           // Own comments removed while the sheet is open.
           final Set<String> removed = <String>{};
@@ -532,178 +533,195 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                   bottom: MediaQuery.of(sheet).viewInsets.bottom,
                 ),
                 child: SafeArea(
-                  child: ListView(
-                    key: const Key('feed-comments'),
-                    shrinkWrap: true,
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  // The field stays at the bottom, over the keyboard; the
+                  // comments scroll above it.
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
-                      _SheetTitle(
-                        icon: Icons.mode_comment_rounded,
-                        title: t('Komentarze'),
-                        count: post.comments.length,
-                      ),
-                      const SizedBox(height: 8),
-                      if (post.comments.isEmpty)
-                        ZenEmpty(
-                          icon: Icons.forum_outlined,
-                          title: t('Jeszcze nic.'),
-                          text: t('Napisz pierwszy komentarz.'),
-                        ),
-                      for (final FeedComment c in post.comments)
-                        if (removed.contains(c.id))
-                          const SizedBox.shrink()
-                        else if (ref.read(hiddenByMeProvider).hides(id: c.id))
-                          HiddenContentPlaceholder(
-                            key: Key('feed-comment-hidden-${c.id}'),
-                            byMe: true,
-                            compact: true,
-                            onShow: () {
-                              showHiddenAnyway(ref, id: c.id);
-                              setSheet(() {});
-                            },
-                          )
-                        else
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                _Initials(
-                                  name: c.authorLabel,
-                                  own: false,
-                                  size: 34,
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Container(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      14,
-                                      10,
-                                      14,
-                                      10,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: zen.surfaceMuted,
-                                      borderRadius: ZenLook.of(
-                                        context,
-                                      ).bubbleRadius(outgoing: false),
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: <Widget>[
-                                        Text(
-                                          c.authorLabel,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            color: zen.textPrimary,
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 13.5,
+                      Flexible(
+                        child: ListView(
+                          key: const Key('feed-comments'),
+                          shrinkWrap: true,
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                          children: <Widget>[
+                            _SheetTitle(
+                              icon: Icons.mode_comment_rounded,
+                              title: t('Komentarze'),
+                              count: post.comments.length,
+                            ),
+                            const SizedBox(height: 8),
+                            if (post.comments.isEmpty)
+                              ZenEmpty(
+                                icon: Icons.forum_outlined,
+                                title: t('Jeszcze nic.'),
+                                text: t('Napisz pierwszy komentarz.'),
+                              ),
+                            for (final FeedComment c in post.comments)
+                              if (removed.contains(c.id))
+                                const SizedBox.shrink()
+                              else if (ref
+                                  .read(hiddenByMeProvider)
+                                  .hides(id: c.id))
+                                HiddenContentPlaceholder(
+                                  key: Key('feed-comment-hidden-${c.id}'),
+                                  byMe: true,
+                                  compact: true,
+                                  onShow: () {
+                                    showHiddenAnyway(ref, id: c.id);
+                                    setSheet(() {});
+                                  },
+                                )
+                              else
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: <Widget>[
+                                      _Initials(
+                                        name: c.authorLabel,
+                                        own: false,
+                                        size: 34,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Container(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            14,
+                                            10,
+                                            14,
+                                            10,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: zen.surfaceMuted,
+                                            borderRadius: ZenLook.of(
+                                              context,
+                                            ).bubbleRadius(outgoing: false),
+                                          ),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: <Widget>[
+                                              Text(
+                                                c.authorLabel,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  color: zen.textPrimary,
+                                                  fontWeight: FontWeight.w700,
+                                                  fontSize: 13.5,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 3),
+                                              if (c.text.trim().isNotEmpty)
+                                                CopyableText(
+                                                  c.text,
+                                                  style: TextStyle(
+                                                    fontSize: 14,
+                                                    height: 1.35,
+                                                    color: zen.textPrimary,
+                                                  ),
+                                                  onReport: () => unawaited(
+                                                    reportContent(
+                                                      context,
+                                                      ref,
+                                                      // The comment's author.
+                                                      authorAddress:
+                                                          c.authorAddress,
+                                                      text: c.text,
+                                                      header: t(
+                                                        'Komentarz — {name}',
+                                                        {'name': c.authorLabel},
+                                                      ),
+                                                      contentId: c.id,
+                                                    ).then((_) {
+                                                      // The reported comment is hidden now.
+                                                      if (sheet.mounted) {
+                                                        setSheet(() {});
+                                                      }
+                                                    }),
+                                                  ),
+                                                ),
+                                              if (_node != null)
+                                                CommentPictures(
+                                                  node: _node!,
+                                                  comment: c,
+                                                ),
+                                            ],
                                           ),
                                         ),
-                                        const SizedBox(height: 3),
-                                        if (c.text.trim().isNotEmpty)
-                                          CopyableText(
-                                            c.text,
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              height: 1.35,
-                                              color: zen.textPrimary,
-                                            ),
-                                            onReport: () => unawaited(
-                                              reportContent(
-                                                context,
-                                                ref,
-                                                // The comment's author.
-                                                authorAddress: c.authorAddress,
-                                                text: c.text,
-                                                header: t(
-                                                  'Komentarz — {name}',
-                                                  {'name': c.authorLabel},
-                                                ),
-                                                contentId: c.id,
-                                              ).then((_) {
-                                                // The reported comment is hidden now.
-                                                if (sheet.mounted) {
-                                                  setSheet(() {});
-                                                }
-                                              }),
-                                            ),
+                                      ),
+                                      if (_node != null &&
+                                          canDeleteComment(_node!, c))
+                                        IconButton(
+                                          key: Key(
+                                            'feed-comment-delete-${c.id}',
                                           ),
-                                        if (_node != null)
-                                          CommentPictures(
-                                            node: _node!,
-                                            comment: c,
+                                          tooltip: t('Usuń komentarz'),
+                                          icon: Icon(
+                                            Icons.delete_outline_rounded,
+                                            color: zen.textSecondary,
                                           ),
-                                      ],
-                                    ),
+                                          onPressed: () async {
+                                            final String? failed =
+                                                await confirmDeleteComment(
+                                                  sheet,
+                                                  _node!,
+                                                  post.id,
+                                                  c,
+                                                );
+                                            if (!sheet.mounted) {
+                                              return;
+                                            }
+                                            if (failed == null) {
+                                              setSheet(() => removed.add(c.id));
+                                            } else if (failed.isNotEmpty) {
+                                              ScaffoldMessenger.maybeOf(
+                                                sheet,
+                                              )?.showSnackBar(
+                                                SnackBar(content: Text(failed)),
+                                              );
+                                            }
+                                          },
+                                        ),
+                                    ],
                                   ),
                                 ),
-                                if (_node != null &&
-                                    canDeleteComment(_node!, c))
-                                  IconButton(
-                                    key: Key('feed-comment-delete-${c.id}'),
-                                    tooltip: t('Usuń komentarz'),
-                                    icon: Icon(
-                                      Icons.delete_outline_rounded,
-                                      color: zen.textSecondary,
-                                    ),
-                                    onPressed: () async {
-                                      final String? failed =
-                                          await confirmDeleteComment(
-                                            sheet,
-                                            _node!,
-                                            post.id,
-                                            c,
-                                          );
-                                      if (!sheet.mounted) {
-                                        return;
-                                      }
-                                      if (failed == null) {
-                                        setSheet(() => removed.add(c.id));
-                                      } else if (failed.isNotEmpty) {
-                                        ScaffoldMessenger.maybeOf(
-                                          sheet,
-                                        )?.showSnackBar(
-                                          SnackBar(content: Text(failed)),
-                                        );
-                                      }
-                                    },
-                                  ),
-                              ],
-                            ),
-                          ),
-                      const SizedBox(height: 6),
-                      CommentComposer(
-                        fieldKey: const Key('feed-comment-field'),
-                        sendKey: const Key('feed-comment-send'),
-                        prefixIcon: const Icon(
-                          Icons.chat_bubble_outline_rounded,
+                          ],
                         ),
-                        onSend:
-                            (String text, List<CommentPicture> pictures) async {
-                              final LedgerNode? node = _node;
-                              final NavigatorState nav = Navigator.of(sheet);
-                              try {
-                                if (node != null) {
-                                  await publishComment(
-                                    node,
-                                    post.id,
-                                    text,
-                                    pictures: pictures,
-                                  );
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        child: CommentComposer(
+                          fieldKey: const Key('feed-comment-field'),
+                          sendKey: const Key('feed-comment-send'),
+                          onSend:
+                              (
+                                String text,
+                                List<CommentPicture> pictures,
+                              ) async {
+                                final LedgerNode? node = _node;
+                                final NavigatorState nav = Navigator.of(sheet);
+                                try {
+                                  if (node != null) {
+                                    await publishComment(
+                                      node,
+                                      post.id,
+                                      text,
+                                      pictures: pictures,
+                                    );
+                                  }
+                                  nav.pop();
+                                  return null;
+                                } on ArgumentError catch (e) {
+                                  return '${e.message}';
+                                } on Object catch (e) {
+                                  return t('Nie udało się: {error}', {
+                                    'error': e,
+                                  });
                                 }
-                                nav.pop();
-                                return null;
-                              } on ArgumentError catch (e) {
-                                return '${e.message}';
-                              } on Object catch (e) {
-                                return t('Nie udało się: {error}', {
-                                  'error': e,
-                                });
-                              }
-                            },
+                              },
+                        ),
                       ),
                     ],
                   ),
@@ -962,7 +980,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           if (node != null) ReactionNoticesButton(node: node),
           if (node != null)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsetsDirectional.only(end: 8),
               child: IconButton(
                 key: const Key('feed-open-following'),
                 tooltip: t('Obserwowani'),
@@ -1108,6 +1126,7 @@ Future<String?> deleteOwnPost(
   final bool? sure = await showDialog<bool>(
     context: context,
     builder: (BuildContext dialog) => AlertDialog(
+      scrollable: true,
       title: Text(t('Usunąć post?')),
       content: Text(
         t(
@@ -1244,7 +1263,7 @@ class _FilterChips extends StatelessWidget {
         children: <Widget>[
           for (final FeedFilter f in filters)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsetsDirectional.only(end: 8),
               child: ChoiceChip(
                 key: Key('feed-filter-${f.name}'),
                 label: Text(_label(f)),
@@ -1430,7 +1449,7 @@ class _PostCard extends StatelessWidget {
     return Container(
       key: Key('feed-post-${post.id}'),
       margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
+      padding: const EdgeInsetsDirectional.fromSTEB(16, 14, 8, 8),
       decoration: BoxDecoration(
         color: zen.surface,
         borderRadius: context.zenRadius(24),
@@ -1508,7 +1527,7 @@ class _PostCard extends StatelessWidget {
               ),
               if (onFollow != null)
                 Padding(
-                  padding: const EdgeInsets.only(left: 6),
+                  padding: const EdgeInsetsDirectional.only(start: 6),
                   child: TextButton.icon(
                     key: Key('feed-follow-${post.id}'),
                     onPressed: onFollow,
@@ -1572,7 +1591,7 @@ class _PostCard extends StatelessWidget {
           ),
           if (post.resharedBy.isNotEmpty || post.audience != Audience.public)
             Padding(
-              padding: const EdgeInsets.only(top: 10, right: 8),
+              padding: const EdgeInsetsDirectional.only(top: 10, end: 8),
               child: Wrap(
                 spacing: 6,
                 runSpacing: 6,
@@ -1597,7 +1616,7 @@ class _PostCard extends StatelessWidget {
             ),
           const SizedBox(height: 12),
           Padding(
-            padding: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsetsDirectional.only(end: 8),
             child: PostContent(post: post, node: node),
           ),
           const SizedBox(height: 10),
@@ -1630,7 +1649,7 @@ class _PostCard extends StatelessWidget {
           ),
           if (likeSummary(post) case final String summary)
             Padding(
-              padding: const EdgeInsets.fromLTRB(4, 2, 8, 2),
+              padding: const EdgeInsetsDirectional.fromSTEB(4, 2, 8, 2),
               child: InkWell(
                 key: Key('feed-like-summary-${post.id}'),
                 borderRadius: context.zenRadius(8),
@@ -1685,7 +1704,7 @@ class _LikeButton extends StatelessWidget {
               key: Key('feed-like-${post.id}'),
               onTap: onLike,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 9, 6, 9),
+                padding: const EdgeInsetsDirectional.fromSTEB(12, 9, 6, 9),
                 child: Icon(
                   liked
                       ? Icons.favorite_rounded
@@ -1700,7 +1719,7 @@ class _LikeButton extends StatelessWidget {
             key: Key('feed-likers-${post.id}'),
             onTap: onShowLikers,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(4, 9, 14, 9),
+              padding: const EdgeInsetsDirectional.fromSTEB(4, 9, 14, 9),
               child: Text(
                 '${post.likeTotal}',
                 style: TextStyle(
@@ -1742,7 +1761,7 @@ class _ActionPill extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 9, 14, 9),
+          padding: const EdgeInsetsDirectional.fromSTEB(12, 9, 14, 9),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
@@ -2023,17 +2042,13 @@ class _PostVideoState extends State<PostVideo> {
   ScrollPosition? _scroll;
   Timer? _poll;
 
+  /// Not in a hidden tab, nor under another page ([mayAutoplayAt]).
+  bool _onScreen = false;
+
   @override
   void initState() {
     super.initState();
     _auto.addListener(_onTurn);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
-    // Layout can shift without scrolling (images loading): look again now
-    // and then.
-    _poll = Timer.periodic(
-      const Duration(milliseconds: 800),
-      (_) => _measure(),
-    );
   }
 
   @override
@@ -2044,10 +2059,42 @@ class _PostVideoState extends State<PostVideo> {
       _scroll?.removeListener(_measure);
       _scroll = p?..addListener(_measure);
     }
+    final bool onScreen = mayAutoplayAt(context);
+    if (onScreen != _onScreen || (onScreen && _poll == null)) {
+      _onScreen = onScreen;
+      _syncPoll();
+    }
+  }
+
+  /// Looks where the video is while it can be seen; out of sight it does
+  /// not play (the next visible one may) and nothing looks.
+  void _syncPoll() {
+    if (!_onScreen) {
+      _poll?.cancel();
+      _poll = null;
+      // After this build: the turn may go to another video's state.
+      scheduleMicrotask(() {
+        if (mounted && !_onScreen) {
+          _auto.report(this, visible: 0, top: double.infinity);
+        }
+      });
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
+    // Layout can shift without scrolling (images loading): look again now
+    // and then.
+    _poll ??= Timer.periodic(
+      const Duration(milliseconds: 800),
+      (_) => _measure(),
+    );
   }
 
   void _measure() {
     if (!mounted) {
+      return;
+    }
+    if (!_onScreen) {
+      _auto.report(this, visible: 0, top: double.infinity);
       return;
     }
     final RenderObject? box = context.findRenderObject();
@@ -2287,8 +2334,8 @@ class _PostVideoState extends State<PostVideo> {
                       color: ZenFixed.onPhoto,
                     ),
                   ),
-                Positioned(
-                  right: 8,
+                PositionedDirectional(
+                  end: 8,
                   top: 8,
                   child: Container(
                     padding: const EdgeInsets.all(4),

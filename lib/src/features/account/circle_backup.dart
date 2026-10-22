@@ -29,6 +29,9 @@ import 'package:zen/src/core/ledger/ledger_identity.dart';
 /// the account key.
 const String kCircleBackupType = 'zen_cbk';
 
+/// The manifest version this build writes and can restore from.
+const int kCircleBackupVersion = 1;
+
 /// Most bytes one copy takes at a holder.
 const int kCircleBackupMaxBytes = 10 * 1024 * 1024;
 
@@ -114,11 +117,18 @@ final class CircleBackupManifest {
   /// Its own id (the hash of its signed body).
   String get id => sha256Hex(utf8.encode(jsonEncode(json))).substring(0, 32);
 
+  /// The manifest's version: above [kCircleBackupVersion] for a copy a
+  /// newer build made (held as it is, not restored here).
+  int get version => json['v'] as int;
+
   /// [json] as a manifest, if it is well-formed (not yet verified).
   static CircleBackupManifest? parse(Object? json) {
     if (json is! Map<String, dynamic> ||
         json['t'] != kCircleBackupType ||
-        json['v'] != 1 ||
+        // Any version: a holder keeps (and hands back) a newer build's copy
+        // as it is; only restoring needs to understand it ([version]).
+        json['v'] is! int ||
+        (json['v'] as int) < 1 ||
         json['a'] is! String ||
         json['at'] is! int ||
         json['ch'] is! List ||
@@ -390,7 +400,7 @@ Future<CircleBackupBuild> buildCircleBackup({
   );
   final Map<String, dynamic> body = <String, dynamic>{
     't': kCircleBackupType,
-    'v': 1,
+    'v': kCircleBackupVersion,
     'a': account,
     'at': at,
     'ch': order,

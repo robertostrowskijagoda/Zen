@@ -6,7 +6,9 @@ import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/utils/system_actions.dart';
 import 'package:zen/src/features/update/github_release.dart';
+import 'package:zen/src/features/update/github_update_installer.dart';
 import 'package:zen/src/features/update/github_update_service.dart';
 import 'package:zen/src/features/update/presentation/updates_screen.dart';
 
@@ -88,7 +90,7 @@ class _BannerTile extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.fromLTRB(14, 8, 4, 8),
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 8, 4, 8),
       decoration: BoxDecoration(
         color: tone.withValues(alpha: 0.09),
         borderRadius: context.zenRadius(18),
@@ -145,6 +147,9 @@ class _UpdateProgress extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     final GithubInstallState state = service.installState;
     final String? message = service.installMessage;
+    // Flatpak: the sandbox cannot install; the release page can.
+    final bool flatpak = runningInFlatpak();
+    final GithubRelease? newer = service.newer;
     final String? step = switch (state) {
       GithubInstallState.downloading => t('Pobieram… {percent}%', {
         'percent': (service.progress * 100).round(),
@@ -154,7 +159,7 @@ class _UpdateProgress extends StatelessWidget {
       _ => null,
     };
     return Padding(
-      padding: const EdgeInsets.only(top: 8, right: 10),
+      padding: const EdgeInsetsDirectional.only(top: 8, end: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -189,11 +194,14 @@ class _UpdateProgress extends StatelessWidget {
               ),
             ),
           if (!service.canInstall)
-            Text(
-              t(
-                'Na tym urządzeniu zaktualizuj Zen tak, jak go '
-                'instalowano.',
-              ),
+            SelectableText(
+              flatpak
+                  ? flatpakUpdateHint
+                  : t(
+                      'Na tym urządzeniu zaktualizuj Zen tak, jak go '
+                      'instalowano.',
+                    ),
+              key: const Key('github-update-manual'),
               style: TextStyle(color: zen.textSecondary, fontSize: 13),
             ),
           const SizedBox(height: 4),
@@ -209,6 +217,14 @@ class _UpdateProgress extends StatelessWidget {
                       : () => unawaited(service.update()),
                   icon: const Icon(Icons.system_update_rounded, size: 18),
                   label: Text(t('Aktualizuj')),
+                ),
+              if (flatpak && newer != null)
+                FilledButton.icon(
+                  key: const Key('github-update-open-page'),
+                  onPressed: () =>
+                      unawaited(openWebLink(newer.pageUri.toString())),
+                  icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                  label: Text(t('Otwórz stronę wydania')),
                 ),
               if (compact)
                 TextButton(
@@ -242,6 +258,13 @@ class GithubUpdateCard extends ConsumerWidget {
         final ZenColors zen = ZenColors.of(context);
         final GithubRelease? newer = service.newer;
         final DateTime? at = service.checkedAt;
+        final DateTime? retryAt = service.nextCheckAt;
+        final String? retryText = retryAt == null
+            ? null
+            : t('Spróbuję ponownie {date} o {time}.', {
+                'date': ZenFormat.date(retryAt),
+                'time': ZenFormat.time(retryAt),
+              });
         final (
           IconData icon,
           Color tone,
@@ -284,11 +307,27 @@ class GithubUpdateCard extends ConsumerWidget {
                 ),
                 GithubCheckState.failed => (
                   Icons.error_outline_rounded,
-                  zen.textMuted,
-                  t('GitHub odpowiedział błędem: {error}', {
-                    'error': service.error ?? '—',
-                  }),
-                  null,
+                  zen.warning,
+                  service.rateLimited
+                      ? t(
+                          'Nie udało się sprawdzić aktualizacji: GitHub '
+                          'chwilowo ogranicza liczbę zapytań.',
+                        )
+                      : t(
+                          'Nie udało się sprawdzić aktualizacji (GitHub: '
+                          '{error}).',
+                          {'error': service.error ?? '—'},
+                        ),
+                  retryText,
+                ),
+                GithubCheckState.missing => (
+                  Icons.help_outline_rounded,
+                  zen.warning,
+                  t('Na GitHubie nie ma opublikowanego wydania Zen.'),
+                  t(
+                    'Repozytorium mogło zostać usunięte albo zablokowane. '
+                    'Nowszą wersję możesz dostać od znajomego.',
+                  ),
                 ),
               };
         return Column(

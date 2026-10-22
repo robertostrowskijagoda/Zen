@@ -420,6 +420,14 @@ final class AccountDirectory {
   int get revision => _revision;
   int _revision = 0;
 
+  /// Grows whenever a certificate of [account] is added (what the archive
+  /// saves, one file per account).
+  int revisionOf(String account) => _accountRevisions[account] ?? 0;
+  final Map<String, int> _accountRevisions = <String, int>{};
+
+  /// Every account with a certificate known.
+  Iterable<String> get accounts => _certs.keys;
+
   bool knowsCertificate(DeviceCertificate cert) =>
       _certs[cert.account]?[cert.device]?.signature == cert.signature;
 
@@ -436,6 +444,7 @@ final class AccountDirectory {
     (_certs[cert.account] ??= <String, DeviceCertificate>{})[cert.device] =
         cert;
     _revision++;
+    _accountRevisions[cert.account] = revisionOf(cert.account) + 1;
   }
 
   /// Records a certificate read back from our own storage (checked when it

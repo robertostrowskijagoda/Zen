@@ -12,6 +12,7 @@ import 'package:zen/src/features/meet/meet_book.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
 /// After the alarm went out, when it goes again to friends whose phone has
@@ -113,6 +114,9 @@ final class LockedAlarm {
   /// Stops everything (the app takes the node back, or the service goes).
   Future<void> stop() async {
     _stopped = true;
+    if (_following) {
+      unawaited(ZenWake.release(tag: 'alarm'));
+    }
     _locationTimer?.cancel();
     _locationTimer = null;
     for (final Timer t in _resendTimers) {
@@ -182,6 +186,17 @@ final class LockedAlarm {
       return;
     }
     _following = true;
+    // An alarm is the one time the phone stays awake on its own: the
+    // positions and resends below are timers, which stand still while it
+    // sleeps. Held for as long as they run (an hour), released when the
+    // app takes the alarm over.
+    Duration follow = locationEvery * kLockedAlarmLocationTicks;
+    for (final Duration after in resends) {
+      if (after > follow) {
+        follow = after;
+      }
+    }
+    unawaited(ZenWake.hold(follow + const Duration(minutes: 1), tag: 'alarm'));
     unawaitedLogged(locateNow(), context: 'Locked alarm: position');
     if (locationEvery > Duration.zero) {
       _locationTimer = Timer.periodic(locationEvery, (Timer timer) {

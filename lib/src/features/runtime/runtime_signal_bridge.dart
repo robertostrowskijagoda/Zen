@@ -29,11 +29,23 @@ final class _RuntimeSignalBridgeState
     extends ConsumerState<RuntimeSignalBridge> {
   bool? _lastInteractive;
   late final ZenCore _core;
+  late final AppSecurityService _security;
 
   @override
   void initState() {
     super.initState();
     _core = ref.read(zenCoreProvider);
+    _security = ref.read(appSecurityServiceProvider);
+    // Followed here, not only in build: once the app is hidden or paused
+    // Flutter draws no frames, so a rebuild would come only on the way back
+    // and friends would never hear "away" (nor would the pings stop).
+    ref.listenManual<bool>(
+      socialHubControllerProvider.select(
+        (SocialHubState state) => state.lifecycle.isInteractive,
+      ),
+      (bool? previous, bool next) => _sync(lifecycleInteractive: next),
+    );
+    _security.addListener(_onSecurityChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         unawaitedLogged(_core.start(), context: 'ZenCore startup failed');
@@ -43,8 +55,32 @@ final class _RuntimeSignalBridgeState
 
   @override
   void dispose() {
+    _security.removeListener(_onSecurityChanged);
     unawaitedLogged(_core.stop(), context: 'Stopping ZenCore failed');
     super.dispose();
+  }
+
+  void _onSecurityChanged() {
+    if (!mounted) {
+      return;
+    }
+    _sync(
+      lifecycleInteractive: ref
+          .read(socialHubControllerProvider)
+          .lifecycle
+          .isInteractive,
+    );
+  }
+
+  /// Tells the core when the user starts or stops seeing the app.
+  void _sync({required bool lifecycleInteractive}) {
+    final bool isInteractive =
+        lifecycleInteractive &&
+        !isSecurityBlockingUi(ref.read(appSecurityServiceProvider));
+    if (_lastInteractive != isInteractive) {
+      _lastInteractive = isInteractive;
+      _core.setInteractive(isInteractive);
+    }
   }
 
   @override
@@ -59,12 +95,7 @@ final class _RuntimeSignalBridgeState
       listenable: security,
       child: widget.child,
       builder: (BuildContext context, Widget? child) {
-        final bool isInteractive =
-            lifecycleInteractive && !isSecurityBlockingUi(security);
-        if (_lastInteractive != isInteractive) {
-          _lastInteractive = isInteractive;
-          _core.setInteractive(isInteractive);
-        }
+        _sync(lifecycleInteractive: lifecycleInteractive);
         return child!;
       },
     );

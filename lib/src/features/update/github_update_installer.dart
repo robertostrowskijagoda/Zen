@@ -44,10 +44,34 @@ abstract interface class GithubUpdateInstaller {
   Future<GithubInstallOutcome> install(File file, GithubRelease release);
 }
 
+/// What a Flatpak user does to update (the banner shows it with a button
+/// that opens the release page).
+String get flatpakUpdateHint => t(
+  'Zen z Flatpaka aktualizujesz poza aplikacją: pobierz '
+  'Zen-Linux-x64.flatpak ze strony wydania i wpisz: '
+  'flatpak install --user ./Zen-Linux-x64.flatpak',
+);
+
+/// Whether [environment] and the file system are those of a Flatpak
+/// sandbox: `FLATPAK_ID` is set there, and `/.flatpak-info` exists even
+/// when the environment was cleared.
+bool isFlatpakSandbox(
+  Map<String, String> environment,
+  bool Function(String path) fileExists,
+) => environment.containsKey('FLATPAK_ID') || fileExists('/.flatpak-info');
+
+/// Whether this Zen runs inside a Flatpak sandbox.
+bool runningInFlatpak() =>
+    !kIsWeb &&
+    Platform.isLinux &&
+    isFlatpakSandbox(
+      Platform.environment,
+      (String path) => File(path).existsSync(),
+    );
+
 /// How this Linux installation was made.
-LinuxInstall currentLinuxInstall([Map<String, String>? environment]) {
-  final Map<String, String> env = environment ?? Platform.environment;
-  if (env.containsKey('FLATPAK_ID')) {
+LinuxInstall currentLinuxInstall() {
+  if (runningInFlatpak()) {
     return LinuxInstall.flatpak;
   }
   return Platform.resolvedExecutable.startsWith('/opt/zen/')
@@ -62,8 +86,11 @@ LinuxInstall currentLinuxInstall([Map<String, String>? environment]) {
 /// * Windows (zip), Linux (tar.gz), macOS (zip): unpacked next to the app's
 ///   folder, then a small helper swaps the folders after Zen exits and
 ///   starts the new version. Where that folder cannot be written (Program
-///   Files, `/opt/zen` of the .deb, Flatpak) the file is saved to Downloads
-///   and its folder opened instead.
+///   Files, `/opt/zen` of the .deb) the file is saved to Downloads and its
+///   folder opened instead.
+/// * Flatpak: nothing ([assetName] is null). The sandbox can neither write
+///   to Downloads nor run `flatpak install`; the banner opens the release
+///   page instead ([flatpakUpdateHint]).
 final class SystemGithubInstaller implements GithubUpdateInstaller {
   SystemGithubInstaller({Future<void> Function()? quit})
     : _quit = quit ?? _quitForUpdate;
@@ -71,7 +98,7 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
   final Future<void> Function() _quit;
 
   @override
-  String? get assetName => kIsWeb
+  String? get assetName => kIsWeb || runningInFlatpak()
       ? null
       : githubAssetName(
           releasePlatform: currentReleasePlatform(),

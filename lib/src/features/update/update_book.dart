@@ -1,3 +1,4 @@
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/update/canary.dart';
 import 'package:zen/src/features/update/release.dart';
 
@@ -193,7 +194,7 @@ final class UpdateBook {
   /// Puts back what was saved (our own disk: signatures were checked when
   /// it came in; releases not newer than this build are dropped).
   void restore(Object? json) {
-    if (json is! Map || json['v'] != 1) {
+    if (json is! Map || !isReadableFormat(json, current: 1)) {
       return;
     }
     final Object? rel = json['rel'];

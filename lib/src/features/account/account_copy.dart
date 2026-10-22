@@ -4,7 +4,9 @@ import 'dart:math' as math;
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_link.dart';
@@ -74,11 +76,35 @@ final class AccountCopyTicket {
   String encode() {
     final String json = jsonEncode(<String, dynamic>{
       'v': kAccountCopyVersion,
+      'app': kAppVersion,
       'a': address,
       'k': b64(key),
       't': b64(token),
     });
     return '$kAccountCopyTicketPrefix${base64Url.encode(utf8.encode(json))}';
+  }
+
+  /// The Zen version that made the ticket in [text] when it speaks another
+  /// protocol than this build ('?' when it did not say); null otherwise.
+  static String? otherVersion(String text) {
+    String body = text.trim();
+    if (body.startsWith(kAccountCopyTicketPrefix)) {
+      body = body.substring(kAccountCopyTicketPrefix.length);
+    }
+    try {
+      final Object? json = jsonDecode(
+        utf8.decode(base64Url.decode(base64Url.normalize(body))),
+      );
+      if (json is! Map ||
+          json['v'] is! int ||
+          json['v'] == kAccountCopyVersion) {
+        return null;
+      }
+      final Object? app = json['app'];
+      return app is String && isValidAppVersion(app) ? app : '?';
+    } on FormatException {
+      return null;
+    }
   }
 
   /// The ticket in [text] (with or without its prefix), or null.
@@ -329,11 +355,19 @@ final class AccountCopySource extends ChangeNotifier {
     final Uint8List? myKey = _myKey;
     final Uint8List? token = _token;
     // One device per ticket: a second greeting waits for a new code.
-    if (mine == null ||
-        myKey == null ||
-        token == null ||
-        _peer != null ||
-        f.payload['v'] != kAccountCopyVersion) {
+    if (mine == null || myKey == null || token == null || _peer != null) {
+      return;
+    }
+    if (f.payload['v'] != kAccountCopyVersion) {
+      // Another Zen version: told, instead of a greeting left unanswered.
+      await transport.send(
+        remoteAddress: f.from,
+        payload: <String, dynamic>{
+          'type': AccountCopyMessages.no,
+          'why': 'version',
+          'app': kAppVersion,
+        },
+      );
       return;
     }
     final Uint8List? theirs = unb64(f.payload['e'], length: 32);
@@ -522,6 +556,10 @@ final class AccountCopyTarget {
   SecretKey? _key;
   StreamSubscription<SignalTransportFrame>? _sub;
   final Completer<AccountCopyOffer?> _offer = Completer<AccountCopyOffer?>();
+
+  /// The other device's Zen version when it said no because it speaks
+  /// another protocol ('?' when it did not say which).
+  String? versionMismatch;
   final Map<String, Completer<Uint8List>> _waiting =
       <String, Completer<Uint8List>>{};
 
@@ -563,6 +601,10 @@ final class AccountCopyTarget {
   Future<void> _onFrame(SecretKey key, SignalTransportFrame f) async {
     final Object? type = f.payload['type'];
     if (type == AccountCopyMessages.no && !_offer.isCompleted) {
+      if (f.payload['why'] == 'version') {
+        final Object? app = f.payload['app'];
+        versionMismatch = app is String && isValidAppVersion(app) ? app : '?';
+      }
       _offer.complete(null);
     } else if (type == AccountCopyMessages.offer && !_offer.isCompleted) {
       final Map<String, dynamic>? body = await _open(

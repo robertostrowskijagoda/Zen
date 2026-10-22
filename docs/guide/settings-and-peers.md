@@ -32,19 +32,31 @@ tapped. The first button hides or shows the rail.
 
 | Section | What's inside |
 |---|---|
-| Invite | your QR code, scanning someone's code, sending Zen to a friend |
-| About | version, about how many people use Zen and how many are in the pyramid, what Zen is, security and privacy, licences, documents (with the date you accepted them), contact, support |
-| Privacy and security | password and app lock, notifications without content (on by default), account and recovery (with the circle backup), accounts on this device (with *Receive in the background*), devices, blocked people, group invitations, messages from non-friends |
+| Invite | your QR code, *Copy invitation* and *Copy code only*, scanning someone's code, sending Zen to a friend |
+| About | version, about how many people use Zen and how many are in the pyramid, **Zen on GitHub** at the top, what Zen is, security and privacy, licences, documents (with the date you accepted them), contact, support |
+| Zen on GitHub | the project page: code, releases, instructions and bug reports |
+| Privacy and security | app password, emergency wipe password and app lock, notifications without content (on by default), account and recovery (key copy, recovery circle, copy with friends, full account copy, second device), accounts on this device (with *Receive in the background*), devices, blocked people, group invitations, messages from non-friends |
 | Messages and calls | call recordings, **GIFs** (the *GIF search* switch), downloading photos and videos (also over mobile data by default; *Media over Wi-Fi only* turns that off), in-app sounds, storage limits, notifications and background operation (Android) |
 | App | permissions and Bluetooth, **Looking around in the background** (Android: how often and how long Bluetooth looks for people nearby), *Why isn't it working?*, appearance, language, data and storage, updates and Pass it on |
-| Advanced | network and service (offline mailboxes, [offline links](offline-links.md)), public peers, diagnostics, delete all data |
+| Advanced | network and service (offline mailboxes, [offline links](offline-links.md)), public peers, diagnostics, **delete this account from this device** |
 
 **Looking around in the background** (Android) lets Bluetooth look for
 people nearby without the Nearby screen open: by default for 8 seconds
 every 5 minutes (choices: every 2, 5, 10, 15 or 30 minutes, for 4, 8 or 15
 seconds, or off). The page shows an estimate of what it costs the battery
-a day. It skips its turn below 15 % battery, in battery saver and while the
-phone sleeps, unless it is charging.
+a day, counting that every look wakes the phone for a few seconds: about
+42 mAh (1.4 %) by default, about 163 mAh every 2 minutes for 15 seconds,
+about 5 mAh every 30 minutes for 4 seconds, plus about 2.4 mAh for being
+visible nearby. These are estimates for a typical phone. It skips its turn
+below 15 % battery, in battery saver and while the phone sleeps, unless it
+is charging.
+
+**Battery.** After 5 minutes in the background an Android phone only
+receives (no presence pings, scans or sync), lock or no lock; *Auto-lock*
+says so when it is set to *Never*, on close, on restart or longer than 5
+minutes. Presence pings go only to friends and only while Zen is on the
+screen. A computer on battery stops being a bridge for others and keeps
+only 4 public peers; plugged in, it goes back to normal.
 
 **GIFs.** The GIF button in chats searches KLIPY, an outside company (the
 only chat feature that talks to one). Switch off *GIF search* and the GIF button disappears and Zen
@@ -54,7 +66,8 @@ default key runs out.
 
 Text on these pages can be selected and copied. *Why isn't it working?*
 checks the network, background work, notifications, battery, the clock and
-free space. **Diagnostics** keeps an event log (without message content) to
+free space; on an iPhone it also says that Zen receives only while it is
+open. **Diagnostics** keeps an event log (without message content) to
 attach to a bug report.
 
 ## Public peers
@@ -70,7 +83,11 @@ cannot read it.
   Their TLS 1.3 uses the hybrid post-quantum key exchange X25519MLKEM768.
   On unencrypted `tcp://` and `ws://` links, anyone on the line could see
   which mesh keys your node talks to.
-- A phone uses up to 16 enabled peers, a computer up to 32.
+- A phone keeps links to 4 peers at a time, taken from up to 16 enabled
+  ones; a peer that stops answering is swapped for the next one (less
+  often when there is no network at all). A computer uses about 20, and
+  only 4 while it runs on battery. Computers check which peer answers
+  fastest every 6 hours, never on battery.
 - **Settings → Advanced → Public peers:** see the list (the default one or
   your own), add a peer (the address is checked strictly), remove one,
   switch one off, **Check peers** (reachable? latency in ms, does the key

@@ -72,8 +72,16 @@ void main() {
     // 8 s of every 300 s, the low-power scan listening a tenth of it.
     expect(duty, closeTo(8 / 300 * 0.1, 1e-9));
     expect(duty, lessThan(0.005));
-    // Well under 1 mAh a day for the radio.
-    expect(nearbyLookMilliampHoursPerDay(), lessThan(1.0));
+    // The radio alone would cost well under 1 mAh a day; the phone kept
+    // awake for each look is what counts: tens of mAh with the defaults.
+    final double radioOnly = 10 * duty * 24;
+    expect(radioOnly, lessThan(1.0));
+    final double perDay = nearbyLookMilliampHoursPerDay();
+    expect(perDay, greaterThan(20));
+    expect(perDay, lessThan(80));
+    // 288 looks of 8 s + 5 s awake at 40 mA, plus the radio's share.
+    expect(perDay, closeTo(288 * (13 * 40 + 0.8 * 10) / 3600, 0.01));
+    expect(nearbyAdvertMilliampHoursPerDay(), closeTo(2.4, 0.01));
     expect(nearbyLookDutyCycle(every: Duration.zero), 0);
     expect(
       nearbyLookDutyCycle(

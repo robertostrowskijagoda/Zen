@@ -250,6 +250,7 @@ final class AudienceKeyring {
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    'v': 1,
     'own': <Map<String, dynamic>>[
       for (final List<AudienceKey> list in _own.values)
         for (final AudienceKey k in list) k.toJson(),
@@ -264,7 +265,8 @@ final class AudienceKeyring {
   };
 
   void restore(Object? json) {
-    if (json is! Map) {
+    // `v` 1 (older files have none); a newer one is not read here.
+    if (json is! Map || (json['v'] is int && json['v'] as int > 1)) {
       return;
     }
     final Object? own = json['own'];

@@ -56,17 +56,52 @@ double nearbyLookDutyCycle({
       kLowPowerScanInterval.inMilliseconds;
 }
 
-/// Roughly what the background look around costs a day, in mAh: the
-/// radio's listening current times the duty cycle times 24 h (the CPU is
-/// awake anyway while the background service holds its wake lock). With
-/// the defaults about 0.6 mAh — around 0.02 % of a 3000 mAh battery.
+/// What a phone draws while a look around keeps it awake with the screen
+/// off (processor, memory, radio driver): tens of milliamps on most phones.
+const double kAwakeMilliamps = 40;
+
+/// How long a look keeps the phone awake besides its own window: waking up,
+/// the results the low-power scan batches ([kLookBatchGrace]) and handing
+/// them over.
+const Duration kLookBatchGrace = Duration(seconds: 3);
+const Duration kLookWakeOverhead = Duration(seconds: 2);
+
+/// What showing this phone nearby costs ("W pobliżu": a low-power,
+/// connectable advert about once a second, all the time it is on), on
+/// average.
+const double kBleAdvertMilliamps = 0.1;
+
+/// Roughly what the background look around costs a day, in mAh: each look
+/// wakes the sleeping phone for its window plus [kLookBatchGrace] and
+/// [kLookWakeOverhead] at [kAwakeMilliamps], and the radio listens for its
+/// share of the window. The awake phone is by far the larger part (the
+/// radio alone would be well under 1 mAh). An estimate for a typical
+/// phone, not a measurement: phones differ, and no look runs while the
+/// phone sleeps deeply (Doze) — then it costs nothing.
 double nearbyLookMilliampHoursPerDay({
   Duration every = kNearbyLookEvery,
   Duration window = kNearbyLookFor,
-}) =>
-    kBleListenMilliamps *
-    nearbyLookDutyCycle(every: every, window: window) *
-    24;
+}) {
+  if (every <= Duration.zero) {
+    return 0;
+  }
+  final double looksPerDay =
+      const Duration(days: 1).inMilliseconds / every.inMilliseconds;
+  final double awakeSeconds =
+      (window + kLookBatchGrace + kLookWakeOverhead).inMilliseconds / 1000;
+  final double listenSeconds =
+      window.inMilliseconds /
+      1000 *
+      kLowPowerScanListen.inMilliseconds /
+      kLowPowerScanInterval.inMilliseconds;
+  final double milliampSeconds =
+      awakeSeconds * kAwakeMilliamps + listenSeconds * kBleListenMilliamps;
+  return looksPerDay * milliampSeconds / 3600;
+}
+
+/// Roughly what showing this phone nearby costs a day, in mAh (the advert
+/// goes out while the phone sleeps; it needs no awake processor).
+double nearbyAdvertMilliampHoursPerDay() => kBleAdvertMilliamps * 24;
 
 /// The phone's power as the radio side reports it with `state`
 /// (`battery` in per cent, `charging`, `powerSave` for battery saver,

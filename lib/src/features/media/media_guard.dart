@@ -47,8 +47,19 @@ const int kMaxGifFrames = 400;
 /// (frames x canvas): bounds the memory and time of playing it.
 const int kMaxGifTotalPixels = 200 * 1000 * 1000;
 
-/// Pictures above this many bytes are re-encoded in a separate isolate.
-const int _isolateThresholdBytes = 32 * 1024;
+/// The most memory a picture from someone else may take once decoded
+/// (width × height × channels × bytes per channel), judged from its header
+/// before anything is decoded: a 40-million-pixel photo fits, the same
+/// picture as a 16-bit PNG does not.
+const int kMaxIncomingImageDecodedBytes = 128 * 1024 * 1024;
+
+/// Pictures that decode to more than this many bytes are re-encoded in a
+/// separate isolate. Judged from the header, not the file size: a file of
+/// a few KB may hold a picture of many millions of pixels.
+const int _inlineDecodedBytes = 256 * 256 * 4;
+
+/// What decoding a picture takes, read from its header.
+typedef ImageCost = ({int width, int height, int decodedBytes});
 
 @immutable
 final class GuardedMedia {
@@ -97,8 +108,12 @@ Future<GuardedMedia> guardIncomingMedia(
         );
       }
       if (actual == MediaKind.image && !_isGif(bytes)) {
-        final Uint8List? clean = bytes.length > _isolateThresholdBytes
-            ? await Isolate.run(() => reencodeIncomingImage(bytes))
+        final int? cost = incomingImageCost(bytes)?.decodedBytes;
+        final Uint8List? clean =
+            cost == null || cost > kMaxIncomingImageDecodedBytes
+            ? null
+            : cost > _inlineDecodedBytes
+            ? await _reencodeInIsolate(bytes)
             : reencodeIncomingImage(bytes);
         if (clean != null) {
           final bool png = _isPng(clean);
@@ -148,6 +163,11 @@ Future<GuardedMedia> guardIncomingMedia(
       return _asFile(bytes, name, null, mimeType: mimeType);
   }
 }
+
+// Not async on purpose: a closure made in an async function may drag its
+// suspended frame along, which cannot be sent to another isolate.
+Future<Uint8List?> _reencodeInIsolate(Uint8List bytes) =>
+    Isolate.run(() => reencodeIncomingImage(bytes));
 
 GuardedMedia _asFile(
   Uint8List bytes,
@@ -346,21 +366,85 @@ bool isAcceptableGif(Uint8List bytes) {
   return false;
 }
 
+/// The size of the picture [bytes] once decoded, from its header alone
+/// (nothing is decompressed): a PNG by its bit depth and colour type (a
+/// 16-bit channel takes two bytes), a JPEG as 8-bit RGB, a WebP or BMP as
+/// 8-bit RGBA. Null when it is not a JPEG, PNG, WebP or BMP whose header
+/// reads.
+ImageCost? incomingImageCost(Uint8List bytes) {
+  if (_isPng(bytes)) {
+    return _pngCost(bytes);
+  }
+  final bool jpeg = _isJpeg(bytes);
+  if (!jpeg &&
+      !_isRiff(bytes, 'WEBP') &&
+      !_startsWith(bytes, const <int>[0x42, 0x4D])) {
+    return null;
+  }
+  try {
+    final img.DecodeInfo? info = img
+        .findDecoderForData(bytes)
+        ?.startDecode(bytes);
+    if (info == null || info.width <= 0 || info.height <= 0) {
+      return null;
+    }
+    return (
+      width: info.width,
+      height: info.height,
+      decodedBytes: info.width * info.height * (jpeg ? 3 : 4),
+    );
+  } on Object {
+    return null;
+  }
+}
+
+ImageCost? _pngCost(Uint8List b) {
+  // The signature (8 bytes), then the IHDR chunk: length (4), "IHDR",
+  // width (4), height (4), bit depth, colour type.
+  if (b.length < 33 || String.fromCharCodes(b.sublist(12, 16)) != 'IHDR') {
+    return null;
+  }
+  final ByteData data = ByteData.sublistView(b);
+  final int width = data.getUint32(16);
+  final int height = data.getUint32(20);
+  final int depth = b[24];
+  final int channels = switch (b[25]) {
+    0 => 1, // grey
+    2 => 3, // RGB
+    3 => 4, // palette: may become RGBA
+    4 => 2, // grey and alpha
+    6 => 4, // RGBA
+    _ => 0,
+  };
+  if (width <= 0 ||
+      height <= 0 ||
+      channels == 0 ||
+      !const <int>{1, 2, 4, 8, 16}.contains(depth)) {
+    return null;
+  }
+  return (
+    width: width,
+    height: height,
+    decodedBytes: width * height * channels * (depth == 16 ? 2 : 1),
+  );
+}
+
 /// Re-encodes a picture from someone else: decoded here (pure Dart), only
 /// its first frame, upright, scaled to [kMaxIncomingImageSide], without
 /// metadata. JPEG, or PNG when it has transparency. Null when it is not a
-/// picture this can read, or it is too large to be a photo.
+/// JPEG, PNG, WebP or BMP this can read, or its header says it is too
+/// large to be a photo ([kMaxIncomingImagePixels],
+/// [kMaxIncomingImageDecodedBytes]): then nothing is decoded at all.
 Uint8List? reencodeIncomingImage(Uint8List bytes) {
   try {
-    final img.Decoder? decoder = img.findDecoderForData(bytes);
-    if (decoder == null) {
+    final ImageCost? cost = incomingImageCost(bytes);
+    if (cost == null ||
+        cost.width * cost.height > kMaxIncomingImagePixels ||
+        cost.decodedBytes > kMaxIncomingImageDecodedBytes) {
       return null;
     }
-    final img.DecodeInfo? info = decoder.startDecode(bytes);
-    if (info == null ||
-        info.width <= 0 ||
-        info.height <= 0 ||
-        info.width * info.height > kMaxIncomingImagePixels) {
+    final img.Decoder? decoder = img.findDecoderForData(bytes);
+    if (decoder == null) {
       return null;
     }
     final img.Image? decoded = decoder.decode(bytes, frame: 0);

@@ -733,6 +733,8 @@ final class IntroService extends ChangeNotifier {
       _diskUnreadable = true;
       final List<int>? raw = await disk.read(_key);
       final Object? json = raw == null ? null : jsonDecode(utf8.decode(raw));
+      // A newer build's file: the user is told to update.
+      heldAsNewerOn(disk, _key, json, current: 1);
       if (json != null && (json is! Map || json['v'] != 1)) {
         // A newer app's file (or damage): never written over.
         logZenWarning('Przedstawienia: nieznany zapis');

@@ -50,15 +50,59 @@ final class _WriterLog {
 
   final String account;
   final String device;
+
+  /// Entries `base + 1` … [head], in order.
   final List<LogEntry> entries = <LogEntry>[];
   final Map<int, LogEntry> pending = <int, LogEntry>{};
   bool forked = false;
 
+  /// The last entry not held: the log is held from its writer's checkpoint
+  /// `base + 1` on (0: from the first entry).
+  int base = 0;
+
+  /// Id of entry [base] (what entry `base + 1` names in `prev`).
+  String baseId = '';
+
   /// Bytes of [entries] and [pending].
   int bytes = 0;
 
-  int get head => entries.length;
-  String get lastId => entries.isEmpty ? '' : entries.last.id;
+  int get head => base + entries.length;
+  String get lastId => entries.isEmpty ? baseId : entries.last.id;
+
+  /// Entry [seq], when held.
+  LogEntry? at(int seq) =>
+      seq > base && seq <= head ? entries[seq - base - 1] : null;
+
+  /// Starts the log after entry [newBase] (id [newBaseId]): every held
+  /// entry and every pending one up to it goes.
+  void startAfter(int newBase, String newBaseId) {
+    for (final LogEntry entry in entries) {
+      bytes -= entry.encodedLength;
+    }
+    entries.clear();
+    for (final int seq in pending.keys.toList()) {
+      if (seq <= newBase) {
+        bytes -= pending.remove(seq)!.encodedLength;
+      }
+    }
+    base = newBase;
+    baseId = newBaseId;
+  }
+
+  /// Drops the held entries before [seq] (a checkpoint held here).
+  void dropBefore(int seq) {
+    final LogEntry? first = at(seq);
+    if (first == null) {
+      return;
+    }
+    final int cut = seq - base - 1;
+    for (int i = 0; i < cut; i++) {
+      bytes -= entries[i].encodedLength;
+    }
+    entries.removeRange(0, cut);
+    base = seq - 1;
+    baseId = first.prev;
+  }
 
   void add(LogEntry entry) {
     entries.add(entry);
@@ -85,11 +129,15 @@ final class _WriterLog {
     pending.clear();
   }
 
+  /// Keeps the entries up to [keep] (a sequence number).
   void truncate(int keep) {
-    for (int i = keep; i < entries.length; i++) {
+    final int from = keep <= base ? 0 : keep - base;
+    for (int i = from; i < entries.length; i++) {
       bytes -= entries[i].encodedLength;
     }
-    entries.removeRange(keep, entries.length);
+    if (from < entries.length) {
+      entries.removeRange(from, entries.length);
+    }
   }
 
   /// Marks the log as keeping two histories: nothing more is taken.
@@ -180,6 +228,15 @@ final class LedgerStore {
   bool isForked(String space, String writer) =>
       _logs[space]?[writer]?.forked ?? false;
 
+  /// Where the held part of a log starts: entries after `base` are held,
+  /// `baseId` is the id of entry `base` ((0, '') for a log held whole).
+  ({int base, String baseId}) baseOf(String space, String writer) {
+    final _WriterLog? log = _logs[space]?[writer];
+    return log == null
+        ? (base: 0, baseId: '')
+        : (base: log.base, baseId: log.baseId);
+  }
+
   /// Entries of [writer] in [space] after [afterSeq], in order.
   List<LogEntry> entriesAfter(
     String space,
@@ -191,9 +248,10 @@ final class LedgerStore {
     if (log == null || afterSeq >= log.head) {
       return const <LogEntry>[];
     }
-    final int start = afterSeq < 0 ? 0 : afterSeq;
+    // Entries before the log's start are not held: it goes on from there.
+    final int start = afterSeq < log.base ? log.base : afterSeq;
     final int end = (start + limit) < log.head ? start + limit : log.head;
-    return log.entries.sublist(start, end);
+    return log.entries.sublist(start - log.base, end - log.base);
   }
 
   /// All entries of [space] (every device), oldest first by HLC.
@@ -263,6 +321,11 @@ final class LedgerStore {
     );
     clock.observe(entry.hlc);
 
+    if (log.head == 0 && entry.seq > 1 && isLedgerCheckpoint(entry)) {
+      // Nothing held yet and the writer's checkpoint arrives: the log may
+      // start here (those who hand it on may have cut what came before).
+      log.startAfter(entry.seq - 1, entry.prev);
+    }
     if (entry.seq <= log.head) {
       // Only reachable for a different id at a taken position (duplicates
       // were caught in the precheck).
@@ -409,7 +472,11 @@ final class LedgerStore {
       if (log.forked) {
         return const IngestResult(IngestStatus.rejected, 'dziennik rozwidlony');
       }
-      if (entry.seq <= log.head && log.entries[entry.seq - 1].id == entry.id) {
+      if (entry.seq <= log.base) {
+        // Before the checkpoint the log is held from: not kept here.
+        return const IngestResult(IngestStatus.duplicate, 'przed początkiem');
+      }
+      if (entry.seq <= log.head && log.at(entry.seq)?.id == entry.id) {
         return const IngestResult(IngestStatus.duplicate);
       }
     }
@@ -496,6 +563,68 @@ final class LedgerStore {
     }
   }
 
+  /// Moves a log of [writer] in [space] to start at the writer's
+  /// checkpoint waiting past a gap: for when the peer that sent it holds
+  /// the log only from that checkpoint on (it was cut there), so the gap
+  /// will never be filled. Everything held before it goes. Returns whether
+  /// the log moved.
+  bool adoptCheckpoint(String space, String writer) {
+    final _WriterLog? log = _logs[space]?[writer];
+    if (log == null || log.forked) {
+      return false;
+    }
+    final List<int> waiting =
+        log.pending.keys.where((int seq) => seq > log.head + 1).toList()
+          ..sort();
+    for (final int seq in waiting) {
+      final LogEntry checkpoint = log.pending[seq]!;
+      if (!isLedgerCheckpoint(checkpoint)) {
+        continue;
+      }
+      log.startAfter(seq - 1, checkpoint.prev);
+      _drain(log);
+      _changed.add(null);
+      return true;
+    }
+    return false;
+  }
+
+  /// Drops the entries of a log before its writer's checkpoint [seq] (held
+  /// here): the log is then held, and handed on, from that checkpoint.
+  /// Returns how many entries went (0 when [seq] is no checkpoint held).
+  int pruneBefore(String space, String writer, int seq) {
+    final _WriterLog? log = _logs[space]?[writer];
+    final LogEntry? checkpoint = log?.at(seq);
+    if (log == null || checkpoint == null || !isLedgerCheckpoint(checkpoint)) {
+      return 0;
+    }
+    final int before = log.entries.length;
+    log.dropBefore(seq);
+    final int removed = before - log.entries.length;
+    if (removed > 0) {
+      _changed.add(null);
+    }
+    return removed;
+  }
+
+  /// Puts back where a log read from our own storage starts (before its
+  /// entries, [restore]): after entry [base] whose id is [baseId].
+  void restoreBase(String space, String writer, int base, String baseId) {
+    if (base <= 0 || _policies(space) == null) {
+      return;
+    }
+    final _WriterLog? log = _logs[space]?[writer];
+    if (log != null && log.head > 0) {
+      return;
+    }
+    _pendingBases['$space|$writer'] = (base: base, baseId: baseId);
+  }
+
+  /// Bases read back ([restoreBase]) for logs whose first entry is not
+  /// restored yet.
+  final Map<String, ({int base, String baseId})> _pendingBases =
+      <String, ({int base, String baseId})>{};
+
   /// Puts back an entry read from our own storage: it was fully checked
   /// when it first arrived, so only the chain is checked again (a damaged
   /// file must not produce a broken log) and its device's certificate must
@@ -514,6 +643,14 @@ final class LedgerStore {
       entry.account,
       entry.device,
     );
+    if (log.head == 0) {
+      final ({int base, String baseId})? start = _pendingBases.remove(
+        '${entry.space}|${entry.writer}',
+      );
+      if (start != null) {
+        log.startAfter(start.base, start.baseId);
+      }
+    }
     if (log.account != entry.account ||
         log.device != entry.device ||
         entry.seq != log.head + 1 ||
@@ -576,9 +713,10 @@ final class LedgerStore {
             revocation.cutoffs[cutoffKey(e.key, space.key)] ??
             revocation.cutoffs[e.key] ??
             0;
-        if (log.entries.length > keep) {
-          removed += log.entries.length - keep;
+        if (log.head > keep) {
+          final int before = log.entries.length;
           log.truncate(keep);
+          removed += before - log.entries.length;
         }
         log.clearPending();
       }

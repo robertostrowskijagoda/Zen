@@ -350,7 +350,7 @@ final Provider<EventService> eventServiceProvider = Provider<EventService>((
 EventHost appEventHost(Ref ref, MeetService meet) => MeetEventHost(
   meet.host,
   address: () => ref.read(runtimeNodeSnapshotProvider).localAddress,
-  name: () => ref.read(userProfileControllerProvider).displayName,
+  name: () => ref.read(userProfileControllerProvider).publicName,
 );
 
 /// Subscribes [handle] to the app's incoming frames until [ref] goes.

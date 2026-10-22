@@ -13,6 +13,13 @@ const Duration kClipboardTtl = Duration(seconds: 60);
 Future<void> copyWithExpiry(String text, {Duration ttl = kClipboardTtl}) =>
     ExpiringClipboard.instance.copy(text, ttl: ttl);
 
+/// Copies public text that is meant to be pasted elsewhere, possibly minutes
+/// later in another app (an invitation link: the person's address in the
+/// network, the same thing the QR code shows to anyone). It is not cleared;
+/// a secret copied before it is gone from the clipboard anyway.
+Future<void> copyPublicText(String text) =>
+    ExpiringClipboard.instance.copyPublic(text);
+
 /// Clears the clipboard now if it still holds what the app last copied
 /// (for example when the app locks).
 Future<void> clearCopiedNow() => ExpiringClipboard.instance.clearNow();
@@ -86,6 +93,15 @@ final class ExpiringClipboard with WidgetsBindingObserver {
         // No binding (a plain unit test): the timer alone does the job.
       }
     }
+  }
+
+  /// Copies [text] without clearing it later (see [copyPublicText]).
+  Future<void> copyPublic(String text) async {
+    await _access.write(text);
+    _timer?.cancel();
+    _timer = null;
+    _pending = null;
+    _deadline = null;
   }
 
   Future<void> clearNow() async {

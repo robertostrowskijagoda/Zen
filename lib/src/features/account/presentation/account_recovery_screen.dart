@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
@@ -16,6 +17,7 @@ import 'package:zen/src/features/account/presentation/account_import_layer.dart'
 import 'package:zen/src/features/account/presentation/circle_backup_card.dart';
 import 'package:zen/src/features/account/presentation/key_backup_screen.dart';
 import 'package:zen/src/features/account/presentation/key_restore_screen.dart';
+import 'package:zen/src/features/account/presentation/recovery_circle_list.dart';
 import 'package:zen/src/features/account/recovery_circle_pick.dart';
 import 'package:zen/src/features/account/recovery_providers.dart';
 import 'package:zen/src/features/account/recovery_service.dart';
@@ -29,6 +31,8 @@ import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
+import 'package:zen/src/features/social/peer_qr_scanner.dart';
+import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
 import 'package:zen/src/features/social/social_hub_state.dart';
 
@@ -69,6 +73,10 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
   bool _busy = false;
   String? _message;
 
+  /// The people the person picked for the circle; `null` until they change
+  /// the default ([_defaultHelpers]).
+  Set<String>? _picked;
+
   /// Accounts the received pieces open, waiting for the person to confirm
   /// one by its fingerprint (nothing is taken before that).
   List<RecoveredAccount>? _candidates;
@@ -105,19 +113,43 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     super.dispose();
   }
 
-  /// Who keeps the pieces: the mailbox circle and the other friends,
-  /// "Przyjaciel" first.
-  List<String> _helpers() {
+  FriendLevel _levelOf(String address) =>
+      _node?.levelOf(address) ?? FriendLevel.friend;
+
+  /// Who keeps the pieces unless the person picks otherwise: the mailbox
+  /// circle and the other friends, "Przyjaciel" first, no weak
+  /// acquaintances.
+  List<String> _defaultHelpers(SocialHubState social) {
     final RelayEngine? engine = ref.read(relayEngineProvider);
-    final SocialHubState social = ref.read(socialHubControllerProvider);
-    final LedgerNode? node = _node;
     return pickRecoveryHelpers(
       mailboxes: <String>[...?engine?.overview.value.relays],
       friends: <String>[
         for (final FriendProfile f in social.acceptedFriends) f.address,
       ],
-      levelOf: (String a) => node?.levelOf(a) ?? FriendLevel.friend,
+      levelOf: _levelOf,
     );
+  }
+
+  /// Everyone who can be picked, closest first.
+  List<String> _pickable(SocialHubState social) => recoveryHelperCandidates(
+    friends: <String>[
+      for (final FriendProfile f in social.acceptedFriends) f.address,
+    ],
+    levelOf: _levelOf,
+  );
+
+  /// Who gets the pieces: the person's pick, else the default.
+  List<String> _helpers() {
+    final SocialHubState social = ref.read(socialHubControllerProvider);
+    final Set<String>? picked = _picked;
+    if (picked == null) {
+      return _defaultHelpers(social);
+    }
+    // In the order of the list (closest first), only current friends.
+    return <String>[
+      for (final String a in _pickable(social))
+        if (picked.contains(a)) a,
+    ];
   }
 
   Future<void> _run(Future<String> Function() action) async {
@@ -158,6 +190,12 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
       return t('Konto ma już inne hasło. Najpierw podaj obecne.');
     }
     final List<String> helpers = _helpers();
+    if (checkRecoveryCircle(helpers, minimum: kEmergencyThreshold) ==
+        RecoveryCircleProblem.tooMany) {
+      return t('Wybierz najwyżej {n} osób.', <String, Object?>{
+        'n': kMaxRecoveryHelpers,
+      });
+    }
     if (helpers.length < kEmergencyThreshold) {
       return tn(
         kEmergencyThreshold,
@@ -184,12 +222,23 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     identity.lock();
     _password.clear();
     _repeat.clear();
-    ref.invalidate(accountSecureReminderProvider);
-    return tn(
-      helpers.length,
-      one: 'Hasło ustawione. Klucze odzyskiwania wysłane do {n} osoby.',
-      few: 'Hasło ustawione. Klucze odzyskiwania wysłane do {n} osób.',
-      many: 'Hasło ustawione. Klucze odzyskiwania wysłane do {n} osób.',
+    ref
+      ..invalidate(accountSecureReminderProvider)
+      ..invalidate(circleReminderProvider);
+    final SocialHubState social = ref.read(socialHubControllerProvider);
+    return t(
+      'Hasło ustawione. Klucze odzyskiwania dostali: {names}. Zapisz tę '
+      'listę razem z kopią klucza — przy odzyskiwaniu poprosisz te osoby '
+      'o pomoc.',
+      <String, Object?>{
+        'names': <String>[
+          for (final String a in helpers)
+            switch (social.friendByAddress(a)) {
+              final FriendProfile f => social.nameFor(f),
+              null => PeerShareCodec.displayNameForAddress(a),
+            },
+        ].join(', '),
+      },
     );
   }
 
@@ -201,8 +250,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     }
     await service.beginRecovery();
     return t(
-      'Odzyskiwanie rozpoczęte. Podaj adres tego urządzenia osobom '
-      'z kręgu, które Ci pomogą, i wpisz tu ich kody.',
+      'Odzyskiwanie rozpoczęte. Wpisz kody osób z kręgu, które Ci pomogą: '
+      'ich urządzenia dostaną prośbę o pomoc. Możesz też pokazać im kod '
+      'tego urządzenia.',
     );
   }
 
@@ -217,7 +267,10 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
       return t('Nieprawidłowy kod.');
     }
     _helperCode.clear();
-    return t('Dodano. Klucze od tej osoby będą przyjmowane.');
+    return t(
+      'Dodano. Ta osoba dostała prośbę o pomoc, a jej klucze będą '
+      'przyjmowane.',
+    );
   }
 
   /// Gives up the recovery: no more pieces, the received ones are dropped.
@@ -229,6 +282,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
+        scrollable: true,
         title: Text(t('Przerwać odzyskiwanie?')),
         content: Text(
           t(
@@ -345,9 +399,54 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     return account == null ? null : accountFingerprint(account);
   }
 
-  Future<void> _help(String owner, String name) async {
-    final TextEditingController to = TextEditingController();
+  /// A new device asked for help: whose piece it wants is not known, so
+  /// with several held the person picks the owner first.
+  Future<void> _answerRequest(
+    RecoveryService service,
+    RecoveryHelpRequest request,
+    String Function(String) nameOf,
+  ) async {
+    final List<String> owners = service.heldFor.toList();
+    String? owner = owners.length == 1 ? owners.single : null;
+    owner ??= await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialog) => SimpleDialog(
+        title: Text(t('Komu pomagasz?')),
+        children: <Widget>[
+          for (final String o in owners)
+            SimpleDialogOption(
+              key: Key('recovery-request-owner-$o'),
+              onPressed: () => Navigator.of(dialog).pop(o),
+              child: Text(nameOf(o)),
+            ),
+        ],
+      ),
+    );
+    if (owner == null || !mounted) {
+      return;
+    }
+    await _help(owner, nameOf(owner), to: request.from);
+  }
+
+  Future<void> _help(String owner, String name, {String? to}) async {
+    final TextEditingController target = TextEditingController(
+      text: to == null ? '' : PeerShareCodec.inviteCodeForAddress(to) ?? to,
+    );
+    String? error;
     RecoveryKind kind = RecoveryKind.normal;
+    final PeerQrScanner scanner = ref.read(peerQrScannerProvider);
+    String? check(String text) {
+      if (text.trim().isEmpty) {
+        return null;
+      }
+      try {
+        parseRecoveryDevice(text);
+        return null;
+      } on FormatException catch (e) {
+        return e.message;
+      }
+    }
+
     final String? fingerprint = _heldFingerprint(_service!, owner);
     final bool? ok = await showDialog<bool>(
       context: context,
@@ -385,11 +484,34 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                 const SizedBox(height: 12),
                 TextField(
                   key: const Key('recovery-help-address'),
-                  controller: to,
+                  controller: target,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  onChanged: (String text) =>
+                      setDialog(() => error = check(text)),
                   decoration: InputDecoration(
-                    labelText: t('Adres nowego urządzenia'),
-                    hintText: t('Wklej adres od tej osoby'),
+                    labelText: t('Kod nowego urządzenia'),
+                    hintText: t('Kod, link albo QR z ekranu tej osoby'),
+                    errorText: error,
+                    errorMaxLines: 4,
                     prefixIcon: const Icon(Icons.smartphone_rounded),
+                    suffixIcon: scanner.isSupported
+                        ? IconButton(
+                            key: const Key('recovery-help-scan'),
+                            tooltip: t('Zeskanuj QR'),
+                            icon: const Icon(Icons.qr_code_scanner_rounded),
+                            onPressed: () async {
+                              final String? scanned = await scanner.scan(
+                                dialog,
+                              );
+                              if (scanned == null) {
+                                return;
+                              }
+                              target.text = scanned;
+                              setDialog(() => error = check(scanned));
+                            },
+                          )
+                        : null,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -425,20 +547,34 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
             ),
             FilledButton(
               key: const Key('recovery-help-confirm'),
-              onPressed: () => Navigator.of(dialog).pop(true),
+              onPressed: () {
+                final String text = target.text;
+                final String? problem = text.trim().isEmpty
+                    ? t('Wpisz kod nowego urządzenia albo zeskanuj jego QR.')
+                    : check(text);
+                if (problem != null) {
+                  setDialog(() => error = problem);
+                  return;
+                }
+                Navigator.of(dialog).pop(true);
+              },
               child: Text(t('Pomóż')),
             ),
           ],
         ),
       ),
     );
-    final String address = to.text.trim();
-    disposeLater(to);
+    final String address = target.text.trim();
+    disposeLater(target);
     if (ok != true || address.isEmpty) {
       return;
     }
     await _run(() async {
-      await _service!.startHelping(owner, address, kind: kind);
+      try {
+        await _service!.startHelping(owner, address, kind: kind);
+      } on FormatException catch (e) {
+        return e.message;
+      }
       return t('Klucz zostanie wysłany po upływie czasu ochronnego.');
     });
   }
@@ -560,7 +696,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
           zen.success,
           t(
             'Wraca: teksty rozmów, profil, ustawienia, randki i sąsiedzi — '
-            'z kopii u kręgu',
+            'z kopii u znajomych',
           ),
         ),
         _scopeLine(
@@ -711,6 +847,202 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     ),
   );
 
+  /// "Kto przechowa klucze": the person's choice of the circle, the closest
+  /// friends ticked by default (no weak acquaintances), at least
+  /// [kEmergencyThreshold] and at most [kMaxRecoveryHelpers].
+  Widget _circlePicker(ZenColors zen, SocialHubState social) {
+    final List<String> pickable = _pickable(social);
+    if (pickable.length < kEmergencyThreshold) {
+      return ZenInfo(
+        key: const Key('recovery-circle-too-few'),
+        icon: Icons.group_add_outlined,
+        tone: zen.warning,
+        text: tn(
+          pickable.length,
+          one:
+              'Krąg potrzebuje co najmniej {min} znajomych. Masz {n} — '
+              'dodaj znajomych, a Zen przypomni o kręgu.',
+          few:
+              'Krąg potrzebuje co najmniej {min} znajomych. Masz {n} — '
+              'dodaj znajomych, a Zen przypomni o kręgu.',
+          many:
+              'Krąg potrzebuje co najmniej {min} znajomych. Masz {n} — '
+              'dodaj znajomych, a Zen przypomni o kręgu.',
+          args: <String, Object?>{'min': kEmergencyThreshold},
+        ),
+      );
+    }
+    final Set<String> picked = _picked ?? _defaultHelpers(social).toSet();
+    final RecoveryCircleProblem? problem = checkRecoveryCircle(
+      picked,
+      minimum: kEmergencyThreshold,
+    );
+    return Column(
+      key: const Key('recovery-circle-picker'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(t('KTO PRZECHOWA KLUCZE'), style: zen.label(color: zen.textMuted)),
+        const SizedBox(height: 4),
+        _paragraph(
+          zen,
+          t(
+            'Wybierz od {min} do {max} osób, którym ufasz i które spotkasz albo '
+            'do których zadzwonisz. Każda dostanie kawałek klucza — sama nic '
+            'z nim nie zrobi.',
+            <String, Object?>{
+              'min': kEmergencyThreshold,
+              'max': kMaxRecoveryHelpers,
+            },
+          ),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: <Widget>[
+            for (final String a in pickable)
+              FilterChip(
+                key: Key('recovery-circle-pick-$a'),
+                label: Text(switch (social.friendByAddress(a)) {
+                  final FriendProfile f => social.nameFor(f),
+                  null => PeerShareCodec.displayNameForAddress(a),
+                }),
+                avatar: _levelOf(a) == FriendLevel.close
+                    ? const Icon(Icons.favorite_rounded, size: 16)
+                    : null,
+                selected: picked.contains(a),
+                onSelected: _busy
+                    ? null
+                    : (bool on) => setState(() {
+                        final Set<String> next = <String>{...picked};
+                        if (on) {
+                          next.add(a);
+                        } else {
+                          next.remove(a);
+                        }
+                        _picked = next;
+                      }),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          switch (problem) {
+            RecoveryCircleProblem.tooFew => t(
+              'Wybrano {n} — potrzeba co najmniej {min}.',
+              <String, Object?>{'n': picked.length, 'min': kEmergencyThreshold},
+            ),
+            RecoveryCircleProblem.tooMany => t(
+              'Wybrano {n} — najwyżej {max}.',
+              <String, Object?>{'n': picked.length, 'max': kMaxRecoveryHelpers},
+            ),
+            null => t('Wybrano {n}.', <String, Object?>{'n': picked.length}),
+          },
+          key: const Key('recovery-circle-count'),
+          style: TextStyle(
+            color: problem == null ? zen.textMuted : zen.warning,
+            fontSize: 12.5,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _scanHelper() async {
+    final String? scanned = await ref.read(peerQrScannerProvider).scan(context);
+    if (scanned == null || !mounted) {
+      return;
+    }
+    _helperCode.text = scanned;
+    await _run(_addHelper);
+  }
+
+  /// The new device's invitation code and QR: what the helpers type in or
+  /// scan (no raw network address to read out).
+  Widget _deviceCodePanel(ZenColors zen, String myAddress) {
+    final PeerShareProfile? me = PeerShareCodec.buildLocalProfile(
+      address: myAddress,
+    );
+    return Container(
+      key: const Key('recovery-device-code'),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: zen.surfaceSunk,
+        borderRadius: context.zenRadius(16),
+        border: Border.all(color: zen.outlineSoft),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(
+            t('KOD TEGO URZĄDZENIA'),
+            style: zen.label(color: zen.textMuted),
+          ),
+          const SizedBox(height: 4),
+          if (me == null)
+            Text(
+              t('Kod pojawi się, gdy urządzenie połączy się z siecią.'),
+              style: TextStyle(color: zen.textSecondary, fontSize: 13.5),
+            )
+          else ...<Widget>[
+            SelectableText(
+              me.inviteCode,
+              key: const Key('recovery-device-invite-code'),
+              textAlign: TextAlign.center,
+              style: zen.mono(
+                color: zen.textPrimary,
+                size: 16,
+                weight: FontWeight.w600,
+                letterSpacing: 0.6,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Center(
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: ZenFixed.qrPaper,
+                  borderRadius: context.zenRadius(16),
+                ),
+                child: QrImageView(
+                  data: me.qrData,
+                  size: 160,
+                  padding: EdgeInsets.zero,
+                  backgroundColor: ZenFixed.qrPaper,
+                  eyeStyle: QrEyeStyle(
+                    color: ZenFixed.qrInk,
+                    eyeShape: QrEyeShape.square,
+                  ),
+                  dataModuleStyle: QrDataModuleStyle(
+                    color: ZenFixed.qrInk,
+                    dataModuleShape: QrDataModuleShape.square,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              t(
+                'Osoby z kręgu wpisują ten kod albo skanują QR w „Pomóż '
+                'odzyskać”. Kod nie jest tajny.',
+              ),
+              style: TextStyle(color: zen.textSecondary, fontSize: 13),
+            ),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton.icon(
+                key: const Key('recovery-device-code-copy'),
+                onPressed: () => unawaited(copyPublicText(me.inviteCode)),
+                icon: const Icon(Icons.copy_rounded, size: 18),
+                label: Text(t('Kopiuj kod')),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   String _when(int millis) {
     return ZenFormat.dayMonthTime(DateTime.fromMillisecondsSinceEpoch(millis));
   }
@@ -837,7 +1169,11 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                                   const SizedBox(height: 3),
                                   Text(
                                     t('Dla urządzenia: {address}', {
-                                      'address': a.to,
+                                      'address':
+                                          PeerShareCodec.inviteCodeForAddress(
+                                            a.to,
+                                          ) ??
+                                          a.to,
                                     }),
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
@@ -852,7 +1188,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                           ],
                         ),
                         Align(
-                          alignment: Alignment.centerRight,
+                          alignment: AlignmentDirectional.centerEnd,
                           child: TextButton(
                             style: TextButton.styleFrom(
                               foregroundColor: zen.danger,
@@ -903,6 +1239,25 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                               ),
                       ),
                       const SizedBox(height: 8),
+                      ZenInfo(
+                        key: const Key('recovery-password-explained'),
+                        icon: Icons.help_outline_rounded,
+                        text: t(
+                          'Hasło konta to nie hasło aplikacji. Hasło aplikacji '
+                          'odblokowuje Zen na tym urządzeniu. Hasło konta '
+                          'chroni klucz konta i wpiszesz je na nowym '
+                          'telefonie przy odzyskiwaniu przez krąg. Może być '
+                          'takie samo jak hasło aplikacji — łatwiej je '
+                          'zapamiętać.',
+                        ),
+                      ),
+                      if (hasPassword) ...<Widget>[
+                        const SizedBox(height: 8),
+                        const RecoveryCircleMembersView(),
+                      ],
+                      const SizedBox(height: 12),
+                      _circlePicker(zen, social),
+                      const SizedBox(height: 8),
                       Text(
                         t('Odcisk Twojego konta: {fingerprint}', {
                           'fingerprint': accountFingerprint(
@@ -942,7 +1297,10 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                         style: FilledButton.styleFrom(
                           minimumSize: const Size.fromHeight(52),
                         ),
-                        onPressed: _busy
+                        onPressed:
+                            _busy ||
+                                social.acceptedFriends.length <
+                                    kEmergencyThreshold
                             ? null
                             : () => unawaited(_run(_setPassword)),
                         child: Text(
@@ -958,6 +1316,52 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                 // The copy of the data the circle keeps.
                 const CircleBackupCard(),
                 ZenSection(t('Przechowujesz klucze dla')),
+                if (service.heldFor.isNotEmpty)
+                  for (final RecoveryHelpRequest r in service.helpRequests)
+                    ZenCard(
+                      key: Key('recovery-request-${r.from}'),
+                      tone: zen.warning,
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          ZenInfo(
+                            icon: Icons.support_rounded,
+                            tone: zen.warning,
+                            title: t('Ktoś prosi o pomoc w odzyskaniu konta'),
+                            text: t(
+                              'Nowe urządzenie podało Cię jako osobę z kręgu '
+                              '({time}). Pomóż tylko, jeśli wiesz na pewno, '
+                              'kto to jest — najlepiej porozmawiaj na żywo '
+                              'albo przez telefon i porównajcie odcisk konta.',
+                              <String, Object?>{'time': _when(r.at)},
+                            ),
+                          ),
+                          Wrap(
+                            alignment: WrapAlignment.end,
+                            spacing: 8,
+                            children: <Widget>[
+                              TextButton(
+                                key: Key('recovery-request-dismiss-${r.from}'),
+                                onPressed: () => unawaited(
+                                  service.dismissHelpRequest(r.from),
+                                ),
+                                child: Text(t('Odrzuć')),
+                              ),
+                              FilledButton(
+                                key: Key('recovery-request-help-${r.from}'),
+                                onPressed: _busy
+                                    ? null
+                                    : () => unawaited(
+                                        _answerRequest(service, r, nameOf),
+                                      ),
+                                child: Text(t('Pomóż')),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                 if (service.heldFor.isEmpty)
                   ZenInfo(
                     icon: Icons.key_off_rounded,
@@ -997,7 +1401,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                       'Wyślesz klucz {name} → {address} {time}',
                       <String, Object?>{
                         'name': nameOf(p.owner),
-                        'address': p.to,
+                        'address':
+                            PeerShareCodec.inviteCodeForAddress(p.to) ?? p.to,
                         'time': _when(p.due),
                       },
                     ),
@@ -1024,9 +1429,10 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                         zen,
                         t(
                           'Poproś dwie osoby z kręgu, żeby pomogły odzyskać '
-                          'Twoje konto, i podaj im adres tego urządzenia. Po '
-                          '24 h wpisz hasło konta. Bez hasła potrzeba czterech '
-                          'osób i 7 dni.',
+                          'Twoje konto (ich lista jest przy kopii klucza albo '
+                          'na starym telefonie). Wpisz tu ich kody — dostaną '
+                          'prośbę o pomoc. Po 24 h wpisz hasło konta. Bez '
+                          'hasła potrzeba czterech osób i 7 dni.',
                         ),
                       ),
                       _recoverScope(zen, const Key('recovery-scope-before')),
@@ -1053,46 +1459,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                         ),
                       ] else ...<Widget>[
                         const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.fromLTRB(14, 10, 4, 10),
-                          decoration: BoxDecoration(
-                            color: zen.surfaceSunk,
-                            borderRadius: context.zenRadius(16),
-                            border: Border.all(color: zen.outlineSoft),
-                          ),
-                          child: Row(
-                            children: <Widget>[
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: <Widget>[
-                                    Text(
-                                      t('ADRES TEGO URZĄDZENIA'),
-                                      style: zen.label(color: zen.textMuted),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    SelectableText(
-                                      myAddress.isEmpty ? '—' : myAddress,
-                                      style: zen.mono(
-                                        color: zen.textPrimary,
-                                        size: 13,
-                                        letterSpacing: 0.2,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: t('Kopiuj adres'),
-                                icon: const Icon(Icons.copy_rounded),
-                                onPressed: myAddress.isEmpty
-                                    ? null
-                                    : () =>
-                                          unawaited(copyWithExpiry(myAddress)),
-                              ),
-                            ],
-                          ),
-                        ),
+                        _deviceCodePanel(zen, myAddress),
                         const SizedBox(height: 8),
                         Text(
                           t('To urządzenie przyjmuje klucze do {time}.', {
@@ -1117,7 +1484,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                             key: Key('recovery-helper-$helper'),
                             icon: Icons.person_rounded,
                             tone: zen.accent,
-                            title: helper,
+                            title:
+                                PeerShareCodec.inviteCodeForAddress(helper) ??
+                                helper,
                             trailing: IconButton(
                               tooltip: t('Usuń'),
                               icon: const Icon(Icons.close_rounded),
@@ -1131,11 +1500,30 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                               child: TextField(
                                 key: const Key('recovery-helper-code'),
                                 controller: _helperCode,
+                                autocorrect: false,
+                                enableSuggestions: false,
                                 decoration: InputDecoration(
                                   labelText: t('Kod osoby z kręgu'),
+                                  hintText: t('Kod, link albo QR tej osoby'),
                                   prefixIcon: const Icon(
                                     Icons.person_add_alt_1_rounded,
                                   ),
+                                  suffixIcon:
+                                      ref
+                                          .read(peerQrScannerProvider)
+                                          .isSupported
+                                      ? IconButton(
+                                          key: const Key(
+                                            'recovery-helper-scan',
+                                          ),
+                                          tooltip: t('Zeskanuj QR'),
+                                          icon: const Icon(
+                                            Icons.qr_code_scanner_rounded,
+                                          ),
+                                          onPressed: () =>
+                                              unawaited(_scanHelper()),
+                                        )
+                                      : null,
                                 ),
                               ),
                             ),
@@ -1252,7 +1640,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                 // The whole account: a backup file, another device.
                 ZenSection(t('Kopia i przenoszenie')),
                 const AccountCopyActions(),
-                ZenSection(t('Kopia zapasowa klucza')),
+                ZenSection(t('Kopia klucza (kartka lub plik)')),
                 ZenCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1260,10 +1648,13 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                       _paragraph(
                         zen,
                         t(
-                          'Kopia klucza (plik z hasłem albo kod) przywraca samo '
-                          'konto na nowym telefonie, nawet gdy nikt z kręgu '
-                          'nie pomoże; czatów nie wraca. Kto ma plik z '
-                          'hasłem lub kod, ma konto.',
+                          'Kopia klucza (kartka z kodem albo plik z hasłem) '
+                          'przywraca konto na nowym telefonie, nawet gdy nikt '
+                          'z kręgu nie pomoże. Znajomi, grupy i teksty rozmów '
+                          'wracają potem z kopii u znajomych, jeśli ją masz. '
+                          'To nie jest kopia całego konta: zdjęć i plików z '
+                          'rozmów nie przywróci. Kto ma kartkę albo plik '
+                          'z hasłem, ma konto.',
                         ),
                       ),
                       const SizedBox(height: 10),

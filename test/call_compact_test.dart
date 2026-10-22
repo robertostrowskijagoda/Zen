@@ -49,10 +49,14 @@ void main() {
     expect(mode.active.value, isFalse);
   });
 
-  testWidgets('the small call view shows who and how long', (
+  Future<void> pumpView(
     WidgetTester tester,
-  ) async {
-    tester.view.physicalSize = const Size(320, 180);
+    Size size, {
+    CallSession? session,
+    bool? interactive,
+    double textScale = 1,
+  }) async {
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
@@ -64,15 +68,82 @@ void main() {
           ),
         ],
         child: MaterialApp(
-          home: CallCompactView(session: _call(CallSessionStatus.active)),
+          builder: (BuildContext context, Widget? child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: TextScaler.linear(textScale)),
+            child: child!,
+          ),
+          home: CallCompactView(
+            session: session ?? _call(CallSessionStatus.active),
+            interactive: interactive,
+          ),
         ),
       ),
     );
-    expect(find.text('Ania'), findsOneWidget);
-    expect(find.text('01:05'), findsOneWidget);
+  }
+
+  // The desktop window's sizes (200x260 is the smallest) with the view's
+  // own buttons.
+  for (final Size size in const <Size>[Size(200, 260), Size(240, 320)]) {
+    for (final double scale in const <double>[1, 1.3, 2]) {
+      testWidgets(
+        'the small call window ${size.width.toInt()}x${size.height.toInt()} '
+        'at text scale $scale shows who and how long',
+        (WidgetTester tester) async {
+          await pumpView(tester, size, interactive: true, textScale: scale);
+          expect(find.text('Ania'), findsOneWidget);
+          expect(find.text('01:05'), findsOneWidget);
+          expect(find.byKey(const Key('call-compact-mute')), findsOneWidget);
+          expect(find.byKey(const Key('call-compact-expand')), findsOneWidget);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
+  }
+
+  testWidgets('a long name and a long status fit the smallest window', (
+    WidgetTester tester,
+  ) async {
+    await pumpView(
+      tester,
+      const Size(200, 260),
+      interactive: true,
+      session: const CallSession(
+        id: 'c2',
+        peerAddress: 'k.ygg',
+        displayName: 'Konstantynopolitańczykowianeczka Wielopolska',
+        kind: CallInviteKind.audio,
+        status: CallSessionStatus.connecting,
+        startedAtMillis: 0,
+      ),
+    );
+    expect(find.byKey(const Key('call-compact-status')), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  // Android's picture-in-picture (about 108x135 dp at 4:5): no buttons of
+  // its own, the name goes under the picture.
+  for (final double scale in const <double>[1, 1.3]) {
+    testWidgets('picture-in-picture 108x135 at text scale $scale', (
+      WidgetTester tester,
+    ) async {
+      await pumpView(
+        tester,
+        const Size(108, 135),
+        interactive: false,
+        textScale: scale,
+      );
+      expect(find.text('Ania'), findsOneWidget);
+      expect(find.text('01:05'), findsOneWidget);
+      expect(find.byKey(const Key('call-compact-who-narrow')), findsOneWidget);
+      expect(find.byKey(const Key('call-compact-mute')), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
 
   testWidgets('without a call the layer shows the app', (
     WidgetTester tester,

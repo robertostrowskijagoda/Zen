@@ -59,6 +59,7 @@ class HealthInputs {
     this.localAddress = '',
     this.errorMessage,
     this.isAndroid = false,
+    this.isIPhone = false,
     this.backgroundRunning,
     this.permissions,
     this.clockSkew,
@@ -72,6 +73,9 @@ class HealthInputs {
   final String localAddress;
   final String? errorMessage;
   final bool isAndroid;
+
+  /// An iPhone or iPad: iOS never lets Zen receive in the background.
+  final bool isIPhone;
 
   /// The always-on service (Android); `null` = not known.
   final bool? backgroundRunning;
@@ -126,6 +130,7 @@ HealthReport buildHealthReport(HealthInputs i) {
     _network(i),
     _peers(i),
     if (i.isAndroid) _background(i),
+    if (i.isIPhone) _iPhoneBackground(),
     _notifications(i),
     if (i.isAndroid) _battery(i),
     _clock(i),
@@ -238,6 +243,19 @@ HealthItem _background(HealthInputs i) {
           fix: HealthFix.appSettings,
         );
 }
+
+/// An iPhone cannot be fixed into receiving in the background: say so, and
+/// what helps.
+HealthItem _iPhoneBackground() => HealthItem(
+  id: 'background',
+  level: HealthLevel.warn,
+  title: t('Praca w tle'),
+  detail: t(
+    'iPhone odbiera tylko przy otwartym Zen — iOS nie pozwala działać '
+    'w tle. Do tego czasu wiadomości czekają u nadawców albo w skrzynkach '
+    'u znajomych. Pomaga znajomy z Zen na komputerze albo na Androidzie.',
+  ),
+);
 
 HealthItem _notifications(HealthInputs i) {
   final String title = t('Powiadomienia');

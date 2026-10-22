@@ -169,6 +169,7 @@ class PlanCard extends StatelessWidget {
     final bool? ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
+        scrollable: true,
         title: Text(t('Odwołać plan?')),
         content: Text(t('Znajomi zobaczą, że plan jest nieaktualny.')),
         actions: <Widget>[
@@ -343,9 +344,13 @@ class PlanCard extends StatelessWidget {
                   ),
                 ),
                 if (maybe.isNotEmpty)
-                  Text(
-                    t('może: {count}', {'count': maybe.length}),
-                    style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+                  Flexible(
+                    child: Text(
+                      t('może: {count}', {'count': maybe.length}),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: zen.textMuted, fontSize: 12.5),
+                    ),
                   ),
               ],
             ),
@@ -566,7 +571,7 @@ class _PersonChip extends StatelessWidget {
       if (!joined) t('może'),
     ].join(' · ');
     return Container(
-      padding: const EdgeInsets.fromLTRB(4, 4, 10, 4),
+      padding: const EdgeInsetsDirectional.fromSTEB(4, 4, 10, 4),
       decoration: BoxDecoration(
         color: joined ? tone.withValues(alpha: 0.14) : zen.surfaceRaised,
         borderRadius: context.zenRadius(999),
@@ -859,7 +864,7 @@ Future<void> showPlanSheet(BuildContext context, PlanService plans) {
               ),
               const SizedBox(height: 10),
               Align(
-                alignment: Alignment.centerLeft,
+                alignment: AlignmentDirectional.centerStart,
                 child: OutlinedButton.icon(
                   key: const Key('plan-time'),
                   onPressed: () => unawaited(pickTime()),

@@ -19,7 +19,8 @@ ZEN_GO_BRIDGE_KEEP_5 = -Wl,-u,_YggSetLocalLinksJson -Wl,-u,_YggGetLocalLinksJson
 ZEN_GO_BRIDGE_KEEP_6 = -Wl,-u,_YggBtLinkStateJson -Wl,-u,_YggBtLinkStartJson -Wl,-u,_YggBtLinkStopJson -Wl,-u,_YggBtLinkPollJson -Wl,-u,_YggBtLinkAcceptJson -Wl,-u,_YggBtLinkRejectJson -Wl,-u,_YggBtLinkDialJson -Wl,-u,_YggBtLinkPairedJson
 ZEN_GO_BRIDGE_KEEP_7 = -Wl,-u,_YggPqPublicKeyJson -Wl,-u,_YggPqEncapsulateJson -Wl,-u,_YggPqDecapsulateJson -Wl,-u,_YggSigPublicKeyJson -Wl,-u,_YggSigSignJson -Wl,-u,_YggSigVerifyJson
 
-ZEN_GO_BRIDGE_LDFLAGS = -force_load "$(ZEN_GO_BRIDGE_LIB)" $(ZEN_GO_BRIDGE_SYSTEM) $(ZEN_GO_BRIDGE_KEEP_1) $(ZEN_GO_BRIDGE_KEEP_2) $(ZEN_GO_BRIDGE_KEEP_3) $(ZEN_GO_BRIDGE_KEEP_4) $(ZEN_GO_BRIDGE_KEEP_5) $(ZEN_GO_BRIDGE_KEEP_6) $(ZEN_GO_BRIDGE_KEEP_7)
+ZEN_GO_BRIDGE_KEEP_8 = -Wl,-u,_YggPqPinsJson -Wl,-u,_YggPqSetPinsJson -Wl,-u,_YggDefaultPublicPeersJson -Wl,-u,_YggSetPublicPeersJson -Wl,-u,_YggProbePeersJson
+ZEN_GO_BRIDGE_LDFLAGS = -force_load "$(ZEN_GO_BRIDGE_LIB)" $(ZEN_GO_BRIDGE_SYSTEM) $(ZEN_GO_BRIDGE_KEEP_1) $(ZEN_GO_BRIDGE_KEEP_2) $(ZEN_GO_BRIDGE_KEEP_3) $(ZEN_GO_BRIDGE_KEEP_4) $(ZEN_GO_BRIDGE_KEEP_5) $(ZEN_GO_BRIDGE_KEEP_6) $(ZEN_GO_BRIDGE_KEEP_7) $(ZEN_GO_BRIDGE_KEEP_8)
 
 OTHER_LDFLAGS = $(inherited) $(ZEN_GO_BRIDGE_LDFLAGS)
 

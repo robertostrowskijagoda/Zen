@@ -137,6 +137,7 @@ final class RelayPeerInfo {
     this.depositToken,
     this.blobQuotaBytes = 0,
     this.blobRelays = const <String, int>{},
+    this.staysOnline = false,
   });
 
   final String address;
@@ -176,6 +177,11 @@ final class RelayPeerInfo {
   /// quota in bytes.
   final Map<String, int> blobRelays;
 
+  /// The peer's device is online most of the time (a computer with Zen in
+  /// the tray, Android with its background service), so it makes a good
+  /// mailbox; an iPhone receives only while Zen is open.
+  final bool staysOnline;
+
   Map<String, dynamic> toJson() => <String, dynamic>{
     'a': address,
     if (publicKey != null) 'pk': base64Url.encode(publicKey!),
@@ -187,6 +193,7 @@ final class RelayPeerInfo {
     if (depositToken != null) 'tk': depositToken,
     if (blobQuotaBytes > 0) 'bq': blobQuotaBytes,
     if (blobRelays.isNotEmpty) 'br': blobRelays,
+    if (staysOnline) 'on': true,
   };
 
   static RelayPeerInfo? fromJson(Object? json) {
@@ -205,6 +212,7 @@ final class RelayPeerInfo {
       depositToken: token is String && token.isNotEmpty ? token : null,
       blobQuotaBytes: (json['bq'] as num?)?.toInt() ?? 0,
       blobRelays: _intMap(json['br']),
+      staysOnline: json['on'] == true,
     );
   }
 }
@@ -637,8 +645,13 @@ final class RelayState {
   /// what arrived so far.
   final Map<String, RelayPartsIn> inParts;
 
+  /// The state as one JSON document. [outboxEntry] writes an outbox entry
+  /// (default: [RelayOutboxEntry.toJson]; the file store keeps big payloads
+  /// apart); [extra] fields are added at the end.
   String toJsonString({
     bool includeMailbox = true,
+    Map<String, dynamic> Function(RelayOutboxEntry entry)? outboxEntry,
+    Map<String, dynamic> extra = const <String, dynamic>{},
   }) => jsonEncode(<String, dynamic>{
     'v': 1,
     if (identity != null) 'id': identity!.toJson(),
@@ -648,7 +661,9 @@ final class RelayState {
     'ver': relaySetVersion,
     // Confirmations of announcements (deposit tokens, capabilities).
     'ann': announcedVersions,
-    'out': outbox.values.map((RelayOutboxEntry e) => e.toJson()).toList(),
+    'out': outbox.values
+        .map(outboxEntry ?? ((RelayOutboxEntry e) => e.toJson()))
+        .toList(),
     if (includeMailbox) 'mail': mailbox,
     'tomb': tombstones,
     'seen': seen,
@@ -674,10 +689,13 @@ final class RelayState {
       'trk': tracked.values.map((RelayTrackedMessage m) => m.toJson()).toList(),
     if (inParts.isNotEmpty)
       'pin': inParts.values.map((RelayPartsIn p) => p.toJson()).toList(),
+    ...extra,
   });
 
-  static RelayState fromJsonString(String raw) {
-    final Object? decoded = jsonDecode(raw);
+  static RelayState fromJsonString(String raw) => fromJson(jsonDecode(raw));
+
+  /// The state from its decoded JSON document ([toJsonString]).
+  static RelayState fromJson(Object? decoded) {
     if (decoded is! Map) {
       return RelayState();
     }

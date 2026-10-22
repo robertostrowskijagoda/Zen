@@ -26,6 +26,7 @@ Future<void> showPostLikers(
 }) => showModalBottomSheet<void>(
   context: context,
   showDragHandle: true,
+  useSafeArea: true,
   isScrollControlled: true,
   builder: (BuildContext context) =>
       _LikersSheet(post: post, node: node, mutualFriends: mutualFriends),
@@ -132,6 +133,7 @@ Future<void> showPostComments(
   context: context,
   isScrollControlled: true,
   showDragHandle: true,
+  useSafeArea: true,
   builder: (BuildContext context) => PostCommentsSheet(
     node: node,
     post: post,
@@ -198,6 +200,7 @@ class _PostCommentsSheetState extends State<PostCommentsSheet> {
     final bool? sure = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
+        scrollable: true,
         title: Text(
           t('Zablokować w Twoich wątkach: {name}?', {'name': c.authorLabel}),
         ),
@@ -303,67 +306,84 @@ class _PostCommentsSheetState extends State<PostCommentsSheet> {
         bottom: MediaQuery.of(context).viewInsets.bottom,
       ),
       child: SafeArea(
-        child: ListView(
-          key: const Key('post-comments'),
-          shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        // The field stays at the bottom, over the keyboard; the comments
+        // scroll above it.
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Text(
-              t('Komentarze ({count})', {'count': comments.length}),
-              style: TextStyle(
-                color: zen.textPrimary,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
+            Flexible(
+              child: ListView(
+                key: const Key('post-comments'),
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                children: <Widget>[
+                  Text(
+                    t('Komentarze ({count})', {'count': comments.length}),
+                    style: TextStyle(
+                      color: zen.textPrimary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (comments.isEmpty)
+                    ZenEmpty(
+                      icon: Icons.forum_outlined,
+                      title: t('Jeszcze nic.'),
+                      text: t('Napisz pierwszy komentarz.'),
+                    ),
+                  for (final FeedComment c in comments)
+                    _CommentRow(
+                      comment: c,
+                      node: widget.node,
+                      mutual:
+                          c.account.isEmpty ||
+                              c.account == widget.node.account ||
+                              widget.node.friendAccounts.containsValue(
+                                c.account,
+                              )
+                          ? null
+                          : mutualFriendsLine(
+                              c.account,
+                              widget.mutualFriends,
+                              key: Key('post-comment-mutual-${c.id}'),
+                            ),
+                      hidden: _isHidden(c),
+                      onHide: _mine
+                          ? () => unawaited(_setHidden(c, true))
+                          : null,
+                      onShow: _mine
+                          ? () => unawaited(_setHidden(c, false))
+                          : null,
+                      onBlock:
+                          _mine &&
+                              c.account.isNotEmpty &&
+                              c.account != widget.node.account
+                          ? () => unawaited(_block(c))
+                          : null,
+                      onDelete: canDeleteComment(widget.node, c)
+                          ? () => unawaited(_delete(c))
+                          : null,
+                    ),
+                  if (_error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        _error!,
+                        key: const Key('post-comment-error'),
+                        style: TextStyle(color: zen.danger, fontSize: 12.5),
+                      ),
+                    ),
+                ],
               ),
             ),
-            const SizedBox(height: 8),
-            if (comments.isEmpty)
-              ZenEmpty(
-                icon: Icons.forum_outlined,
-                title: t('Jeszcze nic.'),
-                text: t('Napisz pierwszy komentarz.'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: CommentComposer(
+                fieldKey: const Key('post-comment-field'),
+                sendKey: const Key('post-comment-send'),
+                onSend: _send,
               ),
-            for (final FeedComment c in comments)
-              _CommentRow(
-                comment: c,
-                node: widget.node,
-                mutual:
-                    c.account.isEmpty ||
-                        c.account == widget.node.account ||
-                        widget.node.friendAccounts.containsValue(c.account)
-                    ? null
-                    : mutualFriendsLine(
-                        c.account,
-                        widget.mutualFriends,
-                        key: Key('post-comment-mutual-${c.id}'),
-                      ),
-                hidden: _isHidden(c),
-                onHide: _mine ? () => unawaited(_setHidden(c, true)) : null,
-                onShow: _mine ? () => unawaited(_setHidden(c, false)) : null,
-                onBlock:
-                    _mine &&
-                        c.account.isNotEmpty &&
-                        c.account != widget.node.account
-                    ? () => unawaited(_block(c))
-                    : null,
-                onDelete: canDeleteComment(widget.node, c)
-                    ? () => unawaited(_delete(c))
-                    : null,
-              ),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  _error!,
-                  key: const Key('post-comment-error'),
-                  style: TextStyle(color: zen.danger, fontSize: 12.5),
-                ),
-              ),
-            const SizedBox(height: 6),
-            CommentComposer(
-              fieldKey: const Key('post-comment-field'),
-              sendKey: const Key('post-comment-send'),
-              onSend: _send,
             ),
           ],
         ),

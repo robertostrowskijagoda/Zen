@@ -51,6 +51,14 @@ everywhere alike. There is no server that could be bribed or shut down.
 4. The newcomer **votes** after 14 days, or as soon as a voting member of
    their cells confirms "we've met".
 
+**Not a member yet?** The Pyramid and Wallet tabs stay on the rail and
+explain *How to join*: only through a friend who is already a member. Meet;
+they open Pyramid → **Invite to the pyramid** and show a code, and you scan
+it with the button below. Nobody pays anything to join. Zen also lists *Your
+friends in the pyramid* when it knows them ("ask one of them for an
+invitation"), or says honestly that it does not know yet or that none of
+your friends is a member.
+
 ## Moving up, step by step
 
 Every move up is **exactly one level**, and that level must agree:
@@ -150,7 +158,7 @@ stricter path:
 - Escrow payments, used by [gates](introductions-and-gates.md) and the
   market, go the same private way: the money is set aside and released by a
   condition, or returned after a deadline.
-- After recovering your account (recovery circle, paper backup or key file)
+- After recovering your account (recovery circle or key copy)
   your place and level come back from the records your friends keep, and
   your balance and history from the treasurers' statements.
 
@@ -262,5 +270,10 @@ pyramid).
 - Your phone folds the records into the pyramid once, then adds new
   records as they come; only a record dated into the past makes it fold
   everything again, in the background for a large pyramid.
+- **Newer rules.** Every record says which version of the pyramid's rules
+  it follows. When a record follows rules newer than your Zen knows, your
+  phone stops at that record: it applies nothing from there on (time stops
+  too), signs nothing, and the Pyramid tab asks you to update Zen. Nothing
+  is lost; after the update the phone goes on from that record.
 
 [Back to the guide](README.md)

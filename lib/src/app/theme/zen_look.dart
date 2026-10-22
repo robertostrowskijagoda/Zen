@@ -838,8 +838,10 @@ final class ZenLook extends ThemeExtension<ZenLook> {
         borders == ZenBorderStyle.ink || borders == ZenBorderStyle.pixel;
     return BoxDecoration(
       color: bevelled ? zen.surface : zen.surfaceSunk,
-      border: Border(
-        right: BorderSide(color: edge, width: thick ? 2.5 : 1),
+      // The rail's edge towards the page (on its right; on its left in a
+      // right-to-left language).
+      border: BorderDirectional(
+        end: BorderSide(color: edge, width: thick ? 2.5 : 1),
       ),
       boxShadow: lit
           ? <BoxShadow>[
@@ -854,24 +856,24 @@ final class ZenLook extends ThemeExtension<ZenLook> {
 
   /// The corners of a chat bubble: rounded, with one small corner on the
   /// side of the sender.
-  BorderRadius bubbleRadius({required bool outgoing}) => outgoing
-      ? BorderRadius.only(
-          topLeft: Radius.circular(radius(22)),
-          topRight: Radius.circular(radius(22)),
-          bottomRight: Radius.circular(radius(5)),
-          bottomLeft: Radius.circular(radius(22)),
+  BorderRadiusDirectional bubbleRadius({required bool outgoing}) => outgoing
+      ? BorderRadiusDirectional.only(
+          topStart: Radius.circular(radius(22)),
+          topEnd: Radius.circular(radius(22)),
+          bottomEnd: Radius.circular(radius(5)),
+          bottomStart: Radius.circular(radius(22)),
         )
-      : BorderRadius.only(
-          topLeft: Radius.circular(radius(22)),
-          topRight: Radius.circular(radius(22)),
-          bottomRight: Radius.circular(radius(22)),
-          bottomLeft: Radius.circular(radius(5)),
+      : BorderRadiusDirectional.only(
+          topStart: Radius.circular(radius(22)),
+          topEnd: Radius.circular(radius(22)),
+          bottomEnd: Radius.circular(radius(22)),
+          bottomStart: Radius.circular(radius(5)),
         );
 
   /// The decoration of a chat bubble in this look; null keeps the default
   /// gradient bubbles of the filled looks.
   BoxDecoration? bubble(ZenColors zen, {required bool outgoing}) {
-    final BorderRadius r = bubbleRadius(outgoing: outgoing);
+    final BorderRadiusGeometry r = bubbleRadius(outgoing: outgoing);
     switch (surfaces) {
       case ZenSurfaceStyle.filled:
       case ZenSurfaceStyle.glass:

@@ -94,7 +94,7 @@ class _HoldToConfirmButtonState extends State<HoldToConfirmButton>
                   children: <Widget>[
                     Positioned.fill(
                       child: FractionallySizedBox(
-                        alignment: Alignment.centerLeft,
+                        alignment: AlignmentDirectional.centerStart,
                         widthFactor: _fill.value,
                         child: ColoredBox(color: tone.withValues(alpha: 0.45)),
                       ),

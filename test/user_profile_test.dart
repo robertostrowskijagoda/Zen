@@ -7,8 +7,9 @@ void main() {
     test('default UserProfile has expected initial properties', () {
       const UserProfile profile = UserProfile();
       expect(profile.displayName, 'Ja');
-      expect(profile.customStatus, contains('Yggdrasil'));
-      expect(profile.bio, isNotEmpty);
+      // No jargon by default: the status and the bio start empty.
+      expect(profile.customStatus, isEmpty);
+      expect(profile.bio, isEmpty);
       expect(profile.avatarPreset, 'zen_avatar_1');
     });
 

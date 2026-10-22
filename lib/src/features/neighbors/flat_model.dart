@@ -409,7 +409,15 @@ final class FlatDoorCode {
   /// Whether a short-lived code is over at [now].
   bool expiredAt(int now) => until != null && until! <= now;
 
+  /// The version written (`v`). A printed sticker lives for years, so a
+  /// reader takes any version from [oldestVersion] on and skips fields it
+  /// does not know; a writer whose code older readers must not take (a
+  /// changed meaning, not just more fields) says so in `mv`, the oldest
+  /// reader version that understands it ([isNewer]).
   static const int currentVersion = 3;
+
+  /// The oldest version read.
+  static const int oldestVersion = 3;
 
   static const String qrPrefix = 'zen-flat:';
 
@@ -442,7 +450,23 @@ final class FlatDoorCode {
   /// get it. The code stays after `#`, so it never reaches the web server.
   String toLink() => '${PeerShareCodec.invitePageUrl}m#${encode()}';
 
-  static FlatDoorCode? parse(String text) {
+  static FlatDoorCode? parse(String text) => fromJson(_decode(text));
+
+  /// Whether [text] is a door code a newer Zen made that this build must
+  /// not read (its `mv` is above [currentVersion]): "update Zen" rather
+  /// than "not a door code".
+  static bool isNewer(String text) {
+    final Object? json = _decode(text);
+    return json is Map && _neededVersion(json) > currentVersion;
+  }
+
+  static int _neededVersion(Map<dynamic, dynamic> json) {
+    final Object? needs = json['mv'];
+    return needs is int ? needs : oldestVersion;
+  }
+
+  /// The JSON inside a code or a sticker link; null when it is neither.
+  static Object? _decode(String text) {
     final String t = text.trim();
     String? code;
     if (t.startsWith(qrPrefix)) {
@@ -457,10 +481,9 @@ final class FlatDoorCode {
       return null;
     }
     try {
-      final Object? json = jsonDecode(
+      return jsonDecode(
         utf8.decode(base64Url.decode(base64Url.normalize(code))),
       );
-      return fromJson(json);
     } on Object {
       return null;
     }
@@ -472,7 +495,9 @@ final class FlatDoorCode {
         json['d'] is! String ||
         json['n'] is! String ||
         json['a'] is! String ||
-        json['v'] != currentVersion) {
+        json['v'] is! int ||
+        (json['v'] as int) < oldestVersion ||
+        _neededVersion(json) > currentVersion) {
       return null;
     }
     final String inbox = json['a'] as String;

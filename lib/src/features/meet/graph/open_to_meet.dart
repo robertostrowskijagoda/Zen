@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/dating/dating_model.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
@@ -255,7 +256,7 @@ final class OpenToMeetBook {
 
   static OpenToMeetBook fromJson(Object? json) {
     final OpenToMeetBook book = OpenToMeetBook();
-    if (json is! Map || json['v'] != 3) {
+    if (json is! Map || !isReadableFormat(json, current: 3, oldest: 3)) {
       return book;
     }
     book.mine = OpenToMeet.byCode(json['my']);
@@ -407,7 +408,10 @@ final class OpenToMeetService extends ChangeNotifier {
     try {
       final Uint8List? raw = await disk.read(storeKey);
       if (raw != null) {
-        _book = OpenToMeetBook.fromJson(jsonDecode(utf8.decode(raw)));
+        final Object? json = jsonDecode(utf8.decode(raw));
+        // A newer build's file stays as it is (saves are skipped).
+        heldAsNewerOn(disk, storeKey, json, current: 3);
+        _book = OpenToMeetBook.fromJson(json);
       }
     } on Object catch (error, stack) {
       logZenError('Graf: odczyt otwartych na poznanie', error, stack);

@@ -42,12 +42,48 @@ final class GithubUnreachableException implements Exception {
 
 /// GitHub answered, but not with what was asked for.
 final class GithubStatusException implements Exception {
-  const GithubStatusException(this.statusCode);
+  const GithubStatusException(this.statusCode, {this.retryAfter});
 
   final int statusCode;
 
+  /// How long GitHub asked to wait (`Retry-After`, or the reset time of
+  /// an exhausted rate limit); null when it said nothing.
+  final Duration? retryAfter;
+
+  /// GitHub's rate limit (60 requests an hour per IP address without an
+  /// account, shared by everyone behind the same mobile operator's
+  /// address): 429, or 403 with a time to wait.
+  bool get rateLimited =>
+      statusCode == HttpStatus.tooManyRequests ||
+      (statusCode == HttpStatus.forbidden && retryAfter != null);
+
   @override
   String toString() => 'HTTP $statusCode';
+}
+
+/// How long GitHub asks a client to wait before the next request, read
+/// from its answer's headers: `Retry-After` (seconds), else, when
+/// `x-ratelimit-remaining` is 0, until `x-ratelimit-reset` (Unix seconds).
+/// Null when the answer says nothing about it.
+Duration? githubRetryAfter({
+  String? retryAfter,
+  String? rateLimitRemaining,
+  String? rateLimitReset,
+  required DateTime now,
+}) {
+  final int? seconds = int.tryParse(retryAfter?.trim() ?? '');
+  if (seconds != null && seconds >= 0) {
+    return Duration(seconds: seconds);
+  }
+  final int? reset = int.tryParse(rateLimitReset?.trim() ?? '');
+  if (rateLimitRemaining?.trim() == '0' && reset != null) {
+    final Duration wait = DateTime.fromMillisecondsSinceEpoch(
+      reset * 1000,
+      isUtc: true,
+    ).difference(now.toUtc());
+    return wait.isNegative ? Duration.zero : wait;
+  }
+  return null;
 }
 
 /// Whether [error] means the server could not be reached (as opposed to an
@@ -66,6 +102,7 @@ final class GithubRelease {
     required this.tag,
     required this.version,
     required this.assets,
+    this.minVersion,
   });
 
   /// `v1.12.0`.
@@ -76,6 +113,11 @@ final class GithubRelease {
 
   /// File name → size in bytes.
   final Map<String, int> assets;
+
+  /// The oldest Zen still supported, from a line `zen-min: 1.12.0` in the
+  /// release notes ([kZenMinLine]); `null` when there is none. A build
+  /// older than this tells the person it must be updated.
+  final String? minVersion;
 
   /// Reads the `releases/latest` answer; null for a draft, a pre-release, a
   /// tag that is not `v<major.minor.patch>` or anything malformed.
@@ -114,7 +156,18 @@ final class GithubRelease {
         }
       }
     }
-    return GithubRelease(tag: tag, version: version, assets: assets);
+    final Object? body = json['body'];
+    final String? min = body is String
+        ? kZenMinLine.firstMatch(body)?.group(1)
+        : null;
+    return GithubRelease(
+      tag: tag,
+      version: version,
+      assets: assets,
+      minVersion: min != null && compareAppVersions(min, version) <= 0
+          ? min
+          : null,
+    );
   }
 
   /// Whether this release is newer than [ours].
@@ -133,6 +186,13 @@ final class GithubRelease {
 }
 
 final RegExp _safeAssetName = RegExp(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$');
+
+/// The line of a release's notes that names the oldest supported Zen:
+/// `zen-min: 1.12.0` (on a line of its own).
+final RegExp kZenMinLine = RegExp(
+  r'^\s*zen-min:\s*(\d{1,4}\.\d{1,4}\.\d{1,4})\s*$',
+  multiLine: true,
+);
 
 /// How Zen is installed on a Linux computer (which release file updates it).
 enum LinuxInstall {
@@ -202,9 +262,18 @@ HttpClient _client() => HttpClient()
   ..userAgent = kGithubUserAgent;
 
 /// Redirects are followed only to GitHub's own hosts ([kGithubHosts]).
-Future<HttpClientResponse> _get(HttpClient client, Uri uri) async {
+Future<HttpClientResponse> _get(
+  HttpClient client,
+  Uri uri, {
+  Map<String, String> headers = const <String, String>{},
+}) async {
   try {
-    return await getFromGithub(client, uri, timeout: kGithubTimeout);
+    return await getFromGithub(
+      client,
+      uri,
+      timeout: kGithubTimeout,
+      headers: headers,
+    );
   } on Object catch (error) {
     if (isUnreachableError(error)) {
       throw GithubUnreachableException(error);
@@ -213,15 +282,49 @@ Future<HttpClientResponse> _get(HttpClient client, Uri uri) async {
   }
 }
 
-/// GETs [uri] and decodes its JSON. Throws [GithubUnreachableException]
-/// when the server cannot be reached and [GithubStatusException] for any
-/// answer but 200.
-Future<Object?> fetchGithubJson(Uri uri) async {
+/// One answer of GitHub's API: the decoded JSON, or [notModified] when
+/// the `If-None-Match` sent matched (GitHub does not count such an answer
+/// against the rate limit), and the `ETag` to send next time.
+@immutable
+final class GithubJsonAnswer {
+  const GithubJsonAnswer({this.json, this.etag, this.notModified = false});
+
+  final Object? json;
+  final String? etag;
+  final bool notModified;
+}
+
+/// GETs [uri] and decodes its JSON. With [etag] it asks
+/// `If-None-Match` and a 304 comes back as [GithubJsonAnswer.notModified].
+/// Throws [GithubUnreachableException] when the server cannot be reached
+/// and [GithubStatusException] (with GitHub's time to wait, if it gave
+/// one) for any other answer but 200.
+Future<GithubJsonAnswer> fetchGithubJsonAnswer(Uri uri, {String? etag}) async {
   final HttpClient client = _client();
   try {
-    final HttpClientResponse response = await _get(client, uri);
+    final HttpClientResponse response = await _get(
+      client,
+      uri,
+      headers: <String, String>{
+        if (etag != null && etag.isNotEmpty) 'If-None-Match': etag,
+      },
+    );
+    final String? newEtag = response.headers.value('etag');
+    if (response.statusCode == HttpStatus.notModified && etag != null) {
+      await _drainQuietly(response);
+      return GithubJsonAnswer(etag: newEtag ?? etag, notModified: true);
+    }
     if (response.statusCode != HttpStatus.ok) {
-      throw GithubStatusException(response.statusCode);
+      await _drainQuietly(response);
+      throw GithubStatusException(
+        response.statusCode,
+        retryAfter: githubRetryAfter(
+          retryAfter: response.headers.value('retry-after'),
+          rateLimitRemaining: response.headers.value('x-ratelimit-remaining'),
+          rateLimitReset: response.headers.value('x-ratelimit-reset'),
+          now: DateTime.now(),
+        ),
+      );
     }
     final BytesBuilder body = BytesBuilder(copy: false);
     try {
@@ -237,9 +340,52 @@ Future<Object?> fetchGithubJson(Uri uri) async {
       }
       rethrow;
     }
-    return jsonDecode(utf8.decode(body.takeBytes()));
+    return GithubJsonAnswer(
+      json: jsonDecode(utf8.decode(body.takeBytes())),
+      etag: newEtag,
+    );
   } finally {
     client.close(force: true);
+  }
+}
+
+/// GETs [uri] and decodes its JSON ([fetchGithubJsonAnswer] without a
+/// cache).
+Future<Object?> fetchGithubJson(Uri uri) async =>
+    (await fetchGithubJsonAnswer(uri)).json;
+
+/// A [GithubJsonFetcher] that remembers the last answer and its `ETag`
+/// for each address and asks with `If-None-Match`: an unchanged release
+/// costs GitHub's rate limit nothing and comes back from here.
+final class GithubJsonCache {
+  GithubJsonCache({
+    Future<GithubJsonAnswer> Function(Uri uri, {String? etag})? fetch,
+  }) : _fetch = fetch ?? fetchGithubJsonAnswer;
+
+  final Future<GithubJsonAnswer> Function(Uri uri, {String? etag}) _fetch;
+  final Map<Uri, GithubJsonAnswer> _last = <Uri, GithubJsonAnswer>{};
+
+  Future<Object?> call(Uri uri) async {
+    final GithubJsonAnswer? last = _last[uri];
+    final GithubJsonAnswer answer = await _fetch(uri, etag: last?.etag);
+    if (answer.notModified && last != null) {
+      return last.json;
+    }
+    final String? etag = answer.etag;
+    if (etag != null && etag.isNotEmpty) {
+      _last[uri] = answer;
+    } else {
+      _last.remove(uri);
+    }
+    return answer.json;
+  }
+}
+
+Future<void> _drainQuietly(HttpClientResponse response) async {
+  try {
+    await response.drain<void>().timeout(kGithubTimeout);
+  } on Object {
+    // Only the status and the headers matter.
   }
 }
 

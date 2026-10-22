@@ -403,4 +403,79 @@ void main() {
       expect(saved!.text, contains('{{media:0}}'));
     });
   });
+
+  group('the memory a picture takes', () {
+    /// A PNG whose header says [width] × [height] with [depth] bits per
+    /// channel and colour type [colour] (the pixel data is not touched).
+    Uint8List pngHeader(int width, int height, int depth, int colour) {
+      final Uint8List png = Uint8List.fromList(
+        img.encodePng(img.Image(width: 2, height: 2)),
+      );
+      ByteData.sublistView(png)
+        ..setUint32(16, width)
+        ..setUint32(20, height);
+      png[24] = depth;
+      png[25] = colour;
+      return png;
+    }
+
+    test('is read from the header: bit depth and channels count', () {
+      expect(
+        incomingImageCost(pngHeader(6000, 4000, 16, 6))!.decodedBytes,
+        6000 * 4000 * 4 * 2,
+      );
+      expect(
+        incomingImageCost(pngHeader(6000, 4000, 1, 0))!.decodedBytes,
+        6000 * 4000,
+      );
+      final ImageCost jpeg = incomingImageCost(_jpegWithGps())!;
+      expect((jpeg.width, jpeg.height), (40, 30));
+      expect(jpeg.decodedBytes, 40 * 30 * 3);
+      expect(incomingImageCost(_twoFrameGif()), isNull);
+      expect(incomingImageCost(pngHeader(10, 10, 3, 6)), isNull);
+    });
+
+    test('a 16-bit PNG within the pixel limit but over the memory limit '
+        'is refused without decoding', () async {
+      final Uint8List png = pngHeader(6000, 4000, 16, 6);
+      expect(6000 * 4000, lessThan(kMaxIncomingImagePixels));
+      expect(
+        incomingImageCost(png)!.decodedBytes,
+        greaterThan(kMaxIncomingImageDecodedBytes),
+      );
+      expect(reencodeIncomingImage(png), isNull);
+      final GuardedMedia g = await guardIncomingMedia(
+        png,
+        declared: MediaKind.image,
+      );
+      expect(g.kind, MediaKind.file);
+    });
+
+    test('a 40-million-pixel photo still fits', () {
+      expect(
+        kMaxIncomingImagePixels * 3,
+        lessThanOrEqualTo(kMaxIncomingImageDecodedBytes),
+      );
+    });
+
+    test('a small file with a big picture is re-encoded off the UI '
+        'isolate and comes out small', () async {
+      // A plain grey 2600 × 2600 picture: a few KB as a PNG.
+      final img.Image grey = img.Image(
+        width: 2600,
+        height: 2600,
+        numChannels: 1,
+      );
+      img.fill(grey, color: img.ColorRgb8(90, 90, 90));
+      final Uint8List png = img.encodePng(grey, level: 9);
+      expect(png.length, lessThan(64 * 1024));
+      final GuardedMedia g = await guardIncomingMedia(
+        png,
+        declared: MediaKind.image,
+      );
+      expect(g.kind, MediaKind.image);
+      final img.Image out = img.decodeImage(g.bytes)!;
+      expect(out.width, kMaxIncomingImageSide);
+    }, timeout: const Timeout(Duration(minutes: 2)));
+  });
 }

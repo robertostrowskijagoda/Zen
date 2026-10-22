@@ -116,6 +116,7 @@ class _HealthScreenState extends ConsumerState<HealthScreen>
         localAddress: shell.localAddress,
         errorMessage: shell.errorMessage,
         isAndroid: _android,
+        isIPhone: !kIsWeb && Platform.isIOS,
         backgroundRunning: _background,
         permissions: _permissions,
         clockSkew: clock.estimate,
@@ -284,7 +285,7 @@ class _HealthScreenState extends ConsumerState<HealthScreen>
     final Color tone = _tone(zen, i.level);
     return ZenCard(
       key: Key('health-row-${i.id}'),
-      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 14, 12, 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -368,7 +369,7 @@ class ClockSkewBanner extends ConsumerWidget {
             key: const Key('clock-skew-banner'),
             onTap: () => unawaited(HealthScreen.open(context)),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+              padding: const EdgeInsetsDirectional.fromSTEB(16, 8, 12, 8),
               child: Row(
                 children: <Widget>[
                   Icon(Icons.schedule_rounded, size: 18, color: zen.warning),

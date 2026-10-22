@@ -244,7 +244,7 @@ class _MetricTile extends StatelessWidget {
           children: <Widget>[
             FittedBox(
               fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
+              alignment: AlignmentDirectional.centerStart,
               child: Text(
                 value,
                 maxLines: 1,
@@ -316,7 +316,7 @@ class _WrapTile extends StatelessWidget {
     final ZenColors zen = ZenColors.of(context);
     return ZenCard(
       onTap: onTap,
-      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+      padding: const EdgeInsetsDirectional.fromSTEB(14, 14, 12, 14),
       child: Row(
         children: <Widget>[
           ZenIconBadge(icon: icon, tone: tone),
@@ -881,6 +881,7 @@ Future<void> _confirmAndRemoveFriend(
     builder: (BuildContext dialogContext) {
       final ZenColors zen = ZenColors.of(dialogContext);
       return AlertDialog(
+        scrollable: true,
         icon: Icon(Icons.person_remove_outlined, color: zen.danger, size: 30),
         title: Text(t('Usunąć znajomego?')),
         content: Text(
@@ -923,6 +924,7 @@ Future<void> _confirmAndBlockFriend(
     builder: (BuildContext dialogContext) {
       final ZenColors zen = ZenColors.of(dialogContext);
       return AlertDialog(
+        scrollable: true,
         icon: Icon(Icons.block_rounded, color: zen.danger, size: 30),
         title: Text(t('Zablokować użytkownika?')),
         content: Text(
@@ -967,6 +969,7 @@ Future<void> _confirmAndClearHistory(
     builder: (BuildContext dialogContext) {
       final ZenColors zen = ZenColors.of(dialogContext);
       return AlertDialog(
+        scrollable: true,
         icon: Icon(
           Icons.cleaning_services_outlined,
           color: zen.warning,
@@ -1344,7 +1347,7 @@ class _InboxCard extends ConsumerWidget {
           ] else if (launchIntent != null) ...<Widget>[
             const SizedBox(height: 10),
             Padding(
-              padding: const EdgeInsets.only(left: 54),
+              padding: const EdgeInsetsDirectional.only(start: 54),
               child: Row(
                 children: <Widget>[
                   Flexible(
@@ -1450,9 +1453,7 @@ Color _inboxTone(ZenColors zen, InboxEntryType type) {
 
 String? _localSenderDisplayName(WidgetRef ref) {
   final String localAddress = ref.read(appShellControllerProvider).localAddress;
-  final String profileName = ref
-      .read(userProfileControllerProvider)
-      .displayName;
+  final String profileName = ref.read(userProfileControllerProvider).publicName;
   return PeerShareCodec.buildLocalProfile(
         address: localAddress,
         displayName: profileName,

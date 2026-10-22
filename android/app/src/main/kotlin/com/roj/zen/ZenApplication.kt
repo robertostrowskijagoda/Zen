@@ -20,6 +20,8 @@ class ZenApplication : Application() {
                 GeneratedPluginRegistrant.registerWith(flutterEngine)
                 ZenCallBridge.register(flutterEngine, this@ZenApplication)
                 ZenMulticastLock.register(flutterEngine, this@ZenApplication)
+                // Alarms that wake the sleeping phone, timed holds.
+                ZenPower.register(flutterEngine, this@ZenApplication, background = true)
                 // A new task replaces the old one.
                 taskEngine?.let { forgetTaskEngine(it) }
                 taskEngine = flutterEngine
@@ -53,6 +55,7 @@ class ZenApplication : Application() {
         ZenWifiDirectBridge.unregister(engine)
         ZenBluetoothLinkBridge.unregister(engine)
         ZenAlarmShortcut.unregister(engine)
+        ZenPower.unregister(engine)
     }
 
     override fun onCreate() {

@@ -58,8 +58,12 @@ String? accountImportRefusal(AccountImportOutcome? outcome) =>
 String accountBackupErrorText(AccountBackupError error) => switch (error) {
   AccountBackupError.password => t('Złe hasło albo plik został zmieniony.'),
   AccountBackupError.format => t(
-    'To nie jest kopia zapasowa Zen albo plik jest uszkodzony lub '
+    'To nie jest kopia całego konta Zen albo plik jest uszkodzony lub '
     'niekompletny (brakuje części?).',
+  ),
+  AccountBackupError.newer => t(
+    'Tę kopię zrobiła nowsza wersja Zen. Zaktualizuj aplikację i otwórz '
+    'ją ponownie.',
   ),
 };
 

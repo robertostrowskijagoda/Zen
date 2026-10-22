@@ -20,6 +20,7 @@ Future<T?> _sheet<T>(BuildContext context, WidgetBuilder builder) =>
     showModalBottomSheet<T>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       showDragHandle: true,
       shape: context.zenSheetShape(),
       builder: builder,
@@ -106,7 +107,9 @@ Future<void> showFilmComments(
                       ),
                       Flexible(
                         child: shown.isEmpty
-                            ? Padding(
+                            // Scrolls so the keyboard over the first comment
+                            // never overflows the sheet.
+                            ? SingleChildScrollView(
                                 padding: const EdgeInsets.all(16),
                                 child: ZenEmpty(
                                   icon: Icons.forum_outlined,
@@ -207,7 +210,7 @@ class _CommentTile extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Container(
-              padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+              padding: const EdgeInsetsDirectional.fromSTEB(14, 10, 8, 10),
               decoration: BoxDecoration(
                 color: zen.surfaceMuted,
                 borderRadius: ZenLook.of(context).bubbleRadius(outgoing: false),

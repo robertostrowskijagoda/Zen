@@ -642,7 +642,7 @@ class _TakerActions extends StatelessWidget {
               const SizedBox(height: 6),
               Text(t('Następnym razem Ty częstujesz.'), style: note),
             ],
-            Align(alignment: Alignment.centerRight, child: cancel),
+            Align(alignment: AlignmentDirectional.centerEnd, child: cancel),
           ],
         );
       case FoodRequestState.declined:
@@ -1272,7 +1272,7 @@ class _FoodShareScreenState extends ConsumerState<FoodShareScreen> {
             ),
             if (!_timeOk)
               Padding(
-                padding: const EdgeInsets.fromLTRB(4, 6, 0, 0),
+                padding: const EdgeInsetsDirectional.fromSTEB(4, 6, 0, 0),
                 child: Text(
                   t(
                     '„Do” musi być później niż teraz i „od”, najwyżej 48 godzin.',

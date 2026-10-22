@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -291,7 +292,10 @@ final class NetworkCensus extends ChangeNotifier {
     try {
       final Uint8List? raw = await disk.read(storageKey);
       if (raw != null) {
-        _read(jsonDecode(utf8.decode(raw)));
+        final Object? json = jsonDecode(utf8.decode(raw));
+        // A newer build's file stays as it is (saves are skipped).
+        heldAsNewerOn(disk, storageKey, json, current: 1);
+        _read(json);
       }
     } on Object catch (error) {
       logZenWarning('Licznik sieci jest uszkodzony; zaczynam od zera: $error');
@@ -304,7 +308,7 @@ final class NetworkCensus extends ChangeNotifier {
   }
 
   void _read(Object? json) {
-    if (json is! Map || json['v'] != 1) {
+    if (json is! Map || !isReadableFormat(json, current: 1)) {
       return;
     }
     _updatedAt = json['u'] is int ? json['u'] as int : 0;

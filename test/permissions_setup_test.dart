@@ -221,6 +221,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(platform.asked.last, ZenPermission.bluetoothOn);
 
+    // The optional ones wait behind one line on the first start, and the
+    // background location is not asked there at all.
+    expect(find.byKey(const Key('permissions-step-camera')), findsNothing);
+    await tester.tap(find.byKey(const Key('permissions-more')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('permissions-row-background-location')),
+      findsNothing,
+    );
     // The camera: a "no"; the next tap opens the system settings.
     await tester.tap(find.byKey(const Key('permissions-step-camera')));
     await tester.pumpAndSettle();

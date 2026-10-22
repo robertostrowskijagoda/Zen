@@ -1,5 +1,7 @@
-// Przegląd całego UI w kilku rozmiarach ekranu i skalach tekstu, z danymi
-// (piramida, wydarzenie, kółko, pytanie, mieszkanie, randki, czaty).
+// ignore_for_file: invalid_use_of_visible_for_testing_member
+// Przegląd całego UI w kilku rozmiarach ekranu, skalach tekstu i językach
+// (także arabski, od prawej do lewej), z danymi (piramida, wydarzenie,
+// kółko, pytanie, mieszkanie, randki, czaty).
 // Zbiera KAŻDY błąd układu (przepełnienia, nachodzenie) zamiast przerywać na
 // pierwszym i wypisuje je na końcu; wybrane konfiguracje zapisują zrzuty.
 //
@@ -7,6 +9,7 @@
 //
 // Zrzuty: scratch/audit/<konfiguracja>/<ekran>.png (poza repo).
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -14,7 +17,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:zen/src/app/app.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/i18n/zen_language_controller.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/account/presentation/account_devices_screen.dart';
 import 'package:zen/src/features/account/presentation/account_recovery_screen.dart';
@@ -90,6 +96,8 @@ final class _Config {
     this.scale, {
     this.light = false,
     this.shots = false,
+    this.desktop = false,
+    this.language = 'pl',
   });
 
   final String name;
@@ -99,6 +107,12 @@ final class _Config {
   final double scale;
   final bool light;
   final bool shots;
+
+  /// The computer layout (the app frames itself on Windows).
+  final bool desktop;
+
+  /// The language of the texts (`assets/i18n/<code>.json`; pl: the code's).
+  final String language;
 }
 
 const List<_Config> _configs = <_Config>[
@@ -106,9 +120,35 @@ const List<_Config> _configs = <_Config>[
   _Config('p360big', 360, 780, 3, 1.3, shots: true),
   _Config('p412light', 412, 915, 2.625, 1.0, light: true, shots: true),
   _Config('p320', 320, 640, 2, 1.0),
+  _Config('p320short', 320, 568, 2, 1.0),
   _Config('p320big', 320, 640, 2, 1.5),
-  _Config('desk', 1280, 800, 1.25, 1.0, shots: true),
+  // Android split screen: a short window.
+  _Config('split', 411, 420, 2.625, 1.0),
+  _Config('tablet', 800, 1280, 2, 1.0),
+  // The computer window is portrait only (aspect at most 0.8): the
+  // smallest, the usual start and the tallest (a maximized column).
+  _Config('desk_min', 390, 720, 1.25, 1.0, desktop: true),
+  _Config('desk', 480, 900, 1.25, 1.0, desktop: true, shots: true),
+  _Config('desk_max', 920, 1150, 1.25, 1.0, desktop: true),
+  // Longer translations, and right to left.
+  _Config('de320', 320, 640, 2, 1.0, language: 'de'),
+  _Config('de360big', 360, 780, 3, 1.3, language: 'de'),
+  _Config('ru320', 320, 640, 2, 1.0, language: 'ru'),
+  _Config('ru360big', 360, 780, 3, 1.3, language: 'ru'),
+  _Config('ar360', 360, 780, 3, 1.0, language: 'ar', shots: true),
+  _Config('ar320big', 320, 640, 2, 1.3, language: 'ar'),
 ];
+
+/// The strings of [code] (Polish: none, the code's own).
+Map<String, Object?> _strings(String code) {
+  if (code == 'pl') {
+    return const <String, Object?>{};
+  }
+  final Object? json = jsonDecode(
+    File('assets/i18n/$code.json').readAsStringSync(),
+  );
+  return json is Map<String, Object?> ? json : const <String, Object?>{};
+}
 
 Future<void> _settle(WidgetTester tester, [int frames = 6]) async {
   for (int i = 0; i < frames; i++) {
@@ -117,7 +157,16 @@ Future<void> _settle(WidgetTester tester, [int frames = 6]) async {
 }
 
 void main() {
-  setUpAll(_loadFonts);
+  setUpAll(() async {
+    await _loadFonts();
+    for (final String code in <String>{
+      for (final _Config c in _configs)
+        if (c.language != 'pl') c.language,
+    }) {
+      await initializeDateFormatting(code);
+    }
+  });
+  tearDown(ZenI18n.debugReset);
 
   final List<String> only = (Platform.environment['AUDIT_ONLY'] ?? '')
       .split(',')
@@ -137,9 +186,11 @@ void main() {
       addTearDown(tester.view.reset);
       addTearDown(tester.platformDispatcher.clearAllTestValues);
       // The computer layout (the app frames itself on Windows).
-      if (c.name == 'desk') {
+      if (c.desktop) {
         debugDefaultTargetPlatformOverride = TargetPlatform.windows;
       }
+      // The language from the start (the app reads it when it starts).
+      ZenI18n.debugUse(c.language, _strings(c.language));
 
       final List<String> problems = <String>[];
       String where = 'start';
@@ -163,6 +214,8 @@ void main() {
           ledgerNodeEnabledProvider.overrideWithValue(true),
           ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
           socialHubSeedProvider.overrideWithValue(SocialHubState.preview()),
+          // Stays in the language of the run (no switch to the system's).
+          zenLanguageLoaderProvider.overrideWithValue((String _) async {}),
         ],
       );
       addTearDown(container.dispose);
@@ -314,9 +367,9 @@ void main() {
         where = name;
         nav().push(MaterialPageRoute<void>(builder: (_) => build()));
         await shot(name);
-        for (final String t in tabs) {
-          if (await tap(find.widgetWithText(Tab, t))) {
-            await shot('${name}_${t.toLowerCase()}');
+        for (final String label in tabs) {
+          if (await tap(find.widgetWithText(Tab, label))) {
+            await shot('${name}_${label.toLowerCase()}');
           }
         }
         if (scroll) {
@@ -379,7 +432,10 @@ void main() {
       await screen(
         'dating',
         () => const DatingScreen(),
-        tabs: <String>['Pary (0)', 'Więcej'],
+        tabs: <String>[
+          t('Pary ({count})', {'count': 0}),
+          t('Więcej'),
+        ],
       );
       await screen('neighbors', () => const NeighborsScreen());
       await screen('flat_door', () => const FlatDoorScreen());
@@ -388,18 +444,18 @@ void main() {
         'pyramid',
         () => const PyramidScreen(),
         tabs: <String>[
-          'Polityka',
-          'Kraj',
-          'Głosowania',
-          'Portfel',
-          'Władza',
-          'Historia',
+          t('Polityka'),
+          t('Kraj'),
+          t('Głosowania'),
+          t('Portfel'),
+          t('Władza'),
+          t('Historia'),
         ],
       );
       await screen(
         'profile',
         () => const ProfileScreen(),
-        tabs: <String>['Galeria', 'Podziękowania'],
+        tabs: <String>[t('Galeria'), t('Podziękowania')],
       );
       await screen(
         'friend_profile',

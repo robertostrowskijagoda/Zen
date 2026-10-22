@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
+import 'package:zen/src/core/storage/format_version.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 
 /// What a copy of the account holds (the person picks it for a backup
@@ -384,6 +385,10 @@ enum AccountBackupError {
 
   /// The password is wrong (or the file was changed).
   password,
+
+  /// Made by a newer Zen (a format or password cost this build does not
+  /// know): update the app, the file is fine.
+  newer,
 }
 
 /// A copy written into a backup file, or read from one.
@@ -566,9 +571,17 @@ final class AccountBackupFile {
     required List<PasswordCost> acceptedCosts,
   }) async {
     final Uint8List? header = await reader.take(30);
-    if (header == null ||
-        ascii.decode(header.sublist(0, 8), allowInvalid: true) !=
-            kAccountBackupMagic) {
+    final String? magic = header == null
+        ? null
+        : ascii.decode(header.sublist(0, 8), allowInvalid: true);
+    if (magic != null &&
+        magic.startsWith('ZENACCT') &&
+        magic.codeUnitAt(7) > kAccountBackupMagic.codeUnitAt(7) &&
+        magic.codeUnitAt(7) <= 0x39) {
+      // `ZENACCT2`…: a newer layout.
+      return (archive: null, error: AccountBackupError.newer);
+    }
+    if (header == null || magic != kAccountBackupMagic) {
       return (archive: null, error: AccountBackupError.format);
     }
     final ByteData h = ByteData.sublistView(header);
@@ -578,7 +591,9 @@ final class AccountBackupFile {
       parallelism: h.getUint8(13),
     );
     if (!acceptedCosts.contains(cost)) {
-      return (archive: null, error: AccountBackupError.format);
+      // Only a newer build picks a cost this one does not know (and an
+      // unknown one is never tried: it could take all the memory).
+      return (archive: null, error: AccountBackupError.newer);
     }
     final SecretKey key = SecretKey(
       await derivePasswordKey(password, header.sublist(14, 30), cost: cost),
@@ -662,7 +677,13 @@ final class AccountBackupFile {
           throw const _Fault(AccountBackupError.format);
         }
         try {
-          archive = AccountArchive.fromJson(jsonDecode(utf8.decode(bytes)));
+          final Object? json = jsonDecode(utf8.decode(bytes));
+          if (json is Map &&
+              json['t'] == AccountArchive.type &&
+              formatAgeOf(json['v'], current: 1) == FormatAge.newer) {
+            throw const _Fault(AccountBackupError.newer);
+          }
+          archive = AccountArchive.fromJson(json);
         } on FormatException {
           archive = null;
         }

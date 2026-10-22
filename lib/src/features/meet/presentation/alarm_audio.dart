@@ -75,10 +75,10 @@ final class AlarmAudioPump {
       if (!await recorder.hasPermission()) {
         return null;
       }
-      final Directory dir = await mediaTemporaryDirectory();
-      path =
-          '${dir.path}${Platform.pathSeparator}'
-          'zen-alarm-${DateTime.now().millisecondsSinceEpoch}.m4a';
+      path = await newTemporaryMediaPath(
+        prefix: 'zen-alarm-',
+        extension: '.m4a',
+      );
       // Speech-quality mono keeps a piece well under the size limit.
       await recorder.start(
         const RecordConfig(
@@ -218,12 +218,7 @@ class _AlarmClipTileState extends State<AlarmClipTile> {
       if (data == null) {
         throw StateError('Brak nagrania.');
       }
-      final Directory temp = await mediaTemporaryDirectory();
-      final File file = File(
-        '${temp.path}${Platform.pathSeparator}'
-        'zen-alarm-play-${widget.alarmId.hashCode}-${widget.clip.n}.m4a',
-      );
-      await file.writeAsBytes(data, flush: true);
+      final File file = await writeTemporaryMedia(data, extension: '.m4a');
       final VideoPlayerController player = VideoPlayerController.file(file);
       _file = file;
       _player = player;

@@ -18,6 +18,7 @@ import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/sealed_inbox.dart';
@@ -123,6 +124,13 @@ const int kLockedStrangerFramesTotal = 50;
 
 /// How often the receiver asks its mailboxes for mail held for it.
 const Duration kLockedMailboxPollInterval = Duration(minutes: 5);
+
+/// How often a locked phone answers one contact's pings at most.
+const Duration kLockedPongEvery = Duration(minutes: 4);
+
+/// "I am leaving the screen": sent to friends when Zen goes to the
+/// background (runtime_signal_module.dart). Nothing to keep for later.
+const String kPresenceAwayType = 'away';
 
 /// What came to a door while the app was locked, per run of the receiver
 /// (knocks and neighbour flats' frames, from anyone who has the sticker).
@@ -466,6 +474,7 @@ final class LockedReceiver {
     this.ringTimeout = const Duration(seconds: 6),
     this.noticeThrottle = const Duration(minutes: 1),
     this.mailboxPollInterval = kLockedMailboxPollInterval,
+    this.pongEvery = kLockedPongEvery,
   }) : _transport = transport,
        _capability = capability,
        _inbox = inbox,
@@ -500,11 +509,17 @@ final class LockedReceiver {
   final Duration noticeThrottle;
   final Duration mailboxPollInterval;
 
+  /// A contact's pings get a pong at most this often: friends ping only
+  /// while Zen is on their screen, and a pong every other ping keeps this
+  /// phone "in the background" for them (kPresenceOfflineAfter).
+  final Duration pongEvery;
+  final Map<String, int> _pongedAt = <String, int>{};
+
   StreamSubscription<SignalTransportFrame>? _subscription;
   StreamSubscription<SignalTransportFrame>? _doorSubscription;
   final Map<String, int> _doorFramesBy = <String, int>{};
   int _doorFramesTotal = 0;
-  Timer? _pollTimer;
+  WakeTimer? _pollTimer;
   Timer? _ringTimer;
   String? _ringingFrom;
   bool _running = false;
@@ -551,10 +566,14 @@ final class LockedReceiver {
     // An alarm that was going on when the app locked carries on here.
     await _alarm?.start();
     await _pollMailboxes();
-    if (mailboxPollInterval > Duration.zero) {
-      _pollTimer = Timer.periodic(
+    if (mailboxPollInterval > Duration.zero &&
+        _capability.mailboxes.isNotEmpty) {
+      // An alarm that wakes the sleeping phone for the poll and its answers.
+      _pollTimer = ZenWake.every(
+        'mailbox-poll',
         mailboxPollInterval,
-        (_) => unawaitedLogged(_pollMailboxes(), context: 'Mailbox poll'),
+        () => unawaitedLogged(_pollMailboxes(), context: 'Mailbox poll'),
+        hold: const Duration(seconds: 15),
       );
     }
     logZenMessage(
@@ -709,7 +728,10 @@ final class LockedReceiver {
     // here) taking their copy of the alarm.
     _alarm?.observe(frame);
     if (type == 'ping') {
-      if (contact) {
+      final int at = _now();
+      final int? last = _pongedAt[from];
+      if (contact && (last == null || at - last >= pongEvery.inMilliseconds)) {
+        _pongedAt[from] = at;
         await _sendQuietly(frame.from, <String, dynamic>{
           'type': 'pong',
           'state': 'background',
@@ -718,7 +740,7 @@ final class LockedReceiver {
       }
       return;
     }
-    if (type == 'pong') {
+    if (type == 'pong' || type == kPresenceAwayType) {
       return;
     }
     if (_isRealTime(type)) {

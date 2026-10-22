@@ -400,9 +400,17 @@ class _ReadableWidth extends StatelessWidget {
 }
 
 /// Height of one rail button (tap area included): roomy on a tall phone,
-/// never below a comfortable thumb target.
+/// never below a comfortable thumb target. The buttons take all the height
+/// there is: on the smallest phone, 320x568, the twelve places get about
+/// 38 dp each (56 dp wide) and still fit without scrolling; from 360x640 up
+/// they are 48 dp. Only a shorter window (a phone on its side, split
+/// screen) scrolls.
 const double _sideTabMaxExtent = 54;
-const double _sideTabMinExtent = 32;
+const double _sideTabMinExtent = 36;
+
+/// The rail's own gaps above the first group and below the alarm.
+const double _railTopGap = 4;
+const double _railBottomGap = 4;
 
 /// What the open tab's label adds to its button.
 const double _sideTabLabelExtent = 14;
@@ -413,7 +421,7 @@ const double _railGroupGap = 9;
 /// The rail: the groups of tabs from the top, the alarm at the bottom.
 /// Buttons share the height (between [_sideTabMinExtent] and
 /// [_sideTabMaxExtent]); it scrolls only when even the smallest do not fit
-/// (a phone on its side).
+/// (a short split-screen window).
 class _SideTabs extends ConsumerWidget {
   const _SideTabs({
     required this.index,
@@ -463,9 +471,12 @@ class _SideTabs extends ConsumerWidget {
     // Keyboard focus walks the whole rail before it moves on to the page.
     return FocusTraversalGroup(
       child: GestureDetector(
-        // Swipe the rail to the left to hide it.
+        // Swipe the rail towards its edge to hide it (to the left; to the
+        // right in a right-to-left language, where the rail is on the right).
         onHorizontalDragEnd: (DragEndDetails d) {
-          if ((d.primaryVelocity ?? 0) < -200) {
+          final double v = d.primaryVelocity ?? 0;
+          final bool rtl = Directionality.of(context) == TextDirection.rtl;
+          if (rtl ? v > 200 : v < -200) {
             onHide();
           }
         },
@@ -481,7 +492,8 @@ class _SideTabs extends ConsumerWidget {
               // its label, each group by its line.
               final double extent =
                   ((c.maxHeight -
-                              16 -
+                              _railTopGap -
+                              _railBottomGap -
                               _sideTabLabelExtent -
                               groups * _railGroupGap) /
                           shown.length)
@@ -506,12 +518,12 @@ class _SideTabs extends ConsumerWidget {
                   child: IntrinsicHeight(
                     child: Column(
                       children: <Widget>[
-                        const SizedBox(height: 4),
+                        const SizedBox(height: _railTopGap),
                         ...top,
                         const Spacer(),
                         for (final int i in shown)
                           if (_shellTabs[i].group == null) button(i, extent),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: _railBottomGap),
                       ],
                     ),
                   ),

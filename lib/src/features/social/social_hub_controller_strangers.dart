@@ -31,7 +31,7 @@ mixin _SocialHubStrangersMixin on _SocialHubControllerBase {
     final MiniProfileTag mini =
         book.ownMiniProfile?.call() ??
         MiniProfileTag(
-          name: ref.read(userProfileControllerProvider).displayName.trim(),
+          name: ref.read(userProfileControllerProvider).publicName.trim(),
         );
     return mini.toJson();
   }

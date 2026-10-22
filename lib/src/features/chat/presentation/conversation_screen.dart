@@ -35,6 +35,7 @@ import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/disappearing_timer_dialog.dart';
 import 'package:zen/src/features/chat/presentation/message_delivery_badge.dart';
 import 'package:zen/src/features/chat/presentation/message_extras.dart';
+import 'package:zen/src/features/chat/presentation/presence_label.dart';
 import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
 import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
@@ -346,7 +347,15 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                                       ? conversationSubtitle
                                       : (friend?.isOnline == true
                                             ? t('online')
-                                            : t('offline')),
+                                            // Quiet for a week or more: say
+                                            // since when (Zen removed?).
+                                            : quietFriendLabel(
+                                                    friend?.lastPresenceAtMillis ??
+                                                        0,
+                                                    DateTime.now()
+                                                        .millisecondsSinceEpoch,
+                                                  ) ??
+                                                  t('offline')),
                                 ].join(' · '),
                                 key: const Key('conversation-subtitle'),
                                 maxLines: 1,
@@ -372,35 +381,34 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
         actions: <Widget>[
           if (activeCall != null &&
               activeCall.status == CallSessionStatus.active)
+            // Icon only: the words are in the bar under the title, and a
+            // label here would push the name of the other person out.
             Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilledButton.icon(
+              padding: const EdgeInsetsDirectional.only(end: 8),
+              child: IconButton(
                 key: const Key('conversation-return-to-call-button'),
-                style: FilledButton.styleFrom(
+                tooltip: t('Wróć do rozmowy'),
+                style: IconButton.styleFrom(
                   backgroundColor: zen.success.withValues(alpha: 0.15),
                   foregroundColor: zen.success,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: context.zenRadius(999),
                     side: BorderSide(color: zen.success.withValues(alpha: 0.5)),
                   ),
                 ),
                 onPressed: () => _returnToCall(context, activeCall),
-                icon: ZenPulsingDot(
-                  color: zen.success,
-                  active: true,
-                  dimension: 8,
-                  dotSize: 4,
-                ),
-                label: Text(
-                  t('Wróć do rozmowy'),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
+                icon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    ZenPulsingDot(
+                      color: zen.success,
+                      active: true,
+                      dimension: 8,
+                      dotSize: 4,
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.phone_in_talk_rounded, size: 20),
+                  ],
                 ),
               ),
             )
@@ -611,12 +619,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
                               ),
                             ),
                           ),
-                          Text(
-                            t('Wróć do rozmowy'),
-                            style: TextStyle(
-                              color: zen.success,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
+                          Flexible(
+                            child: Text(
+                              t('Wróć do rozmowy'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: zen.success,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                              ),
                             ),
                           ),
                           const SizedBox(width: 4),
@@ -999,6 +1011,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
+          scrollable: true,
           title: Text(t('Wyczyść historię')),
           content: Text(
             tn(

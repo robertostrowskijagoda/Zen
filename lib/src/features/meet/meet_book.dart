@@ -985,6 +985,8 @@ final class MeetStore {
       return MeetBook();
     }
     final Object? json = jsonDecode(utf8.decode(raw));
+    // A newer build's book: the user is told to update.
+    heldAsNewerOn(disk, key, json, current: 1);
     if (json is! Map || json['v'] != 1) {
       // A newer app's book (or damage): reading it as empty and writing that
       // back would wipe statuses, alarms and settings. Never written over.

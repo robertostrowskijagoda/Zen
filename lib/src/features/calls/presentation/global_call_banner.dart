@@ -112,8 +112,8 @@ class GlobalCallBanner extends StatelessWidget {
                               ),
                             ),
                             Padding(
-                              padding: const EdgeInsets.only(
-                                left: 5,
+                              padding: const EdgeInsetsDirectional.only(
+                                start: 5,
                                 bottom: 3,
                               ),
                               child: ZenAnimatedDots(

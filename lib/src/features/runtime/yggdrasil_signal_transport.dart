@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/runtime/runtime_signal_codec.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 
 abstract interface class NativeSignalBridge {
   Map<String, dynamic> startSignaling(int handle);
@@ -167,6 +168,9 @@ final class YggdrasilSignalTransport implements SignalTransport {
           break;
         }
         if (result['available'] == true) {
+          // The packet woke the phone; it stays awake a few seconds so the
+          // signal is handled (no lock holds it otherwise).
+          ZenWake.signalArrived();
           await _processSignalResult(result);
           // Whatever queued up meanwhile, without another round trip.
           await _pollOnce();

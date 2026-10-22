@@ -129,6 +129,19 @@ final class GraphLabelCache {
 
   static const int _max = 1500;
 
+  TextDirection _direction = TextDirection.ltr;
+
+  /// The direction of the app's language: used for a label with no letter
+  /// of its own direction (digits, emoji); set from the screen's
+  /// `Directionality`.
+  TextDirection get direction => _direction;
+  set direction(TextDirection value) {
+    if (value != _direction) {
+      _direction = value;
+      clear();
+    }
+  }
+
   TextPainter get(String text, Color color, {bool bold = false}) {
     final String key = '${color.toARGB32()}|$bold|$text';
     final TextPainter? had = _cache[key];
@@ -148,7 +161,8 @@ final class GraphLabelCache {
           fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
         ),
       ),
-      textDirection: TextDirection.ltr,
+      // An Arabic name keeps its "…" at its own end, in any language.
+      textDirection: labelDirection(text, _direction),
       maxLines: 1,
       ellipsis: '…',
     )..layout(maxWidth: 96);
@@ -160,6 +174,28 @@ final class GraphLabelCache {
     }
     _cache.clear();
   }
+}
+
+/// The direction of [text] by its first letter with a direction of its own
+/// (Hebrew, Arabic and the like: right to left); [fallback] when it has none.
+TextDirection labelDirection(String text, TextDirection fallback) {
+  for (final int r in text.runes) {
+    if ((r >= 0x0590 && r <= 0x08FF) ||
+        (r >= 0xFB1D && r <= 0xFDFF) ||
+        (r >= 0xFE70 && r <= 0xFEFF) ||
+        (r >= 0x10800 && r <= 0x10FFF) ||
+        (r >= 0x1E800 && r <= 0x1EFFF)) {
+      return TextDirection.rtl;
+    }
+    if ((r >= 0x41 && r <= 0x5A) ||
+        (r >= 0x61 && r <= 0x7A) ||
+        (r >= 0xC0 && r < 0x0590 && r != 0xD7 && r != 0xF7) ||
+        (r >= 0x0900 && r < 0x2000) ||
+        (r >= 0x3040 && r < 0xFB1D)) {
+      return TextDirection.ltr;
+    }
+  }
+  return fallback;
 }
 
 /// Labels drawn at most in one paint.

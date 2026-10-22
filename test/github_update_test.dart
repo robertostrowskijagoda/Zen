@@ -122,6 +122,25 @@ void main() {
       expect(name('ios', Abi.iosArm64), isNull);
     });
 
+    test('Flatpak is recognised (and then nothing is downloaded)', () {
+      bool none(String path) => false;
+      expect(isFlatpakSandbox(const <String, String>{}, none), isFalse);
+      expect(
+        isFlatpakSandbox(const <String, String>{
+          'FLATPAK_ID': 'com.roj.zen',
+        }, none),
+        isTrue,
+      );
+      expect(
+        isFlatpakSandbox(
+          const <String, String>{},
+          (String path) => path == '/.flatpak-info',
+        ),
+        isTrue,
+      );
+      expect(flatpakUpdateHint, contains('flatpak install --user'));
+    });
+
     test('SHA256SUMS must list the file by name with its sum', () {
       final String hex = 'ab' * 32;
       final String sums = '$hex  Zen.apk\n${'cd' * 32} *Zen-macOS.zip\n';
@@ -256,13 +275,119 @@ void main() {
       }
     });
 
-    test('no published release (404) is no update, not unreachable', () async {
+    test('no published release (404) is said so, not "up to date"', () async {
+      bool gone = false;
       final GithubUpdateService s = service(
-        fetchJson: (Uri uri) async => throw const GithubStatusException(404),
+        fetchJson: (Uri uri) async => gone
+            ? throw const GithubStatusException(404)
+            : _releaseJson('v1.12.0'),
       );
       await s.check();
-      expect(s.state, GithubCheckState.upToDate);
+      expect(s.newer?.version, '1.12.0');
+      gone = true;
+      await s.check();
+      expect(s.state, GithubCheckState.missing);
+      // A release that is gone is not offered any more.
+      expect(s.newer, isNull);
       expect(s.showUnreachableBanner, isFalse);
+      expect(s.nextCheckAt, isNull);
+    });
+
+    test('a rate limit: tried again when GitHub says, and said so', () async {
+      final DateTime now = DateTime(2026, 10, 22, 12);
+      final GithubUpdateService s = GithubUpdateService(
+        installer: _FakeInstaller(dir),
+        fetchJson: (Uri uri) async => throw const GithubStatusException(
+          403,
+          retryAfter: Duration(minutes: 30),
+        ),
+        now: () => now,
+        currentVersion: '1.11.0',
+      );
+      addTearDown(s.dispose);
+      await s.check();
+      expect(s.state, GithubCheckState.failed);
+      expect(s.rateLimited, isTrue);
+      expect(s.nextCheckAt, now.add(const Duration(minutes: 31)));
+    });
+
+    test('other errors: retried sooner than the next regular check, '
+        'twice as late each time', () async {
+      final DateTime now = DateTime(2026, 10, 22, 12);
+      bool broken = true;
+      final GithubUpdateService s = GithubUpdateService(
+        installer: _FakeInstaller(dir),
+        fetchJson: (Uri uri) async => broken
+            ? throw const GithubStatusException(502)
+            : _releaseJson('v1.11.0'),
+        now: () => now,
+        currentVersion: '1.11.0',
+      );
+      addTearDown(s.dispose);
+      await s.check();
+      expect(s.rateLimited, isFalse);
+      expect(s.nextCheckAt, now.add(const Duration(minutes: 15)));
+      await s.check();
+      expect(s.nextCheckAt, now.add(const Duration(minutes: 30)));
+      for (int i = 0; i < 10; i++) {
+        await s.check();
+      }
+      expect(s.nextCheckAt, now.add(s.checkEvery));
+      broken = false;
+      await s.check();
+      expect(s.state, GithubCheckState.upToDate);
+      expect(s.nextCheckAt, isNull);
+    });
+
+    test("GitHub's wait is read from its headers", () {
+      final DateTime now = DateTime.utc(2026, 10, 22, 12);
+      final int inForty =
+          now.add(const Duration(minutes: 40)).millisecondsSinceEpoch ~/ 1000;
+      expect(
+        githubRetryAfter(retryAfter: '120', now: now),
+        const Duration(minutes: 2),
+      );
+      expect(
+        githubRetryAfter(
+          rateLimitRemaining: '0',
+          rateLimitReset: '$inForty',
+          now: now,
+        ),
+        const Duration(minutes: 40),
+      );
+      // Requests left: no wait, however near the reset.
+      expect(
+        githubRetryAfter(
+          rateLimitRemaining: '12',
+          rateLimitReset: '${now.millisecondsSinceEpoch ~/ 1000}',
+          now: now,
+        ),
+        isNull,
+      );
+      expect(githubRetryAfter(now: now), isNull);
+      expect(const GithubStatusException(429).rateLimited, isTrue);
+      expect(const GithubStatusException(403).rateLimited, isFalse);
+      expect(
+        const GithubStatusException(403, retryAfter: Duration.zero).rateLimited,
+        isTrue,
+      );
+    });
+
+    test('an unchanged release comes from the cache (If-None-Match)', () async {
+      final List<String?> sent = <String?>[];
+      final GithubJsonCache cache = GithubJsonCache(
+        fetch: (Uri uri, {String? etag}) async {
+          sent.add(etag);
+          return etag == '"a"'
+              ? const GithubJsonAnswer(etag: '"a"', notModified: true)
+              : GithubJsonAnswer(json: _releaseJson('v1.12.0'), etag: '"a"');
+        },
+      );
+      final Object? first = await cache(kGithubLatestReleaseUri);
+      final Object? second = await cache(kGithubLatestReleaseUri);
+      expect(sent, <String?>[null, '"a"']);
+      expect(GithubRelease.fromJson(second)?.version, '1.12.0');
+      expect(second, same(first));
     });
 
     test('an error answer is not "unreachable"', () async {
@@ -719,6 +844,42 @@ void main() {
       await pumpCard(signed);
       expect(find.byKey(const Key('github-no-author-signature')), findsNothing);
       await finish(tester, signed);
+    });
+
+    testWidgets('the updates card says when a check failed and when it is '
+        'tried again', (WidgetTester tester) async {
+      final GithubUpdateService s = GithubUpdateService(
+        installer: _FakeInstaller(Directory.systemTemp),
+        fetchJson: (Uri uri) async => throw const GithubStatusException(
+          429,
+          retryAfter: Duration(minutes: 5),
+        ),
+        now: () => DateTime(2026, 10, 22, 12),
+        currentVersion: '1.11.0',
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [githubUpdateServiceProvider.overrideWithValue(s)],
+          child: MaterialApp(
+            theme: ZenTheme.dark(),
+            home: const Scaffold(
+              body: SingleChildScrollView(child: GithubUpdateCard()),
+            ),
+          ),
+        ),
+      );
+      await s.check();
+      await tester.pump();
+      expect(find.byKey(const Key('github-state-failed')), findsOneWidget);
+      expect(
+        find.text(
+          'Nie udało się sprawdzić aktualizacji: GitHub chwilowo ogranicza '
+          'liczbę zapytań.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Spróbuję ponownie'), findsOneWidget);
+      await finish(tester, s);
     });
 
     testWidgets('nothing without the service (store build)', (

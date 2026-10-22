@@ -52,7 +52,7 @@ class CircleBackupCard extends ConsumerWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      t('Kopia u kręgu'),
+                      t('Kopia u znajomych'),
                       style: TextStyle(
                         color: zen.textPrimary,
                         fontWeight: FontWeight.w700,
@@ -65,8 +65,8 @@ class CircleBackupCard extends ConsumerWidget {
               const SizedBox(height: 8),
               Text(
                 lastAt == null
-                    ? t('Kopia u kręgu: jeszcze żadna')
-                    : t('Kopia u kręgu: ostatnio {date}, {size}', {
+                    ? t('Kopia u znajomych: jeszcze żadna')
+                    : t('Kopia u znajomych: ostatnio {date}, {size}', {
                         'date': ZenFormat.dateTime(
                           DateTime.fromMillisecondsSinceEpoch(lastAt),
                         ),
@@ -171,7 +171,7 @@ class _RestoreProgress extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final String label = switch (restore.phase) {
-      CircleBackupRestorePhase.searching => t('Szukam kopii u kręgu…'),
+      CircleBackupRestorePhase.searching => t('Szukam kopii u znajomych…'),
       CircleBackupRestorePhase.downloading => t(
         'Pobieram kopię: {done} z {total}',
         {'done': restore.done, 'total': restore.total},
@@ -181,7 +181,10 @@ class _RestoreProgress extends StatelessWidget {
         {'done': restore.done, 'total': restore.total},
       ),
       CircleBackupRestorePhase.done => t('Dane z kopii przywrócone.'),
-      CircleBackupRestorePhase.failed => t('Nie znaleziono kopii u kręgu.'),
+      CircleBackupRestorePhase.failed => t('Nie znaleziono kopii u znajomych.'),
+      CircleBackupRestorePhase.newer => t(
+        'Kopię zrobiła nowsza wersja Zen. Zaktualizuj aplikację.',
+      ),
       CircleBackupRestorePhase.idle => '',
     };
     final bool working =

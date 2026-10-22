@@ -11,14 +11,18 @@ abstract interface class AppSettingsStore {
   Future<void> save(AppSettings settings);
 }
 
-/// The settings as named JSON fields (see [AppSettings.toJson]). The app is
-/// not released yet, so there is no reader for older formats: a file it
-/// cannot read simply falls back to the defaults.
+/// The settings as named JSON fields (see [AppSettings.toJson]). A file it
+/// cannot read falls back to the defaults; one a newer build wrote (`v`
+/// above 1) is kept as it is. Fields a newer build added are written back
+/// as they were read, so going back to an older build does not erase them.
 final class FileAppSettingsStore implements AppSettingsStore {
   FileAppSettingsStore({required this.store, this.storageKey = 'settings/app'});
 
   final FileBinaryStore store;
   final String storageKey;
+
+  /// Fields of the file this build does not know (a newer build's).
+  Map<String, Object?> _carried = const <String, Object?>{};
 
   @override
   Future<AppSettings?> load() async {
@@ -32,7 +36,13 @@ final class FileAppSettingsStore implements AppSettingsStore {
     } on FormatException {
       return null;
     }
-    return json is Map<String, dynamic> ? AppSettings.fromJson(json) : null;
+    if (store.heldAsNewer(storageKey, json, current: kFirstFormatVersion) ||
+        json is! Map<String, dynamic>) {
+      return null;
+    }
+    final AppSettings settings = AppSettings.fromJson(json);
+    _carried = unknownFields(json, settings.toJson());
+    return settings;
   }
 
   @override
@@ -40,7 +50,11 @@ final class FileAppSettingsStore implements AppSettingsStore {
     await store.write(
       storageKey,
       Uint8List.fromList(
-        utf8.encode(jsonEncode(withFormatVersion(settings.toJson()))),
+        utf8.encode(
+          jsonEncode(
+            withCarriedFields(withFormatVersion(settings.toJson()), _carried),
+          ),
+        ),
       ),
     );
   }

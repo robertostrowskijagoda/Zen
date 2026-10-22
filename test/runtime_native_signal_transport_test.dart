@@ -11,6 +11,52 @@ import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/security_payload_protector.dart';
 
 void main() {
+  test('an unchanged node snapshot tells nobody; the node is read rarely '
+      'off the screen', () {
+    const RuntimeTransportSnapshot a = RuntimeTransportSnapshot(
+      health: RuntimeTransportHealth.active,
+      peers: 4,
+      activeTransfers: 0,
+      latencyMs: 30,
+      throughputMbps: 0,
+      inboxLimitMb: 32,
+      localAddress: '200:1::1',
+    );
+    final RuntimeTransportSnapshot same = a.copyWith();
+    expect(same, a);
+    expect(same.hashCode, a.hashCode);
+    expect(a.copyWith(peers: 3), isNot(a));
+    expect(a.copyWith(errorMessage: 'x'), isNot(a));
+
+    final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
+    addTearDown(runtime.dispose);
+    int told = 0;
+    runtime.addListener(() => told += 1);
+    // The preview starts once (a change), a second start changes nothing.
+    unawaited(runtime.start());
+    final int afterStart = told;
+    unawaited(runtime.start());
+    expect(told, afterStart);
+
+    expect(
+      kRuntimeRefreshOnScreen,
+      greaterThanOrEqualTo(const Duration(seconds: 10)),
+    );
+    expect(
+      kRuntimeRefreshUnseen,
+      greaterThanOrEqualTo(const Duration(seconds: 30)),
+    );
+  });
+
+  test('an extra account asks the bridge for fewer public peers', () {
+    const String config = '{"PrivateKey":"ab","Peers":[]}';
+    expect(withNodePeerTarget(config, null), config);
+    final Map<String, dynamic> asked =
+        jsonDecode(withNodePeerTarget(config, 2)) as Map<String, dynamic>;
+    expect(asked['ZenPeerTarget'], 2);
+    expect(asked['PrivateKey'], 'ab');
+  });
+
   test('lazy signal transport bootstraps once and forwards frames', () async {
     final MemorySignalTransport inner = MemorySignalTransport();
     int bootstrapCalls = 0;

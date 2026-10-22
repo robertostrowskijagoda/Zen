@@ -123,6 +123,11 @@ final class LedgerReplicator {
   /// request (a stranger's limit) does not stall the download.
   final Map<String, Set<String>> _pendingChunks = <String, Set<String>>{};
 
+  /// `peer|space|writer` → where we asked [peer] to send that log from
+  /// (`lg_want`): an answer that starts later, at the writer's checkpoint,
+  /// says the peer holds the log only from there.
+  final Map<String, int> _wantedFrom = <String, int>{};
+
   /// Chunks asked from one source in one message.
   static const int chunksPerRequest = 4;
   final Map<String, (int, int)> _budget = <String, (int, int)>{};
@@ -288,6 +293,12 @@ final class LedgerReplicator {
               t.key: mine[t.key] ?? 0,
         };
         if (weLack.isNotEmpty) {
+          if (_wantedFrom.length > 4096) {
+            _wantedFrom.clear();
+          }
+          weLack.forEach((String writer, int from) {
+            _wantedFrom['$peer|$space|$writer'] = from;
+          });
           send(peer, <String, dynamic>{
             'type': LedgerMessages.want,
             'space': space,
@@ -351,6 +362,8 @@ final class LedgerReplicator {
       return byLog != 0 ? byLog : a.seq.compareTo(b.seq);
     });
     final Set<(String, String)> missing = <(String, String)>{};
+    // The first entry of each log in this batch.
+    final Map<String, LogEntry> firsts = <String, LogEntry>{};
     for (final LogEntry entry in entries) {
       final bool allowed =
           (acceptsFrom?.call(peer, entry.space) ??
@@ -359,9 +372,25 @@ final class LedgerReplicator {
       if (!allowed) {
         continue;
       }
+      firsts.putIfAbsent('${entry.space}|${entry.writer}', () => entry);
       final IngestResult result = await store.ingest(entry);
       if (result.status == IngestStatus.awaitingCertificate) {
         missing.add((entry.account, entry.device));
+      }
+    }
+    // We asked for a log from where ours ends and the answer starts later,
+    // at its writer's checkpoint: the peer holds it only from there (it was
+    // cut at the checkpoint), so the gap would never fill. Not for entries
+    // pushed unasked, which may skip ahead for other reasons.
+    for (final LogEntry first in firsts.values) {
+      final int? askedFrom = _wantedFrom.remove(
+        '$peer|${first.space}|${first.writer}',
+      );
+      if (askedFrom != null &&
+          isLedgerCheckpoint(first) &&
+          first.seq > askedFrom + 1 &&
+          first.seq > store.headOf(first.space, first.writer) + 1) {
+        store.adoptCheckpoint(first.space, first.writer);
       }
     }
     _askCertificates(peer, missing);

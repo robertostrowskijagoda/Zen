@@ -126,7 +126,7 @@ mixin _SocialHubGroupCallMixin on _SocialHubControllerBase {
   }) {
     final String senderName = ref
         .read(userProfileControllerProvider)
-        .displayName;
+        .publicName;
     return <String, dynamic>{
       'type': type,
       'groupId': call.groupId,

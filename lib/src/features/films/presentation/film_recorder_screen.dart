@@ -59,7 +59,8 @@ class FilmRecorderScreen extends StatefulWidget {
   State<FilmRecorderScreen> createState() => _FilmRecorderScreenState();
 }
 
-class _FilmRecorderScreenState extends State<FilmRecorderScreen> {
+class _FilmRecorderScreenState extends State<FilmRecorderScreen>
+    with WidgetsBindingObserver {
   List<FilmLens> _lenses = const <FilmLens>[];
   FilmLens _lens = FilmLens.back;
   bool _opening = true;
@@ -73,12 +74,69 @@ class _FilmRecorderScreenState extends State<FilmRecorderScreen> {
   Timer? _tick;
   bool _closing = false;
 
+  /// The camera was let go while the window is hidden (the tray, another
+  /// app): it comes back when the window does.
+  bool _suspended = false;
+
   int get _limitMs => _long ? kFilmHardMaxMs : kFilmDefaultMaxMs;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_init());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      unawaited(_suspend());
+    } else if (state == AppLifecycleState.resumed) {
+      unawaited(_resume());
+    }
+  }
+
+  /// Hidden: a recording going on ends (and is kept), and the camera (with
+  /// its light) goes off.
+  Future<void> _suspend() async {
+    if (_suspended || _opening || _lenses.isEmpty) {
+      return;
+    }
+    if (_recording) {
+      await _stop();
+    }
+    if (!mounted || _suspended) {
+      return;
+    }
+    _suspended = true;
+    _tick?.cancel();
+    try {
+      await widget.camera.close();
+    } on Object {
+      // Already closed.
+    }
+    if (mounted) {
+      setState(() {
+        _opening = true;
+        _torch = false;
+      });
+    }
+  }
+
+  Future<void> _resume() async {
+    if (!_suspended || !mounted) {
+      return;
+    }
+    _suspended = false;
+    try {
+      await widget.camera.open(_lens);
+    } on Object catch (e) {
+      _error = t('Nie udało się włączyć kamery: {error}', {'error': e});
+    }
+    if (mounted) {
+      setState(() => _opening = false);
+    }
   }
 
   Future<void> _init() async {
@@ -102,6 +160,7 @@ class _FilmRecorderScreenState extends State<FilmRecorderScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tick?.cancel();
     unawaited(widget.camera.close());
     super.dispose();

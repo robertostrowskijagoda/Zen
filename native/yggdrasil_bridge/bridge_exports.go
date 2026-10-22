@@ -109,6 +109,12 @@ func YggStopNode(handle C.int) *C.char {
 		node.stopLeafMonitor()
 		node.stopPeerProbeMonitor()
 		node.stopPeerNudge()
+		if node.phonePeers != nil {
+			node.phonePeers.stopWatch()
+		}
+		if node.power != nil {
+			node.power.stopWatch()
+		}
 		for _, guard := range node.peerGuards {
 			guard.close()
 		}

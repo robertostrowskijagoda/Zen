@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/zen_web.dart';
 
 @immutable
 final class PeerShareProfile {
@@ -27,6 +28,13 @@ final class PeerShareProfile {
   /// The QR code: the same code as a link, so the phone's camera opens the
   /// app with it.
   String get qrData => PeerShareCodec.qrDataForInviteCode(inviteCode);
+
+  /// The invitation link (see [PeerShareCodec.inviteLinkForCode]).
+  String get inviteLink => PeerShareCodec.inviteLinkForCode(inviteCode);
+
+  /// What "Kopiuj zaproszenie" copies: a message to paste in any messenger,
+  /// with the link that opens Zen (or shows how to install it).
+  String get inviteMessage => PeerShareCodec.inviteMessageForCode(inviteCode);
 }
 
 @immutable
@@ -48,8 +56,7 @@ final class PeerDialTarget {
 
 final class PeerShareCodec {
   /// The project's page on GitHub (downloads, instructions, the code).
-  static const String repositoryUrl =
-      'https://github.com/robertostrowskijagoda/Zen';
+  static const String repositoryUrl = kZenRepositoryUrl;
 
   /// Where a QR code points: a one-file page on GitHub Pages
   /// (`tool/pages/index.html`) that opens Zen with the code — or, without
@@ -58,14 +65,37 @@ final class PeerShareCodec {
   /// invited whom. Zen itself answers this link once the person lets it
   /// ("Otwieraj obsługiwane linki"), and its scanner reads the code from it
   /// directly.
-  static const String invitePageUrl =
-      'https://robertostrowskijagoda.github.io/Zen/';
+  static const String invitePageUrl = kZenPagesBase;
 
   /// A full invitation link for [code] (the universal QR / shareable link).
   static String inviteLinkForCode(String code) =>
       '$invitePageUrl#${code.replaceAll('-', '')}';
 
-  /// Pulls an invitation code out of an invite link — [invitePageUrl] or
+  /// A message with the invitation link for [code], to paste in another
+  /// messenger. Pasted whole into "Mam czyjś kod", it still works (see
+  /// [normalizeManualInput]).
+  static String inviteMessageForCode(String code) => t(
+    'Dodaj mnie w Zen: {link}\nNie masz Zen? Ten link pokaże, jak go '
+    'zainstalować.',
+    <String, Object?>{'link': inviteLinkForCode(code)},
+  );
+
+  /// An invitation link somewhere inside [text] (a pasted invitation
+  /// message), as its code; `null` when there is none.
+  static String? inviteCodeInText(String text) {
+    for (final String word in text.split(RegExp(r'\s+'))) {
+      final String? code = inviteCodeFromLink(
+        word.replaceFirst(RegExp(r'[).,;!?»”"]+$'), ''),
+      );
+      if (code != null) {
+        return code;
+      }
+    }
+    return null;
+  }
+
+  /// Pulls an invitation code out of an invite link — the invitation page
+  /// under any of [kZenPageBases] (the old address too, after a move) or
   /// [repositoryUrl] with `#CODE` — or null when [input] is not one.
   static String? inviteCodeFromLink(String input) {
     final Uri? uri = Uri.tryParse(input.trim());
@@ -80,14 +110,7 @@ final class PeerShareCodec {
   }
 
   /// Whether [uri] is the invitation page or the project page.
-  static bool _isInvitePage(Uri uri) {
-    String page(Uri u) =>
-        '${u.host.toLowerCase()}'
-        '${u.path.toLowerCase().replaceFirst(RegExp(r'/+$'), '')}';
-    final String target = page(uri);
-    return target == page(Uri.parse(invitePageUrl)) ||
-        target == page(Uri.parse(repositoryUrl));
-  }
+  static bool _isInvitePage(Uri uri) => isZenPage(uri);
 
   static const int _shareIdLength = 12;
   static const int _shareIdGroupSize = 4;
@@ -249,8 +272,11 @@ final class PeerShareCodec {
     if (trimmed.toLowerCase().startsWith('zen://')) {
       return trimmed;
     }
-    // A universal invite link (`https://…#CODE`): take the code out of it.
-    final String? linkCode = inviteCodeFromLink(trimmed);
+    // A universal invite link (`https://…#CODE`), alone or inside a pasted
+    // invitation message: take the code out of it.
+    final String? linkCode =
+        inviteCodeFromLink(trimmed) ??
+        (trimmed.contains(RegExp(r'\s')) ? inviteCodeInText(trimmed) : null);
     if (linkCode != null) {
       return inviteCodeForAddress(addressFromInviteCode(linkCode)!)!;
     }

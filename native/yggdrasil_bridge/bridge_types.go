@@ -63,6 +63,12 @@ type bridgeNode struct {
 	// (local_link.go), made on first use.
 	localLinks   *localLinkManager
 	localLinksMu sync.Mutex
+	// Which public peers a phone dials now and the rest of its pool
+	// (phone_peers.go); nil on computers.
+	phonePeers *phonePeerKeeper
+	// A computer's bridge and peer count on battery (power_source.go); nil
+	// on phones.
+	power *desktopPowerSaver
 	// The post-quantum session layer of the signal port (pq_session.go),
 	// made on first use.
 	pq     *pqEndpoint
@@ -155,9 +161,10 @@ const (
 	// Desktops help the wider mesh by accepting inbound peering (they are
 	// the bridges). "[::]" listens on IPv6 and IPv4 together; Go
 	// falls back to IPv4 alone where the computer has no IPv6.
-	defaultDesktopPeerListen       = "tls://[::]:32913"
-	androidBootstrapPeerLimit      = 8
-	androidBootstrapPeerCount      = 16
+	defaultDesktopPeerListen = "tls://[::]:32913"
+	// A phone's candidates from the public pool (or the user's list); it
+	// dials only phonePeerCount of them at once (phone_peers.go).
+	phonePeerPoolSize              = 16
 	desktopPublicPeerCount         = 20
 	desktopPeerProbeCandidateLimit = 40
 	androidPeerProbeCandidateLimit = 16
@@ -165,8 +172,10 @@ const (
 	leafProbeCycleBudget           = 3 * time.Second
 	leafConnectGracePeriod         = 8 * time.Second
 	leafHealthCheckInterval        = 20 * time.Second
-	peerProbeRefreshInterval       = 10 * time.Minute
-	signalChunkSize                = 1300
+	// The desktop's latency probe of the pool only feeds the diagnostics
+	// ("selectedPeer"): rarely, never on battery (power_source.go).
+	peerProbeRefreshInterval = 6 * time.Hour
+	signalChunkSize          = 1300
 	// Most signals queued for the app at once (see signal_inbox.go).
 	signalInboxCapacity = 2048
 	signalTTL           = 90 * time.Second

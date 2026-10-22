@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
@@ -97,16 +98,25 @@ String messageDeliveryLabel(MessageDeliveryStatus status) {
   );
 }
 
+/// This device is an iPhone: it sends (and retries) only while Zen is open,
+/// never in the background, and the texts say so.
+bool get messageDeliveryOnIPhone =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
 /// The label of [stage] alone (the legend uses it with a placeholder count).
 String messageDeliveryStageLabel(
   MessageDeliveryStage stage, {
   Object? mailboxes,
+  bool? iPhone,
 }) {
   return switch (stage) {
     MessageDeliveryStage.sending => t('Wysyłanie…'),
-    MessageDeliveryStage.waitingHere => t('Czeka u Ciebie — odbiorca offline'),
+    MessageDeliveryStage.waitingHere =>
+      (iPhone ?? messageDeliveryOnIPhone)
+          ? t('Czeka na Twoim iPhonie — odbiorca offline')
+          : t('Czeka u Ciebie — odbiorca offline'),
     MessageDeliveryStage.inMailboxes => t(
-      'Czeka na odbiór u zaufanych znajomych odbiorcy ({n})',
+      'Czeka w skrzynkach u znajomych odbiorcy ({n})',
       <String, Object?>{'n': mailboxes ?? 'N'},
     ),
     MessageDeliveryStage.waitingForBoth => t(
@@ -119,28 +129,51 @@ String messageDeliveryStageLabel(
   };
 }
 
-/// What [stage] means, in a sentence or two.
-String messageDeliveryExplanation(MessageDeliveryStage stage) {
+/// What [stage] means, in a sentence or two. On an iPhone ([iPhone], by
+/// default this device) nothing is retried while Zen is closed.
+String messageDeliveryExplanation(MessageDeliveryStage stage, {bool? iPhone}) {
+  final bool ios = iPhone ?? messageDeliveryOnIPhone;
   return switch (stage) {
     MessageDeliveryStage.sending => t(
       'Zen próbuje dostarczyć wiadomość bezpośrednio.',
     ),
-    MessageDeliveryStage.waitingHere => t(
-      'Odbiorca jest offline i żaden jego zaufany znajomy nie ma jeszcze '
-      'kopii. Wiadomość czeka na tym urządzeniu i jest ponawiana, aż dotrze.',
-    ),
-    MessageDeliveryStage.inMailboxes => t(
-      'Odbiorca jest offline. Zaszyfrowane kopie trzymają jego zaufani '
-      'znajomi i oddadzą je, gdy wróci. To urządzenie też ponawia wysyłkę.',
-    ),
+    MessageDeliveryStage.waitingHere =>
+      ios
+          ? t(
+              'Odbiorca jest offline i żadna z jego skrzynek u znajomych nie '
+              'ma jeszcze kopii. Wiadomość czeka na Twoim iPhonie. Wyjdzie, '
+              'gdy Zen będzie otwarty, a odbiorca w sieci — iPhone nie '
+              'wysyła w tle.',
+            )
+          : t(
+              'Odbiorca jest offline i żadna z jego skrzynek u znajomych nie '
+              'ma jeszcze kopii. Wiadomość czeka na tym urządzeniu i jest '
+              'ponawiana, aż dotrze.',
+            ),
+    MessageDeliveryStage.inMailboxes =>
+      ios
+          ? t(
+              'Odbiorca jest offline. Zaszyfrowane kopie trzymają jego '
+              'znajomi (skrzynki) i oddadzą je, gdy wróci. Ten iPhone ponawia '
+              'wysyłkę tylko przy otwartym Zen.',
+            )
+          : t(
+              'Odbiorca jest offline. Zaszyfrowane kopie trzymają jego '
+              'znajomi (skrzynki) i oddadzą je, gdy wróci. To urządzenie też '
+              'ponawia wysyłkę.',
+            ),
     MessageDeliveryStage.waitingForBoth => t(
-      'Za duża dla skrzynek u zaufanych znajomych odbiorcy. Plik czeka na '
-      'tym urządzeniu i przejdzie, gdy oba telefony będą online w tym samym '
-      'czasie.',
+      'Za duża dla skrzynek u znajomych odbiorcy. Plik czeka na tym '
+      'urządzeniu i przejdzie, gdy oba urządzenia będą online w tym samym '
+      'czasie (iPhone: z otwartym Zen).',
     ),
-    MessageDeliveryStage.sent => t(
-      'Wiadomość jest w kolejce i będzie ponawiana, aż dotrze.',
-    ),
+    MessageDeliveryStage.sent =>
+      ios
+          ? t(
+              'Wiadomość jest w kolejce. Ten iPhone ponawia wysyłkę, gdy Zen '
+              'jest otwarty.',
+            )
+          : t('Wiadomość jest w kolejce i będzie ponawiana, aż dotrze.'),
     MessageDeliveryStage.delivered => t('Wiadomość jest u odbiorcy.'),
     MessageDeliveryStage.read => t('Odbiorca otworzył wiadomość.'),
     MessageDeliveryStage.failed => t(
@@ -273,10 +306,7 @@ Future<void> showMessageDeliveryDetails(
                         MessageDeliveryStage.inMailboxes) ...<Widget>[
                   const SizedBox(height: 6),
                   Text(
-                    t(
-                      'Jedną z kopii trzymasz Ty — jesteś zaufanym znajomym '
-                      'odbiorcy.',
-                    ),
+                    t('Jedną z kopii trzymasz Ty — jesteś skrzynką odbiorcy.'),
                     style: text.bodyMedium?.copyWith(color: zen.textSecondary),
                   ),
                 ],
@@ -345,7 +375,7 @@ class _GroupCounts extends StatelessWidget {
           if (status.inMailboxes > 0)
             (
               MessageDeliveryStage.inMailboxes,
-              t('U zaufanych znajomych odbiorców: {n}', <String, Object?>{
+              t('W skrzynkach u znajomych: {n}', <String, Object?>{
                 'n': status.inMailboxes,
               }),
             ),

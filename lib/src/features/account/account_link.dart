@@ -3,7 +3,9 @@ import 'dart:convert';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
+import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/peer_version.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -29,15 +31,51 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// Messages (version 2): `al_hello {v: 2, c}` (old → new, commitment),
 /// `al_key {v: 2, e}` (new → old), `al_reveal {e}` (old → new),
 /// `al_seed {n, c}` (old → new), `al_done` (new → old). A hello without a
-/// commitment or with another version is ignored.
+/// commitment is ignored; one of another version is answered with
+/// `al_ver {v: [versions spoken here], app}`, so both screens say "update
+/// Zen on both devices" instead of waiting in silence.
 const String kLinkHelloType = 'al_hello';
 const String kLinkKeyType = 'al_key';
 const String kLinkRevealType = 'al_reveal';
 const String kLinkSeedType = 'al_seed';
 const String kLinkDoneType = 'al_done';
 
+const String kLinkVersionType = 'al_ver';
+
 /// The linking protocol this app speaks (commit, then reveal).
 const int kLinkProtocolVersion = 2;
+
+/// The answer to a greeting in a linking protocol this app does not speak.
+Map<String, dynamic> linkVersionFrame() => <String, dynamic>{
+  'type': kLinkVersionType,
+  'v': const <int>[kLinkProtocolVersion],
+  'app': kAppVersion,
+};
+
+/// The other device speaks another linking protocol: a different version
+/// of Zen.
+final class AccountLinkVersionException implements Exception {
+  const AccountLinkVersionException(this.otherApp);
+
+  /// The other device's Zen version, when it said (`major.minor.patch`).
+  final String? otherApp;
+
+  @override
+  String toString() => accountLinkVersionText(otherApp);
+}
+
+/// "Different version — update both", with the other device's version.
+String accountLinkVersionText(String? otherApp) => t(
+  'Drugie urządzenie ma inną wersję Zen ({version}). Zaktualizuj Zen na '
+  'obu urządzeniach.',
+  {'version': otherApp ?? '?'},
+);
+
+/// The app version a linking frame names (`app`), when valid.
+String? _appOf(Map<String, dynamic> payload) {
+  final Object? app = payload['app'];
+  return app is String && isValidAppVersion(app) ? app : null;
+}
 
 /// What the new device receives.
 @immutable
@@ -156,6 +194,8 @@ final class AccountLinkSender {
     _mine = mine;
     _helloKey = pub;
     final Completer<Uint8List> answer = Completer<Uint8List>();
+    // An "other version" answer may come before it is awaited.
+    answer.future.ignore();
     final Completer<void> done = Completer<void>();
     _done = done;
     _sub = transport.frames.listen((SignalTransportFrame f) {
@@ -170,6 +210,8 @@ final class AccountLinkSender {
         }
       } else if (type == kLinkDoneType && !done.isCompleted) {
         done.complete();
+      } else if (type == kLinkVersionType && !answer.isCompleted) {
+        answer.completeError(AccountLinkVersionException(_appOf(f.payload)));
       }
     });
     // Only the commitment: the key itself stays back until the new
@@ -179,6 +221,7 @@ final class AccountLinkSender {
       payload: <String, dynamic>{
         'type': kLinkHelloType,
         'v': kLinkProtocolVersion,
+        'app': kAppVersion,
         'c': b64(await linkCommitment(pub)),
       },
     );
@@ -323,6 +366,11 @@ final class AccountLinkReceiver {
         ),
   ];
 
+  /// The Zen version of a device that greeted in another linking protocol
+  /// ('?' when it did not say); null while none did.
+  String? get versionMismatch => _versionMismatch;
+  String? _versionMismatch;
+
   /// Devices with an attempt in progress (any stage).
   List<String> get peers => <String>[
     for (final _LinkSession s in _sessions.values) s.address,
@@ -381,7 +429,15 @@ final class AccountLinkReceiver {
 
   Future<void> _onHello(SignalTransportFrame f, String from) async {
     final Uint8List? commitment = _key32(f.payload['c']);
-    if (commitment == null || f.payload['v'] != kLinkProtocolVersion) {
+    final Object? version = f.payload['v'];
+    if (version is int && version != kLinkProtocolVersion) {
+      // Another Zen version: both screens say so.
+      _versionMismatch = _appOf(f.payload) ?? '?';
+      _changed();
+      await transport.send(remoteAddress: f.from, payload: linkVersionFrame());
+      return;
+    }
+    if (commitment == null || version != kLinkProtocolVersion) {
       return;
     }
     // A new greeting from the same device starts its attempt over.

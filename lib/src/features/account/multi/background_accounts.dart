@@ -335,7 +335,7 @@ final class BackgroundAccountNode {
     required Directory accounts,
     required ZenBackgroundAccount account,
     required RuntimeSystemNotificationService notices,
-    Duration waitTimeout = const Duration(seconds: 5),
+    Duration waitTimeout = const Duration(seconds: 30),
     SecureStorageCredentialsStore secrets =
         const SecureStorageCredentialsStore.device(),
   }) async {
@@ -360,7 +360,7 @@ final class BackgroundAccountNode {
     required Directory support,
     required AppSecurityCredentialsStore credentials,
     required RuntimeSystemNotificationService notices,
-    Duration waitTimeout = const Duration(seconds: 5),
+    Duration waitTimeout = const Duration(seconds: 30),
   }) async {
     Future<Directory> folder() async => support;
     final FileBackgroundVault vault = FileBackgroundVault(
@@ -389,6 +389,9 @@ final class BackgroundAccountNode {
         nodeConfigProtector: BackgroundKeyProtector(credentials),
         fallbackPollInterval: const Duration(seconds: 2),
         supportDirectory: folder,
+        // Only receives: two public peers do (a phone's main node dials
+        // four; computers keep their own number).
+        peerTarget: 2,
       ),
     );
     if (doorKit != null && !doorKit.isEmpty) {
@@ -424,7 +427,7 @@ final class BackgroundAccountNode {
     required Directory accounts,
     required RuntimeSystemNotificationService notices,
     String? skip,
-    Duration waitTimeout = const Duration(seconds: 5),
+    Duration waitTimeout = const Duration(seconds: 30),
     SecureStorageCredentialsStore secrets =
         const SecureStorageCredentialsStore.device(),
   }) async {

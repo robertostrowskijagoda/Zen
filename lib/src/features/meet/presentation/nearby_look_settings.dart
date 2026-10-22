@@ -16,7 +16,8 @@ String nearbyLookChoiceText(int minutes, int seconds) => t(
   {'minutes': minutes, 'seconds': seconds},
 );
 
-/// What a choice costs: "ok. 0,6 mAh na dobę (0,02% baterii)".
+/// What a choice costs: "ok. 42,2 mAh na dobę (1,41% baterii)" (an
+/// estimate with the phone kept awake for each look).
 String nearbyLookCostText(int minutes, int seconds) {
   final Duration every = Duration(minutes: minutes);
   final Duration window = Duration(seconds: seconds);
@@ -93,6 +94,26 @@ class NearbyLookSettingsTile extends StatelessWidget {
                     'oszczędzaniu baterii i we śnie telefonu rozglądanie '
                     'czeka.',
                   ),
+                  style: TextStyle(
+                    color: zen.textSecondary,
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  t(
+                    'To szacunki dla typowego telefonu: każde rozglądanie '
+                    'budzi go na kilka sekund. Samo pokazywanie się w '
+                    'pobliżu to ok. {mah} mAh na dobę.',
+                    {
+                      'mah': ZenFormat.number(
+                        nearbyAdvertMilliampHoursPerDay(),
+                        decimals: 1,
+                      ),
+                    },
+                  ),
+                  key: const Key('nearby-look-cost-note'),
                   style: TextStyle(
                     color: zen.textSecondary,
                     fontSize: 13,

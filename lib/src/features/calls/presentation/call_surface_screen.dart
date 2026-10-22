@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -300,12 +298,12 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
     CallMediaSessionController callMedia,
   ) async {
     if (!callMedia.isRecording) {
-      final Directory temp = await mediaTemporaryDirectory();
-      await callMedia.startRecording(
-        '${temp.path}/zen_rec_${DateTime.now().millisecondsSinceEpoch}'
-        '.${callMedia.recordingExtension}',
-        label: widget.title,
+      // A random name in a private folder: nobody can put a link there.
+      final String path = await newTemporaryMediaPath(
+        prefix: 'zen_rec_',
+        extension: '.${callMedia.recordingExtension}',
       );
+      await callMedia.startRecording(path, label: widget.title);
       return;
     }
     // The file goes into the encrypted store by itself (also when the
@@ -418,7 +416,7 @@ class _SurfaceTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 4, 16, 4),
+      padding: const EdgeInsetsDirectional.fromSTEB(8, 4, 16, 4),
       child: Row(
         children: <Widget>[
           IconButton(
@@ -462,7 +460,7 @@ class _SurfaceTopBar extends StatelessWidget {
           ),
           CallFloatOverAppsButton(color: zen.textPrimary),
           Padding(
-            padding: const EdgeInsets.only(left: 8),
+            padding: const EdgeInsetsDirectional.only(start: 8),
             child: FilledButton.tonalIcon(
               key: const Key('call-surface-top-chat-button'),
               style: FilledButton.styleFrom(
@@ -807,8 +805,8 @@ class _CallMediaStageState extends State<_CallMediaStage> {
               : _AmbientAudioStage(session: widget.session, zen: widget.zen),
         ),
         if (hasPip)
-          Positioned(
-            right: 16,
+          PositionedDirectional(
+            end: 16,
             top: 16,
             child: GestureDetector(
               onTap: hasRemote && local != null
@@ -899,8 +897,8 @@ class _ScreenShareStage extends StatelessWidget {
             ),
           ),
         ),
-        Positioned(
-          right: 12,
+        PositionedDirectional(
+          end: 12,
           top: 12,
           child: Column(
             mainAxisSize: MainAxisSize.min,

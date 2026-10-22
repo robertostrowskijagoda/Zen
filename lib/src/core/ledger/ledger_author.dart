@@ -55,6 +55,11 @@ final class LedgerAuthor {
     _tail = result.then((_) {}, onError: (Object _) {});
     return result;
   }
+
+  /// Appends a checkpoint ([kLedgerCheckpointKind]) to [space]: from it on
+  /// the log may be held and handed on without what came before.
+  Future<LogEntry> checkpoint(String space) =>
+      append(space, kLedgerCheckpointKind, const <String, dynamic>{});
 }
 
 /// A brand-new account with its first device.

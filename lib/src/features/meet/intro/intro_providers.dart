@@ -41,7 +41,7 @@ final class AppIntroFriending implements IntroFriending {
     final SocialHubController social = ref.read(
       socialHubControllerProvider.notifier,
     );
-    final String own = ref.read(userProfileControllerProvider).displayName;
+    final String own = ref.read(userProfileControllerProvider).publicName;
     final String? me = own.trim().isEmpty ? null : own.trim();
     if (status == FriendRelationshipStatus.pendingIncoming) {
       await social.acceptFriendRequest(
@@ -78,7 +78,7 @@ final Provider<IntroService> introServiceProvider = Provider<IntroService>((
     host: MeetEventHost(
       AppMeetHost(ref),
       address: () => ref.read(runtimeNodeSnapshotProvider).localAddress,
-      name: () => ref.read(userProfileControllerProvider).displayName,
+      name: () => ref.read(userProfileControllerProvider).publicName,
     ),
     disk: ref.read(ledgerDiskProvider),
     // Read when needed, so the inbox alone does not start the statuses.
