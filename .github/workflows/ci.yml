@@ -205,7 +205,8 @@ jobs:
 
       # Flutter's Linux toolchain; libsecret for flutter_secure_storage,
       # the app indicator for system_tray, GStreamer for audio and video;
-      # PulseAudio's headers for call recording;
+      # PulseAudio's headers for call recording; GStreamer's plugins for
+      # the media player's codec test;
       # make and g++ build Zen's own H.264 encoder (OpenH264, from source);
       # Xvfb for the start below; dpkg-dev for the .deb.
       - name: Build tools and libraries
@@ -220,16 +221,15 @@ jobs:
             libstdc++-12-dev libsecret-1-dev libayatana-appindicator3-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libpulse-dev \
             xvfb libgl1-mesa-dri libglx-mesa0 \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav \
             dpkg-dev
 
       # Films from friends are decoded only in the formats Zen itself sends
       # (linux/runner/zen_media_codecs.cc): checked against the real
-      # plugins, FFmpeg's (gstreamer1.0-libav) included, through playbin
-      # and playbin3.
+      # plugins (installed above), FFmpeg's (gstreamer1.0-libav) included,
+      # through playbin and playbin3.
       - name: "Media player: only Zen's formats"
         run: |
-          sudo apt-get install -y --no-install-recommends \
-            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav
           # shellcheck disable=SC2046 # pkg-config's flags are separate words
           g++ -std=c++17 -Wall -Werror -DZEN_HAVE_GSTREAMER=1 -Ilinux/runner \
             linux/runner/test/zen_media_codecs_test.cc linux/runner/zen_media_codecs.cc \

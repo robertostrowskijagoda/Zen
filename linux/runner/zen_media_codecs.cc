@@ -23,6 +23,12 @@ GstStaticCaps allowed_caps = GST_STATIC_CAPS(
     // Sound: AAC and MP3 are both audio/mpeg.
     "audio/mpeg; audio/x-opus");
 
+// Decoded sound and pictures: nothing parses or decodes them any more.
+// decodebin never asks about them, but decodebin3 (playbin3 of GStreamer
+// 1.20) offers them to select-stream, e.g. the PCM wavparse makes of a WAV.
+GstStaticCaps raw_caps =
+    GST_STATIC_CAPS("audio/x-raw(ANY); video/x-raw(ANY)");
+
 // decodebin's GstAutoplugSelectResult (not in a public header).
 constexpr gint kAutoplugTry = 0;
 constexpr gint kAutoplugSkip = 2;
@@ -138,9 +144,12 @@ gboolean zen_media_caps_allowed(const GstCaps* caps) {
   if (caps == nullptr || gst_caps_is_empty(caps) || gst_caps_is_any(caps)) {
     return FALSE;
   }
+  GstCaps* raw = gst_static_caps_get(&raw_caps);
   GstCaps* allowed = gst_static_caps_get(&allowed_caps);
-  const gboolean subset = gst_caps_is_subset(caps, allowed);
+  const gboolean subset =
+      gst_caps_is_subset(caps, raw) || gst_caps_is_subset(caps, allowed);
   gst_caps_unref(allowed);
+  gst_caps_unref(raw);
   return subset;
 }
 

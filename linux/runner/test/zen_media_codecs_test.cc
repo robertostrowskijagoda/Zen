@@ -150,6 +150,11 @@ int main(int argc, char** argv) {
   Check(CapsAllowed("audio/mpeg, mpegversion=1, layer=3"), "MP3 plays");
   Check(CapsAllowed("video/quicktime, variant=iso"), "MP4 plays");
   Check(CapsAllowed("audio/x-opus"), "Opus plays");
+  // Decoded already (the PCM of a WAV): decodebin3 asks about it too.
+  Check(CapsAllowed("audio/x-raw, format=S16LE, rate=48000, channels=2"),
+        "raw audio plays");
+  Check(CapsAllowed("video/x-raw, format=I420"), "raw video plays");
+  Check(!CapsAllowed("audio/x-raw; audio/x-vorbis"), "raw or Vorbis refused");
   Check(!CapsAllowed("video/mpeg, mpegversion=4"), "MPEG-4 Part 2 refused");
   Check(!CapsAllowed("audio/x-ac3"), "AC-3 refused");
   Check(!CapsAllowed("video/x-theora"), "Theora refused");
