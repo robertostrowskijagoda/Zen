@@ -58,6 +58,15 @@ jobs:
         id: test
         run: flutter test --file-reporter json:test-results.json
 
+      # The release workflow makes every file the app updates from, and the
+      # install page and the SideStore source point to them
+      # (tool/release.dart, tool/ci/test_release_source.py).
+      - name: Release contract
+        run: |
+          dart run tool/release.dart check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tool/ci/test_release_source.py
+
       # Format, analyzer and test counts (with the failed tests) on the
       # run's summary page; tool/ci/ci_summary.py never fails the job.
       - name: Summary

@@ -85,10 +85,49 @@ overwritten by one signed with a different key. Changing the package to
 
 ## 3. Release step by step
 
+**In short** (the details follow in items 1–8):
+
+1. Make sure `main` is green in CI and the "Unreleased" part of
+   `CHANGELOG.md` says what is new.
+2. `dart run tool/release.dart prepare 1.12.0` (on a clean `main`). It runs
+   `dart format`, `flutter analyze`, `flutter test` and `go test`
+   (`--skip-checks` skips them when CI already ran them on this commit),
+   checks that `release.yml` makes every file the app updates from under
+   exactly the names the app asks for (`tool/release_contract.dart`; also
+   `dart run tool/release.dart check`, which CI runs), writes the version
+   and the next build number into `pubspec.yaml`,
+   `lib/src/app/app_version.dart` and the Linux AppStream metadata (Android,
+   iOS, macOS and Windows take them from `pubspec.yaml`), turns "Unreleased"
+   into "1.12.0 — <date>", commits, and makes the annotated tag `v1.12.0`.
+   It never pushes. `--build N` picks the build number, `--no-tag` stops
+   before the commit.
+3. `git push origin HEAD && git push origin v1.12.0`. Approve the `release`
+   environment when GitHub asks (the APK key and the signing key).
+   `release.yml` refuses a tag that differs from the version in
+   `pubspec.yaml` / `app_version.dart` (otherwise every build would keep
+   offering the release as an update).
+4. When the draft release is complete, download its files into one folder
+   and check them as the app will:
+   `dart run tool/release.dart verify <folder> --version 1.12.0
+   --require-signature` (names, `SHA256SUMS` against every file, the format
+   and the signatures of `SHA256SUMS.sig`; signatures need Go). The GitHub
+   JSON of the draft can be checked too: `--github-json release.json`.
+5. Publish the draft. This starts `pages.yml`, which refreshes the install
+   page data and the SideStore / AltStore source (`apps.json`) for the new
+   `Zen-unsigned.ipa`. Builds then find the release within 12 hours.
+
+The checks behind it: `test/release_contract_test.dart` (the app's file
+names, the workflow, the version) and `test/github_release_e2e_test.dart`
+(a release built like `release.yml`, served as GitHub serves it, updates
+every platform; a changed file, a changed `SHA256SUMS`, a foreign key or an
+older signed version installs nothing); `tool/ci/test_release_source.py`
+(the source and the install page links).
+
 1. **Version number:** `version:` in `pubspec.yaml` and `kAppVersion`
    / `kAppBuild` in `lib/src/app/app_version.dart` (a test checks that they
    match); the same number in the CHANGELOG heading and in the tag. The build
-   number (`versionCode`) must increase.
+   number (`versionCode`) must increase. `tool/release.dart prepare` writes
+   all of them.
 2. **Go bridge** builds itself (section 3.1): `flutter build apk`, `windows`,
    `linux`, `macos` and `ios` rebuild it only when its sources changed. After
    changing `go.mod` (e.g. a new Yggdrasil version) refresh the licenses:
@@ -168,8 +207,8 @@ overwritten by one signed with a different key. Changing the package to
    `flutter build appbundle --release --flavor appStoreOnly` (Play AAB),
    `flutter build apk --release --flavor appStoreOnly` (Galaxy Store). The
    copies named `Zen-APP-STORE-ONLY-do-not-install-manually.aab|apk` appear in
-   `build/app/outputs/app-store-only/`; the app is called "Zen" as everywhere
-   (only the About screen says "Wersja ze sklepu"; no icon camouflage). Never
+   `build/app/outputs/app-store-only/`; the app is the same as everywhere
+   (no self-update, no APK handing, no icon camouflage). Never
    attach them to a GitHub release or hand them to people to sideload.
 
    The README links to `…/releases/latest/download/Zen.apk`,
@@ -193,8 +232,9 @@ overwritten by one signed with a different key. Changing the package to
    tag creates a draft with all files from item 4. In the description: what's
    new (from the CHANGELOG), the certificate fingerprint, the SHA-256 sums.
    Publish it by hand after checking.
-7. **Verification:** download from `releases/latest/download/`, compare the
-   sum, `apksigner verify --print-certs Zen.apk` (fingerprint as in the
+7. **Verification:** `dart run tool/release.dart verify` on the downloaded
+   files (step 4 above), then download from `releases/latest/download/`,
+   compare the sum, `apksigner verify --print-certs Zen.apk` (fingerprint as in the
    README), install on a clean phone and run on Windows, Linux and Mac.
 8. **First release with `com.roj.zen`:** state in the description that it is a
    new app — the old one (`com.HuraganKodu.zen`) stays alongside with its
@@ -404,52 +444,56 @@ accident: the files are called
 data. Yggdrasil runs in Zen as a library, without `VpnService` (VPN would
 require an organization account).
 
-**Done (the `appStoreOnly` flavor):**
+**The rule:** the store build is the same app as the GitHub build. It differs
+only where the stores force it, in three places, and nothing else changes
+(name, pyramid, wallet, dating, donation link and About are identical):
 
-- the manifest in `src/appStoreOnly` removes `REQUEST_INSTALL_PACKAGES` and
-  removes the camouflage alias; the launcher label stays "Zen" (only the About
-  screen says "Wersja ze sklepu");
-- Dart (`appFlavor == 'appStoreOnly'` or `--dart-define=ZEN_STORE=true`) turns off
-  the update service, shows "Aktualizacje ze sklepu" ("Updates from the
-  store") and replaces "Podaj dalej" with a dialog containing a link
-  (`--dart-define=ZEN_STORE_URL=…`, default: the project page);
-- flavors are active only for a task with a flavor (`--flavor appStoreOnly|full`)
-  or with `-Pzen.flavors=true`, so a plain `flutter build apk` / `flutter run`
-  works unchanged;
-- built by hand, not by `release.yml` (section 3 item 4).
-
-**Still to do** for the `appStoreOnly` variant:
-
-1. ~~no self-update, no `REQUEST_INSTALL_PACKAGES`~~ (done; self-update from
+1. no self-update and no `REQUEST_INSTALL_PACKAGES` (self-update from
    outside Play is a hard violation of the Device and Network Abuse policy);
-2. ~~"Podaj dalej" as a link or QR to the store and the page, without sending
-   the APK~~ (done as a link);
-3. background service: a declared type (`connectedDevice`; `phoneCall`,
-   `camera`, `microphone` only during a call) instead of `specialUse`, a video
-   for reviewers, an "always online" switch;
-4. `USE_FULL_SCREEN_INTENT`: a "calls" declaration; the alarm asks for special
-   access and has a fallback (a loud notification);
-5. location only in the foreground or one background feature (alarm), with a
-   clear disclosure; Bluetooth with `neverForLocation`, if true;
-6. dating: the whole app 18+ ("Restrict Minor Access") or dating hidden — an
-   easily bypassed age gate is not enough;
-7. names: "Samorząd" / "Rada" (Council) instead of "pyramid", "points" instead
-   of "currency" and "wallet", with the note "no monetary value"; a "no
-   financial features" declaration (the rejection risk is an assessment, not a
-   rule);
-8. no link to buycoffee.to in the app (or a tip via Play Billing);
-9. user content: terms before the first post, reports to the author (e-mail),
-   a child safety (CSAE) page with a contact person, a moderation description;
-10. targetSdk 36, AAB, privacy policy, Data safety (klipy.com too: queries and
-    IP), IARC rating, instructions and a second account for the reviewer
-    (Briar disappeared from Play in 2022 partly for lack of test data);
-11. countries: Poland, the EU and English-speaking countries; without China,
-    Russia, Belarus and sanctioned countries (the GitHub APK stays everywhere).
+   the Updates screen says "Aktualizacje ze sklepu" ("Updates from the
+   store");
+2. "Podaj dalej" passes Zen on as a link (`--dart-define=ZEN_STORE_URL=…`,
+   default: the project page), never as an APK;
+3. no launcher disguise (the manifest in `src/appStoreOnly` removes the
+   alias).
 
-New UI texts of the variant (to translate): the "Podaj dalej" dialog in the
-store build, "Aktualizacje ze sklepu" (card title) and its body ("This version
-of Zen is updated by the store you got it from"), and the "Podaj dalej"
-section description in the store build.
+Because a store may sign the app with its own key (Play App Signing), the
+store build also skips the check of its own signing certificate (`device_integrity.dart`); the other tamper
+checks stay.
+
+**How it is built:** `appFlavor == 'appStoreOnly'` or
+`--dart-define=ZEN_STORE=true` (`lib/src/features/update/store_build.dart`).
+Flavors are active only for a task with a flavor (`--flavor appStoreOnly|full`)
+or with `-Pzen.flavors=true`, so a plain `flutter build apk` / `flutter run`
+works unchanged. It is built by hand, not by `release.yml` (section 3 item 4):
+`flutter build appbundle --release --flavor appStoreOnly`; the files land in
+`build/app/outputs/app-store-only/`.
+
+**Still to do** before publishing in a store (declarations and store
+listing, not app changes):
+
+1. background service: a declared type (`connectedDevice`; `phoneCall`,
+   `camera`, `microphone` only during a call) instead of `specialUse`, and a
+   video for reviewers;
+2. `USE_FULL_SCREEN_INTENT`: a "calls" declaration; the alarm asks for special
+   access and has a fallback (a loud notification);
+3. location only in the foreground or one background feature (alarm), with a
+   clear disclosure; Bluetooth with `neverForLocation`, if true;
+4. dating: declare the app 18+ ("Restrict Minor Access") in the Play Console;
+5. the store listing explains that pyramid points have no monetary value,
+   with a "no financial features" declaration (the rejection risk is an
+   assessment, not a rule);
+6. user content: terms before the first post (already the consent screen),
+   a report contact (e-mail), a child safety (CSAE) page with a contact
+   person, a moderation description;
+7. targetSdk 36, AAB, privacy policy, Data safety (klipy.com too: queries and
+   IP), IARC rating, instructions and a second account for the reviewer
+   (Briar disappeared from Play in 2022 partly for lack of test data);
+8. countries: Poland, the EU and English-speaking countries; without China,
+   Russia, Belarus and sanctioned countries (the GitHub APK stays everywhere).
+
+If a store rejects the identical app, the owner decides then; no store-only
+changes are planned.
 
 ### 6.3 iPhone and Mac
 
@@ -473,8 +517,8 @@ section description in the store build.
     those countries;
   - **App Store** — full review: user content (filter before publishing,
     reports with a response, blocking, contact), no impression of an
-    "anonymous chat", dating as a side feature, names as in section 6.2, the donation
-    link only in the US store, in-app account deletion, an encryption
+    "anonymous chat", dating as a side feature, the donation link (allowed
+    without restrictions only in the US store), in-app account deletion, an encryption
     declaration (in France a separate declaration or a switch to CryptoKit);
   - **macOS** — Developer ID signature and notarization in CI (no content
     review): "Open Anyway" and keychain prompts after updates go away.
@@ -528,7 +572,7 @@ Now (October–December 2026):
 2. Release key backup with Shamir (section 2 item 3) — before registration.
 3. Google account USD 25 and registration of `com.roj.zen` with the release
    key (section 4).
-4. The `appStoreOnly` variant (section 6.2: built; the remaining items open) with the same
+4. The `appStoreOnly` variant (section 6.2: built; the store declarations open) with the same
    package and key; closed test with 12 testers × 14 days; publication in
    Poland and the EU (+ English-speaking countries); then Galaxy Store with the
    same variant. About 3–6 weeks in total.
@@ -596,8 +640,9 @@ In 2027:
   **anonymous** payments are not gifts — their qualification in PIT is
   disputed. Unregistered activity in 2026: up to PLN 10,813.50 of revenue per
   quarter. A collection for one's own work is usually not a "public
-  collection" within the meaning of the act. In store versions the donation
-  link has to be removed (section 6.2, section 6.3).
+  collection" within the meaning of the act. The store build keeps the
+  donation link like every other build (section 6.2); if a store's review
+  objects to it, the owner decides then.
 - In the app the donation appears only in "O aplikacji" (at the top), with no
   nagging elsewhere. Good practices: a clear goal, short reports.
 

@@ -466,6 +466,20 @@ jobs:
         with:
           persist-credentials: false
 
+      # The app reports the version of pubspec.yaml and treats the tag as
+      # the release's version: if they differ, every build would keep
+      # offering this release as an update (tool/release.dart prepare sets
+      # both).
+      - name: The tag is the version of the build
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(sed -n 's/^version: *\([0-9][0-9.]*\)+.*$/\1/p' pubspec.yaml)
+          app=$(sed -n "s/^const String kAppVersion = '\(.*\)';$/\1/p" lib/src/app/app_version.dart)
+          if [ "v$version" != "$GITHUB_REF_NAME" ] || [ "$app" != "$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME, pubspec.yaml $version, app_version.dart $app: they must agree (dart run tool/release.dart prepare)."
+            exit 1
+          fi
+
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: release-*
