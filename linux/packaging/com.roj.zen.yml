@@ -14,9 +14,20 @@
 # GTK). libsecret and GStreamer are in it too; the tray's
 # libayatana-appindicator3 and its dependencies are not, so the workflow
 # copies them next to the bundle (extra-lib/).
+#
+# Runtime: GNOME 51 (Flathub, September 2026; GNOME 50 is supported until
+# April 2027). Each GNOME runtime gets security fixes for about a year:
+# move to the next one with every GNOME release (March and September),
+# `flatpak install` warns about an end-of-life runtime. GNOME 51 dropped
+# gcr-3 and libhandy, which Zen does not use.
+#
+# Updates: inside the sandbox Zen does not download or install anything
+# itself (it cannot run `flatpak install` there); it shows the new version
+# and opens the release page in the browser (through the portal) with the
+# command to run. So no file-system access is needed.
 app-id: com.roj.zen
 runtime: org.gnome.Platform
-runtime-version: '48'
+runtime-version: '51'
 sdk: org.gnome.Sdk
 command: zen
 finish-args:

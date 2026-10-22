@@ -5,9 +5,11 @@
 //       Do the app and .github/workflows/release.yml agree on the file
 //       names (and the version in pubspec.yaml and app_version.dart)?
 //   dart run tool/release.dart prepare 1.12.0 [--build 12] [--skip-checks]
-//       [--allow-dirty] [--no-tag]
-//       Clean tree, `flutter analyze`, `flutter test` and `go test` (unless
-//       --skip-checks), the check above, then the version everywhere
+//       [--allow-dirty] [--no-tag] [--allow-unpinned-keys]
+//       Clean tree, the app pins its release keys (kReleaseMaintainers,
+//       kOfficialApkCertificatesSha256; --allow-unpinned-keys only for a
+//       test release), `flutter analyze`, `flutter test` and `go test`
+//       (unless --skip-checks), the check above, then the version everywhere
 //       (pubspec.yaml, app_version.dart, the Linux AppStream metadata),
 //       CHANGELOG "Unreleased" → "1.12.0 — <date>", a commit and the
 //       annotated tag v1.12.0. Prints the push command; never pushes.
@@ -204,7 +206,29 @@ Future<bool> _prepare(List<String> args) async {
     return false;
   }
 
-  // 2. The checks CI runs.
+  // 2. The app pins the keys its updates are checked with; without them
+  // the release cannot be told from a forged one.
+  final List<String> keys = pinnedKeyProblems(
+    releaseDart: File(
+      'lib/src/features/update/release.dart',
+    ).readAsStringSync(),
+    apkSignatureDart: File(
+      'lib/src/features/update/apk_signature.dart',
+    ).readAsStringSync(),
+  );
+  if (keys.isNotEmpty) {
+    if (!_flag(args, 'allow-unpinned-keys')) {
+      _report('release keys', keys);
+      stderr.writeln('Pin them first (a test release: --allow-unpinned-keys).');
+      return false;
+    }
+    stderr.writeln(
+      'WARNING: --allow-unpinned-keys: ${keys.join('; ')}. Not for a '
+      'release people update from.',
+    );
+  }
+
+  // 3. The checks CI runs.
   if (_flag(args, 'skip-checks')) {
     stdout.writeln('Skipping analyze and tests: make sure CI is green.');
   } else {
@@ -237,12 +261,12 @@ Future<bool> _prepare(List<String> args) async {
     }
   }
 
-  // 3. The app and the workflow agree.
+  // 4. The app and the workflow agree.
   if (!_report('check', _check())) {
     return false;
   }
 
-  // 4. The version everywhere, and the changelog.
+  // 5. The version everywhere, and the changelog.
   final DateTime today = DateTime.now();
   final String date =
       '${today.year}-${today.month.toString().padLeft(2, '0')}-'
@@ -267,7 +291,7 @@ Future<bool> _prepare(List<String> args) async {
   // FLUTTER_BUILD_NAME / FLUTTER_BUILD_NUMBER, FLUTTER_VERSION).
   stdout.writeln('Version $version+$build written.');
 
-  // 5. Commit and tag (never pushed here).
+  // 6. Commit and tag (never pushed here).
   final List<String> files = <String>[
     'pubspec.yaml',
     'lib/src/app/app_version.dart',

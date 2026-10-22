@@ -1,0 +1,8 @@
+# SHA-256 of the prebuilt libwebrtc that flutter_webrtc downloads for
+# Windows and Linux (checked by tool/ci/check_libwebrtc.py after the build).
+#
+#   <sha256>  <binary_version>/<platform>/<file name>
+#
+# Empty until filled in from a build that was checked by hand: the
+# check then only warns and prints the lines to add here. A file whose
+# hash differs from its line fails the build.

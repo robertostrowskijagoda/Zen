@@ -83,8 +83,10 @@ if command -v dpkg-shlibdeps > /dev/null 2>&1; then
   done
   if shlibs=$(cd "$work" && dpkg-shlibdeps -O --ignore-missing-info \
     -l"$root/opt/zen/lib" "$@" 2> "$work/shlibdeps.log"); then
-    # Built on Ubuntu 24.04, whose 64-bit time_t libraries are named ...t64
-    # (libgtk-3-0t64): older Debian and Ubuntu call them without it.
+    # The release is built on Ubuntu 22.04 (names without t64; Debian 13
+    # and Ubuntu 24.04+ renamed some libraries ...t64 and their packages
+    # provide the old names, which CI's deb-install job checks). Built on
+    # a t64 system, older Debian and Ubuntu get the plain name as well.
     depends=$(printf '%s\n' "$shlibs" | sed -n 's/^shlibs:Depends=//p' |
       sed -E 's/([a-z0-9.+-]+)t64( \([^)]*\))?/\1t64\2 | \1\2/g')
   else

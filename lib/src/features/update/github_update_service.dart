@@ -29,8 +29,14 @@ enum GithubCheckState {
   /// timeout): possibly blocked.
   unreachable,
 
-  /// GitHub answered, but with an error (rate limit, server error…).
+  /// GitHub answered, but with an error (rate limit, server error…):
+  /// tried again at [GithubUpdateService.nextCheckAt].
   failed,
+
+  /// GitHub says the project has no published release (404): before the
+  /// first release, or the repository was removed, made private or
+  /// blocked. Not "up to date": updates may have to come from friends.
+  missing,
 }
 
 /// Where the update the person asked for is.
@@ -65,8 +71,14 @@ bool githubUpdatesEnabledFor({
 /// also checks the signing certificate).
 ///
 /// Only one request to api.github.com per check, with no header but the
-/// User-Agent "Zen". Complements the friend-to-friend updates
-/// (update_service.dart), which need no server at all.
+/// User-Agent "Zen" and `If-None-Match` (the `ETag` of the last answer:
+/// an unchanged release does not count against GitHub's rate limit of 60
+/// requests an hour per IP address, which people behind one mobile
+/// operator's address share). A failed check is tried again sooner than
+/// [checkEvery]: after the wait GitHub asks for, else after
+/// [retryFirst], doubling each time up to [checkEvery].
+/// Complements the friend-to-friend updates (update_service.dart), which
+/// need no server at all.
 final class GithubUpdateService extends ChangeNotifier {
   GithubUpdateService({
     required this.installer,
@@ -80,7 +92,8 @@ final class GithubUpdateService extends ChangeNotifier {
     this.firstCheckAfter = const Duration(seconds: 20),
     this.checkEvery = const Duration(hours: 12),
     this.confirmAfter = const Duration(minutes: 2),
-  }) : _fetchJson = fetchJson ?? fetchGithubJson,
+    this.retryFirst = const Duration(minutes: 15),
+  }) : _fetchJson = fetchJson ?? GithubJsonCache().call,
        _fetchSums = fetchSums ?? fetchSha256Sums,
        _download = download ?? downloadGithubAsset,
        _internetWorks = internetWorks ?? (() => true),
@@ -101,6 +114,10 @@ final class GithubUpdateService extends ChangeNotifier {
   /// before the warning banner may show (a one-off hiccup says nothing).
   final Duration confirmAfter;
 
+  /// The first wait after GitHub answered with an error (when it did not
+  /// say how long to wait); doubled after each further error.
+  final Duration retryFirst;
+
   final GithubJsonFetcher _fetchJson;
   final Sha256SumsFetcher _fetchSums;
   final GithubDownloader _download;
@@ -112,6 +129,10 @@ final class GithubUpdateService extends ChangeNotifier {
   String? _error;
   DateTime? _checkedAt;
   int _unreachableInARow = 0;
+  int _failedInARow = 0;
+  bool _rateLimited = false;
+  DateTime? _nextCheckAt;
+  Timer? _retry;
   bool _unreachableDismissed = false;
   String? _dismissedVersion;
   Future<void>? _checking;
@@ -132,7 +153,17 @@ final class GithubUpdateService extends ChangeNotifier {
 
   DateTime? get checkedAt => _checkedAt;
 
+  /// When a failed check ([GithubCheckState.failed]) is tried again.
+  DateTime? get nextCheckAt => _nextCheckAt;
+
+  /// Whether the last error was GitHub's rate limit.
+  bool get rateLimited => _rateLimited;
+
   bool get checking => _checking != null;
+
+  /// The oldest Zen the newest release still supports (`zen-min:` in its
+  /// notes), when it names one.
+  String? get minimumVersion => _latest?.minVersion;
 
   /// The published release newer than this build, if any.
   GithubRelease? get newer {
@@ -212,6 +243,7 @@ final class GithubUpdateService extends ChangeNotifier {
         await _fetchJson(kGithubLatestReleaseUri),
       );
       _reached();
+      _answered();
       if (release != null) {
         _latest = release;
       }
@@ -221,12 +253,17 @@ final class GithubUpdateService extends ChangeNotifier {
     } on GithubStatusException catch (e) {
       _reached();
       if (e.statusCode == HttpStatus.notFound) {
-        // Nothing published yet.
-        _state = GithubCheckState.upToDate;
+        // No published release (yet, or any more): said so, not hidden
+        // behind "up to date".
+        _answered();
+        _latest = null;
+        _state = GithubCheckState.missing;
       } else {
         _state = GithubCheckState.failed;
         _error = e.toString();
+        _failedAgain(e.rateLimited, e.retryAfter);
       }
+      logZenWarning('Sprawdzanie nowej wersji na GitHubie: $e');
     } on Object catch (e) {
       if (isUnreachableError(e)) {
         _state = GithubCheckState.unreachable;
@@ -239,9 +276,37 @@ final class GithubUpdateService extends ChangeNotifier {
         _reached();
         _state = GithubCheckState.failed;
         _error = e.toString();
+        _failedAgain(false, null);
       }
       logZenWarning('Sprawdzanie nowej wersji na GitHubie: $e');
     }
+  }
+
+  /// GitHub gave a real answer: no retry pending.
+  void _answered() {
+    _failedInARow = 0;
+    _rateLimited = false;
+    _nextCheckAt = null;
+    _retry?.cancel();
+    _retry = null;
+  }
+
+  /// GitHub answered with an error: try again after [retryAfter] (what
+  /// GitHub asked for, at least a minute) or [retryFirst] doubled for each
+  /// error in a row, never later than the next regular check.
+  void _failedAgain(bool rateLimited, Duration? retryAfter) {
+    _failedInARow++;
+    _rateLimited = rateLimited;
+    final int doublings = _failedInARow > 16 ? 15 : _failedInARow - 1;
+    Duration wait = retryAfter != null
+        ? retryAfter + const Duration(minutes: 1)
+        : retryFirst * (1 << doublings);
+    if (wait > checkEvery) {
+      wait = checkEvery;
+    }
+    _nextCheckAt = _now().add(wait);
+    _retry?.cancel();
+    _retry = _disposed ? null : Timer(wait, () => unawaited(check()));
   }
 
   void _reached() {
@@ -417,6 +482,7 @@ final class GithubUpdateService extends ChangeNotifier {
     }
     _timers.clear();
     _confirm?.cancel();
+    _retry?.cancel();
     super.dispose();
   }
 }

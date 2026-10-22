@@ -375,3 +375,42 @@ String moveUnreleased(String changelog, String version, DateTime date) {
       '## $version — $day\n'
       '${changelog.substring(at + heading.length + 2)}';
 }
+
+/// The entries of `const List<String> [name] = <String>[...];` in [source]
+/// (empty when the list is empty or missing).
+List<String> constStringList(String source, String name) {
+  final RegExpMatch? m = RegExp(
+    '$name\\s*=\\s*<String>\\[(.*?)\\]\\s*;',
+    dotAll: true,
+  ).firstMatch(source);
+  if (m == null) {
+    return const <String>[];
+  }
+  return <String>[
+    for (final RegExpMatch e in RegExp(r"'([^']*)'").allMatches(m.group(1)!))
+      if (e.group(1)!.trim().isNotEmpty) e.group(1)!.trim(),
+  ];
+}
+
+/// Why a release must not be prepared yet: the app does not pin the keys
+/// its updates are checked with ([releaseDart] is
+/// lib/src/features/update/release.dart, [apkSignatureDart]
+/// lib/src/features/update/apk_signature.dart). Without
+/// kReleaseMaintainers the computers accept an update whose SHA256SUMS
+/// nobody signed; without kOfficialApkCertificatesSha256 a computer
+/// cannot tell the official APK from another one ("Podaj dalej") and the
+/// install page shows no fingerprint.
+List<String> pinnedKeyProblems({
+  required String releaseDart,
+  required String apkSignatureDart,
+}) => <String>[
+  if (constStringList(releaseDart, 'kReleaseMaintainers').isEmpty)
+    'kReleaseMaintainers is empty: pin the release signing key '
+        '(dart run tool/zen_release.dart keygen; docs/RELEASES.md, 8.6)',
+  if (constStringList(
+    apkSignatureDart,
+    'kOfficialApkCertificatesSha256',
+  ).isEmpty)
+    'kOfficialApkCertificatesSha256 is empty: pin the APK certificate '
+        '(dart run tool/zen_release.dart fingerprint --keystore <jks> --write)',
+];

@@ -72,6 +72,35 @@ void main() {
   });
 
   group('prepare', () {
+    test('refuses while the app pins no release keys', () {
+      const String none =
+          'const List<String> kReleaseMaintainers = <String>[];';
+      const String noCert =
+          'const List<String> kOfficialApkCertificatesSha256 = <String>[];';
+      expect(
+        pinnedKeyProblems(releaseDart: none, apkSignatureDart: noCert),
+        hasLength(2),
+      );
+      const String key =
+          "const List<String> kReleaseMaintainers = <String>[\n  'zh1abc',\n];";
+      const String cert =
+          'const List<String> kOfficialApkCertificatesSha256 = <String>[\n'
+          "  'ab12',\n];";
+      expect(
+        pinnedKeyProblems(releaseDart: key, apkSignatureDart: cert),
+        isEmpty,
+      );
+      expect(constStringList(key, 'kReleaseMaintainers'), <String>['zh1abc']);
+      // The real files are read the same way.
+      expect(
+        constStringList(
+          File('lib/src/features/update/release.dart').readAsStringSync(),
+          'kReleaseMaintainers',
+        ),
+        kReleaseMaintainers,
+      );
+    });
+
     test('bumps pubspec.yaml and app_version.dart', () {
       const String pubspec = 'name: zen\nversion: 1.11.0+11\n\nenvironment:\n';
       expect(

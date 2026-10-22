@@ -7,6 +7,10 @@
 # .github/dependabot.yml); the token is read-only and no secret is used.
 # The test jobs write a short report (format, analyzer, test counts, failed
 # tests) to the run's summary page with tool/ci/ci_summary.py.
+# Linux runners are pinned to an image (as in release.yml): the Linux build
+# runs on Ubuntu 22.04 like the release, its .deb is installed on the
+# systems the README promises, and govulncheck looks for known
+# vulnerabilities in the Go bridge's dependencies and Go itself.
 name: CI
 
 on:
@@ -42,7 +46,7 @@ jobs:
           cache: true
 
       - name: Packages
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Format
         id: format
@@ -66,6 +70,10 @@ jobs:
           dart run tool/release.dart check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tool/ci/test_release_source.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tool/ci/test_ci_checks.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tool/ci/test_check_libwebrtc.py
 
       # Format, analyzer and test counts (with the failed tests) on the
       # run's summary page; tool/ci/ci_summary.py never fails the job.
@@ -117,12 +125,45 @@ jobs:
           --vet '${{ steps.vet.outcome }}'
           --test '${{ steps.test.outcome }}' --log go-test.log
 
+  govulncheck:
+    name: Go vulnerabilities (govulncheck)
+    # Known vulnerabilities (vuln.go.dev) in the code the bridge really
+    # calls, in its modules and in the Go toolchain of go.mod (its
+    # `toolchain` line, which setup-go installs). Fails on any finding:
+    # update the module (or the toolchain line) and refresh
+    # LICENSES-GO.txt. Linux build tags; the Android, Windows and Apple
+    # files use the same modules.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: native/yggdrasil_bridge
+    env:
+      GOVULNCHECK_VERSION: v1.8.0
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: native/yggdrasil_bridge/go.mod
+          cache-dependency-path: native/yggdrasil_bridge/go.sum
+
+      - name: govulncheck
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          go version
+          go run "golang.org/x/vuln/cmd/govulncheck@$GOVULNCHECK_VERSION" -show verbose ./...
+
   android-bridge:
     name: Go bridge for Android (3 ABIs)
     # The APK carries arm64-v8a, armeabi-v7a (32-bit) and x86_64: each must
     # build and export the bridge (a 32-bit-only break shows up here, not
-    # on the maintainer's arm64 phone). The NDK is on the runner.
-    runs-on: ubuntu-latest
+    # on the maintainer's arm64 phone). The NDK is on the runner. Each
+    # 64-bit library must work with 16 KB pages (Google Play, Android 15+).
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -139,15 +180,20 @@ jobs:
           export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
           sh native/yggdrasil_bridge/build_android.sh
           nm="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          readelf="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
           for abi in arm64-v8a armeabi-v7a x86_64; do
             lib="android/app/src/main/jniLibs/$abi/libyggdrasil_bridge.so"
             "$nm" -D --defined-only "$lib" | grep -q ' YggStartNode$'
             ls -l "$lib"
+            "$readelf" -l "$lib" | grep -E '^\s*LOAD'
           done
+          python3 tool/ci/check_page_alignment.py android/app/src/main/jniLibs
 
   linux:
     name: Linux build
-    runs-on: ubuntu-latest
+    # As the release: Ubuntu 22.04 (glibc 2.35), the oldest system the
+    # Linux files support.
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -158,8 +204,7 @@ jobs:
       # the app indicator for system_tray, GStreamer for audio and video;
       # PulseAudio's headers for call recording;
       # make and g++ build Zen's own H.264 encoder (OpenH264, from source);
-      # Xvfb for the start below; dpkg-dev and the validators for the
-      # packaging check.
+      # Xvfb for the start below; dpkg-dev for the .deb.
       - name: Build tools and libraries
         run: |
           sudo apt-get update
@@ -169,7 +214,7 @@ jobs:
             libstdc++-12-dev libsecret-1-dev libayatana-appindicator3-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libpulse-dev \
             xvfb libgl1-mesa-dri libglx-mesa0 \
-            dpkg-dev desktop-file-utils appstream
+            dpkg-dev
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
@@ -183,7 +228,7 @@ jobs:
           cache: true
 
       - name: Packages
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Build (the Go bridge builds itself)
         run: flutter build linux --release
@@ -194,12 +239,26 @@ jobs:
           nm -D --defined-only "$bridge" | grep ' YggStartNode$'
           ldd build/linux/x64/release/bundle/zen | grep 'libgstreamer-1.0'
 
-      - name: Packaging (.desktop, AppStream, .deb)
+      # No binary may need a newer glibc / libstdc++ than Ubuntu 22.04's.
+      - name: glibc baseline and libraries
         run: |
-          desktop-file-validate linux/packaging/com.roj.zen.desktop
-          appstreamcli validate --no-net linux/packaging/com.roj.zen.metainfo.xml
-          sh linux/packaging/build_deb.sh build/linux/x64/release/bundle x64 /tmp/zen.deb
-          dpkg-deb --info /tmp/zen.deb
+          sh tool/ci/check_linux_abi.sh build/linux/x64/release/bundle 2.35 3.4.30
+          # The prebuilt libwebrtc flutter_webrtc downloaded, against the
+          # SHA-256 pinned in tool/ci/libwebrtc.sha256.
+          python3 tool/ci/check_libwebrtc.py linux-x64 build/linux/x64/release/bundle
+
+      - name: Package (.deb)
+        run: |
+          mkdir -p deb
+          sh linux/packaging/build_deb.sh build/linux/x64/release/bundle x64 deb/zen.deb
+          dpkg-deb --info deb/zen.deb
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ci-linux-deb
+          path: deb/zen.deb
+          retention-days: 3
+          if-no-files-found: error
 
       - name: Start (still running after 20 seconds)
         run: |
@@ -209,6 +268,65 @@ jobs:
             echo "::error::zen stopped with status $status within 20 seconds"
             exit 1
           fi
+
+  packaging:
+    name: Linux packaging metadata
+    # The validators of a current system (the build above runs on an older
+    # one, whose appstream knows fewer rules).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends desktop-file-utils appstream
+
+      - name: .desktop and AppStream
+        run: |
+          desktop-file-validate linux/packaging/com.roj.zen.desktop
+          appstreamcli validate --no-net linux/packaging/com.roj.zen.metainfo.xml
+
+  deb-install:
+    name: .deb on ${{ matrix.image }}
+    # The README promises Debian, Ubuntu and Mint: the .deb built on Ubuntu
+    # 22.04 must install there (its dependencies resolve, the t64 library
+    # names of newer systems included) and find every library it links.
+    # Only the dependencies, not the recommended packages.
+    needs: linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:22.04', 'ubuntu:24.04', 'ubuntu:26.04', 'debian:12', 'debian:13']
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ci-linux-deb
+          path: deb
+
+      - name: Install and look for missing libraries
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          IMAGE: ${{ matrix.image }}
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ./deb/zen.deb
+          # The bundle's own libraries find each other through /opt/zen/lib.
+          missing=$(LD_LIBRARY_PATH=/opt/zen/lib ldd /opt/zen/zen /opt/zen/lib/*.so \
+            | grep 'not found' || true)
+          if [ -n "$missing" ]; then
+            echo "::error::Missing libraries on $IMAGE:"
+            echo "$missing"
+            exit 1
+          fi
+          echo "Zen installs on $IMAGE."
 
   windows-arm64:
     name: Windows on ARM build
@@ -252,7 +370,7 @@ jobs:
           cache: false
 
       - name: Packages
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Build
         run: flutter build windows --release
@@ -295,7 +413,7 @@ jobs:
         run: sh native/yggdrasil_bridge/build_macos.sh
 
       - name: Packages
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Build
         run: flutter build macos --release

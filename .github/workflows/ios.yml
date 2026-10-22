@@ -31,10 +31,19 @@ jobs:
         with:
           persist-credentials: false
 
+      # The `toolchain` line (the patched Go every other build uses, as
+      # setup-go's go-version-file does), else the newest patch release of
+      # the `go` line.
       - name: Go version from go.mod
         id: go
         run: |
-          version=$(awk '$1 == "go" { split($2, v, "."); print v[1] "." v[2] ".x" }' native/yggdrasil_bridge/go.mod)
+          version=$(awk '
+            $1 == "toolchain" { sub(/^go/, "", $2); toolchain = $2 }
+            $1 == "go" { split($2, v, "."); go = v[1] "." v[2] ".x" }
+            END { print (toolchain != "" ? toolchain : go) }
+          ' native/yggdrasil_bridge/go.mod)
+          test -n "$version"
+          echo "Go $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       # No caches: the file goes into a release (see release.yml, "No
@@ -54,7 +63,7 @@ jobs:
         run: sh native/yggdrasil_bridge/build_ios.sh iphoneos
 
       - name: Flutter packages
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Build (without signing)
         run: flutter build ios --release --no-codesign

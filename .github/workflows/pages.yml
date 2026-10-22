@@ -8,6 +8,12 @@
 #   /release.json  version, files and sizes, and the Android signing
 #                  certificate fingerprint, for the install page;
 #   /zen-icon.png  the app icon the source names.
+# The app's data in apps.json (permissions, version numbers) comes from
+# the release itself (its Zen-unsigned.ipa, checked against its
+# SHA256SUMS), never from main: AltStore refuses an app whose permissions
+# differ from its source's. The fingerprint is the one the code pins at
+# the release tag; a release whose Zen.apk or IPA contradicts it stops
+# the deployment (the old pages stay).
 # Runs on a push to main that changes them, by hand, once a day, and when
 # a release is published: that event only asks for a run on main (the
 # github-pages environment deploys from main only), so the source follows
@@ -23,7 +29,6 @@ on:
     paths:
       - 'tool/pages/**'
       - 'tool/ci/release_source.py'
-      - 'ios/Runner/Info.plist'
       - '.github/workflows/pages.yml'
   release:
     types: [published]
@@ -40,8 +45,9 @@ concurrency:
 jobs:
   kick:
     name: Refresh after a release
-    if: github.event_name == 'release'
-    runs-on: ubuntu-latest
+    # Pages exist only once the repository is public (docs/RELEASES.md).
+    if: github.event_name == 'release' && !github.event.repository.private
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: write
@@ -54,8 +60,8 @@ jobs:
 
   deploy:
     name: Pages and the iPhone source
-    if: github.event_name != 'release'
-    runs-on: ubuntu-latest
+    if: github.event_name != 'release' && !github.event.repository.private
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -77,14 +83,15 @@ jobs:
           cp -R tool/pages _site
           cp ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png _site/zen-icon.png
 
-      # Best effort: the fingerprint shown on the install page comes from
-      # the APK of the latest release (apksigner of the runner's SDK).
+      # Best effort: the certificate of the latest release's APK
+      # (apksigner of the runner's SDK), which release_source.py compares
+      # with the fingerprint the code pins at the release tag.
       - name: Android signing certificate of the latest release
         continue-on-error: true
         run: |
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/Zen.apk" \
             "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/Zen.apk"
-          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
           "$apksigner" verify --print-certs "$RUNNER_TEMP/Zen.apk" \
             | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1 \
             > "$RUNNER_TEMP/fingerprint.txt"
