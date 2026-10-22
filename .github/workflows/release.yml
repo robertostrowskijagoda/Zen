@@ -303,7 +303,14 @@ jobs:
       - name: Packages
         run: flutter pub get --enforce-lockfile
 
-      - name: Build (the Go bridge builds itself)
+      # Built on its own, with its output in the log; inside MSBuild its
+      # check fails on this runner without saying why, so it is skipped there.
+      - name: Go bridge (ARM64)
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File native/yggdrasil_bridge/build_if_changed.ps1 -Target windows -Arch arm64
+
+      - name: Build
+        env:
+          ZEN_SKIP_GO_BRIDGE: '1'
         run: flutter build windows --release
 
       - name: Visual C++ runtime

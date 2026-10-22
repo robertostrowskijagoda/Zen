@@ -384,7 +384,11 @@ jobs:
       - name: Go bridge (ARM64)
         run: powershell -NoProfile -ExecutionPolicy Bypass -File native/yggdrasil_bridge/build_if_changed.ps1 -Target windows -Arch arm64
 
+      # The bridge was built just above; inside MSBuild its check fails on
+      # this runner without saying why, so it is skipped there.
       - name: Build
+        env:
+          ZEN_SKIP_GO_BRIDGE: '1'
         run: flutter build windows --release
 
       - name: Go bridge in the app
