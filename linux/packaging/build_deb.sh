@@ -104,7 +104,7 @@ Architecture: $deb_arch
 Maintainer: Robert Ostrowski-Jagoda
 Installed-Size: $size
 Depends: $depends
-Recommends: gstreamer1.0-plugins-good, gstreamer1.0-libav, gnome-keyring | kwalletmanager, libayatana-appindicator3-1
+Recommends: gstreamer1.0-plugins-good, gstreamer1.0-libav, gnome-keyring | kwalletmanager, libayatana-appindicator3-1, libpulse0
 Section: net
 Priority: optional
 Homepage: https://github.com/robertostrowskijagoda/Zen

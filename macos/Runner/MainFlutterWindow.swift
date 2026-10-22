@@ -12,6 +12,10 @@ class MainFlutterWindow: NSWindow {
     // (desktop_window_bridge.dart) keeps the same sizes.
     self.setContentSize(NSSize(width: 430, height: 880))
     self.contentMinSize = NSSize(width: 390, height: 720)
+    // Portrait only: no full-screen space (the green button zooms into a
+    // tall column instead, see setFrame below).
+    self.collectionBehavior.remove(.fullScreenPrimary)
+    self.collectionBehavior.insert(.fullScreenNone)
     self.center()
 
     RegisterGeneratedPlugins(registry: flutterViewController)
@@ -29,6 +33,8 @@ class MainFlutterWindow: NSWindow {
     ZenIntegrityBridge.register(with: flutterViewController.engine.binaryMessenger)
     // Films of the "Filmy" section compressed and trimmed (AVFoundation).
     ZenVideoBridge.register(with: flutterViewController.engine.binaryMessenger)
+    // Call recording: what the call plays and the microphone (AAC).
+    ZenCallRecorder.register(with: flutterViewController.engine.binaryMessenger)
     // The recorder's own camera (AVCaptureSession, in ZenVideoBridge.swift).
     ZenCameraBridge.register(
       with: flutterViewController.registrar(forPlugin: "ZenCameraBridge"))
@@ -38,6 +44,36 @@ class MainFlutterWindow: NSWindow {
     registerForDraggedTypes([.fileURL])
 
     super.awakeFromNib()
+  }
+
+  /// Width / height at most: the window stays portrait however it is
+  /// resized or zoomed.
+  private static let maxAspect: CGFloat = 0.8
+
+  private func portrait(_ rect: NSRect) -> NSRect {
+    let maxWidth = (rect.height * MainFlutterWindow.maxAspect).rounded(.down)
+    guard rect.width > maxWidth else {
+      return rect
+    }
+    var narrowed = rect
+    narrowed.size.width = maxWidth
+    let current = frame
+    if inLiveResize && rect.maxX == current.maxX {
+      // The left edge is being dragged: keep the right one.
+      narrowed.origin.x = rect.maxX - maxWidth
+    } else if !(inLiveResize && rect.minX == current.minX) {
+      // Zoomed, snapped or resized by the app: around the centre.
+      narrowed.origin.x = rect.midX - maxWidth / 2
+    }
+    return narrowed
+  }
+
+  override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+    super.setFrame(portrait(frameRect), display: flag)
+  }
+
+  override func setFrame(_ frameRect: NSRect, display displayFlag: Bool, animate animateFlag: Bool) {
+    super.setFrame(portrait(frameRect), display: displayFlag, animate: animateFlag)
   }
 
   override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {

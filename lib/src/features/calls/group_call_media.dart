@@ -127,7 +127,7 @@ abstract class GroupCallMedia extends ChangeNotifier {
   /// Participants who are recording this call right now.
   Set<String> get recordingPeers => const <String>{};
 
-  /// File type of recordings on this device ("mp4", "wav").
+  /// File type of recordings on this device ("mp4", "m4a", "wav").
   String get recordingExtension => 'mp4';
 
   /// Starts recording what this device hears into [path]; [label] names

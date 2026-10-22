@@ -156,6 +156,7 @@ jobs:
 
       # Flutter's Linux toolchain; libsecret for flutter_secure_storage,
       # the app indicator for system_tray, GStreamer for audio and video;
+      # PulseAudio's headers for call recording;
       # make and g++ build Zen's own H.264 encoder (OpenH264, from source);
       # Xvfb for the start below; dpkg-dev and the validators for the
       # packaging check.
@@ -166,7 +167,7 @@ jobs:
             clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
             make g++ \
             libstdc++-12-dev libsecret-1-dev libayatana-appindicator3-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libpulse-dev \
             xvfb libgl1-mesa-dri libglx-mesa0 \
             dpkg-dev desktop-file-utils appstream
 

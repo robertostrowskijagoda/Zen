@@ -18,7 +18,7 @@ void main() {
       }
       final String path =
           '${Directory.systemTemp.path}${Platform.pathSeparator}zen_rec_it.wav';
-      final WindowsCallRecorder recorder = WindowsCallRecorder();
+      final RunnerCallRecorder recorder = RunnerCallRecorder.wav();
       await tester.runAsync(() async {
         await recorder.start(path);
         await Future<void>.delayed(const Duration(seconds: 2));

@@ -93,7 +93,7 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
         builder: (BuildContext dialog) => AlertDialog(
           title: Text(t('Rozmowa: {name}', {'name': rec.peer})),
           content: rec.isAudioOnly
-              // Sound only (recorded on a computer): nothing to look at.
+              // Sound only (a computer or an iPhone): nothing to look at.
               ? const SizedBox(
                   height: 120,
                   child: Center(

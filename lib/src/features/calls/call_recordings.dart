@@ -23,13 +23,18 @@ final class CallRecording {
   final int millis;
   final int bytes;
 
-  /// `video/mp4` (Android) or `audio/wav` (Windows: sound only).
+  /// `video/mp4` (Android), `audio/mp4` (AAC: iPhone, iPad, Mac) or
+  /// `audio/wav` (Windows, Linux); the last two are sound only.
   final String mime;
 
   bool get isAudioOnly => mime.startsWith('audio/');
 
   /// File extension when exported or played.
-  String get extension => mime == 'audio/wav' ? 'wav' : 'mp4';
+  String get extension => switch (mime) {
+    'audio/wav' => 'wav',
+    'audio/mp4' => 'm4a',
+    _ => 'mp4',
+  };
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,

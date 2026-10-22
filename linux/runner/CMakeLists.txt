@@ -13,6 +13,8 @@ add_executable(${BINARY_NAME}
   "zen_media_transfer.cc"
   "zen_film_codec.cc"
   "zen_video_bridge.cc"
+  "zen_call_recorder.cc"
+  "zen_portrait_window.cc"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )
 
@@ -41,6 +43,20 @@ else()
   message(WARNING "GStreamer development files not found: Zen will build "
     "without audio and video playback (install libgstreamer1.0-dev and "
     "libgstreamer-plugins-base1.0-dev).")
+endif()
+
+# Call recording (zen_call_recorder.cc): PulseAudio's client library, which
+# PipeWire serves too. Only its headers are needed to build (libpulse-dev);
+# the library is loaded at run time (dlopen), so Zen starts without it.
+# Without the headers the app builds anyway and cannot record calls.
+pkg_check_modules(PULSE IMPORTED_TARGET libpulse)
+if(PULSE_FOUND)
+  target_compile_definitions(${BINARY_NAME} PRIVATE ZEN_HAVE_PULSE=1)
+  target_include_directories(${BINARY_NAME} SYSTEM PRIVATE ${PULSE_INCLUDE_DIRS})
+  target_link_libraries(${BINARY_NAME} PRIVATE ${CMAKE_DL_LIBS})
+else()
+  message(WARNING "PulseAudio development files not found: Zen will build "
+    "without call recording (install libpulse-dev).")
 endif()
 
 # Films (zen_video_bridge.cc, zen_film_codec.cc): Zen's own H.264 encoder,

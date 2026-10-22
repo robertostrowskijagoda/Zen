@@ -35,6 +35,10 @@ import UserNotifications
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenVideoBridge") {
       ZenVideoBridge.register(with: registrar.messenger())
     }
+    // Call recording: what the call plays and the microphone (AAC).
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenCallRecorder") {
+      ZenCallRecorder.register(with: registrar.messenger())
+    }
     // Pictures on the clipboard ("Wklej" in chats: GIFs keyboards copy).
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ZenMediaTransferBridge") {
       ZenMediaTransferBridge.register(with: registrar.messenger())

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -8,10 +9,18 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 /// What records calls on this device, for 1:1 and group calls:
 /// - Android: flutter_webrtc's recorder — what you hear, plus the other
 ///   side's video in a 1:1 video call (`.mp4`);
+/// - iPhone, iPad and Mac: the runner (ios/Runner/ZenCallRecorder.swift,
+///   shared by both apps) taps flutter_webrtc's own audio processing: what
+///   the call plays (everyone else, already mixed) and the microphone, as
+///   AAC (`.m4a`); other sounds of the device are never in it;
 /// - Windows: only what this app plays (the other side, through WASAPI
 ///   process loopback — never other apps or system sounds) mixed with the
 ///   microphone, in the app's runner (`.wav`);
-/// - elsewhere: not yet.
+/// - Linux: the same through PulseAudio (also PipeWire's): only this app's
+///   own playback streams, followed as they come and go, mixed with the
+///   default microphone (linux/runner/zen_call_recorder.cc, `.wav`); without
+///   libpulse it is not available;
+/// - elsewhere (the web): no.
 ///
 /// Recording is always announced to everyone in the call first; this only
 /// writes the file.
@@ -35,11 +44,23 @@ CallRecorder platformCallRecorder() {
   if (kIsWeb) {
     return const UnavailableCallRecorder();
   }
-  if (Platform.isAndroid) {
-    return AndroidCallRecorder();
-  }
-  if (Platform.isWindows) {
-    return WindowsCallRecorder();
+  return callRecorderForPlatform(Platform.operatingSystem);
+}
+
+/// The recorder for [operatingSystem] (`Platform.operatingSystem`).
+CallRecorder callRecorderForPlatform(
+  String operatingSystem, {
+  MethodChannel? channel,
+}) {
+  switch (operatingSystem) {
+    case 'android':
+      return AndroidCallRecorder();
+    case 'ios':
+    case 'macos':
+      return RunnerCallRecorder.aac(channel: channel);
+    case 'windows':
+    case 'linux':
+      return RunnerCallRecorder.wav(channel: channel);
   }
   return const UnavailableCallRecorder();
 }
@@ -106,22 +127,71 @@ final class AndroidCallRecorder implements CallRecorder {
   }
 }
 
-/// The runner's WASAPI recorder (windows/runner/call_recorder.cpp).
-final class WindowsCallRecorder implements CallRecorder {
-  WindowsCallRecorder({MethodChannel? channel})
-    : _channel = channel ?? const MethodChannel('zen/recorder');
+/// The recorder in the app's own runner (method channel `zen/recorder`):
+/// Windows (windows/runner/call_recorder.cpp), Linux
+/// (linux/runner/zen_call_recorder.cc), iPhone, iPad and Mac
+/// (ios/Runner/ZenCallRecorder.swift). Sound only; [video] is ignored.
+///
+///  - `available` → bool: whether this device can record at all;
+///  - `start` {path} → true, or the error `unavailable` (nothing to record
+///    with here) or `start_failed` with the reason;
+///  - `stop` → the path, or null when nothing ran.
+final class RunnerCallRecorder implements CallRecorder {
+  RunnerCallRecorder({
+    required this.extension,
+    required this.mime,
+    MethodChannel? channel,
+  }) : _channel = channel ?? const MethodChannel(channelName);
+
+  /// AAC in an MP4 file (iPhone, iPad, Mac).
+  factory RunnerCallRecorder.aac({MethodChannel? channel}) =>
+      RunnerCallRecorder(extension: 'm4a', mime: 'audio/mp4', channel: channel);
+
+  /// Plain PCM in a WAV file (Windows, Linux).
+  factory RunnerCallRecorder.wav({MethodChannel? channel}) =>
+      RunnerCallRecorder(extension: 'wav', mime: 'audio/wav', channel: channel);
+
+  static const String channelName = 'zen/recorder';
+
+  @override
+  final String extension;
+
+  @override
+  final String mime;
 
   final MethodChannel _channel;
   bool _recording = false;
+  bool? _runnerAvailable;
+  Future<bool>? _asking;
 
+  /// The runner is asked once, the first time this is read; until it
+  /// answers, recording is offered (a refusal then says why).
   @override
-  bool get available => true;
+  bool get available {
+    if (_asking == null) {
+      unawaited(checkAvailable());
+    }
+    return _runnerAvailable ?? true;
+  }
 
-  @override
-  String get extension => 'wav';
+  /// Asks the runner (once) whether this device can record.
+  Future<bool> checkAvailable() => _asking ??= _ask();
 
-  @override
-  String get mime => 'audio/wav';
+  Future<bool> _ask() async {
+    try {
+      _runnerAvailable =
+          await _channel.invokeMethod<bool>('available') ?? false;
+    } catch (_) {
+      // No runner recorder (or no answer): nothing to record with.
+      _runnerAvailable = false;
+    }
+    return _runnerAvailable ?? false;
+  }
+
+  void _markUnavailable() {
+    _runnerAvailable = false;
+    _asking ??= Future<bool>.value(false);
+  }
 
   @override
   bool get isRecording => _recording;
@@ -136,10 +206,17 @@ final class WindowsCallRecorder implements CallRecorder {
         'path': path,
       });
     } on PlatformException catch (e) {
+      if (e.code == 'unavailable') {
+        _markUnavailable();
+        throw UnsupportedError(
+          t('Nagrywanie rozmów nie jest jeszcze dostępne na tym urządzeniu.'),
+        );
+      }
       throw StateError(
         t('Nie udało się zacząć nagrywania: {error}', {'error': e.message}),
       );
     } on MissingPluginException {
+      _markUnavailable();
       throw UnsupportedError(
         t('Ta wersja aplikacji nie umie nagrywać — zaktualizuj ją.'),
       );

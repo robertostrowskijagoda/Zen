@@ -132,7 +132,7 @@ abstract class CallMediaSessionController extends ChangeNotifier {
   /// The other side is recording this call.
   bool get remoteRecording => false;
 
-  /// File type of recordings on this device ("mp4", "wav").
+  /// File type of recordings on this device ("mp4", "m4a", "wav").
   String get recordingExtension => 'mp4';
 
   /// Starts recording the call into [path] and tells the other side.
