@@ -50,6 +50,8 @@ void main() {
     Size size = const Size(360, 740),
     double textScale = 1,
     bool Function(SeenProfile s)? canAsk,
+    int Function(SeenProfile s)? verdicts,
+    Future<bool> Function(SeenProfile s)? confirmYes,
   }) async {
     tester.view.physicalSize = size * 2;
     tester.view.devicePixelRatio = 2;
@@ -72,6 +74,8 @@ void main() {
             onMatchmake: (SeenProfile s) => matched.add(s.profile.name),
             onAsk: (SeenProfile s) => asked.add(s.profile.name),
             canAsk: canAsk,
+            verdicts: verdicts,
+            confirmYes: confirmYes,
           ),
         ),
       ),
@@ -219,5 +223,34 @@ void main() {
     await tester.tap(find.byKey(const Key('dating-deck-ask')));
     await tester.pump();
     expect(asked, isEmpty, reason: 'the only friend is the person');
+  });
+
+  testWidgets('a verdict of the pyramid\'s court shows on the card and is '
+      'asked about before „Tak”', (WidgetTester tester) async {
+    final List<String> confirmed = <String>[];
+    bool allow = false;
+    await pumpDeck(
+      tester,
+      <SeenProfile>[_seen('Ania'), _seen('Basia')],
+      verdicts: (SeenProfile s) => s.profile.name == 'Ania' ? 1 : 0,
+      confirmYes: (SeenProfile s) async {
+        confirmed.add(s.profile.name);
+        return allow;
+      },
+    );
+    expect(find.byKey(const Key('dating-card-verdict')), findsOneWidget);
+    expect(find.text('Wyrok sądu piramidy'), findsOneWidget);
+    // Declined: the card stays, nothing decided.
+    await tester.tap(find.byKey(const Key('dating-deck-yes')));
+    await tester.pumpAndSettle();
+    expect(confirmed, <String>['Ania']);
+    expect(decided, isEmpty);
+    expect(find.byKey(const Key('dating-card-Ania')), findsOneWidget);
+    // Read and accepted: decided.
+    allow = true;
+    await tester.tap(find.byKey(const Key('dating-deck-yes')));
+    await tester.pumpAndSettle();
+    expect(decided, <(String, bool)>[('k-Ania', true)]);
+    expect(find.byKey(const Key('dating-card-verdict')), findsNothing);
   });
 }

@@ -2698,4 +2698,46 @@ void main() {
     expect(asked(darek, id), asked(ewa, id));
     expect(darek.service.toDecide, isEmpty, reason: 'both are two steps away');
   });
+
+  test('a dating profile is linked to an account (for the pyramid court\'s '
+      'verdicts) only when this phone knows it anyway: by the key that '
+      'person\'s own phone told it; a key two addresses claim links to '
+      'nobody', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania');
+    final _Phone bob = _Phone(net, 'bob');
+    final _Phone cela = _Phone(net, 'cela');
+    final _Phone darek = _Phone(net, 'darek');
+    net
+      ..link(ania, bob)
+      ..link(ania, cela)
+      ..link(bob, darek);
+    await cela.service.load();
+    await ania.date(name: 'Ania', gender: DatingGender.woman);
+    await bob.date(name: 'Bob', gender: DatingGender.man);
+    await darek.date(name: 'Darek', gender: DatingGender.man);
+    await ania.service.maybePublish(force: true);
+    final String bobKey = bob.service.myKey!;
+    final String darekKey = darek.service.myKey!;
+    expect(ania.names(), containsAll(<String>['Bob', 'Darek']));
+    // Bob is her friend: his account is known, his verdicts would show.
+    expect(ania.service.accountOf(bobKey), bob.address);
+    // Darek is two steps away: his profile names no account, none is
+    // guessed.
+    expect(ania.service.accountOf(darekKey), isNull);
+    expect(
+      jsonEncode(ania.service.profile(darekKey)!.profile.wireJson()),
+      isNot(contains(darek.address)),
+    );
+    // Someone else claims Bob's key as theirs: the link is gone (no
+    // verdict of the wrong person on his profile).
+    await ania.service.handle(
+      SignalTransportFrame(
+        from: cela.address,
+        payload: <String, dynamic>{'type': DatingTypes.key, 'k': bobKey},
+        receivedAtMillis: 0,
+      ),
+    );
+    expect(ania.service.accountOf(bobKey), isNull);
+  });
 }

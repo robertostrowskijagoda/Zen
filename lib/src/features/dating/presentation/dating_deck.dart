@@ -20,6 +20,8 @@ class DatingSwipeDeck extends StatefulWidget {
     this.onAsk,
     this.canAsk,
     this.friendsOnly,
+    this.verdicts,
+    this.confirmYes,
     super.key,
   });
 
@@ -43,6 +45,14 @@ class DatingSwipeDeck extends StatefulWidget {
   /// Whether the two would meet only as new friends (no dates): the card
   /// then does not speak of dating.
   final bool Function(SeenProfile seen)? friendsOnly;
+
+  /// How many verdicts of the pyramid's court this person has, as their
+  /// profile would show them (0: none, or the account is not known).
+  final int Function(SeenProfile seen)? verdicts;
+
+  /// Asked before a „Tak” (e.g. when the person has a verdict); false
+  /// keeps the card.
+  final Future<bool> Function(SeenProfile seen)? confirmYes;
 
   @override
   State<DatingSwipeDeck> createState() => _DatingSwipeDeckState();
@@ -124,6 +134,17 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
     }
     _leaving = true;
     _backSign = 0;
+    final Future<bool> Function(SeenProfile seen)? confirm = widget.confirmYes;
+    if (yes && confirm != null && !await confirm(s)) {
+      if (mounted) {
+        _leaving = false;
+        await _animate(0, const Duration(milliseconds: 300), Curves.easeOut);
+      }
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
     await _animate(
       (yes ? 1 : -1) * _width * 1.4,
       const Duration(milliseconds: 240),
@@ -219,6 +240,8 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
                                     key: ValueKey<String>(list[i].profile.key),
                                     seen: list[i],
                                     friendsOnly: friendly(list[i]),
+                                    verdicts:
+                                        widget.verdicts?.call(list[i]) ?? 0,
                                   ),
                                 ),
                               ),
@@ -245,6 +268,7 @@ class _DatingSwipeDeckState extends State<DatingSwipeDeck>
                                     seen: top,
                                     stamp: stamp,
                                     friendsOnly: topFriends,
+                                    verdicts: widget.verdicts?.call(top) ?? 0,
                                     onOpen: widget.onOpen == null
                                         ? null
                                         : () => widget.onOpen!(top),
@@ -408,6 +432,7 @@ class DatingSwipeCard extends StatefulWidget {
     this.stamp = 0,
     this.onOpen,
     this.friendsOnly = false,
+    this.verdicts = 0,
     super.key,
   });
 
@@ -415,6 +440,9 @@ class DatingSwipeCard extends StatefulWidget {
 
   /// The two would meet only as new friends.
   final bool friendsOnly;
+
+  /// Verdicts of the pyramid's court on this person (shown as a badge).
+  final int verdicts;
 
   /// How far a swipe went: above 0 towards „Tak”, below towards „Nie” (±1
   /// shows the stamp in full).
@@ -476,6 +504,7 @@ class _DatingSwipeCardState extends State<DatingSwipeCard> {
                           seen: widget.seen,
                           tone: tone,
                           friendsOnly: widget.friendsOnly,
+                          verdicts: widget.verdicts,
                         )
                       : _PhotoPage(
                           seen: widget.seen,
@@ -544,8 +573,8 @@ class _DatingSwipeCardState extends State<DatingSwipeCard> {
                   style: IconButton.styleFrom(
                     backgroundColor: onText
                         ? tone.withValues(alpha: 0.16)
-                        : const Color(0x59000000),
-                    foregroundColor: onText ? tone : const Color(0xFFFFFFFF),
+                        : ZenFixed.photoScrimLight,
+                    foregroundColor: onText ? tone : ZenFixed.onPhoto,
                   ),
                   icon: const Icon(Icons.info_outline_rounded),
                   onPressed: widget.onOpen,
@@ -615,11 +644,13 @@ class _DescriptionPage extends StatelessWidget {
     required this.seen,
     required this.tone,
     required this.friendsOnly,
+    this.verdicts = 0,
   });
 
   final SeenProfile seen;
   final Color tone;
   final bool friendsOnly;
+  final int verdicts;
 
   @override
   Widget build(BuildContext context) {
@@ -697,6 +728,14 @@ class _DescriptionPage extends StatelessWidget {
                   spacing: 6,
                   runSpacing: 6,
                   children: <Widget>[
+                    if (verdicts > 0)
+                      ZenPill(
+                        key: const Key('dating-card-verdict'),
+                        text: datingVerdictLabel(verdicts),
+                        tone: zen.danger,
+                        icon: Icons.gavel_rounded,
+                        filled: true,
+                      ),
                     if (friendsOnly)
                       ZenPill(
                         key: const Key('dating-card-friends'),
@@ -819,8 +858,8 @@ class _PhotoPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
     final DatingProfile p = seen.profile;
-    const Color onPhoto = Color(0xFFFFFFFF);
-    const Color onPhotoSoft = Color(0xE6FFFFFF);
+    const Color onPhoto = ZenFixed.onPhoto;
+    final Color onPhotoSoft = ZenFixed.onPhoto.withValues(alpha: 0.9);
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
@@ -832,10 +871,10 @@ class _PhotoPage extends StatelessWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: <Color>[
-                  Color(0x33000000),
-                  Color(0x00000000),
-                  Color(0x00000000),
-                  Color(0xB3000000),
+                  ZenFixed.photoScrimFaint,
+                  ZenFixed.photoClear,
+                  ZenFixed.photoClear,
+                  ZenFixed.photoScrimStrong,
                 ],
                 stops: <double>[0, 0.18, 0.55, 1],
               ),
@@ -864,7 +903,7 @@ class _PhotoPage extends StatelessWidget {
                 const SizedBox(height: 4),
                 Row(
                   children: <Widget>[
-                    const Icon(
+                    Icon(
                       Icons.people_alt_rounded,
                       size: 15,
                       color: onPhotoSoft,
@@ -875,7 +914,7 @@ class _PhotoPage extends StatelessWidget {
                         datingWay(seen),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: onPhotoSoft,
                           fontSize: 13.5,
                           fontWeight: FontWeight.w600,
@@ -892,3 +931,11 @@ class _PhotoPage extends StatelessWidget {
     );
   }
 }
+
+/// "Wyrok sądu piramidy" / "3 wyroki sądu piramidy".
+String datingVerdictLabel(int n) => tn(
+  n,
+  one: 'Wyrok sądu piramidy',
+  few: '{n} wyroki sądu piramidy',
+  many: '{n} wyroków sądu piramidy',
+);

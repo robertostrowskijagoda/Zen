@@ -624,6 +624,27 @@ final class DatingService extends ChangeNotifier {
   @visibleForTesting
   String? knownKeyOf(String address) => _friendKeys[_n(address)];
 
+  /// The account (address) behind the dating profile [datingKey], when this
+  /// person knows it anyway: a friend, a member of one of their groups or
+  /// someone across an opened gate whose own phone told this one that key
+  /// ([DatingTypes.key], from their address). Nobody else is linked — a
+  /// profile never names its account — and a key two addresses claim links
+  /// to neither. Used to show the pyramid court's verdicts on that person,
+  /// as their profile would: the owner cannot take them off a profile that
+  /// is linked.
+  String? accountOf(String datingKey) {
+    String? found;
+    for (final MapEntry<String, String> e in _friendKeys.entries) {
+      if (e.value == datingKey) {
+        if (found != null) {
+          return null;
+        }
+        found = e.key;
+      }
+    }
+    return found;
+  }
+
   // ---- storage ----
 
   /// The stored state could not be read (e.g. the app was still locked):

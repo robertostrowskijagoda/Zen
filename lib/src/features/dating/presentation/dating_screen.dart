@@ -19,11 +19,14 @@ import 'package:zen/src/features/dating/presentation/dating_reconfirm.dart';
 import 'package:zen/src/features/meet/location.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
+import 'package:zen/src/features/meet/presentation/graph_screen.dart';
 import 'package:zen/src/features/meet/presentation/safe_photo.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
+import 'package:zen/src/features/pyramid/presentation/pyramid_court_view.dart';
 import 'package:zen/src/features/pyramid/presentation/pyramid_wallet.dart';
 import 'package:zen/src/features/pyramid/presentation/report_sheet.dart';
+import 'package:zen/src/features/pyramid/pyramid_court.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
@@ -35,23 +38,23 @@ Color datingTone(ZenColors zen) => zenTone(zen, 4);
 
 /// A dating photo (base64 JPEG) or a placeholder.
 Widget datingPhoto(String? photo, {double size = 72}) {
-  final BorderRadius radius = BorderRadius.circular(size * 0.3);
-  if (photo != null) {
-    // Someone else's photo: made again here before it is shown.
-    return ClipRRect(
-      borderRadius: radius,
-      child: SizedBox.square(
-        dimension: size,
-        child: SafePhoto(
-          data: photo,
-          clean: true,
-          icon: Icons.favorite_rounded,
-        ),
-      ),
-    );
-  }
   return Builder(
     builder: (BuildContext context) {
+      final BorderRadius radius = context.zenRadius(size * 0.3);
+      if (photo != null) {
+        // Someone else's photo: made again here before it is shown.
+        return ClipRRect(
+          borderRadius: radius,
+          child: SizedBox.square(
+            dimension: size,
+            child: SafePhoto(
+              data: photo,
+              clean: true,
+              icon: Icons.favorite_rounded,
+            ),
+          ),
+        );
+      }
       final Color tone = datingTone(ZenColors.of(context));
       return Container(
         width: size,
@@ -160,11 +163,14 @@ class _DatingPhotoPagerState extends State<DatingPhotoPager> {
                     height: 7,
                     decoration: BoxDecoration(
                       color: i == current
-                          ? const Color(0xFFFFFFFF)
-                          : const Color(0x99FFFFFF),
+                          ? ZenFixed.onPhoto
+                          : ZenFixed.onPhotoSoft,
                       borderRadius: context.zenRadius(4),
                       boxShadow: const <BoxShadow>[
-                        BoxShadow(color: Color(0x40000000), blurRadius: 4),
+                        BoxShadow(
+                          color: ZenFixed.photoScrimLight,
+                          blurRadius: 4,
+                        ),
                       ],
                     ),
                   ),
@@ -243,57 +249,60 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
           return Scaffold(
             key: const Key('dating-screen'),
             appBar: ZenSectionBar(title: t('Randki')),
-            body: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-              children: <Widget>[
-                ZenHero(
-                  title: t('Randki przez znajomych'),
-                  icon: Icons.favorite_rounded,
-                  tone: tone,
-                  text: t(
-                    'Tylko z ludźmi oddalonymi o 1–3 kroki znajomości (albo '
-                    'za bramami, które otworzysz) — zawsze jest ktoś po '
-                    'drodze, kogo można zapytać.',
+            body: SelectionArea(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                children: <Widget>[
+                  ZenHero(
+                    title: t('Randki przez znajomych'),
+                    icon: Icons.favorite_rounded,
+                    tone: tone,
+                    text: t(
+                      'Tylko z ludźmi oddalonymi o 1–3 kroki znajomości (albo '
+                      'za bramami, które otworzysz) — zawsze jest ktoś po '
+                      'drodze, kogo można zapytać.',
+                    ),
                   ),
-                ),
-                ZenInfo(
-                  icon: Icons.waving_hand_rounded,
-                  tone: tone,
-                  title: t('Albo po prostu nowi znajomi'),
-                  text: t(
-                    'W profilu wybierasz, czego szukasz: randek, nowych '
-                    'znajomych bez intencji związkowej, albo jednego '
-                    'i drugiego.',
+                  ZenInfo(
+                    icon: Icons.waving_hand_rounded,
+                    tone: tone,
+                    title: t('Albo po prostu nowi znajomi'),
+                    text: t(
+                      'W profilu wybierasz, czego szukasz: randek, nowych '
+                      'znajomych bez intencji związkowej, albo jednego '
+                      'i drugiego.',
+                    ),
                   ),
-                ),
-                ZenInfo(
-                  icon: Icons.visibility_off_rounded,
-                  tone: tone,
-                  title: t('Nikt nie wie, że randkujesz'),
-                  text: t(
-                    'Twój telefon wysyła i przekazuje dalej takie same '
-                    'latarnie, czy randki są włączone, czy nie.',
+                  ZenInfo(
+                    icon: Icons.visibility_off_rounded,
+                    tone: tone,
+                    title: t('Nikt nie wie, że randkujesz'),
+                    text: t(
+                      'Twój telefon wysyła i przekazuje dalej takie same '
+                      'latarnie, czy randki są włączone, czy nie.',
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  key: const Key('dating-setup'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                    backgroundColor: tone,
-                    foregroundColor: ZenColors.foregroundFor(tone),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    key: const Key('dating-setup'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      backgroundColor: tone,
+                      foregroundColor: ZenColors.foregroundFor(tone),
+                    ),
+                    onPressed: () =>
+                        unawaited(DatingProfileEditor.open(context)),
+                    icon: const Icon(Icons.favorite_rounded),
+                    label: Text(
+                      dating.me.complete
+                          ? t('Włącz randki')
+                          : t('Załóż profil randkowy'),
+                    ),
                   ),
-                  onPressed: () => unawaited(DatingProfileEditor.open(context)),
-                  icon: const Icon(Icons.favorite_rounded),
-                  label: Text(
-                    dating.me.complete
-                        ? t('Włącz randki')
-                        : t('Załóż profil randkowy'),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _FriendCorner(dating: dating),
-              ],
+                  const SizedBox(height: 8),
+                  _FriendCorner(dating: dating),
+                ],
+              ),
             ),
           );
         }
@@ -338,47 +347,49 @@ class _DatingScreenState extends ConsumerState<DatingScreen> {
                 ],
               ),
             ),
-            body: TabBarView(
-              children: <Widget>[
-                _NewProfiles(dating: dating),
-                _Matches(dating: dating),
-                ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                  children: <Widget>[
-                    _SafeDateCard(dating: dating),
-                    if (dating.hiddenProfiles.isNotEmpty) ...<Widget>[
-                      ZenSection(t('Ukryte po zgłoszeniu')),
-                      for (final SeenProfile s in dating.hiddenProfiles)
-                        HiddenContentPlaceholder(
-                          key: Key('dating-hidden-${s.profile.key}'),
-                          byMe: true,
-                          onShow: () =>
-                              showHiddenAnyway(ref, datingKey: s.profile.key),
-                        ),
+            body: SelectionArea(
+              child: TabBarView(
+                children: <Widget>[
+                  _NewProfiles(dating: dating),
+                  _Matches(dating: dating),
+                  ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                    children: <Widget>[
+                      _SafeDateCard(dating: dating),
+                      if (dating.hiddenProfiles.isNotEmpty) ...<Widget>[
+                        ZenSection(t('Ukryte po zgłoszeniu')),
+                        for (final SeenProfile s in dating.hiddenProfiles)
+                          HiddenContentPlaceholder(
+                            key: Key('dating-hidden-${s.profile.key}'),
+                            byMe: true,
+                            onShow: () =>
+                                showHiddenAnyway(ref, datingKey: s.profile.key),
+                          ),
+                      ],
+                      if (dating.liked.isNotEmpty) ...<Widget>[
+                        ZenSection(t('Czekasz na odpowiedź')),
+                        for (final SeenProfile s in dating.liked)
+                          _PersonRow(
+                            photo: s.profile.photo,
+                            title: s.profile.name,
+                            subtitle: t(
+                              'Dowiesz się tylko, jeśli też powie „Tak”.',
+                            ),
+                            trailing: Icon(
+                              Icons.hourglass_top_rounded,
+                              color: zen.textMuted,
+                              size: 20,
+                            ),
+                            onTap: () => unawaited(
+                              DatingProfileScreen.open(context, s.profile.key),
+                            ),
+                          ),
+                      ],
+                      _FriendCorner(dating: dating),
                     ],
-                    if (dating.liked.isNotEmpty) ...<Widget>[
-                      ZenSection(t('Czekasz na odpowiedź')),
-                      for (final SeenProfile s in dating.liked)
-                        _PersonRow(
-                          photo: s.profile.photo,
-                          title: s.profile.name,
-                          subtitle: t(
-                            'Dowiesz się tylko, jeśli też powie „Tak”.',
-                          ),
-                          trailing: Icon(
-                            Icons.hourglass_top_rounded,
-                            color: zen.textMuted,
-                            size: 20,
-                          ),
-                          onTap: () => unawaited(
-                            DatingProfileScreen.open(context, s.profile.key),
-                          ),
-                        ),
-                    ],
-                    _FriendCorner(dating: dating),
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -533,13 +544,13 @@ class DatingQuote extends StatelessWidget {
 }
 
 /// "Nowe": the profiles to decide on, as a stack of cards.
-class _NewProfiles extends StatelessWidget {
+class _NewProfiles extends ConsumerWidget {
   const _NewProfiles({required this.dating});
 
   final DatingService dating;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ZenColors zen = ZenColors.of(context);
     final List<SeenProfile> list = dating.toDecide;
     if (list.isEmpty) {
@@ -586,8 +597,80 @@ class _NewProfiles extends StatelessWidget {
       onAsk: (SeenProfile s) => unawaited(askDatingOpinion(context, dating, s)),
       canAsk: (SeenProfile s) =>
           dating.opinionFriends(s.profile.key).isNotEmpty,
+      verdicts: (SeenProfile s) => datingVerdicts(ref, dating, s).length,
+      confirmYes: (SeenProfile s) => confirmDatingYes(context, ref, dating, s),
     );
   }
+}
+
+/// The pyramid court's verdicts on the person behind [s], as their own
+/// profile shows them — only when this person knows their account anyway
+/// ([DatingService.accountOf]); a dating profile never names its account,
+/// so nothing new about anyone is learnt from it. The owner cannot take
+/// them off: they come from the pyramid, not from the profile.
+List<PyrVerdictView> datingVerdicts(
+  WidgetRef ref,
+  DatingService dating,
+  SeenProfile s,
+) {
+  final String? account = dating.accountOf(s.profile.key);
+  if (account == null || !ref.exists(pyramidServiceProvider)) {
+    return const <PyrVerdictView>[];
+  }
+  return ref.read(pyramidServiceProvider).verdictsAt(account);
+}
+
+/// Before a „Tak” to someone with a verdict of the pyramid's court: the
+/// verdicts, and a choice. True at once when there is none.
+Future<bool> confirmDatingYes(
+  BuildContext context,
+  WidgetRef ref,
+  DatingService dating,
+  SeenProfile s,
+) async {
+  final String? account = dating.accountOf(s.profile.key);
+  if (account == null || datingVerdicts(ref, dating, s).isEmpty) {
+    return true;
+  }
+  final PyramidService pyr = ref.read(pyramidServiceProvider);
+  final bool? ok = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext context) => AlertDialog(
+      key: const Key('dating-verdict-confirm'),
+      title: Text(t('Zanim powiesz „Tak”')),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                t(
+                  'Sąd piramidy wydał wyrok w sprawie tej osoby. Przeczytaj '
+                  'go, zanim zdecydujesz.',
+                ),
+              ),
+              const SizedBox(height: 10),
+              PyrVerdictList(pyr: pyr, address: account),
+            ],
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(t('Anuluj')),
+        ),
+        FilledButton(
+          key: const Key('dating-verdict-yes'),
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(t('Mimo to „Tak”')),
+        ),
+      ],
+    ),
+  );
+  return ok ?? false;
 }
 
 /// "Zapytaj o opinię": a question to a friend who knows the person — a
@@ -1220,6 +1303,16 @@ class DatingProfileScreen extends ConsumerWidget {
                       ? datingWay(s)
                       : '${datingWay(s)} · ${datingMutual(s)}',
                 ),
+                // The pyramid court's verdicts, when the account is known
+                // anyway (as on the person's profile).
+                if (dating.accountOf(p.key) != null &&
+                    ref.exists(pyramidServiceProvider)) ...<Widget>[
+                  const SizedBox(height: 6),
+                  PyrVerdictList(
+                    pyr: ref.read(pyramidServiceProvider),
+                    address: dating.accountOf(p.key),
+                  ),
+                ],
                 if (note != null && note.isNotEmpty) ...<Widget>[
                   const SizedBox(height: 6),
                   DatingQuote(text: note, tone: tone),
@@ -1314,7 +1407,16 @@ class DatingProfileScreen extends ConsumerWidget {
                           ),
                           onPressed: decided == true
                               ? null
-                              : () => unawaited(dating.decide(p.key, true)),
+                              : () => unawaited(() async {
+                                  if (await confirmDatingYes(
+                                    context,
+                                    ref,
+                                    dating,
+                                    s,
+                                  )) {
+                                    await dating.decide(p.key, true);
+                                  }
+                                }()),
                           icon: Icon(
                             friends
                                 ? Icons.waving_hand_rounded
@@ -1465,113 +1567,117 @@ class _DatingChatScreenState extends ConsumerState<DatingChatScreen> {
               ),
             ],
           ),
-          body: Column(
-            children: <Widget>[
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                  children: <Widget>[
-                    ZenInfo(
-                      icon: Icons.lock_rounded,
-                      tone: tone,
-                      text: t(
-                        'Wiadomości idą przez znajomych, zaszyfrowane — nikt '
-                        'po drodze ich nie przeczyta. Mogą dochodzić '
-                        'z opóźnieniem. Gdy się poznacie, dodajcie się do '
-                        'znajomych.',
-                      ),
-                    ),
-                    DatingSafeMutual(
-                      dating: dating,
-                      profileKey: widget.profileKey,
-                    ),
-                    if (lines.isEmpty)
-                      ZenEmpty(
-                        icon: Icons.waving_hand_rounded,
+          body: SelectionArea(
+            child: Column(
+              children: <Widget>[
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    children: <Widget>[
+                      ZenInfo(
+                        icon: Icons.lock_rounded,
                         tone: tone,
-                        title: t('Zacznijcie rozmowę'),
-                        text: t('Napisz pierwszy(-a)!'),
+                        text: t(
+                          'Wiadomości idą przez znajomych, zaszyfrowane — nikt '
+                          'po drodze ich nie przeczyta. Mogą dochodzić '
+                          'z opóźnieniem. Gdy się poznacie, dodajcie się do '
+                          'znajomych.',
+                        ),
                       ),
-                    const SizedBox(height: 8),
-                    for (final DatingLine l in lines)
-                      Align(
-                        alignment: l.mine
-                            ? Alignment.centerRight
-                            : Alignment.centerLeft,
-                        child: Container(
-                          margin: EdgeInsets.only(
-                            top: 3,
-                            bottom: 3,
-                            left: l.mine ? 48 : 0,
-                            right: l.mine ? 0 : 48,
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
-                          ),
-                          constraints: const BoxConstraints(maxWidth: 480),
-                          decoration: BoxDecoration(
-                            color: l.mine ? tone : zen.surfaceRaised,
-                            borderRadius: ZenLook.of(
-                              context,
-                            ).bubbleRadius(outgoing: l.mine),
-                            border: l.mine
-                                ? null
-                                : Border.all(color: zen.outlineSoft),
-                          ),
-                          child: Text(
-                            l.text,
-                            style: TextStyle(
-                              color: l.mine ? onTone : zen.textPrimary,
-                              fontSize: 15,
-                              height: 1.35,
+                      DatingSafeMutual(
+                        dating: dating,
+                        profileKey: widget.profileKey,
+                      ),
+                      if (lines.isEmpty)
+                        ZenEmpty(
+                          icon: Icons.waving_hand_rounded,
+                          tone: tone,
+                          title: t('Zacznijcie rozmowę'),
+                          text: t('Napisz pierwszy(-a)!'),
+                        ),
+                      const SizedBox(height: 8),
+                      for (final DatingLine l in lines)
+                        Align(
+                          alignment: l.mine
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: Container(
+                            margin: EdgeInsets.only(
+                              top: 3,
+                              bottom: 3,
+                              left: l.mine ? 48 : 0,
+                              right: l.mine ? 0 : 48,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            constraints: const BoxConstraints(maxWidth: 480),
+                            decoration: BoxDecoration(
+                              color: l.mine ? tone : zen.surfaceRaised,
+                              borderRadius: ZenLook.of(
+                                context,
+                              ).bubbleRadius(outgoing: l.mine),
+                              border: l.mine
+                                  ? null
+                                  : Border.all(color: zen.outlineSoft),
+                            ),
+                            child: Text(
+                              l.text,
+                              style: TextStyle(
+                                color: l.mine ? onTone : zen.textPrimary,
+                                fontSize: 15,
+                                height: 1.35,
+                              ),
                             ),
                           ),
                         ),
+                    ],
+                  ),
+                ),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: zen.surface,
+                    border: Border(top: BorderSide(color: zen.outlineSoft)),
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: TextField(
+                              key: const Key('dating-chat-text'),
+                              controller: _text,
+                              minLines: 1,
+                              maxLines: 4,
+                              enableIMEPersonalizedLearning: false,
+                              textCapitalization: TextCapitalization.sentences,
+                              decoration: InputDecoration(
+                                hintText: t('Napisz…'),
+                              ),
+                              onSubmitted: (_) => unawaited(_send(dating)),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton.filled(
+                            key: const Key('dating-chat-send'),
+                            tooltip: t('Wyślij'),
+                            style: IconButton.styleFrom(
+                              backgroundColor: tone,
+                              foregroundColor: onTone,
+                            ),
+                            onPressed: () => unawaited(_send(dating)),
+                            icon: const Icon(Icons.send_rounded),
+                          ),
+                        ],
                       ),
-                  ],
-                ),
-              ),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: zen.surface,
-                  border: Border(top: BorderSide(color: zen.outlineSoft)),
-                ),
-                child: SafeArea(
-                  top: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-                    child: Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: TextField(
-                            key: const Key('dating-chat-text'),
-                            controller: _text,
-                            minLines: 1,
-                            maxLines: 4,
-                            enableIMEPersonalizedLearning: false,
-                            textCapitalization: TextCapitalization.sentences,
-                            decoration: InputDecoration(hintText: t('Napisz…')),
-                            onSubmitted: (_) => unawaited(_send(dating)),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton.filled(
-                          key: const Key('dating-chat-send'),
-                          tooltip: t('Wyślij'),
-                          style: IconButton.styleFrom(
-                            backgroundColor: tone,
-                            foregroundColor: onTone,
-                          ),
-                          onPressed: () => unawaited(_send(dating)),
-                          icon: const Icon(Icons.send_rounded),
-                        ),
-                      ],
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -2372,6 +2478,22 @@ class DatingSafeMutual extends StatelessWidget {
               ],
             ),
           ],
+          if (both != null && both.isNotEmpty)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const Key('dating-safe-graph'),
+                onPressed: () => unawaited(
+                  GraphScreen.openSafeDate(
+                    context,
+                    name: s.profile.name,
+                    friends: both,
+                  ),
+                ),
+                icon: const Icon(Icons.hub_rounded),
+                label: Text(t('Pokaż na grafie')),
+              ),
+            ),
           const SizedBox(height: 10),
           if (!mine)
             OutlinedButton.icon(
