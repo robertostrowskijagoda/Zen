@@ -120,7 +120,9 @@ key, so every release must be signed with this key.
    It never pushes. `--build N` picks the build number, `--no-tag` stops
    before the commit. It refuses while `kReleaseMaintainers` or
    `kOfficialApkCertificatesSha256` is empty; `--allow-unpinned-keys` is
-   only for a test release (with a loud warning).
+   only for a test release (with a loud warning) and does not get past CI:
+   a tag run stops at once while either list is empty
+   (`dart run tool/release.dart pinned`).
 3. `git push origin HEAD`, open a pull request to `main` (changes reach
    `main` only through pull requests), wait for green CI and merge it with
    a merge commit (not squash or rebase: the tag must stay on a commit of
@@ -1000,13 +1002,16 @@ on" says that this build cannot check the author's signature yet.
 `sign` job of `release.yml` (with Go for the signature) makes it on every
 `v*` tag with the environment secret **`ZEN_RELEASE_SIGNING_KEY`** (in the
 `release` environment, so it waits for the same approval as the Android
-job); without the secret it is skipped with a warning. By hand:
+job); without the secret it is skipped with a warning. The job then runs
+`zen_release.dart verify --pinned`: a signature by a key that is not in
+`kReleaseMaintainers` of the tagged app stops the run (every installed
+computer would refuse such a release). By hand:
 
 ```
 dart run tool/zen_release.dart sums-manifest --version 1.12.0 \
     --out SHA256SUMS.sig SHA256SUMS
 dart run tool/zen_release.dart sign SHA256SUMS.sig ~/zen-release.key
-dart run tool/zen_release.dart verify SHA256SUMS.sig
+dart run tool/zen_release.dart verify --pinned SHA256SUMS.sig
 ```
 
 One-time steps for the maintainer:

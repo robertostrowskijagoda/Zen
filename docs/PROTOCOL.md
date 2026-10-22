@@ -793,6 +793,12 @@ against its hash; friends may push, strangers only answer what we asked.
 **Account and device frames** (`ledger_node.dart`): `lg_hello` {`cert`, `p`:
 {`f` address, `k` device key fingerprint, `s` device signature over
 `"zen.hello.v2|" + f + "|" + k`}} introduces an account's device to a friend.
+Only the first hello of a run to a friend carries the whole certificate;
+later ones name it (`cd`: {`a` account, `d` device}) and a friend that does
+not know it asks for it once a minute at most (`nc: 1`). The proof is signed
+once per address and session key. The periodic round (every 10 minutes)
+greets only who was heard from in the last 30 minutes, and everyone once an
+hour.
 The proof binds the address to the post-quantum device key of the session
 that carried the hello: a hello whose `k` is not the frame's `senderKey` is
 refused, the signed key is pinned (replacing the session's) when the hello
@@ -1070,7 +1076,8 @@ ML-DSA.
   certificate inside, now 4.9 KB), its device's certificate (about 9.9 KB)
   travels and is stored once per device; a pyramid record carries one per
   signer (4.5 KB, 7.1 KB keyed); `lg_hello` (certificate and proof, about
-  15 KB, at most every 10 minutes per friend) two: its proof ties an
+  15 KB the first time, about 5 KB later, at most every 10 minutes per
+  friend) two: its proof ties an
   address to a device key, which a quantum attacker able to take over the
   address at the mesh level could otherwise claim. Small transport frames
   carry none. The floor is the ML-DSA-65 signature itself (3309 bytes).

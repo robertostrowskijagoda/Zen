@@ -29,6 +29,8 @@
 ### Security and post-quantum
 - **Hybrid ML-KEM-768 + X25519** for every signal between devices (no plaintext mode), offline mailbox mail, the locked phone's inbox, Bluetooth hellos, local link handshakes, neighbours' doors, dating boxes, food pickup and Table for six addresses, and private transfers.
 - **Hybrid signatures (Ed25519 + ML-DSA-65)** on account and device records, posts, pyramid records, ballots, voting cards and releases. **Device identity** is post-quantum: device keys are pinned per address, and a key mismatch shows a warning in the chat.
+- **Call recordings** of any length are encrypted into Zen's storage in pieces; the plain file is deleted only after that, "saved" appears only then, and a failed save offers *Retry*. Profile photos from another device or a backup go straight into encrypted storage.
+- **Release checks:** a tag build stops at once while the app pins no release key or APK certificate, and `SHA256SUMS.sig` must be signed by a pinned key.
 - **Calls:** frame encryption (AES-128-GCM, per-call hybrid keys rotated every 5 minutes and on every join or leave) inside DTLS-SRTP, and every packet sealed again in Zen's relay with a 256-bit ChaCha20-Poly1305 key of the two devices.
 - **Cell votes** with one-time hybrid voting cards; only the card registration stays a ring signature. **Event tickets** are HMAC-based. **Dating lanterns** commit to a one-time hybrid key, and the match test is a sealed offer.
 - **Yggdrasil:** no NodeInfo answers, no admin socket, only encrypted peer links (TLS 1.3 with X25519MLKEM768), strict peer address checks.
@@ -131,6 +133,10 @@
 - **Fewer connections and pings:** a phone keeps 4 public peers instead of 16 (swapped when one fails); presence pings go only to friends, only while Zen is on screen, every 2.5 minutes.
 - **Calmer screens:** status dots and neon effects pulse briefly on a change instead of all the time, animations run at a low frame rate and stop when hidden; videos pause off screen.
 - **Computers on battery** stop bridging for others and keep 4 public peers; the battery estimate for looking around now counts the phone's wake-up time.
+- **Shorter wake-ups:** an incoming signal keeps the phone awake for about 3 seconds (a message, knock or call until its work is done); mailbox polls and Nearby looks share one wake-up; a look is not scheduled while Bluetooth is off; each alarm releases its wake lock as soon as its work ends.
+- **Lighter hellos:** a friend gets the device certificate once per run, later hellos only name it and are signed once; the 10-minute round greets only who was heard from lately (everyone once an hour); "I'm here" is not repeated within 2.5 minutes.
+- **Only computers serve as always-on mailboxes** (a locked phone takes only its own mail); friends' bridges that are no longer chosen are disconnected (a phone keeps 1, a computer 5, a laptop on battery 1).
+- **GIFs** play only while they can be seen (not in a hidden tab, under another page, in the background or in the tray) and are decoded at their on-screen size.
 
 ### Compatibility between versions
 - **Data from a newer Zen is never overwritten:** every stored format has a version and is kept as is when it is newer; unknown fields survive a rewrite; a bar asks to update. Samples of all 1.12.0 formats are kept as tests.
