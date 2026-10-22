@@ -76,8 +76,13 @@ final class LedgerAccountDirectory implements AccountDeviceDirectory {
   String get ownAccount => node.isReady ? node.account : '';
 
   @override
-  String? accountOf(String address) =>
-      node.isReady ? node.accountOfAnyAddress(address) : null;
+  String? accountOf(String address) => node.isReady
+      ? node.accountOfAnyAddress(address) ?? node.unlinkedAccountOf(address)
+      : null;
+
+  @override
+  String? unlinkedAccountOf(String address) =>
+      node.isReady ? node.unlinkedAccountOf(address) : null;
 
   @override
   List<String> addressesOf(String account) =>
@@ -231,7 +236,15 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     ..onSessionKeys = (Map<String, String> keys, {bool force = false}) {
       runtime.vouchSessionKeys(keys, force: force);
     }
-    ..onDeviceKeyMismatch = warnKeyMismatch;
+    ..onDeviceKeyMismatch = warnKeyMismatch
+    // A friend's device its owner unlinked (lost or stolen): said in the
+    // chat with that friend.
+    ..onDeviceUnlinked = (String address) => unawaitedLogged(
+      ref
+          .read(socialHubControllerProvider.notifier)
+          .warnDeviceUnlinked(address),
+      context: 'Ostrzeżenie o odłączonym urządzeniu',
+    );
   final StreamSubscription<String> keyConflicts = runtime.sessionKeyConflicts
       .listen(warnKeyMismatch);
   ref.onDispose(keyConflicts.cancel);
@@ -297,10 +310,14 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     ));
   // The social hub asks friends' levels without starting the ledger.
   final FriendLevelLookup levels = ref.read(friendLevelLookupProvider)
-    ..levelOf = node.levelOf;
+    ..levelOf = node.levelOf
+    ..unlinked = node.isUnlinkedAddress;
   ref.onDispose(() {
     if (levels.levelOf == node.levelOf) {
       levels.levelOf = null;
+    }
+    if (levels.unlinked == node.isUnlinkedAddress) {
+      levels.unlinked = null;
     }
   });
   // Conversations are the same on every device of the account.

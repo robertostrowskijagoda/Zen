@@ -24,6 +24,7 @@ final class SimNode {
           servesTo?.call(peer, space) ?? true,
       forwardsFrom: (String peer, String space) =>
           forwardsFrom?.call(peer, space) ?? false,
+      knowsAccount: (String account) => knowsAccount?.call(account) ?? false,
     );
   }
 
@@ -44,6 +45,9 @@ final class SimNode {
 
   /// Optional: spaces taken from a peer only to pass on.
   bool Function(String peer, String space)? forwardsFrom;
+
+  /// Optional: accounts this device has a reason to know (friends).
+  bool Function(String account)? knowsAccount;
 
   Future<void> becomeAuthor() async {
     final LedgerAccountSetup setup = await LedgerAccountSetup.create(
@@ -75,6 +79,12 @@ final class SimNet {
   int delivered = 0;
   int dropped = 0;
 
+  /// Message type → the largest one sent (bytes of its JSON).
+  final Map<String, int> largest = <String, int>{};
+
+  /// Message type → how many were sent.
+  final Map<String, int> sent = <String, int>{};
+
   SimNode add(String name) => nodes[name] = SimNode(name, this);
 
   void link(String a, String b) {
@@ -83,7 +93,13 @@ final class SimNet {
   }
 
   void _enqueue(String from, String to, Map<String, dynamic> message) {
-    _queue.add((from, to, jsonEncode(message)));
+    final String json = jsonEncode(message);
+    final String type = '${message['type']}';
+    if ((largest[type] ?? 0) < json.length) {
+      largest[type] = json.length;
+    }
+    sent[type] = (sent[type] ?? 0) + 1;
+    _queue.add((from, to, json));
   }
 
   /// Delivers until nothing is left in flight.

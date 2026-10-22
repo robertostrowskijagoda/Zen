@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:math';
+
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/crypto/hybrid_signature.dart';
@@ -317,6 +320,22 @@ final class DeviceRevocation {
   final int issued;
   final String signature;
 
+  /// Most logs one revocation names (a device writes one log per space);
+  /// what a revocation would list beyond that is left out, so cut off
+  /// whole. Bounds what one revocation costs to keep and pass on.
+  static const int maxCutoffs = 1024;
+
+  static final Expando<String> _ids = Expando<String>('revocationId');
+  static final Expando<int> _sizes = Expando<int>('revocationSize');
+
+  /// A short id of this very revocation (from its signature).
+  String get id =>
+      _ids[this] ??= sha256Hex(utf8.encode(signature)).substring(0, 32);
+
+  /// Its size as it travels (bytes of its JSON).
+  int get encodedLength =>
+      _sizes[this] ??= utf8.encode(jsonEncode(toJson())).length;
+
   static Map<String, dynamic> _payload(
     String account,
     String device,
@@ -336,16 +355,19 @@ final class DeviceRevocation {
     required Map<String, int> cutoffs,
     required int issued,
   }) async {
-    // Keyed: a revocation travels to everyone, also to phones that never
-    // met the account (a cut-off must reach them before the device's
-    // entries do).
+    final Map<String, int> kept = cutoffs.length <= maxCutoffs
+        ? cutoffs
+        : Map<String, int>.fromEntries(cutoffs.entries.take(maxCutoffs));
+    // Keyed: a revocation travels with the certificates it concerns, also
+    // to phones that never met the account (a cut-off must reach them
+    // before the device's entries do).
     final Uint8List sig = await account.signWithKey(
-      canonicalJsonBytes(_payload(account.id, device, cutoffs, issued)),
+      canonicalJsonBytes(_payload(account.id, device, kept, issued)),
     );
     return DeviceRevocation(
       account: account.id,
       device: device,
-      cutoffs: Map<String, int>.unmodifiable(cutoffs),
+      cutoffs: Map<String, int>.unmodifiable(kept),
       issued: issued,
       signature: b64(sig),
     );
@@ -368,6 +390,7 @@ final class DeviceRevocation {
         !_isKey(json['account']) ||
         !_isKey(json['device']) ||
         json['cutoffs'] is! Map ||
+        (json['cutoffs'] as Map).length > maxCutoffs ||
         json['issued'] is! int ||
         !isKeyedHybridSignatureText(json['sig'])) {
       return null;
@@ -408,17 +431,48 @@ bool _isCutoffKey(Object? key) {
 }
 
 /// Which devices belong to which account, and which were cut off.
+///
+/// Revocations are bounded: anyone can make an account and sign
+/// revocations with it, and each is about 8 KB (kept in the ledger, checked
+/// at start, passed on). Per account at most one per device certified here
+/// plus [spareRevocationsPerAccount] (never more than
+/// [maxRevocationsPerAccount]), [maxRevocationsPerDevice] per device, and
+/// [maxRevocations] in all. When everything is full, a revocation of an
+/// account [isCoreAccount] names (this account, friends, followed ones)
+/// makes room by dropping the oldest of another account; anything else is
+/// refused.
 final class AccountDirectory {
   final Map<String, Map<String, DeviceCertificate>> _certs =
       <String, Map<String, DeviceCertificate>>{};
   final Map<String, List<DeviceRevocation>> _revocations =
       <String, List<DeviceRevocation>>{};
 
+  /// Signatures of every revocation kept.
+  final Set<String> _revocationSignatures = <String>{};
+
+  /// Revocations kept per account.
+  final Map<String, int> _revocationsPerAccount = <String, int>{};
+  int _revocationCount = 0;
+
+  static const int spareRevocationsPerAccount = 4;
+  static const int maxRevocationsPerAccount = 32;
+  static const int maxRevocationsPerDevice = 2;
+  static const int maxRevocations = 512;
+
+  /// Accounts whose revocations are never dropped to make room (set by
+  /// the app: this account, friends, followed accounts).
+  bool Function(String account)? isCoreAccount;
+
   static String _key(String account, String device) => '$account|$device';
 
   /// Grows whenever a certificate is added (what the archive saves).
   int get revision => _revision;
   int _revision = 0;
+
+  /// Grows whenever a revocation is added or dropped (what the archive
+  /// saves).
+  int get revocationRevision => _revocationRevision;
+  int _revocationRevision = 0;
 
   /// Grows whenever a certificate of [account] is added (what the archive
   /// saves, one file per account).
@@ -471,24 +525,107 @@ final class AccountDirectory {
     return true;
   }
 
-  /// Records a revocation after checking its signature. Returns false for
-  /// a bad signature; true (and nothing changes) for one already known.
-  Future<bool> addRevocation(DeviceRevocation revocation) async {
-    final List<DeviceRevocation> list =
-        _revocations[_key(revocation.account, revocation.device)] ??=
-            <DeviceRevocation>[];
-    if (list.any((DeviceRevocation r) => r.signature == revocation.signature)) {
-      return true;
-    }
-    if (!await revocation.verify()) {
-      if (list.isEmpty) {
-        _revocations.remove(_key(revocation.account, revocation.device));
-      }
+  /// Whether this very revocation is kept here.
+  bool knowsRevocation(DeviceRevocation revocation) =>
+      _revocationSignatures.contains(revocation.signature);
+
+  /// Whether [revocation] would be kept (the limits above), not counting
+  /// its signature.
+  bool hasRoomFor(DeviceRevocation revocation) {
+    if ((_revocations[_key(revocation.account, revocation.device)]?.length ??
+            0) >=
+        maxRevocationsPerDevice) {
       return false;
     }
-    list.add(revocation);
+    final int perAccount = min(
+      devicesOf(revocation.account).length + spareRevocationsPerAccount,
+      maxRevocationsPerAccount,
+    );
+    if ((_revocationsPerAccount[revocation.account] ?? 0) >= perAccount) {
+      return false;
+    }
+    return _revocationCount < maxRevocations ||
+        ((isCoreAccount?.call(revocation.account) ?? false) &&
+            _droppableKey() != null);
+  }
+
+  /// The oldest revocations of an account that is not core, if any.
+  String? _droppableKey() {
+    for (final MapEntry<String, List<DeviceRevocation>> e
+        in _revocations.entries) {
+      if (e.value.isNotEmpty &&
+          !(isCoreAccount?.call(e.value.first.account) ?? false)) {
+        return e.key;
+      }
+    }
+    return null;
+  }
+
+  void _drop(String key) {
+    final List<DeviceRevocation>? list = _revocations.remove(key);
+    if (list == null || list.isEmpty) {
+      return;
+    }
+    final String account = list.first.account;
+    _revocationCount -= list.length;
+    final int left = (_revocationsPerAccount[account] ?? 0) - list.length;
+    if (left > 0) {
+      _revocationsPerAccount[account] = left;
+    } else {
+      _revocationsPerAccount.remove(account);
+    }
+    for (final DeviceRevocation r in list) {
+      _revocationSignatures.remove(r.signature);
+    }
+    _revocationRevision++;
+  }
+
+  bool _keep(DeviceRevocation revocation) {
+    if (knowsRevocation(revocation)) {
+      return true;
+    }
+    if (!hasRoomFor(revocation)) {
+      return false;
+    }
+    if (_revocationCount >= maxRevocations) {
+      final String? drop = _droppableKey();
+      if (drop == null) {
+        return false;
+      }
+      _drop(drop);
+    }
+    (_revocations[_key(revocation.account, revocation.device)] ??=
+            <DeviceRevocation>[])
+        .add(revocation);
+    _revocationSignatures.add(revocation.signature);
+    _revocationsPerAccount[revocation.account] =
+        (_revocationsPerAccount[revocation.account] ?? 0) + 1;
+    _revocationCount++;
+    _revocationRevision++;
     return true;
   }
+
+  /// Records a revocation after checking its signature. Returns false for
+  /// a bad signature or one over the limits; true (and nothing changes)
+  /// for one already known.
+  Future<bool> addRevocation(DeviceRevocation revocation) async {
+    if (knowsRevocation(revocation)) {
+      return true;
+    }
+    // The limits first: a revocation that would not be kept costs no
+    // signature check.
+    if (!hasRoomFor(revocation) || !await revocation.verify()) {
+      return false;
+    }
+    return _keep(revocation);
+  }
+
+  /// Records a revocation read back from our own storage (checked when it
+  /// first arrived), within the limits.
+  bool trustRevocation(DeviceRevocation revocation) => _keep(revocation);
+
+  /// How many revocations are kept.
+  int get revocationCount => _revocationCount;
 
   bool isRevoked(String account, String device) =>
       _revocations[_key(account, device)]?.isNotEmpty ?? false;
@@ -496,6 +633,10 @@ final class AccountDirectory {
   /// Every signed revocation known, as issued (for passing on).
   Iterable<DeviceRevocation> get revocations =>
       _revocations.values.expand((List<DeviceRevocation> l) => l);
+
+  /// The revocations of [device] of [account] kept here.
+  List<DeviceRevocation> revocationsOf(String account, String device) =>
+      _revocations[_key(account, device)] ?? const <DeviceRevocation>[];
 
   Iterable<DeviceCertificate> devicesOf(String account) =>
       _certs[account]?.values ?? const <DeviceCertificate>[];

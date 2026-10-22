@@ -121,11 +121,13 @@ final class DiskBlobChunkBackend implements BlobChunkBackend {
 /// The files (format 1, from 1.12.0):
 ///
 /// * [indexKey]: which logs are held (and from where: a log cut at its
-///   writer's checkpoint starts after `b`), revocations, blocks, which
+///   writer's checkpoint starts after `b`), blocks, which
 ///   certificate files and file lists exist, and the small per-file marks
 ///   (refused, wanted, who a file was fetched for);
 /// * one certificate file per account ([certificatesKeyOf]), rewritten only
 ///   when a certificate of that account is added;
+/// * the device revocations ([revocationsKey]), rewritten only when they
+///   change (each is about 8 KB; [AccountDirectory] bounds how many);
 /// * sixteen file lists ([blobListKeyOf], by the first hex digit of an id),
 ///   each rewritten only when it changed;
 /// * the log segments ([logKeyOf]) of [segmentSize] entries, so adding one
@@ -138,6 +140,9 @@ final class LedgerArchive {
   LedgerArchive({required this.disk, this.segmentSize = 200});
 
   static const String indexKey = 'ledger/index';
+
+  /// The device revocations kept ([AccountDirectory.revocations]).
+  static const String revocationsKey = 'ledger/revocations';
 
   /// Start of the name of every certificate file ([certificatesKeyOf]).
   static const String certificatesPrefix = 'ledger/certs-';
@@ -193,6 +198,9 @@ final class LedgerArchive {
 
   /// [AccountDirectory.revision] when the certificates were last compared.
   int? _checkedDirectory;
+
+  /// [AccountDirectory.revocationRevision] of the revocations on disk.
+  int? _savedRevocations;
 
   /// Shard → the file list on disk, as written.
   final Map<String, String> _savedBlobLists = <String, String>{};
@@ -380,12 +388,11 @@ final class LedgerArchive {
       return;
     }
     await _loadCertificates(store, index);
-    for (final Object? json in _list(index['rev'])) {
-      final DeviceRevocation? r = DeviceRevocation.fromJson(json);
-      if (r != null) {
-        await store.directory.addRevocation(r);
-      }
+    // Checked when they first came (and kept within the limits).
+    for (final DeviceRevocation r in await _readRevocations()) {
+      store.directory.trustRevocation(r);
     }
+    _savedRevocations = store.directory.revocationRevision;
     for (final Object? a in _list(index['blocked'])) {
       if (a is String) {
         store.blockedAccounts.add(a);
@@ -482,6 +489,22 @@ final class LedgerArchive {
     }
   }
 
+  /// The revocations on disk (none when the file is missing or damaged).
+  Future<List<DeviceRevocation>> _readRevocations() async {
+    final Uint8List? raw = await disk.read(revocationsKey);
+    if (raw == null) {
+      return const <DeviceRevocation>[];
+    }
+    try {
+      return <DeviceRevocation>[
+        for (final Object? json in _list(jsonDecode(utf8.decode(raw))))
+          ?DeviceRevocation.fromJson(json),
+      ];
+    } on FormatException {
+      return const <DeviceRevocation>[];
+    }
+  }
+
   void _scheduleFlush() {
     if (_flushQueued || _paused) {
       return;
@@ -543,15 +566,22 @@ final class LedgerArchive {
       }
     }
     final List<String> lists = await _flushBlobLists(blobs);
+    final int revocations = store.directory.revocationRevision;
+    if (_savedRevocations != revocations) {
+      await disk.write(
+        revocationsKey,
+        _jsonBytes(<Map<String, dynamic>>[
+          for (final DeviceRevocation r in store.directory.revocations)
+            r.toJson(),
+        ]),
+      );
+      _savedRevocations = revocations;
+    }
     await disk.write(
       indexKey,
       _jsonBytes(<String, dynamic>{
         'v': formatVersion,
         'logs': logs,
-        'rev': <Map<String, dynamic>>[
-          for (final DeviceRevocation r in store.directory.revocations)
-            r.toJson(),
-        ],
         'blocked': store.blockedAccounts.toList(),
         'certs': <String>[
           for (final String account in _savedCertificates.keys)
@@ -716,9 +746,8 @@ final class LedgerArchive {
       final Map<dynamic, dynamic>? index = (await _readIndex()).index;
       if (index != null) {
         await _loadCertificates(store, index);
-        for (final Object? json in _list(index['rev'])) {
-          final DeviceRevocation? r = DeviceRevocation.fromJson(json);
-          if (r != null) {
+        for (final DeviceRevocation r in await _readRevocations()) {
+          if (!store.directory.knowsRevocation(r)) {
             await store.applyRevocation(r);
           }
         }
@@ -824,6 +853,10 @@ final class LedgerArchive {
     }
     if (index is! Map || !isReadableFormat(index, current: formatVersion)) {
       return out;
+    }
+    final Uint8List? revocations = await disk.read(revocationsKey);
+    if (revocations != null) {
+      out[revocationsKey] = revocations;
     }
     for (final Object? name in _list(index['certs'])) {
       if (name is! String) {

@@ -22,6 +22,26 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
     );
   }
 
+  /// The friend at [address] unlinked that device (lost or stolen): it is
+  /// said in the conversation with them. Nothing goes there any more; the
+  /// friend's other devices get the messages.
+  Future<void> warnDeviceUnlinked(String address) async {
+    final FriendProfile? friend = state.friendByAddress(address);
+    if (friend == null) {
+      return;
+    }
+    await _appendSystemMessage(
+      peerAddress: friend.address,
+      text: t(
+        'Ta osoba odłączyła to urządzenie (zgubione lub skradzione). '
+        'Nic stamtąd nie jest przyjmowane i nic tam nie wysyłamy. Wiadomości '
+        'trafiają na jej pozostałe urządzenia; jeśli żadnego nie ma, dodaj '
+        'ją ponownie.',
+      ),
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
   /// Another device of this account sent [payload] to [peerAddress]: show
   /// it in the conversation here too.
   Future<void> recordMirroredSend(

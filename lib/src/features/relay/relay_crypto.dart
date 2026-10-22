@@ -359,6 +359,12 @@ final class RelayCipher {
   /// Opens a mailbox envelope; throws when it was not sealed by
   /// [senderPublicKey] for [recipient] (a hybrid identity), or was tampered
   /// with.
+  ///
+  /// The hybrid KEM keeps the content secret against a quantum computer;
+  /// who sent it rests on the static X25519 term alone, which such a
+  /// computer could forge from the sender's public key (an honest limit,
+  /// docs/SECURITY_MODEL.md). What must be the sender's own beyond that
+  /// is signed with its hybrid device key (ledger entries, hellos).
   static Future<Uint8List> openHybrid({
     required RelayIdentity recipient,
     required Uint8List senderPublicKey,

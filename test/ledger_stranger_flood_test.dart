@@ -70,6 +70,35 @@ void main() {
     expect(repliesTo((String a) => true), 20);
   });
 
+  test('a stranger\'s hello that only names a certificate is never '
+      'answered, whatever it names', () async {
+    Future<void> named(String from, String account, String device) =>
+        transport.injectIncoming(
+          from: PeerShareCodec.normalizeAddress(from),
+          payload: <String, dynamic>{
+            'type': kLedgerHelloType,
+            'cd': <String, dynamic>{'a': account, 'd': device},
+            'p': <String, dynamic>{
+              'f': PeerShareCodec.normalizeAddress(from),
+              's': 'x',
+            },
+          },
+        );
+    final String unknownDevice = (await LedgerKeyPair.generate()).id;
+    // This account with a device it does not have, this very device (its
+    // certificate is here), and someone else entirely: all the same.
+    await named('200:31::1', node.account, unknownDevice);
+    await named('200:32::1', node.account, node.identity.deviceKey.id);
+    await named(
+      '200:33::1',
+      (await LedgerKeyPair.generate()).id,
+      unknownDevice,
+    );
+    await _settle();
+
+    expect(repliesTo((String a) => true), 0);
+  });
+
   test('one /64 network shares one stranger budget', () async {
     for (int i = 0; i < kStrangerFramesPerMinute + 10; i++) {
       await helloFromNewAccount('200:1:2:3::${i + 1}');

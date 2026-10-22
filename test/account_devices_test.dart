@@ -358,4 +358,7 @@ final class _Dir implements AccountDeviceDirectory {
   @override
   String? contactAddressOf(String account) =>
       account == 'ANIA' ? 'ania1' : null;
+
+  @override
+  String? unlinkedAccountOf(String address) => null;
 }

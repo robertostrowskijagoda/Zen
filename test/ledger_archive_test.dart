@@ -99,6 +99,46 @@ void main() {
     );
   });
 
+  test('revocations have a file of their own, written only when they '
+      'change', () async {
+    final MemoryLedgerDisk disk = MemoryLedgerDisk();
+    final _Device first = await _Device(disk).open();
+    final LedgerAccountSetup setup = await LedgerAccountSetup.create();
+    final LedgerAuthor author = LedgerAuthor(
+      deviceKey: setup.deviceKey,
+      certificate: setup.certificate,
+      store: first.store,
+    );
+    final String space = accountSpace('feed', author.account);
+    await author.append(space, 'post', <String, dynamic>{'n': 0});
+    final DeviceRevocation revocation = await DeviceRevocation.issue(
+      account: setup.accountKey,
+      device: setup.deviceKey.id,
+      cutoffs: <String, int>{author.writer: 1},
+      issued: 1,
+    );
+    await first.store.applyRevocation(revocation);
+    await first.archive.flush();
+    final Map<String, dynamic> index =
+        jsonDecode(utf8.decode(disk.files[LedgerArchive.indexKey]!))
+            as Map<String, dynamic>;
+    expect(index.containsKey('rev'), isFalse, reason: 'not in the index');
+    final Uint8List saved = disk.files[LedgerArchive.revocationsKey]!;
+
+    // Saving again (the index is rewritten each time) leaves it alone.
+    disk.files.remove(LedgerArchive.revocationsKey);
+    await first.archive.flush();
+    expect(disk.files.containsKey(LedgerArchive.revocationsKey), isFalse);
+    disk.files[LedgerArchive.revocationsKey] = saved;
+
+    final _Device second = await _Device(disk).open();
+    expect(
+      second.store.directory.isRevoked(setup.accountKey.id, setup.deviceKey.id),
+      isTrue,
+    );
+    expect(second.store.directory.revocationCount, 1);
+  });
+
   test('saving happens by itself after changes', () async {
     final MemoryLedgerDisk disk = MemoryLedgerDisk();
     final _Device device = await _Device(disk).open();
