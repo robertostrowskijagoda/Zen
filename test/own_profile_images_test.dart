@@ -103,6 +103,56 @@ void main() {
     expect(mine.existsSync(), isTrue);
   });
 
+  test(
+    'a photo from another device or a backup leaves no plain copy',
+    () async {
+      final Uint8List photo = _bytes(70000, 4);
+      final String path = await sealIncomingProfileImage(
+        vault,
+        Stream<List<int>>.fromIterable(<List<int>>[
+          photo.sublist(0, 1000),
+          photo.sublist(1000),
+        ]),
+        cover: false,
+        folder: () async => temporary,
+      );
+      expect(isMediaVaultPath(path), isTrue);
+      expect(path, startsWith(support.path));
+      expect(await readOwnProfileImage(path), photo);
+      // The plain file in the temporary media folder went at once.
+      expect(temporary.listSync(), isEmpty);
+
+      // Cut off halfway: nothing plain stays either.
+      await expectLater(
+        sealIncomingProfileImage(
+          vault,
+          Stream<List<int>>.error(StateError('cut')),
+          cover: true,
+          folder: () async => temporary,
+        ),
+        throwsA(anything),
+      );
+      expect(temporary.listSync(), isEmpty);
+
+      // A locked vault: the same.
+      final MediaVault locked = MediaVault(
+        masterKey: () async => null,
+        supportDirectory: () async => support,
+        temporaryDirectory: () async => temporary,
+      );
+      await expectLater(
+        sealIncomingProfileImage(
+          locked,
+          Stream<List<int>>.value(photo),
+          cover: true,
+          folder: () async => temporary,
+        ),
+        throwsStateError,
+      );
+      expect(temporary.listSync(), isEmpty);
+    },
+  );
+
   test('a locked vault keeps the plain file for later', () async {
     final MediaVault locked = MediaVault(
       masterKey: () async => null,

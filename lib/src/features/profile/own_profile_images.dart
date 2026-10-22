@@ -4,7 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
+import 'package:zen/src/features/media/media_temp_folder.dart'
+    show createPrivateTemporaryFile;
 import 'package:zen/src/features/media/media_vault.dart';
+import 'package:zen/src/features/security/app_security_crypto.dart';
 
 // Your own photo and cover live in the media vault, encrypted like
 // everything else of yours, not as plain files. The profile editor
@@ -55,6 +58,46 @@ Future<String?> sealProfileImageFile(MediaVault vault, String path) async {
     // Locked or no data key yet: the next save or start tries again.
     logZenError('Sealing a profile picture failed', error, stackTrace);
     return null;
+  }
+}
+
+/// Puts a picture of your own profile arriving as [bytes] (from your other
+/// device or from a backup) into [vault]; returns its vault path.
+///
+/// The bytes pass through a short-lived plain file in the temporary media
+/// folder ([folder]; private to this user, emptied at start, at exit and by
+/// every wipe), deleted as soon as the vault holds the picture or the
+/// attempt fails. Throws when the picture is too big or cannot be stored.
+Future<String> sealIncomingProfileImage(
+  MediaVault vault,
+  Stream<List<int>> bytes, {
+  required bool cover,
+  Future<Directory> Function() folder = mediaTemporaryDirectory,
+}) async {
+  final Directory dir = await folder();
+  final File plain = await createPrivateTemporaryFile(
+    '${dir.path}${Platform.pathSeparator}${cover ? 'cover_' : 'avatar_'}'
+    '${securityHexFromBytes(randomSecurityBytes(16))}.jpg',
+  );
+  try {
+    final IOSink sink = plain.openWrite();
+    try {
+      await sink.addStream(bytes);
+    } finally {
+      await sink.close();
+    }
+    if (await plain.length() > kMaxOwnProfileImageBytes) {
+      throw const FormatException('The profile picture is too big.');
+    }
+    return await vault.putFile(plain);
+  } finally {
+    try {
+      if (plain.existsSync()) {
+        await plain.delete();
+      }
+    } on FileSystemException catch (error) {
+      logZenWarning('Deleting a plain profile picture failed: $error');
+    }
   }
 }
 
