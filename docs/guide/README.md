@@ -20,9 +20,9 @@ stays private, and the limits.
 
 | | Page | In short |
 |---|---|---|
-| 1 | [Getting started](getting-started.md) | Install, the first start, the password, several accounts on one device, getting your account back |
+| 1 | [Getting started](getting-started.md) | Install, the first start, your name, the passwords, several accounts on one device, getting your account back, the recovery circle |
 | 2 | [Friends and the graph](friends-and-graph.md) | Friendship levels, the graph and its modes, the timeline, full screen, adding friends of friends |
-| 3 | [Chats, delivery and calls](chats-and-delivery.md) | Messages and groups, reactions, replies, edits, files, GIFs, drag and drop, offline mailboxes, delivery icons, calls |
+| 3 | [Chats, delivery and calls](chats-and-delivery.md) | Messages and groups, reactions, replies, edits, files, GIFs, drag and drop, offline mailboxes, iPhone delivery, delivery icons, calls |
 | 4 | [Feed and videos](feed-and-videos.md) | Posts for chosen people, the short-video section |
 | 5 | [Meeting people](meeting-people.md) | Right now, events, dinner circles, sharing food, Nearby, the alarm, asking the network |
 | 6 | [Neighbours](neighbours.md) | A code on your door, knocking, who sees what |
@@ -52,8 +52,15 @@ More for the technically minded:
 - **Mesh**: the [Yggdrasil](https://yggdrasil-network.github.io/) network.
   Every device has its own address in it; traffic goes directly or through
   other devices that cannot read it.
-- **Mailbox**: a trusted friend's device that keeps sealed messages for you
-  while you are offline.
+- **Mailbox**: a friend's device that keeps sealed messages for you while
+  you are offline; devices that stay online (computers, Android) are
+  preferred.
+- **Recovery circle**: 4 to 6 friends who each hold a piece of your key and
+  together help you back onto a new phone.
+- **Copies**: a *key copy* (paper or file) brings back the account itself;
+  a *full account copy* (a file) brings back what you put in it; the *copy
+  with friends* is kept by your recovery circle and brings back friends,
+  groups and conversation texts.
 - **Post-quantum**: protected also against a future quantum computer. See the
   [security model](../SECURITY_MODEL.md).
 

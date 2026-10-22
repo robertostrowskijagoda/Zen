@@ -57,7 +57,9 @@ never your address.
 
 ## Dinner circles
 
-- 4 to 8 friends cook in turn. The founder invites, everyone answers
+- 4 to 8 people cook in turn: you and 3 to 7 friends (with fewer than 3
+  friends the screen says how many you have and *Start a circle* stays
+  off). The founder invites, everyone answers
   **Count me in** or **No, thanks**; members can invite their own friends.
   **Leave circle** reshuffles the cooking queue.
 - **Who's coming:** *I'll be there / Can't make it / Maybe* for the next
@@ -107,7 +109,8 @@ never your address.
   battery saver or when the phone sleeps. About 0.3 % of the radio's time.
   **Settings → Looking around in the background** sets how often (2 to 30
   minutes) and how long (4 to 15 seconds), with an estimate of the battery
-  cost.
+  cost (about 1.4 % a day by default; [details](settings-and-peers.md#settings)).
+  The phone wakes only for each look and goes back to sleep.
 - **Passed by:** a private log of friends you passed, built only from what
   Nearby heard, kept encrypted on the phone for 30 days (a place rounded to
   about 100 m, only if the alarm's location permission is on). Strangers are
@@ -132,8 +135,10 @@ never your address.
 - **What:** your location every minute for up to an hour, optional voice
   clips, and for each recipient *sent → delivered → seen → answer*
   ("On my way", "Calling", "Can't").
-- **Ending:** **I'm safe** with your PIN. A panic PIN looks the same, but
-  tells your friends you may be under pressure. Also a 112 button and a
+- **Ending:** **I'm safe** with your PIN. A **duress PIN** looks the same
+  (the alarm goes from the screen), but tells your friends you may be forced
+  to end it. It erases nothing (that is the emergency wipe password); a
+  wrong PIN ends nothing, you can type again. Also a 112 button and a
   backup SMS to up to 5 numbers.
 - **From a locked Android phone:** an alarm kit, sealed with a separate
   background key, lets the background service raise the alarm without your
@@ -141,8 +146,8 @@ never your address.
 
 ## Privacy
 
-- Events, plans and tables reach only people through friends; far circles
-  see no addresses.
+- Events, plans and tables reach only people through friends; people
+  further away see no addresses.
 - *Passed by*, the "eat together" suggestions and food counters never leave
   the phone.
 - Location goes only where a feature says (the alarm), from the system's own

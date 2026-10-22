@@ -1,6 +1,6 @@
 # Friends and the graph
 
-> Who you know, how close you are, and how your circles connect: drawn from
+> Who you know, how close you are, and how your groups of friends connect: drawn from
 > what your friends chose to show you, computed on your own phone.
 
 <p align="center">
@@ -44,14 +44,14 @@ Modes (chips above the graph):
 
 | Mode | What it shows |
 |---|---|
-| Friends | who knows whom; circles are found and named automatically |
+| Friends | who knows whom; groups of friends are found and named automatically |
 | Statuses | who is online, statuses, who is open to meeting |
 | Met in person | the "met" notes, closeness as line styles |
 | Pyramid | your pyramid's line and levels |
 | Gates | prices on the lines for introductions ([gates](introductions-and-gates.md)) |
 | Path | the shortest or cheapest way to a person |
 | Timeline | your graph 3, 6 and 12 months ago; *Show how the graph grew* animates it |
-| Bridges | friends who alone connect two of your circles, and circles with no link; Zen suggests introducing two people |
+| Bridges | friends who alone connect two of your groups of friends, and groups with no link; Zen suggests introducing two people |
 | Long ago | friends you have not talked to or met for 4, 8, 12 or 26 weeks, with a gentle *Message* or *Remind me later* |
 
 Also on the graph:
@@ -62,14 +62,14 @@ Also on the graph:
 - **Trust map** on a person's card: when you met in person, which friends
   met them, thank-you cards, time in the pyramid, shared events. No stars,
   no scores.
-- **Your circles**: give a circle your own name ("Climbing", "Uni"). The
+- **Your groups of friends**: give a group your own name ("Climbing", "Uni"). The
   name never leaves the phone.
-- **Graph snapshot**: a 1080 x 1080 picture with initials and circle
+- **Graph snapshot**: a 1080 x 1080 picture with initials and group
   colours only, no names or addresses, to save or send.
 - **Full screen**: the button next to the zoom buttons, F11 on a computer
   (Esc leaves). The controls fade after 3 seconds and come back on a touch.
   Mode, filters and the selected person carry over.
-- Filters: everyone / friends and close friends / close friends, by circle,
+- Filters: everyone / friends and close friends / close friends, by group of friends,
   number of mutual friends, nationality, status, nearby.
 
 ## Adding a friend of a friend
@@ -92,7 +92,7 @@ one friend.
 - Dates for the timeline are kept on this phone from now on; older ones are
   taken from your conversations and "met" notes. Friends from before are
   shown as "always".
-- *Long ago*, *Your circles* and the snapshot are visible only to you.
+- *Long ago*, *Your groups of friends* and the snapshot are visible only to you.
 
 ## Limits
 

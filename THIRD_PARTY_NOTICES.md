@@ -57,8 +57,9 @@ Apache-2.0, MPL-2.0 or Zlib (vector_math).
 | Protocol Buffers (protobuf-javalite, via Tink) | Android | BSD-3-Clause |
 | desugar_jdk_libs | Android | GPL-2.0 with the Classpath Exception; source: https://github.com/google/desugar_jdk_libs |
 | DKImagePickerController, DKPhotoGallery, SDWebImage, SwiftyGif (via file_picker) | iOS | MIT |
+| Microsoft Visual C++ Redistributable (msvcp140.dll, msvcp140_1.dll, msvcp140_2.dll, vcruntime140.dll, vcruntime140_1.dll) | Windows (`Zen-Windows.zip`, `Zen-Windows-arm64.zip`) | Copyright © Microsoft Corporation. Redistributed unchanged, only as part of Zen, under the Visual Studio licence terms for "Distributable Code" (the REDIST list) |
 | GTK, GLib, GStreamer, libsecret (system libraries) | Linux | LGPL-2.1+ |
-| OpenH264 2.4.1 (Zen's H.264 encoder for films, built from source into the app) | Linux | BSD-2-Clause (`assets/licenses/native/openh264.txt`); Cisco's H.264 patent licence covers only Cisco's own binaries, not this build |
+| OpenH264 2.4.1 (Zen's H.264 encoder for films, built from source into the app) | Linux | BSD-2-Clause (`assets/licenses/native/openh264.txt`); Cisco's H.264 patent licence covers only Cisco's own binaries, not this build (on the other systems Zen uses the system's codecs; see `docs/RELEASES.md`, section 6.1.1) |
 | vo-aacenc 0.1.3 (VisualOn; Zen's AAC encoder for films' sound, built from source into the app) | Linux | Apache-2.0 (`assets/licenses/native/vo_aacenc.txt`) |
 | ffmpeg (not shipped: run as a separate program when the computer has it, to decode a film GStreamer cannot) | Linux | LGPL-2.1+ / GPL-2.0+ (the system's copy) |
 | libayatana-appindicator3, libdbusmenu (copied into the Flatpak) | Linux Flatpak | LGPL-2.1 / LGPL-3.0; source: the Ubuntu packages of the same version |

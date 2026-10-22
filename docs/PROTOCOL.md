@@ -258,8 +258,9 @@ Direction is sender -> recipient unless stated. "Reliable" means the type is in
 
 | type | Fields | Notes |
 |---|---|---|
-| `ping` | optional hello: `mf`, `mk`, `ms` | Every 45 s (default) to each accepted friend and group member. Not answered unless the sender is a friend or group member. |
-| `pong` | `state` (`"foreground"` or other), hello fields | Reply. Hello fields (friends only): `mf` short digest of the friend list sent, `mz` digest of the nearby keys given to that friend, `ms` time the current status was set (0 if none or not visible), `ma` digest of the alarm key. The receiver asks again for what does not match with `meet_req`. |
+| `ping` | optional hello: `mf`, `mk`, `ms`; version: `ver`, `build`, `caps`, `minv` | Only while Zen is on the screen: to every target when the app comes to the screen, then every 2 min 30 s (`kPresencePingInterval`). Targets: accepted friends, plus members of groups with an unconfirmed invitation from this device. A friend counts as offline after 7 min without an answer (`kPresenceOfflineAfter`). Not answered unless the sender is a friend or group member. |
+| `pong` | `state` (`"foreground"` or other), hello fields, version fields | Reply. Hello fields (friends only): `mf` short digest of the friend list sent, `mz` digest of the nearby keys given to that friend, `ms` time the current status was set (0 if none or not visible), `ma` digest of the alarm key. The receiver asks again for what does not match with `meet_req`. A locked Android phone answers one contact at most every 4 min (`kLockedPongEvery`). |
+| `away` | - | Sent when the app leaves the screen ("leaving"); the receiver shows the friend as in the background. Never mailboxed; ignored by a locked phone. |
 | `typing` | `isTyping` (bool) | Real-time, not reliable. |
 
 ### 2.2 Friends and profile
@@ -551,6 +552,20 @@ Computers run no GATT server: they cannot receive waves.
 Unknown `type`, or a type the parser does not map, yields no signal
 (`zenSignalFromTransportPayload` returns `null`; relay engine returns `false`).
 
+### 2.13a Recovery circle and account moves [P]
+
+- `rc_help` (`recovery_service.dart`): a recovering device tells a person of
+  the circle (whose invitation code it was given) that it asks for help. A
+  device holding a piece of that account's key stores the request (at most
+  8, 30 days, once per sender) and shows a notification
+  and a card with *Help* (the new device's address filled in) and
+  *Decline*. A device holding no piece ignores it.
+- `al_ver {v: [...], app}` (`account_link.dart`): the answer to a device-link
+  hello of another protocol version; both sides show "the other device has
+  another version of Zen". Moving an account: the transfer code carries
+  `app`; a hello of another version is answered `acx_no {why: "version",
+  app}`.
+
 ### 2.14 Circle copy (`cbk_*`) [V]
 
 `circle_backup_service.dart`, `circle_backup_holder.dart`. Between the
@@ -628,8 +643,20 @@ relays.
 - `rly_announce` {`pk` (X25519 public key, base64url), `pq` (hybrid
   ML-KEM-768 + X25519 public key, 1216 bytes, base64url), `relays` (<=6
   addresses), `v` (monotonic version), `tk` (deposit token), `dk` (deposit key,
-  only to the recipient's relays)} -> `rly_announce_ack {v}`. Only accepted
-  from friends (and group members when sharing is on).
+  only to the recipient's relays), `on` (true when the device usually stays
+  online: a computer with Zen in the tray or an Android phone with the
+  background service; absent on iPhone)} -> `rly_announce_ack {v}`. Only
+  accepted from friends (and group members when sharing is on).
+- **Choosing relays** (`RelayEngine.rankRelays`): first friends (not casual
+  friends) whose announcement had `on` and who were seen in the last days,
+  then close friends before friends, then the most recently seen. A chosen
+  relay stays unless it was not seen for `staleRelayAfter` (3 days) while a
+  fresher one exists, or a friend with `on` appears and the relay has none
+  (then the relay seen longest ago is swapped). Checked on every `tick()`.
+- **Outbox:** a queued payload of 4 KB or more is stored in its own file
+  (`relay/out/<id>`, written once before the state, removed with the item);
+  the queue holds at most 32 MB of payloads (`kRelayOutboxMaxBytes`), beyond
+  which a new message is refused as not sent; small frames always pass.
 - `rly_deposit` {`env`: envelope, `tk`?} -> `rly_deposit_ack {id, r}`.
   **Envelope**: `{id, s (sender), r (recipient), c (created ms), x (expires
   ms), q (hybrid KEM ciphertext, 1120 bytes), n (12-byte nonce), b
@@ -686,13 +713,22 @@ A signed, append-only, per-device **log** for each **space**.
   exactly the ML-DSA key the device's certificate publishes. About 4.5 KB
   of JSON (a like: 382 B of content + 4549 B; it was 14448 B with the
   certificate inside).
+- **Checkpoint:** an entry of kind `checkpoint` (empty body) marks a point
+  a writer's log may start from. A receiver accepts a log that starts at a
+  checkpoint, moves to the checkpoint when it asked for entries from its own
+  head and the sender answered from a checkpoint (never for entries pushed
+  unasked), and treats entries before its start as duplicates, not a fork.
+  A holder may prune a log (`pruneBefore`), only at a checkpoint. When
+  checkpoints are written and when other accounts' logs are pruned is not
+  decided yet; 1.12.0 can read both.
 - **Device certificate** (the device record) =
   `{t:"dev_cert", account, device, dpk, name (<=60), issued, sig}`: `dpk` is the
   device key's ML-DSA public key (base64url, 1952 bytes), `sig` the **account
   key**'s keyed hybrid signature (it carries the account's ML-DSA key), so a
   certificate checks out on its own; about 9.9 KB. It is **not** part of an
   entry: a store keeps the certificates of the devices whose entries it holds
-  (`ledger/certs`, written when one is added) and checks every entry of a
+  (`ledger/certs-<hash>`, one file per account, written only when that
+  account's certificates change) and checks every entry of a
   device with its certificate. An entry whose certificate is unknown waits,
   unchecked and outside its log (at most 1024 in all), and the receiver asks
   the peer that sent it (`lg_cert_want`, again in the next sync with that
@@ -712,7 +748,11 @@ A signed, append-only, per-device **log** for each **space**.
   Media never goes inside an entry; it is named by blob hash.
 - **Spaces** (owner-only write, `AccountSpacePolicy`): `feed/<acct>`,
   `acts/<acct>`, `private/<acct>`, `profile/<acct>`, `own/<acct>`; and `power`
-  (closed, nobody may write yet). Unknown spaces are refused. Public spaces that
+  (closed, nobody may write yet). A space of a kind this build does not know
+  (`<kind>/<account>`, written by a newer Zen) is kept for the owner and
+  handed on, within bounds (`UnknownAccountSpacePolicy`: 1000 entries per
+  device log, 8 logs, 4 MB per space, 8 MB per owner, 64 MB and 256 spaces
+  in all); it is served by no rules of its own. Public spaces that
   anyone may read: `feed`, `profile`; `private` and `own` are sealed to the
   account's own devices.
 - **Kinds seen** [P]: `post`, `post_edit`, `post_del`, `reshare`, `comment`,
@@ -778,6 +818,13 @@ only records with that `body.py`.
 record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {treasurerKey: signature}? }
 ```
 
+- **Rules version:** `body.rv` is the version of the pyramid rules a record
+  follows (absent = 1, `kPyramidRulesVersion`). From a record (the genesis
+  included) whose `rv` is higher than the build knows, nothing is applied,
+  the pyramid's time stops (`PyramidState.rulesTooNew`), the build signs
+  nothing and asks the user to update. A future version must write `rv` in
+  the record that switches rules and in every later one. `body.wk == true`
+  marks a record whose signatures are keyed (for future kinds).
 - `body` is canonical JSON (same rules as the ledger); the record `id` is the
   sha256 of the canonical body; signatures (`s`, `ts`) are hybrid (4.1) over
   the canonical body (`ts`: over `"zen-treasurer|" + id`). Signatures on
@@ -1031,30 +1078,71 @@ ML-DSA.
 ## 5. Versioning and compatibility
 
 There is **no global protocol version number** on the wire. Compatibility
-comes from additive changes and tolerant parsing:
+comes from additive changes, tolerant parsing and explicit format versions.
+From 1.12.0 on, older formats are kept readable (the rules are in
+`lib/src/core/storage/format_version.dart`):
 
 1. **Unknown `type` is ignored**, unknown JSON fields are ignored. New frame
    types and optional fields can be added without breaking old peers.
 2. **Never reuse or change the meaning of an existing field or `type`.** Prefer a
    new field or type. Old peers keep working because they ignore it.
-3. Where a format needs a version it has its own: ledger entry `v` (1; entries
+3. **Stored formats:** a reader reads every version from the oldest known
+   to the current one and writes the current one. A new optional field needs
+   no new version; stores that rewrite a document carry unknown fields over
+   (`unknownFields` / `withCarriedFields`). A version **higher** than the
+   current one means "written by a newer Zen": the data is left untouched
+   (`NewerFormatException`; the file store holds the key and neither writes
+   nor deletes it, nor falls back to a `.bak`), the app runs on defaults and
+   asks to update (`ZenFormatGuard`). This covers the friend list, chats,
+   the signal queue, transfers, settings and profile, the ledger identity
+   and index, the pyramid log, recipient keys, the bridge book, the census,
+   the update book, meetings, the relay state, `.zenbackup` files
+   (`ZENACCT2…` or a manifest `v > 1`), the circle copy and the encrypted
+   envelope (`ZENENC3…` is "newer", not "no data"). Documents without `v`
+   (for example `meet/*`) change incompatibly only under a new key.
+4. **Enums stored by index:** their order is pinned by a test, new values
+   are only appended, and an index out of range reads as a fallback value
+   (`enumAt`), never an error.
+5. **Samples:** `test/fixtures/formats/1.12.0/` holds a sample of every
+   stored and sent format as 1.12.0 wrote it (written once at the release,
+   never changed); later builds must read them.
+6. Where a format needs a version it has its own: ledger entry `v` (1; entries
    with a higher `v` are still stored and passed on; only this build's own checks
-   apply), dating lantern `v:5`, alarm wave `v:6`,
-   BLE hello `v:7`, dating KDF/AAD labels `*.v1`, mailbox and inbox labels
-   `*.v2`, the hybrid signature's `zen.sig.v1` and its ML-DSA derivation label
+   apply), the pyramid rules version `rv` (3.4), dating lantern `v:5`,
+   alarm wave `v:6`, BLE hello `v:7`, the door sticker `v` (3; a sticker with
+   `v >= 3` and unknown fields is read, and its `mv` field names the oldest
+   reader, so a newer version can make older ones ask to update), dating
+   KDF/AAD labels `*.v1`, mailbox and inbox labels `*.v2`, the hybrid
+   signature's `zen.sig.v1` and its ML-DSA derivation label
    `zen.sig.mldsa65.v1`, the session layer's `ZPQ1` and key record version 1, blob manifest
    `chunk` size, `profile_update.v` (monotonic counter), relay announcement
-   version `v`.
-4. The compression wire formats are all accepted: plain JSON, `ZSTD:` + base64,
+   version `v`, recipient keys `v: 1`.
+7. **Changing the key exchange (KEM):** always keep opening `ZPQ1`; switch
+   on a newer format only after both sides listed it in `caps`, which they
+   exchange inside an already sealed session. The key record has a version:
+   a future record with another version goes next to the old one, not in
+   its place.
+8. **Ledger checkpoints** (3.3) let logs start later than entry 1; 1.12.0
+   already accepts them, so writing checkpoints and pruning can start later
+   without breaking anyone. Note that `UnknownAccountSpacePolicy` counts the
+   entry number: a log of an unknown kind that starts at a checkpoint past
+   1000 is not passed on by 1.12.0.
+9. The compression wire formats are all accepted: plain JSON, `ZSTD:` + base64,
    and the Dart `_zenEncoding` wrapper.
-5. Two names for one frame: call end is `hangup` or `call_end`.
-6. Persisted indices (for example the order of `ZenSignalType` in the signal
-   queue) must only be appended to.
-7. No formats of earlier versions are kept: the app has not been released, so
-   there are no migrations and no readers for older peers.
-8. The app version is `kAppVersion` (1.11.0, equal to `pubspec.yaml`); friends
-   exchange it, the build and a short list of capabilities in ping/pong (a
-   declaration, nothing security-related depends on it).
+10. Two names for one frame: call end is `hangup` or `call_end`.
+11. The app version is `kAppVersion` (equal to `pubspec.yaml`); friends
+    exchange it, the build, a short list of capabilities (`caps`) and
+    `minv`, the oldest version they still talk to (`kMinPeerVersion`), in
+    ping and pong. `minv` is raised only when a change cannot stay
+    compatible; a build older than a friend's `minv` (or than the
+    `zen-min: X.Y.Z` line of the latest GitHub release, or the `min` field
+    of a network release manifest) shows "update". Today that is only a
+    message: a newer build decides by `caps` and `minv` what it sends to
+    older ones. Nothing security-related depends on these claims.
+12. Moving or linking an account between devices of different versions is
+    refused with a clear message (`al_ver`, `acx_no`; 2.13a).
+13. A release manifest skips bad or unknown file entries (up to 64) and
+    needs one valid entry; its signature covers the list as received.
 
 ## 6. Security properties and known limits
 

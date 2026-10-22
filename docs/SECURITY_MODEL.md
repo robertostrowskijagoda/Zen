@@ -30,7 +30,7 @@ stay classical, for reasons explained below.
 | Someone impersonating a friend's address | inject or read messages | device keys pinned per address and bound to the hybrid identity |
 | A future quantum computer | break X25519 / Ed25519 | ML-KEM-768 and ML-DSA-65 in every hybrid; the secret holds while either half holds |
 | A thief with your device, locked | read your data | AES-256-GCM, password via Argon2id, hardware-held keys, throttled attempts |
-| Someone who picks up your unlocked device or forces you to open it | find other accounts | hidden accounts and decoy folders, the panic password |
+| Someone who picks up your unlocked device or forces you to open it | find other accounts | hidden accounts and decoy folders, the emergency wipe password |
 | A forged update | install malware as "Zen" | `SHA256SUMS`, Android signing certificate, the hybrid signature once maintainer keys are pinned |
 | A modified Zen of another person | forge pyramid or ledger records, money | every phone checks every signed record by the same rules |
 | Tools inside Zen's own process (debugger, Frida, hooks) | sign what you never asked for | detection; money and the pyramid power key are blocked while detected |
@@ -160,22 +160,36 @@ friend vouching for their key, is trust on first use.
   master key. What arrives is stored sealed until you unlock.
 - **Screens.** The wallet and other sensitive screens are protected from
   screenshots and screen recording (Android, Windows, macOS). Clipboard
-  copies of secrets expire after 60 seconds. Notifications show no content
-  by default.
+  copies of secrets (the account key, a transfer code) expire after 60
+  seconds; the invitation code is the public address and stays.
+  Notifications show no content by default.
+- **Media in the clear, briefly.** Some media must exist as a plain file for
+  a moment (a call recording being written, an alarm clip, a video being
+  published, a file handed to the system player). They go to a private
+  folder `zen-media` (one per profile): on Linux under the app's own cache
+  (`~/.cache/<app>`), or `$XDG_RUNTIME_DIR` when there is none, `/tmp` only
+  as a last resort; on macOS the per-user temporary folder; elsewhere the
+  app's own folder. A new folder is made with mode 0700; an existing one is
+  used only when it is a real directory (not a link), has no rights for
+  group or others, and Zen can `chmod` it (only the owner can); otherwise a
+  fresh `zen-media.XXXXXX` (`mkdtemp`) is used, and without a private
+  folder nothing is written. Each file is created empty with mode 0600
+  before its content goes in, under a random name. The folder is cleared at
+  start, at exit on computers, and when the account is deleted.
 - **Several accounts.** Each account has its own keys, mesh node, folder,
   keystore entries and password. Folders are named by a keyed hash of the
   account ID; every device has 2 to 5 decoy folders from the first start,
   and a deleted account is replaced by a decoy, so the number of folders
   stays the same. Keystore entries of extra accounts have hashed names. There
-  is no list of hidden accounts. A panic password erases its account
-  silently. An account with **"Receive in background"** on (off by default
+  is no list of hidden accounts. An emergency wipe password erases its
+  account silently. An account with **"Receive in background"** on (off by default
   for extra accounts) keeps its mesh node and a small receive kit under a
   separate background key, so the background service (Android) or the tray
   (computers) runs it without the password; someone with full access to the
   device (root, or on a computer any program of the same user) can then tell
   that the account exists and read its mesh address and whom it accepts
   messages from. Its notifications are generic.
-- **The copy at the recovery circle.** Each person of your recovery circle
+- **The copy with friends.** Each person of your recovery circle
   keeps an encrypted copy of your data: profile (no photos), friends and
   groups with their levels, settings, your pyramid state and a wallet
   statement, your household (flat key, resident key, household profile and
@@ -193,7 +207,7 @@ friend vouching for their key, is trust on first use.
   and gives a copy back only to a device the account certified (a signed,
   fresh request). After any recovery Zen asks the circle and friends for the
   newest copy, checks it and restores it with progress shown.
-- **The backup file.** "Create a backup" writes the chosen parts of the
+- **The full account copy.** "Create a full account copy" writes the chosen parts of the
   account (always the account key) into one file, in parts of 1 GB when
   larger. It is sealed in frames of 1 MiB with AES-256-GCM under a key from
   the backup password (Argon2id, 64 MiB, 2 passes; symmetric only, so
@@ -201,7 +215,13 @@ friend vouching for their key, is trust on first use.
   bound to it, so frames cannot be cut, swapped or added, and every file
   inside is checked by its SHA-256. A wrong password is told apart from a
   damaged file. A copy of another account is refused before its files are
-  read on a device that already holds an account with data.
+  read on a device that already holds an account with data. A copy made by
+  a newer Zen is refused with "update first", never half-read.
+- **Data from a newer Zen.** Stored files carry a format version. A file
+  written by a newer version is left untouched (not overwritten, not
+  replaced by a backup or a fresh identity); the app runs on defaults and
+  asks you to update. Unknown fields are carried over when Zen rewrites a
+  file.
 - **Moving the account to another device.** The device with the account
   shows a one-time QR code: its address, a one-time X25519 key and a
   random 128-bit token. The new device answers with its own one-time key
@@ -213,6 +233,38 @@ friend vouching for their key, is trust on first use.
   ChaCha20-Poly1305 under that key, inside the post-quantum session every
   signal already travels in. Blocks wait in the encrypted store, so a
   transfer cut short goes on from where it stopped.
+
+## Files from others
+
+- **Pictures.** Every received picture is decoded and saved again before it
+  is shown. Before decoding, Zen reads only the header and computes the
+  memory the picture would take (PNG from its bit depth and colour type,
+  JPEG as 8-bit RGB, WebP and BMP as RGBA). Above 128 MiB decoded, or above
+  40 megapixels, it is refused without being unpacked; anything larger than
+  a small icon is decoded in a separate isolate, so a small file holding a
+  huge picture cannot freeze or exhaust the app.
+- **Who brought a file.** The block store remembers, for each file fetched
+  for someone else's post or comment, whose entry brought it (the first
+  reason wins). When an author deletes a comment, only files that are named
+  by that comment, came with that author's entries and are used by nothing
+  else are removed; files made on this device, received in a chat, or
+  brought by another author are never touched. Refusing a file because of
+  one author blocks it only for that author's entries; a chat or another
+  author may still fetch it. Storage limits count only files fetched for
+  posts and comments. *Remove from my device* stays final.
+
+## Build and supply chain
+
+- The Go bridge is built with the Go version pinned in `go.mod`'s
+  `toolchain` line (the latest 1.26 security release), and CI runs
+  `govulncheck` against the bridge's modules and Go itself.
+- Flutter packages come exactly from `pubspec.lock` (`--enforce-lockfile`).
+- The prebuilt libwebrtc that `flutter_webrtc` downloads for Windows and
+  Linux is checked against pinned SHA-256 sums in `tool/ci/libwebrtc.sha256`
+  (until the pins are filled in, a missing pin only warns).
+- Release signing keys live only in a GitHub environment that needs the
+  maintainer's approval and works only for version tags
+  ([RELEASES.md](RELEASES.md), section 3).
 
 ## Memory hardening and tamper detection
 
@@ -252,7 +304,10 @@ friend vouching for their key, is trust on first use.
 - Any Yggdrasil node answers debug questions about its direct neighbours
   (this needs a change in Yggdrasil itself).
 - libwebrtc logs key material at its info log level; release builds keep
-  WebRTC logging off, and it must stay off.
+  WebRTC logging off, and it must stay off. The bundled libwebrtc is M150;
+  fixes from newer Chrome releases arrive only with a new WebRTC-SDK build.
+- A comment naming files that are not its own can still make a device fetch
+  them (network traffic, bounded per entry), but no longer remove them.
 - Pyramid transfers are private, but not from the treasurers: every
   treasurer (the top levels) sees every transfer, like a bank. A dishonest
   majority of treasurers could sign a double spend or a false statement;

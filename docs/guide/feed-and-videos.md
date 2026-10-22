@@ -39,6 +39,11 @@ friends, or close friends only.
 - A comment can carry up to 4 photos or GIFs (camera, gallery, a file, GIF
   search, a keyboard GIF, or dropped and pasted on a computer); tap one to
   see it full screen. Your own comment can be deleted, with its pictures.
+  The comment field stays at the bottom of the comments, like under videos.
+- A deleted comment takes with it only the pictures that came with that
+  author's entries and that nothing else uses: a deleted comment can never
+  remove a photo from your chats, the pyramid or your own posts. Storage
+  limits likewise count only pictures fetched for posts and comments.
 - You can hide comments and block people in your own threads; **Report**
   keeps the signed original as evidence and can remove the post from your
   device.
@@ -63,7 +68,7 @@ reactions, comments, **Reply with a video**, **Send to chat**.
   your finger.
 - A video is stored in encrypted blocks of 256 KB. Only the video on screen
   downloads in full; the next two fetch their first block, the next five
-  their cover. Blocks come from the author's devices, from friends who
+  their cover. A video plays only while its tab is on the screen. Blocks come from the author's devices, from friends who
   passed it on, and from the author's mailboxes (which keep a friend's
   newest videos, up to 20 MB per person).
 - Up to 1 GB of other people's videos is cached; watched ones go first. Your
@@ -86,7 +91,9 @@ reactions, comments, **Reply with a video**, **Send to chat**.
   H.264 encoder (OpenH264) and an AAC encoder (vo-aacenc) built into Zen;
   it needs GStreamer (or ffmpeg) to read the input. Without either, a video
   is published as it is if it is at most 20 MB and 90 seconds, without
-  trimming.
+  trimming. On a computer the camera turns off while Zen is hidden or
+  minimised (a recording in progress ends and is kept) and on again when
+  you come back.
 - Likes and comments of friends of friends reach the author through the
   friend who passed the video on, shown as "Ada (via Bob)".
 - The feed and video lists are only as complete as what your friends'

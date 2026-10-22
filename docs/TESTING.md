@@ -135,18 +135,26 @@ AUDIT_ONLY=p320,desk flutter test tool/ui_tour/ui_audit_test.dart --update-golde
 ```
 
 The test sets up data (pyramid, event, circle, question, flat, dating, chats)
-and walks through all tabs and screens in six configurations: `p360` (360 dp),
-`p360big` (text 130%), `p412light` (light theme), `p320`, `p320big` (text
-150%) and `desk` (1280 × 800, Windows layout). Every layout error (overflow,
+and walks through all tabs and screens in these configurations: `p360`
+(360 dp), `p360big` (text 130%), `p412light` (light theme), `p320`,
+`p320big` (text 150%), `p320short` (320 × 568), `split` (411 × 420, a split
+screen), `tablet` (800 × 1280), the computer's portrait window `desk_min`
+(390 × 720), `desk` (480 × 900) and `desk_max` (920 × 1150), and in other
+languages `de320`, `de360big`, `ru320`, `ru360big` (text 130%), `ar360`
+and `ar320big` (Arabic, right to left). Every layout error (overflow,
 overlap) is collected instead of aborting the test: the list is in
 `scratch/audit/<configuration>.txt`, screenshots in
 `scratch/audit/<configuration>/` (outside the repository). `AUDIT_ONLY`
 narrows the configurations. The test ends "failed" because of the app's
 timers — what counts is the list of problems.
 
-Languages: the audit runs in Polish (tests do not load translations). Text
-length in other languages (German, Russian) and right-to-left layout (Arabic)
-currently have to be checked by hand: Settings → Language.
+Languages: the language is set before start (the app does not switch to
+the system's language there). `test/ui_dialogs_fit_test.dart` opens the
+main dialogs on 320 × 568 with a 260 dp keyboard in Polish, German and
+Arabic at text 100% and 130%, and guards that every `AlertDialog` scrolls
+and that feature code uses direction-aware paddings and alignments;
+`test/call_compact_test.dart` checks the small call window and
+picture-in-picture sizes.
 
 ### 4.1 Pictures for the user guide (`tool/ui_tour/docs_screens_test.dart`)
 
