@@ -13,7 +13,7 @@
 //       android-x86_64=dist/Zen-x86_64.apk \
 //       windows=dist/zen-windows.zip
 //   dart run tool/zen_release.dart sign release.json maintainer.key
-//   dart run tool/zen_release.dart verify release.json
+//   dart run tool/zen_release.dart verify [--pinned] release.json
 //   dart run tool/zen_release.dart sums release.json > SHA256SUMS
 //   dart run tool/zen_release.dart sums-manifest --version 1.10.0 \
 //       --out SHA256SUMS.sig SHA256SUMS        # then: sign SHA256SUMS.sig key
@@ -44,6 +44,7 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:zen/src/core/crypto/hybrid_signature_core.dart';
 import 'package:zen/src/features/update/apk_signing_block.dart';
 
+import 'release_contract.dart' show pinnedReleaseKeys, pinnedSignatureProblems;
 import 'zen_sig.dart';
 
 export 'zen_sig.dart' show ToolKey, useToolSigner;
@@ -428,7 +429,7 @@ void _writeJson(String path, Object json) => File(
 ).writeAsStringSync(const JsonEncoder.withIndent('  ').convert(json));
 
 /// Options without a value.
-const Set<String> _flags = <String>{'--write', '--no-official'};
+const Set<String> _flags = <String>{'--write', '--no-official', '--pinned'};
 
 /// The arguments that are not options or option values.
 List<String> positionalArgs(List<String> args) => <String>[
@@ -468,7 +469,9 @@ Użycie: dart run tool/zen_release.dart <polecenie>
          [--mirror URL]... platforma=plik...
   canary --text T [--days 90] [--out canary.json]
   sign PLIK.json KLUCZ            podpis wydania albo kanarka
-  verify PLIK.json                kto podpisał i co jest w środku
+  verify [--pinned] PLIK.json     kto podpisał i co jest w środku; z --pinned
+                                  błąd, gdy żaden ważny podpis nie jest kluczem
+                                  z kReleaseMaintainers (albo lista jest pusta)
   sums release.json               linie SHA256SUMS
   sums-manifest --version V [--out SHA256SUMS.sig] SHA256SUMS
                                   SHA256SUMS do podpisania (aktualizacja z GitHuba)
@@ -658,6 +661,21 @@ Future<void> _run(String command, List<String> args) async {
       if (sums && ok.isEmpty) {
         stderr.writeln('Brak ważnego podpisu.');
         exitCode = 1;
+      }
+      if (args.contains('--pinned')) {
+        // The keys the app of this tree pins: CI checks that the key it
+        // signed with is one of them.
+        final List<String> problems = pinnedSignatureProblems(
+          signers: ok,
+          pinned: pinnedReleaseKeys(File(kReleasePath).readAsStringSync()),
+          needed: sums ? 1 : 2,
+        );
+        for (final String problem in problems) {
+          stderr.writeln('Błąd: $problem');
+        }
+        if (problems.isNotEmpty) {
+          exitCode = 1;
+        }
       }
     case 'sums':
       stdout.write(sha256Sums(_readJson(positional.first)));
