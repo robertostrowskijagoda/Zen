@@ -7,6 +7,7 @@
 #include "location_bridge.h"
 #include "media_transfer_bridge.h"
 #include "nearby_radio_bridge.h"
+#include "portrait_window.h"
 #include "security_bridge.h"
 #include "video_bridge.h"
 #include "wifi_direct_bridge.h"
@@ -82,12 +83,26 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     std::optional<LRESULT> result =
         flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
                                                       lparam);
+    // The window plugin answers this one itself (minimum size); the
+    // portrait limit goes on top of its answer.
+    if (message == WM_GETMINMAXINFO) {
+      portrait_window::LimitMaximized(hwnd,
+                                      reinterpret_cast<MINMAXINFO*>(lparam));
+      return result.value_or(0);
+    }
     if (result) {
       return *result;
     }
   }
 
   switch (message) {
+    case WM_SIZING:
+      portrait_window::ClampSizing(wparam, reinterpret_cast<RECT*>(lparam));
+      return TRUE;
+    case WM_WINDOWPOSCHANGING:
+      portrait_window::ClampPosition(hwnd,
+                                     reinterpret_cast<WINDOWPOS*>(lparam));
+      break;
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;

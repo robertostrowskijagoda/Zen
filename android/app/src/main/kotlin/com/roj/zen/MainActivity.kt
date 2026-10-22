@@ -125,7 +125,8 @@ class MainActivity : FlutterFragmentActivity() {
     @RequiresApi(Build.VERSION_CODES.O)
     private fun pipParams(): PictureInPictureParams {
         val builder = PictureInPictureParams.Builder()
-            .setAspectRatio(if (pipVideo) Rational(3, 4) else Rational(16, 9))
+            // Portrait, like the app (the video and the caller's name alike).
+            .setAspectRatio(if (pipVideo) Rational(3, 4) else Rational(4, 5))
         if (pipCallActive) {
             val hangUp = PendingIntent.getBroadcast(
                 this,

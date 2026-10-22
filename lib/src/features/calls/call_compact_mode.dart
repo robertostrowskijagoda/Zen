@@ -24,9 +24,9 @@ final class CallCompactMode {
 
   static final CallCompactMode instance = CallCompactMode._();
 
-  /// Size of the floating window on computers.
-  static const Size desktopAudioSize = Size(300, 170);
-  static const Size desktopVideoSize = Size(320, 260);
+  /// Size of the floating window on computers (portrait, like the app).
+  static const Size desktopAudioSize = Size(200, 260);
+  static const Size desktopVideoSize = Size(240, 320);
 
   /// Whether the call is shown as the small floating window right now.
   final ValueNotifier<bool> active = ValueNotifier<bool>(false);

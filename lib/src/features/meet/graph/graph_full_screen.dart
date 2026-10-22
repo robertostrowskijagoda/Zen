@@ -8,24 +8,27 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/graph/graph_model.dart';
 
 // The graph on the whole screen: the app's bars go, the system bars on a
-// phone too (immersive), the window fills the screen on a computer; all
-// of it comes back on the way out.
+// phone too (immersive), the window is maximized on a computer (the app is
+// portrait only, so that is the tallest column the screen has); all of it
+// comes back on the way out.
 
 /// What the system shows around the app while the graph is full screen.
 abstract interface class FullScreenChrome {
-  /// Hides the system bars (phone) or makes the window full screen
-  /// (computer).
+  /// Hides the system bars (phone) or maximizes the window (computer).
   Future<void> enter();
 
   /// Brings back what [enter] hid.
   Future<void> exit();
 }
 
-/// The real [FullScreenChrome]: immersive mode on phones, a full-screen
+/// The real [FullScreenChrome]: immersive mode on phones, a maximized
 /// window on computers. Never throws (a platform without it just keeps
 /// its bars).
 final class PlatformFullScreenChrome implements FullScreenChrome {
   const PlatformFullScreenChrome();
+
+  /// Whether the window was maximized already before [enter].
+  static bool _wasMaximized = false;
 
   static bool get _desktop =>
       !kIsWeb &&
@@ -36,7 +39,10 @@ final class PlatformFullScreenChrome implements FullScreenChrome {
   Future<void> enter() async {
     try {
       if (_desktop) {
-        await windowManager.setFullScreen(true);
+        _wasMaximized = await windowManager.isMaximized();
+        if (!_wasMaximized) {
+          await windowManager.maximize();
+        }
       } else {
         await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       }
@@ -49,7 +55,9 @@ final class PlatformFullScreenChrome implements FullScreenChrome {
   Future<void> exit() async {
     try {
       if (_desktop) {
-        await windowManager.setFullScreen(false);
+        if (!_wasMaximized) {
+          await windowManager.unmaximize();
+        }
       } else {
         await SystemChrome.setEnabledSystemUIMode(
           SystemUiMode.manual,

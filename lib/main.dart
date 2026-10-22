@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/app.dart';
@@ -26,6 +27,11 @@ void main(List<String> args) {
     () async {
       WidgetsFlutterBinding.ensureInitialized();
       _installGlobalErrorHandlers();
+      // Zen is portrait only (the manifests say so too; this covers the
+      // rest, e.g. tablets that would rotate anyway).
+      await SystemChrome.setPreferredOrientations(<DeviceOrientation>[
+        DeviceOrientation.portraitUp,
+      ]);
       // NOTICE and the Go, native and font licenses next to the Dart
       // packages' ones.
       registerGoLicenses();
