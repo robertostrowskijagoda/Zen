@@ -82,6 +82,12 @@ abstract final class FlatTypes {
   /// shows knockers more than its name before "Wpuść" ([FlatDoorView]).
   static const String card = 'flat_card';
 
+  /// Phone to phone: "this resident's household runs on another phone of
+  /// their account now" (signed with the resident's own key,
+  /// [flatMovedBytes]). To the phone it left — which then steps down — and
+  /// from housemates to an old phone that still speaks for the resident.
+  static const String phone = 'flat_phone';
+
   /// What comes in through a door (the bridge lets only these through,
   /// `kFlatDoorTypes`): knocks and everything between neighbour flats, sent
   /// from the sender's door; [reveal] comes from the resident's own phone;
@@ -112,6 +118,7 @@ abstract final class FlatTypes {
     rekey,
     slot,
     held,
+    phone,
   };
 
   static const Set<String> all = <String>{...atDoor, ...atPhone};
@@ -294,6 +301,24 @@ const Duration kKnockMemory = Duration(days: 14);
 
 /// At most this many knocks wait at once; the oldest goes first.
 const int kMaxKnocks = 20;
+
+/// How far a household's profile revision jumps when it moves to another
+/// phone of the account: edits the old phone made before it heard of the
+/// move never win over the profile naming the new door.
+const int kTakeoverRevStep = 64;
+
+/// What "Przenieś mieszkanie na to urządzenie" did
+/// ([NeighborsService.takeOver]).
+enum FlatTakeover {
+  /// The household runs here now, with a new door key.
+  done,
+
+  /// No copy of a household here to take (or it is not valid).
+  nothing,
+
+  /// This device is not on the network yet.
+  offline,
+}
 
 /// A resident key a neighbour has known at least this long counts when a
 /// household announces a new key. A key that showed up just before
@@ -508,6 +533,34 @@ final class NeighborsService extends ChangeNotifier {
   /// Neighbour households that moved to a new key (old key → the switch).
   final Map<String, FlatKeySwitch> _switches = <String, FlatKeySwitch>{};
 
+  /// One device of an account runs its household (the door); the others
+  /// keep a copy ([accountCopy]) to take it over ([takeOver]). When this
+  /// device started running it ([_runAt], a stamp that only grows) and on
+  /// which phone ([_runBy]; '' after leaving it): a device that sees a
+  /// newer start elsewhere steps down.
+  int _runAt = 0;
+  String _runBy = '';
+
+  /// The account's household as another device of the account runs it
+  /// (or ran it: a copy restored from a backup), while this device does
+  /// not: what "Przenieś mieszkanie na to urządzenie" takes.
+  Map<String, Object?>? _held;
+
+  /// The residents' latest moves to another phone of their account
+  /// (resident → phone, when, the resident's signature): shared with the
+  /// housemates, and only a later move replaces one.
+  final Map<String, (String, int, String)> _moves =
+      <String, (String, int, String)>{};
+
+  /// Phones a resident's household moved away from (phone → resident):
+  /// what they still send for the household is dropped, and they are told
+  /// where it went ([FlatTypes.phone]).
+  final Map<String, String> _movedFrom = <String, String>{};
+
+  /// When each such phone was last told (in memory: at most every 10
+  /// minutes).
+  final Map<String, int> _toldMoved = <String, int>{};
+
   /// Residents of neighbour flats who showed us their own account:
   /// flat key → reveals.
   final Map<String, List<FlatReveal>> _reveals = <String, List<FlatReveal>>{};
@@ -551,7 +604,8 @@ final class NeighborsService extends ChangeNotifier {
                 for (final MapEntry<String, String> m in p.members.entries)
                   if (m.key != _resident?.id &&
                       m.value.isNotEmpty &&
-                      m.value != own)
+                      m.value != own &&
+                      !p.retired.contains(m.value))
                     m.value,
               ],
             )
@@ -764,9 +818,13 @@ final class NeighborsService extends ChangeNotifier {
       for (final NeighborFlat f in _neighbors.values)
         if (!audience.contains(f)) f,
     ];
+    // The door it replaces stopped for good (a new door key): nobody sends
+    // there again, nor takes what comes from it.
     await _changeProfile(
-      (FlatProfile p) =>
-          p.copyWith(members: <String, String>{...p.members, me: door}),
+      (FlatProfile p) => p.copyWith(
+        members: <String, String>{...p.members, me: door},
+        retired: p.retiring(p.members[me] ?? ''),
+      ),
     );
     // Everyone else must reach the new door too (the audience got it).
     await _pushProfile(to: others, quiet: true);
@@ -1011,8 +1069,13 @@ final class NeighborsService extends ChangeNotifier {
   bool get isLoaded => _loaded;
   bool _loaded = false;
 
+  /// The stored state is being read again: what is in memory is half of
+  /// it, so [accountCopy] says nothing meanwhile.
+  bool _loading = false;
+
   Future<void> load() async {
     try {
+      _loading = true;
       _diskUnreadable = true;
       final List<int>? raw = await disk.read(_key);
       _diskUnreadable = false;
@@ -1021,6 +1084,7 @@ final class NeighborsService extends ChangeNotifier {
         await _fromJson(json);
       }
       _loaded = true;
+      _loading = false;
       await _checkRestored();
       if (_syncDoorKey()) {
         await _save();
@@ -1031,6 +1095,8 @@ final class NeighborsService extends ChangeNotifier {
       notifyListeners();
     } on Object catch (error, stack) {
       logZenError('Odczyt sąsiadów', error, stack);
+    } finally {
+      _loading = false;
     }
   }
 
@@ -1253,7 +1319,57 @@ final class NeighborsService extends ChangeNotifier {
         }
       }
     }
+    _runAt = json['runAt'] is int ? json['runAt'] as int : 0;
+    _runBy = json['runBy'] is String ? json['runBy'] as String : '';
+    final Object? held = json['held'];
+    _held = held is Map ? _plain(held) : null;
+    _moves
+      ..clear()
+      ..addAll(_movesFrom(json['mv']));
+    _movedFrom
+      ..clear()
+      ..addAll(_stringMapOf(json['mvFrom']));
   }
+
+  /// [json] as plain JSON (maps with string keys), as it is stored and
+  /// synced.
+  static Map<String, Object?> _plain(Map<dynamic, dynamic> json) =>
+      Map<String, Object?>.from(jsonDecode(jsonEncode(json)) as Map);
+
+  /// Moves to another phone (resident → phone, when, signature) from JSON,
+  /// not checked yet.
+  static Map<String, (String, int, String)> _movesFrom(Object? json) =>
+      <String, (String, int, String)>{
+        if (json is Map)
+          for (final MapEntry<dynamic, dynamic> e in json.entries)
+            if (e.key is String &&
+                e.value is Map &&
+                (e.value as Map)['ph'] is String &&
+                (e.value as Map)['at'] is int &&
+                (e.value as Map)['s'] is String)
+              e.key as String: (
+                (e.value as Map)['ph'] as String,
+                (e.value as Map)['at'] as int,
+                (e.value as Map)['s'] as String,
+              ),
+      };
+
+  Map<String, dynamic> _movesJson() => <String, dynamic>{
+    for (final MapEntry<String, (String, int, String)> e in _moves.entries)
+      e.key: <String, dynamic>{
+        'ph': e.value.$1,
+        'at': e.value.$2,
+        's': e.value.$3,
+      },
+  };
+
+  /// String → string entries of [json] (unclipped).
+  static Map<String, String> _stringMapOf(Object? json) => <String, String>{
+    if (json is Map)
+      for (final MapEntry<dynamic, dynamic> e in json.entries)
+        if (e.key is String && e.value is String)
+          e.key as String: e.value as String,
+  };
 
   /// Phone addresses by resident key, from JSON (anything else dropped).
   Map<String, String> _phoneMap(Object? json) => <String, String>{
@@ -1494,6 +1610,11 @@ final class NeighborsService extends ChangeNotifier {
           'sw': <Map<String, dynamic>>[
             for (final FlatKeySwitch s in _switches.values) s.toJson(),
           ],
+          'runAt': _runAt,
+          'runBy': _runBy,
+          'held': ?_held,
+          'mv': _movesJson(),
+          'mvFrom': _movedFrom,
         }),
       ),
     );
@@ -1741,12 +1862,10 @@ final class NeighborsService extends ChangeNotifier {
       return;
     }
     for (final NeighborFlat f in (to ?? audience).toList()) {
-      await _sendToDoors(
-        f.profile.doors,
-        FlatTypes.profile,
-        f.key,
-        <String, dynamic>{'p': p.toJson(), if (quiet) 'q': true},
-      );
+      await _sendToDoors(f.doors, FlatTypes.profile, f.key, <String, dynamic>{
+        'p': p.toJson(),
+        if (quiet) 'q': true,
+      });
     }
   }
 
@@ -1810,6 +1929,7 @@ final class NeighborsService extends ChangeNotifier {
             if (f.weScanned) 'ws': true,
             if (f.scannedUs) 'su': true,
             if (f.residents.isNotEmpty) 'rk': f.residents,
+            if (f.retired.isNotEmpty) 'x': f.retired.toList(),
           },
       ],
       'rm': _removed,
@@ -1823,6 +1943,8 @@ final class NeighborsService extends ChangeNotifier {
         for (final MapEntry<String, String> e in _phones.entries)
           if (p.members.containsKey(e.key)) e.key: e.value,
       },
+      // Residents' moves to another phone of their account, signed.
+      'mv': _movesJson(),
     });
   }
 
@@ -1903,6 +2025,7 @@ final class NeighborsService extends ChangeNotifier {
     _seed = b64(pair.seed);
     _pair = pair;
     _phones.clear();
+    _startRun();
     final LedgerKeyPair me = await _ensureResident();
     _door = _newDoor();
     _doorAt = _now();
@@ -2134,6 +2257,7 @@ final class NeighborsService extends ChangeNotifier {
     _pair = pair;
     _seed = seed;
     _joinAsk = null;
+    _startRun();
     _names[me.id] = _defaultName();
     await _save();
     // In: the housemate adds this resident and shares the household (after
@@ -2314,101 +2438,365 @@ final class NeighborsService extends ChangeNotifier {
         });
       }
     }
-    _dropFlat();
+    if (hasFlat) {
+      // The account's other devices drop their copies too.
+      _forget();
+    } else {
+      _dropFlat();
+    }
     await _save();
   }
 
-  // ---- the circle copy (after a recovery) ----
+  // ---- one household, several devices of the account ----
 
-  /// When the household was taken back from the circle copy, while no
-  /// housemate has confirmed it yet; null otherwise.
+  /// When this phone took the household over while it has housemates,
+  /// until one of them confirms it; null otherwise.
   int? _restoredAt;
 
-  /// How long a household taken from the circle copy waits for a
-  /// housemate.
+  /// How long a household taken over waits for a housemate to confirm it.
+  /// A copy older than a change of the household's key is never confirmed
+  /// (nobody answers under the old key): it is dropped then, never put in
+  /// place of the new key, and the person joins again with a household
+  /// code.
   static const Duration restoreConfirmWait = Duration(days: 14);
 
-  /// Whether the household came from the circle copy and waits for a
-  /// housemate's confirmation.
-  bool get restoredUnconfirmed => _restoredAt != null;
+  /// Whether this phone took the household over and no housemate has
+  /// confirmed it yet.
+  bool get waitingForHousemate => _restoredAt != null;
 
-  /// What the circle copy keeps of the household: its key, this resident's
-  /// key, the profile, housemates' names and phones. Never the door key
-  /// (one phone runs one door) nor neighbours (they come back with the
-  /// household's state from a housemate). Null without a household.
-  Map<String, dynamic>? backupState() {
-    final FlatProfile? p = _profile;
-    final String? seed = _seed;
-    final String? residentSeed = _residentSeed;
-    if (p == null || seed == null || residentSeed == null || joining) {
+  /// This phone as the one running the household.
+  String get _runPhone => _runBy.isNotEmpty ? _runBy : _own;
+
+  /// Which phone runs the household [copy] is of, and since when.
+  static (String, int)? _runOf(Map<dynamic, dynamic>? copy) {
+    final Object? run = copy?['run'];
+    if (run is! Map || run['a'] is! String || run['at'] is! int) {
       return null;
     }
-    return <String, dynamic>{
-      'seed': seed,
-      'rseed': residentSeed,
-      'p': p.toJson(),
-      'names': Map<String, String>.of(_names),
-      'phones': Map<String, String>.of(_phones),
-    };
+    return (run['a'] as String, run['at'] as int);
   }
 
-  /// Takes the household back from the circle copy (after a recovery),
-  /// held back until a housemate confirms it with the household's current
-  /// state: this phone asks the housemates to take it as the same resident
-  /// (signed with the resident key). A household that changed its key
-  /// meanwhile does not answer under the old one; after
-  /// [restoreConfirmWait] the old key is dropped, never put in place of the
-  /// new one (the person joins again from a housemate's code). Nothing when
-  /// this phone has a household already.
+  /// Whether the run [a] started after [b] (at the same moment: the phone
+  /// that sorts higher), so every device settles on the same one.
+  static bool _startedAfter((String, int) a, (String, int) b) =>
+      a.$2 > b.$2 || (a.$2 == b.$2 && a.$1.compareTo(b.$1) > 0);
+
+  /// This phone starts running the household now: later than any start
+  /// it knows of.
+  void _startRun() {
+    final (String, int)? held = _runOf(_held);
+    _runAt = max(max(_now(), _runAt + 1), (held?.$2 ?? 0) + 1);
+    _runBy = _own;
+    _held = null;
+  }
+
+  /// The account leaves the household (this phone left or was removed):
+  /// the account's other devices drop their copies too.
+  void _forget() {
+    _dropFlat();
+    _runAt = max(_now(), _runAt + 1);
+    _runBy = '';
+    _held = null;
+  }
+
+  /// The household this device keeps a copy of and could take over
+  /// ([takeOver]): its profile as the copy has it (checked on taking it);
+  /// null when it keeps none.
+  FlatProfile? get heldFlat {
+    final Map<String, Object?>? copy = _held;
+    if (copy == null || copy['seed'] is! String || copy['rseed'] is! String) {
+      return null;
+    }
+    return FlatProfile.fromJson(copy['p']);
+  }
+
+  /// The phone that runs [heldFlat] (or last did), or null.
+  String? get heldRunBy {
+    final (String, int)? run = _runOf(_held);
+    return run == null || run.$1.isEmpty ? null : run.$1;
+  }
+
+  /// Whether "Przenieś mieszkanie na to urządzenie" can run here.
+  bool get canTakeOver => !hasFlat && !joining && heldFlat != null;
+
+  /// The household as the account's devices keep it, the same on each: the
+  /// device that runs it gives its state (with which phone runs it and
+  /// since when), the others the newest copy they got, a device that left
+  /// the household says so. Never the door key (one phone runs one door)
+  /// nor messages and knocks (housemates send them again). Null while the
+  /// stored state is not read yet: nothing is sent or removed then.
+  Map<String, Object?>? accountCopy() =>
+      !_loaded || _loading || _diskUnreadable ? null : _copy();
+
+  Map<String, Object?> _copy() {
+    if (hasFlat && !joining && _seed != null && _residentSeed != null) {
+      return _liveCopy();
+    }
+    final Map<String, Object?>? held = _held;
+    if (held != null) {
+      return _plain(held);
+    }
+    if (_runAt > 0) {
+      return <String, Object?>{
+        'run': <String, Object?>{'a': '', 'at': _runAt},
+      };
+    }
+    return <String, Object?>{};
+  }
+
+  Map<String, Object?> _liveCopy() => _plain(<String, Object?>{
+    'run': <String, Object?>{'a': _runPhone, 'at': _runAt},
+    'seed': _seed,
+    'rseed': _residentSeed,
+    'p': _profile!.toJson(),
+    'names': _names,
+    'phones': _phones,
+    'door': _door,
+    'doorAt': _doorAt,
+    'view': _view.toJson(),
+    'viewAt': _viewAt,
+    'share': shareWithScanners,
+    'shareAt': _shareAt,
+    // One unit per neighbour between the devices (by 'id').
+    'nb': <Map<String, dynamic>>[
+      for (final NeighborFlat f in _neighbors.values)
+        <String, dynamic>{'id': f.key, ...f.toJson()},
+    ],
+    'rm': _removed,
+    'sign': _signupsJson(),
+    'my': _mineJson(),
+    'mv': _movesJson(),
+  });
+
+  /// Takes the account's household copy another device of the account
+  /// sent ([accountCopy]). This device keeps the newest one when it does
+  /// not run the household; when it does, it steps down for a later start
+  /// of the same resident's household on another phone (the old door key
+  /// goes, the door stops) — never for a copy that left the household, nor
+  /// for an older one, so it never takes the household back by itself.
+  Future<void> takeAccountCopy(Map<String, Object?> state) {
+    final Completer<void> done = Completer<void>();
+    _queue = _queue.then((_) async {
+      try {
+        await _takeAccountCopy(_plain(state));
+      } on Object catch (error, stack) {
+        logZenError('Sąsiedzi: kopia z innego urządzenia', error, stack);
+      }
+      done.complete();
+    });
+    return done.future;
+  }
+
+  Future<void> _takeAccountCopy(Map<String, Object?> copy) async {
+    // Not into a state half read from the disk (it would come back).
+    for (int i = 0; _loading && i < 200; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+    final (String, int)? run = _runOf(copy);
+    if (run == null || !_loaded || _diskUnreadable) {
+      return;
+    }
+    if (hasFlat) {
+      if (run.$1.isNotEmpty &&
+          run.$1 != _runPhone &&
+          copy['seed'] is String &&
+          copy['rseed'] == _residentSeed &&
+          _startedAfter(run, (_runPhone, _runAt))) {
+        await _stepDown(copy, run);
+      }
+      return;
+    }
+    if (joining) {
+      return;
+    }
+    final (String, int) known = _runOf(_held) ?? ('', _runAt);
+    if (known != run && !_startedAfter(run, known)) {
+      return;
+    }
+    if (_held != null && jsonEncode(_held) == jsonEncode(copy)) {
+      return;
+    }
+    _held = copy;
+    await _write();
+  }
+
+  /// What the circle copy and the account's backup keep of the household:
+  /// [accountCopy] while it holds one (here or as a copy). Null without a
+  /// household.
+  Map<String, dynamic>? backupState() {
+    final Map<String, Object?> copy = _copy();
+    return copy['seed'] is String && copy['rseed'] is String
+        ? Map<String, dynamic>.from(copy)
+        : null;
+  }
+
+  /// Keeps the household from a backup (the circle copy, a backup file,
+  /// another device's transfer) as a copy to take over ([takeOver]) — it
+  /// does not start here by itself. False when this phone runs a
+  /// household, or the copy is not newer than what it knows.
   Future<bool> restoreFromBackup(Map<String, dynamic> json) async {
-    if (_profile != null || _pair != null || joining) {
+    if (hasFlat ||
+        joining ||
+        json['seed'] is! String ||
+        json['rseed'] is! String) {
       return false;
     }
-    final Object? seed = json['seed'];
-    final Object? residentSeed = json['rseed'];
+    final Map<String, Object?> copy = _plain(json);
+    final (String, int) run = _runOf(copy) ?? ('', 0);
+    final (String, int) known = _runOf(_held) ?? ('', _runAt);
+    if (!_startedAfter(run, known)) {
+      return false;
+    }
+    _held = copy;
+    await _save();
+    final FlatProfile? flat = heldFlat;
+    if (flat != null) {
+      await host.notify(
+        RuntimeSystemNotification(
+          id: 'flat-held-${flat.key.hashCode}',
+          title: t('Przenieś mieszkanie na to urządzenie'),
+          body: t(
+            '„{name}” wróciło z kopii. Otwórz Sąsiadów, żeby drzwi '
+            'działały na tym urządzeniu.',
+            {'name': flat.name},
+          ),
+          createdAtMillis: _now(),
+          category: RuntimeSystemNotificationCategory.social,
+          routeKey: buildFlatKnocksRouteKey(),
+          slotKey: 'flat-held',
+        ),
+      );
+    }
+    return true;
+  }
+
+  /// "Przenieś mieszkanie na to urządzenie": the household of the copy kept
+  /// here starts on this phone with a new door key, so a new door address.
+  /// The old door is retired in the profile (neighbours never send there
+  /// again and drop what comes from it); housemates move the resident to
+  /// this phone (signed with the resident key, later than any move before);
+  /// the phone that ran it steps down when it hears (from the account's
+  /// devices, a housemate, or this phone directly). The old sticker's door
+  /// address stops answering: a new sticker is needed.
+  Future<FlatTakeover> takeOver() async {
+    final Map<String, Object?>? copy = _held;
+    final String own = _own;
+    if (hasFlat || joining || copy == null) {
+      return FlatTakeover.nothing;
+    }
+    if (own.isEmpty) {
+      return FlatTakeover.offline;
+    }
+    final Object? seed = copy['seed'];
+    final Object? residentSeed = copy['rseed'];
     final Uint8List? seedBytes = unb64(seed, length: 32);
     final Uint8List? residentBytes = unb64(residentSeed, length: 32);
     if (seed is! String ||
         residentSeed is! String ||
         seedBytes == null ||
         residentBytes == null) {
-      return false;
+      return FlatTakeover.nothing;
     }
     final LedgerKeyPair pair = await LedgerKeyPair.fromSeed(seedBytes);
-    final LedgerKeyPair resident = await LedgerKeyPair.fromSeed(residentBytes);
-    final FlatProfile? p = await _verifiedProfile(pair.id, json['p']);
-    if (p == null || !p.members.containsKey(resident.id)) {
-      return false;
+    final LedgerKeyPair me = await LedgerKeyPair.fromSeed(residentBytes);
+    final FlatProfile? p = await _verifiedProfile(pair.id, copy['p']);
+    if (p == null || !p.members.containsKey(me.id)) {
+      return FlatTakeover.nothing;
     }
+    final String ranOn = _runOf(copy)?.$1 ?? '';
+    _dropFlat();
     _seed = seed;
     _pair = pair;
-    _profile = p;
     _residentSeed = residentSeed;
-    _resident = resident;
-    _names
-      ..clear()
-      ..addAll(_stringMap(json['names']));
-    _phones
-      ..clear()
-      ..addAll(_phoneMap(json['phones']));
-    _restoredAt = _now();
-    await _ensureResident();
+    _resident = me;
+    _names.addAll(_stringMap(copy['names']));
+    _phones.addAll(_phoneMap(copy['phones']));
+    final String old = ranOn.isNotEmpty && isRoutablePeerAddress(ranOn)
+        ? _n(ranOn)
+        : (_phones[me.id] ?? '');
+    final Object? door = copy['door'];
+    final Object? doorAt = copy['doorAt'];
+    if (door is String && door.isNotEmpty && doorAt is int) {
+      _door = door;
+      _doorAt = doorAt;
+    } else {
+      _door = _newDoor();
+      _doorAt = _now();
+    }
+    _view = FlatDoorView.fromJson(copy['view']);
+    _viewAt = copy['viewAt'] is int ? copy['viewAt'] as int : 0;
+    shareWithScanners = copy['share'] == true;
+    _shareAt = copy['shareAt'] is int ? copy['shareAt'] as int : 0;
+    final Object? nb = copy['nb'];
+    if (nb is List) {
+      for (final Object? item in nb) {
+        final NeighborFlat? f = NeighborFlat.fromJson(item);
+        if (f != null && f.key != p.key) {
+          _neighbors[f.key] = f;
+        }
+      }
+    }
+    _removed.addAll(_intMap(copy['rm']));
+    _signups.addAll(_signupsFromJson(copy['sign']));
+    _mine.addAll(_flatSignupMap(copy['my']));
+    _profile = p;
+    _startRun();
+    // Housemates' moves the copy knows (checked); this resident's own move
+    // is this one.
+    await _takeMoves(copy['mv']);
+    _phones[me.id] = own;
+    final String moved = b64(
+      await me.signWithKey(flatMovedBytes(p.key, me.id, own, _runAt)),
+    );
+    _moves[me.id] = (own, _runAt, moved);
+    if (old.isNotEmpty && old != own) {
+      _movedFrom[old] = me.id;
+    }
+    // A new door key, never the old phone's (the copy has none anyway).
+    _doorKey = null;
+    _doorKeyFor = '';
+    // The old door stopped for good; the new one is named once it runs
+    // ([_syncOwnDoor]). The revision jumps past edits the old phone may
+    // still make before it hears of this, and past any earlier takeover
+    // (seconds since the epoch: a copy a little stale still wins).
+    _profile = await p
+        .copyWith(
+          members: <String, String>{...p.members, me.id: ''},
+          retired: p.retiring(p.members[me.id] ?? ''),
+          rev: max(p.rev + kTakeoverRevStep, _runAt ~/ 1000),
+        )
+        .signedWith(pair);
+    _restoredAt = _housemates.isEmpty ? null : _now();
     await _save();
-    await _announceRestored();
-    return true;
+    await _announceMoved();
+    await _syncHouse();
+    if (old.isNotEmpty && old != own) {
+      // The old phone, if it is on: it steps down at once.
+      await _sendMove(old, me.id, _moves[me.id]!);
+    }
+    // Everyone who knows the household stops sending to the old door.
+    await _pushProfile(to: _neighbors.values.toList(), quiet: true);
+    await _syncOwnDoor();
+    notifyListeners();
+    return FlatTakeover.done;
   }
 
-  /// Tells the housemates this resident is on this phone now.
-  Future<void> _announceRestored() async {
+  /// Tells the housemates this resident's household runs on this phone now
+  /// (the move signed with the resident's key); they answer with the
+  /// household's state, which confirms it.
+  Future<void> _announceMoved() async {
     final LedgerKeyPair? me = _resident;
     final FlatProfile? p = _profile;
     final String own = _own;
-    if (me == null || p == null || _pair == null || own.isEmpty) {
+    final (String, int, String)? move = me == null ? null : _moves[me.id];
+    if (me == null ||
+        p == null ||
+        _pair == null ||
+        own.isEmpty ||
+        move == null ||
+        move.$1 != own) {
       return;
     }
-    final String moved = b64(
-      await me.signWithKey(flatMovedBytes(p.key, me.id, own)),
-    );
     for (final String phone in _housemates) {
       await _send(
         phone,
@@ -2416,14 +2804,54 @@ final class NeighborsService extends ChangeNotifier {
           'a': own,
           'n': _names[me.id] ?? _defaultName(),
           'rk': me.id,
-          'rs': moved,
+          'rs': move.$3,
+          'at': move.$2,
         }),
       );
     }
   }
 
-  /// At start: a household from the circle copy asks the housemates again,
-  /// or is dropped once [restoreConfirmWait] passed without an answer.
+  /// Sends [phone] the move of [resident] ([FlatTypes.phone]).
+  Future<void> _sendMove(
+    String phone,
+    String resident,
+    (String, int, String) move,
+  ) async {
+    final FlatProfile? p = _profile;
+    if (p == null || _pair == null) {
+      return;
+    }
+    await _send(
+      phone,
+      await _envelope(FlatTypes.phone, p.key, <String, dynamic>{
+        'a': resident,
+        'ph': move.$1,
+        'at': move.$2,
+        'rs': move.$3,
+      }),
+    );
+  }
+
+  /// A phone the household moved away from still speaks for it: it is
+  /// told where the household went (at most every 10 minutes).
+  Future<void> _tellMoved(String phone) async {
+    final String? resident = _movedFrom[phone];
+    final (String, int, String)? move = resident == null
+        ? null
+        : _moves[resident];
+    final int now = _now();
+    final int? told = _toldMoved[phone];
+    if (move == null ||
+        (told != null &&
+            now - told < const Duration(minutes: 10).inMilliseconds)) {
+      return;
+    }
+    _toldMoved[phone] = now;
+    await _sendMove(phone, resident!, move);
+  }
+
+  /// At start: a household taken over asks the housemates again, or is
+  /// dropped once [restoreConfirmWait] passed without an answer.
   Future<void> _checkRestored() async {
     final int? at = _restoredAt;
     if (at == null) {
@@ -2431,11 +2859,156 @@ final class NeighborsService extends ChangeNotifier {
     }
     if (_now() - at > restoreConfirmWait.inMilliseconds) {
       _restoredAt = null;
-      _dropFlat();
+      _forget();
       await _save();
       return;
     }
-    await _announceRestored();
+    await _announceMoved();
+  }
+
+  /// Another phone of the account runs the household since [run]: this one
+  /// steps down. Everything of the household goes from here, the old door
+  /// key too (the door stops, friends give back its mailbox doors); [copy]
+  /// stays as the copy to take it back with — only by hand.
+  Future<void> _stepDown(Map<String, Object?> copy, (String, int) run) async {
+    final String name = _profile?.name ?? '';
+    _dropFlat();
+    _doorKey = null;
+    _doorKeyFor = '';
+    _held = <String, Object?>{
+      ...copy,
+      'run': <String, Object?>{'a': run.$1, 'at': run.$2},
+    };
+    await _save();
+    await host.notify(
+      RuntimeSystemNotification(
+        id: 'flat-moved-away-${run.$2}',
+        title: t('„{name}” działa na innym urządzeniu', {'name': name}),
+        body: t(
+          'Mieszkanie przeniesiono na inne urządzenie Twojego konta. Ten '
+          'telefon nie otwiera już drzwi.',
+        ),
+        createdAtMillis: _now(),
+        category: RuntimeSystemNotificationCategory.social,
+        slotKey: 'flat-moved-away',
+      ),
+    );
+  }
+
+  /// Takes a housemate's move to another phone of their account ([phone]
+  /// since [at], [sig] signed with their resident key): only a later one
+  /// than any seen for them, so an old notice sent again changes nothing.
+  /// True when taken (or it is the one known).
+  Future<bool> _takeMove(
+    String resident,
+    Object? phone,
+    Object? at,
+    Object? sig,
+  ) async {
+    final FlatProfile? p = _profile;
+    if (p == null ||
+        resident == _resident?.id ||
+        !p.members.containsKey(resident) ||
+        phone is! String ||
+        !isRoutablePeerAddress(phone) ||
+        at is! int ||
+        sig is! String) {
+      return false;
+    }
+    final String to = _n(phone);
+    final (String, int, String)? had = _moves[resident];
+    if (had != null && had.$1 == to && had.$2 == at) {
+      return true;
+    }
+    if (had != null && !_startedAfter((to, at), (had.$1, had.$2))) {
+      return false;
+    }
+    if (!await verifyLedgerSignature(
+      publicKey: resident,
+      message: flatMovedBytes(p.key, resident, to, at),
+      signature: sig,
+    )) {
+      return false;
+    }
+    _moves[resident] = (to, at, sig);
+    final String? old = _phones[resident];
+    if (old != null && old != to) {
+      _movedFrom[old] = resident;
+      while (_movedFrom.length > 32) {
+        _movedFrom.remove(_movedFrom.keys.first);
+      }
+    }
+    _movedFrom.remove(to);
+    _phones[resident] = to;
+    return true;
+  }
+
+  /// Takes the residents' moves [json] names (from a housemate, or the
+  /// account copy). True when one is a later move of this phone's own
+  /// resident: this phone stepped down.
+  Future<bool> _takeMoves(Object? json) async {
+    final String? me = _resident?.id;
+    for (final MapEntry<String, (String, int, String)> e in _movesFrom(
+      json,
+    ).entries) {
+      if (e.key == me) {
+        if (await _supersededBy(e.value.$1, e.value.$2, e.value.$3)) {
+          return true;
+        }
+        continue;
+      }
+      await _takeMove(e.key, e.value.$1, e.value.$2, e.value.$3);
+    }
+    return false;
+  }
+
+  /// Steps down when this phone's own resident moved the household to
+  /// [phone] at [at] ([sig]: signed with the resident's key, which only the
+  /// account's devices hold) after this phone started running it. True
+  /// when it did.
+  Future<bool> _supersededBy(Object? phone, Object? at, Object? sig) async {
+    final FlatProfile? p = _profile;
+    final LedgerKeyPair? me = _resident;
+    if (p == null ||
+        me == null ||
+        !hasFlat ||
+        phone is! String ||
+        !isRoutablePeerAddress(phone) ||
+        at is! int ||
+        sig is! String) {
+      return false;
+    }
+    final String to = _n(phone);
+    if (to == _runPhone || !_startedAfter((to, at), (_runPhone, _runAt))) {
+      return false;
+    }
+    if (!await verifyLedgerSignature(
+      publicKey: me.id,
+      message: flatMovedBytes(p.key, me.id, to, at),
+      signature: sig,
+    )) {
+      return false;
+    }
+    final Map<String, Object?> copy = _liveCopy();
+    await _stepDown(copy, (to, at));
+    return true;
+  }
+
+  /// [FlatTypes.phone]: a resident's household moved to another phone of
+  /// their account — this phone's own resident (it steps down), or a
+  /// housemate's.
+  Future<void> _onPhoneMoved(Map<String, dynamic> b) async {
+    final Object? a = b['a'];
+    if (a is! String) {
+      return;
+    }
+    if (a == _resident?.id) {
+      await _supersededBy(b['ph'], b['at'], b['rs']);
+      return;
+    }
+    if (await _takeMove(a, b['ph'], b['at'], b['rs'])) {
+      await _save();
+    }
   }
 
   /// Forgets everything of the household on this phone (it left, was
@@ -2479,6 +3052,10 @@ final class NeighborsService extends ChangeNotifier {
     _voteSigs.clear();
     _switches.clear();
     _doorOut.clear();
+    _moves.clear();
+    _movedFrom.clear();
+    _toldMoved.clear();
+    _restoredAt = null;
     // The next household gets a resident key of its own.
     _resident = null;
     _residentSeed = null;
@@ -2494,12 +3071,9 @@ final class NeighborsService extends ChangeNotifier {
       return;
     }
     for (final NeighborFlat f in _neighbors.values.toList()) {
-      await _sendToDoors(
-        f.profile.doors,
-        FlatTypes.moved,
-        f.key,
-        <String, dynamic>{'pl': p.place},
-      );
+      await _sendToDoors(f.doors, FlatTypes.moved, f.key, <String, dynamic>{
+        'pl': p.place,
+      });
     }
     final int t = _now();
     for (final String key in _neighbors.keys) {
@@ -2547,7 +3121,7 @@ final class NeighborsService extends ChangeNotifier {
     if (had != null && had.weScanned) {
       // Also at the door on the sticker: their doors may have moved since.
       await _sendToDoors(
-        <String>[...had.profile.doors, code.inbox],
+        <String>[...had.doors, code.inbox],
         FlatTypes.get,
         code.key,
         const <String, dynamic>{},
@@ -2720,7 +3294,7 @@ final class NeighborsService extends ChangeNotifier {
     final NeighborFlat? f = _neighbors[key];
     if (f != null) {
       await _sendToDoors(
-        f.profile.doors,
+        f.doors,
         FlatTypes.get,
         key,
         const <String, dynamic>{},
@@ -2753,18 +3327,13 @@ final class NeighborsService extends ChangeNotifier {
     _messages[m.id] = m;
     _lastRead[key] = m.at;
     await _save();
-    await _sendToDoors(
-      f.profile.doors,
-      FlatTypes.message,
-      key,
-      <String, dynamic>{
-        'id': m.id,
-        't': m.text,
-        'at': m.at,
-        'by': m.by,
-        if (about.isNotEmpty) 'it': about,
-      },
-    );
+    await _sendToDoors(f.doors, FlatTypes.message, key, <String, dynamic>{
+      'id': m.id,
+      't': m.text,
+      'at': m.at,
+      'by': m.by,
+      if (about.isNotEmpty) 'it': about,
+    });
     await _syncHouse();
     return true;
   }
@@ -2786,12 +3355,10 @@ final class NeighborsService extends ChangeNotifier {
       at: _now(),
     );
     await _save();
-    await _sendToDoors(
-      f.profile.doors,
-      FlatTypes.signup,
-      key,
-      <String, dynamic>{'i': itemId, 'c': count.clamp(0, 20)},
-    );
+    await _sendToDoors(f.doors, FlatTypes.signup, key, <String, dynamic>{
+      'i': itemId,
+      'c': count.clamp(0, 20),
+    });
     await _syncHouse();
     return true;
   }
@@ -2996,6 +3563,15 @@ final class NeighborsService extends ChangeNotifier {
       return;
     }
     if (from == ownKey) {
+      if (type != FlatTypes.join &&
+          type != FlatTypes.phone &&
+          _movedFrom.containsKey(sender) &&
+          _residentOf(sender) == null) {
+        // A phone the household moved away from that did not hear yet: it
+        // speaks for nobody here any more, and is told where it went.
+        await _tellMoved(sender);
+        return;
+      }
       switch (type) {
         case FlatTypes.house:
           await _onHouse(sender, b);
@@ -3007,10 +3583,17 @@ final class NeighborsService extends ChangeNotifier {
           await _onKick(sender, b);
         case FlatTypes.rekey:
           await _onRekey(sender, b);
+        case FlatTypes.phone:
+          await _onPhoneMoved(b);
       }
       return;
     }
     if (_profile == null) {
+      return;
+    }
+    if (frame.door && (_neighbors[from]?.retired.contains(sender) ?? false)) {
+      // From a door that household retired (its old door key): not theirs
+      // any more.
       return;
     }
     if (frame.door &&
@@ -3308,7 +3891,7 @@ final class NeighborsService extends ChangeNotifier {
       // To the door that knocked: their card names none of their doors.
       // Their full profile comes back from there.
       await _sendToDoors(
-        <String>[...f.profile.doors, k.sender],
+        <String>[...f.doors, k.sender],
         FlatTypes.profile,
         f.key,
         <String, dynamic>{'p': p.toJson()},
@@ -3708,16 +4291,11 @@ final class NeighborsService extends ChangeNotifier {
         at: _now(),
       );
     }
-    await _sendToDoors(
-      f.profile.doors,
-      FlatTypes.signupAck,
-      from,
-      <String, dynamic>{
-        'i': item.id,
-        'c': accepted ? count : before,
-        'ok': accepted,
-      },
-    );
+    await _sendToDoors(f.doors, FlatTypes.signupAck, from, <String, dynamic>{
+      'i': item.id,
+      'c': accepted ? count : before,
+      'ok': accepted,
+    });
     if (!accepted) {
       return;
     }
@@ -3797,24 +4375,46 @@ final class NeighborsService extends ChangeNotifier {
       return;
     }
     final String resident = rk as String;
-    final String? phone = _phones[resident];
-    if ((!p.members.containsKey(resident) &&
-            (_approved[resident] ?? 0) <= _now()) ||
-        (phone != null &&
-            phone != sender &&
-            // The resident's account came back on a new phone (signed with
-            // the resident's own key).
-            !(p.members.containsKey(resident) &&
-                b['rs'] is String &&
-                await verifyLedgerSignature(
-                  publicKey: resident,
-                  message: flatMovedBytes(p.key, resident, sender),
-                  signature: b['rs'] as String,
-                ))) ||
-        (!p.members.containsKey(resident) &&
-            p.members.length >= FlatProfile.maxMembers)) {
-      // A resident key already someone else's, or no room.
+    if (resident == _resident?.id) {
+      // This very resident's household started on another phone of the
+      // account.
+      await _supersededBy(sender, b['at'], b['rs']);
       return;
+    }
+    final String? phone = _phones[resident];
+    final bool member = p.members.containsKey(resident);
+    if (phone != null && phone != sender) {
+      // The resident's household moved to another phone of their account
+      // ("Przenieś mieszkanie na to urządzenie"): only with the resident's
+      // own signature, and only a later move than any seen.
+      if (!member || !await _takeMove(resident, sender, b['at'], b['rs'])) {
+        return;
+      }
+      await _save();
+      await _syncHouse(to: <String>[sender]);
+      final String name = residentName(resident);
+      await host.notify(
+        RuntimeSystemNotification(
+          id: 'flat-phone-${resident.hashCode}-${_moves[resident]?.$2}',
+          title: t('Domownik zmienił telefon'),
+          body: t('{name}: drzwi działają teraz na innym telefonie.', {
+            'name': name.isEmpty ? t('Domownik') : name,
+          }),
+          createdAtMillis: _now(),
+          category: RuntimeSystemNotificationCategory.social,
+          slotKey: 'flat-join',
+        ),
+      );
+      return;
+    }
+    if ((!member && (_approved[resident] ?? 0) <= _now()) ||
+        (!member && p.members.length >= FlatProfile.maxMembers)) {
+      // Not let in here, or no room.
+      return;
+    }
+    if (member && b['rs'] != null) {
+      // The resident's phone says again where the household runs.
+      await _takeMove(resident, sender, b['at'], b['rs']);
     }
     _phones[resident] = sender;
     _approved.remove(resident);
@@ -3824,16 +4424,16 @@ final class NeighborsService extends ChangeNotifier {
         (_names[resident] ?? '').isEmpty) {
       _names[resident] = _clip(name, 40);
     }
-    if (!p.members.containsKey(resident)) {
-      // Their door is named once it runs (they put it in themselves).
-      await _changeProfile(
-        (FlatProfile p) =>
-            p.copyWith(members: <String, String>{...p.members, resident: ''}),
-      );
-    } else {
+    if (member) {
       await _save();
       await _syncHouse(to: <String>[sender]);
+      return;
     }
+    // Their door is named once it runs (they put it in themselves).
+    await _changeProfile(
+      (FlatProfile p) =>
+          p.copyWith(members: <String, String>{...p.members, resident: ''}),
+    );
     await host.notify(
       RuntimeSystemNotification(
         id: 'flat-join-${sender.hashCode}',
@@ -3953,7 +4553,12 @@ final class NeighborsService extends ChangeNotifier {
     if (p == null) {
       return;
     }
-    // A household taken from the circle copy: a housemate confirmed it.
+    // Residents' moves to other phones of their accounts; a later move of
+    // this phone's own resident: this phone steps down.
+    if (await _takeMoves(b['mv'])) {
+      return;
+    }
+    // A household taken over on this phone: a housemate confirmed it.
     _restoredAt = null;
     final bool wasJoining = joining;
     final Map<String, String> before =
@@ -4015,6 +4620,10 @@ final class NeighborsService extends ChangeNotifier {
         final NeighborFlat? had = _neighbors[fp.key];
         // Residents' keys a housemate pinned (ours stay where we have one).
         final Map<String, int> pins = flatPinsFromJson(item['rk']);
+        final Object? retired = item['x'];
+        final List<String> gone = retired is List
+            ? retired.whereType<String>().take(NeighborFlat.maxRetired).toList()
+            : const <String>[];
         if (had == null) {
           _neighbors[fp.key] = NeighborFlat(
             profile: fp,
@@ -4023,8 +4632,10 @@ final class NeighborsService extends ChangeNotifier {
             scannedUs: item['su'] == true,
             seenItems: fp.items.map((FlatItem i) => i.id).toSet(),
             residents: pins,
+            retired: gone,
           );
         } else {
+          had.retire(gone);
           if (fp.newerThan(had.profile)) {
             had.profile = fp;
           }
@@ -4304,7 +4915,7 @@ final class NeighborsService extends ChangeNotifier {
         return;
       }
       final String flat = p.name;
-      _dropFlat();
+      _forget();
       await _save();
       await host.notify(
         RuntimeSystemNotification(
@@ -4566,13 +5177,7 @@ final class NeighborsService extends ChangeNotifier {
     // To neighbours first, from the door they know: the new door code gives
     // this phone's door a new key, and so a new address.
     for (final NeighborFlat f in _neighbors.values.toList()) {
-      await _sendToDoors(
-        f.profile.doors,
-        FlatTypes.newKey,
-        f.key,
-        notice,
-        pair: old,
-      );
+      await _sendToDoors(f.doors, FlatTypes.newKey, f.key, notice, pair: old);
     }
     _oldKey = old.id;
     _seed = b64(pair.seed);
@@ -4721,13 +5326,9 @@ final class NeighborsService extends ChangeNotifier {
       return;
     }
     for (final NeighborFlat f in _neighbors.values.toList()) {
-      await _sendToDoors(
-        f.profile.doors,
-        FlatTypes.newKey,
-        f.key,
-        <String, dynamic>{'p': next.toJson()},
-        pair: mine,
-      );
+      await _sendToDoors(f.doors, FlatTypes.newKey, f.key, <String, dynamic>{
+        'p': next.toJson(),
+      }, pair: mine);
     }
     _seed = b64(seedBytes);
     _pair = theirs;
@@ -5025,6 +5626,7 @@ final class NeighborsService extends ChangeNotifier {
         ...next.items.map((FlatItem i) => i.id),
       },
       residents: Map<String, int>.of(f.residents),
+      retired: f.retired,
     );
     for (final FlatMessage m in _messages.values.toList()) {
       if (m.flat == from) {
@@ -5106,7 +5708,7 @@ final class NeighborsService extends ChangeNotifier {
       }),
       kReliableTtlKey: kDoorRetryLife.inMilliseconds,
     };
-    for (final String d in f.profile.doors.toSet()) {
+    for (final String d in f.doors.toSet()) {
       await _send(d, payload);
     }
     return true;

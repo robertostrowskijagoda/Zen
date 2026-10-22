@@ -18,6 +18,7 @@ import 'package:zen/src/features/neighbors/flat_model.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/neighbors/neighbors_service.dart';
 import 'package:zen/src/features/neighbors/presentation/flat_door_screen.dart';
+import 'package:zen/src/features/neighbors/presentation/flat_takeover.dart';
 import 'package:zen/src/features/neighbors/presentation/neighbor_screen.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
 
@@ -331,6 +332,9 @@ class NeighborsScreen extends ConsumerWidget {
             if (service.joining && !service.hasFlat) {
               return _Joining(service: service);
             }
+            if (service.canTakeOver) {
+              return const _HeldFlat();
+            }
             if (!service.hasFlat) {
               return _NoFlat(service: service);
             }
@@ -398,6 +402,32 @@ class _Joining extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// This device keeps a copy of the account's household: another device of
+/// the account runs it, or it came back from a backup.
+class _HeldFlat extends StatelessWidget {
+  const _HeldFlat();
+
+  @override
+  Widget build(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+      children: <Widget>[
+        const FlatTakeoverCard(),
+        ZenInfo(
+          icon: Icons.info_outline_rounded,
+          tone: neighborsTone(zen),
+          text: t(
+            'Tu jest kopia: profil, domownicy i sąsiedzi. Pukanie, '
+            'wiadomości i zaproszenia obsługuje urządzenie, na którym działa '
+            'mieszkanie.',
+          ),
+        ),
+      ],
     );
   }
 }
@@ -964,6 +994,16 @@ class _FlatHome extends ConsumerWidget {
             ],
           ),
         ),
+        if (service.waitingForHousemate)
+          ZenInfo(
+            key: const Key('flat-waiting-housemate'),
+            icon: Icons.hourglass_top_rounded,
+            tone: tone,
+            text: t(
+              'Mieszkanie działa już na tym urządzeniu. Czekamy, aż któryś '
+              'z domowników to potwierdzi.',
+            ),
+          ),
         const SizedBox(height: 8),
         IntrinsicHeight(
           child: Row(

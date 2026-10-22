@@ -11,10 +11,11 @@ import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
-/// The household and the dating profile in the circle copy: a recovered
-/// resident is back in the household once a housemate confirms it (and
-/// housemates see the new phone); a key the household changed meanwhile is
-/// never undone.
+/// The household and the dating profile in the circle copy: the household
+/// comes back as a copy, a recovered resident moves it to the new phone by
+/// hand ("Przenieś mieszkanie na to urządzenie") and a housemate confirms
+/// it (housemates see the new phone); a key the household changed
+/// meanwhile is never undone.
 void main() {
   test(
     'a recovered resident is back in the household on a new phone',
@@ -29,19 +30,29 @@ void main() {
               as Map<String, dynamic>;
       // No door key in the copy: one phone runs one door.
       expect(copy.containsKey('dk'), isFalse);
+      expect(jsonEncode(copy), isNot(contains(ola.service.doorKey!)));
 
-      // Ola's phone is lost; her account comes back on a new one.
+      // Ola's phone is lost; her account comes back on a new one, with the
+      // household as a copy: it does not start there by itself.
       ola.online = false;
       final _Phone again = _Phone(net, 'Ola (nowy)');
       expect(await again.service.restoreFromBackup(copy), isTrue);
+      expect(again.service.hasFlat, isFalse);
+      expect(again.service.canTakeOver, isTrue);
+      // Twice is nothing new.
+      expect(await again.service.restoreFromBackup(copy), isFalse);
+
+      // "Przenieś mieszkanie na to urządzenie".
+      expect(await again.service.takeOver(), FlatTakeover.done);
       expect(again.service.residentKey, ola.service.residentKey);
       await _settle();
 
       // Ania took the new phone as Ola's and sent the household's state.
-      expect(again.service.restoredUnconfirmed, isFalse);
+      expect(again.service.waitingForHousemate, isFalse);
       expect(again.service.profile!.key, ania.service.profile!.key);
       expect(again.heardFrom, contains(ania.address));
-      // Twice is nothing new.
+      final String me = again.service.residentKey!;
+      expect(ania.service.profile!.members[me], again.inbox);
       expect(await again.service.restoreFromBackup(copy), isFalse);
     },
   );
@@ -68,16 +79,19 @@ void main() {
 
     final _Phone again = _Phone(net, 'Ola (nowy)');
     expect(await again.service.restoreFromBackup(copy), isTrue);
+    expect(await again.service.takeOver(), FlatTakeover.done);
     await _settle();
-    // Nobody answers under the old key: the household stays held back.
-    expect(again.service.restoredUnconfirmed, isTrue);
+    // Nobody answers under the old key: it waits for a housemate.
+    expect(again.service.waitingForHousemate, isTrue);
+    expect(ania.service.profile!.key, newKey);
 
     // Two weeks later the old key is dropped, not put back.
     again.clock += const Duration(days: 15).inMilliseconds;
     again.service = again.restarted();
     await again.service.load();
-    expect(again.service.restoredUnconfirmed, isFalse);
+    expect(again.service.waitingForHousemate, isFalse);
     expect(again.service.hasFlat, isFalse);
+    expect(again.service.canTakeOver, isFalse);
   });
 
   test('the dating profile comes back without its photos', () {

@@ -13,6 +13,9 @@ import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/neighbors/neighbors_providers.dart';
+import 'package:zen/src/features/neighbors/neighbors_service.dart';
+import 'package:zen/src/features/neighbors/presentation/flat_takeover.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
@@ -92,6 +95,28 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
     return ok;
   }
 
+  /// Whether [device] runs the account's household while this device keeps
+  /// a copy it can take over.
+  bool _runsFlat(AccountDevice device) {
+    final NeighborsService neighbors = ref.read(neighborsServiceProvider);
+    final String? by = neighbors.heldRunBy;
+    final String? address = device.address;
+    return neighbors.canTakeOver &&
+        by != null &&
+        address != null &&
+        PeerShareCodec.addressesEqual(by, address);
+  }
+
+  /// The device that runs the account's household, as "Działa na: …".
+  String? _flatRunsOn(LedgerNode node) {
+    for (final AccountDevice d in node.ownDevices) {
+      if (!d.isThis && _runsFlat(d)) {
+        return t('Działa na: {device}', {'device': d.name});
+      }
+    }
+    return null;
+  }
+
   Future<void> _unlink(AccountDevice device) async {
     final bool? sure = await showDialog<bool>(
       context: context,
@@ -124,9 +149,13 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
     if (sure != true || !await _unlock(t('Odłączenie urządzenia'))) {
       return;
     }
+    // Known before: once cut off, it is not on the list any more.
+    final bool ranFlat = _runsFlat(device);
+    bool unlinked = false;
     setState(() => _busy = true);
     try {
       await _node!.unlinkDevice(device.device);
+      unlinked = true;
       _message = t('„{name}” jest odłączone.', {'name': device.name});
     } on Object catch (error) {
       _message = t('Nie udało się: {error}', {'error': error});
@@ -135,6 +164,17 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
       if (mounted) {
         setState(() => _busy = false);
       }
+    }
+    if (unlinked && ranFlat && mounted) {
+      // The cut-off device opened the household's door: the door moves
+      // here, with a new key.
+      await takeOverFlat(
+        context,
+        ref.read(neighborsServiceProvider),
+        lead: t('„{device}” otwierało drzwi mieszkania.', {
+          'device': device.name,
+        }),
+      );
     }
   }
 
@@ -211,6 +251,10 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
                             child: Text(t('Odłącz')),
                           ),
                   ),
+                if (!node.isRevoked) ...<Widget>[
+                  const SizedBox(height: 12),
+                  FlatTakeoverCard(runsOn: _flatRunsOn(node)),
+                ],
                 const SizedBox(height: 20),
                 FilledButton.icon(
                   key: const Key('devices-link-new'),

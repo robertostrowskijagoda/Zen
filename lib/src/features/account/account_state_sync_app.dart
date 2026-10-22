@@ -17,6 +17,7 @@ import 'package:zen/src/features/account/recovery_providers.dart';
 import 'package:zen/src/features/dating/dating_model.dart';
 import 'package:zen/src/features/dating/dating_providers.dart';
 import 'package:zen/src/features/dating/dating_service.dart';
+import 'package:zen/src/features/feed/feed_model.dart' show deletedCommentIds;
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -25,6 +26,7 @@ import 'package:zen/src/features/meet/circle/food_providers.dart';
 import 'package:zen/src/features/meet/intro/intro_providers.dart';
 import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/plan/plan_providers.dart';
+import 'package:zen/src/features/neighbors/household_sync.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -65,8 +67,9 @@ const List<String> kSyncedMeetKeys = <String>[
 ];
 
 /// Copies kept on the other devices for a recovery (not taken into use
-/// there): the household (its key belongs to one phone, the door's) and
-/// chats with people who are not friends.
+/// there): the household (one phone runs it, the door; the others take it
+/// over by hand, [HouseholdSyncDomain]) and chats with people who are not
+/// friends.
 const String kHeldHousehold = 'held/household';
 const String kHeldStrangers = 'held/chat/strangers';
 
@@ -461,16 +464,24 @@ final class OwnMediaKeeper {
     unawaited(_added?.cancel());
   }
 
-  /// The files of the account's own entries this device does not hold.
-  List<String> missing() => <String>[
-    for (final String kind in spaces)
-      for (final LogEntry e in node.store.entries(
-        accountSpace(kind, node.account),
-      ))
-        for (final String id in e.blobs)
-          if (!node.blobs.isComplete(id) && !node.blobs.refused.contains(id))
-            id,
-  ];
+  /// The files of the account's own entries this device does not hold
+  /// (not those of comments removed since).
+  List<String> missing() {
+    final Set<String> removed = deletedCommentIds(
+      node.store.entries(accountSpace('acts', node.account)),
+    );
+    return <String>[
+      for (final String kind in spaces)
+        for (final LogEntry e in node.store.entries(
+          accountSpace(kind, node.account),
+        ))
+          if (!removed.contains(e.id))
+            for (final String id in e.blobs)
+              if (!node.blobs.isComplete(id) &&
+                  !node.blobs.refused.contains(id))
+                id,
+    ];
+  }
 
   /// Asks the account's other devices for what is missing, when files may
   /// travel now.
@@ -500,6 +511,7 @@ final class AccountDevicesKeeper {
   final Ref ref;
   AccountStateSync? _sync;
   OwnMediaKeeper? _media;
+  HouseholdSyncDomain? _household;
   final List<_PokedDomain> _domains = <_PokedDomain>[];
   final List<void Function()> _unlisten = <void Function()>[];
 
@@ -571,11 +583,11 @@ final class AccountDevicesKeeper {
     for (final StoredStateSyncDomain d in meet) {
       _listen(services[d.key]!.$1(), d);
     }
-    final HeldStateSyncDomain household = HeldStateSyncDomain(
+    final HouseholdSyncDomain household = HouseholdSyncDomain(
       kHeldHousehold,
-      disk,
-      () async => ref.read(neighborsServiceProvider).backupState(),
+      ref.read(neighborsServiceProvider),
     );
+    _household = household;
     final HeldStateSyncDomain strangers = HeldStateSyncDomain(
       kHeldStrangers,
       disk,
@@ -586,13 +598,12 @@ final class AccountDevicesKeeper {
       ?dating,
       profile,
       ...meet,
-      household,
       strangers,
     ]);
     final AccountStateSync sync = AccountStateSync(
       channel: LedgerAccountSyncChannel(node),
       disk: disk,
-      domains: _domains,
+      domains: <AccountSyncDomain>[..._domains, household],
     );
     _sync = sync;
     await sync.start();
@@ -611,6 +622,8 @@ final class AccountDevicesKeeper {
     for (final _PokedDomain d in _domains) {
       await d.close();
     }
+    await _household?.close();
+    _household = null;
   }
 }
 

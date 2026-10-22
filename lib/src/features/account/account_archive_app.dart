@@ -101,10 +101,10 @@ final class AppAccountArchiveSource implements AccountArchiveSource {
   @override
   Map<String, dynamic> dating() => ref.read(datingServiceProvider).me.toJson();
 
+  /// The household here, or the copy this device keeps of it.
   @override
   Future<Map<String, dynamic>?> household() async =>
-      ref.read(neighborsServiceProvider).backupState() ??
-      await heldAccountState(node.disk, kHeldHousehold);
+      ref.read(neighborsServiceProvider).backupState();
 
   @override
   Future<Uint8List?> readState(String key) async {

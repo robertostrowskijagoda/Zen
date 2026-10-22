@@ -231,8 +231,8 @@ final class AppCircleBackupData implements CircleBackupData {
       await ref.read(pyramidServiceProvider).mergeFromOwnDevice(pyramid);
     }
     step();
-    // The household: held back until a housemate confirms it (a key
-    // changed meanwhile is never undone).
+    // The household: kept as a copy; "Przenieś mieszkanie na to
+    // urządzenie" starts it here (a key changed meanwhile is never undone).
     final Object? household = content.sections[CircleBackupSections.household];
     if (household is Map<String, dynamic>) {
       await ref.read(neighborsServiceProvider).restoreFromBackup(household);

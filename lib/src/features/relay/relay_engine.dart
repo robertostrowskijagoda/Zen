@@ -380,6 +380,8 @@ const Set<String> kReliablePayloadTypes = <String>{
   'flat_rekey',
   'flat_newkey',
   'flat_reveal',
+  // The household moved to another phone of a resident's account.
+  'flat_phone',
   // Knocks while nobody is home (flat_door_mail.dart): to a friend's
   // mailbox door, a friend's mailbox door handed over, and passed on.
   'flat_seal',
@@ -409,6 +411,7 @@ const Set<String> _directOnlyPayloadTypes = <String>{
   'flat_rekey',
   'flat_newkey',
   'flat_reveal',
+  'flat_phone',
   // A door never answers; a friend passes a knock on the moment the
   // resident shows up (the other mailboxes took the same knock).
   'flat_seal',

@@ -138,11 +138,15 @@ final class FlatProfile {
     this.about = '',
     this.items = const <FlatItem>[],
     this.photo = '',
+    this.retired = const <String>[],
     this.signature = '',
   });
 
   /// Longest photo accepted in a profile (base64 characters).
   static const int maxPhotoChars = 100 * 1024;
+
+  /// Old doors a profile lists at most ([retired]).
+  static const int maxRetired = 16;
 
   /// Most residents a profile may name: everything for a flat goes to each
   /// one's door, so a longer list would make other phones send to
@@ -172,9 +176,31 @@ final class FlatProfile {
   /// address is not here (only "Pokaż mój profil" shows it).
   final Map<String, String> members;
 
+  /// Doors of this household that stopped for good (a resident's phone
+  /// got a new door key: "Nowy kod", or the household moved to another
+  /// phone of the same account), newest last: whoever routes to the
+  /// household never sends to them again, and what comes from them is
+  /// dropped, even when an older profile still names one.
+  final List<String> retired;
+
   /// The doors to send to.
   Iterable<String> get doors =>
-      members.values.where((String d) => d.isNotEmpty);
+      members.values.where((String d) => d.isNotEmpty && !retired.contains(d));
+
+  /// [retired] with [door] added (the oldest go past [maxRetired]).
+  List<String> retiring(String door) {
+    if (door.isEmpty) {
+      return retired;
+    }
+    final List<String> next = <String>[
+      for (final String d in retired)
+        if (d != door) d,
+      door,
+    ];
+    return next.length > maxRetired
+        ? next.sublist(next.length - maxRetired)
+        : next;
+  }
 
   /// The resident whose door is [door], or `null`.
   String? residentAt(String door) {
@@ -216,6 +242,7 @@ final class FlatProfile {
     'r': rev,
     // Only when set.
     if (photo.isNotEmpty) 'ph': photo,
+    if (retired.isNotEmpty) 'x': retired,
   };
 
   Uint8List get signedBytes => canonicalJsonBytes(_body());
@@ -234,6 +261,7 @@ final class FlatProfile {
     int? rev,
     String? photo,
     String? key,
+    List<String>? retired,
   }) => FlatProfile(
     key: key ?? this.key,
     name: name ?? this.name,
@@ -243,6 +271,7 @@ final class FlatProfile {
     members: members ?? this.members,
     rev: rev ?? this.rev,
     photo: photo ?? this.photo,
+    retired: retired ?? this.retired,
   );
 
   Future<FlatProfile> signedWith(LedgerKeyPair pair) async {
@@ -256,6 +285,7 @@ final class FlatProfile {
       members: members,
       rev: rev,
       photo: photo,
+      retired: retired,
       signature: b64(sig),
     );
   }
@@ -287,8 +317,10 @@ final class FlatProfile {
     final Object? about = json['ab'];
     final Object? place = json['pl'];
     final Object? photo = json['ph'];
+    final Object? retired = json['x'];
     if ((photo is String && photo.length > maxPhotoChars) ||
-        (members is Map && members.length > maxMembers)) {
+        (members is Map && members.length > maxMembers) ||
+        (retired is List && retired.length > maxRetired)) {
       return null;
     }
     return FlatProfile(
@@ -318,6 +350,12 @@ final class FlatProfile {
       },
       rev: json['r'] as int,
       photo: photo is String ? photo : '',
+      retired: <String>[
+        if (retired is List)
+          for (final Object? d in retired)
+            if (d is String && isRoutablePeerAddress(d))
+              PeerShareCodec.normalizeAddress(d),
+      ],
       signature: json['s'] is String ? json['s'] as String : '',
     );
   }
@@ -591,16 +629,25 @@ Uint8List flatLeaveBytes(String flatKey, String resident) => canonicalJsonBytes(
   <String, dynamic>{'t': 'zen_flat_leave', 'f': flatKey, 'a': resident},
 );
 
-/// What a resident signs (with their own resident key) when their account
-/// comes back on a new phone at [address] (recovered, with the household
-/// from the circle copy): housemates move the resident to that phone.
-Uint8List flatMovedBytes(String flatKey, String resident, String address) =>
-    canonicalJsonBytes(<String, dynamic>{
-      't': 'zen_flat_moved_phone',
-      'f': flatKey,
-      'a': resident,
-      'to': address,
-    });
+/// What a resident signs (with their own resident key) when the household
+/// moves to another phone of their account at [address] ("Przenieś
+/// mieszkanie na to urządzenie": another device of the account, or a new
+/// phone after a recovery) at [at]: housemates move the resident to that
+/// phone, and only a later move ([at]) moves them again, so an old notice
+/// sent once more changes nothing. The phone the household left steps down
+/// when it sees one newer than its own start.
+Uint8List flatMovedBytes(
+  String flatKey,
+  String resident,
+  String address,
+  int at,
+) => canonicalJsonBytes(<String, dynamic>{
+  't': 'zen_flat_moved_phone',
+  'f': flatKey,
+  'a': resident,
+  'to': address,
+  'at': at,
+});
 
 /// What a resident signs (with their own resident key) to show a
 /// neighbour flat [to] their own account at [address] under [name] ("Pokaż
@@ -631,17 +678,51 @@ Map<String, int> flatPinsFromJson(Object? json) => <String, int>{
 /// A neighbour's flat on "Moi sąsiedzi".
 final class NeighborFlat {
   NeighborFlat({
-    required this.profile,
+    required FlatProfile profile,
     required this.addedAt,
     this.weScanned = false,
     this.scannedUs = false,
     this.following = true,
     Set<String>? seenItems,
     Map<String, int>? residents,
-  }) : seenItems = seenItems ?? <String>{},
-       residents = residents ?? <String, int>{};
+    Iterable<String> retired = const <String>[],
+  }) : _profile = profile,
+       seenItems = seenItems ?? <String>{},
+       residents = residents ?? <String, int>{} {
+    retire(retired);
+    retire(profile.retired);
+  }
 
-  FlatProfile profile;
+  /// Old doors kept at most ([retired]).
+  static const int maxRetired = 64;
+
+  FlatProfile _profile;
+
+  /// Their newest profile; the old doors it lists stay [retired].
+  FlatProfile get profile => _profile;
+  set profile(FlatProfile next) {
+    _profile = next;
+    retire(next.retired);
+  }
+
+  /// Their doors that stopped for good, from every profile of theirs seen
+  /// ([FlatProfile.retired]): never sent to again, and what comes from one
+  /// is dropped — also when an older profile (an old phone that did not
+  /// hear of the move yet) names it again.
+  final Set<String> retired = <String>{};
+
+  /// Adds [doors] to [retired] (the oldest go past [maxRetired]).
+  void retire(Iterable<String> doors) {
+    retired.addAll(doors);
+    while (retired.length > maxRetired) {
+      retired.remove(retired.first);
+    }
+  }
+
+  /// The doors to send to: their profile's, without the [retired] ones.
+  Iterable<String> get doors =>
+      _profile.doors.where((String d) => !retired.contains(d));
+
   final int addedAt;
 
   /// We scanned their door (or took their invitation nearby).
@@ -670,6 +751,7 @@ final class NeighborFlat {
     if (!following) 'mute': true,
     'seen': seenItems.toList(),
     if (residents.isNotEmpty) 'rk': residents,
+    if (retired.isNotEmpty) 'x': retired.toList(),
   };
 
   static NeighborFlat? fromJson(Object? json) {
@@ -681,6 +763,7 @@ final class NeighborFlat {
       return null;
     }
     final Object? seen = json['seen'];
+    final Object? retired = json['x'];
     return NeighborFlat(
       profile: p,
       addedAt: json['at'] as int,
@@ -689,6 +772,9 @@ final class NeighborFlat {
       following: json['mute'] != true,
       seenItems: seen is List ? seen.whereType<String>().toSet() : null,
       residents: flatPinsFromJson(json['rk']),
+      retired: retired is List
+          ? retired.whereType<String>().take(maxRetired)
+          : const <String>[],
     );
   }
 }
