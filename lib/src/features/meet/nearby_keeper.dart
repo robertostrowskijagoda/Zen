@@ -4,6 +4,7 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/meet/meet_service.dart';
 import 'package:zen/src/features/meet/nearby.dart';
 import 'package:zen/src/features/meet/nearby_look_policy.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 
 export 'package:zen/src/features/meet/nearby_look_policy.dart';
 
@@ -19,8 +20,9 @@ export 'package:zen/src/features/meet/nearby_look_policy.dart';
 ///
 /// Showing this phone and alarm waves are the app's anyway
 /// (`nearbyServiceProvider`, `AlarmWatcher`). While the app is locked or
-/// closed the Android background service does all of it from the nearby
-/// kit (`LockedNearby`), so [active] says "unlocked".
+/// closed, or once the app handed its node over (long in the background),
+/// the Android background service does all of it from the nearby kit
+/// (`LockedNearby`), so [active] says "unlocked and the app has the node".
 final class NearbyKeeper {
   NearbyKeeper({
     required this.nearby,
@@ -113,7 +115,15 @@ final class NearbyKeeper {
     if (why != null) {
       return _skip(why);
     }
-    final bool ran = await nearby.scanWindow(lookFor);
+    // Started while the phone is awake (this timer stands still while it
+    // sleeps); held awake for the window, so the scan is never left on
+    // until the next wake.
+    final bool ran = await ZenWake.holdWhile(
+      () => nearby.scanWindow(lookFor),
+      tag: 'nearby-look-app',
+      limit: lookFor + const Duration(seconds: 5),
+      linger: kLookBatchGrace,
+    );
     if (!ran) {
       return _skip(NearbyLookSkip.busy);
     }

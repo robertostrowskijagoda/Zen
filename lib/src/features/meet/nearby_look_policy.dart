@@ -60,9 +60,10 @@ double nearbyLookDutyCycle({
 /// off (processor, memory, radio driver): tens of milliamps on most phones.
 const double kAwakeMilliamps = 40;
 
-/// How long a look keeps the phone awake besides its own window: waking up,
-/// the results the low-power scan batches ([kLookBatchGrace]) and handing
-/// them over.
+/// How long a look keeps the phone awake besides its own window: the
+/// results the low-power scan batches ([kLookBatchGrace]), and waking up,
+/// reading the radio's state and letting go ([kLookWakeOverhead]: the
+/// wake's hold ends a second after the look is done, `LockedNearby`).
 const Duration kLookBatchGrace = Duration(seconds: 3);
 const Duration kLookWakeOverhead = Duration(seconds: 2);
 
@@ -76,8 +77,14 @@ const double kBleAdvertMilliamps = 0.1;
 /// [kLookWakeOverhead] at [kAwakeMilliamps], and the radio listens for its
 /// share of the window. The awake phone is by far the larger part (the
 /// radio alone would be well under 1 mAh). An estimate for a typical
-/// phone, not a measurement: phones differ, and no look runs while the
-/// phone sleeps deeply (Doze) — then it costs nothing.
+/// phone, not a measurement: phones differ.
+///
+/// An upper bound: the look shares its wake with the mailbox polls (every
+/// 5 min, `LockedReceiver`), which wake the phone anyway; with them the
+/// look adds only its window and the batched results. In deep sleep (Doze)
+/// its alarm waits for Doze's own window and the look is skipped then
+/// (only the mailbox poll's wake still comes, and it ends at once for the
+/// look). With Bluetooth off or no permission no look is planned at all.
 double nearbyLookMilliampHoursPerDay({
   Duration every = kNearbyLookEvery,
   Duration window = kNearbyLookFor,

@@ -102,6 +102,12 @@ final class _Radio implements NearbyRadio {
     return true;
   }
 
+  /// Bluetooth switched on or off (the radio side tells the engines).
+  void turn({required bool on}) {
+    enabled = on;
+    _events.add(<Object?, Object?>{'type': 'bluetooth', 'on': on});
+  }
+
   /// A phone nearby ([device]) waved [json] at this one. [elsewhere]: the
   /// other engine answers alarm waves now.
   void hear(
@@ -597,6 +603,51 @@ void main() {
     await log.takeKept(record.payload);
     expect(log.encounters, isEmpty);
     log.dispose();
+  });
+
+  test('locked, no look around is planned while Bluetooth is off or not '
+      'allowed', () async {
+    final _Net net = _Net();
+    final _Phone ania = _Phone(net, 'ania', <String>['bob']);
+    final _Phone bob = _Phone(net, 'bob', <String>['ania']);
+    await ania.meet.shareNearbySecret('bob');
+    await bob.meet.setNearbyBackgroundScan(true);
+    final MemoryRuntimeSystemNotificationService notices =
+        MemoryRuntimeSystemNotificationService();
+    final _Kept kept = _Kept();
+    final NearbyKit kit = await _kitOf(bob);
+    LockedNearby lockedWith() => LockedNearby(
+      kit: kit,
+      radio: bob.radio,
+      keep: kept.keep,
+      notices: notices,
+      now: () => bob.clock,
+    );
+
+    bob.radio.enabled = false;
+    final LockedNearby locked = lockedWith();
+    await locked.start();
+    expect(locked.looksPlanned, isFalse, reason: 'no wake for nothing');
+    bob.radio.turn(on: true);
+    await Future<void>.delayed(Duration.zero);
+    expect(locked.looksPlanned, isTrue);
+    bob.radio.turn(on: false);
+    await Future<void>.delayed(Duration.zero);
+    expect(locked.looksPlanned, isFalse);
+    await locked.stop();
+
+    // Not allowed to use Bluetooth: nothing planned, whatever comes.
+    bob.radio
+      ..enabled = true
+      ..permitted = false;
+    final LockedNearby denied = lockedWith();
+    await denied.start();
+    expect(denied.looksPlanned, isFalse);
+    bob.radio.turn(on: true);
+    await Future<void>.delayed(Duration.zero);
+    expect(denied.looksPlanned, isFalse);
+    await denied.stop();
+    expect(denied.looksPlanned, isFalse);
   });
 
   test('the power-button shortcut raises the very alarm of the button: off '

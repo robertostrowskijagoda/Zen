@@ -9,6 +9,7 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
+import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/core/utils/system_actions.dart';
 import 'package:zen/src/features/meet/alarm_shortcut.dart';
@@ -1493,7 +1494,11 @@ class _AlarmWatcherState extends ConsumerState<AlarmWatcher> {
     final AppSecurityService security = ref.read(appSecurityServiceProvider);
     final NearbyKeeper keeper = NearbyKeeper(
       nearby: nearby,
-      active: () => !isSecurityBlockingUi(security),
+      // Not once the node went to the service (locked, or long in the
+      // background): it looks around itself then, and two would look.
+      active: () =>
+          !isSecurityBlockingUi(security) &&
+          ref.read(zenCoreProvider).isStarted,
     );
     _keeper = keeper;
     unawaitedLogged(keeper.start(), context: 'W pobliżu: rozglądanie');
