@@ -142,7 +142,7 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
     if (!await unlockAccountKey(
       context,
       node,
-      t('Kopia zapasowa konta'),
+      t('Kopia całego konta (plik)'),
       wrong: () => setState(() => _message = t('Złe hasło konta.')),
     )) {
       return;
@@ -197,7 +197,7 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
     final List<String>? written = _written;
     return Scaffold(
       key: const Key('account-backup-screen'),
-      appBar: AppBar(title: Text(t('Kopia zapasowa konta'))),
+      appBar: AppBar(title: Text(t('Kopia całego konta (plik)'))),
       body: SelectionArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
@@ -206,7 +206,7 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
               t(
                 'Jeden plik z całym kontem albo jego częścią, zaszyfrowany '
                 'Twoim hasłem. Przywrócisz go na tym lub nowym urządzeniu '
-                'przez „Mam backup”.',
+                'przez „Mam kopię”.',
               ),
               style: TextStyle(color: zen.textSecondary, height: 1.4),
             ),
@@ -289,7 +289,7 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
                 ),
                 onPressed: () => unawaited(_create()),
                 icon: const Icon(Icons.save_alt_rounded),
-                label: Text(t('Utwórz kopię zapasową')),
+                label: Text(t('Utwórz kopię całego konta')),
               ),
             if (_message != null) ...<Widget>[
               const SizedBox(height: 10),
@@ -327,7 +327,7 @@ class _AccountBackupScreenState extends ConsumerState<AccountBackupScreen> {
   }
 }
 
-/// "Mam backup": the backup file of the account, or the key alone (a
+/// "Mam kopię": the backup file of the account, or the key alone (a
 /// paper key or a key file).
 class AccountBackupRestoreScreen extends ConsumerStatefulWidget {
   const AccountBackupRestoreScreen({super.key});
@@ -431,19 +431,19 @@ class _AccountBackupRestoreScreenState
     final List<String>? parts = _parts;
     return Scaffold(
       key: const Key('account-backup-restore-screen'),
-      appBar: AppBar(title: Text(t('Mam backup'))),
+      appBar: AppBar(title: Text(t('Mam kopię'))),
       body: SelectionArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
           children: <Widget>[
-            ZenSection(t('Plik kopii zapasowej'), top: 4),
+            ZenSection(t('Kopia całego konta (plik)'), top: 4),
             ZenCard(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
                   Text(
                     t(
-                      'Plik .zenbackup z „Utwórz kopię zapasową”. Wraca to, '
+                      'Plik .zenbackup z „Utwórz kopię całego konta”. Wraca to, '
                       'co w nim jest; na tym samym koncie dane się łączą.',
                     ),
                     style: TextStyle(color: zen.textSecondary, height: 1.4),
@@ -523,7 +523,7 @@ class _AccountBackupRestoreScreenState
                   Text(
                     t(
                       'Kartka z kluczem albo plik klucza: wraca konto, a '
-                      'reszta z kopii u kręgu, jeśli ją masz.',
+                      'reszta z kopii u znajomych, jeśli ją masz.',
                     ),
                     style: TextStyle(color: zen.textSecondary, height: 1.4),
                   ),

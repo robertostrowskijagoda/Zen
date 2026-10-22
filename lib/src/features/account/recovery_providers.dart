@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
@@ -21,6 +22,7 @@ import 'package:zen/src/features/neighbors/neighbors_providers.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
+import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -48,6 +50,56 @@ final Provider<RecoveryService?> recoveryServiceProvider =
           ref.read(socialHubControllerProvider),
         ).contains(PeerShareCodec.normalizeAddress(address)),
       );
+      // Help requests and alarms must reach the person even with the
+      // screen closed.
+      Future<void> post(String id, String title, String body) async {
+        await ref
+            .read(runtimeSystemNotificationServiceProvider)
+            .show(
+              RuntimeSystemNotification(
+                id: id,
+                title: title,
+                body: body,
+                createdAtMillis: DateTime.now().millisecondsSinceEpoch,
+                category: RuntimeSystemNotificationCategory.social,
+                slotKey: id,
+              ),
+            );
+      }
+
+      service
+        ..onHelpRequested = (RecoveryHelpRequest request) {
+          unawaitedLogged(
+            post(
+              'recovery-help-${request.from}',
+              t('Ktoś prosi o pomoc w odzyskaniu konta'),
+              t(
+                'Nowe urządzenie podało Cię jako osobę z kręgu. Zanim '
+                'pomożesz, upewnij się (najlepiej na żywo), kto to jest: '
+                'Ustawienia → Konto i odzyskiwanie.',
+              ),
+            ),
+            context: 'Powiadomienie o prośbie o pomoc',
+          );
+        }
+        ..onAlarm = (RecoveryAlarm alarm) {
+          final SocialHubState social = ref.read(socialHubControllerProvider);
+          final FriendProfile? helper = social.friendByAddress(alarm.helper);
+          unawaitedLogged(
+            post(
+              'recovery-alarm-${alarm.helper}',
+              t('Ktoś odzyskuje Twoje konto'),
+              t(
+                '{name} wyda klucz Twojego konta nowemu urządzeniu. Jeśli to '
+                'nie Ty, zatrzymaj to w Ustawienia → Konto i odzyskiwanie.',
+                <String, Object?>{
+                  'name': helper == null ? t('Ktoś') : social.nameFor(helper),
+                },
+              ),
+            ),
+            context: 'Powiadomienie o wydaniu klucza',
+          );
+        };
       unawaitedLogged(
         service.start(),
         context: 'Start odzyskiwania konta nie udał się',

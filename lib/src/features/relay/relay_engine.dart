@@ -58,6 +58,7 @@ abstract interface class RelayPeerSource {
 final class RelayConfig {
   const RelayConfig({
     this.maxRelays = 6,
+    this.staleRelayAfter = const Duration(days: 3),
     this.messageTtl = const Duration(days: 14),
     this.depositAfter = const Duration(seconds: 4),
     this.directRetrySchedule = const <Duration>[
@@ -110,6 +111,9 @@ final class RelayConfig {
 
   /// How many friends hold this device's mail.
   final int maxRelays;
+
+  /// A mailbox not seen for this long is replaced by a friend seen lately.
+  final Duration staleRelayAfter;
 
   /// How long anything is kept for delivery (outbox and relays alike).
   final Duration messageTtl;
@@ -531,6 +535,7 @@ final class RelayEngine {
     this.config = const RelayConfig(),
     int Function()? clock,
     RelayBlobStore? blobStore,
+    this.staysOnline = false,
   }) : _store = store,
        _peers = peers,
        _rawSend = send,
@@ -546,6 +551,12 @@ final class RelayEngine {
   final Future<void> Function(String, Map<String, dynamic>) _rawSend;
   final int Function() _now;
   final RelayConfig config;
+
+  /// This device is online most of the time (a computer with Zen in the
+  /// tray, Android with its background service). Announced to friends, who
+  /// then prefer it as a mailbox; an iPhone, which receives only while Zen
+  /// is open, announces `false`.
+  final bool staysOnline;
 
   final ValueNotifier<RelayOverview> overview = ValueNotifier<RelayOverview>(
     const RelayOverview(),
@@ -772,9 +783,17 @@ final class RelayEngine {
       ..remove(kSendOnceKey)
       ..remove(kReliableTtlKey)
       ..[kReliableIdKey] = rid;
+    final int size = utf8.encode(jsonEncode(wire)).length;
+    if (size >= kRelayInlinePayloadChars &&
+        wire['type'] != kRelayPartType &&
+        _outboxBytes(state) + size > kRelayOutboxMaxBytes) {
+      // Too much waits already: refused (the chat shows "not sent")
+      // rather than a queue that grows without end.
+      throw const RelayOutboxFullException();
+    }
     final bool relayable =
         !_directOnlyPayloadTypes.contains(wire['type']) &&
-        utf8.encode(jsonEncode(wire)).length <= config.maxRelayablePayloadBytes;
+        size <= config.maxRelayablePayloadBytes;
     final RelayOutboxEntry fresh = RelayOutboxEntry(
       rid: rid,
       recipient: to,
@@ -799,6 +818,20 @@ final class RelayEngine {
 
   static bool _isPart(RelayOutboxEntry entry) =>
       entry.payload['type'] == kRelayPartType;
+
+  /// Size of each queued payload, measured once.
+  static final Expando<int> _payloadBytes = Expando<int>('payloadBytes');
+
+  /// Bytes of the payloads in the outbox.
+  static int _outboxBytes(RelayState state) {
+    int total = 0;
+    for (final RelayOutboxEntry entry in state.outbox.values) {
+      total += _payloadBytes[entry.payload] ??= utf8
+          .encode(jsonEncode(entry.payload))
+          .length;
+    }
+    return total;
+  }
 
   // ---------------------------------------------------------------------------
   // Delivery of chat messages, for the chat's status
@@ -1518,6 +1551,7 @@ final class RelayEngine {
           : null,
       blobQuotaBytes: max(0, _intOf(payload['bq'])),
       blobRelays: _blobRelaysFrom(payload['br'], relays),
+      staysOnline: payload['on'] == true,
     );
     if (_blobs != null &&
         state.currentRelays.contains(from) &&
@@ -1561,6 +1595,7 @@ final class RelayEngine {
         'pq': base64Url.encode(identity.pqPublicKey!),
       'relays': state.currentRelays,
       'v': state.relaySetVersion,
+      if (staysOnline) 'on': true,
       'tk': _depositToken(depositKey, recipient: _self, sender: to),
       if (state.currentRelays.contains(to)) 'dk': base64Url.encode(depositKey),
       if (_blobs != null) ...<String, dynamic>{
@@ -1593,10 +1628,16 @@ final class RelayEngine {
 
   /// Re-derives this device's relay set; bumps the version when it changed.
   ///
-  /// Automatic mode is sticky on purpose: a relay stays until it stops being
-  /// a friend, and only vacancies are filled with the most recently seen
-  /// friends. Re-ranking on every presence change would re-announce to every
-  /// friend all the time and scatter the mail across ever-changing devices.
+  /// Automatic mode is sticky on purpose: re-ranking on every presence
+  /// change would re-announce to every friend all the time and scatter the
+  /// mail across ever-changing devices. A relay stays until it stops being a
+  /// friend, or until it has not been seen for [RelayConfig.staleRelayAfter]
+  /// while a fresher friend could take its place. Free places go first to
+  /// friends whose device stays online (computers in the tray, Android with
+  /// its background service), then to the closest, then to the most
+  /// recently seen; a device that stays online also takes the place of one
+  /// that does not (one iPhone holding mail for another iPhone delivers
+  /// only when both happen to have Zen open).
   bool _refreshRelaySet(RelayState state) {
     if (!_peers.isReady) {
       return false;
@@ -1617,27 +1658,17 @@ final class RelayEngine {
           .take(config.maxRelays)
           .toList(growable: false);
     } else {
-      final List<String> kept = state.currentRelays
-          .where(friendAddresses.contains)
-          .toList();
-      final List<RelayFriend> candidates =
-          friends.where((RelayFriend f) {
-            final String a = PeerShareCodec.normalizeAddress(f.address);
-            return friendAddresses.contains(a) && !kept.contains(a);
-          }).toList()..sort((RelayFriend a, RelayFriend b) {
-            // "Przyjaciel" first, then the most recently seen.
-            final int byLevel = b.closeness.compareTo(a.closeness);
-            return byLevel != 0
-                ? byLevel
-                : b.lastSeenAtMillis.compareTo(a.lastSeenAtMillis);
-          });
-      for (final RelayFriend candidate in candidates) {
-        if (kept.length >= config.maxRelays) {
-          break;
-        }
-        kept.add(PeerShareCodec.normalizeAddress(candidate.address));
-      }
-      next = kept;
+      next = rankRelays(
+        current: state.currentRelays,
+        friends: <RelayFriend>[
+          for (final RelayFriend f in friends)
+            if (PeerShareCodec.normalizeAddress(f.address) != _self) f,
+        ],
+        staysOnline: (String a) => state.peers[a]?.staysOnline ?? false,
+        nowMillis: _now(),
+        maxRelays: config.maxRelays,
+        staleAfter: config.staleRelayAfter,
+      );
     }
     if (listEquals(next, state.currentRelays)) {
       return false;
@@ -1646,6 +1677,90 @@ final class RelayEngine {
     state.relaySetVersion += 1;
     _lastAnnounceAt.clear();
     return true;
+  }
+
+  /// The automatic relay set (see [_refreshRelaySet]): [current] kept where
+  /// it still fits, vacancies filled from [friends] by preference.
+  ///
+  /// Weak acquaintances ("Słaby znajomy", closeness 0) never jump the queue
+  /// for staying online. A relay not seen for [staleAfter] (0 = never seen,
+  /// not stale) is replaced only by a friend seen within that time.
+  @visibleForTesting
+  static List<String> rankRelays({
+    required List<String> current,
+    required List<RelayFriend> friends,
+    required bool Function(String address) staysOnline,
+    required int nowMillis,
+    required int maxRelays,
+    required Duration staleAfter,
+  }) {
+    final Map<String, RelayFriend> byAddress = <String, RelayFriend>{
+      for (final RelayFriend f in friends)
+        PeerShareCodec.normalizeAddress(f.address): f,
+    };
+    bool stale(String a) {
+      final int seen = byAddress[a]?.lastSeenAtMillis ?? 0;
+      return seen > 0 && nowMillis - seen > staleAfter.inMilliseconds;
+    }
+
+    bool preferred(String a) =>
+        staysOnline(a) && (byAddress[a]?.closeness ?? 0) > 0 && !stale(a);
+    int seenAt(String a) => byAddress[a]?.lastSeenAtMillis ?? 0;
+
+    final List<String> kept = current
+        .map(PeerShareCodec.normalizeAddress)
+        .where(byAddress.containsKey)
+        .toSet()
+        .take(maxRelays)
+        .toList();
+    final List<String> candidates =
+        byAddress.keys.where((String a) => !kept.contains(a)).toList()
+          ..sort((String a, String b) {
+            final int byOnline = (preferred(b) ? 1 : 0).compareTo(
+              preferred(a) ? 1 : 0,
+            );
+            if (byOnline != 0) {
+              return byOnline;
+            }
+            final int byFresh = (stale(a) ? 1 : 0).compareTo(stale(b) ? 1 : 0);
+            if (byFresh != 0) {
+              return byFresh;
+            }
+            // "Przyjaciel" first, then the most recently seen.
+            final int byLevel = byAddress[b]!.closeness.compareTo(
+              byAddress[a]!.closeness,
+            );
+            return byLevel != 0 ? byLevel : seenAt(b).compareTo(seenAt(a));
+          });
+    // Vacancies first.
+    while (kept.length < maxRelays && candidates.isNotEmpty) {
+      kept.add(candidates.removeAt(0));
+    }
+    // A relay gone quiet for days makes way for a friend seen lately; one
+    // that does not stay online makes way for one that does.
+    for (final String candidate in List<String>.of(candidates)) {
+      if (stale(candidate)) {
+        break; // sorted: no fresher one follows
+      }
+      final List<String> replaceable =
+          kept
+              .where(
+                (String a) =>
+                    stale(a) || (preferred(candidate) && !preferred(a)),
+              )
+              .toList()
+            ..sort((String a, String b) {
+              final int byStale = (stale(b) ? 1 : 0).compareTo(
+                stale(a) ? 1 : 0,
+              );
+              return byStale != 0 ? byStale : seenAt(a).compareTo(seenAt(b));
+            });
+      if (replaceable.isEmpty) {
+        continue;
+      }
+      kept[kept.indexOf(replaceable.first)] = candidate;
+    }
+    return kept;
   }
 
   /// Switches between automatic (`null`) and a hand-picked relay list.

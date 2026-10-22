@@ -5,10 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/domain/profile/user_profile.dart';
+import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
 import 'package:zen/src/features/account/presentation/account_import_layer.dart';
-import 'package:zen/src/features/account/presentation/account_recovery_screen.dart';
 import 'package:zen/src/features/account/presentation/key_backup_screen.dart';
+import 'package:zen/src/features/account/presentation/name_step.dart';
+import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
 /// The first start, right after the permissions step: first "Jak
@@ -26,6 +29,9 @@ class AccountSecureStage extends ConsumerStatefulWidget {
 
 class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
   bool _fresh = false;
+
+  /// The name step was answered (saved or skipped).
+  bool _nameDone = false;
 
   Future<void> _answer() => ref
       .read(appSettingsControllerProvider.notifier)
@@ -52,7 +58,7 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
               text: t(
                 'Pierwszy raz w Zen? Załóż nowe konto. Masz już konto? '
                 'Przywróć je z kopii, z drugiego urządzenia albo z pomocą '
-                'kręgu zaufanych.',
+                'kręgu odzyskiwania.',
               ),
             ),
             FilledButton.icon(
@@ -82,9 +88,20 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
     if (!_fresh) {
       return _start(context);
     }
+    // A new account: first the name friends will see.
+    if (!_nameDone &&
+        !ref.watch(
+          userProfileControllerProvider.select(
+            (UserProfile p) => p.hasChosenName,
+          ),
+        )) {
+      return FirstNameStep(onDone: () => setState(() => _nameDone = true));
+    }
     final ZenColors zen = ZenColors.of(context);
     // Rebuilds when the person comes back from one of the screens.
     final bool secured = !ref.watch(accountSecureReminderProvider);
+    // The circle needs friends and a brand-new account has none: it waits
+    // (Zen reminds once there are enough, see CircleReminderCard).
     return Scaffold(
       key: const Key('account-secure-stage'),
       body: SafeArea(
@@ -104,47 +121,7 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
                   Text(
-                    t('Krąg zaufanych'),
-                    style: TextStyle(
-                      color: zen.textPrimary,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 15.5,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    t(
-                      'Do 6 osób dostaje po kawałku klucza i razem pomogą '
-                      'Ci wrócić na nowym telefonie. Potrzeba co najmniej '
-                      '4 znajomych — jeśli ich jeszcze nie masz, wróć do '
-                      'tego później.',
-                    ),
-                    style: TextStyle(
-                      color: zen.textSecondary,
-                      fontSize: 13.5,
-                      height: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  FilledButton.icon(
-                    key: const Key('account-secure-circle'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(48),
-                    ),
-                    onPressed: () =>
-                        unawaited(AccountRecoveryScreen.open(context)),
-                    icon: const Icon(Icons.groups_2_outlined),
-                    label: Text(t('Wybierz krąg zaufanych')),
-                  ),
-                ],
-              ),
-            ),
-            ZenCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Text(
-                    t('Kopia zapasowa klucza'),
+                    t('Kopia klucza (kartka lub plik)'),
                     style: TextStyle(
                       color: zen.textPrimary,
                       fontWeight: FontWeight.w700,
@@ -173,6 +150,50 @@ class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
                     onPressed: () => unawaited(KeyBackupScreen.open(context)),
                     icon: const Icon(Icons.history_edu_rounded),
                     label: Text(t('Zrób kopię klucza')),
+                  ),
+                ],
+              ),
+            ),
+            ZenCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Text(
+                    t('Krąg odzyskiwania'),
+                    style: TextStyle(
+                      color: zen.textPrimary,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15.5,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    t(
+                      'Od 4 do 6 wybranych znajomych dostaje po kawałku '
+                      'klucza i razem pomogą Ci wrócić na nowym telefonie — '
+                      'ze znajomymi i rozmowami. Dostępny od {n} znajomych: '
+                      'gdy ich dodasz, Zen Ci o nim przypomni.',
+                      <String, Object?>{'n': kEmergencyThreshold},
+                    ),
+                    style: TextStyle(
+                      color: zen.textSecondary,
+                      fontSize: 13.5,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  FilledButton.icon(
+                    key: const Key('account-secure-circle'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                    onPressed: null,
+                    icon: const Icon(Icons.groups_2_outlined),
+                    label: Text(
+                      t('Dostępny od {n} znajomych', <String, Object?>{
+                        'n': kEmergencyThreshold,
+                      }),
+                    ),
                   ),
                 ],
               ),

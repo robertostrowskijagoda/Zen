@@ -19,6 +19,9 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 /// * `rc_piece {kind, half, account}`: helper → new device, after the
 ///   delay. `account` is the account the piece is for; the account the
 ///   pieces open must still be confirmed by its fingerprint.
+/// * `rc_help {}`: new device → helper, when the person names the helper
+///   there: the helper's device tells its person that someone asks for
+///   help (it holds pieces), with the new device's address ready.
 ///
 /// The new device takes pieces only while a recovery is started on it
 /// ([RecoveryService.beginRecovery]), only from its friends and the helpers
@@ -30,6 +33,52 @@ abstract final class RecoveryMessages {
   static const String alarm = 'rc_alarm';
   static const String cancel = 'rc_cancel';
   static const String piece = 'rc_piece';
+  static const String help = 'rc_help';
+}
+
+/// A new device asked this device (a helper) for help with a recovery.
+@immutable
+final class RecoveryHelpRequest {
+  const RecoveryHelpRequest({required this.from, required this.at});
+
+  /// The new device's address: where the piece would go.
+  final String from;
+  final int at;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{'from': from, 'at': at};
+
+  static RecoveryHelpRequest? fromJson(Object? json) {
+    if (json is! Map) {
+      return null;
+    }
+    final Object? from = json['from'];
+    final Object? at = json['at'];
+    return from is String && from.isNotEmpty && at is int
+        ? RecoveryHelpRequest(from: from, at: at)
+        : null;
+  }
+}
+
+/// The new device's address from what the person it helps passed on: its
+/// invitation code, link, QR or plain address. Throws [FormatException]
+/// with a message for the person when [input] is none of them.
+String parseRecoveryDevice(String input) {
+  try {
+    final String address = PeerShareCodec.normalizeAddress(
+      PeerShareCodec.parseTarget(input).address,
+    );
+    if (address.isNotEmpty) {
+      return address;
+    }
+  } on FormatException {
+    // Told below in the person's words.
+  }
+  throw FormatException(
+    t(
+      'To nie jest kod nowego urządzenia. Wklej kod albo link, który '
+      'pokazuje jego ekran „Odzyskaj konto”, albo zeskanuj jego QR.',
+    ),
+  );
 }
 
 /// Which half of a piece is released.
@@ -111,6 +160,12 @@ final class RecoveryService {
   static const String _acksKey = 'recovery/acks';
   static const String _receivedKey = 'recovery/received';
   static const String _collectingKey = 'recovery/collecting';
+  static const String _circleKey = 'recovery/circle';
+  static const String _requestsKey = 'recovery/requests';
+
+  /// Help requests kept at most, and for how long.
+  static const int maxRequests = 8;
+  static const Duration requestLifetime = Duration(days: 30);
 
   /// Pieces kept for one recovery, at most.
   static const int maxReceived = 24;
@@ -154,6 +209,20 @@ final class RecoveryService {
         RecoveryKind.emergency: <Map<String, dynamic>>[],
       };
   final List<RecoveryAlarm> _alarms = <RecoveryAlarm>[];
+
+  /// Who the pieces of this account went to at the last hand-out (in the
+  /// order of the pieces).
+  final List<String> _circle = <String>[];
+
+  /// New devices that asked this device for help (see [RecoveryHelpRequest]).
+  final List<RecoveryHelpRequest> _requests = <RecoveryHelpRequest>[];
+
+  /// Told when a new device asks for help (the app posts a notification).
+  void Function(RecoveryHelpRequest request)? onHelpRequested;
+
+  /// Told when a friend is about to release this account's piece to a new
+  /// device (the app posts a notification on the old devices).
+  void Function(RecoveryAlarm alarm)? onAlarm;
   final StreamController<void> _changes = StreamController<void>.broadcast();
   StreamSubscription<SignalTransportFrame>? _frames;
   Timer? _timer;
@@ -181,6 +250,31 @@ final class RecoveryService {
 
   /// The helpers the person listed for the recovery on this device.
   Set<String> get allowedHelpers => Set<String>.unmodifiable(_helpers);
+
+  /// Who keeps this account's pieces (addresses, from the last hand-out);
+  /// [acks] tells who confirmed.
+  List<String> get circle => List<String>.unmodifiable(_circle);
+
+  /// New devices that asked for help and were not answered yet.
+  List<RecoveryHelpRequest> get helpRequests {
+    final int now = _clock();
+    return List<RecoveryHelpRequest>.unmodifiable(
+      _requests.where(
+        (RecoveryHelpRequest r) => now - r.at < requestLifetime.inMilliseconds,
+      ),
+    );
+  }
+
+  /// Forgets the help request from [from] (answered or turned down).
+  Future<void> dismissHelpRequest(String from) async {
+    final String a = PeerShareCodec.normalizeAddress(from);
+    final int before = _requests.length;
+    _requests.removeWhere((RecoveryHelpRequest r) => r.from == a);
+    if (_requests.length != before) {
+      await _saveRequests();
+      _changed();
+    }
+  }
 
   /// The friends who sent pieces (to greet after recovery).
   List<String> get helperAddresses => <String>{
@@ -240,6 +334,14 @@ final class RecoveryService {
     await start();
     _acks.clear();
     await _saveAcks();
+    _circle
+      ..clear()
+      ..addAll(<String>[
+        for (int i = 0; i < helpers.length && i < pieces.length; i++)
+          PeerShareCodec.normalizeAddress(helpers[i]),
+      ]);
+    await _write(_circleKey, _circle);
+    _changed();
     for (int i = 0; i < helpers.length && i < pieces.length; i++) {
       await transport.send(
         remoteAddress: helpers[i],
@@ -252,7 +354,9 @@ final class RecoveryService {
   }
 
   /// This device (a helper) agrees to give [owner]'s piece to the new
-  /// device at [to]. The owner's devices get an alarm right away.
+  /// device at [to] (its invitation code, link or address; a
+  /// [FormatException] when it is none). The owner's devices get an alarm
+  /// right away.
   Future<void> startHelping(
     String owner,
     String to, {
@@ -269,10 +373,12 @@ final class RecoveryService {
             .inMilliseconds;
     final PendingRelease release = PendingRelease(
       owner: o,
-      to: PeerShareCodec.normalizeAddress(to),
+      to: parseRecoveryDevice(to),
       kind: kind,
       due: due,
     );
+    _requests.removeWhere((RecoveryHelpRequest r) => r.from == release.to);
+    await _saveRequests();
     _pending
       ..removeWhere(
         (PendingRelease p) =>
@@ -382,6 +488,16 @@ final class RecoveryService {
       await _saveCollecting();
       _changed();
     }
+    // The helper's device tells its person that someone asks for help,
+    // with this device's address ready to use.
+    try {
+      await transport.send(
+        remoteAddress: a,
+        payload: const <String, dynamic>{'type': RecoveryMessages.help},
+      );
+    } on Object catch (error) {
+      logZenWarning('Prośba o pomoc w odzyskaniu nie wyszła: $error');
+    }
     return true;
   }
 
@@ -446,14 +562,21 @@ final class RecoveryService {
             .where((RecoveryKind k) => k.name == frame.payload['kind'])
             .firstOrNull;
         if (isFriend(from) && to is String && due is int && kind != null) {
-          _alarms.add(
-            RecoveryAlarm(helper: from, to: to, kind: kind, due: due),
+          final RecoveryAlarm alarm = RecoveryAlarm(
+            helper: from,
+            to: to,
+            kind: kind,
+            due: due,
           );
+          _alarms.add(alarm);
           logZenWarning(
             'Ktoś z kręgu chce wydać klucz odzyskiwania Twojego konta.',
           );
+          onAlarm?.call(alarm);
           _changed();
         }
+      case RecoveryMessages.help:
+        await _onHelpRequest(from);
       case RecoveryMessages.cancel:
         // Only the owner (their old address) can stop a release.
         final int before = _pending.length;
@@ -465,6 +588,33 @@ final class RecoveryService {
       case RecoveryMessages.piece:
         await _onPiece(from, frame.payload);
     }
+  }
+
+  /// A new device named this device as a helper. Only a device that keeps
+  /// someone's piece listens; each new device is told once (until answered
+  /// or dismissed), and only [maxRequests] are kept, so a stranger with
+  /// this person's invitation code cannot flood them.
+  Future<void> _onHelpRequest(String from) async {
+    if (_held.isEmpty || from.isEmpty || isFriend(from)) {
+      // A friend's own device is no new device of someone recovering.
+      return;
+    }
+    final int now = _clock();
+    _requests.removeWhere(
+      (RecoveryHelpRequest r) => now - r.at >= requestLifetime.inMilliseconds,
+    );
+    if (_requests.any((RecoveryHelpRequest r) => r.from == from) ||
+        _requests.length >= maxRequests) {
+      return;
+    }
+    final RecoveryHelpRequest request = RecoveryHelpRequest(
+      from: from,
+      at: now,
+    );
+    _requests.add(request);
+    await _saveRequests();
+    onHelpRequested?.call(request);
+    _changed();
   }
 
   /// A half for the recovery on this device.
@@ -590,6 +740,17 @@ final class RecoveryService {
         }
       }
     }
+    final Object? circle = await _read(_circleKey);
+    if (circle is List) {
+      _circle.addAll(circle.whereType<String>().take(maxHelpers));
+    }
+    final Object? requests = await _read(_requestsKey);
+    if (requests is List) {
+      _requests.addAll(<RecoveryHelpRequest>[
+        for (final Object? r in requests.take(maxRequests))
+          ?RecoveryHelpRequest.fromJson(r),
+      ]);
+    }
     final Object? collecting = await _read(_collectingKey);
     if (collecting is Map && collecting['since'] is int) {
       _collectingSince = collecting['since'] as int;
@@ -606,6 +767,10 @@ final class RecoveryService {
   });
 
   Future<void> _saveHeld() => _write(_heldKey, _held);
+
+  Future<void> _saveRequests() => _write(_requestsKey, <Map<String, dynamic>>[
+    for (final RecoveryHelpRequest r in _requests) r.toJson(),
+  ]);
 
   Future<void> _savePending() => _write(_pendingKey, <Map<String, dynamic>>[
     for (final PendingRelease p in _pending) p.toJson(),

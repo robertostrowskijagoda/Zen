@@ -11,8 +11,10 @@ import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/features/account/account_archive.dart';
 import 'package:zen/src/features/account/account_archive_app.dart';
 import 'package:zen/src/features/account/account_copy.dart';
+import 'package:zen/src/features/account/account_link.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/account/presentation/account_copy_common.dart';
+import 'package:zen/src/features/account/presentation/account_devices_screen.dart';
 import 'package:zen/src/features/account/presentation/account_restore_info.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
@@ -20,7 +22,7 @@ import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/security/sensitive_access.dart';
 import 'package:zen/src/features/social/peer_qr_scanner.dart';
 
-/// "Przenieś na inne urządzenie": this device shows a code; the other one
+/// "Dodaj drugie urządzenie lub przenieś konto": this device shows a code; the other one
 /// reads it, both show the same digits, and after "Pozwól" here the whole
 /// account goes there (key, friends, conversations with their files,
 /// profile, settings, pyramid, dating, neighbours, meetings, films).
@@ -114,7 +116,7 @@ class _AccountCopySendScreenState extends ConsumerState<AccountCopySendScreen> {
     if (!await unlockAccountKey(
       context,
       node,
-      t('Przenieś na inne urządzenie'),
+      t('Dodaj drugie urządzenie lub przenieś konto'),
       wrong: () => setState(() => _message = t('Złe hasło konta.')),
     )) {
       return;
@@ -139,11 +141,20 @@ class _AccountCopySendScreenState extends ConsumerState<AccountCopySendScreen> {
         source?.state ?? AccountCopySendState.waiting;
     return Scaffold(
       key: const Key('account-copy-send'),
-      appBar: AppBar(title: Text(t('Przenieś na inne urządzenie'))),
+      appBar: AppBar(title: Text(t('Drugie urządzenie'))),
       body: SelectionArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
           children: <Widget>[
+            ZenInfo(
+              key: const Key('account-copy-stays'),
+              icon: Icons.devices_rounded,
+              text: t(
+                'To urządzenie zostaje na koncie. Po skopiowaniu masz Zen na '
+                'obu i oba dostają wiadomości.',
+              ),
+            ),
+            const SizedBox(height: 8),
             Text(
               t(
                 'Na drugim urządzeniu wybierz „Odzyskaj z innego urządzenia” '
@@ -239,6 +250,29 @@ class _AccountCopySendScreenState extends ConsumerState<AccountCopySendScreen> {
                   'działa dalej jak dotąd.',
                 ),
               ),
+            if (state == AccountCopySendState.done) ...<Widget>[
+              ZenInfo(
+                key: const Key('account-copy-old-phone'),
+                icon: Icons.phonelink_erase_rounded,
+                tone: zen.warning,
+                title: t('Oddajesz albo sprzedajesz to urządzenie?'),
+                text: t(
+                  'Usuń z niego konto (Ustawienia → Usuń to konto z tego '
+                  'urządzenia) albo odłącz je na nowym w „Urządzenia”. '
+                  'Inaczej dalej będzie odbierać Twoje wiadomości.',
+                ),
+              ),
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: TextButton.icon(
+                  key: const Key('account-copy-open-devices'),
+                  onPressed: () =>
+                      unawaited(AccountDevicesScreen.open(context)),
+                  icon: const Icon(Icons.devices_other_rounded),
+                  label: Text(t('Urządzenia')),
+                ),
+              ),
+            ],
             if (state == AccountCopySendState.failed)
               ZenInfo(
                 icon: Icons.block_rounded,
@@ -318,7 +352,12 @@ class _AccountCopyReceiveScreenState
     );
     final LedgerNode? node = ref.read(ledgerNodeProvider);
     if (ticket == null) {
-      _say(t('To nie jest kod przeniesienia konta.'));
+      final String? other = AccountCopyTicket.otherVersion(_code.text);
+      _say(
+        other != null
+            ? accountLinkVersionText(other == '?' ? null : other)
+            : t('To nie jest kod przeniesienia konta.'),
+      );
       return;
     }
     if (importer == null || node == null) {
@@ -347,7 +386,12 @@ class _AccountCopyReceiveScreenState
       setState(() => _digits = digits);
       final AccountCopyOffer? offer = await target.offer();
       if (offer == null) {
-        _say(t('Drugie urządzenie nie pozwoliło.'));
+        final String? other = target.versionMismatch;
+        _say(
+          other != null
+              ? accountLinkVersionText(other == '?' ? null : other)
+              : t('Drugie urządzenie nie pozwoliło.'),
+        );
         return;
       }
       final String? refused = accountImportRefusal(
@@ -422,7 +466,8 @@ class _AccountCopyReceiveScreenState
             Text(
               t(
                 'Na urządzeniu, które ma konto: Konto i odzyskiwanie → '
-                'Przenieś na inne urządzenie. Zeskanuj kod, który pokaże, '
+                'Dodaj drugie urządzenie lub przenieś konto. Zeskanuj kod, '
+                'który pokaże, '
                 'albo go wklej.',
               ),
               style: TextStyle(color: zen.textSecondary, height: 1.4),

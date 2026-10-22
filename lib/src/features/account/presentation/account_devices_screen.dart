@@ -121,6 +121,7 @@ class _AccountDevicesScreenState extends ConsumerState<AccountDevicesScreen> {
     final bool? sure = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialog) => AlertDialog(
+        scrollable: true,
         title: Text(t('Odłączyć „{name}”?', {'name': device.name})),
         content: Text(
           t(
@@ -404,6 +405,7 @@ Future<String?> askAccountPassword(BuildContext context, String title) async {
   final String? result = await showDialog<String>(
     context: context,
     builder: (BuildContext dialog) => AlertDialog(
+      scrollable: true,
       title: Text(title),
       content: TextField(
         key: const Key('account-password-field'),
@@ -798,6 +800,12 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
             ),
           ),
           const SizedBox(height: 12),
+          if (_receiver.versionMismatch case final String other)
+            ZenInfo(
+              icon: Icons.system_update_outlined,
+              tone: zen.warning,
+              text: accountLinkVersionText(other == '?' ? null : other),
+            ),
           if (profile == null)
             _Waiting(t('Czekam na połączenie z siecią…'))
           else

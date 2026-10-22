@@ -551,9 +551,109 @@ void main() {
       await _settle();
       expect(services[helpers[0]]!.heldFor, isEmpty);
     });
+
+    test('the owner sees who keeps the pieces', () async {
+      await services[owner]!.distribute(
+        helpers.take(4).toList(),
+        await createRecoveryPieces(
+          account: 'konto',
+          seed: randomBytes(32),
+          password: _password,
+          helpers: 4,
+          now: now,
+          cost: _light,
+        ),
+      );
+      await _settle();
+      expect(services[owner]!.circle, helpers.take(4).toList());
+      expect(services[owner]!.acks.keys.toSet(), helpers.take(4).toSet());
+    });
+
+    test('naming a helper on the new device asks them for help', () async {
+      await services[owner]!.distribute(
+        helpers,
+        await createRecoveryPieces(
+          account: 'konto',
+          seed: randomBytes(32),
+          password: _password,
+          helpers: 6,
+          now: now,
+          cost: _light,
+        ),
+      );
+      await _settle();
+      final List<RecoveryHelpRequest> told = <RecoveryHelpRequest>[];
+      services[helpers[0]]!.onHelpRequested = told.add;
+      final RecoveryService f = services[fresh]!;
+      await f.beginRecovery();
+      // The helper's invitation code, as the person types it.
+      expect(
+        await f.allowHelper(PeerShareCodec.inviteCodeForAddress(helpers[0])!),
+        isTrue,
+      );
+      await _settle();
+      expect(told.map((RecoveryHelpRequest r) => r.from).toList(), <String>[
+        fresh,
+      ]);
+      expect(services[helpers[0]]!.helpRequests.single.from, fresh);
+      // Asked again: told once.
+      await f.allowHelper(helpers[0]);
+      await _settle();
+      expect(told, hasLength(1));
+
+      // Answering it (with the new device's code) clears the request.
+      await services[helpers[0]]!.startHelping(
+        owner,
+        PeerShareCodec.inviteCodeForAddress(fresh)!,
+      );
+      expect(services[helpers[0]]!.helpRequests, isEmpty);
+      expect(services[helpers[0]]!.pending.single.to, fresh);
+    });
+
+    test('a device that keeps no piece is not asked', () async {
+      final List<RecoveryHelpRequest> told = <RecoveryHelpRequest>[];
+      services[helpers[1]]!.onHelpRequested = told.add;
+      await services[fresh]!.beginRecovery();
+      await services[fresh]!.allowHelper(helpers[1]);
+      await _settle();
+      expect(told, isEmpty);
+      expect(services[helpers[1]]!.helpRequests, isEmpty);
+    });
+
+    test(
+      'the helper\'s field takes only a code, a link or an address',
+      () async {
+        await services[owner]!.distribute(
+          helpers,
+          await createRecoveryPieces(
+            account: 'konto',
+            seed: randomBytes(32),
+            password: _password,
+            helpers: 6,
+            now: now,
+            cost: _light,
+          ),
+        );
+        await _settle();
+        for (final String bad in <String>['', 'Ola', 'https://example.com/x']) {
+          expect(
+            () => services[helpers[0]]!.startHelping(owner, bad),
+            throwsFormatException,
+            reason: bad,
+          );
+        }
+        expect(services[helpers[0]]!.pending, isEmpty);
+        final String link = PeerShareCodec.inviteLinkForCode(
+          PeerShareCodec.inviteCodeForAddress(fresh)!,
+        );
+        await services[helpers[0]]!.startHelping(owner, link);
+        expect(services[helpers[0]]!.pending.single.to, fresh);
+        expect(parseRecoveryDevice(fresh), fresh);
+      },
+    );
   });
 
-  testWidgets('the screen asks for matching passwords and enough helpers', (
+  testWidgets('the screen offers the circle only with enough friends', (
     WidgetTester tester,
   ) async {
     // A tall window: the whole screen (with the circle's backup card) is
@@ -584,27 +684,21 @@ void main() {
     }
     expect(find.text('Nikt jeszcze nie powierzył Ci klucza.'), findsOneWidget);
 
-    await tester.enterText(
-      find.byKey(const Key('recovery-password')),
-      'abcdefgh',
-    );
-    await tester.enterText(
-      find.byKey(const Key('recovery-password-repeat')),
-      'abcdefgX',
-    );
-    await tester.tap(find.byKey(const Key('recovery-set-password')));
-    await tester.runAsync(() => _settle());
-    await tester.pump();
-    expect(find.text('Hasła się różnią.'), findsOneWidget);
-
-    await tester.enterText(
-      find.byKey(const Key('recovery-password-repeat')),
-      'abcdefgh',
-    );
-    await tester.tap(find.byKey(const Key('recovery-set-password')));
-    await tester.runAsync(() => _settle());
-    await tester.pump();
+    // Without four friends the circle is not offered: the button waits,
+    // and the screen says why.
+    expect(find.byKey(const Key('recovery-circle-too-few')), findsOneWidget);
     expect(find.textContaining('co najmniej 4 znajomych'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('recovery-set-password')))
+          .onPressed,
+      isNull,
+    );
+    // The account password is told apart from the app password.
+    expect(
+      find.byKey(const Key('recovery-password-explained')),
+      findsOneWidget,
+    );
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(() => _settle());

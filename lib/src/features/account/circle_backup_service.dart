@@ -122,6 +122,9 @@ enum CircleBackupRestorePhase {
   applying,
   done,
   failed,
+
+  /// The copy found was made by a newer Zen: update the app and try again.
+  newer,
 }
 
 @immutable
@@ -605,6 +608,12 @@ final class CircleBackupService {
       return;
     }
     if (!await m.verify(account: id.account)) {
+      return;
+    }
+    if (m.version > kCircleBackupVersion) {
+      // Made by a newer Zen: this build cannot open it. Said so, instead
+      // of a download that ends in "damaged".
+      await _endRestore(CircleBackupRestorePhase.newer);
       return;
     }
     _target = m;

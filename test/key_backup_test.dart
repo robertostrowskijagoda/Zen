@@ -18,6 +18,7 @@ import 'package:zen/src/features/account/presentation/key_backup_screen.dart';
 import 'package:zen/src/features/account/presentation/key_restore_screen.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
+import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 import 'package:zen/src/features/settings/app_settings_store.dart';
@@ -478,7 +479,31 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('account-start-new')));
     await tester.pumpAndSettle();
+    // A new account is asked for the name friends will see.
+    expect(find.byKey(const Key('first-name-step')), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('first-name-save')))
+          .onPressed,
+      isNull,
+      reason: 'no name yet',
+    );
+    await tester.enterText(find.byKey(const Key('first-name-field')), ' Ania ');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('first-name-save')));
+    await tester.pumpAndSettle();
+    final ProviderContainer container = ProviderScope.containerOf(
+      tester.element(find.byType(AccountSecureStage)),
+    );
+    expect(container.read(userProfileControllerProvider).publicName, 'Ania');
     expect(find.byKey(const Key('account-secure-circle')), findsOneWidget);
+    // A new account has no friends yet: the circle waits for four.
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('account-secure-circle')))
+          .onPressed,
+      isNull,
+    );
     expect(find.byKey(const Key('account-secure-key')), findsOneWidget);
     await tester.tap(find.byKey(const Key('account-secure-later')));
     await tester.pumpAndSettle();

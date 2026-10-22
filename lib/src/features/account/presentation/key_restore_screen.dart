@@ -208,10 +208,10 @@ class _KeyRestoreScreenState extends ConsumerState<KeyRestoreScreen> {
                 ZenInfo(
                   icon: Icons.history_edu_rounded,
                   text: t(
-                    'Kopia klucza zwraca samo konto, nie czaty. To '
-                    'urządzenie stanie się Twoim kolejnym urządzeniem tego '
-                    'konta. Znajomych i grupy przywróci dopiero krąg '
-                    'odzyskiwania.',
+                    'Kopia klucza zwraca konto. To urządzenie stanie się '
+                    'Twoim kolejnym urządzeniem tego konta. Znajomi, grupy '
+                    'i teksty rozmów wrócą z kopii u znajomych, jeśli ją '
+                    'masz; zdjęcia i pliki z rozmów — nie.',
                   ),
                 ),
                 ZenCard(

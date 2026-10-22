@@ -198,7 +198,7 @@ final class PlatformAccountBackupPlaces implements AccountBackupPlaces {
   Future<String?> target(String name) async {
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       final String? path = await FilePicker.platform.saveFile(
-        dialogTitle: t('Zapisz kopię zapasową konta'),
+        dialogTitle: t('Zapisz kopię całego konta'),
         fileName: name,
       );
       return path == null || path.isEmpty ? null : path;

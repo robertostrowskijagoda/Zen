@@ -163,7 +163,7 @@ class AccountCopyActions extends StatelessWidget {
     super.key,
   });
 
-  /// "Odzyskaj przez krąg zaufanych" (hidden when null).
+  /// "Odzyskaj z pomocą kręgu" (hidden when null).
   final VoidCallback? circle;
 
   /// Instead of opening a way back here (the first start: it opens once
@@ -214,21 +214,21 @@ class AccountCopyActions extends StatelessWidget {
             button(
               'account-backup-open',
               Icons.save_alt_rounded,
-              t('Utwórz kopię zapasową'),
+              t('Utwórz kopię całego konta'),
               () => unawaited(AccountBackupScreen.open(context)),
               filled: true,
             ),
             button(
               'account-copy-send-open',
               Icons.send_to_mobile_rounded,
-              t('Przenieś na inne urządzenie'),
+              t('Dodaj drugie urządzenie lub przenieś konto'),
               () => unawaited(AccountCopySendScreen.open(context)),
             ),
           ],
           button(
             'account-restore-backup-open',
             Icons.restore_page_outlined,
-            t('Mam backup'),
+            t('Mam kopię'),
             () => onRestore != null
                 ? onRestore!(AccountStartAction.backup)
                 : unawaited(AccountBackupRestoreScreen.open(context)),
@@ -245,7 +245,7 @@ class AccountCopyActions extends StatelessWidget {
             button(
               'account-restore-circle-open',
               Icons.groups_2_outlined,
-              t('Odzyskaj przez krąg zaufanych'),
+              t('Odzyskaj z pomocą kręgu'),
               circle!,
             ),
           const SizedBox(height: 4),
