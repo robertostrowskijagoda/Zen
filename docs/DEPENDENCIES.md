@@ -12,7 +12,9 @@ Versions: Flutter **3.47.1** (Dart 3.11), Go from
 **0.5.14**. Exact package versions are in `pubspec.lock` (every build uses
 it with `--enforce-lockfile`) and `go.sum`. The prebuilt libwebrtc of
 `flutter_webrtc` 1.6.2+hotfix.4 (`m150.7871.03` on Windows and Linux) is
-checked against `tool/ci/libwebrtc.sha256`.
+checked against `tool/ci/libwebrtc.sha256`; the prebuilt WebRTC-SDK
+150.7871.01 of iOS and macOS against `tool/ci/webrtc_sdk.sha256`. JitPack
+serves only the `com.github.davidliu` group.
 
 ## How the parts fit
 

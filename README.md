@@ -226,9 +226,11 @@ Option names may differ a little depending on the phone. You do this once.
 
 ### Windows
 
-Download **Zen-Windows.zip**, unpack it and run `zen.exe`. Nothing else
-needs installing: the Microsoft Visual C++ runtime Zen needs is in the ZIP,
-next to `zen.exe`. If Windows shows "Windows protected your PC", click
+Download **Zen-Windows.zip**, unpack the whole ZIP (it holds a folder
+`Zen`) and run `Zen\zen.exe`. Keep that folder whole and put nothing else in
+it: Zen updates itself in place only there. Nothing else needs installing:
+the Microsoft Visual C++ runtime Zen needs is in the folder, next to
+`zen.exe`. If Windows shows "Windows protected your PC", click
 **More info → Run anyway**.
 
 If Windows 11 says *Smart App Control blocked an app that may be unsafe*,
