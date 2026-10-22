@@ -32,10 +32,18 @@ typedef MirroredSend =
 /// Messages another own device sent, copied here: `{type, to, p}`.
 const String kMirrorType = 'acct_mirror';
 
-/// What is copied to the account's other devices: text messages, and the
+/// What is copied to the account's other devices: text messages, the
 /// disappearing-messages timer (those messages never go into the ledger's
-/// lasting copies, so this live copy is how the other devices see them).
-const Set<String> kMirroredTypes = <String>{'message', 'disappear_timer'};
+/// lasting copies, so this live copy is how the other devices see them),
+/// and reactions, edits and deletions of messages (1:1 and groups), so the
+/// conversation looks the same on each.
+const Set<String> kMirroredTypes = <String>{
+  'message',
+  'disappear_timer',
+  'msg_react',
+  'msg_edit',
+  'msg_delete',
+};
 
 /// Whether [payload] is copied to the account's other devices.
 bool isMirroredPayload(Map<String, dynamic> payload) =>

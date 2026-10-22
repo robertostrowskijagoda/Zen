@@ -11,6 +11,9 @@ import 'package:zen/src/core/utils/secure_clipboard.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
+import 'package:zen/src/features/account/circle_backup_service.dart';
+import 'package:zen/src/features/account/presentation/account_import_layer.dart';
+import 'package:zen/src/features/account/presentation/circle_backup_card.dart';
 import 'package:zen/src/features/account/presentation/key_backup_screen.dart';
 import 'package:zen/src/features/account/presentation/key_restore_screen.dart';
 import 'package:zen/src/features/account/recovery_circle_pick.dart';
@@ -312,6 +315,12 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
     // The pyramid key comes from the account key: the place and the
     // wallet come back with the records friends keep.
     await PyramidService.markRecovered(node.disk);
+    // The copy of the data kept by the circle comes back after the
+    // restart: asked for from the helpers first, then friends.
+    await CircleBackupService.markRestore(
+      node.disk,
+      helpers: <String>{...candidate.helpers, ...service.helperAddresses},
+    );
     await service.endRecovery();
     _candidates = null;
     _recoverPassword.clear();
@@ -515,7 +524,7 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
   }
 
   /// "Co odzyskasz": what comes back with the recovery circle and what
-  /// never does, so nobody expects the chat history on a new phone.
+  /// does not, so nobody expects the photos of the chats on a new phone.
   Widget _recoverScope(ZenColors zen, Key key) => Container(
     key: key,
     margin: const EdgeInsets.only(top: 12),
@@ -547,21 +556,30 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
         ),
         _scopeLine(
           zen,
-          Icons.cancel_outlined,
-          zen.danger,
-          t('Nie wraca: historia czatów'),
+          Icons.check_circle_outline_rounded,
+          zen.success,
+          t(
+            'Wraca: teksty rozmów, profil, ustawienia, randki i sąsiedzi — '
+            'z kopii u kręgu',
+          ),
+        ),
+        _scopeLine(
+          zen,
+          Icons.check_circle_outline_rounded,
+          zen.success,
+          t('Wraca: piramida i portfel, gdy potwierdzą je osoby z piramidy'),
         ),
         _scopeLine(
           zen,
           Icons.cancel_outlined,
           zen.danger,
-          t('Nie wraca: portfel'),
+          t('Nie wraca: zdjęcia i pliki z rozmów, spotkania, filmy'),
         ),
         _scopeLine(
           zen,
-          Icons.cancel_outlined,
-          zen.danger,
-          t('Nie wraca: profil randkowy'),
+          Icons.info_outline_rounded,
+          zen.accent,
+          t('Wszystko wraca z drugiego urządzenia albo z pliku kopii.'),
         ),
       ],
     ),
@@ -937,6 +955,8 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                     ],
                   ),
                 ),
+                // The copy of the data the circle keeps.
+                const CircleBackupCard(),
                 ZenSection(t('Przechowujesz klucze dla')),
                 if (service.heldFor.isEmpty)
                   ZenInfo(
@@ -1229,6 +1249,9 @@ class _AccountRecoveryScreenState extends ConsumerState<AccountRecoveryScreen> {
                     ],
                   ),
                 ),
+                // The whole account: a backup file, another device.
+                ZenSection(t('Kopia i przenoszenie')),
+                const AccountCopyActions(),
                 ZenSection(t('Kopia zapasowa klucza')),
                 ZenCard(
                   child: Column(

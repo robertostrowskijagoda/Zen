@@ -9,6 +9,7 @@ import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/signals/signal_queue_store.dart';
+import 'package:zen/src/features/account/account_media.dart';
 import 'package:zen/src/features/account/device_chat_sync.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/ledger/bridge_book.dart';
@@ -96,6 +97,7 @@ final class _Target implements ChatSyncTarget {
     String key,
     ChatMessage message, {
     Uint8List? bytes,
+    String? storedPath,
   }) async {
     final List<ChatMessage> list = chats[key] ??= <ChatMessage>[];
     if (!list.any((ChatMessage m) => m.id == message.id)) {
@@ -113,6 +115,14 @@ final class _Target implements ChatSyncTarget {
   @override
   Future<void> forgetGroupFromOtherDevice(String groupId) async =>
       leftGroups.add(groupId);
+}
+
+/// Mobile data or Wi-Fi, as the test says.
+final class _Policy implements AccountMediaPolicy {
+  bool allowed = true;
+
+  @override
+  Future<bool> mayFetchNow() async => allowed;
 }
 
 ChatMessage _text(String id, String text) => ChatMessage(
@@ -438,4 +448,73 @@ void main() {
       expect(reported, hasLength(2));
     },
   );
+
+  test('over mobile data a big file waits, the message does not', () async {
+    final String a1 = _a('200::c1');
+    final String a2 = _a('200::c2');
+    final _Linked t1 = await _transport(a1);
+    final _Linked t2 = await _transport(a2);
+    final MemoryLedgerDisk d1 = MemoryLedgerDisk();
+    final MemoryLedgerDisk d2 = MemoryLedgerDisk();
+    final LedgerNode first = _node(t1, disk: d1);
+    await first.start();
+    final _Target firstChats = _Target();
+    final DeviceChatSync firstSync = DeviceChatSync(
+      node: first,
+      target: firstChats,
+    );
+    await firstSync.start();
+    addTearDown(firstSync.stop);
+
+    final LedgerIdentity id1 = await LedgerIdentity.loadOrCreate(d1);
+    await LedgerIdentity.adoptAccount(d2, id1.accountKey!.seed);
+    final LedgerNode second = _node(t2, disk: d2);
+    await second.start();
+    final _Policy policy = _Policy()..allowed = false;
+    final _Target secondChats = _Target();
+    final DeviceChatSync secondSync = DeviceChatSync(
+      node: second,
+      target: secondChats,
+      policy: policy,
+      fileWait: const Duration(seconds: 5),
+    );
+    await secondSync.start();
+    addTearDown(secondSync.stop);
+    await second.rememberDeviceAddresses(<String>[a1]);
+    await _settle(200);
+
+    // A film of 700 KB: several pieces of the file store.
+    final Uint8List film = Uint8List.fromList(
+      List<int>.generate(700 * 1024, (int i) => i % 251),
+    );
+    firstSync.onOutgoing(
+      'group:g1',
+      ChatMessage(
+        id: 'v1',
+        sender: 'self',
+        text: '',
+        sentAtMillis: 5000,
+        direction: ChatMessageDirection.outgoing,
+        type: ChatMessageType.video,
+        mimeType: 'video/mp4',
+        attachmentBytes: film,
+      ),
+    );
+    await _settle(200);
+    await secondSync.idle;
+    expect(
+      secondChats.chats['group:g1']?.map((ChatMessage m) => m.id),
+      contains('v1'),
+      reason: 'the message is there at once',
+    );
+    expect(secondChats.files['v1'], isNull);
+    expect(await secondSync.waitingFiles(), 1);
+
+    // On Wi-Fi: the file comes.
+    policy.allowed = true;
+    await secondSync.retryWaitingFiles();
+    await _settle(100);
+    expect(secondChats.files['v1'], film);
+    expect(await secondSync.waitingFiles(), 0);
+  });
 }

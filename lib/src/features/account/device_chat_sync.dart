@@ -1,19 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
+import 'package:zen/src/features/account/account_media.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 
 /// Files bigger than this are not copied to the account's other devices
-/// (the message is, without the file).
-const int kMaxSyncedFileBytes = 25 * 1024 * 1024;
+/// (the message is, without the file): the largest file the ledger's file
+/// store takes. Files travel piece by piece (never whole in memory).
+const int kMaxSyncedFileBytes = kMaxStreamedMediaBytes;
 
 /// One message as the account's devices pass it on (no file bytes).
 Map<String, dynamic> chatMessageToSync(ChatMessage m) => <String, dynamic>{
@@ -35,6 +36,9 @@ Map<String, dynamic> chatMessageToSync(ChatMessage m) => <String, dynamic>{
               : m.deliveryState)
           .name,
   if (m.readAtMillis != null) 'r': m.readAtMillis,
+  // Reply, reactions, edit, deletion, forwarding (also what the circle
+  // backup keeps of a conversation).
+  'x': ?chatMessageExtrasToJson(m),
 };
 
 ChatMessage? chatMessageFromSync(Object? json) {
@@ -52,7 +56,7 @@ ChatMessage? chatMessageFromSync(Object? json) {
       values.where((T v) => v.name == name).firstOrNull ?? fallback;
   int? asInt(Object? v) => v is int ? v : null;
   String? asString(Object? v) => v is String ? v : null;
-  return ChatMessage(
+  final ChatMessage base = ChatMessage(
     id: id,
     sender: sender,
     text: text,
@@ -74,6 +78,7 @@ ChatMessage? chatMessageFromSync(Object? json) {
     ),
     readAtMillis: asInt(json['r']),
   );
+  return chatMessageWithExtras(base, json['x']);
 }
 
 bool _hasFile(ChatMessage m) => m.type != ChatMessageType.text;
@@ -146,10 +151,14 @@ final class SyncingMessageTimelineStore implements MessageTimelineStore {
 abstract interface class ChatSyncTarget {
   List<String> conversationKeys();
   Future<List<ChatMessage>> conversationMessages(String key);
+
+  /// With its file as [bytes] (small, or no media vault here) or as
+  /// [storedPath] (a media vault file written piece by piece).
   Future<void> importSyncedMessage(
     String key,
     ChatMessage message, {
     Uint8List? bytes,
+    String? storedPath,
   });
   Future<void> forgetFriendFromOtherDevice(String address);
   Future<void> forgetGroupFromOtherDevice(String groupId);
@@ -162,13 +171,32 @@ abstract interface class ChatSyncTarget {
 /// * a newly linked device gets this device's whole history once;
 /// * a friend removed or a group left on another device goes here too.
 final class DeviceChatSync {
-  DeviceChatSync({required this.node, required this.target, this.vault});
+  DeviceChatSync({
+    required this.node,
+    required this.target,
+    this.vault,
+    this.policy,
+    this.retryEvery = const Duration(minutes: 5),
+    this.fileWait = const Duration(minutes: 2),
+  });
 
   final LedgerNode node;
   final ChatSyncTarget target;
 
   /// Opens attachments kept encrypted (by default [MediaVault.current]).
   final MediaVault? vault;
+
+  /// When files may travel (mobile data); always when null.
+  final AccountMediaPolicy? policy;
+
+  /// How often files that had to wait are tried again.
+  final Duration retryEvery;
+
+  /// How long one file is waited for before it goes on the waiting list.
+  final Duration fileWait;
+
+  static const String _pendingKey = 'account/sync/media_pending';
+  Timer? _retry;
 
   final Set<String> _imported = <String>{};
   final List<StreamSubscription<Object?>> _subs =
@@ -186,10 +214,13 @@ final class DeviceChatSync {
       _enqueue(() => _apply(e));
     }
     _enqueue(_maybeSendHistory);
+    _enqueue(retryWaitingFiles);
+    _retry = Timer.periodic(retryEvery, (_) => _enqueue(retryWaitingFiles));
   }
 
   Future<void> stop() async {
     _stopped = true;
+    _retry?.cancel();
     for (final StreamSubscription<Object?> s in _subs) {
       await s.cancel();
     }
@@ -211,32 +242,36 @@ final class DeviceChatSync {
   /// Waits until everything queued so far is done (tests).
   Future<void> get idle => _queue;
 
+  /// Seals the file of [m] into the ledger's file store piece by piece.
   Future<Map<String, dynamic>?> _storeFile(ChatMessage m) async {
     if (!_hasFile(m)) {
       return null;
     }
-    Uint8List? bytes = m.attachmentBytes;
-    final String? path = m.attachmentPath?.trim();
-    if ((bytes == null || bytes.isEmpty) && path != null && path.isNotEmpty) {
-      final MediaVault? reader = vault ?? MediaVault.current;
-      if (await File(path).exists()) {
-        if (reader != null) {
-          if (await reader.length(path) <= kMaxSyncedFileBytes) {
-            bytes = await reader.read(path);
-          }
-        } else if (!isMediaVaultPath(path) &&
-            await File(path).length() <= kMaxSyncedFileBytes) {
-          bytes = await File(path).readAsBytes();
-        }
-      }
+    final String mime = m.mimeType ?? 'application/octet-stream';
+    final Uint8List? bytes = m.attachmentBytes;
+    if (bytes != null && bytes.isNotEmpty) {
+      return storeMediaStreamed(
+        node.blobs,
+        size: bytes.length,
+        range: (int start, int end) async =>
+            Uint8List.sublistView(bytes, start, end),
+        mime: mime,
+      );
     }
-    if (bytes == null || bytes.isEmpty || bytes.length > kMaxSyncedFileBytes) {
+    final String? path = m.attachmentPath?.trim();
+    if (path == null || path.isEmpty) {
       return null;
     }
-    return storeMedia(
+    final AccountFileReader reader = AccountFileReader(vault);
+    final int? size = await reader.size(path);
+    if (size == null || size == 0 || size > kMaxSyncedFileBytes) {
+      return null;
+    }
+    return storeMediaStreamed(
       node.blobs,
-      bytes,
-      mime: m.mimeType ?? 'application/octet-stream',
+      size: size,
+      range: (int start, int end) => reader.range(path, start, end),
+      mime: mime,
     );
   }
 
@@ -265,6 +300,7 @@ final class DeviceChatSync {
     });
   }
 
+  /// A small file whole (a history bundle).
   Future<Uint8List?> _fetch(Object? refJson) async {
     final MediaRef? ref = mediaRefFromJson(refJson);
     if (ref == null || !await node.waitForBlob(ref.id)) {
@@ -273,9 +309,126 @@ final class DeviceChatSync {
     return openMedia(node.blobs, ref);
   }
 
-  Future<void> _import(String key, ChatMessage m, {Uint8List? bytes}) async {
+  Future<void> _import(String key, ChatMessage m) async {
     _imported.add(m.id);
-    await target.importSyncedMessage(key, m, bytes: bytes);
+    await target.importSyncedMessage(key, m);
+  }
+
+  /// [m] with its file [refJson]: the text at once; the file now, or —
+  /// over mobile data with "Media tylko przez Wi-Fi" — once on Wi-Fi.
+  Future<void> _importWithFile(
+    String key,
+    ChatMessage m,
+    Object? refJson,
+  ) async {
+    _imported.add(m.id);
+    final MediaRef? ref = mediaRefFromJson(refJson);
+    if (ref == null) {
+      await target.importSyncedMessage(key, m);
+      return;
+    }
+    if (policy != null && !await policy!.mayFetchNow()) {
+      await target.importSyncedMessage(key, m);
+      await _remember(key, m, refJson);
+      return;
+    }
+    if (!await _takeFile(key, m, ref)) {
+      await target.importSyncedMessage(key, m);
+      await _remember(key, m, refJson);
+    }
+  }
+
+  /// Fetches [ref] from the account's devices and hands it over piece by
+  /// piece (into the media vault); false when it did not come.
+  Future<bool> _takeFile(String key, ChatMessage m, MediaRef ref) async {
+    // Not long: what does not come waits in the list and is tried again.
+    if (!await node.waitForBlob(ref.id, timeout: fileWait)) {
+      return false;
+    }
+    final MediaVault? v = vault ?? MediaVault.current;
+    final int? length = mediaPlainLength(node.blobs, ref);
+    if (length == null) {
+      return false;
+    }
+    try {
+      if (v != null) {
+        final String path = await v.putStream(
+          length,
+          openMediaStreamed(node.blobs, ref),
+        );
+        await target.importSyncedMessage(key, m, storedPath: path);
+      } else {
+        // No media vault (tests): the file whole.
+        final Uint8List? bytes = await openMedia(node.blobs, ref);
+        if (bytes == null) {
+          return false;
+        }
+        await target.importSyncedMessage(key, m, bytes: bytes);
+      }
+      return true;
+    } on Object catch (error) {
+      logZenWarning('A file from another device was not taken: $error');
+      return false;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _waiting() async {
+    final Uint8List? raw = await node.disk.read(_pendingKey);
+    if (raw == null) {
+      return <Map<String, dynamic>>[];
+    }
+    try {
+      final Object? json = jsonDecode(utf8.decode(raw));
+      return <Map<String, dynamic>>[
+        if (json is List)
+          for (final Object? item in json)
+            if (item is Map) Map<String, dynamic>.from(item),
+      ];
+    } on FormatException {
+      return <Map<String, dynamic>>[];
+    }
+  }
+
+  Future<void> _saveWaiting(List<Map<String, dynamic>> items) => node.disk
+      .write(_pendingKey, Uint8List.fromList(utf8.encode(jsonEncode(items))));
+
+  Future<void> _remember(String key, ChatMessage m, Object? refJson) async {
+    final List<Map<String, dynamic>> items = await _waiting();
+    items
+      ..removeWhere(
+        (Map<String, dynamic> i) =>
+            i['m'] is Map && (i['m'] as Map)['id'] == m.id,
+      )
+      ..add(<String, dynamic>{
+        'k': key,
+        'm': chatMessageToSync(m),
+        'f': refJson,
+      });
+    await _saveWaiting(items);
+  }
+
+  /// How many files wait for Wi-Fi (or for the other device).
+  Future<int> waitingFiles() async => (await _waiting()).length;
+
+  /// Takes the files that had to wait, when they may travel now.
+  Future<void> retryWaitingFiles() async {
+    final List<Map<String, dynamic>> items = await _waiting();
+    if (items.isEmpty || (policy != null && !await policy!.mayFetchNow())) {
+      return;
+    }
+    final List<Map<String, dynamic>> left = <Map<String, dynamic>>[];
+    for (final Map<String, dynamic> item in items) {
+      final Object? key = item['k'];
+      final ChatMessage? m = chatMessageFromSync(item['m']);
+      final MediaRef? ref = mediaRefFromJson(item['f']);
+      if (key is! String || m == null || ref == null) {
+        continue;
+      }
+      if (!await _takeFile(key, m, ref)) {
+        left.add(item);
+      }
+    }
+    await _saveWaiting(left);
   }
 
   Future<void> _apply(LogEntry e) async {
@@ -292,11 +445,11 @@ final class DeviceChatSync {
         final ChatMessage? m = chatMessageFromSync(body['m']);
         if (key is String && m != null) {
           final Object? file = body['f'];
-          await _import(
-            key,
-            m,
-            bytes: file == null ? null : await _fetch(file),
-          );
+          if (file == null) {
+            await _import(key, m);
+          } else {
+            await _importWithFile(key, m, file);
+          }
         }
       case kChatHistoryKind:
         await _applyHistory(body);
@@ -345,10 +498,7 @@ final class DeviceChatSync {
       }
     }
     for (final (String key, ChatMessage m, Object? ref) in withFiles) {
-      final Uint8List? bytes = await _fetch(ref);
-      if (bytes != null) {
-        await _import(key, m, bytes: bytes);
-      }
+      await _importWithFile(key, m, ref);
     }
   }
 

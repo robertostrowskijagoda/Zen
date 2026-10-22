@@ -764,13 +764,13 @@ class _LinkReceiveScreenState extends ConsumerState<_LinkReceiveScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: ZenFixed.qrPaper,
                       borderRadius: context.zenRadius(20),
                     ),
                     child: QrImageView(
                       data: profile.qrData,
                       size: 180,
-                      backgroundColor: Colors.white,
+                      backgroundColor: ZenFixed.qrPaper,
                     ),
                   ),
                   const SizedBox(height: 14),

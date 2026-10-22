@@ -37,6 +37,11 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
       await _recordMirroredGroupMessage(payload);
       return;
     }
+    if (type == 'msg_react' || type == 'msg_edit' || type == 'msg_delete') {
+      // A reaction, edit or deletion made on another device.
+      await _applyMirroredChatChange(peerAddress, payload);
+      return;
+    }
     if (type != 'message') {
       return;
     }
@@ -71,6 +76,8 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
               sentAtMillis: sentAt,
               direction: ChatMessageDirection.outgoing,
               deliveryState: ChatMessageDeliveryState.sent,
+              reply: ChatReply.fromJson(payload['re']),
+              forwarded: payload['fwd'] == true,
             ),
       );
       _updateFriendPreview(peerAddress: peer, preview: text.trim());
@@ -167,14 +174,24 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
 
   /// A message from another device of this account (a copy of what it sent,
   /// or its history): added to conversation [key] unless already there,
-  /// with its file when [bytes] are given.
+  /// with its file when [bytes] are given — or [storedPath], a file of the
+  /// media vault written piece by piece (deleted here when not needed).
   Future<void> importSyncedMessage(
     String key,
     ChatMessage message, {
     Uint8List? bytes,
+    String? storedPath,
   }) async {
     StoredAttachment? stored;
-    if (bytes != null && bytes.isNotEmpty) {
+    if (storedPath != null && isMediaVaultPath(storedPath)) {
+      stored = StoredAttachment(
+        path: storedPath,
+        type: message.type,
+        mimeType: message.mimeType ?? 'application/octet-stream',
+        fileName: message.fileName ?? 'zalacznik-${message.type.name}',
+        sizeBytes: message.attachmentSizeBytes ?? 0,
+      );
+    } else if (bytes != null && bytes.isNotEmpty) {
       stored = await _persistIncomingAttachmentFile(
         peerAddress: key,
         messageId: message.id,
@@ -193,6 +210,7 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
             fileName: stored.fileName,
             mimeType: stored.mimeType,
           );
+    bool unused = false;
     await _enqueueStateWork(() async {
       await _upsertTimelineMessage(
         peerAddress: key,
@@ -206,10 +224,17 @@ mixin _SocialHubDevicesMixin on _SocialHubControllerBase {
               (existing.attachmentPath == null ||
                   existing.attachmentPath!.isEmpty) &&
               existing.attachmentBytes == null;
-          return stored != null && missing ? withFile(existing) : existing;
+          if (stored != null && missing) {
+            return withFile(existing);
+          }
+          unused = stored != null;
+          return existing;
         },
       );
     });
+    if (unused && storedPath != null) {
+      await _mediaVault.delete(storedPath);
+    }
   }
 
   /// Friends and groups, for the account's other devices (sealed by the

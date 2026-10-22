@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/ledger_identity.dart';
 import 'package:zen/src/features/account/account_recovery.dart';
+import 'package:zen/src/features/account/circle_backup_service.dart';
 import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
 
@@ -211,5 +212,7 @@ Future<LedgerIdentity> adoptPaperBackup(
     deviceName: deviceName,
   );
   await PyramidService.markRecovered(disk);
+  // And the copy the recovery circle keeps, asked for from friends.
+  await CircleBackupService.markRestore(disk);
   return identity;
 }

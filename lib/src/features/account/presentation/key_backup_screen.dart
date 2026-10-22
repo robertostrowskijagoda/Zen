@@ -583,14 +583,14 @@ class _PaperBackupViewState extends State<PaperBackupView> {
         child: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: ZenFixed.qrPaper,
             borderRadius: context.zenRadius(20),
           ),
           child: QrImageView(
             key: const Key('paper-backup-qr'),
             data: paperBackupQrData(widget.code),
             size: 220,
-            backgroundColor: Colors.white,
+            backgroundColor: ZenFixed.qrPaper,
           ),
         ),
       ),

@@ -6,23 +6,82 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/account/account_secure_providers.dart';
+import 'package:zen/src/features/account/presentation/account_import_layer.dart';
 import 'package:zen/src/features/account/presentation/account_recovery_screen.dart';
 import 'package:zen/src/features/account/presentation/key_backup_screen.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-/// "Zabezpiecz konto": the first start, right after the
-/// permissions step. Offers the recovery circle and the backup of the
-/// key (file or code), or "later" — remembered, with a reminder in Settings
-/// until the account is secured.
-class AccountSecureStage extends ConsumerWidget {
+/// The first start, right after the permissions step: first "Jak
+/// zaczynasz?" — a new account, or one brought back (a backup, another
+/// device, the recovery circle); then, for a new account, "Zabezpiecz
+/// konto": the recovery circle and the backup of the key (file or code),
+/// or "later" — remembered, with a reminder in Settings until the account
+/// is secured.
+class AccountSecureStage extends ConsumerStatefulWidget {
   const AccountSecureStage({super.key});
 
-  Future<void> _answer(WidgetRef ref) => ref
+  @override
+  ConsumerState<AccountSecureStage> createState() => _AccountSecureStageState();
+}
+
+class _AccountSecureStageState extends ConsumerState<AccountSecureStage> {
+  bool _fresh = false;
+
+  Future<void> _answer() => ref
       .read(appSettingsControllerProvider.notifier)
       .setAccountSecureOffered(true);
 
+  /// A way back to an existing account: the first start ends here and the
+  /// way opens once the app (and the network) runs.
+  void _restore(AccountStartAction action) {
+    ref.read(accountStartActionProvider).value = action;
+    unawaited(_answer());
+  }
+
+  Widget _start(BuildContext context) {
+    final ZenColors zen = ZenColors.of(context);
+    return Scaffold(
+      key: const Key('account-start-stage'),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          children: <Widget>[
+            ZenHero(
+              title: t('Jak zaczynasz?'),
+              icon: Icons.waving_hand_outlined,
+              text: t(
+                'Pierwszy raz w Zen? Załóż nowe konto. Masz już konto? '
+                'Przywróć je z kopii, z drugiego urządzenia albo z pomocą '
+                'kręgu zaufanych.',
+              ),
+            ),
+            FilledButton.icon(
+              key: const Key('account-start-new'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+              ),
+              onPressed: () => setState(() => _fresh = true),
+              icon: const Icon(Icons.person_add_alt_1_rounded),
+              label: Text(t('Nowe konto')),
+            ),
+            const SizedBox(height: 12),
+            Text(t('MAM JUŻ KONTO'), style: zen.label(color: zen.textMuted)),
+            AccountCopyActions(
+              backup: false,
+              circle: () => _restore(AccountStartAction.circle),
+              onRestore: _restore,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    if (!_fresh) {
+      return _start(context);
+    }
     final ZenColors zen = ZenColors.of(context);
     // Rebuilds when the person comes back from one of the screens.
     final bool secured = !ref.watch(accountSecureReminderProvider);
@@ -127,7 +186,7 @@ class AccountSecureStage extends ConsumerWidget {
               ),
             TextButton(
               key: const Key('account-secure-later'),
-              onPressed: () => unawaited(_answer(ref)),
+              onPressed: () => unawaited(_answer()),
               child: Text(secured ? t('Gotowe') : t('Później')),
             ),
             if (!secured)

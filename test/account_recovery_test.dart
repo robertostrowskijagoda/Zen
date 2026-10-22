@@ -556,6 +556,11 @@ void main() {
   testWidgets('the screen asks for matching passwords and enough helpers', (
     WidgetTester tester,
   ) async {
+    // A tall window: the whole screen (with the circle's backup card) is
+    // built at once.
+    tester.view.physicalSize = const Size(800, 3200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -606,6 +611,11 @@ void main() {
   });
   testWidgets('the screen shows whose account the pieces open before '
       'taking it', (WidgetTester tester) async {
+    // A tall window: the whole screen (with the circle's backup card) is
+    // built at once.
+    tester.view.physicalSize = const Size(800, 3200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final MemorySignalTransport transport = MemorySignalTransport();
     await tester.pumpWidget(
       ProviderScope(
@@ -636,9 +646,13 @@ void main() {
     await waitFor(() => start.evaluate().isNotEmpty);
     expect(find.byKey(const Key('recovery-recover-emergency')), findsNothing);
     expect(find.byKey(const Key('recovery-scope-before')), findsOneWidget);
-    expect(find.textContaining('Nie wraca: historia czatów'), findsOneWidget);
-    expect(find.textContaining('Nie wraca: portfel'), findsOneWidget);
-    expect(find.textContaining('Nie wraca: profil randkowy'), findsOneWidget);
+    expect(find.textContaining('Wraca: teksty rozmów'), findsOneWidget);
+    expect(find.textContaining('Wraca: piramida i portfel'), findsOneWidget);
+    expect(
+      find.textContaining('Nie wraca: zdjęcia i pliki z rozmów'),
+      findsOneWidget,
+    );
+
     expect(find.textContaining('Wraca: znajomi i grupy'), findsOneWidget);
     await tapKey('recovery-start');
     final Finder collecting = find.byKey(const Key('recovery-collecting'));

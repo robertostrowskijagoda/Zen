@@ -164,6 +164,13 @@ final class RecoveryService {
 
   /// Owners whose pieces this device keeps (addresses).
   Iterable<String> get heldFor => _held.keys;
+
+  /// The accounts whose pieces this device keeps: the recovery circles it
+  /// is in (it keeps their circle copies too).
+  Set<String> get heldAccounts => <String>{
+    for (final Map<String, dynamic> piece in _held.values)
+      ?RecoveryPiece.fromJson(piece)?.account,
+  };
   List<PendingRelease> get pending =>
       List<PendingRelease>.unmodifiable(_pending);
   Map<String, int> get acks => Map<String, int>.unmodifiable(_acks);

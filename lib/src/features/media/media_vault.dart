@@ -123,6 +123,74 @@ final class MediaVault {
     return path;
   }
 
+  /// Encrypts [length] plain bytes arriving as [plain] (pieces of any
+  /// size) into a new file, segment by segment, so memory stays at one
+  /// segment whatever the size; returns its path. Throws (and leaves
+  /// nothing behind) when [plain] brings more or fewer bytes.
+  Future<String> putStream(int length, Stream<List<int>> plain) async {
+    final Uint8List key = await _key();
+    final Directory folder = await _folder();
+    final String id = _newId();
+    final String path =
+        '${folder.path}${Platform.pathSeparator}$id$kMediaVaultExtension';
+    final File temporary = File('$path.tmp');
+    final IOSink out = temporary.openWrite();
+    final int count = _segmentCount(length);
+    int index = 0;
+    Future<void> seal(Uint8List bytes) async {
+      out.add(
+        await encryptSecurityBytes(
+          bytes,
+          key,
+          aad: _segmentAad(id, index, count, length),
+        ),
+      );
+      index++;
+    }
+
+    try {
+      out.add(_headerFor(length));
+      final BytesBuilder segment = BytesBuilder(copy: false);
+      int seen = 0;
+      await for (final List<int> part in plain) {
+        seen += part.length;
+        if (seen > length) {
+          throw const FormatException('More bytes than announced.');
+        }
+        int at = 0;
+        while (at < part.length) {
+          final int k = min(
+            kMediaVaultSegmentBytes - segment.length,
+            part.length - at,
+          );
+          segment.add(part.sublist(at, at + k));
+          at += k;
+          if (segment.length == kMediaVaultSegmentBytes) {
+            await seal(segment.takeBytes());
+          }
+        }
+      }
+      if (seen != length) {
+        throw const FormatException('Fewer bytes than announced.');
+      }
+      if (segment.length > 0 || index == 0) {
+        await seal(segment.takeBytes());
+      }
+      await out.flush();
+      await out.close();
+      await temporary.rename(path);
+      return path;
+    } on Object {
+      try {
+        await out.close();
+      } on Object {
+        // Already closed.
+      }
+      await _deleteQuietly(temporary);
+      rethrow;
+    }
+  }
+
   /// The plain bytes of the file at [path].
   Future<Uint8List> read(String path) async {
     if (!isMediaVaultPath(path)) {
@@ -452,6 +520,20 @@ List<int> _segmentAad(String id, int index, int count, int length) =>
     throw const FormatException('Encrypted media file has the wrong size.');
   }
   return (length: length, count: count);
+}
+
+/// The header of a file of [length] plain bytes.
+Uint8List _headerFor(int length) {
+  final ByteData header = ByteData(_headerBytes);
+  for (int index = 0; index < _magic.length; index++) {
+    header.setUint8(index, _magic[index]);
+  }
+  header
+    ..setUint8(6, _formatVersion)
+    ..setUint8(7, 0)
+    ..setUint32(8, kMediaVaultSegmentBytes, Endian.little)
+    ..setUint32(12, length, Endian.little);
+  return header.buffer.asUint8List();
 }
 
 Future<Uint8List> _sealMedia(Uint8List key, String id, Uint8List plain) async {

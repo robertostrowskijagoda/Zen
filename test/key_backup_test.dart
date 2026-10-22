@@ -465,6 +465,19 @@ void main() {
         ],
       ),
     );
+    // First "Jak zaczynasz?": a new account, or one brought back.
+    expect(find.byKey(const Key('account-start-stage')), findsOneWidget);
+    expect(
+      find.byKey(const Key('account-restore-backup-open')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('account-copy-receive-open')), findsOneWidget);
+    expect(
+      find.byKey(const Key('account-restore-circle-open')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('account-start-new')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('account-secure-circle')), findsOneWidget);
     expect(find.byKey(const Key('account-secure-key')), findsOneWidget);
     await tester.tap(find.byKey(const Key('account-secure-later')));
