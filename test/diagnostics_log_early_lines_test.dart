@@ -43,12 +43,13 @@ void main() {
 /// The log is written fire-and-forget: [read] once the lines landed.
 Future<String> _settled(Future<String> Function() read) async {
   String text = '';
-  for (int i = 0; i < 100; i++) {
+  // Generous: next to the whole suite a loaded disk can be slow.
+  for (int i = 0; i < 200; i++) {
     text = await read();
     if (text.contains('after the attach')) {
       return text;
     }
-    await Future<void>.delayed(const Duration(milliseconds: 20));
+    await Future<void>.delayed(const Duration(milliseconds: 50));
   }
   return text;
 }

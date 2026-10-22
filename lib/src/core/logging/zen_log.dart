@@ -59,8 +59,14 @@ abstract final class ZenDiagnosticsLog {
         _early,
       );
       _early.clear();
+      // In one write: a slow disk (or a scanner holding the file) then
+      // costs one wait, not one per line.
+      final StringBuffer batch = StringBuffer();
       for (final (DateTime time, String line) in early) {
-        _append(target, time, line);
+        batch.write(_entry(time, line));
+      }
+      if (batch.isNotEmpty) {
+        _queue(target, batch.toString());
       }
     } catch (error) {
       _console('[ZEN] Attaching the diagnostics log failed: $error');
@@ -101,21 +107,41 @@ abstract final class ZenDiagnosticsLog {
   /// Queues [line], written at [time], for [target] (redacted here: an
   /// early line only once the app's folders are known).
   static void _append(File target, DateTime time, String line) {
+    _queue(target, _entry(time, line));
+  }
+
+  /// One line of the file, redacted.
+  static String _entry(DateTime time, String line) {
     final String redacted = redactDiagnosticsText(
       line,
       privatePlaces: _privatePlaces,
       homeDirectory: _home,
     );
-    final String entry =
-        '${time.toIso8601String()} [$_source] '
+    return '${time.toIso8601String()} [$_source] '
         '$redacted\n';
+  }
+
+  /// Appends [entry] after everything queued before it.
+  static void _queue(File target, String entry) {
     _writes = _writes
         .then((_) => _appendEntry(target, entry))
         .catchError((Object _) {});
   }
 
   static Future<void> _appendEntry(File target, String entry) async {
-    await target.writeAsString(entry, mode: FileMode.append, flush: false);
+    // On Windows another process (a virus scanner, the indexer) may hold
+    // the file for a moment: try again shortly instead of losing the line.
+    for (int attempt = 1; ; attempt++) {
+      try {
+        await target.writeAsString(entry, mode: FileMode.append, flush: false);
+        break;
+      } on FileSystemException {
+        if (attempt >= 5) {
+          rethrow;
+        }
+        await Future<void>.delayed(Duration(milliseconds: 25 * attempt));
+      }
+    }
     final int length = await target.length();
     if (length <= keepBytes * 2) {
       return;

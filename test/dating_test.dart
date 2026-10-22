@@ -861,8 +861,11 @@ void main() {
     // profile, no name.
     expect(marek.service.profile(x), isNull);
     expect(marek.service.profile(y), isNull);
-    expect(jsonEncode(marek.received), isNot(contains('Xenia')));
-    expect(jsonEncode(marek.sent), isNot(contains('Yann')));
+    // (Quoted: base64 of sealed boxes may hold the bare letters by chance.)
+    expect(jsonEncode(marek.received), isNot(contains(r'\"Xenia\"')));
+    expect(jsonEncode(marek.received), isNot(contains('"Xenia"')));
+    expect(jsonEncode(marek.sent), isNot(contains(r'\"Yann\"')));
+    expect(jsonEncode(marek.sent), isNot(contains('"Yann"')));
     // The one who introduced them is whom they can ask.
     expect(xenia.service.opinionFriends(y), <String>[marek.address]);
 
