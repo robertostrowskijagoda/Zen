@@ -11,11 +11,13 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
 import 'package:zen/src/features/calls/group_call_media.dart';
 import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/calls/presentation/call_compact_layer.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
+import 'package:zen/src/features/calls/presentation/call_recording_notice.dart';
 import 'package:zen/src/features/calls/presentation/call_security_badge.dart';
 import 'package:zen/src/features/calls/presentation/call_session_widgets.dart';
 import 'package:zen/src/features/calls/presentation/screen_share_guard.dart';
@@ -421,12 +423,13 @@ class _GroupCallScreenState extends ConsumerState<GroupCallScreen> {
       await media.startRecording(path, label: label);
       return;
     }
-    final String? path = await media.stopRecording();
-    if (path != null && mounted) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        SnackBar(content: Text(t('Nagranie zapisane (zaszyfrowane).'))),
-      );
-    }
+    // "Saved" only once it is encrypted in the app.
+    final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(
+      context,
+    );
+    final CallRecordingKeeper keeper = ref.read(callRecordingKeeperProvider);
+    final CallRecordingOutcome? outcome = await media.stopRecording();
+    showCallRecordingOutcome(messenger, keeper, outcome);
   }
 
   Future<void> _toggleScreenShare(GroupCallMedia media) async {

@@ -1512,6 +1512,7 @@
   "Nagranie jeszcze się pobiera…": "Bản ghi vẫn đang tải…",
   "Nagranie nie zawiera danych.": "Bản ghi không có dữ liệu.",
   "Nagranie nie zawiera dźwięku.": "Bản ghi không có âm thanh.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "Bản ghi cuộc gọi chưa được lưu. Hãy thử lại trước khi đóng ứng dụng, nếu không nó sẽ mất.",
   "Nagranie zapisane (zaszyfrowane).": "Đã lưu bản ghi (mã hóa).",
   "Nagranie {number}": "Bản ghi {number}",
   "Nagrywaj": "Ghi âm",

@@ -8,10 +8,12 @@ import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/domain/calls/call_session.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
+import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
 import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
 import 'package:zen/src/features/calls/presentation/call_compact_layer.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
+import 'package:zen/src/features/calls/presentation/call_recording_notice.dart';
 import 'package:zen/src/features/calls/presentation/call_security_badge.dart';
 import 'package:zen/src/features/calls/presentation/call_session_widgets.dart';
 import 'package:zen/src/features/calls/presentation/screen_share_guard.dart';
@@ -307,13 +309,13 @@ class _CallSurfaceScreenState extends ConsumerState<CallSurfaceScreen> {
       return;
     }
     // The file goes into the encrypted store by itself (also when the
-    // call simply ends while recording).
-    final String? path = await callMedia.stopRecording();
-    if (path != null && context.mounted) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        SnackBar(content: Text(t('Nagranie zapisane (zaszyfrowane).'))),
-      );
-    }
+    // call simply ends while recording); "saved" only once it is there.
+    final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(
+      context,
+    );
+    final CallRecordingKeeper keeper = ref.read(callRecordingKeeperProvider);
+    final CallRecordingOutcome? outcome = await callMedia.stopRecording();
+    showCallRecordingOutcome(messenger, keeper, outcome);
   }
 
   Future<void> _toggleScreenShare(

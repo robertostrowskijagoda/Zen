@@ -1578,6 +1578,7 @@
   "Nagranie jeszcze się pobiera…": "Запись ещё загружается…",
   "Nagranie nie zawiera danych.": "В записи нет данных.",
   "Nagranie nie zawiera dźwięku.": "В записи нет звука.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "Запись звонка не сохранена. Повтори попытку до закрытия приложения, иначе она пропадёт.",
   "Nagranie zapisane (zaszyfrowane).": "Запись сохранена (зашифрована).",
   "Nagranie {number}": "Запись {number}",
   "Nagrywaj": "Записывать",

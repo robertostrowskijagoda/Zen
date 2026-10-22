@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +10,7 @@ import 'package:zen/src/app/i18n/zen_format.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/media/media_vault.dart';
@@ -46,6 +46,7 @@ class CallRecordingsScreen extends ConsumerStatefulWidget {
 class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
   late final CallRecordingStore _store = CallRecordingStore(
     ref.read(ledgerDiskProvider),
+    ref.read(mediaVaultProvider),
   );
   List<CallRecording>? _items;
 
@@ -72,15 +73,20 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
 
   /// A plain copy only for the moment of playing, deleted afterwards.
   Future<void> _play(CallRecording rec) async {
-    final Uint8List? data = await _store.read(rec.id);
-    if (data == null || !mounted) {
+    // Random name in the temporary media folder (emptied at every start),
+    // decrypted piece by piece.
+    final File file;
+    try {
+      file = await _store.openTemporary(rec);
+    } on Object catch (error, stackTrace) {
+      logZenError('Opening a call recording failed', error, stackTrace);
+      _tell(t('Nie udało się odtworzyć nagrania.'));
       return;
     }
-    // Random name in the temporary media folder (emptied at every start).
-    final File file = await writeTemporaryMedia(
-      data,
-      extension: '.${rec.extension}',
-    );
+    if (!mounted) {
+      await file.delete();
+      return;
+    }
     final VideoPlayerController player = VideoPlayerController.file(file);
     try {
       await player.initialize();
@@ -124,10 +130,6 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
   }
 
   Future<void> _export(CallRecording rec) async {
-    final Uint8List? data = await _store.read(rec.id);
-    if (data == null) {
-      return;
-    }
     final String name = 'rozmowa-${rec.id}.${rec.extension}';
     String? target;
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
@@ -148,17 +150,22 @@ class _CallRecordingsScreenState extends ConsumerState<CallRecordingsScreen> {
     if (target == null) {
       return;
     }
-    await File(target).writeAsBytes(data, flush: true);
-    // A plain copy on purpose: the panic password deletes it too.
+    // Remembered first: the panic password deletes it too, even a copy
+    // cut short.
     await rememberExportedFile(target);
+    try {
+      await _store.exportTo(rec, File(target));
+    } on Object catch (error, stackTrace) {
+      logZenError('Exporting a call recording failed', error, stackTrace);
+      _tell(t('Nie udało się zapisać pliku: {error}', {'error': error}));
+      return;
+    }
+    _tell(t('Zapisano bez szyfrowania: {path}', {'path': target}));
+  }
+
+  void _tell(String text) {
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            t('Zapisano bez szyfrowania: {path}', {'path': target}),
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
     }
   }
 

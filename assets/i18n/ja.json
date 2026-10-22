@@ -1512,6 +1512,7 @@
   "Nagranie jeszcze się pobiera…": "録音をダウンロード中です…",
   "Nagranie nie zawiera danych.": "録音にデータがありません。",
   "Nagranie nie zawiera dźwięku.": "録音に音声が含まれていません。",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "通話の録音は保存されませんでした。アプリを閉じる前にもう一度お試しください。閉じると失われます。",
   "Nagranie zapisane (zaszyfrowane).": "録音を保存しました（暗号化済み）。",
   "Nagranie {number}": "録音 {number}",
   "Nagrywaj": "録音",

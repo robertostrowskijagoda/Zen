@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/features/calls/call_recorder.dart';
 import 'package:zen/src/features/calls/call_recordings.dart';
+import 'package:zen/src/features/media/media_vault.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -16,10 +17,18 @@ void main() {
       addTearDown(() => dir.deleteSync(recursive: true));
       final File file = File('${dir.path}/r.wav')
         ..writeAsBytesSync(Uint8List.fromList(<int>[1, 2, 3, 4]));
-      final MemoryLedgerDisk disk = MemoryLedgerDisk();
+      final Uint8List key = Uint8List.fromList(List<int>.filled(32, 7));
+      final CallRecordingStore store = CallRecordingStore(
+        MemoryLedgerDisk(),
+        MediaVault(
+          masterKey: () async => key,
+          supportDirectory: () async => dir,
+          temporaryDirectory: () async => dir,
+        ),
+      );
 
       final CallRecording? rec = await keepCallRecording(
-        disk,
+        store,
         path: file.path,
         mime: 'audio/wav',
         label: 'Rodzina',
@@ -28,21 +37,17 @@ void main() {
 
       expect(rec, isNotNull);
       expect(file.existsSync(), isFalse);
-      final List<CallRecording> all = await CallRecordingStore(disk).list();
+      final List<CallRecording> all = await store.list();
       expect(all.single.peer, 'Rodzina');
       expect(all.single.isAudioOnly, isTrue);
       expect(all.single.extension, 'wav');
-      expect(await CallRecordingStore(disk).read(all.single.id), <int>[
-        1,
-        2,
-        3,
-        4,
-      ]);
+      final File copy = await store.openTemporary(all.single);
+      expect(copy.readAsBytesSync(), <int>[1, 2, 3, 4]);
 
       // Nothing recorded: nothing kept.
       expect(
         await keepCallRecording(
-          disk,
+          store,
           path: '${dir.path}/missing.wav',
           mime: 'audio/wav',
           label: 'x',
@@ -52,13 +57,23 @@ void main() {
     },
   );
 
-  test('recordings from before keep working as video', () {
+  test('a recording without a type is video; one without a file is none', () {
     final CallRecording? old = CallRecording.fromJson(<String, dynamic>{
       'id': 'rec-1',
       'peer': 'Ania',
       'at': 1,
       'bytes': 10,
+      'file': '${'a' * 32}.zmedia',
     });
+    expect(
+      CallRecording.fromJson(<String, dynamic>{
+        'id': 'rec-1',
+        'peer': 'Ania',
+        'at': 1,
+        'bytes': 10,
+      }),
+      isNull,
+    );
     expect(old!.mime, 'video/mp4');
     expect(old.extension, 'mp4');
     expect(old.isAudioOnly, isFalse);
@@ -68,6 +83,7 @@ void main() {
         peer: 'Kuba',
         millis: 2,
         bytes: 3,
+        file: 'b.zmedia',
         mime: 'audio/wav',
       ).toJson(),
     )!;
@@ -81,6 +97,7 @@ void main() {
         peer: 'Ola',
         millis: 3,
         bytes: 4,
+        file: 'c.zmedia',
         mime: 'audio/mp4',
       ).toJson(),
     )!;

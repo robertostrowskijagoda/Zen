@@ -14,7 +14,6 @@ import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/calls/call_safety_cues.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
 import 'package:zen/src/features/calls/group_call_media.dart';
-import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 
 part 'group_call_media_webrtc.dart';
@@ -141,8 +140,9 @@ abstract class CallMediaSessionController extends ChangeNotifier {
     throw UnsupportedError(t('Nagrywanie nie jest tu dostępne.'));
   }
 
-  /// Stops recording; returns the file path, or null when nothing ran.
-  Future<String?> stopRecording() async => null;
+  /// Stops recording and waits until the recording is stored (encrypted)
+  /// in the app; null when nothing ran.
+  Future<CallRecordingOutcome?> stopRecording() async => null;
 
   /// Gets every finished recording — stopped by hand or by the end of the
   /// call — to be kept (encrypted) in the app.
@@ -159,8 +159,32 @@ abstract class CallMediaSessionController extends ChangeNotifier {
 }
 
 /// A recording that just ended: the file, its type and who it was with.
+/// Completes once it is stored (or could not be).
 typedef CallRecordingFinished =
-    void Function(String path, String mime, String label);
+    Future<CallRecordingOutcome> Function(
+      String path,
+      String mime,
+      String label,
+    );
+
+/// Hands a finished recording to [keep]; never throws (without a keeper,
+/// or when it fails, the recording counts as not stored).
+Future<CallRecordingOutcome> keepFinishedRecording(
+  CallRecordingFinished? keep,
+  String path,
+  String mime,
+  String label,
+) async {
+  if (keep == null) {
+    return CallRecordingOutcome.failed;
+  }
+  try {
+    return await keep(path, mime, label);
+  } on Object catch (error, stackTrace) {
+    logZenError('Saving the call recording failed', error, stackTrace);
+    return CallRecordingOutcome.failed;
+  }
+}
 
 final Provider<CallMediaSessionController> callMediaSessionControllerProvider =
     Provider<CallMediaSessionController>((Ref ref) {
@@ -169,15 +193,9 @@ final Provider<CallMediaSessionController> callMediaSessionControllerProvider =
             transport: ref.read(signalTransportProvider),
           );
       controller.onRecordingFinished =
-          (String path, String mime, String label) => unawaitedLogged(
-            keepCallRecording(
-              ref.read(ledgerDiskProvider),
-              path: path,
-              mime: mime,
-              label: label,
-            ),
-            context: 'Saving the call recording failed',
-          );
+          (String path, String mime, String label) => ref
+              .read(callRecordingKeeperProvider)
+              .keep(path: path, mime: mime, label: label);
       // `dispose` closes the session first and only then releases the
       // renderers, so a separate `close()` here would just race it.
       ref.onDispose(controller.dispose);
@@ -408,21 +426,26 @@ final class WebRtcCallMediaSessionController
   }
 
   @override
-  Future<String?> stopRecording() async {
-    final String? path = _recordingPath;
+  Future<CallRecordingOutcome?> stopRecording() async {
+    final String? path = await _stopRecorder(tell: true);
     if (path == null) {
       return null;
     }
-    await _finishRecording(tell: true);
     _notify();
-    return path;
+    return keepFinishedRecording(
+      onRecordingFinished,
+      path,
+      _recorder.mime,
+      _recordingLabel,
+    );
   }
 
-  /// Stops the recorder and hands the file over to be kept.
-  Future<void> _finishRecording({required bool tell}) async {
+  /// Stops the recorder; returns the file to be kept, or null when nothing
+  /// ran.
+  Future<String?> _stopRecorder({required bool tell}) async {
     final String? path = _recordingPath;
     if (path == null) {
-      return;
+      return null;
     }
     _recordingPath = null;
     try {
@@ -433,7 +456,23 @@ final class WebRtcCallMediaSessionController
     if (tell) {
       _sendCallSignal(kCallRecordingSignal, false);
     }
-    onRecordingFinished?.call(path, _recorder.mime, _recordingLabel);
+    return path;
+  }
+
+  /// The call ends while recording: the file is stored in the background
+  /// (the call does not wait for the encryption).
+  Future<void> _finishRecording() async {
+    final String? path = await _stopRecorder(tell: false);
+    if (path != null) {
+      unawaited(
+        keepFinishedRecording(
+          onRecordingFinished,
+          path,
+          _recorder.mime,
+          _recordingLabel,
+        ),
+      );
+    }
   }
 
   @override
@@ -2331,7 +2370,7 @@ final class WebRtcCallMediaSessionController
 
   Future<void> _closeInternal() async {
     // The call ends: a recording still running is finished and kept.
-    await _finishRecording(tell: false);
+    await _finishRecording();
     _remoteRecording = false;
     final MediaStream? screen = _screenStream;
     _screenStream = null;

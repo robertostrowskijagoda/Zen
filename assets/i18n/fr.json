@@ -1534,6 +1534,7 @@
   "Nagranie jeszcze się pobiera…": "L’enregistrement est encore en cours de téléchargement…",
   "Nagranie nie zawiera danych.": "L’enregistrement ne contient aucune donnée.",
   "Nagranie nie zawiera dźwięku.": "L’enregistrement ne contient pas de son.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "L’enregistrement de l’appel n’a pas été sauvegardé. Réessayez avant de fermer l’application, sinon il sera perdu.",
   "Nagranie zapisane (zaszyfrowane).": "Enregistrement sauvegardé (chiffré).",
   "Nagranie {number}": "Enregistrement {number}",
   "Nagrywaj": "Enregistrer",
