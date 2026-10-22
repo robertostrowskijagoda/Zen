@@ -410,11 +410,11 @@ SideStore or AltStore sign it with the user's free Apple ID (README, section
   own. `tool/ci/check_libwebrtc.py <platform> <bundle>` hashes the library
   in the finished bundle and the downloaded ZIP and compares them with
   `tool/ci/libwebrtc.sha256` (`<sha256>  <version>/<platform>/<file>`): a
-  difference fails the build, a missing pin only warns and prints the line
-  to paste. Pin the lines after the first trusted build (compare the ZIP's
-  sum with one downloaded independently), then add `--strict` in
-  `release.yml` so a missing pin fails too. Repeat after every
-  `flutter_webrtc` bump. Tests: `tool/ci/test_check_libwebrtc.py`.
+  difference fails the build. In CI a missing pin only warns and prints the
+  line to paste; `release.yml` runs it with `--strict`, so a release fails
+  without pins. After every `flutter_webrtc` bump that changes the
+  libwebrtc version, add the new lines (compare the ZIP's sum with one
+  downloaded independently from the webrtc-sdk/libwebrtc release). Tests: `tool/ci/test_check_libwebrtc.py`.
 - **Go.** `go.mod` has a `toolchain` line (go1.26.10, the latest 1.26
   security fix); `actions/setup-go` with `go-version-file` takes it, and
   `ios.yml` reads it too. Dependabot does not raise `toolchain`: bump it by

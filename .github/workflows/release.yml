@@ -237,7 +237,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # The prebuilt libwebrtc flutter_webrtc downloaded, against the
           # SHA-256 pinned in tool/ci/libwebrtc.sha256.
-          python tool/ci/check_libwebrtc.py windows-x64 build/windows/x64/runner/Release
+          python tool/ci/check_libwebrtc.py --strict windows-x64 build/windows/x64/runner/Release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Release files
@@ -329,7 +329,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # The prebuilt libwebrtc flutter_webrtc downloaded, against the
           # SHA-256 pinned in tool/ci/libwebrtc.sha256.
-          python tool/ci/check_libwebrtc.py windows-arm64 build/windows/arm64/runner/Release
+          python tool/ci/check_libwebrtc.py --strict windows-arm64 build/windows/arm64/runner/Release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Release files
@@ -414,7 +414,7 @@ jobs:
           sh tool/ci/check_linux_abi.sh "$bundle" 2.35 3.4.30
           # The prebuilt libwebrtc flutter_webrtc downloaded, against the
           # SHA-256 pinned in tool/ci/libwebrtc.sha256.
-          python3 tool/ci/check_libwebrtc.py "linux-$ARCH" "$bundle"
+          python3 tool/ci/check_libwebrtc.py --strict "linux-$ARCH" "$bundle"
 
       - name: Release files
         env:
