@@ -159,7 +159,8 @@ jobs:
 
   android-bridge:
     name: Go bridge for Android (3 ABIs)
-    # The APK carries arm64-v8a, armeabi-v7a (32-bit) and x86_64: each must
+    # The release has one APK each for arm64-v8a, armeabi-v7a (32-bit) and
+    # x86_64 (release.yml, --split-per-abi): each ABI must
     # build and export the bridge (a 32-bit-only break shows up here, not
     # on the maintainer's arm64 phone). The NDK is on the runner. Each
     # 64-bit library must work with 16 KB pages (Google Play, Android 15+).
@@ -208,6 +209,9 @@ jobs:
       - name: Build tools and libraries
         run: |
           sudo apt-get update
+          # Ubuntu 22.04 runners carry libunwind-14-dev, which conflicts
+          # with the libunwind-dev that libgstreamer1.0-dev needs.
+          sudo apt-get remove -y libunwind-14-dev || true
           sudo apt-get install -y --no-install-recommends \
             clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
             make g++ \
@@ -371,6 +375,11 @@ jobs:
 
       - name: Packages
         run: flutter pub get --enforce-lockfile
+
+      # Built on its own first: inside `flutter build` a failing Go build
+      # shows only "exited with code 1".
+      - name: Go bridge (ARM64)
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File native/yggdrasil_bridge/build_windows.ps1 -Arch arm64
 
       - name: Build
         run: flutter build windows --release

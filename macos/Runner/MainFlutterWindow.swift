@@ -76,15 +76,15 @@ class MainFlutterWindow: NSWindow {
     super.setFrame(portrait(frameRect), display: displayFlag, animate: animateFlag)
   }
 
-  override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+  @objc func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
     return ZenMediaTransferBridge.filePaths(sender.draggingPasteboard).isEmpty ? [] : .copy
   }
 
-  override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+  @objc func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
     return ZenMediaTransferBridge.filePaths(sender.draggingPasteboard).isEmpty ? [] : .copy
   }
 
-  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+  @objc func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
     let paths = ZenMediaTransferBridge.filePaths(sender.draggingPasteboard)
     guard !paths.isEmpty, let view = contentView else {
       return false

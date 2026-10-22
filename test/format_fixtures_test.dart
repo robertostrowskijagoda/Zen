@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/peer_version.dart';
+import 'package:zen/src/core/crypto/hybrid_signature.dart';
 import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/hlc.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
@@ -411,6 +412,10 @@ void main() {
     });
 
     test('a copy at the recovery circle', () async {
+      // The same signer wherever the sample is written or read (a machine
+      // with the bridge signs with the real ML-DSA, CI has none).
+      debugOverrideHybridSigner(kStandInHybridSigner);
+      addTearDown(() => debugOverrideHybridSigner(null));
       final Map<String, dynamic> sample = await _sample('circle', () async {
         final LedgerIdentity me = await LedgerIdentity.loadOrCreate(
           MemoryLedgerDisk(),
