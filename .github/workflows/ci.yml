@@ -323,8 +323,10 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends ./deb/zen.deb
           # The bundle's own libraries find each other through /opt/zen/lib.
+          # libjvm.so is skipped: package:jni's library (pulled in by a
+          # plugin) names it, but it is only loaded on Android.
           missing=$(LD_LIBRARY_PATH=/opt/zen/lib ldd /opt/zen/zen /opt/zen/lib/*.so \
-            | grep 'not found' || true)
+            | grep 'not found' | grep -v 'libjvm\.so' || true)
           if [ -n "$missing" ]; then
             echo "::error::Missing libraries on $IMAGE:"
             echo "$missing"
@@ -376,10 +378,11 @@ jobs:
       - name: Packages
         run: flutter pub get --enforce-lockfile
 
-      # Built on its own first: inside `flutter build` a failing Go build
-      # shows only "exited with code 1".
+      # Built on its own first, with its output in the log (inside
+      # `flutter build` a failing Go build shows only "exited with code 1");
+      # the stamp it leaves lets the build below use this library as is.
       - name: Go bridge (ARM64)
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File native/yggdrasil_bridge/build_windows.ps1 -Arch arm64
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File native/yggdrasil_bridge/build_if_changed.ps1 -Target windows -Arch arm64
 
       - name: Build
         run: flutter build windows --release

@@ -106,6 +106,15 @@ foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
     COMPONENT Runtime)
 endforeach(bundled_library)
 
+# zstandard_linux builds its zstd library as a separate shared library but
+# does not list it among its bundled libraries: without this the installed
+# app (the .deb, the tarball) cannot load the plugin.
+if(TARGET zstandard_linux)
+  install(FILES "$<TARGET_FILE:zstandard_linux>"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endif()
+
 # Go bridge (native/yggdrasil_bridge): checked on every build and rebuilt
 # only when its Go sources changed (the hash is kept next to the library;
 # see build_linux.sh). Without Go an existing library is used with a
