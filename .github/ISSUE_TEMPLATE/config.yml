@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Zen on Discord
+    url: https://discord.gg/g4vHvpKV37
+    about: Questions, help with installing and using Zen, and talk with other people who use it.
+  - name: Report a security vulnerability
+    url: https://github.com/robertostrowskijagoda/Zen/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue (see SECURITY.md).
+  - name: User guide
+    url: https://github.com/robertostrowskijagoda/Zen/blob/main/docs/guide/README.md
+    about: How every part of Zen works, with pictures.

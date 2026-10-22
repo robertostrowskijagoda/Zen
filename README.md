@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen.apk"><b>⬇ Android</b></a>
+  <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-arm64-v8a.apk"><b>⬇ Android</b></a>
   &nbsp;·&nbsp;
   <a href="https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-Windows.zip"><b>⬇ Windows</b></a>
   &nbsp;·&nbsp;
@@ -33,6 +33,8 @@
   <a href="#mac-linux"><b>💻 Mac, Linux</b></a>
   &nbsp;·&nbsp;
   <a href="docs/guide/README.md"><b>📖 User guide</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://discord.gg/g4vHvpKV37"><b>💬 Discord</b></a>
   &nbsp;·&nbsp;
   <a href="#support-zen"><b>💜 Support</b></a>
 </p>
@@ -78,6 +80,8 @@ Zen also tries a new way of deciding shared matters: the **pyramid**, built
 from small cells of people who know each other in person, where votes, trust
 and a common purse flow from the bottom up, with no headquarters that could be
 bribed or shut down.
+
+Using Zen to break the law is forbidden by the [Terms of use](docs/TERMS.md).
 
 ## Post-quantum
 
@@ -156,7 +160,7 @@ Why, and what an attacker could do: [Security model](docs/SECURITY_MODEL.md).
 
 | System | Builds | Notes |
 |---|---|---|
-| Android | `Zen.apk` (arm64-v8a, armeabi-v7a, x86_64) | full feature set, background receiving while locked |
+| Android | `Zen-arm64-v8a.apk` (most phones), `Zen-armeabi-v7a.apk` (older 32-bit phones), `Zen-x86_64.apk` (Chromebooks, emulators) | full feature set, background receiving while locked |
 | iPhone | `Zen-unsigned.ipa` (iOS 15+) | sideloaded; receives only while open |
 | Windows | `Zen-Windows.zip` (x64), `Zen-Windows-arm64.zip` | the Visual C++ runtime is inside the ZIP |
 | Linux | `.tar.gz`, `.deb` (x64, arm64), `.flatpak` (x64) | Ubuntu 22.04+, Debian 12+, Mint 21+ (glibc 2.35+); other systems: Flatpak |
@@ -187,7 +191,8 @@ on another phone / computer** shows the same steps and a QR code to that page.
 
 ### Android
 
-1. On your phone open this page and tap **Download for Android**.
+1. On your phone open this page and tap **⬇ Android** at the top (the file
+   for almost every phone; the other files are below).
 2. When the file has downloaded, tap it (or open **Downloads**).
 3. The phone will ask whether to allow the browser to install apps — tap
    **Settings**, turn on **Allow from this source** and go back.
@@ -195,9 +200,14 @@ on another phone / computer** shows the same steps and a QR code to that page.
    choose **More details → Install anyway** (this is normal outside a store).
 5. Open Zen and set a password.
 
-One universal `Zen.apk` covers 64-bit phones (arm64-v8a), older 32-bit phones
-(armeabi-v7a) and x86_64 devices (Chromebooks, emulators). Zen updates
-itself from GitHub; if you use [Obtainium](https://obtainium.imranr.dev/),
+There is one APK per processor type: almost every phone needs
+[Zen-arm64-v8a.apk](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-arm64-v8a.apk);
+older 32-bit phones need
+[Zen-armeabi-v7a.apk](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-armeabi-v7a.apk),
+and Chromebooks and emulators
+[Zen-x86_64.apk](https://github.com/robertostrowskijagoda/Zen/releases/latest/download/Zen-x86_64.apk).
+If installing the first file fails on an older phone, take the 32-bit one. Zen updates
+itself from GitHub with the right file; if you use [Obtainium](https://obtainium.imranr.dev/),
 you can add `https://github.com/robertostrowskijagoda/Zen` there instead (one
 tap on the install page).
 
@@ -278,7 +288,7 @@ enterprise certificates get revoked and hand your app to strangers —
 
 ### Mac, Linux
 
-New — the Linux and Mac builds are made by GitHub Actions together with the
+The Linux and Mac builds are made by GitHub Actions together with the
 other release files; they are not signed and have not yet been checked on many
 real computers, so they may have bugs.
 
@@ -338,7 +348,7 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
    the real Zen. The key fingerprint (SHA-256):
 
    ```
-   (will appear with the first signed release)
+   (published here and in every release description once release signing is set up)
    ```
 
 ## Why Zen is not on Google Play or the App Store
@@ -405,9 +415,9 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
   against `SHA256SUMS` and, on Android, Zen's signing certificate
   ([details](docs/guide/updates.md)).
 - The legal texts: [privacy policy](docs/PRIVACY.md) and
-  [terms of use](docs/TERMS.md), also in Polish
-  ([polityka prywatności](docs/PRIVACY.pl.md), [regulamin](docs/TERMS.pl.md)). Zen asks no one for their age, except the
-  pyramid, which asks for the birth year at entry.
+  [terms of use](docs/TERMS.md). Using Zen to break the law is forbidden by
+  the terms of use. Zen asks no one for their age, except the pyramid, which
+  asks for the birth year at entry.
 
 Found a vulnerability? Please report it privately: [SECURITY.md](SECURITY.md).
 
@@ -454,7 +464,7 @@ when its sources changed (details: `docs/RELEASES.md`, point 3.1).
 
 | System | You need | Command |
 |---|---|---|
-| Android (one APK: arm64-v8a, armeabi-v7a, x86_64) | Android Studio (SDK and NDK), JDK 17 | `flutter build apk --release` |
+| Android (one APK per ABI: arm64-v8a, armeabi-v7a, x86_64) | Android Studio (SDK and NDK), JDK 17 | `flutter build apk --release --split-per-abi` |
 | Android for a store only (Google Play, Galaxy Store; the same app without self-update, APK handing and launcher disguise; the build writes `Zen-APP-STORE-ONLY-do-not-install-manually.aab` and `.apk` to `build/app/outputs/app-store-only/`; never install this build by hand) | as above | `flutter build appbundle --release --flavor appStoreOnly` |
 | Windows | Visual Studio 2022 ("Desktop development with C++"), gcc for Go (e.g. Strawberry Perl) | `flutter build windows --release` |
 | Windows on ARM (on an ARM64 computer) | as above, with ARM64 tools; for Go [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) instead of gcc | `flutter build windows --release` |
@@ -496,6 +506,13 @@ in `macos/Runner/Release.entitlements`.
 | [SECURITY.md](SECURITY.md) | reporting a vulnerability |
 | [CHANGELOG.md](CHANGELOG.md) | history of changes |
 
+## Community
+
+Questions, help with installing, ideas, or just talk with other people who
+use Zen: **[Zen on Discord](https://discord.gg/g4vHvpKV37)**. Bugs and
+feature requests go to [GitHub Issues](https://github.com/robertostrowskijagoda/Zen/issues);
+vulnerabilities privately, as in [SECURITY.md](SECURITY.md).
+
 ## Support Zen
 
 Zen is free and ad-free — it is kept going only by voluntary donations.
@@ -503,8 +520,10 @@ It is made by one person, with no company and no investors.
 
 **[☕ Buy me a coffee at buycoffee.to/zen](https://buycoffee.to/zen)** — this is the only
 official Zen fundraiser; the same link is in the app (About → Support Zen).
-Donations are voluntary gifts and buy no rights or features. Copies of Zen
-must keep this link with the author's name ([NOTICE](NOTICE), section 1).
+Donations are voluntary gifts and buy no rights or features. The license
+does not force anyone to keep this link; a modified version must only not
+show any other address as a way to support the author ([NOTICE](NOTICE),
+section 2).
 
 ### About the author
 
@@ -524,19 +543,30 @@ copyright stays with the author. In short:
 | You may | If you share Zen or a modified version, you must |
 |---|---|
 | use Zen for any purpose, privately or in a company, on any number of devices | make the source code available, under the same GPL-3.0 terms, to everyone you give a copy or a modified version to |
-| read, study, change and build the code | keep "Zen by Robert Ostrowski-Jagoda" and the donation link [buycoffee.to/zen](https://buycoffee.to/zen) in the About screen (a modified version may replace the link only with a marked note pointing to the original author's page) |
-| share copies, also modified ones, also for a fee | mark a modified version as changed and never present it as the original or an official release |
-| | give a modified version a different name and icon ("Zen" and the logo are not licensed) |
+| read, study, change and build the code | keep the author attribution "Zen by Robert Ostrowski-Jagoda" (in a modified version: "Based on Zen by Robert Ostrowski-Jagoda") among the legal notices in the About screen |
+| share copies, also modified ones, also for a fee | mark a modified version as modified and never present it as the original, an official release or endorsed by the author |
+| | give a modified version a name and icon that are clearly different from Zen's and another Android application ID (the license grants no trademark rights to the name "Zen" or the logo) |
 
-Because the license is approved by both the FSF and the OSI, Zen can also be
-distributed through F-Droid and IzzyOnDroid (not set up yet;
-[docs/RELEASES.md](docs/RELEASES.md), section 6.1). Builds that such
-repositories make from the unchanged source of a release may keep the name and
-icon (NOTICE, 3.3). The full license text is in [LICENSE](LICENSE); libraries
-keep their own licenses (in the app: About → Licenses; list of components in
+The additional terms are only of the kinds section 7 of the GPL allows
+(author attribution, marking modified versions, no trademark rights). The
+donation link is **not** a condition: unmodified copies show it because it
+is part of the app, and a modified version may keep, change or remove it,
+but must not show any other address as a way to support the author
+(NOTICE, section 2). Builds that software repositories and distributions
+(F-Droid, IzzyOnDroid, Flathub, Linux distributions) make from the source
+of a release, changed only to build, package and meet their policies, may
+keep the name and icon (NOTICE, section 5). The full license text is in
+[LICENSE](LICENSE); libraries keep their own licenses (in the app: About →
+Licenses and thanks → Licenses; list of components in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), what each is used for in
-[docs/DEPENDENCIES.md](docs/DEPENDENCIES.md)).
+[docs/DEPENDENCIES.md](docs/DEPENDENCIES.md)). Contributions are accepted
+under the contributor licence grant in [CONTRIBUTING.md](CONTRIBUTING.md),
+which does not change the license anyone receives Zen under.
 
-**F-Droid readiness:** the license fits, Zen uses no Google Play services and no
-tracker, and the Go bridge builds from source. Still missing: a build recipe
-(Flutter + Go) and a build with the GitHub self-update switched off.
+**F-Droid and IzzyOnDroid** (not set up yet;
+[docs/RELEASES.md](docs/RELEASES.md), section 6.1): the license fits their
+rules, and Zen uses no Google Play services, Firebase or other proprietary
+libraries and no tracker. Still to do: an F-Droid build recipe (Flutter +
+the Go bridge, built as the store variant without the GitHub self-update),
+and F-Droid will probably mark the optional GIF search (KLIPY, a
+proprietary service) with the "NonFreeNet" anti-feature.

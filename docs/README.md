@@ -4,7 +4,10 @@
 
 - [User guide](guide/README.md): what each part of Zen does and how it works,
   with pictures.
-- [Privacy policy](PRIVACY.md) and [terms of use](TERMS.md).
+- [Privacy policy](PRIVACY.md) and [terms of use](TERMS.md). Using Zen to
+  break the law is forbidden by the terms of use.
+- [Zen on Discord](https://discord.gg/g4vHvpKV37): questions, help and
+  talk with other people who use Zen.
 
 **Security**
 

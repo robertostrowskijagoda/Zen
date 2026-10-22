@@ -11,12 +11,13 @@ updater expects, sets the version in every place, moves the *Unreleased*
 notes in the CHANGELOG under the new version, commits and tags. Pushing the
 tag starts the **Release** workflow, which first checks that the tag equals
 the version in the build: it builds every
-file (Android, Windows x64 and ARM64, Linux tarballs, `.deb` and Flatpak,
+file (Android APKs, one per processor type: arm64-v8a, armeabi-v7a and
+x86_64; Windows x64 and ARM64, Linux tarballs, `.deb` and Flatpak,
 macOS, the unsigned iPhone file), writes `SHA256SUMS` with the checksum of
 each, signs that list (`SHA256SUMS.sig`, once the signing key is set up)
 and attaches everything to a draft
-release, which the maintainer checks and publishes by hand. The Android APK
-is signed with the release key, which only a tag run can use, after the
+release, which the maintainer checks and publishes by hand. The Android APKs
+are signed with the release key, which only a tag run can use, after the
 maintainer approves it. Every build uses exactly the locked package
 versions, the Linux files are checked to run on Ubuntu 22.04 and newer, the
 Windows ZIPs carry the Visual C++ runtime, and the Android libraries are
@@ -29,7 +30,8 @@ aligned for phones with 16 KB memory pages. Details:
   20 seconds after it starts and then every 12 hours. GitHub sees your IP
   address and the name "Zen", nothing else.
 - When there is a newer version, a bar says so. **Update** downloads the
-  file for your system and checks it against the release's `SHA256SUMS`;
+  file for your system (on Android the APK for your phone's processor type)
+  and checks it against the release's `SHA256SUMS`;
   on Android also that it is signed with the same certificate as the
   installed app. Then the system installer asks (Android), or a helper
   swaps the folders after Zen closes (Windows, Linux tarball, macOS). Where
