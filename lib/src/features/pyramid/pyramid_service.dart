@@ -3418,13 +3418,27 @@ final class PyramidService extends ChangeNotifier {
     );
   }
 
-  Future<PyramidRecord?> comment(String postId, String text) async {
+  /// Comments on [postId] with [text] and [media] (references of pictures
+  /// already stored in this device's blob store, see `PyrComment.media`).
+  Future<PyramidRecord?> comment(
+    String postId,
+    String text, {
+    List<Map<String, dynamic>> media = const <Map<String, dynamic>>[],
+  }) async {
     final String? k = myKey;
-    if (k == null || text.trim().isEmpty) {
+    final List<Map<String, dynamic>> img = pyrCommentMedia(media);
+    if (k == null ||
+        (text.trim().isEmpty && img.isEmpty) ||
+        img.length != media.length) {
       return null;
     }
     return propose(
-      <String, dynamic>{'t': PyrT.comment, 'post': postId, 'text': text.trim()},
+      <String, dynamic>{
+        't': PyrT.comment,
+        'post': postId,
+        'text': text.trim(),
+        if (img.isNotEmpty) 'img': img,
+      },
       candidates: <String>[k],
       need: 1,
     );

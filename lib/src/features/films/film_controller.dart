@@ -6,6 +6,7 @@ import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/ledger_archive.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/feed/comment_media.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/feed/post_media.dart';
@@ -66,7 +67,17 @@ abstract class FilmsBackend extends ChangeNotifier {
   /// Reacts with [emoji] ('' takes the reaction back).
   Future<String?> react(FilmPost film, String emoji);
 
-  Future<String?> comment(FilmPost film, String text);
+  /// Comments on [film] with [text] and [pictures] (photos and GIFs made
+  /// ready with `commentPicture`).
+  Future<String?> comment(
+    FilmPost film,
+    String text, {
+    List<CommentPicture> pictures = const <CommentPicture>[],
+  });
+
+  /// The ledger behind the films, when there is one: comments' pictures
+  /// are read from it, and own comments can be removed through it.
+  LedgerNode? get ledger => null;
 
   /// [film] was watched (long enough to count).
   void markWatched(FilmPost film);
@@ -222,6 +233,7 @@ final class FilmsController extends FilmsBackend {
         e.kind == kFilmPassKind ||
         e.kind == kLikeKind ||
         e.kind == kCommentKind ||
+        e.kind == kCommentDeleteKind ||
         e.kind == kFilmReactionKind ||
         e.kind == kFilmSeenKind) {
       _scheduleRebuild();
@@ -676,16 +688,19 @@ final class FilmsController extends FilmsBackend {
   }
 
   @override
-  Future<String?> comment(FilmPost film, String text) async {
-    final Map<String, dynamic> body;
+  LedgerNode? get ledger => node;
+
+  @override
+  Future<String?> comment(
+    FilmPost film,
+    String text, {
+    List<CommentPicture> pictures = const <CommentPicture>[],
+  }) async {
     try {
-      body = commentBody(film.id, text, mini: ownMiniProfile(node));
+      await publishComment(node, film.id, text, pictures: pictures);
+      return null;
     } on ArgumentError catch (e) {
       return e.message as String?;
-    }
-    try {
-      await node.publish(kCommentKind, body, spaceKind: 'acts');
-      return null;
     } on Object catch (e) {
       return '$e';
     }

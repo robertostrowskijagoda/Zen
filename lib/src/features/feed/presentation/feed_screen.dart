@@ -15,12 +15,15 @@ import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
+import 'package:zen/src/features/feed/comment_media.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/feed_items.dart';
 import 'package:zen/src/features/feed/feed_memo.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
 import 'package:zen/src/features/feed/post_media.dart';
+import 'package:zen/src/features/feed/presentation/comment_composer.dart';
+import 'package:zen/src/features/feed/presentation/comment_pictures.dart';
 import 'package:zen/src/features/feed/presentation/mutual_friends.dart';
 import 'package:zen/src/features/feed/presentation/post_editor_screen.dart';
 import 'package:zen/src/features/feed/presentation/post_reactions_sheet.dart';
@@ -513,14 +516,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   }
 
   void _openComments(FeedPost post) {
-    final TextEditingController field = TextEditingController();
     unawaited(
       showModalBottomSheet<void>(
         context: context,
         isScrollControlled: true,
         showDragHandle: true,
         builder: (BuildContext sheet) {
-          String? error;
+          // Own comments removed while the sheet is open.
+          final Set<String> removed = <String>{};
           return StatefulBuilder(
             builder: (BuildContext sheet, StateSetter setSheet) {
               final ZenColors zen = ZenColors.of(sheet);
@@ -547,7 +550,9 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                           text: t('Napisz pierwszy komentarz.'),
                         ),
                       for (final FeedComment c in post.comments)
-                        if (ref.read(hiddenByMeProvider).hides(id: c.id))
+                        if (removed.contains(c.id))
+                          const SizedBox.shrink()
+                        else if (ref.read(hiddenByMeProvider).hides(id: c.id))
                           HiddenContentPlaceholder(
                             key: Key('feed-comment-hidden-${c.id}'),
                             byMe: true,
@@ -598,101 +603,107 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                                           ),
                                         ),
                                         const SizedBox(height: 3),
-                                        CopyableText(
-                                          c.text,
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            height: 1.35,
-                                            color: zen.textPrimary,
-                                          ),
-                                          onReport: () => unawaited(
-                                            reportContent(
-                                              context,
-                                              ref,
-                                              // The comment's author.
-                                              authorAddress: c.authorAddress,
-                                              text: c.text,
-                                              header: t('Komentarz — {name}', {
-                                                'name': c.authorLabel,
+                                        if (c.text.trim().isNotEmpty)
+                                          CopyableText(
+                                            c.text,
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              height: 1.35,
+                                              color: zen.textPrimary,
+                                            ),
+                                            onReport: () => unawaited(
+                                              reportContent(
+                                                context,
+                                                ref,
+                                                // The comment's author.
+                                                authorAddress: c.authorAddress,
+                                                text: c.text,
+                                                header: t(
+                                                  'Komentarz — {name}',
+                                                  {'name': c.authorLabel},
+                                                ),
+                                                contentId: c.id,
+                                              ).then((_) {
+                                                // The reported comment is hidden now.
+                                                if (sheet.mounted) {
+                                                  setSheet(() {});
+                                                }
                                               }),
-                                              contentId: c.id,
-                                            ).then((_) {
-                                              // The reported comment is hidden now.
-                                              if (sheet.mounted) {
-                                                setSheet(() {});
-                                              }
-                                            }),
+                                            ),
                                           ),
-                                        ),
+                                        if (_node != null)
+                                          CommentPictures(
+                                            node: _node!,
+                                            comment: c,
+                                          ),
                                       ],
                                     ),
                                   ),
                                 ),
+                                if (_node != null &&
+                                    canDeleteComment(_node!, c))
+                                  IconButton(
+                                    key: Key('feed-comment-delete-${c.id}'),
+                                    tooltip: t('Usuń komentarz'),
+                                    icon: Icon(
+                                      Icons.delete_outline_rounded,
+                                      color: zen.textSecondary,
+                                    ),
+                                    onPressed: () async {
+                                      final String? failed =
+                                          await confirmDeleteComment(
+                                            sheet,
+                                            _node!,
+                                            post.id,
+                                            c,
+                                          );
+                                      if (!sheet.mounted) {
+                                        return;
+                                      }
+                                      if (failed == null) {
+                                        setSheet(() => removed.add(c.id));
+                                      } else if (failed.isNotEmpty) {
+                                        ScaffoldMessenger.maybeOf(
+                                          sheet,
+                                        )?.showSnackBar(
+                                          SnackBar(content: Text(failed)),
+                                        );
+                                      }
+                                    },
+                                  ),
                               ],
                             ),
                           ),
                       const SizedBox(height: 6),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Expanded(
-                            child: TextField(
-                              key: const Key('feed-comment-field'),
-                              controller: field,
-                              maxLength: kMaxCommentChars,
-                              minLines: 1,
-                              maxLines: 4,
-                              textCapitalization: TextCapitalization.sentences,
-                              decoration: InputDecoration(
-                                hintText: t('Napisz komentarz'),
-                                prefixIcon: const Icon(
-                                  Icons.chat_bubble_outline_rounded,
-                                ),
-                                counterText: '',
-                                errorText: error,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: IconButton.filled(
-                              key: const Key('feed-comment-send'),
-                              tooltip: t('Wyślij'),
-                              icon: const Icon(Icons.send_rounded),
-                              onPressed: () async {
-                                final Map<String, dynamic> body;
-                                try {
-                                  body = commentBody(
+                      CommentComposer(
+                        fieldKey: const Key('feed-comment-field'),
+                        sendKey: const Key('feed-comment-send'),
+                        prefixIcon: const Icon(
+                          Icons.chat_bubble_outline_rounded,
+                        ),
+                        onSend:
+                            (String text, List<CommentPicture> pictures) async {
+                              final LedgerNode? node = _node;
+                              final NavigatorState nav = Navigator.of(sheet);
+                              try {
+                                if (node != null) {
+                                  await publishComment(
+                                    node,
                                     post.id,
-                                    field.text,
-                                    mini: _node == null
-                                        ? null
-                                        : ownMiniProfile(_node!),
-                                  );
-                                } on ArgumentError catch (e) {
-                                  setSheet(() => error = e.message as String?);
-                                  return;
-                                }
-                                final NavigatorState nav = Navigator.of(sheet);
-                                try {
-                                  await _node?.publish(
-                                    kCommentKind,
-                                    body,
-                                    spaceKind: 'acts',
-                                  );
-                                  nav.pop();
-                                } catch (e) {
-                                  setSheet(
-                                    () => error = t('Nie udało się: {error}', {
-                                      'error': e,
-                                    }),
+                                    text,
+                                    pictures: pictures,
                                   );
                                 }
-                              },
-                            ),
-                          ),
-                        ],
+                                nav.pop();
+                                return null;
+                              } on ArgumentError catch (e) {
+                                return '${e.message}';
+                              } on Object catch (e) {
+                                return t('Nie udało się: {error}', {
+                                  'error': e,
+                                });
+                              }
+                            },
                       ),
                     ],
                   ),
@@ -701,7 +712,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
             },
           );
         },
-      ).whenComplete(() => disposeLater(field)),
+      ),
     );
   }
 

@@ -39,18 +39,29 @@ const int kMaxBundleComments = 30;
 /// Pages per post at most (page 0 included): 2000 likes, 300 comments.
 const int kMaxBundlePages = 10;
 
+/// Pictures of comments one bundle page passes on (the newest comments'
+/// first): their files are named by the page, so whoever reads it fetches
+/// them from the friend who wrote it (an entry names at most
+/// `kMaxBlobsPerEntry` files).
+const int kMaxBundleCommentImages = 24;
+
+/// Key of a comment's pictures inside a bundle's comment.
+const String kBundleImagesKey = 'img';
+
 /// Most blocked accounts a bundle passes on.
 const int _maxBundleBlocked = 200;
 
 /// Entry kinds (besides likes, comments, bundles and reshares) after which
 /// bundles are written again: removed posts (their tombstones travel to
-/// friends of resharers), hidden comments, blocked people, further pages.
+/// friends of resharers), hidden and removed comments, blocked people,
+/// further pages.
 const Set<String> kReactionRelayExtraKinds = <String>{
   _filmKind,
   _filmPassKind,
   kPostDeleteKind,
   kReshareDeleteKind,
   kCommentHideKind,
+  kCommentDeleteKind,
   kThreadBlockKind,
   kReactionsPageKind,
 };
@@ -72,6 +83,7 @@ typedef BundleComment = ({
   String text,
   int millis,
   MediaRef? avatar,
+  List<MediaRef> images,
 });
 
 List<BundleLike> _likesOf(Object? likes) => <BundleLike>[
@@ -93,7 +105,9 @@ List<BundleComment> _commentsOf(Object? comments) => <BundleComment>[
           c['a'] is String &&
           c['n'] is String &&
           c['t'] is String &&
-          c['at'] is int)
+          c['at'] is int &&
+          ((c['t'] as String).trim().isNotEmpty ||
+              commentImagesOf(c[kBundleImagesKey]).isNotEmpty))
         (
           id: c['id'] as String,
           account: c['a'] as String,
@@ -103,6 +117,7 @@ List<BundleComment> _commentsOf(Object? comments) => <BundleComment>[
               : c['t'] as String,
           millis: c['at'] as int,
           avatar: mediaRefFromJson(c[kBundleAvatarKey]),
+          images: commentImagesOf(c[kBundleImagesKey]),
         ),
 ];
 
@@ -383,27 +398,39 @@ Future<int> relayReactions(
           likeAvatars[member.$1] = avatar;
         }
       }
+      final Set<String> removed = deletedCommentIds(member.$3);
       for (final LogEntry e in member.$3) {
-        final Object? text = e.body['text'];
-        if (e.kind == kCommentKind &&
-            e.body['post'] == postId &&
-            text is String &&
-            text.trim().isNotEmpty &&
-            !mod.hidesComment(postId, e.id)) {
-          final Map<String, dynamic>? avatar = avatarJsonOf(
-            node,
-            member.$1,
-            e.body,
-          );
-          comments[e.id] = <String, dynamic>{
-            'id': e.id,
-            'a': member.$1,
-            'n': member.$2,
-            't': text,
-            'at': e.hlc.millis,
-            kBundleAvatarKey: ?avatar,
-          };
+        if (e.kind != kCommentKind ||
+            e.body['post'] != postId ||
+            removed.contains(e.id) ||
+            mod.hidesComment(postId, e.id)) {
+          continue;
         }
+        final FeedComment? c = feedCommentFrom(
+          e,
+          authorLabel: member.$2,
+          account: member.$1,
+        );
+        if (c == null) {
+          continue;
+        }
+        final Map<String, dynamic>? avatar = avatarJsonOf(
+          node,
+          member.$1,
+          e.body,
+        );
+        comments[e.id] = <String, dynamic>{
+          'id': e.id,
+          'a': member.$1,
+          'n': member.$2,
+          't': c.text,
+          'at': e.hlc.millis,
+          kBundleAvatarKey: ?avatar,
+          if (c.images.isNotEmpty)
+            kBundleImagesKey: <Map<String, dynamic>>[
+              for (final MediaRef m in c.images) mediaRefToJson(m),
+            ],
+        };
       }
     }
     // Resharers also pass on what the author's circle said.
@@ -431,6 +458,10 @@ Future<int> relayReactions(
             kBundleAvatarKey: ?(c.avatar == null
                 ? null
                 : mediaRefToJson(c.avatar!)),
+            if (c.images.isNotEmpty)
+              kBundleImagesKey: <Map<String, dynamic>>[
+                for (final MediaRef m in c.images) mediaRefToJson(m),
+              ],
           },
         );
       }
@@ -473,24 +504,45 @@ Future<int> relayReactions(
       ];
     }
 
-    List<Map<String, dynamic>> commentsOn(int page) =>
-        newestFirst
-            .skip(page * kMaxBundleComments)
-            .take(kMaxBundleComments)
-            .toList()
-          ..sort(
-            (Map<String, dynamic> a, Map<String, dynamic> b) =>
-                (a['at'] as int).compareTo(b['at'] as int),
-          );
+    // Pictures go along for the newest comments of a page only, so a page
+    // stays small and names few enough files.
+    List<Map<String, dynamic>> commentsOn(int page) {
+      int pictures = 0;
+      final List<Map<String, dynamic>> on = <Map<String, dynamic>>[];
+      for (final Map<String, dynamic> c
+          in newestFirst
+              .skip(page * kMaxBundleComments)
+              .take(kMaxBundleComments)) {
+        final Object? img = c[kBundleImagesKey];
+        final int count = img is List ? img.length : 0;
+        if (count > 0 && pictures + count <= kMaxBundleCommentImages) {
+          pictures += count;
+          on.add(c);
+        } else {
+          on.add(Map<String, dynamic>.of(c)..remove(kBundleImagesKey));
+        }
+      }
+      return on..sort(
+        (Map<String, dynamic> a, Map<String, dynamic> b) =>
+            (a['at'] as int).compareTo(b['at'] as int),
+      );
+    }
+
+    // The files of the pictures a page passes on.
+    List<String> picturesOf(List<Map<String, dynamic>> page) => <String>[
+      for (final Map<String, dynamic> c in page)
+        ...commentImagesOf(c[kBundleImagesKey]).map((MediaRef m) => m.id),
+    ];
     final List<String> hidden = (mod.hidden[postId]?.toList() ?? <String>[])
       ..sort();
     final List<String> blocked = (mod.blocked.keys.toList()..sort())
         .take(_maxBundleBlocked)
         .toList();
+    final List<Map<String, dynamic>> firstComments = commentsOn(0);
     final Map<String, dynamic> body = <String, dynamic>{
       'post': postId,
       'likes': likesOn(0),
-      'comments': commentsOn(0),
+      'comments': firstComments,
       if (likeList.length > kMaxBundleLikers) 'nl': likeList.length,
       if (newestFirst.length > kMaxBundleComments) 'nc': newestFirst.length,
       if (pageCount > 1) 'np': pageCount,
@@ -506,25 +558,36 @@ Future<int> relayReactions(
       continue;
     }
     try {
-      await node.publish(kReactionsKind, body, spaceKind: 'acts');
+      await node.publish(
+        kReactionsKind,
+        body,
+        spaceKind: 'acts',
+        blobs: picturesOf(firstComments),
+      );
       written++;
     } on ArgumentError {
       // Too big for one entry even after the limits: skip this round.
       continue;
     }
     for (int pg = 1; pg < pageCount; pg++) {
+      final List<Map<String, dynamic>> pageComments = commentsOn(pg);
       final Map<String, dynamic> page = <String, dynamic>{
         'post': postId,
         'pg': pg,
         'likes': likesOn(pg),
-        'comments': commentsOn(pg),
+        'comments': pageComments,
       };
       final LogEntry? had = myPages[postId]?[pg];
       if (had != null && canonicalJson(had.body) == canonicalJson(page)) {
         continue;
       }
       try {
-        await node.publish(kReactionsPageKind, page, spaceKind: 'acts');
+        await node.publish(
+          kReactionsPageKind,
+          page,
+          spaceKind: 'acts',
+          blobs: picturesOf(pageComments),
+        );
         written++;
       } on ArgumentError {
         // Too big: this page waits for the next round.

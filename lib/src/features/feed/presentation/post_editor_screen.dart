@@ -1180,6 +1180,22 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
               controller: b.controller,
               focusNode: b.focus,
               enableIMEPersonalizedLearning: false,
+              // GIFs and stickers from the keyboard (Android) go in like
+              // pasted pictures; iPhone keyboards copy them to the
+              // clipboard ("Wklej obrazek" in the field's menu).
+              contentInsertionConfiguration: ContentInsertionConfiguration(
+                onContentInserted: (KeyboardInsertedContent content) {
+                  final Uint8List? data = content.data;
+                  if (data != null && data.isNotEmpty) {
+                    unawaited(
+                      _addTransferred(<TransferItem>[
+                        TransferItem(name: 'klawiatura', bytes: data),
+                      ]),
+                    );
+                  }
+                },
+              ),
+              contextMenuBuilder: picturePasteMenu(_addTransferred),
               keyboardType: TextInputType.multiline,
               textCapitalization: TextCapitalization.sentences,
               minLines: onlyOne ? 6 : 1,

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
+import 'package:zen/src/features/feed/comment_media.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/films/film_controller.dart';
@@ -112,7 +113,11 @@ final class _FakeBackend extends FilmsBackend {
   }
 
   @override
-  Future<String?> comment(FilmPost film, String text) async {
+  Future<String?> comment(
+    FilmPost film,
+    String text, {
+    List<CommentPicture> pictures = const <CommentPicture>[],
+  }) async {
     calls.add('comment ${film.id} $text');
     _replace(
       film.copyWith(

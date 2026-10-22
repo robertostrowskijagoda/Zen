@@ -452,13 +452,48 @@ final class PyrComment {
     required this.author,
     required this.text,
     required this.at,
+    this.media = const <Map<String, dynamic>>[],
   });
 
   final String id;
   final String author;
   final String text;
   final int at;
+
+  /// Photos and GIFs in the comment: references of sealed files in the
+  /// writer's blob store (`post_media.dart`, `{id, k, n, mime}`), fetched
+  /// from the writer's device. At most [kMaxPyrCommentMedia].
+  final List<Map<String, dynamic>> media;
 }
+
+/// Most pictures in one pyramid comment.
+const int kMaxPyrCommentMedia = 4;
+
+/// The picture references of a comment record's `img`: well-formed ones
+/// only (an id and a key and nonce as strings, an image type), at most
+/// [kMaxPyrCommentMedia].
+List<Map<String, dynamic>> pyrCommentMedia(Object? img) =>
+    <Map<String, dynamic>>[
+      if (img is List)
+        for (final Object? m in img.take(kMaxPyrCommentMedia))
+          if (m is Map &&
+              m['id'] is String &&
+              (m['id'] as String).isNotEmpty &&
+              (m['id'] as String).length <= 128 &&
+              m['k'] is String &&
+              (m['k'] as String).length <= 64 &&
+              m['n'] is String &&
+              (m['n'] as String).length <= 32 &&
+              m['mime'] is String &&
+              (m['mime'] as String).startsWith('image/') &&
+              (m['mime'] as String).length <= 40)
+            <String, dynamic>{
+              'id': m['id'],
+              'k': m['k'],
+              'n': m['n'],
+              'mime': m['mime'],
+            },
+    ];
 
 final class PyrReferendum {
   PyrReferendum({
@@ -2282,12 +2317,17 @@ final class PyramidState {
         } else if (members[k]?.nat != post.nat) {
           return 'komentują członkowie tej narodowości';
         }
+        final List<Map<String, dynamic>> media = pyrCommentMedia(b['img']);
+        if (r.str('text').trim().isEmpty && media.isEmpty) {
+          return 'pusty komentarz';
+        }
         post.comments.add(
           PyrComment(
             id: r.id,
             author: k,
             text: _clip(r.str('text'), 2000),
             at: r.at,
+            media: media,
           ),
         );
         return null;

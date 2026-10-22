@@ -5,7 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/features/feed/comment_media.dart';
+import 'package:zen/src/features/feed/feed_model.dart';
+import 'package:zen/src/features/feed/post_media.dart';
+import 'package:zen/src/features/feed/presentation/comment_composer.dart';
+import 'package:zen/src/features/feed/presentation/comment_pictures.dart';
 import 'package:zen/src/features/feed/presentation/seen_tracker.dart';
+import 'package:zen/src/features/ledger/ledger_node.dart';
+import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/profile/profile_fields.dart';
@@ -76,6 +83,12 @@ class PyramidFeedCard extends ConsumerWidget {
         : pyrTone(zen);
     final PyramidState? s = pyr.state;
     final String? me = pyr.myKey;
+    // Pictures of comments are sealed files in the ledger's blob store
+    // (the ledger is asked for only when there are any).
+    final LedgerNode? node =
+        post.comments.any((PyrComment c) => c.media.isNotEmpty)
+        ? ref.watch(ledgerNodeProvider)
+        : null;
     final bool member = s != null && me != null && s.isMember(me);
     final bool leadsSection =
         national && member && s.nationalLead(post.nat) == me;
@@ -263,24 +276,60 @@ class PyramidFeedCard extends ConsumerWidget {
                                       padding: const EdgeInsets.symmetric(
                                         vertical: 3,
                                       ),
-                                      child: Text.rich(
-                                        TextSpan(
-                                          children: <InlineSpan>[
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: <Widget>[
+                                          Text.rich(
                                             TextSpan(
-                                              text: '${nameOf(c.author)}  ',
-                                              style: TextStyle(
-                                                color: zen.textPrimary,
-                                                fontWeight: FontWeight.w700,
-                                              ),
+                                              children: <InlineSpan>[
+                                                TextSpan(
+                                                  text: '${nameOf(c.author)}  ',
+                                                  style: TextStyle(
+                                                    color: zen.textPrimary,
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                                ),
+                                                TextSpan(text: c.text),
+                                              ],
                                             ),
-                                            TextSpan(text: c.text),
-                                          ],
-                                        ),
-                                        style: TextStyle(
-                                          color: zen.textSecondary,
-                                          fontSize: 13.5,
-                                          height: 1.35,
-                                        ),
+                                            style: TextStyle(
+                                              color: zen.textSecondary,
+                                              fontSize: 13.5,
+                                              height: 1.35,
+                                            ),
+                                          ),
+                                          if (node != null &&
+                                              c.media.isNotEmpty)
+                                            PictureTiles(
+                                              key: Key(
+                                                'pyr-comment-pictures-${c.id}',
+                                              ),
+                                              node: node,
+                                              images: <MediaRef>[
+                                                for (final Map<String, dynamic>
+                                                    m
+                                                    in c.media)
+                                                  ?mediaRefFromJson(m),
+                                              ],
+                                              // No ledger entry names them:
+                                              // fetched from the writer's
+                                              // devices.
+                                              fetchOnShow: true,
+                                              download: (MediaRef m) =>
+                                                  node.fetchBlobFrom(
+                                                    m.id,
+                                                    <String>{
+                                                      ?s
+                                                          .members[c.author]
+                                                          ?.addr,
+                                                      ...?s
+                                                          .members[c.author]
+                                                          ?.addrs,
+                                                    }..remove(''),
+                                                  ),
+                                            ),
+                                        ],
                                       ),
                                     ),
                                   ),
@@ -310,16 +359,14 @@ class PyramidFeedCard extends ConsumerWidget {
                           if (member && post.canComment)
                             TextButton.icon(
                               key: Key('feed-pyr-comment-${post.id}'),
-                              onPressed: () => unawaited(() async {
-                                final String? text = await askText(
+                              onPressed: () => unawaited(
+                                showPyramidCommentSheet(
                                   context,
-                                  title: t('Komentarz'),
-                                  maxLines: 3,
-                                );
-                                if (text != null) {
-                                  await pyr.comment(post.id, text);
-                                }
-                              }()),
+                                  pyr: pyr,
+                                  postId: post.id,
+                                  node: ref.read(ledgerNodeProvider),
+                                ),
+                              ),
                               icon: const Icon(
                                 Icons.mode_comment_outlined,
                                 size: 18,
@@ -648,5 +695,106 @@ class PyramidFeedHeader extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Entry kind (in the account's `own` space, sealed for its devices) that
+/// names the pictures of a pyramid comment written on this device, so the
+/// account's other devices fetch and keep them too.
+const String kPyramidCommentMediaKind = 'pyr_comment_media';
+
+/// Writes a comment under the pyramid post [postId]: text and up to
+/// [kMaxPyrCommentMedia] photos or GIFs. The pictures are stored sealed in
+/// this device's blob store ([node]) and fetched from it by the members
+/// who read the comment.
+Future<void> showPyramidCommentSheet(
+  BuildContext context, {
+  required PyramidService pyr,
+  required String postId,
+  required LedgerNode? node,
+}) => showModalBottomSheet<void>(
+  context: context,
+  isScrollControlled: true,
+  showDragHandle: true,
+  builder: (BuildContext sheet) => Padding(
+    padding: EdgeInsets.fromLTRB(
+      16,
+      0,
+      16,
+      16 + MediaQuery.of(sheet).viewInsets.bottom,
+    ),
+    child: SafeArea(
+      child: CommentComposer(
+        fieldKey: Key('pyr-comment-field-$postId'),
+        sendKey: Key('pyr-comment-send-$postId'),
+        onSend: (String text, List<CommentPicture> pictures) async {
+          final NavigatorState nav = Navigator.of(sheet);
+          final String? failed = await sendPyramidComment(
+            pyr,
+            postId,
+            text,
+            pictures: pictures,
+            node: node,
+          );
+          if (failed == null) {
+            nav.pop();
+          }
+          return failed;
+        },
+      ),
+    ),
+  ),
+);
+
+/// Stores [pictures] (when there is a [node]) and writes the comment; an
+/// error to show, or null.
+Future<String?> sendPyramidComment(
+  PyramidService pyr,
+  String postId,
+  String text, {
+  List<CommentPicture> pictures = const <CommentPicture>[],
+  LedgerNode? node,
+}) async {
+  try {
+    checkCommentPictures(pictures);
+  } on ArgumentError catch (e) {
+    return '${e.message}';
+  }
+  if (pictures.length > kMaxPyrCommentMedia) {
+    return t('Nie udało się wysłać komentarza.');
+  }
+  if (text.trim().isEmpty && pictures.isEmpty) {
+    return t('Pusty komentarz.');
+  }
+  if (pictures.isNotEmpty && node == null) {
+    return t('Nie udało się wysłać komentarza.');
+  }
+  final List<Map<String, dynamic>> refs = <Map<String, dynamic>>[];
+  try {
+    for (final CommentPicture p in pictures) {
+      refs.add(await storeMedia(node!.blobs, p.bytes, mime: p.mime));
+    }
+    final PyramidRecord? record = await pyr.comment(postId, text, media: refs);
+    if (record == null) {
+      throw StateError('no record');
+    }
+    if (refs.isNotEmpty) {
+      try {
+        // The account's other devices keep them too.
+        await node!.publishForOwnDevices(
+          kPyramidCommentMediaKind,
+          <String, dynamic>{'post': postId, 'img': refs},
+          blobs: mediaIds(refs),
+        );
+      } on Object {
+        // The comment is out: its pictures stay on this device.
+      }
+    }
+    return null;
+  } on Object {
+    for (final String id in mediaIds(refs)) {
+      await node?.blobs.refuse(id);
+    }
+    return t('Nie udało się wysłać komentarza.');
   }
 }

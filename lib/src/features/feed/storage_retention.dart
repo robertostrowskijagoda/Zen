@@ -2,7 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/ledger/blob_store.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/feed/comment_media.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
+import 'package:zen/src/features/feed/reaction_relay.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/profile/profile_gallery.dart';
 
@@ -152,14 +154,22 @@ List<StoredMedia> _oldestOver(List<StoredMedia> files, int limit) {
 }
 
 /// Entry kinds whose photos and videos the limits may delete: posts, their
-/// edits, reshares and gallery items of other people. Files of anything
-/// else (profile photos, chats, updates) are never touched.
+/// edits, reshares, gallery items and comments of other people, and the
+/// comment pictures bundles pass on. Files of anything else (profile
+/// photos, chats, updates) are never touched.
 const Set<String> _limitedKinds = <String>{
   kPostKind,
   kPostEditKind,
   kReshareKind,
   kGalleryKind,
+  kCommentKind,
+  kReactionsKind,
+  kReactionsPageKind,
 };
+
+/// Entries of this account that only pass on other people's files (the
+/// comment pictures in its bundles): those files are not pinned by them.
+const Set<String> _passedOnKinds = <String>{kReactionsKind, kReactionsPageKind};
 
 /// Blob ids [e] uses: its own, and those of the post a reshare carries.
 Iterable<String> _blobIdsOf(LogEntry e) sync* {
@@ -186,7 +196,8 @@ List<StoredMedia> storedMediaOf(LedgerNode node) {
   for (final String space in node.store.spaces.toList()) {
     for (final LogEntry e in node.store.entries(space)) {
       final Iterable<String> ids = _blobIdsOf(e);
-      if (e.account == node.account || !_limitedKinds.contains(e.kind)) {
+      if ((e.account == node.account && !_passedOnKinds.contains(e.kind)) ||
+          !_limitedKinds.contains(e.kind)) {
         pinned.addAll(ids);
         continue;
       }
@@ -304,14 +315,29 @@ Future<RetentionResult> enforceStorageLimits(
     // Another process (the background service) owns the files right now.
     return const RetentionResult();
   }
+  // Pictures of removed comments go first, whoever wrote them (this
+  // account's own too: removed on another of its devices).
+  int removedFiles = 0;
+  int removedBytes = 0;
+  for (final String id in removedCommentMedia(node)) {
+    if (node.blobs.refused.contains(id)) {
+      continue;
+    }
+    removedBytes += node.blobs.manifest(id)?.size ?? 0;
+    removedFiles++;
+    await node.blobs.refuse(id);
+  }
   final RetentionPlan plan = planStorageRetention(
     storedMediaOf(node),
     nowMillis: nowMillis ?? DateTime.now().millisecondsSinceEpoch,
   );
   if (plan.isEmpty) {
-    return const RetentionResult();
+    return RetentionResult(
+      expiredFiles: removedFiles,
+      expiredBytes: removedBytes,
+    );
   }
-  int expiredBytes = 0;
+  int expiredBytes = removedBytes;
   for (final StoredMedia m in plan.expired) {
     await node.blobs.refuse(m.id);
     expiredBytes += m.bytes;
@@ -327,11 +353,12 @@ Future<RetentionResult> enforceStorageLimits(
     limitBytes += m.bytes;
   }
   logZenMessage(
-    'Limity miejsca: usunięto ${plan.expired.length + limitFiles} plików '
+    'Limity miejsca: usunięto '
+    '${plan.expired.length + limitFiles + removedFiles} plików '
     '(${expiredBytes + limitBytes} B).',
   );
   return RetentionResult(
-    expiredFiles: plan.expired.length,
+    expiredFiles: plan.expired.length + removedFiles,
     expiredBytes: expiredBytes,
     limitFiles: limitFiles,
     limitBytes: limitBytes,

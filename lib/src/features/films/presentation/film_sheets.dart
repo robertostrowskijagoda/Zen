@@ -4,12 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/features/feed/comment_media.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
+import 'package:zen/src/features/feed/presentation/comment_composer.dart';
+import 'package:zen/src/features/feed/presentation/comment_pictures.dart';
 import 'package:zen/src/features/feed/presentation/feed_screen.dart'
     show postTimeLabel;
 import 'package:zen/src/features/films/film_controller.dart';
 import 'package:zen/src/features/films/film_model.dart';
 import 'package:zen/src/features/films/presentation/film_page.dart';
+import 'package:zen/src/features/ledger/ledger_node.dart';
 
 /// A sheet from the bottom edge in the look of the theme.
 Future<T?> _sheet<T>(BuildContext context, WidgetBuilder builder) =>
@@ -65,21 +69,20 @@ Future<void> showFilmComments(
   required Future<void> Function(FeedComment comment) onReport,
   bool Function(FeedComment comment)? hidden,
 }) {
-  final TextEditingController field = TextEditingController();
   return _sheet<void>(context, (BuildContext sheet) {
-    String? error;
-    bool sending = false;
+    // Own comments removed while the sheet is open.
+    final Set<String> removed = <String>{};
     return StatefulBuilder(
       builder: (BuildContext sheet, StateSetter setSheet) {
         return ListenableBuilder(
           listenable: backend,
           builder: (BuildContext sheet, Widget? child) {
-            final ZenColors zen = ZenColors.of(sheet);
             final FilmPost now = backend.byId(film.id) ?? film;
             final List<FeedComment> shown = <FeedComment>[
               for (final FeedComment c in now.comments)
-                if (!(hidden?.call(c) ?? false)) c,
+                if (!(hidden?.call(c) ?? false) && !removed.contains(c.id)) c,
             ];
+            final LedgerNode? node = backend.ledger;
             return Padding(
               padding: EdgeInsets.only(
                 bottom: MediaQuery.of(sheet).viewInsets.bottom,
@@ -120,60 +123,46 @@ Future<void> showFilmComments(
                                   for (final FeedComment c in shown)
                                     _CommentTile(
                                       comment: c,
+                                      node: node,
                                       // Own comments carry no address.
                                       onReport: c.authorAddress.isEmpty
                                           ? null
                                           : () => unawaited(onReport(c)),
+                                      onDelete:
+                                          node != null &&
+                                              canDeleteComment(node, c)
+                                          ? () async {
+                                              final String? failed =
+                                                  await confirmDeleteComment(
+                                                    sheet,
+                                                    node,
+                                                    now.id,
+                                                    c,
+                                                  );
+                                              if (failed == null &&
+                                                  sheet.mounted) {
+                                                setSheet(
+                                                  () => removed.add(c.id),
+                                                );
+                                              }
+                                            }
+                                          : null,
                                     ),
                                 ],
                               ),
                       ),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Expanded(
-                              child: TextField(
-                                key: const Key('film-comment-field'),
-                                controller: field,
-                                maxLength: kMaxCommentChars,
-                                minLines: 1,
-                                maxLines: 4,
-                                textCapitalization:
-                                    TextCapitalization.sentences,
-                                decoration: InputDecoration(
-                                  hintText: t('Napisz komentarz'),
-                                  counterText: '',
-                                  errorText: error,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            IconButton.filled(
-                              key: const Key('film-comment-send'),
-                              tooltip: t('Wyślij'),
-                              icon: const Icon(Icons.send_rounded),
-                              color: zen.onAccent,
-                              onPressed: sending
-                                  ? null
-                                  : () async {
-                                      setSheet(() => sending = true);
-                                      final String? failed = await backend
-                                          .comment(now, field.text);
-                                      if (!sheet.mounted) {
-                                        return;
-                                      }
-                                      setSheet(() {
-                                        sending = false;
-                                        error = failed;
-                                        if (failed == null) {
-                                          field.clear();
-                                        }
-                                      });
-                                    },
-                            ),
-                          ],
+                        child: CommentComposer(
+                          fieldKey: const Key('film-comment-field'),
+                          sendKey: const Key('film-comment-send'),
+                          onSend:
+                              (String text, List<CommentPicture> pictures) =>
+                                  backend.comment(
+                                    now,
+                                    text,
+                                    pictures: pictures,
+                                  ),
                         ),
                       ),
                     ],
@@ -185,14 +174,25 @@ Future<void> showFilmComments(
         );
       },
     );
-  }).whenComplete(() => disposeLater(field));
+  });
 }
 
 class _CommentTile extends StatelessWidget {
-  const _CommentTile({required this.comment, this.onReport});
+  const _CommentTile({
+    required this.comment,
+    this.node,
+    this.onReport,
+    this.onDelete,
+  });
 
   final FeedComment comment;
+
+  /// Where the comment's pictures are read from.
+  final LedgerNode? node;
   final VoidCallback? onReport;
+
+  /// Removes this account's own comment.
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -234,14 +234,17 @@ class _CommentTile extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 3),
-                        SelectableText(
-                          comment.text,
-                          style: TextStyle(
-                            fontSize: 14,
-                            height: 1.35,
-                            color: zen.textPrimary,
+                        if (comment.text.trim().isNotEmpty)
+                          SelectableText(
+                            comment.text,
+                            style: TextStyle(
+                              fontSize: 14,
+                              height: 1.35,
+                              color: zen.textPrimary,
+                            ),
                           ),
-                        ),
+                        if (node != null)
+                          CommentPictures(node: node!, comment: comment),
                         const SizedBox(height: 3),
                         Text(
                           postTimeLabel(comment.millis),
@@ -264,6 +267,18 @@ class _CommentTile extends StatelessWidget {
                         color: zen.textMuted,
                       ),
                       onPressed: onReport,
+                    ),
+                  if (onDelete != null)
+                    IconButton(
+                      key: Key('film-comment-delete-${comment.id}'),
+                      tooltip: t('Usuń komentarz'),
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        Icons.delete_outline_rounded,
+                        size: 18,
+                        color: zen.textMuted,
+                      ),
+                      onPressed: onDelete,
                     ),
                 ],
               ),

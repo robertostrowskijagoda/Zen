@@ -5,8 +5,11 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
+import 'package:zen/src/features/feed/comment_media.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/mini_profile_tag.dart';
+import 'package:zen/src/features/feed/presentation/comment_composer.dart';
+import 'package:zen/src/features/feed/presentation/comment_pictures.dart';
 import 'package:zen/src/features/feed/presentation/reactor_avatar.dart';
 import 'package:zen/src/features/feed/thread_moderation.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
@@ -159,8 +162,10 @@ class PostCommentsSheet extends StatefulWidget {
 }
 
 class _PostCommentsSheetState extends State<PostCommentsSheet> {
-  final TextEditingController _field = TextEditingController();
   String? _error;
+
+  /// Own comments removed while the sheet is open.
+  final Set<String> _removed = <String>{};
 
   /// Decisions made while the sheet is open (comment id → hidden).
   final Map<String, bool> _hidden = <String, bool>{};
@@ -168,12 +173,6 @@ class _PostCommentsSheetState extends State<PostCommentsSheet> {
   final List<FeedComment> _written = <FeedComment>[];
 
   bool get _mine => widget.post.account == widget.node.account;
-
-  @override
-  void dispose() {
-    _field.dispose();
-    super.dispose();
-  }
 
   bool _isHidden(FeedComment c) => _hidden[c.id] ?? c.hiddenByAuthor;
 
@@ -241,44 +240,53 @@ class _PostCommentsSheetState extends State<PostCommentsSheet> {
     }
   }
 
-  Future<void> _send() async {
-    final Map<String, dynamic> body;
+  Future<String?> _send(String text, List<CommentPicture> pictures) async {
     try {
-      body = commentBody(
+      final LogEntry entry = await publishComment(
+        widget.node,
         widget.post.id,
-        _field.text,
-        mini: ownMiniProfile(widget.node),
+        text,
+        pictures: pictures,
       );
-    } on ArgumentError catch (e) {
-      setState(() => _error = e.message as String?);
-      return;
-    }
-    try {
-      final LogEntry entry = await widget.node.publish(
-        kCommentKind,
-        body,
-        spaceKind: 'acts',
+      final FeedComment? mine = feedCommentFrom(
+        entry,
+        authorLabel: t('Ty'),
+        account: widget.node.account,
       );
-      _field.clear();
-      if (mounted) {
+      if (mounted && mine != null) {
         setState(() {
           _error = null;
-          _written.add(
-            FeedComment(
-              id: entry.id,
-              authorLabel: t('Ty'),
-              text: body['text'] as String,
-              millis: entry.hlc.millis,
-              account: widget.node.account,
-            ),
-          );
+          _written.add(mine);
         });
       }
       widget.onChanged?.call();
+      return null;
+    } on ArgumentError catch (e) {
+      return '${e.message}';
     } on Object catch (e) {
-      if (mounted) {
-        setState(() => _error = t('Nie udało się: {error}', {'error': e}));
+      return t('Nie udało się: {error}', {'error': e});
+    }
+  }
+
+  Future<void> _delete(FeedComment c) async {
+    final String? failed = await confirmDeleteComment(
+      context,
+      widget.node,
+      widget.post.id,
+      c,
+    );
+    if (!mounted || failed == '') {
+      return;
+    }
+    setState(() {
+      if (failed == null) {
+        _removed.add(c.id);
+      } else {
+        _error = failed;
       }
+    });
+    if (failed == null) {
+      widget.onChanged?.call();
     }
   }
 
@@ -289,7 +297,7 @@ class _PostCommentsSheetState extends State<PostCommentsSheet> {
       for (final FeedComment c in widget.post.comments)
         if (!_blocked.contains(c.account)) c,
       ..._written,
-    ];
+    ].where((FeedComment c) => !_removed.contains(c.id)).toList();
     return Padding(
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
@@ -338,34 +346,24 @@ class _PostCommentsSheetState extends State<PostCommentsSheet> {
                         c.account != widget.node.account
                     ? () => unawaited(_block(c))
                     : null,
+                onDelete: canDeleteComment(widget.node, c)
+                    ? () => unawaited(_delete(c))
+                    : null,
+              ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  _error!,
+                  key: const Key('post-comment-error'),
+                  style: TextStyle(color: zen.danger, fontSize: 12.5),
+                ),
               ),
             const SizedBox(height: 6),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Expanded(
-                  child: TextField(
-                    key: const Key('post-comment-field'),
-                    controller: _field,
-                    maxLength: kMaxCommentChars,
-                    minLines: 1,
-                    maxLines: 4,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: InputDecoration(
-                      hintText: t('Napisz komentarz'),
-                      counterText: '',
-                      errorText: _error,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  key: const Key('post-comment-send'),
-                  tooltip: t('Wyślij'),
-                  icon: const Icon(Icons.send_rounded),
-                  onPressed: () => unawaited(_send()),
-                ),
-              ],
+            CommentComposer(
+              fieldKey: const Key('post-comment-field'),
+              sendKey: const Key('post-comment-send'),
+              onSend: _send,
             ),
           ],
         ),
@@ -383,6 +381,7 @@ class _CommentRow extends StatelessWidget {
     this.onHide,
     this.onShow,
     this.onBlock,
+    this.onDelete,
   });
 
   final FeedComment comment;
@@ -396,10 +395,14 @@ class _CommentRow extends StatelessWidget {
   final VoidCallback? onShow;
   final VoidCallback? onBlock;
 
+  /// Removes this account's own comment.
+  final VoidCallback? onDelete;
+
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    final bool canModerate = onHide != null || onBlock != null;
+    final bool canModerate =
+        onHide != null || onBlock != null || onDelete != null;
     return Opacity(
       key: Key('post-comment-${comment.id}'),
       opacity: hidden ? 0.55 : 1,
@@ -443,14 +446,16 @@ class _CommentRow extends StatelessWidget {
                         child: mutual!,
                       ),
                     const SizedBox(height: 3),
-                    Text(
-                      comment.text,
-                      style: TextStyle(
-                        fontSize: 14,
-                        height: 1.35,
-                        color: zen.textPrimary,
+                    if (comment.text.trim().isNotEmpty)
+                      SelectableText(
+                        comment.text,
+                        style: TextStyle(
+                          fontSize: 14,
+                          height: 1.35,
+                          color: zen.textPrimary,
+                        ),
                       ),
-                    ),
+                    CommentPictures(node: node, comment: comment),
                     if (hidden) ...<Widget>[
                       const SizedBox(height: 4),
                       Text(
@@ -475,6 +480,7 @@ class _CommentRow extends StatelessWidget {
                 onSelected: (String v) => (switch (v) {
                   'hide' => onHide,
                   'show' => onShow,
+                  'delete' => onDelete,
                   _ => onBlock,
                 })?.call(),
                 itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
@@ -494,6 +500,15 @@ class _CommentRow extends StatelessWidget {
                       child: ListTile(
                         leading: const Icon(Icons.visibility_outlined),
                         title: Text(t('Pokaż komentarz')),
+                      ),
+                    ),
+                  if (onDelete != null)
+                    PopupMenuItem<String>(
+                      key: const Key('post-comment-delete'),
+                      value: 'delete',
+                      child: ListTile(
+                        leading: const Icon(Icons.delete_outline_rounded),
+                        title: Text(t('Usuń komentarz')),
                       ),
                     ),
                   if (onBlock != null)

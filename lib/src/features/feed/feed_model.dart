@@ -224,6 +224,78 @@ const String kCommentKind = 'comment';
 /// Longest comment text accepted.
 const int kMaxCommentChars = 1000;
 
+/// Most pictures (photos, GIFs) in one comment. They are stored like a
+/// post's photos (`post_media.dart`): sealed files the comment names.
+const int kMaxCommentImages = 4;
+
+/// Entry kind of a comment's removal by its writer, in the same `acts`
+/// space: the comment disappears and every phone deletes its pictures.
+const String kCommentDeleteKind = 'comment_del';
+
+/// Body of the removal of comment [commentId] under [postId].
+Map<String, dynamic> commentDeleteBody(String postId, String commentId) =>
+    <String, dynamic>{'post': postId, 'comment': commentId};
+
+/// Ids of the comments their writer removed, from one writer's [acts]
+/// (a removal counts only for a comment of the same writer).
+Set<String> deletedCommentIds(Iterable<LogEntry> acts) {
+  final Map<String, String> removedBy = <String, String>{};
+  for (final LogEntry e in acts) {
+    final Object? id = e.body['comment'];
+    if (e.kind == kCommentDeleteKind && id is String && id.isNotEmpty) {
+      removedBy[id] = e.account;
+    }
+  }
+  if (removedBy.isEmpty) {
+    return const <String>{};
+  }
+  return <String>{
+    for (final LogEntry e in acts)
+      if (e.kind == kCommentKind && removedBy[e.id] == e.account) e.id,
+  };
+}
+
+/// The pictures of a comment body (`img`): photos and GIFs only, at most
+/// [kMaxCommentImages].
+List<MediaRef> commentImagesOf(Object? img) => <MediaRef>[
+  if (img is List)
+    for (final Object? m in img.take(kMaxCommentImages))
+      if (mediaRefFromJson(m) case final MediaRef ref
+          when isPhotoMime(ref.mime))
+        ref,
+];
+
+/// The comment in entry [e] (a [kCommentKind] with a post, and text or
+/// pictures), or `null`.
+FeedComment? feedCommentFrom(
+  LogEntry e, {
+  required String authorLabel,
+  required String account,
+  String authorAddress = '',
+}) {
+  final Object? post = e.body['post'];
+  final Object? text = e.body['text'];
+  if (e.kind != kCommentKind || post is! String || post.isEmpty) {
+    return null;
+  }
+  final String said = text is String ? text : '';
+  final List<MediaRef> images = commentImagesOf(e.body['img']);
+  if (said.trim().isEmpty && images.isEmpty) {
+    return null;
+  }
+  return FeedComment(
+    id: e.id,
+    authorLabel: authorLabel,
+    text: said.length > kMaxCommentChars
+        ? said.substring(0, kMaxCommentChars)
+        : said,
+    millis: e.hlc.millis,
+    authorAddress: authorAddress,
+    account: account,
+    images: images,
+  );
+}
+
 @immutable
 final class FeedComment {
   const FeedComment({
@@ -235,6 +307,7 @@ final class FeedComment {
     this.account = '',
     this.hiddenByAuthor = false,
     this.avatar,
+    this.images = const <MediaRef>[],
   });
 
   final String id;
@@ -257,6 +330,9 @@ final class FeedComment {
   /// comment came with one.
   final MediaRef? avatar;
 
+  /// Photos and GIFs in the comment (sealed files, like a post's).
+  final List<MediaRef> images;
+
   FeedComment hidden() => FeedComment(
     id: id,
     authorLabel: authorLabel,
@@ -266,6 +342,7 @@ final class FeedComment {
     account: account,
     hiddenByAuthor: true,
     avatar: avatar,
+    images: images,
   );
 }
 
@@ -354,15 +431,28 @@ String? likeSummary(FeedPost post) {
 }
 
 /// Body of a comment on [postId] (validated, trimmed). With [mini] the
-/// writer's mini-profile goes along, signed with the comment.
+/// writer's mini-profile goes along, signed with the comment. [images]
+/// are references of stored pictures (`storeMedia`), at most
+/// [kMaxCommentImages]; a comment may be pictures alone.
 Map<String, dynamic> commentBody(
   String postId,
   String text, {
   MiniProfileTag? mini,
+  List<Map<String, dynamic>> images = const <Map<String, dynamic>>[],
 }) {
   final String trimmed = text.trim();
-  if (trimmed.isEmpty) {
+  if (trimmed.isEmpty && images.isEmpty) {
     throw ArgumentError(t('Pusty komentarz.'));
+  }
+  if (images.length > kMaxCommentImages) {
+    throw ArgumentError(
+      tn(
+        kMaxCommentImages,
+        one: 'Komentarz może mieć najwyżej {n} obrazek.',
+        few: 'Komentarz może mieć najwyżej {n} obrazki.',
+        many: 'Komentarz może mieć najwyżej {n} obrazków.',
+      ),
+    );
   }
   if (trimmed.length > kMaxCommentChars) {
     throw ArgumentError(
@@ -377,6 +467,7 @@ Map<String, dynamic> commentBody(
   return withMiniProfile(<String, dynamic>{
     'post': postId,
     'text': trimmed,
+    if (images.isNotEmpty) 'img': images,
   }, mini);
 }
 
@@ -821,28 +912,19 @@ List<FeedPost> buildFeed(
         friend: true,
       );
     }
+    final Set<String> removed = deletedCommentIds(acts);
     for (final LogEntry e in acts) {
-      final Object? post = e.body['post'];
-      final Object? text = e.body['text'];
-      if (e.kind != kCommentKind ||
-          post is! String ||
-          text is! String ||
-          text.trim().isEmpty) {
-        continue;
+      final FeedComment? c = removed.contains(e.id)
+          ? null
+          : feedCommentFrom(
+              e,
+              authorLabel: name,
+              account: account,
+              authorAddress: address,
+            );
+      if (c != null) {
+        addComment(e.body['post'] as String, c);
       }
-      addComment(
-        post,
-        FeedComment(
-          id: e.id,
-          authorLabel: name,
-          text: text.length > kMaxCommentChars
-              ? text.substring(0, kMaxCommentChars)
-              : text,
-          millis: e.hlc.millis,
-          authorAddress: address,
-          account: account,
-        ),
-      );
     }
   }
 
@@ -913,6 +995,7 @@ List<FeedPost> buildFeed(
             millis: c.millis,
             account: c.account,
             avatar: c.avatar,
+            images: c.images,
           ),
         );
       }

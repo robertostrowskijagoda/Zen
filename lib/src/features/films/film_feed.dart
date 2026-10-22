@@ -236,29 +236,25 @@ List<FilmPost> buildFilms(
         }
       }
     }
+    final Set<String> removed = deletedCommentIds(acts);
     for (final LogEntry e in acts) {
       final Object? post = e.body['post'];
-      final Object? text = e.body['text'];
       if (e.kind != kCommentKind ||
           e.account != account ||
           post is! String ||
-          text is! String ||
-          text.trim().isEmpty ||
+          removed.contains(e.id) ||
           !films.containsKey(post)) {
         continue;
       }
-      (comments[post] ??= <FeedComment>[]).add(
-        FeedComment(
-          id: e.id,
-          authorLabel: name,
-          text: text.length > kMaxCommentChars
-              ? text.substring(0, kMaxCommentChars)
-              : text,
-          millis: e.hlc.millis,
-          authorAddress: address,
-          account: account,
-        ),
+      final FeedComment? c = feedCommentFrom(
+        e,
+        authorLabel: name,
+        account: account,
+        authorAddress: address,
       );
+      if (c != null) {
+        (comments[post] ??= <FeedComment>[]).add(c);
+      }
     }
   }
 
@@ -317,6 +313,7 @@ List<FilmPost> buildFilms(
             millis: c.millis,
             account: c.account,
             avatar: c.avatar,
+            images: c.images,
           ),
         );
       }
