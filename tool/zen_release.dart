@@ -25,6 +25,7 @@
 //       --out canary.json                      # then: sign canary.json key
 //   dart run tool/zen_release.dart fingerprint Zen-arm64-v8a.apk \
 //       [Zen-armeabi-v7a.apk Zen-x86_64.apk] [--write]   # one certificate
+//       [--pinned]          # error unless kOfficialApkCertificatesSha256 has it
 //   dart run tool/zen_release.dart fingerprint --keystore zen-release.jks \
 //       [--alias zen]                          # password: $ZEN_STOREPASS
 //
@@ -44,7 +45,13 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:zen/src/core/crypto/hybrid_signature_core.dart';
 import 'package:zen/src/features/update/apk_signing_block.dart';
 
-import 'release_contract.dart' show pinnedReleaseKeys, pinnedSignatureProblems;
+import 'release_contract.dart'
+    show
+        constStringList,
+        constStringListSpan,
+        pinnedCertificateProblems,
+        pinnedReleaseKeys,
+        pinnedSignatureProblems;
 import 'zen_sig.dart';
 
 export 'zen_sig.dart' show ToolKey, useToolSigner;
@@ -320,18 +327,21 @@ Future<String> keystoreFingerprint(String keystore, String alias) async {
 }
 
 /// [source] (a Dart file) with `const List<String> [name] = <String>[…];`
-/// set to [values]. Throws when the declaration is not there.
+/// set to [values]; a commented-out declaration is left alone. Throws when
+/// the declaration is not there.
 String replaceConstList(String source, String name, List<String> values) {
-  final RegExp declaration = RegExp(
-    'const List<String> ${RegExp.escape(name)}\\s*=\\s*<String>\\[[^\\]]*\\];',
-  );
-  if (!declaration.hasMatch(source)) {
+  final (int, int)? span = constStringListSpan(source, name);
+  if (span == null) {
     throw FormatException('Nie znaleziono $name.');
   }
   final String list = values.isEmpty
       ? '<String>[]'
       : '<String>[\n${values.map((String v) => "  '$v',\n").join()}]';
-  return source.replaceFirst(declaration, 'const List<String> $name = $list;');
+  return source.replaceRange(
+    span.$1,
+    span.$2,
+    'const List<String> $name = $list;',
+  );
 }
 
 Future<ToolKey> keyFromSeed(List<int> seed) => ToolKey.fromSeed(seed);
@@ -477,8 +487,10 @@ Użycie: dart run tool/zen_release.dart <polecenie>
                                   SHA256SUMS do podpisania (aktualizacja z GitHuba)
   bundle release.json WYJŚCIE.zenupdate platforma=plik...
   revoke --build N --why T KLUCZ WYJŚCIE.json
-  fingerprint PLIK.apk... [--write]  odcisk certyfikatu APK (kilka plików:
-                                  muszą mieć ten sam certyfikat)
+  fingerprint PLIK.apk... [--write] [--pinned]  odcisk certyfikatu APK
+                                  (kilka plików: muszą mieć ten sam
+                                  certyfikat); z --pinned błąd, gdy go nie ma
+                                  w kOfficialApkCertificatesSha256
   fingerprint --keystore PLIK.jks [--alias zen] [--write]''';
 
 String _dartList(String name, List<String> values) =>
@@ -745,6 +757,24 @@ Future<void> _run(String command, List<String> args) async {
       stdout.writeln('Odcisk certyfikatu (SHA-256), do README i wydania:');
       for (final String fp in fingerprints) {
         stdout.writeln('  ${formatCertificateFingerprint(fp)}');
+      }
+      if (args.contains('--pinned')) {
+        // The certificate the app of this tree pins: CI checks that the
+        // APKs it built are signed with it.
+        final List<String> problems = pinnedCertificateProblems(
+          fingerprints: fingerprints,
+          pinned: constStringList(
+            File(kApkSignaturePath).readAsStringSync(),
+            'kOfficialApkCertificatesSha256',
+          ),
+        );
+        for (final String problem in problems) {
+          stderr.writeln('Błąd: $problem');
+        }
+        if (problems.isNotEmpty) {
+          exitCode = 1;
+          return;
+        }
       }
       if (args.contains('--write')) {
         final File file = File(kApkSignaturePath);

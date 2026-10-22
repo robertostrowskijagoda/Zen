@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app_version.dart';
 import 'package:zen/src/features/update/github_release.dart';
+import 'package:zen/src/features/update/github_update_installer.dart'
+    as app_installer;
 import 'package:zen/src/features/update/release.dart';
 import 'package:zen/src/features/update/sha256_sums.dart';
 
@@ -83,6 +85,59 @@ void main() {
       expect(build, kAppBuild);
     });
 
+    test('Windows and Linux: one Zen folder with its marker', () {
+      expect(
+        desktopArchiveProblems(
+          File('.github/workflows/release.yml').readAsStringSync(),
+        ),
+        isEmpty,
+      );
+      // The app reads the marker the workflow writes.
+      expect(kAppFolderMarker, app_installer.kAppFolderMarker);
+      expect(kAppFolderMarkerHeader, app_installer.kAppFolderMarkerHeader);
+      const String marker =
+          "          Set-Content -LiteralPath (Join-Path \$app 'zen-app.marker') "
+          "-Value (@('zen-app 1') + \$names)\n";
+      const String tar =
+          '      - name: Release files\n'
+          '        run: |\n'
+          "          { echo 'zen-app 1'; ls -A b; } > \"\$bundle/zen-app.marker\"\n"
+          "          tar --transform 's,^bundle,Zen,' -cf - bundle \\\n"
+          '            | gzip -9n > "dist/Zen-Linux-\$ARCH.tar.gz"\n';
+      String windows(String zip, {bool loose = false, bool marked = true}) =>
+          '      - name: Release files\n'
+          '        run: |\n'
+          "          \$app = Join-Path \$env:RUNNER_TEMP 'zip/Zen'\n"
+          '${marked ? marker : ''}'
+          '          Compress-Archive -Path '
+          '${loose ? 'build/windows/x64/runner/Release/*' : r'$app'} '
+          '-DestinationPath dist/$zip\n';
+      final String good =
+          windows('Zen-Windows.zip') + windows('Zen-Windows-arm64.zip') + tar;
+      expect(desktopArchiveProblems(good), isEmpty);
+      // Loose files in the zip: "Extract here" spills them into Downloads.
+      expect(
+        desktopArchiveProblems(
+          windows('Zen-Windows.zip', loose: true) +
+              windows('Zen-Windows-arm64.zip') +
+              tar,
+        ),
+        <String>['Zen-Windows.zip must hold one Zen folder, not loose files'],
+      );
+      // No marker: the app would never update itself in place.
+      expect(
+        desktopArchiveProblems(
+          windows('Zen-Windows.zip') +
+              windows('Zen-Windows-arm64.zip', marked: false) +
+              tar.replaceFirst("echo 'zen-app 1'", 'true'),
+        ),
+        <String>[
+          'Zen-Windows-arm64.zip carries no zen-app.marker',
+          'the Linux tar.gz carries no zen-app.marker',
+        ],
+      );
+    });
+
     test('a workflow that renames a file is caught', () {
       final Set<String> produced = workflowAssetNames(
         'run: cp a dist/Zen-Windows-x64.zip\n'
@@ -125,6 +180,145 @@ void main() {
         ),
         kReleaseMaintainers,
       );
+    });
+
+    test('a commented-out key is not pinned', () {
+      const String cert =
+          'const List<String> kOfficialApkCertificatesSha256 = <String>[\n'
+          "  'ab12',\n];";
+      // The compiled app holds an empty list in each of these: CI must not
+      // see a key there.
+      for (final String release in <String>[
+        "const List<String> kReleaseMaintainers = <String>[\n"
+            "  // 'zh1abc',  // switched off for now\n];",
+        "const List<String> kReleaseMaintainers = <String>[\n"
+            "  /* 'zh1abc', /* nested */ 'zh1def', */\n];",
+        "// const List<String> kReleaseMaintainers = <String>['zh1abc'];\n"
+            'const List<String> kReleaseMaintainers = <String>[];',
+      ]) {
+        expect(pinnedReleaseKeys(release), isEmpty, reason: release);
+        expect(
+          pinnedKeyProblems(releaseDart: release, apkSignatureDart: cert),
+          <Matcher>[contains('kReleaseMaintainers is empty')],
+        );
+      }
+      expect(
+        pinnedKeyProblems(
+          releaseDart:
+              "const List<String> kReleaseMaintainers = <String>['zh1abc'];",
+          apkSignatureDart:
+              'const List<String> kOfficialApkCertificatesSha256 = '
+              "<String>[\n  // 'ab12',\n];",
+        ),
+        <Matcher>[contains('kOfficialApkCertificatesSha256 is empty')],
+      );
+      // Comment markers inside a string are text; adjacent literals join;
+      // a comment after an entry does not hide it.
+      expect(
+        constStringList(
+          "const String u = 'https://example.org/*x';\n"
+              'const List<String> k = <String>[\n'
+              "  'zh1' 'abc', // the first key\n"
+              "  r'zh1\$def',\n"
+              '];',
+          'k',
+        ),
+        <String>['zh1abc', r'zh1$def'],
+      );
+      // Anything but a plain literal is an error, never a guess.
+      for (final String entry in <String>['other', r"'${x}'", r"'$x'"]) {
+        expect(
+          () =>
+              constStringList('const List<String> k = <String>[$entry];', 'k'),
+          throwsFormatException,
+          reason: entry,
+        );
+      }
+      // Every real Dart file of the project is read without losing code.
+      for (final FileSystemEntity f in Directory(
+        'lib',
+      ).listSync(recursive: true)) {
+        if (f is File && f.path.endsWith('.dart')) {
+          final String text = f.readAsStringSync();
+          expect(stripDartComments(text).length, text.length, reason: f.path);
+        }
+      }
+    });
+
+    test('the APKs must be signed with the pinned certificate', () {
+      final String cert = 'ab' * 32;
+      final String shown = <String>[
+        for (int i = 0; i < 64; i += 2) cert.substring(i, i + 2).toUpperCase(),
+      ].join(':');
+      // As keytool prints it, or as plain hex: the same certificate.
+      expect(
+        pinnedCertificateProblems(
+          fingerprints: <String>[cert],
+          pinned: <String>[shown],
+        ),
+        isEmpty,
+      );
+      expect(
+        pinnedCertificateProblems(
+          fingerprints: <String>['cd' * 32],
+          pinned: <String>[cert],
+        ),
+        <Matcher>[contains('does not pin')],
+      );
+      expect(
+        pinnedCertificateProblems(
+          fingerprints: <String>[cert],
+          pinned: const <String>[],
+        ),
+        <Matcher>[contains('kOfficialApkCertificatesSha256 is empty')],
+      );
+      // The tag build runs the check on the APKs it built.
+      expect(
+        File('.github/workflows/release.yml').readAsStringSync(),
+        contains('dart run tool/zen_release.dart fingerprint --pinned dist/'),
+      );
+    });
+
+    test('prepare refuses unpinned native downloads', () {
+      final String sum = 'ab' * 32;
+      final String props =
+          'distributionUrl=https\\://services.gradle.org/distributions/'
+          'gradle-8.14-all.zip\n';
+      final String pins = '# comment\n$sum  150.7871.01/WebRTC.xcframework\n';
+      expect(
+        nativePinProblems(
+          gradleWrapperProperties: '${props}distributionSha256Sum=$sum\n',
+          iosPodfileLock: true,
+          macosPodfileLock: true,
+          webrtcSdkPins: pins,
+        ),
+        isEmpty,
+      );
+      expect(
+        nativePinProblems(
+          gradleWrapperProperties: '$props# distributionSha256Sum=$sum\n',
+          iosPodfileLock: false,
+          macosPodfileLock: true,
+          webrtcSdkPins: '# $sum  150.7871.01/WebRTC.xcframework\n',
+        ),
+        <Matcher>[
+          contains('distributionSha256Sum'),
+          contains('ios/Podfile.lock'),
+          contains('webrtc_sdk.sha256'),
+        ],
+      );
+      // The real pin file reads as a pin file (comments only, or pins).
+      for (final String line in File(
+        'tool/ci/webrtc_sdk.sha256',
+      ).readAsLinesSync()) {
+        expect(
+          line.isEmpty ||
+              line.startsWith('#') ||
+              RegExp(r'^[0-9a-f]{64}\s+\S+$').hasMatch(line),
+          isTrue,
+          reason: line,
+        );
+      }
     });
 
     test('a signature counts only by a pinned key', () {

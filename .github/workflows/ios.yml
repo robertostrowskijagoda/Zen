@@ -68,6 +68,38 @@ jobs:
       - name: Build (without signing)
         run: flutter build ios --release --no-codesign
 
+      # The WebRTC framework CocoaPods downloaded (a zip from a GitHub
+      # release, which CocoaPods never checks) against the hash pinned in
+      # tool/ci/webrtc_sdk.sha256; a release build fails without a pin.
+      - name: WebRTC framework (pinned SHA-256)
+        run: |
+          if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ]; then
+            python3 tool/ci/check_webrtc_sdk.py --strict ios/Pods
+          else
+            python3 tool/ci/check_webrtc_sdk.py ios/Pods
+          fi
+
+      # Once ios/Podfile.lock is committed the build must use exactly its
+      # pods (without it CocoaPods resolves them anew on every build); until
+      # then this build's file is kept as the artifact podfile-lock-ios,
+      # to be committed.
+      - name: Pods as locked (ios/Podfile.lock)
+        run: |
+          if git ls-files --error-unmatch ios/Podfile.lock > /dev/null 2>&1; then
+            if ! git diff --exit-code -I '^COCOAPODS:' -- ios/Podfile.lock; then
+              echo "::error::The build resolved other pods than the committed ios/Podfile.lock."
+              exit 1
+            fi
+          else
+            echo "::warning::ios/Podfile.lock is not committed: the pods are resolved anew on every build. Commit the file of the artifact podfile-lock-ios."
+          fi
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: podfile-lock-ios
+          path: ios/Podfile.lock
+          if-no-files-found: warn
+
       - name: Package Zen-unsigned.ipa
         run: |
           rm -rf build/ipa build/Zen-unsigned.ipa

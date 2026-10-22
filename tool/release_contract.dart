@@ -129,6 +129,77 @@ List<String> androidBuildProblems(String releaseYml, String gradleProperties) {
   ];
 }
 
+/// The file in every Windows and Linux release folder that lists what the
+/// folder holds (kAppFolderMarker in
+/// lib/src/features/update/github_update_installer.dart): the app updates
+/// itself in place only in a folder that holds exactly that.
+const String kAppFolderMarker = 'zen-app.marker';
+
+/// The first line of [kAppFolderMarker] (kAppFolderMarkerHeader).
+const String kAppFolderMarkerHeader = 'zen-app 1';
+
+/// What is wrong with how [releaseYml] packs the computer files: each
+/// Windows zip must hold one `Zen` folder (never loose files, which
+/// "Extract here" would spill into Downloads), and the Windows zips and the
+/// Linux tar.gz must carry [kAppFolderMarker], written in the step that
+/// packs them.
+List<String> desktopArchiveProblems(String releaseYml) {
+  final List<String> lines = <String>[
+    for (final String l in const LineSplitter().convert(releaseYml))
+      if (!l.trimLeft().startsWith('#')) l,
+  ];
+  // The lines of the step (from its `- name:` or `- uses:`) up to [end].
+  List<String> stepOf(int end) {
+    int start = end;
+    final RegExp stepStart = RegExp(r'^\s*- (name|uses):');
+    while (start > 0 && !stepStart.hasMatch(lines[start])) {
+      start--;
+    }
+    return lines.sublist(start, end + 1);
+  }
+
+  bool writesMarker(List<String> step) => step.any(
+    (String l) =>
+        l.contains(kAppFolderMarker) && l.contains(kAppFolderMarkerHeader),
+  );
+  final List<String> out = <String>[];
+  for (final String zip in <String>[
+    'Zen-Windows.zip',
+    'Zen-Windows-arm64.zip',
+  ]) {
+    final int at = lines.indexWhere(
+      (String l) => l.contains('Compress-Archive') && l.contains('dist/$zip'),
+    );
+    if (at < 0) {
+      out.add('release.yml does not pack $zip with Compress-Archive');
+      continue;
+    }
+    final List<String> step = stepOf(at);
+    if (RegExp(r'-Path\s+\S*\*').hasMatch(lines[at]) ||
+        !step.any((String l) => RegExp(r"[/\\]Zen'").hasMatch(l))) {
+      out.add('$zip must hold one Zen folder, not loose files');
+    }
+    if (!writesMarker(step)) {
+      out.add('$zip carries no $kAppFolderMarker');
+    }
+  }
+  final int tar = lines.indexWhere(
+    (String l) => l.contains(r'dist/Zen-Linux-$ARCH.tar.gz'),
+  );
+  if (tar < 0) {
+    out.add('release.yml does not pack Zen-Linux-\$ARCH.tar.gz');
+  } else {
+    final List<String> step = stepOf(tar);
+    if (!step.any((String l) => l.contains("'s,^bundle,Zen,'"))) {
+      out.add('the Linux tar.gz must hold one Zen folder');
+    }
+    if (!writesMarker(step)) {
+      out.add('the Linux tar.gz carries no $kAppFolderMarker');
+    }
+  }
+  return out;
+}
+
 /// What the workflow does not produce of what the app needs ([needed]).
 List<String> workflowProblems(Set<String> produced, Iterable<String> needed) =>
     <String>[
@@ -405,19 +476,249 @@ String moveUnreleased(String changelog, String version, DateTime date) {
 }
 
 /// The entries of `const List<String> [name] = <String>[...];` in [source]
-/// (empty when the list is empty or missing).
+/// as the compiler reads them: comments (`//`, `/* */`) are skipped, so a
+/// commented-out key never counts; adjacent literals join; entries are
+/// trimmed and empty ones left out. Empty when the list is empty or
+/// missing. Throws a [FormatException] when an entry is not a plain string
+/// literal (an interpolation, another constant): a check must never guess
+/// what the app holds.
 List<String> constStringList(String source, String name) {
+  final String clean = stripDartComments(source);
   final RegExpMatch? m = RegExp(
-    '$name\\s*=\\s*<String>\\[(.*?)\\]\\s*;',
-    dotAll: true,
-  ).firstMatch(source);
+    '\\b${RegExp.escape(name)}\\s*=\\s*<String>\\s*\\[',
+  ).firstMatch(clean);
   if (m == null) {
     return const <String>[];
   }
-  return <String>[
-    for (final RegExpMatch e in RegExp(r"'([^']*)'").allMatches(m.group(1)!))
-      if (e.group(1)!.trim().isNotEmpty) e.group(1)!.trim(),
-  ];
+  return _DartStringList(clean, name, m.end).read();
+}
+
+/// Where `const List<String> [name] = <String>[...];` is in [source]
+/// (start, end), not counting a commented-out one; null when it is not
+/// there. Throws as [constStringList].
+(int, int)? constStringListSpan(String source, String name) {
+  final String clean = stripDartComments(source);
+  final RegExpMatch? m = RegExp(
+    'const\\s+List<String>\\s+${RegExp.escape(name)}\\s*=\\s*<String>\\s*\\[',
+  ).firstMatch(clean);
+  if (m == null) {
+    return null;
+  }
+  final _DartStringList list = _DartStringList(clean, name, m.end)..read();
+  final Match? end = RegExp(r'\s*;').matchAsPrefix(clean, list.at);
+  return end == null ? null : (m.start, end.end);
+}
+
+/// [source] (Dart) with every comment (`//`, `/* */`, nested) blanked out,
+/// line breaks and string literals (with their interpolations) kept. Of
+/// the same length, so a position in it is the same in [source].
+String stripDartComments(String source) => _DartComments(source).strip();
+
+final class _DartComments {
+  _DartComments(this.source) : _out = source.codeUnits.toList();
+
+  final String source;
+  final List<int> _out;
+
+  static final RegExp _word = RegExp(r'[A-Za-z0-9_$]');
+
+  String strip() {
+    _code(0, interpolation: false);
+    return String.fromCharCodes(_out);
+  }
+
+  void _blank(int start, int end) {
+    for (int k = start; k < end; k++) {
+      if (_out[k] != 0x0A) {
+        _out[k] = 0x20;
+      }
+    }
+  }
+
+  /// Code from [start] to the end of [source], or to the `}` that closes an
+  /// [interpolation]; returns the position after it.
+  int _code(int start, {required bool interpolation}) {
+    final int n = source.length;
+    int i = start;
+    int depth = 0;
+    while (i < n) {
+      final String c = source[i];
+      if (source.startsWith('//', i)) {
+        final int end = source.indexOf('\n', i);
+        final int stop = end < 0 ? n : end;
+        _blank(i, stop);
+        i = stop;
+      } else if (source.startsWith('/*', i)) {
+        int j = i + 2;
+        int level = 1;
+        while (j < n && level > 0) {
+          if (source.startsWith('/*', j)) {
+            level++;
+            j += 2;
+          } else if (source.startsWith('*/', j)) {
+            level--;
+            j += 2;
+          } else {
+            j++;
+          }
+        }
+        _blank(i, j);
+        i = j;
+      } else if (c == "'" || c == '"') {
+        i = _string(i);
+      } else if (c == '{') {
+        depth++;
+        i++;
+      } else if (c == '}') {
+        if (interpolation && depth == 0) {
+          return i + 1;
+        }
+        depth--;
+        i++;
+      } else {
+        i++;
+      }
+    }
+    return i;
+  }
+
+  /// The string literal whose opening quote is at [start]; returns the
+  /// position after it.
+  int _string(int start) {
+    final int n = source.length;
+    final bool raw =
+        start > 0 &&
+        (source[start - 1] == 'r' || source[start - 1] == 'R') &&
+        !(start > 1 && _word.hasMatch(source[start - 2]));
+    final String q = source[start];
+    final String quote = source.startsWith(q * 3, start) ? q * 3 : q;
+    int i = start + quote.length;
+    while (i < n) {
+      if (source.startsWith(quote, i)) {
+        return i + quote.length;
+      }
+      if (quote.length == 1 && source[i] == '\n') {
+        return i;
+      }
+      if (!raw && source[i] == '\\') {
+        i += 2;
+      } else if (!raw && source.startsWith(r'${', i)) {
+        i = _code(i + 2, interpolation: true);
+      } else {
+        i++;
+      }
+    }
+    return n;
+  }
+}
+
+/// Reads a list of string literals from [text] (without comments), from
+/// [at], just after its `[`.
+final class _DartStringList {
+  _DartStringList(this.text, this.name, this.at);
+
+  final String text;
+  final String name;
+
+  /// Where reading goes on; after [read], just after the closing `]`.
+  int at;
+
+  static const Map<String, String> _escapes = <String, String>{
+    'n': '\n',
+    'r': '\r',
+    't': '\t',
+    'b': '\b',
+    'f': '\f',
+    'v': '\v',
+  };
+
+  void _skip() {
+    while (at < text.length && text[at].trim().isEmpty) {
+      at++;
+    }
+  }
+
+  bool _quoteAt(int i) => i < text.length && (text[i] == "'" || text[i] == '"');
+
+  bool _startsLiteral() =>
+      _quoteAt(at) ||
+      (at < text.length &&
+          (text[at] == 'r' || text[at] == 'R') &&
+          _quoteAt(at + 1));
+
+  String _literal() {
+    final bool raw = text[at] == 'r' || text[at] == 'R';
+    if (raw) {
+      at++;
+    }
+    final String q = text[at];
+    final String quote = text.startsWith(q * 3, at) ? q * 3 : q;
+    at += quote.length;
+    final StringBuffer value = StringBuffer();
+    while (true) {
+      if (at >= text.length || (quote.length == 1 && text[at] == '\n')) {
+        throw FormatException('$name: an unterminated string');
+      }
+      if (text.startsWith(quote, at)) {
+        at += quote.length;
+        return value.toString();
+      }
+      final String c = text[at];
+      if (!raw && c == r'$') {
+        throw FormatException('$name: an entry with an interpolation');
+      }
+      if (!raw && c == '\\') {
+        if (at + 1 >= text.length ||
+            text[at + 1] == 'x' ||
+            text[at + 1] == 'u') {
+          throw FormatException('$name: an escape this check does not read');
+        }
+        value.write(_escapes[text[at + 1]] ?? text[at + 1]);
+        at += 2;
+        continue;
+      }
+      value.write(c);
+      at++;
+    }
+  }
+
+  List<String> read() {
+    final List<String> values = <String>[];
+    while (true) {
+      _skip();
+      if (at < text.length && text[at] == ']') {
+        at++;
+        break;
+      }
+      final StringBuffer entry = StringBuffer();
+      bool any = false;
+      while (true) {
+        _skip();
+        if (!_startsLiteral()) {
+          break;
+        }
+        entry.write(_literal());
+        any = true;
+      }
+      if (!any) {
+        throw FormatException('$name: an entry that is not a string literal');
+      }
+      values.add(entry.toString().trim());
+      _skip();
+      if (at < text.length && text[at] == ',') {
+        at++;
+      } else if (at < text.length && text[at] == ']') {
+        at++;
+        break;
+      } else {
+        throw FormatException('$name: not a list of string literals');
+      }
+    }
+    return <String>[
+      for (final String v in values)
+        if (v.isNotEmpty) v,
+    ];
+  }
 }
 
 /// The release signing keys the app pins: kReleaseMaintainers in
@@ -453,6 +754,67 @@ List<String> pinnedSignatureProblems({
           '${signers.isEmpty ? 'none' : signers.join(', ')}',
   ];
 }
+
+/// Why APKs signed with the certificates [fingerprints] (SHA-256, any
+/// case, with or without colons) are not ones the app built from this tree
+/// accepts: it pins no APK certificate ([pinned] is
+/// kOfficialApkCertificatesSha256), or one of them is not pinned (the
+/// keystore in CI is not the one in the app: phones would refuse the
+/// update, and the install page would show another fingerprint).
+List<String> pinnedCertificateProblems({
+  required List<String> fingerprints,
+  required List<String> pinned,
+}) {
+  String hex(String v) => v.toLowerCase().replaceAll(RegExp('[^0-9a-f]'), '');
+  final Set<String> pins = <String>{for (final String p in pinned) hex(p)};
+  if (pins.isEmpty) {
+    return <String>[
+      'kOfficialApkCertificatesSha256 is empty: pin the APK certificate '
+          '(dart run tool/zen_release.dart fingerprint --keystore <jks> '
+          '--write)',
+    ];
+  }
+  return <String>[
+    if (fingerprints.isEmpty) 'no APK certificate to compare',
+    for (final String f in fingerprints)
+      if (!pins.contains(hex(f)))
+        'the APKs are signed with $f, which kOfficialApkCertificatesSha256 '
+            'does not pin (${pins.join(', ')})',
+  ];
+}
+
+/// What the native builds do not pin yet, each with where its pin comes
+/// from: the Gradle distribution ([gradleWrapperProperties] without
+/// `distributionSha256Sum`), the iPhone and Mac pods (no
+/// `ios/Podfile.lock`, `macos/Podfile.lock`: CocoaPods resolves them anew
+/// on every build) and the WebRTC framework they download
+/// ([webrtcSdkPins], tool/ci/webrtc_sdk.sha256, without a line).
+List<String> nativePinProblems({
+  required String gradleWrapperProperties,
+  required bool iosPodfileLock,
+  required bool macosPodfileLock,
+  required String webrtcSdkPins,
+}) => <String>[
+  if (!RegExp(
+    r'^[ \t]*distributionSha256Sum[ \t]*=[ \t]*[0-9a-fA-F]{64}[ \t]*\r?$',
+    multiLine: true,
+  ).hasMatch(gradleWrapperProperties))
+    'android/gradle/wrapper/gradle-wrapper.properties has no '
+        'distributionSha256Sum (the SHA-256 of its Gradle zip, from '
+        'https://gradle.org/release-checksums/)',
+  if (!iosPodfileLock)
+    'ios/Podfile.lock is not in the repository (commit the artifact '
+        'podfile-lock-ios of an iOS build)',
+  if (!macosPodfileLock)
+    'macos/Podfile.lock is not in the repository (commit the artifact '
+        'podfile-lock-macos of a release build)',
+  if (!RegExp(
+    r'^[0-9a-f]{64}[ \t]+\S+/WebRTC\.xcframework[ \t]*\r?$',
+    multiLine: true,
+  ).hasMatch(webrtcSdkPins))
+    'tool/ci/webrtc_sdk.sha256 pins no WebRTC.xcframework (python3 '
+        'tool/ci/check_webrtc_sdk.py --hash on the official one)',
+];
 
 /// Why a release must not be prepared yet: the app does not pin the keys
 /// its updates are checked with ([releaseDart] is

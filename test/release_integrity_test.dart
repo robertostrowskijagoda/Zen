@@ -776,6 +776,19 @@ void main() {
         () => tool.replaceConstList('nic', 'kReleaseMaintainers', <String>[]),
         throwsFormatException,
       );
+      // A commented-out declaration stays as it is; the real one changes.
+      expect(
+        tool.replaceConstList(
+          "// const List<String> kReleaseMaintainers = <String>['old'];\n"
+              'const List<String> kReleaseMaintainers = <String>[\n'
+              "  // 'off',\n"
+              '];\n',
+          'kReleaseMaintainers',
+          <String>['k1'],
+        ),
+        "// const List<String> kReleaseMaintainers = <String>['old'];\n"
+        "const List<String> kReleaseMaintainers = <String>[\n  'k1',\n];\n",
+      );
     });
   });
 

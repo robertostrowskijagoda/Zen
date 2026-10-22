@@ -74,6 +74,8 @@ jobs:
           python tool/ci/test_ci_checks.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tool/ci/test_check_libwebrtc.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tool/ci/test_check_webrtc_sdk.py
 
       # Format, analyzer and test counts (with the failed tests) on the
       # run's summary page; tool/ci/ci_summary.py never fails the job.
@@ -219,6 +221,20 @@ jobs:
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libpulse-dev \
             xvfb libgl1-mesa-dri libglx-mesa0 \
             dpkg-dev
+
+      # Films from friends are decoded only in the formats Zen itself sends
+      # (linux/runner/zen_media_codecs.cc): checked against the real
+      # plugins, FFmpeg's (gstreamer1.0-libav) included, through playbin
+      # and playbin3.
+      - name: "Media player: only Zen's formats"
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav
+          # shellcheck disable=SC2046 # pkg-config's flags are separate words
+          g++ -std=c++17 -Wall -Werror -DZEN_HAVE_GSTREAMER=1 -Ilinux/runner \
+            linux/runner/test/zen_media_codecs_test.cc linux/runner/zen_media_codecs.cc \
+            $(pkg-config --cflags --libs gstreamer-1.0) -o "$RUNNER_TEMP/codecs_test"
+          "$RUNNER_TEMP/codecs_test"
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
