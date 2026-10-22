@@ -99,7 +99,7 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
        _random = random ?? Random();
 
   static const int _versionMarker = 255;
-  static const int _currentVersion = 7;
+  static const int _currentVersion = 8;
 
   final LedgerDisk disk;
   final String storagePrefix;
@@ -597,7 +597,20 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
           a.readAtMillis == b.readAtMillis &&
           a.durationMs == b.durationMs &&
           a.expiresAtMillis == b.expiresAtMillis &&
+          _sameExtras(a, b) &&
           _sameBytes(a.attachmentBytes, b.attachmentBytes));
+
+  static String? _extrasOf(ChatMessage m) {
+    final Map<String, dynamic>? extras = chatMessageExtrasToJson(m);
+    return extras == null ? null : jsonEncode(extras);
+  }
+
+  static bool _sameExtras(ChatMessage a, ChatMessage b) =>
+      a.reply == b.reply &&
+      a.editedAtMillis == b.editedAtMillis &&
+      a.deletedAtMillis == b.deletedAtMillis &&
+      a.forwarded == b.forwarded &&
+      _extrasOf(a) == _extrasOf(b);
 
   static bool _sameBytes(Uint8List? a, Uint8List? b) {
     if (identical(a, b)) {
@@ -655,7 +668,9 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
         ..writeNullableString(message.attachmentPath)
         ..writeNullableInt64(message.readAtMillis)
         ..writeNullableInt64(message.durationMs)
-        ..writeNullableInt64(message.expiresAtMillis);
+        ..writeNullableInt64(message.expiresAtMillis)
+        // Reply, reactions, edit, deletion, forwarding (JSON).
+        ..writeNullableString(_extrasOf(message));
     }
     return writer.toBytes();
   }
@@ -713,7 +728,7 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
     final ChatMessageDeliveryState deliveryState = _deliveryStateFromIndex(
       reader.readUint8(),
     );
-    return ChatMessage(
+    final ChatMessage base = ChatMessage(
       id: id,
       sender: sender,
       text: text,
@@ -730,6 +745,15 @@ final class FileMessageTimelineStore implements MessageTimelineStore {
       durationMs: reader.readNullableInt64(),
       expiresAtMillis: reader.readNullableInt64(),
     );
+    final String? extras = reader.readNullableString();
+    if (extras == null || extras.isEmpty) {
+      return base;
+    }
+    try {
+      return chatMessageWithExtras(base, jsonDecode(extras));
+    } on FormatException {
+      return base;
+    }
   }
 }
 

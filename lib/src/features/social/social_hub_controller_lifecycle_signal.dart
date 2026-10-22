@@ -566,6 +566,13 @@ mixin _SocialHubLifecycleSignalMixin on _SocialHubControllerBase {
       await _handleDisappearTimer(signal, timestamp);
       return;
     }
+    if (signal.type == ZenSignalType.messageReaction ||
+        signal.type == ZenSignalType.messageEdit ||
+        signal.type == ZenSignalType.messageDelete) {
+      // A reaction, an edit or a deletion of a message already here.
+      await _handleChatChange(signal, timestamp);
+      return;
+    }
     if (_isGroupCallSignalType(signal.type)) {
       // Group calls run their own, real-time protocol: nothing is queued,
       // nothing goes through the generic notification path.

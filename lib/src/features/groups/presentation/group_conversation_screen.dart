@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,14 +14,20 @@ import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/calls/presentation/call_action_runner.dart';
+import 'package:zen/src/features/chat/chat_gif_catalog.dart';
+import 'package:zen/src/features/chat/chat_media_blocks.dart';
 import 'package:zen/src/features/chat/disappearing_messages.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
+import 'package:zen/src/features/chat/presentation/chat_attachment_picker.dart';
+import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/disappearing_timer_dialog.dart';
 import 'package:zen/src/features/chat/presentation/message_delivery_badge.dart';
+import 'package:zen/src/features/chat/presentation/message_extras.dart';
 import 'package:zen/src/features/groups/group_board.dart';
 import 'package:zen/src/features/groups/group_board_providers.dart';
 import 'package:zen/src/features/groups/presentation/group_board_view.dart';
+import 'package:zen/src/features/media/media_transfer.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
 import 'package:zen/src/features/security/secure_screen.dart';
@@ -63,6 +70,218 @@ class _GroupConversationScreenState
   bool _boardTab = false;
   late final SocialHubController _socialHub;
 
+  /// The message the next one replies to (shown over the composer).
+  ChatReply? _replyTo;
+
+  /// A file is being picked or handed over.
+  bool _attaching = false;
+
+  /// A message just jumped to from a reply: outlined for a moment.
+  String? _highlightId;
+  Timer? _highlightTimer;
+  final Map<String, GlobalKey> _bubbleKeys = <String, GlobalKey>{};
+
+  GlobalKey _bubbleKey(String id) => _bubbleKeys.putIfAbsent(id, GlobalKey.new);
+
+  /// Who [who] is in this group (`self`, a member's address).
+  String _nameOf(String who) {
+    if (who == 'self') {
+      return t('Ty');
+    }
+    final SocialHubState hub = ref.read(socialHubControllerProvider);
+    return hub.friendByAddress(who)?.displayLabel ??
+        hub.groupById(widget.groupId)?.memberNames[who] ??
+        t('Uczestnik');
+  }
+
+  /// Scrolls to the message [id] a reply quotes and outlines it briefly.
+  Future<void> _jumpToMessage(String id, List<ChatMessage> messages) async {
+    final int index = messages.indexWhere((ChatMessage m) => m.id == id);
+    if (index < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t('Tej wiadomości nie ma już w rozmowie.'))),
+      );
+      return;
+    }
+    BuildContext? target = _bubbleKeys[id]?.currentContext;
+    if (target == null && _scrollController.hasClients) {
+      // The list is reversed: the newest message is at offset 0.
+      final int fromEnd = messages.length - 1 - index;
+      await _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent *
+            fromEnd /
+            (messages.length > 1 ? messages.length - 1 : 1),
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+      await WidgetsBinding.instance.endOfFrame;
+      target = _bubbleKeys[id]?.currentContext;
+    }
+    if (target != null && target.mounted) {
+      await Scrollable.ensureVisible(
+        target,
+        alignment: 0.5,
+        duration: const Duration(milliseconds: 250),
+      );
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() => _highlightId = id);
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (mounted) {
+        setState(() => _highlightId = null);
+      }
+    });
+  }
+
+  /// Picks a photo, film, file, GIF or voice message and sends it to the
+  /// group (with the reply being written, if any).
+  Future<void> _attach() async {
+    if (_attaching || !_canWrite) {
+      return;
+    }
+    final ChatAttachmentSource? source = await pickChatAttachmentSource(
+      context,
+      gifEnabled: ref.read(gifSearchEnabledProvider),
+    );
+    if (source == null || !mounted) {
+      return;
+    }
+    setState(() => _attaching = true);
+    try {
+      final PickedChatAttachment? picked = await pickChatAttachment(
+        context,
+        ref,
+        source,
+      );
+      if (picked == null || !mounted) {
+        return;
+      }
+      final ChatReply? replyTo = _replyTo;
+      setState(() => _replyTo = null);
+      await _socialHub.sendGroupAttachment(
+        groupId: widget.groupId,
+        bytes: picked.bytes,
+        attachmentPath: picked.path,
+        fileName: picked.fileName,
+        mimeType: picked.mimeType,
+        type: picked.type,
+        durationMs: picked.durationMs,
+        replyTo: replyTo,
+      );
+    } on FormatException catch (error) {
+      _showSnack(error.message);
+    } on StateError catch (error) {
+      _showSnack(error.message);
+    } on Object catch (error) {
+      _showSnack(
+        t('Nie udało się wysłać pliku: {error}', <String, Object?>{
+          'error': error,
+        }),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _attaching = false);
+      }
+    }
+  }
+
+  /// Files dropped on the chat or pasted: photos as fresh JPEGs, GIFs
+  /// animated, films, files (see media_transfer.dart).
+  Future<void> _sendTransferred(List<TransferItem> items) => sendTransferItems(
+    context,
+    items,
+    send: (OutgoingAttachment attachment) async {
+      try {
+        await _socialHub.sendGroupAttachment(
+          groupId: widget.groupId,
+          bytes: attachment.bytes,
+          attachmentPath: attachment.path,
+          fileName: attachment.fileName,
+          mimeType: attachment.mimeType,
+          type: attachment.chatType,
+        );
+      } on FormatException catch (error) {
+        _showSnack(error.message);
+      } on StateError catch (error) {
+        _showSnack(error.message);
+      }
+    },
+  );
+
+  /// Puts a photo on the group's board, with what is written in the
+  /// composer as its caption. The photo is kept once as blocks the members
+  /// fetch; only its reference goes out with the post.
+  Future<void> _attachBoardPhoto() async {
+    if (_attaching || !_canWrite) {
+      return;
+    }
+    final ChatMediaBlocks? blocks = ref
+        .read(chatMediaBlocksHolderProvider)
+        .blocks;
+    if (blocks == null) {
+      _showSnack(t('Zdjęcia na tablicy będą dostępne, gdy sieć się uruchomi.'));
+      return;
+    }
+    final String caption = _composerController.text.trim();
+    if (caption.length > kMaxBoardPostChars) {
+      _showSnack(t('Podpis zdjęcia jest za długi.'));
+      return;
+    }
+    setState(() => _attaching = true);
+    try {
+      final PickedChatAttachment? picked = await pickChatAttachment(
+        context,
+        ref,
+        ChatAttachmentSource.gallery,
+      );
+      if (picked == null || !mounted) {
+        return;
+      }
+      final Uint8List? bytes = picked.bytes;
+      if (picked.type != ChatMessageType.image ||
+          bytes == null ||
+          bytes.isEmpty) {
+        _showSnack(t('Na tablicę można dodać tylko zdjęcie.'));
+        return;
+      }
+      if (bytes.length > kMaxBoardPhotoBytes) {
+        _showSnack(t('To zdjęcie jest za duże.'));
+        return;
+      }
+      final Map<String, dynamic> media = await blocks.store(
+        bytes,
+        mime: picked.mimeType ?? 'image/jpeg',
+      );
+      final GroupBoardPost? post = await ref
+          .read(groupBoardServiceProvider)
+          .publish(widget.groupId, caption, media: media);
+      if (post != null && mounted) {
+        _composerController.clear();
+      }
+    } on FormatException catch (error) {
+      _showSnack(error.message);
+    } on Object catch (error) {
+      _showSnack(
+        t('Nie udało się dodać zdjęcia: {error}', <String, Object?>{
+          'error': error,
+        }),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _attaching = false);
+      }
+    }
+  }
+
+  void _showSnack(String text) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -72,12 +291,15 @@ class _GroupConversationScreenState
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         unawaited(_socialHub.enterGroupConversation(widget.groupId));
+        // Files whose blocks did not arrive yet are asked for again.
+        unawaited(_socialHub.retryPendingGroupMedia(widget.groupId));
       }
     });
   }
 
   @override
   void dispose() {
+    _highlightTimer?.cancel();
     _socialHub.leaveGroupConversation(widget.groupId);
     _composerController.dispose();
     _scrollController.dispose();
@@ -183,9 +405,17 @@ class _GroupConversationScreenState
         await ref.read(groupBoardServiceProvider).publish(widget.groupId, text);
         return;
       }
+      final ChatReply? replyTo = _replyTo;
+      if (replyTo != null) {
+        setState(() => _replyTo = null);
+      }
       await ref
           .read(socialHubControllerProvider.notifier)
-          .sendGroupMessage(groupId: widget.groupId, text: text);
+          .sendGroupMessage(
+            groupId: widget.groupId,
+            text: text,
+            replyTo: replyTo,
+          );
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -357,6 +587,10 @@ class _GroupConversationScreenState
     final int memberCount = group?.memberCount ?? 1;
     final bool isPending = group?.isInvitePending ?? false;
     final bool isMember = group != null && !isPending;
+    final List<String> memberAddresses =
+        group?.memberAddresses ?? const <String>[];
+    final Map<String, String> memberNames =
+        group?.memberNames ?? const <String, String>{};
 
     return Scaffold(
       backgroundColor: zen.background,
@@ -502,401 +736,593 @@ class _GroupConversationScreenState
             ),
         ],
       ),
-      body: Column(
-        children: <Widget>[
-          if (isPending)
-            _PendingInviteBanner(
-              group: group!,
-              onJoin: () => _join(group),
-              onDecline: () => _decline(group),
-            ),
-          if (isMember && (inThisCall || (runningCall?.isEmpty == false)))
-            _RunningCallBanner(
-              inCall: inThisCall,
-              headcount: inThisCall
-                  ? activeCall.participantAddresses.length + 1
-                  : runningCall!.participants.length,
-              onTap: inThisCall
-                  ? () => openGroupCallSurface(
-                      groupId: widget.groupId,
-                      groupName: name,
-                    )
-                  : _joinRunningCall,
-            ),
-          if (isMember)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
-              child: SegmentedButton<bool>(
-                key: const Key('group-tabs'),
-                showSelectedIcon: false,
-                segments: <ButtonSegment<bool>>[
-                  ButtonSegment<bool>(
-                    value: false,
-                    icon: const Icon(Icons.forum_outlined, size: 18),
-                    label: Text(t('Czat')),
-                  ),
-                  ButtonSegment<bool>(
-                    value: true,
-                    icon: const Icon(Icons.push_pin_outlined, size: 18),
-                    label: Text(t('Tablica')),
-                  ),
-                ],
-                selected: <bool>{_boardTab},
-                onSelectionChanged: (Set<bool> value) =>
-                    setState(() => _boardTab = value.first),
+      // Files dropped on the chat, and pictures or files pasted with Ctrl+V
+      // on a computer, are sent (media_transfer.dart).
+      body: MediaDropArea(
+        enabled: _canWrite && !_boardTab,
+        onItems: _sendTransferred,
+        child: Column(
+          children: <Widget>[
+            if (isPending)
+              _PendingInviteBanner(
+                group: group!,
+                onJoin: () => _join(group),
+                onDecline: () => _decline(group),
               ),
-            ),
-          // Message List
-          Expanded(
-            child: _boardTab && isMember
-                ? GroupBoardView(
-                    key: Key('group-board-${widget.groupId}'),
-                    board: ref.watch(groupBoardServiceProvider),
-                    groupId: widget.groupId,
-                    canPost: isMember,
-                    nameOf: (GroupBoardPost p) =>
-                        friends[p.author]?.displayLabel ??
-                        ref
-                            .read(socialHubControllerProvider)
-                            .friendByAddress(p.author)
-                            ?.displayLabel ??
-                        group.memberNames[p.author] ??
-                        (p.authorName.isEmpty ? t('Uczestnik') : p.authorName),
-                  )
-                : messagesAsync.when(
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (Object err, _) => Center(
-                      child: Text(t('Błąd ładowania: {error}', {'error': err})),
+            if (isMember && (inThisCall || (runningCall?.isEmpty == false)))
+              _RunningCallBanner(
+                inCall: inThisCall,
+                headcount: inThisCall
+                    ? activeCall.participantAddresses.length + 1
+                    : runningCall!.participants.length,
+                onTap: inThisCall
+                    ? () => openGroupCallSurface(
+                        groupId: widget.groupId,
+                        groupName: name,
+                      )
+                    : _joinRunningCall,
+              ),
+            if (isMember)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+                child: SegmentedButton<bool>(
+                  key: const Key('group-tabs'),
+                  showSelectedIcon: false,
+                  segments: <ButtonSegment<bool>>[
+                    ButtonSegment<bool>(
+                      value: false,
+                      icon: const Icon(Icons.forum_outlined, size: 18),
+                      label: Text(t('Czat')),
                     ),
-                    data: (List<ChatMessage> messages) {
-                      final bool animateEntrance =
-                          !_messageEntrancePlayed && messages.isNotEmpty;
-                      if (messages.isNotEmpty) {
-                        _messageEntrancePlayed = true;
-                      }
-                      if (messages.isEmpty) {
-                        return Center(
-                          child: SingleChildScrollView(
-                            child: ZenEmpty(
-                              icon: Icons.forum_outlined,
-                              title: t('Brak wiadomości w tej grupie'),
-                              text: isMember
-                                  ? t(
-                                      'Napisz pierwszą wiadomość do uczestników grupy.',
-                                    )
-                                  : t('Tu pojawią się wiadomości grupy.'),
+                    ButtonSegment<bool>(
+                      value: true,
+                      icon: const Icon(Icons.push_pin_outlined, size: 18),
+                      label: Text(t('Tablica')),
+                    ),
+                  ],
+                  selected: <bool>{_boardTab},
+                  onSelectionChanged: (Set<bool> value) =>
+                      setState(() => _boardTab = value.first),
+                ),
+              ),
+            // Message List
+            Expanded(
+              child: _boardTab && isMember
+                  ? GroupBoardView(
+                      key: Key('group-board-${widget.groupId}'),
+                      board: ref.watch(groupBoardServiceProvider),
+                      groupId: widget.groupId,
+                      canPost: isMember,
+                      blocks: ref.read(chatMediaBlocksHolderProvider).blocks,
+                      sourcesOf: (GroupBoardPost p) => <String>[
+                        p.author,
+                        ...memberAddresses,
+                      ],
+                      nameOf: (GroupBoardPost p) =>
+                          friends[p.author]?.displayLabel ??
+                          ref
+                              .read(socialHubControllerProvider)
+                              .friendByAddress(p.author)
+                              ?.displayLabel ??
+                          memberNames[p.author] ??
+                          (p.authorName.isEmpty
+                              ? t('Uczestnik')
+                              : p.authorName),
+                    )
+                  : messagesAsync.when(
+                      loading: () =>
+                          const Center(child: CircularProgressIndicator()),
+                      error: (Object err, _) => Center(
+                        child: Text(
+                          t('Błąd ładowania: {error}', {'error': err}),
+                        ),
+                      ),
+                      data: (List<ChatMessage> messages) {
+                        final bool animateEntrance =
+                            !_messageEntrancePlayed && messages.isNotEmpty;
+                        if (messages.isNotEmpty) {
+                          _messageEntrancePlayed = true;
+                        }
+                        if (messages.isEmpty) {
+                          return Center(
+                            child: SingleChildScrollView(
+                              child: ZenEmpty(
+                                icon: Icons.forum_outlined,
+                                title: t('Brak wiadomości w tej grupie'),
+                                text: isMember
+                                    ? t(
+                                        'Napisz pierwszą wiadomość do uczestników grupy.',
+                                      )
+                                    : t('Tu pojawią się wiadomości grupy.'),
+                              ),
                             ),
-                          ),
-                        );
-                      }
+                          );
+                        }
 
-                      // Reversed, so the chat opens at the newest message and new
-                      // ones appear without the user having to scroll down.
-                      return ListView.builder(
-                        controller: _scrollController,
-                        reverse: true,
-                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-                        itemCount: messages.length,
-                        itemBuilder: (BuildContext context, int reversedIndex) {
-                          final int index = messages.length - 1 - reversedIndex;
-                          final ChatMessage msg = messages[index];
-                          if (msg.isSystem) {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: Center(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    color: zen.surfaceRaised.withValues(
-                                      alpha: 0.85,
+                        final Map<String, ChatMessage> byId =
+                            <String, ChatMessage>{
+                              for (final ChatMessage m in messages) m.id: m,
+                            };
+                        // Reversed, so the chat opens at the newest message and new
+                        // ones appear without the user having to scroll down.
+                        return ListView.builder(
+                          controller: _scrollController,
+                          reverse: true,
+                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                          itemCount: messages.length,
+                          itemBuilder: (BuildContext context, int reversedIndex) {
+                            final int index =
+                                messages.length - 1 - reversedIndex;
+                            final ChatMessage msg = messages[index];
+                            if (msg.isSystem) {
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 8,
+                                ),
+                                child: Center(
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: zen.surfaceRaised.withValues(
+                                        alpha: 0.85,
+                                      ),
+                                      borderRadius: context.zenRadius(16),
+                                      border: Border.all(
+                                        color: zen.outlineSoft,
+                                      ),
                                     ),
-                                    borderRadius: context.zenRadius(16),
-                                    border: Border.all(color: zen.outlineSoft),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 5,
-                                    ),
-                                    child: Text(
-                                      chatMessageText(msg),
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: zen.textSecondary,
-                                        fontSize: 12.5,
-                                        fontWeight: FontWeight.w500,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 5,
+                                      ),
+                                      child: Text(
+                                        chatMessageText(msg),
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: zen.textSecondary,
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w500,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            );
-                          }
-                          final bool isSelf =
-                              msg.isOutgoing || msg.sender == 'self';
-                          if (!isSelf && hiddenByMe.hides(id: msg.id)) {
-                            return HiddenContentPlaceholder(
-                              key: Key('group-hidden-${msg.id}'),
-                              byMe: true,
-                              compact: true,
-                              onShow: () => showHiddenAnyway(ref, id: msg.id),
-                            );
-                          }
-                          final String senderName = isSelf
-                              ? t('Ty')
-                              : friends[msg.sender]?.displayLabel ??
-                                    ref
-                                        .read(socialHubControllerProvider)
-                                        .friendByAddress(msg.sender)
-                                        ?.displayLabel ??
-                                    group?.memberNames[msg.sender] ??
-                                    t('Uczestnik');
+                              );
+                            }
+                            final bool isSelf =
+                                msg.isOutgoing || msg.sender == 'self';
+                            if (!isSelf && hiddenByMe.hides(id: msg.id)) {
+                              return HiddenContentPlaceholder(
+                                key: Key('group-hidden-${msg.id}'),
+                                byMe: true,
+                                compact: true,
+                                onShow: () => showHiddenAnyway(ref, id: msg.id),
+                              );
+                            }
+                            final String senderName = isSelf
+                                ? t('Ty')
+                                : friends[msg.sender]?.displayLabel ??
+                                      ref
+                                          .read(socialHubControllerProvider)
+                                          .friendByAddress(msg.sender)
+                                          ?.displayLabel ??
+                                      group?.memberNames[msg.sender] ??
+                                      t('Uczestnik');
 
-                          final Color senderTone = zenTone(
-                            zen,
-                            (msg.sender.hashCode & 0x7FFFFFFF) % 8,
-                          );
-                          // The look's own bubbles, or the gradient ones.
-                          final ZenLook look = ZenLook.of(context);
-                          final BoxDecoration? themed = look.bubble(
-                            zen,
-                            outgoing: isSelf,
-                          );
-                          final bool onGradient = isSelf && themed == null;
-                          final Widget bubble = Align(
-                            alignment: isSelf
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 6),
-                              constraints: BoxConstraints(
-                                maxWidth:
-                                    (MediaQuery.of(context).size.width * 0.78)
-                                        .clamp(160.0, 440.0),
-                              ),
-                              decoration:
-                                  themed ??
-                                  (isSelf
-                                      ? BoxDecoration(
-                                          gradient: LinearGradient(
-                                            colors: <Color>[
-                                              zen.accent,
-                                              Color.lerp(
+                            final Color senderTone = zenTone(
+                              zen,
+                              (msg.sender.hashCode & 0x7FFFFFFF) % 8,
+                            );
+                            // The look's own bubbles, or the gradient ones.
+                            final ZenLook look = ZenLook.of(context);
+                            final BoxDecoration? themed = look.bubble(
+                              zen,
+                              outgoing: isSelf,
+                            );
+                            // Files keep their own colours: only text sits on
+                            // the gradient.
+                            final bool onGradient =
+                                isSelf &&
+                                themed == null &&
+                                msg.type == ChatMessageType.text;
+                            final String key = 'group:${widget.groupId}';
+                            final List<ChatMenuItem> actions = isMember
+                                ? chatMessageActions(
+                                    context,
+                                    ref,
+                                    message: msg,
+                                    conversationKey: key,
+                                    onReply: () => setState(
+                                      () => _replyTo = _socialHub.replyTo(msg),
+                                    ),
+                                  )
+                                : const <ChatMenuItem>[];
+                            final ChatReply? reply = msg.isDeleted
+                                ? null
+                                : msg.reply;
+                            final ChatMessage? replyOriginal = reply == null
+                                ? null
+                                : byId[reply.messageId];
+                            final Widget bubble = Align(
+                              alignment: isSelf
+                                  ? Alignment.centerRight
+                                  : Alignment.centerLeft,
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 6),
+                                constraints: BoxConstraints(
+                                  maxWidth:
+                                      (MediaQuery.of(context).size.width * 0.78)
+                                          .clamp(160.0, 440.0),
+                                ),
+                                decoration:
+                                    themed ??
+                                    (onGradient
+                                        ? BoxDecoration(
+                                            gradient: LinearGradient(
+                                              colors: <Color>[
                                                 zen.accent,
-                                                zen.accentSecondary,
-                                                0.35,
-                                              )!,
-                                            ],
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight,
-                                          ),
-                                          borderRadius: look.bubbleRadius(
-                                            outgoing: true,
-                                          ),
-                                          boxShadow: <BoxShadow>[
-                                            BoxShadow(
-                                              color: zen.accent.withValues(
-                                                alpha: 0.18,
-                                              ),
-                                              blurRadius: 12,
-                                              offset: const Offset(0, 4),
+                                                Color.lerp(
+                                                  zen.accent,
+                                                  zen.accentSecondary,
+                                                  0.35,
+                                                )!,
+                                              ],
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
                                             ),
-                                          ],
-                                        )
-                                      : BoxDecoration(
-                                          color: zen.surfaceRaised,
-                                          borderRadius: look.bubbleRadius(
-                                            outgoing: false,
+                                            borderRadius: look.bubbleRadius(
+                                              outgoing: true,
+                                            ),
+                                            boxShadow: ZenLook.of(context)
+                                                .tinted(
+                                                  zen,
+                                                  zen.accent,
+                                                  radius: 12,
+                                                  alpha: 0.18,
+                                                  offset: const Offset(0, 4),
+                                                ),
+                                          )
+                                        : BoxDecoration(
+                                            color: zen.surfaceRaised,
+                                            borderRadius: look.bubbleRadius(
+                                              outgoing: false,
+                                            ),
+                                            border: Border.all(
+                                              color: zen.outlineSoft,
+                                            ),
+                                          )),
+                                foregroundDecoration: _highlightId == msg.id
+                                    ? BoxDecoration(
+                                        borderRadius: look.bubbleRadius(
+                                          outgoing: isSelf,
+                                        ),
+                                        border: Border.all(
+                                          color: zen.accent,
+                                          width: 2,
+                                        ),
+                                      )
+                                    : null,
+                                padding: const EdgeInsets.fromLTRB(
+                                  14,
+                                  9,
+                                  14,
+                                  10,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    if (!isSelf)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 3,
+                                        ),
+                                        child: Text(
+                                          senderName,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: senderTone,
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w700,
                                           ),
-                                          border: Border.all(
-                                            color: zen.outlineSoft,
-                                          ),
-                                        )),
-                              padding: const EdgeInsets.fromLTRB(14, 9, 14, 10),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  if (!isSelf)
-                                    Padding(
-                                      padding: const EdgeInsets.only(bottom: 3),
-                                      child: Text(
-                                        senderName,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: senderTone,
-                                          fontSize: 12.5,
-                                          fontWeight: FontWeight.w700,
                                         ),
                                       ),
-                                    ),
-                                  CopyableText(
-                                    msg.text,
-                                    style: TextStyle(
-                                      color: onGradient
-                                          ? zen.onAccent
-                                          : zen.textPrimary,
-                                      fontSize: 15,
-                                      height: 1.4,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    // What others wrote can be reported.
-                                    onReport: isSelf
-                                        ? null
-                                        : () => unawaited(
-                                            reportContent(
-                                              context,
-                                              ref,
-                                              authorAddress: msg.sender,
-                                              text: msg.text,
-                                              header: t(
-                                                'Wiadomość w grupie {group} — {name}',
-                                                {
-                                                  'group': widget.groupName,
-                                                  'name': senderName,
-                                                },
-                                              ),
-                                              contentId: msg.id,
-                                              deleteLocal: () async {
-                                                await ref
-                                                    .read(
-                                                      socialHubControllerProvider
-                                                          .notifier,
-                                                    )
-                                                    .deleteMessageLocally(
-                                                      key:
-                                                          'group:${widget.groupId}',
-                                                      messageId: msg.id,
-                                                    );
-                                              },
-                                            ),
+                                    if (msg.forwarded && !msg.isDeleted)
+                                      ChatForwardedMarker(onAccent: onGradient),
+                                    if (reply != null)
+                                      ChatReplyQuote(
+                                        reply: reply,
+                                        original: replyOriginal,
+                                        senderLabel: _nameOf(
+                                          replyOriginal == null
+                                              ? reply.sender
+                                              : (replyOriginal.isOutgoing
+                                                    ? 'self'
+                                                    : replyOriginal.sender),
+                                        ),
+                                        onTap: () => unawaited(
+                                          _jumpToMessage(
+                                            reply.messageId,
+                                            messages,
                                           ),
-                                  ),
-                                  // How far it got, over all members.
-                                  if (msg.isOutgoing)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 2),
-                                      child: MessageDeliveryBadge(
-                                        message: msg,
-                                        conversationKey:
-                                            'group:${widget.groupId}',
-                                        isGroup: true,
+                                        ),
                                         onAccent: onGradient,
                                       ),
-                                    ),
-                                ],
+                                    if (msg.isDeleted)
+                                      Text(
+                                        deletedMessageLabel(),
+                                        key: Key('deleted-message-${msg.id}'),
+                                        style: TextStyle(
+                                          color: onGradient
+                                              ? zen.onAccent
+                                              : zen.textMuted,
+                                          fontSize: 14,
+                                          fontStyle: FontStyle.italic,
+                                        ),
+                                      )
+                                    else if (msg.type != ChatMessageType.text)
+                                      GestureDetector(
+                                        onLongPressStart:
+                                            (LongPressStartDetails d) =>
+                                                unawaited(
+                                                  showChatContextMenu(
+                                                    context,
+                                                    d.globalPosition,
+                                                    actions,
+                                                  ),
+                                                ),
+                                        child: ChatAttachmentBody(message: msg),
+                                      )
+                                    else
+                                      CopyableText(
+                                        msg.text,
+                                        actions: actions,
+                                        style: TextStyle(
+                                          color: onGradient
+                                              ? zen.onAccent
+                                              : zen.textPrimary,
+                                          fontSize: 15,
+                                          height: 1.4,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        // What others wrote can be reported.
+                                        onReport: isSelf
+                                            ? null
+                                            : () => unawaited(
+                                                reportContent(
+                                                  context,
+                                                  ref,
+                                                  authorAddress: msg.sender,
+                                                  text: msg.text,
+                                                  header: t(
+                                                    'Wiadomość w grupie {group} — {name}',
+                                                    {
+                                                      'group': widget.groupName,
+                                                      'name': senderName,
+                                                    },
+                                                  ),
+                                                  contentId: msg.id,
+                                                  deleteLocal: () async {
+                                                    await ref
+                                                        .read(
+                                                          socialHubControllerProvider
+                                                              .notifier,
+                                                        )
+                                                        .deleteMessageLocally(
+                                                          key:
+                                                              'group:${widget.groupId}',
+                                                          messageId: msg.id,
+                                                        );
+                                                  },
+                                                ),
+                                              ),
+                                      ),
+                                    if (!msg.isDeleted &&
+                                        msg.reactions.isNotEmpty)
+                                      ChatReactionsBar(
+                                        reactions: msg.reactions,
+                                        nameOf: _nameOf,
+                                        onToggle: (String emoji) => unawaited(
+                                          _socialHub.reactToMessage(
+                                            conversationKey: key,
+                                            messageId: msg.id,
+                                            emoji: emoji,
+                                          ),
+                                        ),
+                                      ),
+                                    if (msg.isEdited && !msg.isDeleted)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: Text(
+                                          editedMarker(),
+                                          style: TextStyle(
+                                            color: onGradient
+                                                ? zen.onAccent.withValues(
+                                                    alpha: 0.72,
+                                                  )
+                                                : zen.textMuted,
+                                            fontSize: 11,
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                        ),
+                                      ),
+                                    // How far it got, over all members.
+                                    if (msg.isOutgoing)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: MessageDeliveryBadge(
+                                          message: msg,
+                                          conversationKey:
+                                              'group:${widget.groupId}',
+                                          isGroup: true,
+                                          onAccent: onGradient,
+                                        ),
+                                      ),
+                                  ],
+                                ),
                               ),
-                            ),
-                          );
-                          // Stagger from the newest bubble up — those are the ones
-                          // visible when the conversation opens.
-                          final int fromEnd = messages.length - 1 - index;
-                          if (animateEntrance &&
-                              fromEnd < _entranceStaggerLimit) {
-                            return ZenFadeSlide(
-                              duration: const Duration(milliseconds: 300),
-                              delay: Duration(milliseconds: 30 * fromEnd),
-                              offset: Offset(isSelf ? 10 : -10, 6),
+                            );
+                            // Stagger from the newest bubble up — those are the ones
+                            // visible when the conversation opens.
+                            final int fromEnd = messages.length - 1 - index;
+                            if (animateEntrance &&
+                                fromEnd < _entranceStaggerLimit) {
+                              return ZenFadeSlide(
+                                duration: const Duration(milliseconds: 300),
+                                delay: Duration(milliseconds: 30 * fromEnd),
+                                offset: Offset(isSelf ? 10 : -10, 6),
+                                child: KeyedSubtree(
+                                  key: _bubbleKey(msg.id),
+                                  child: bubble,
+                                ),
+                              );
+                            }
+                            return KeyedSubtree(
+                              key: _bubbleKey(msg.id),
                               child: bubble,
                             );
-                          }
-                          return bubble;
-                        },
-                      );
-                    },
-                  ),
-          ),
-          // Composer Bar
-          if (!isMember)
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                child: Text(
-                  group == null
-                      ? t('Nie jesteś już w tej grupie.')
-                      : t('Dołącz do grupy, żeby pisać.'),
-                  key: const Key('group-chat-readonly-note'),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: zen.textSecondary),
-                ),
-              ),
-            )
-          else
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: zen.surface,
-                border: Border(top: BorderSide(color: zen.outlineSoft)),
-              ),
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: zen.surfaceRaised,
-                      borderRadius: context.zenRadius(26),
-                      border: Border.all(color: zen.outlineSoft),
+                          },
+                        );
+                      },
                     ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: <Widget>[
-                        Expanded(
-                          child: TextField(
-                            key: const Key('group-chat-composer-field'),
-                            controller: _composerController,
-                            enableIMEPersonalizedLearning: false,
-                            textCapitalization: TextCapitalization.sentences,
-                            style: TextStyle(
-                              color: zen.textPrimary,
-                              fontSize: 15,
-                              height: 1.35,
-                            ),
-                            decoration: InputDecoration(
-                              hintText: _boardTab
-                                  ? t('Napisz post na tablicę grupy...')
-                                  : t('Napisz wiadomość do grupy...'),
-                              hintStyle: TextStyle(
-                                color: zen.textMuted,
-                                fontSize: 14.5,
-                              ),
-                              filled: false,
-                              isDense: true,
-                              border: InputBorder.none,
-                              enabledBorder: InputBorder.none,
-                              focusedBorder: InputBorder.none,
-                              contentPadding: const EdgeInsets.fromLTRB(
-                                18,
-                                13,
-                                8,
-                                13,
-                              ),
-                            ),
-                            onSubmitted: (_) => _sendMessage(),
-                          ),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(2, 4, 4, 4),
-                          child: IconButton.filled(
-                            key: const Key('group-chat-send-button'),
-                            style: IconButton.styleFrom(
-                              backgroundColor: zen.accent,
-                              foregroundColor: zen.onAccent,
-                              minimumSize: const Size(40, 40),
-                              fixedSize: const Size(40, 40),
-                              padding: EdgeInsets.zero,
-                              shape: const CircleBorder(),
-                            ),
-                            icon: const Icon(Icons.send_rounded, size: 20),
-                            onPressed: _sendMessage,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
             ),
-        ],
+            // Composer Bar
+            if (!isMember)
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                  child: Text(
+                    group == null
+                        ? t('Nie jesteś już w tej grupie.')
+                        : t('Dołącz do grupy, żeby pisać.'),
+                    key: const Key('group-chat-readonly-note'),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: zen.textSecondary),
+                  ),
+                ),
+              )
+            else
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: zen.surface,
+                  border: Border(top: BorderSide(color: zen.outlineSoft)),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      if (_replyTo != null && !_boardTab)
+                        ChatReplyComposerBar(
+                          reply: _replyTo!,
+                          senderLabel: _nameOf(_replyTo!.sender),
+                          onCancel: () => setState(() => _replyTo = null),
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: zen.surfaceRaised,
+                            borderRadius: context.zenRadius(26),
+                            border: Border.all(color: zen.outlineSoft),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: <Widget>[
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(4, 4, 0, 4),
+                                child: IconButton(
+                                  key: Key(
+                                    _boardTab
+                                        ? 'group-board-photo-button'
+                                        : 'group-chat-attach-button',
+                                  ),
+                                  tooltip: _boardTab
+                                      ? t('Dodaj zdjęcie')
+                                      : t('Załącznik'),
+                                  onPressed: _attaching
+                                      ? null
+                                      : (_boardTab
+                                            ? _attachBoardPhoto
+                                            : _attach),
+                                  icon: _attaching
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : Icon(
+                                          Icons.add_circle_outline_rounded,
+                                          color: zen.accent,
+                                        ),
+                                ),
+                              ),
+                              Expanded(
+                                child: TextField(
+                                  key: const Key('group-chat-composer-field'),
+                                  controller: _composerController,
+                                  enableIMEPersonalizedLearning: false,
+                                  textCapitalization:
+                                      TextCapitalization.sentences,
+                                  style: TextStyle(
+                                    color: zen.textPrimary,
+                                    fontSize: 15,
+                                    height: 1.35,
+                                  ),
+                                  decoration: InputDecoration(
+                                    hintText: _boardTab
+                                        ? t('Napisz post na tablicę grupy...')
+                                        : t('Napisz wiadomość do grupy...'),
+                                    hintStyle: TextStyle(
+                                      color: zen.textMuted,
+                                      fontSize: 14.5,
+                                    ),
+                                    filled: false,
+                                    isDense: true,
+                                    border: InputBorder.none,
+                                    enabledBorder: InputBorder.none,
+                                    focusedBorder: InputBorder.none,
+                                    contentPadding: const EdgeInsets.fromLTRB(
+                                      18,
+                                      13,
+                                      8,
+                                      13,
+                                    ),
+                                  ),
+                                  onSubmitted: (_) => _sendMessage(),
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(2, 4, 4, 4),
+                                child: IconButton.filled(
+                                  key: const Key('group-chat-send-button'),
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: zen.accent,
+                                    foregroundColor: zen.onAccent,
+                                    minimumSize: const Size(40, 40),
+                                    fixedSize: const Size(40, 40),
+                                    padding: EdgeInsets.zero,
+                                    shape: const CircleBorder(),
+                                  ),
+                                  icon: const Icon(
+                                    Icons.send_rounded,
+                                    size: 20,
+                                  ),
+                                  onPressed: _sendMessage,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

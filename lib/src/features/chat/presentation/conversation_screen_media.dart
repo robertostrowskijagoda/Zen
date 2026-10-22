@@ -51,6 +51,18 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                 toneIndex: 3,
                 onPressed: canCompose && idle ? _pickAndSendAttachment : null,
               ),
+              // iPhone keyboards copy GIFs to the clipboard instead of
+              // inserting them: "Wklej" sends what is there.
+              if (clipboardPasteButtonShown) ...<Widget>[
+                const SizedBox(width: 6),
+                _ComposerActionButton(
+                  key: const Key('conversation-paste-button'),
+                  icon: Icons.content_paste_rounded,
+                  tooltip: t('Wklej obrazek ze schowka'),
+                  toneIndex: 4,
+                  onPressed: canCompose && idle ? _pasteFromClipboard : null,
+                ),
+              ],
               // Voice notes are an outgoing action, so the mic sits on the
               // right, over the send button - not with the attachment pickers.
               const Spacer(),
@@ -83,7 +95,7 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
             duration: const Duration(milliseconds: 180),
             decoration: BoxDecoration(
               color: zen.surfaceRaised,
-              borderRadius: BorderRadius.circular(26),
+              borderRadius: context.zenRadius(26),
               border: Border.all(
                 color: _isRecordingVoice
                     ? zen.warning.withValues(alpha: 0.6)
@@ -106,6 +118,17 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                         : TextField(
                             key: const Key('conversation-composer-field'),
                             controller: _composerController,
+                            // GIFs and stickers from the keyboard (Android's
+                            // rich content): a GIF stays animated.
+                            contentInsertionConfiguration: canCompose
+                                ? ContentInsertionConfiguration(
+                                    onContentInserted:
+                                        (KeyboardInsertedContent content) =>
+                                            unawaited(
+                                              _sendKeyboardContent(content),
+                                            ),
+                                  )
+                                : null,
                             // Keyboard must not learn what you write.
                             enableIMEPersonalizedLearning: false,
                             enabled: canText && !_isRecordingBusy,
@@ -298,6 +321,125 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
     }
   }
 
+  /// A GIF from the gallery, the files or the keyboard goes as an animated
+  /// picture, without comments and other metadata (`gif_files.dart`). One
+  /// over the limits, or damaged, goes as a plain file if the person agrees.
+  /// False when [bytes] are not a GIF: they go their usual way.
+  Future<bool> _sendPickedGif(Uint8List bytes, String fileName) async {
+    final PickedGif gif = preparePickedGif(bytes);
+    if (gif.status == PickedGifStatus.notGif) {
+      return false;
+    }
+    final String name = gifFileName(fileName);
+    if (gif.status == PickedGifStatus.ready) {
+      await _sendGifAttachment(name, ChatMessageType.image, bytes: gif.bytes);
+    } else if (await _confirmGifAsFile(gif.status) && mounted) {
+      await _sendGifAttachment(
+        name,
+        ChatMessageType.file,
+        bytes: stripGifMetadata(bytes) ?? bytes,
+      );
+    }
+    return true;
+  }
+
+  /// A picture the keyboard inserted (a GIF or a sticker): a GIF goes as
+  /// an animated GIF, anything else as a fresh photo.
+  Future<void> _sendKeyboardContent(KeyboardInsertedContent content) async {
+    final Uint8List? data = content.data;
+    if (data == null || data.isEmpty) {
+      _showComposerSnackBar(t('Klawiatura nie przekazała obrazka.'));
+      return;
+    }
+    final String name = 'klawiatura-${DateTime.now().millisecondsSinceEpoch}';
+    if (await _sendPickedGif(data, name)) {
+      return;
+    }
+    final Uint8List clean;
+    try {
+      clean = await sanitizePhoto(data);
+    } on ArgumentError {
+      _showComposerSnackBar(t('Ten plik nie jest zdjęciem.'));
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    try {
+      await _socialHubController.sendLocalAttachment(
+        peerAddress: widget.peerAddress,
+        displayName: _conversationDisplayName,
+        bytes: clean,
+        fileName: '$name.jpg',
+        mimeType: 'image/jpeg',
+        type: ChatMessageType.image,
+      );
+    } on FormatException catch (error) {
+      _showComposerSnackBar(error.message);
+    }
+  }
+
+  Future<void> _sendGifAttachment(
+    String fileName,
+    ChatMessageType type, {
+    Uint8List? bytes,
+    String? path,
+  }) async {
+    try {
+      await _socialHubController.sendLocalAttachment(
+        peerAddress: widget.peerAddress,
+        displayName: _conversationDisplayName,
+        bytes: bytes,
+        attachmentPath: path,
+        fileName: fileName,
+        mimeType: 'image/gif',
+        type: type,
+      );
+    } on FormatException catch (error) {
+      _showComposerSnackBar(error.message);
+    }
+  }
+
+  /// Asks whether a GIF that cannot play in the chat ([status]: too large
+  /// or damaged) goes as a plain file instead.
+  Future<bool> _confirmGifAsFile(PickedGifStatus status) =>
+      confirmGifAsFile(context, status);
+
+  /// Files dropped on the chat or pasted (Ctrl+V on a computer, "Wklej" on
+  /// an iPhone): photos as fresh JPEGs, GIFs animated, films, files.
+  Future<void> _sendTransferred(List<TransferItem> items) => sendTransferItems(
+    context,
+    items,
+    send: (OutgoingAttachment attachment) async {
+      try {
+        await _socialHubController.sendLocalAttachment(
+          peerAddress: widget.peerAddress,
+          displayName: _conversationDisplayName,
+          bytes: attachment.bytes,
+          attachmentPath: attachment.path,
+          fileName: attachment.fileName,
+          mimeType: attachment.mimeType,
+          type: attachment.chatType,
+        );
+      } on FormatException catch (error) {
+        _showComposerSnackBar(error.message);
+      }
+    },
+  );
+
+  Future<void> _pasteFromClipboard() async {
+    final List<TransferItem> items = await MediaTransfer.platform
+        .readClipboard();
+    if (!mounted) {
+      return;
+    }
+    if (items.isEmpty) {
+      _showComposerSnackBar(t('W schowku nie ma obrazka ani pliku.'));
+      return;
+    }
+    await _sendTransferred(items);
+  }
+
   Future<void> _capturePhotoOrVideo() async {
     final ZenColors zen = ZenColors.of(context);
     final ImagePicker picker = ImagePicker();
@@ -388,6 +530,10 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
           : (option == _CaptureOption.video
                 ? 'video-${DateTime.now().millisecondsSinceEpoch}.mp4'
                 : 'photo-${DateTime.now().millisecondsSinceEpoch}.jpg');
+      if (option == _CaptureOption.gallery &&
+          await _sendPickedGif(bytes, fileName)) {
+        return;
+      }
       String? sendPath = fromCamera ? null : file.path;
       if (option != _CaptureOption.video) {
         // A photo goes out as a fresh JPEG: no location or camera data in
@@ -964,6 +1110,17 @@ class _RecordingComposerStatus extends StatelessWidget {
   }
 }
 
+/// Picks a GIF from the search, as in a chat (group chats too); `null`
+/// when dismissed.
+Future<GifCatalogEntry?> showChatGifPicker(
+  BuildContext context,
+  WidgetRef ref,
+) => showDialog<GifCatalogEntry>(
+  context: context,
+  builder: (BuildContext context) =>
+      _ConversationGifPickerDialog(catalog: ref.read(gifCatalogProvider)),
+);
+
 class _ConversationGifPickerDialog extends StatefulWidget {
   const _ConversationGifPickerDialog({required this.catalog});
 
@@ -1181,8 +1338,8 @@ class _ConversationGifPickerDialogState
                                             begin: Alignment.bottomCenter,
                                             end: Alignment.topCenter,
                                             colors: <Color>[
-                                              Color(0xD0000000),
-                                              Color(0x00000000),
+                                              ZenFixed.photoScrimStrong,
+                                              ZenFixed.photoClear,
                                             ],
                                           ),
                                         ),
@@ -1193,7 +1350,7 @@ class _ConversationGifPickerDialogState
                                             maxLines: 2,
                                             overflow: TextOverflow.ellipsis,
                                             style: const TextStyle(
-                                              color: Colors.white,
+                                              color: ZenFixed.onPhoto,
                                               fontWeight: FontWeight.w700,
                                             ),
                                           ),
@@ -1781,7 +1938,7 @@ class _VideoAttachmentPreviewScreenState
             padding: const EdgeInsets.all(16),
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: Colors.black,
+                color: ZenFixed.photoBackdrop,
                 borderRadius: context.zenRadius(28),
                 border: Border.all(color: zen.outline),
               ),
@@ -1793,7 +1950,7 @@ class _VideoAttachmentPreviewScreenState
                     ? Center(
                         child: Text(
                           t('Nie udało się uruchomić podgladu wideo.'),
-                          style: const TextStyle(color: Colors.white70),
+                          style: const TextStyle(color: ZenFixed.onPhotoSoft),
                           textAlign: TextAlign.center,
                         ),
                       )
@@ -1803,7 +1960,7 @@ class _VideoAttachmentPreviewScreenState
                             child: ClipRRect(
                               borderRadius: context.zenRadius(20),
                               child: ColoredBox(
-                                color: Colors.black,
+                                color: ZenFixed.photoBackdrop,
                                 child: Center(
                                   child: AspectRatio(
                                     aspectRatio:
@@ -1823,9 +1980,11 @@ class _VideoAttachmentPreviewScreenState
                               child: LinearProgressIndicator(
                                 minHeight: 6,
                                 value: progress,
-                                backgroundColor: Colors.white10,
+                                backgroundColor: ZenFixed.onPhoto.withValues(
+                                  alpha: 0.1,
+                                ),
                                 valueColor: const AlwaysStoppedAnimation<Color>(
-                                  Colors.white70,
+                                  ZenFixed.onPhotoSoft,
                                 ),
                               ),
                             ),
@@ -1854,7 +2013,7 @@ class _VideoAttachmentPreviewScreenState
                                         durationMs: widget.message.durationMs,
                                       ),
                                 style: const TextStyle(
-                                  color: Colors.white70,
+                                  color: ZenFixed.onPhotoSoft,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),

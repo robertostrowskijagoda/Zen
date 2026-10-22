@@ -368,6 +368,9 @@ SocialHubState _applySignal(
     case ZenSignalType.groupCallDecline:
     case ZenSignalType.profileUpdate:
     case ZenSignalType.disappearTimer:
+    case ZenSignalType.messageReaction:
+    case ZenSignalType.messageEdit:
+    case ZenSignalType.messageDelete:
       // Group calls have their own coordinator (see the group call part).
       return current;
     case ZenSignalType.groupUpdate:
@@ -865,6 +868,9 @@ InboxEntry _buildInboxEntry({
     ZenSignalType.groupCallDecline ||
     ZenSignalType.profileUpdate ||
     ZenSignalType.disappearTimer ||
+    ZenSignalType.messageReaction ||
+    ZenSignalType.messageEdit ||
+    ZenSignalType.messageDelete ||
     ZenSignalType.callRinging ||
     ZenSignalType.callOfferRequest ||
     ZenSignalType.transferOffer ||
@@ -1143,6 +1149,9 @@ RuntimeSystemNotification _systemNotificationFromEntry({
       ZenSignalType.messageRead ||
       ZenSignalType.messageChunk ||
       ZenSignalType.messageChunkAck ||
+      ZenSignalType.messageReaction ||
+      ZenSignalType.messageEdit ||
+      ZenSignalType.messageDelete ||
       ZenSignalType.deepLink ||
       ZenSignalType.presence ||
       ZenSignalType.typing ||
@@ -1240,6 +1249,9 @@ String? _notificationDedupKeyForSignal(ZenSignal signal) {
     ),
     ZenSignalType.profileUpdate => 'profile:$sender',
     ZenSignalType.disappearTimer => 'disappear:$sender',
+    ZenSignalType.messageReaction ||
+    ZenSignalType.messageEdit ||
+    ZenSignalType.messageDelete => 'chat-change:$sender',
     ZenSignalType.transferCancel => 'transfer:$sender',
     ZenSignalType.transferOffer ||
     ZenSignalType.transferAnswer ||
@@ -1616,6 +1628,9 @@ bool _isSignalAllowedFromPeer(SocialHubState hubState, ZenSignal signal) {
           (groupHasMember(grp, signal.sender) ||
               PeerShareCodec.addressesEqual(grp.createdById, signal.sender));
     case ZenSignalType.disappearTimer:
+    case ZenSignalType.messageReaction:
+    case ZenSignalType.messageEdit:
+    case ZenSignalType.messageDelete:
       // A friend for the 1:1 chat; a member of a joined group for a group.
       final String? timerGroupId = signal.groupId;
       if (timerGroupId == null || timerGroupId.isEmpty) {

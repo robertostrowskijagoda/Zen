@@ -176,11 +176,7 @@ void main() {
     'global settings seed retention defaults into new accepted relation',
     () async {
       final MemoryAppSettingsStore settingsStore = MemoryAppSettingsStore(
-        const AppSettings(
-          inboxLimitMb: 80,
-          autoCleanupDays: 14,
-          notificationDelaySeconds: 6,
-        ),
+        const AppSettings(inboxLimitMb: 80, autoCleanupDays: 14),
       );
       final ProviderContainer container = ProviderContainer(
         overrides: [

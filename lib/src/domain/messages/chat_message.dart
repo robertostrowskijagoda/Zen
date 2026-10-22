@@ -10,6 +10,83 @@ enum ChatMessageType { text, image, file, voice, video }
 
 const Object _chatMessageUnset = Object();
 
+/// Longest piece of the original's text a reply carries (shown while the
+/// original is not at hand).
+const int kMaxReplySnippetChars = 200;
+
+/// How long after sending one's own message can still be edited.
+const Duration kChatEditWindow = Duration(hours: 24);
+
+/// Most different people's reactions kept on one message.
+const int kMaxReactionsPerMessage = 256;
+
+/// The longest reaction taken (one emoji, maybe with modifiers).
+const int kMaxReactionChars = 16;
+
+/// What a reply quotes.
+@immutable
+final class ChatReply {
+  const ChatReply({required this.messageId, this.sender = '', this.text = ''});
+
+  /// Id of the message replied to (in the same conversation).
+  final String messageId;
+
+  /// Who wrote it (`self`, an address), for the quote.
+  final String sender;
+
+  /// The start of its text; empty for a message that disappears (the quote
+  /// then shows only while the original is still there).
+  final String text;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'id': messageId,
+    if (sender.isNotEmpty) 's': sender,
+    if (text.isNotEmpty) 't': text,
+  };
+
+  static ChatReply? fromJson(Object? json) {
+    if (json is! Map) {
+      return null;
+    }
+    final Object? id = json['id'];
+    final Object? sender = json['s'];
+    final Object? text = json['t'];
+    if (id is! String || id.isEmpty || id.length > 256) {
+      return null;
+    }
+    return ChatReply(
+      messageId: id,
+      sender: sender is String && sender.length <= 256 ? sender : '',
+      text: text is String ? clipChatSnippet(text) : '',
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is ChatReply &&
+      other.messageId == messageId &&
+      other.sender == sender &&
+      other.text == text;
+
+  @override
+  int get hashCode => Object.hash(messageId, sender, text);
+}
+
+/// [text] cut to [kMaxReplySnippetChars] (never inside a surrogate pair),
+/// on one line.
+String clipChatSnippet(String text) {
+  final String line = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (line.length <= kMaxReplySnippetChars) {
+    return line;
+  }
+  int end = kMaxReplySnippetChars;
+  final int last = line.codeUnitAt(end - 1);
+  if (last >= 0xD800 && last <= 0xDBFF) {
+    end -= 1;
+  }
+  return '${line.substring(0, end)}…';
+}
+
 @immutable
 final class ChatMessage {
   const ChatMessage({
@@ -28,6 +105,12 @@ final class ChatMessage {
     this.deliveryState = ChatMessageDeliveryState.none,
     this.readAtMillis,
     this.expiresAtMillis,
+    this.reply,
+    this.reactions = const <String, String>{},
+    this.editedAtMillis,
+    this.deletedAtMillis,
+    this.forwarded = false,
+    this.pendingMedia,
   });
 
   final String id;
@@ -48,6 +131,30 @@ final class ChatMessage {
   /// When a disappearing message is deleted; `null` for
   /// messages that stay.
   final int? expiresAtMillis;
+
+  /// The message this one answers.
+  final ChatReply? reply;
+
+  /// Reactions: who (`self` or an address) → emoji, one per person.
+  final Map<String, String> reactions;
+
+  /// When its author last edited it (the earlier text is not kept).
+  final int? editedAtMillis;
+
+  /// When its author (or a group's creator) deleted it for everyone: the
+  /// content is gone, a note stays in its place.
+  final int? deletedAtMillis;
+
+  /// Passed on from another conversation.
+  final bool forwarded;
+
+  /// A file a group member shared as content-addressed blocks
+  /// (`chat_media_blocks.dart`): its reference until it is downloaded.
+  final Map<String, dynamic>? pendingMedia;
+
+  bool get isEdited => editedAtMillis != null;
+
+  bool get isDeleted => deletedAtMillis != null;
 
   bool get disappears => expiresAtMillis != null;
 
@@ -95,6 +202,12 @@ final class ChatMessage {
     Object? readAtMillis = _chatMessageUnset,
     Object? expiresAtMillis = _chatMessageUnset,
     ChatMessageDeliveryState? deliveryState,
+    Object? reply = _chatMessageUnset,
+    Map<String, String>? reactions,
+    Object? editedAtMillis = _chatMessageUnset,
+    Object? deletedAtMillis = _chatMessageUnset,
+    bool? forwarded,
+    Object? pendingMedia = _chatMessageUnset,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -140,8 +253,86 @@ final class ChatMessage {
               fieldName: 'expiresAtMillis',
             ),
       deliveryState: deliveryState ?? this.deliveryState,
+      reply: identical(reply, _chatMessageUnset)
+          ? this.reply
+          : castCopyWithValue<ChatReply>(reply, fieldName: 'reply'),
+      reactions: reactions ?? this.reactions,
+      editedAtMillis: identical(editedAtMillis, _chatMessageUnset)
+          ? this.editedAtMillis
+          : castCopyWithValue<int>(editedAtMillis, fieldName: 'editedAtMillis'),
+      deletedAtMillis: identical(deletedAtMillis, _chatMessageUnset)
+          ? this.deletedAtMillis
+          : castCopyWithValue<int>(
+              deletedAtMillis,
+              fieldName: 'deletedAtMillis',
+            ),
+      forwarded: forwarded ?? this.forwarded,
+      pendingMedia: identical(pendingMedia, _chatMessageUnset)
+          ? this.pendingMedia
+          : castCopyWithValue<Map<String, dynamic>>(
+              pendingMedia,
+              fieldName: 'pendingMedia',
+            ),
     );
   }
+
+  /// [this] deleted for everyone at [atMillis]: no text, no file, no
+  /// quote and no reactions left.
+  ChatMessage deletedAt(int atMillis) => ChatMessage(
+    id: id,
+    sender: sender,
+    text: '',
+    sentAtMillis: sentAtMillis,
+    direction: direction,
+    deliveryState: deliveryState,
+    readAtMillis: readAtMillis,
+    expiresAtMillis: expiresAtMillis,
+    deletedAtMillis: atMillis,
+  );
+}
+
+/// What [m] has beyond the basic fields (reply, reactions, edit, deletion,
+/// forwarding, a file still to fetch), for storage and copies; `null` when
+/// there is nothing.
+Map<String, dynamic>? chatMessageExtrasToJson(ChatMessage m) {
+  final Map<String, dynamic> out = <String, dynamic>{
+    if (m.reply != null) 're': m.reply!.toJson(),
+    if (m.reactions.isNotEmpty) 'rx': m.reactions,
+    'ed': ?m.editedAtMillis,
+    'del': ?m.deletedAtMillis,
+    if (m.forwarded) 'fwd': true,
+    'pm': ?m.pendingMedia,
+  };
+  return out.isEmpty ? null : out;
+}
+
+/// [m] with the extras [json] describes (see [chatMessageExtrasToJson]).
+ChatMessage chatMessageWithExtras(ChatMessage m, Object? json) {
+  if (json is! Map) {
+    return m;
+  }
+  final Object? rx = json['rx'];
+  final Object? edited = json['ed'];
+  final Object? deleted = json['del'];
+  final Object? pending = json['pm'];
+  return m.copyWith(
+    reply: ChatReply.fromJson(json['re']),
+    reactions: <String, String>{
+      if (rx is Map)
+        for (final MapEntry<dynamic, dynamic> e in rx.entries.take(
+          kMaxReactionsPerMessage,
+        ))
+          if (e.key is String &&
+              e.value is String &&
+              (e.value as String).isNotEmpty &&
+              (e.value as String).length <= kMaxReactionChars)
+            e.key as String: e.value as String,
+    },
+    editedAtMillis: edited is int ? edited : null,
+    deletedAtMillis: deleted is int ? deleted : null,
+    forwarded: json['fwd'] == true,
+    pendingMedia: pending is Map ? Map<String, dynamic>.from(pending) : null,
+  );
 }
 
 String chatMessageLabelForType(

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -9,7 +11,10 @@ import 'package:zen/src/features/social/peer_share_codec.dart';
 // (`group_board_have`) and each answers with the posts it wrote itself
 // (`group_board_put`): a post is only ever taken from its own author, so
 // no member can put words in another's mouth. Its author may edit or
-// remove a post; the group's creator may remove any post.
+// remove a post; the group's creator may remove any post. A post may carry
+// a photo: only its reference travels with the post, the photo itself is
+// kept as content-addressed blocks (`chat_media_blocks.dart`) that the
+// members fetch from the author or from each other.
 
 /// A new, edited or removed post, to every member (reliable).
 const String kGroupPostType = 'group_post';
@@ -40,6 +45,12 @@ const int kMaxBoardPostsPerHour = 20;
 /// Posts sent in one [kGroupBoardPutType] answer.
 const int kMaxBoardPutPosts = 50;
 
+/// Longest photo reference (`{id, k, n, mime}`) a post may carry.
+const int kMaxBoardMediaRefChars = 2048;
+
+/// Largest photo put on a board.
+const int kMaxBoardPhotoBytes = 8 * 1024 * 1024;
+
 /// Longest author name kept with a post.
 const int _maxNameChars = 80;
 
@@ -57,6 +68,7 @@ final class GroupBoardPost {
     required this.createdAt,
     required this.version,
     this.deleted = false,
+    this.media,
   });
 
   /// A post as it travels or is stored, or `null` when anything is off.
@@ -71,6 +83,7 @@ final class GroupBoardPost {
     final Object? created = json['t'];
     final Object? version = json['v'];
     final bool deleted = json['d'] == true;
+    final Map<String, dynamic>? media = deleted ? null : _mediaRef(json['m']);
     if (id is! String ||
         !_postId.hasMatch(id) ||
         author is! String ||
@@ -84,7 +97,8 @@ final class GroupBoardPost {
       return null;
     }
     final String body = text.trim();
-    if (body.length > kMaxBoardPostChars || (!deleted && body.isEmpty)) {
+    if (body.length > kMaxBoardPostChars ||
+        (!deleted && body.isEmpty && media == null)) {
       return null;
     }
     final String shown = name is String ? name.trim() : '';
@@ -98,7 +112,16 @@ final class GroupBoardPost {
       createdAt: created,
       version: version,
       deleted: deleted,
+      media: media,
     );
+  }
+
+  static Map<String, dynamic>? _mediaRef(Object? json) {
+    if (json is! Map || json['id'] is! String) {
+      return null;
+    }
+    final Map<String, dynamic> ref = Map<String, dynamic>.from(json);
+    return jsonEncode(ref).length > kMaxBoardMediaRefChars ? null : ref;
   }
 
   final String id;
@@ -116,6 +139,9 @@ final class GroupBoardPost {
   /// Removed: kept only as a marker, so the post does not come back.
   final bool deleted;
 
+  /// The photo's reference (blocks), if the post has one.
+  final Map<String, dynamic>? media;
+
   bool get edited => !deleted && version > createdAt;
 
   /// Whether this version replaces [other] (the same post).
@@ -132,6 +158,8 @@ final class GroupBoardPost {
         createdAt: createdAt,
         version: version ?? this.version,
         deleted: deleted ?? this.deleted,
+        // A removed post keeps nothing of its content.
+        media: (deleted ?? this.deleted) ? null : media,
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -142,6 +170,7 @@ final class GroupBoardPost {
     't': createdAt,
     'v': version,
     if (deleted) 'd': true,
+    'm': ?media,
   };
 }
 

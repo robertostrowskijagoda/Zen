@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -33,11 +34,14 @@ import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/chat/presentation/disappearing_timer_dialog.dart';
 import 'package:zen/src/features/chat/presentation/message_delivery_badge.dart';
+import 'package:zen/src/features/chat/presentation/message_extras.dart';
 import 'package:zen/src/features/chat/presentation/stranger_chat_widgets.dart';
 import 'package:zen/src/features/chat/stranger_chats.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
 import 'package:zen/src/features/feed/post_media.dart';
+import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/media_guard.dart';
+import 'package:zen/src/features/media/media_transfer.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/moderation/hidden_by_me.dart';
 import 'package:zen/src/features/moderation/presentation/report_content.dart';
@@ -95,6 +99,74 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
   int _lastRenderedMessageCount = -1;
   DateTime? _lastTypingSentAt;
 
+  /// The message the next one replies to (shown over the composer).
+  ChatReply? _replyTo;
+
+  /// A message just jumped to from a reply: outlined for a moment.
+  String? _highlightId;
+  Timer? _highlightTimer;
+  final Map<String, GlobalKey> _bubbleKeys = <String, GlobalKey>{};
+
+  GlobalKey _bubbleKey(String id) => _bubbleKeys.putIfAbsent(id, GlobalKey.new);
+
+  /// Who [who] is in this chat (`self`, the friend's address).
+  String _nameOf(String who) {
+    if (who == 'self') {
+      return t('Ty');
+    }
+    return ref
+            .read(socialHubControllerProvider)
+            .friendByAddress(who)
+            ?.displayLabel ??
+        widget.title;
+  }
+
+  void _startReply(ChatMessage message) {
+    setState(() {
+      _replyTo = _socialHubController.replyTo(message);
+    });
+  }
+
+  /// Scrolls to the message [id] a reply quotes and outlines it briefly.
+  Future<void> _jumpToMessage(String id, List<ChatMessage> thread) async {
+    final int index = thread.indexWhere((ChatMessage m) => m.id == id);
+    if (index < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t('Tej wiadomości nie ma już w rozmowie.'))),
+      );
+      return;
+    }
+    BuildContext? target = _bubbleKeys[id]?.currentContext;
+    if (target == null && _scrollController.hasClients) {
+      // Not built yet (off screen): about there first.
+      final ScrollPosition position = _scrollController.position;
+      await _scrollController.animateTo(
+        position.maxScrollExtent * index / math.max(1, thread.length - 1),
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+      await WidgetsBinding.instance.endOfFrame;
+      target = _bubbleKeys[id]?.currentContext;
+    }
+    if (target != null && target.mounted) {
+      await Scrollable.ensureVisible(
+        target,
+        alignment: 0.3,
+        duration: const Duration(milliseconds: 250),
+      );
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() => _highlightId = id);
+    _highlightTimer?.cancel();
+    _highlightTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (mounted) {
+        setState(() => _highlightId = null);
+      }
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -128,6 +200,7 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
 
   @override
   void dispose() {
+    _highlightTimer?.cancel();
     _composerController.removeListener(_onComposerChanged);
     if (_lastTypingSentAt != null) {
       _socialHubController.sendTypingState(
@@ -488,199 +561,280 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
           ),
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          children: <Widget>[
-            if (isCallActive)
-              Material(
-                color: zen.surfaceSunk,
-                child: InkWell(
-                  key: const Key('conversation-return-to-call-banner'),
-                  onTap: () => _returnToCall(context, activeCall),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: zen.success.withValues(alpha: 0.12),
-                      border: Border(
-                        bottom: BorderSide(
-                          color: zen.success.withValues(alpha: 0.35),
+      // Files dropped on the chat, and pictures or files pasted with
+      // Ctrl+V on a computer, are sent (media_transfer.dart).
+      body: MediaDropArea(
+        enabled: friend?.status == FriendRelationshipStatus.accepted,
+        onItems: _sendTransferred,
+        child: SafeArea(
+          child: Column(
+            children: <Widget>[
+              if (isCallActive)
+                Material(
+                  color: zen.surfaceSunk,
+                  child: InkWell(
+                    key: const Key('conversation-return-to-call-banner'),
+                    onTap: () => _returnToCall(context, activeCall),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: zen.success.withValues(alpha: 0.12),
+                        border: Border(
+                          bottom: BorderSide(
+                            color: zen.success.withValues(alpha: 0.35),
+                          ),
                         ),
                       ),
-                    ),
-                    child: Row(
-                      children: <Widget>[
-                        ZenPulsingDot(
-                          color: zen.success,
-                          active: true,
-                          dimension: 10,
-                          dotSize: 5,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            t('Aktywna rozmowa: {name}', {
-                              'name': activeCall.displayName,
-                            }),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: zen.textPrimary,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13,
+                      child: Row(
+                        children: <Widget>[
+                          ZenPulsingDot(
+                            color: zen.success,
+                            active: true,
+                            dimension: 10,
+                            dotSize: 5,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              t('Aktywna rozmowa: {name}', {
+                                'name': activeCall.displayName,
+                              }),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: zen.textPrimary,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
-                        ),
-                        Text(
-                          t('Wróć do rozmowy'),
-                          style: TextStyle(
-                            color: zen.success,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
+                          Text(
+                            t('Wróć do rozmowy'),
+                            style: TextStyle(
+                              color: zen.success,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(
-                          Icons.arrow_forward_ios_rounded,
-                          size: 12,
-                          color: zen.success,
-                        ),
-                      ],
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.arrow_forward_ios_rounded,
+                            size: 12,
+                            color: zen.success,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            // Someone who is not a friend.
-            if (isStrangerConversation(friend, widget.peerAddress))
-              StrangerChatBanner(address: widget.peerAddress, friend: friend),
-            Expanded(
-              child: messages.when(
-                data: (List<ChatMessage> thread) {
-                  _scheduleScrollToBottom(thread.length);
-                  final bool animateEntrance =
-                      !_messageEntrancePlayed && thread.isNotEmpty;
-                  if (thread.isNotEmpty) {
-                    _messageEntrancePlayed = true;
-                  }
-                  return thread.isEmpty && friend?.isTyping != true
-                      ? ListView(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-                          children: <Widget>[
-                            ZenEmpty(
-                              icon: Icons.forum_outlined,
-                              title: t('Brak wiadomości'),
-                              text: t(
-                                'Zacznij rozmowę bez czekania na '
-                                'synchronizację tła.',
+              // Someone who is not a friend.
+              if (isStrangerConversation(friend, widget.peerAddress))
+                StrangerChatBanner(address: widget.peerAddress, friend: friend),
+              Expanded(
+                child: messages.when(
+                  data: (List<ChatMessage> thread) {
+                    _scheduleScrollToBottom(thread.length);
+                    final bool animateEntrance =
+                        !_messageEntrancePlayed && thread.isNotEmpty;
+                    if (thread.isNotEmpty) {
+                      _messageEntrancePlayed = true;
+                    }
+                    return thread.isEmpty && friend?.isTyping != true
+                        ? ListView(
+                            controller: _scrollController,
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+                            children: <Widget>[
+                              ZenEmpty(
+                                icon: Icons.forum_outlined,
+                                title: t('Brak wiadomości'),
+                                text: t(
+                                  'Zacznij rozmowę bez czekania na '
+                                  'synchronizację tła.',
+                                ),
                               ),
-                            ),
-                          ],
-                        )
-                      : ListView.separated(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-                          itemBuilder: (BuildContext context, int index) {
-                            if (index == thread.length) {
-                              return _TypingBubble(
-                                key: const Key('conversation-typing-bubble'),
-                                name: friend?.displayLabel ?? t('Kontakt'),
-                              );
-                            }
-                            final ChatMessage message = thread[index];
-                            final bool startsNewDay =
-                                index == 0 ||
-                                !_isSameDay(
-                                  thread[index - 1].sentAtMillis,
-                                  message.sentAtMillis,
+                            ],
+                          )
+                        : ListView.separated(
+                            controller: _scrollController,
+                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                            itemBuilder: (BuildContext context, int index) {
+                              if (index == thread.length) {
+                                return _TypingBubble(
+                                  key: const Key('conversation-typing-bubble'),
+                                  name: friend?.displayLabel ?? t('Kontakt'),
                                 );
-                            // Stagger from the newest bubble up — those are
-                            // the ones visible when the conversation opens.
-                            final int fromEnd = thread.length - 1 - index;
-                            return Column(
-                              children: <Widget>[
-                                if (startsNewDay)
-                                  _DaySeparator(
-                                    key: Key(
-                                      'day-separator-${message.sentAtMillis}',
+                              }
+                              final ChatMessage message = thread[index];
+                              final ChatReply? reply = message.reply;
+                              final ChatMessage? replyOriginal = reply == null
+                                  ? null
+                                  : thread
+                                        .where(
+                                          (ChatMessage m) =>
+                                              m.id == reply.messageId,
+                                        )
+                                        .firstOrNull;
+                              // Reactions, replies, edits and the rest are
+                              // for friends' chats.
+                              final bool extras =
+                                  friend?.status ==
+                                  FriendRelationshipStatus.accepted;
+                              final bool startsNewDay =
+                                  index == 0 ||
+                                  !_isSameDay(
+                                    thread[index - 1].sentAtMillis,
+                                    message.sentAtMillis,
+                                  );
+                              // Stagger from the newest bubble up — those are
+                              // the ones visible when the conversation opens.
+                              final int fromEnd = thread.length - 1 - index;
+                              return Column(
+                                children: <Widget>[
+                                  if (startsNewDay)
+                                    _DaySeparator(
+                                      key: Key(
+                                        'day-separator-${message.sentAtMillis}',
+                                      ),
+                                      millis: message.sentAtMillis,
                                     ),
-                                    millis: message.sentAtMillis,
-                                  ),
-                                if (hiddenByMe.hides(id: message.id))
-                                  HiddenContentPlaceholder(
-                                    key: Key(
-                                      'conversation-hidden-${message.id}',
-                                    ),
-                                    byMe: true,
-                                    compact: true,
-                                    onShow: () =>
-                                        showHiddenAnyway(ref, id: message.id),
-                                  )
-                                else
-                                  _MessageBubble(
-                                    message: message,
-                                    conversationKey: widget.peerAddress,
-                                    entranceDelay:
-                                        animateEntrance &&
-                                            fromEnd < _entranceStaggerLimit
-                                        ? Duration(milliseconds: 30 * fromEnd)
-                                        : null,
-                                    onReport: () => unawaited(
-                                      reportContent(
-                                        context,
-                                        ref,
-                                        authorAddress: widget.peerAddress,
-                                        text: message.text,
-                                        header: t('Wiadomość od {name}', {
-                                          'name': conversationTitle,
-                                        }),
-                                        contentId: message.id,
-                                        deleteLocal: () async {
-                                          await ref
-                                              .read(
-                                                socialHubControllerProvider
-                                                    .notifier,
+                                  if (hiddenByMe.hides(id: message.id))
+                                    HiddenContentPlaceholder(
+                                      key: Key(
+                                        'conversation-hidden-${message.id}',
+                                      ),
+                                      byMe: true,
+                                      compact: true,
+                                      onShow: () =>
+                                          showHiddenAnyway(ref, id: message.id),
+                                    )
+                                  else
+                                    KeyedSubtree(
+                                      key: _bubbleKey(message.id),
+                                      child: _MessageBubble(
+                                        message: message,
+                                        conversationKey: widget.peerAddress,
+                                        highlighted: _highlightId == message.id,
+                                        actions: extras
+                                            ? chatMessageActions(
+                                                context,
+                                                ref,
+                                                message: message,
+                                                conversationKey:
+                                                    widget.peerAddress,
+                                                onReply: () =>
+                                                    _startReply(message),
                                               )
-                                              .deleteMessageLocally(
-                                                key: widget.peerAddress,
-                                                messageId: message.id,
-                                              );
-                                        },
+                                            : const <ChatMenuItem>[],
+                                        replyOriginal: replyOriginal,
+                                        replySenderLabel: reply == null
+                                            ? ''
+                                            : _nameOf(
+                                                replyOriginal == null
+                                                    ? reply.sender
+                                                    : (replyOriginal.isOutgoing
+                                                          ? 'self'
+                                                          : replyOriginal
+                                                                .sender),
+                                              ),
+                                        onJumpToReply: reply == null
+                                            ? null
+                                            : () => unawaited(
+                                                _jumpToMessage(
+                                                  reply.messageId,
+                                                  thread,
+                                                ),
+                                              ),
+                                        onToggleReaction: extras
+                                            ? (String emoji) => unawaited(
+                                                _socialHubController
+                                                    .reactToMessage(
+                                                      conversationKey:
+                                                          widget.peerAddress,
+                                                      messageId: message.id,
+                                                      emoji: emoji,
+                                                    ),
+                                              )
+                                            : null,
+                                        nameOf: _nameOf,
+                                        entranceDelay:
+                                            animateEntrance &&
+                                                fromEnd < _entranceStaggerLimit
+                                            ? Duration(
+                                                milliseconds: 30 * fromEnd,
+                                              )
+                                            : null,
+                                        onReport: () => unawaited(
+                                          reportContent(
+                                            context,
+                                            ref,
+                                            authorAddress: widget.peerAddress,
+                                            text: message.text,
+                                            header: t('Wiadomość od {name}', {
+                                              'name': conversationTitle,
+                                            }),
+                                            contentId: message.id,
+                                            deleteLocal: () async {
+                                              await ref
+                                                  .read(
+                                                    socialHubControllerProvider
+                                                        .notifier,
+                                                  )
+                                                  .deleteMessageLocally(
+                                                    key: widget.peerAddress,
+                                                    messageId: message.id,
+                                                  );
+                                            },
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                  ),
-                              ],
-                            );
-                          },
-                          separatorBuilder: (BuildContext context, int index) {
-                            return const SizedBox(height: 6);
-                          },
-                          itemCount:
-                              thread.length +
-                              (friend?.isTyping == true ? 1 : 0),
-                        );
-                },
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (Object error, StackTrace stackTrace) {
-                  return Center(
-                    child: Text(
-                      t('Nie udało się wczytać rozmowy.'),
-                      style: TextStyle(color: zen.warning),
-                    ),
-                  );
-                },
+                                ],
+                              );
+                            },
+                            separatorBuilder:
+                                (BuildContext context, int index) {
+                                  return const SizedBox(height: 6);
+                                },
+                            itemCount:
+                                thread.length +
+                                (friend?.isTyping == true ? 1 : 0),
+                          );
+                  },
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (Object error, StackTrace stackTrace) {
+                    return Center(
+                      child: Text(
+                        t('Nie udało się wczytać rozmowy.'),
+                        style: TextStyle(color: zen.warning),
+                      ),
+                    );
+                  },
+                ),
               ),
-            ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: zen.surface,
-                border: Border(top: BorderSide(color: zen.outlineSoft)),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: zen.surface,
+                  border: Border(top: BorderSide(color: zen.outlineSoft)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    if (_replyTo != null)
+                      ChatReplyComposerBar(
+                        reply: _replyTo!,
+                        senderLabel: _nameOf(_replyTo!.sender),
+                        onCancel: () => setState(() => _replyTo = null),
+                      ),
+                    _buildComposer(friend),
+                  ],
+                ),
               ),
-              child: _buildComposer(friend),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -699,11 +853,16 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
             ?.displayLabel ??
         widget.title;
     _composerController.clear();
+    final ChatReply? replyTo = _replyTo;
+    if (replyTo != null) {
+      setState(() => _replyTo = null);
+    }
     try {
       await _socialHubController.sendLocalMessage(
         peerAddress: widget.peerAddress,
         displayName: displayName,
         text: text,
+        replyTo: replyTo,
       );
       if (mounted) {
         unawaited(ref.read(zenSoundEffectsProvider).play(ZenSound.messageSent));
@@ -753,6 +912,36 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
     final Uint8List? headerBytes = bytes != null && bytes.isNotEmpty
         ? Uint8List.sublistView(bytes, 0, bytes.length > 16 ? 16 : bytes.length)
         : await _readAttachmentHeader(attachmentPath);
+    // A GIF file goes as an animated picture, like one from the gallery (a
+    // too large one as a file, if the person agrees).
+    if (headerBytes != null && looksLikeGif(headerBytes)) {
+      final int size = bytes?.length ?? picked.size;
+      if (size > kMaxSentGifBytes) {
+        if (await _confirmGifAsFile(PickedGifStatus.tooLarge) && mounted) {
+          await _sendGifAttachment(
+            gifFileName(fileName),
+            ChatMessageType.file,
+            bytes: bytes,
+            path: bytes == null ? attachmentPath : null,
+          );
+        }
+        return;
+      }
+      Uint8List? whole = bytes;
+      if (whole == null || whole.isEmpty) {
+        try {
+          whole = await File(attachmentPath!).readAsBytes();
+        } on FileSystemException {
+          whole = null;
+        }
+      }
+      if (!mounted) {
+        return;
+      }
+      if (whole != null && await _sendPickedGif(whole, fileName)) {
+        return;
+      }
+    }
     final String? mimeType = lookupMimeType(
       picked.name,
       headerBytes: headerBytes,

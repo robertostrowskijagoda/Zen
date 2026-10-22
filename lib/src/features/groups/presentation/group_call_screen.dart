@@ -691,7 +691,7 @@ class _ParticipantTile extends StatelessWidget {
               Positioned.fill(
                 child: ColoredBox(
                   key: const Key('group-call-screen-view'),
-                  color: Colors.black,
+                  color: ZenFixed.photoBackdrop,
                   child: RTCVideoView(
                     screen,
                     objectFit:
@@ -760,7 +760,7 @@ class _ParticipantTile extends StatelessWidget {
                     width: 72,
                     height: 96,
                     child: ColoredBox(
-                      color: Colors.black,
+                      color: ZenFixed.photoBackdrop,
                       child: RTCVideoView(
                         video,
                         mirror: isSelf,
@@ -808,7 +808,7 @@ class _ParticipantTile extends StatelessWidget {
                         vertical: 3,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.55),
+                        color: ZenFixed.photoBackdrop.withValues(alpha: 0.55),
                         borderRadius: context.zenRadius(999),
                       ),
                       child: Text(
@@ -816,7 +816,7 @@ class _ParticipantTile extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: Colors.white,
+                          color: ZenFixed.onPhoto,
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),

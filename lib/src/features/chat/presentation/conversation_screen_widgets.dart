@@ -74,7 +74,7 @@ class _DaySeparator extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: zen.surfaceRaised.withValues(alpha: 0.85),
-            borderRadius: ZenRadii.pill,
+            borderRadius: context.zenRadius(999),
             border: Border.all(color: zen.outlineSoft),
           ),
           child: Padding(
@@ -107,7 +107,7 @@ class _TypingBubble extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: zen.surfaceRaised,
-          borderRadius: ZenRadii.drop,
+          borderRadius: ZenLook.of(context).bubbleRadius(outgoing: false),
           border: Border.all(color: zen.outlineSoft),
         ),
         child: Padding(
@@ -273,15 +273,54 @@ List<PopupMenuEntry<_ConversationMenuAction>> _conversationMenuItems({
   return items;
 }
 
+/// The file of a chat message as its bubble shows it (photo, GIF, film,
+/// voice message, file; a placeholder while it is still coming), for
+/// group chats too.
+class ChatAttachmentBody extends StatelessWidget {
+  const ChatAttachmentBody({super.key, required this.message});
+
+  final ChatMessage message;
+
+  @override
+  Widget build(BuildContext context) => switch (message.type) {
+    _ when !message.hasAttachment => _AttachmentStubContent(message: message),
+    ChatMessageType.image => _ImageAttachmentContent(message: message),
+    ChatMessageType.voice => _VoiceAttachmentContent(message: message),
+    ChatMessageType.video => _VideoAttachmentContent(message: message),
+    _ => _FileAttachmentContent(message: message),
+  };
+}
+
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
     required this.conversationKey,
     this.entranceDelay,
     this.onReport,
+    this.actions = const <ChatMenuItem>[],
+    this.replyOriginal,
+    this.replySenderLabel = '',
+    this.onJumpToReply,
+    this.onToggleReaction,
+    this.nameOf,
+    this.highlighted = false,
   });
 
   final ChatMessage message;
+
+  /// The long-press menu's own entries (react, reply, edit, forward,
+  /// delete for everyone).
+  final List<ChatMenuItem> actions;
+
+  /// The message this one replies to, when it is in the conversation.
+  final ChatMessage? replyOriginal;
+  final String replySenderLabel;
+  final VoidCallback? onJumpToReply;
+  final ValueChanged<String>? onToggleReaction;
+  final String Function(String who)? nameOf;
+
+  /// Just jumped to (from a reply): outlined for a moment.
+  final bool highlighted;
 
   /// The conversation the message is in (the friend's address): where its
   /// delivery status and "Ponów" act.
@@ -304,7 +343,7 @@ class _MessageBubble extends StatelessWidget {
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: zen.accentTertiary.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: context.zenRadius(16),
               border: Border.all(
                 color: zen.accentTertiary.withValues(alpha: 0.22),
               ),
@@ -338,7 +377,16 @@ class _MessageBubble extends StatelessWidget {
         ? zen.onAccent.withValues(alpha: 0.72)
         : zen.textMuted;
 
-    final Widget body = switch (message.type) {
+    final Widget content = switch (message.type) {
+      _ when message.isDeleted => Text(
+        deletedMessageLabel(),
+        key: Key('deleted-message-${message.id}'),
+        style: TextStyle(
+          color: onGradient ? zen.onAccent : zen.textMuted,
+          fontSize: 14,
+          fontStyle: FontStyle.italic,
+        ),
+      ),
       ChatMessageType.image when message.hasAttachment =>
         _ImageAttachmentContent(message: message),
       ChatMessageType.image => _AttachmentStubContent(message: message),
@@ -354,8 +402,25 @@ class _MessageBubble extends StatelessWidget {
           fontWeight: FontWeight.w500,
         ),
         onReport: outgoing ? null : onReport,
+        actions: actions,
       ),
     };
+    // Files have no text to long-press: the same menu, on the bubble.
+    final Widget body =
+        message.type == ChatMessageType.text ||
+            message.isDeleted ||
+            actions.isEmpty
+        ? content
+        : GestureDetector(
+            onLongPressStart: (LongPressStartDetails d) => unawaited(
+              showChatContextMenu(context, d.globalPosition, actions),
+            ),
+            onSecondaryTapDown: (TapDownDetails d) => unawaited(
+              showChatContextMenu(context, d.globalPosition, actions),
+            ),
+            child: content,
+          );
+    final ChatReply? reply = message.isDeleted ? null : message.reply;
 
     final BoxDecoration? themed = look.bubble(zen, outgoing: outgoing);
     final BoxDecoration decoration;
@@ -371,14 +436,14 @@ class _MessageBubble extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: ZenRadii.dropEnd,
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: zen.accent.withValues(alpha: 0.18),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        borderRadius: look.bubbleRadius(outgoing: true),
+        boxShadow: ZenLook.of(context).tinted(
+          zen,
+          zen.accent,
+          radius: 12,
+          alpha: 0.18,
+          offset: const Offset(0, 4),
+        ),
       );
     } else if (outgoing) {
       decoration = BoxDecoration(
@@ -386,13 +451,13 @@ class _MessageBubble extends StatelessWidget {
           zen.accent.withValues(alpha: 0.14),
           zen.surfaceRaised,
         ),
-        borderRadius: ZenRadii.dropEnd,
+        borderRadius: look.bubbleRadius(outgoing: true),
         border: Border.all(color: zen.accent.withValues(alpha: 0.28)),
       );
     } else {
       decoration = BoxDecoration(
         color: zen.surfaceRaised,
-        borderRadius: ZenRadii.drop,
+        borderRadius: look.bubbleRadius(outgoing: false),
         border: Border.all(color: zen.outlineSoft),
       );
     }
@@ -408,50 +473,89 @@ class _MessageBubble extends StatelessWidget {
             constraints: BoxConstraints(maxWidth: maxWidth),
             child: DecoratedBox(
               decoration: decoration,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 9, 12, 7),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: <Widget>[
-                    body,
-                    const SizedBox(height: 3),
-                    Padding(
-                      padding: EdgeInsets.zero,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          Text(
-                            _timeLabel(message.sentAtMillis),
-                            style: TextStyle(
-                              color: metaColor,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
+              position: DecorationPosition.background,
+              child: DecoratedBox(
+                decoration: highlighted
+                    ? BoxDecoration(
+                        borderRadius: look.bubbleRadius(outgoing: outgoing),
+                        border: Border.all(color: zen.accent, width: 2),
+                      )
+                    : const BoxDecoration(),
+                position: DecorationPosition.foreground,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 9, 12, 7),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: <Widget>[
+                      if (message.forwarded && !message.isDeleted)
+                        ChatForwardedMarker(onAccent: onGradient),
+                      if (reply != null)
+                        ChatReplyQuote(
+                          reply: reply,
+                          original: replyOriginal,
+                          senderLabel: replySenderLabel,
+                          onTap: onJumpToReply,
+                          onAccent: onGradient,
+                        ),
+                      body,
+                      if (!message.isDeleted && message.reactions.isNotEmpty)
+                        ChatReactionsBar(
+                          reactions: message.reactions,
+                          onToggle: (String emoji) =>
+                              onToggleReaction?.call(emoji),
+                          nameOf: nameOf ?? (String who) => who,
+                        ),
+                      const SizedBox(height: 3),
+                      Padding(
+                        padding: EdgeInsets.zero,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            if (message.isEdited &&
+                                !message.isDeleted) ...<Widget>[
+                              Text(
+                                editedMarker(),
+                                style: TextStyle(
+                                  color: metaColor,
+                                  fontSize: 11,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                            ],
+                            Text(
+                              _timeLabel(message.sentAtMillis),
+                              style: TextStyle(
+                                color: metaColor,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
-                          ),
-                          if (outgoing) ...<Widget>[
-                            const SizedBox(width: 2),
-                            // Icon by status; long press: its label, tap:
-                            // details, legend and "Ponów".
-                            MessageDeliveryBadge(
-                              message: message,
-                              conversationKey: conversationKey,
-                              onAccent: onGradient,
-                            ),
-                          ] else if (message.deliveryState ==
-                              ChatMessageDeliveryState.sending) ...<Widget>[
-                            // An attachment still coming in.
-                            const SizedBox(width: 4),
-                            Icon(
-                              Icons.schedule_rounded,
-                              size: 14,
-                              color: zen.textMuted,
-                            ),
+                            if (outgoing) ...<Widget>[
+                              const SizedBox(width: 2),
+                              // Icon by status; long press: its label, tap:
+                              // details, legend and "Ponów".
+                              MessageDeliveryBadge(
+                                message: message,
+                                conversationKey: conversationKey,
+                                onAccent: onGradient,
+                              ),
+                            ] else if (message.deliveryState ==
+                                ChatMessageDeliveryState.sending) ...<Widget>[
+                              // An attachment still coming in.
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.schedule_rounded,
+                                size: 14,
+                                color: zen.textMuted,
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -503,15 +607,17 @@ class _ImageAttachmentContent extends StatelessWidget {
     final bool isGifFile =
         (message.mimeType?.toLowerCase() == 'image/gif') ||
         (message.fileName?.toLowerCase().endsWith('.gif') ?? false);
+    // GIFs play as far as the media settings allow (tap to play
+    // otherwise) and stay still for reduced motion.
     final Widget image = isGifFile && message.attachmentBytes != null
-        ? ZenAnimatedImage(
+        ? ZenGif(
             bytes: message.attachmentBytes,
             width: double.infinity,
             height: 220,
             errorBuilder: _buildImageError,
           )
         : isGifFile && message.attachmentPath != null
-        ? ZenAnimatedImage(
+        ? ZenGif(
             file: File(message.attachmentPath!),
             width: double.infinity,
             height: 220,
@@ -541,7 +647,7 @@ class _ImageAttachmentContent extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        ClipRRect(borderRadius: BorderRadius.circular(16), child: image),
+        ClipRRect(borderRadius: context.zenRadius(16), child: image),
         if (message.fileName != null) ...<Widget>[
           const SizedBox(height: 8),
           Text(
@@ -598,7 +704,7 @@ class _FileAttachmentContent extends StatelessWidget {
         DecoratedBox(
           decoration: BoxDecoration(
             color: zen.accent.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: context.zenRadius(14),
             border: Border.all(color: zen.accent.withValues(alpha: 0.24)),
           ),
           child: Padding(
@@ -668,7 +774,7 @@ class _AttachmentStubContent extends StatelessWidget {
         DecoratedBox(
           decoration: BoxDecoration(
             color: zen.accent.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: context.zenRadius(14),
             border: Border.all(color: zen.accent.withValues(alpha: 0.24)),
           ),
           child: Padding(

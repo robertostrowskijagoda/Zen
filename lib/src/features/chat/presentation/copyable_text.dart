@@ -4,60 +4,96 @@ import 'package:flutter/material.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/utils/secure_clipboard.dart';
 
+/// One entry of a message's long-press menu.
+@immutable
+final class ChatMenuItem {
+  const ChatMenuItem({
+    required this.id,
+    required this.icon,
+    required this.label,
+    required this.onSelected,
+  });
+
+  /// Also the menu entry's key: `bubble-<id>`.
+  final String id;
+  final IconData icon;
+  final String label;
+  final VoidCallback onSelected;
+}
+
+/// Shows [items] as a menu at [at] (a long press or a right click).
+Future<void> showChatContextMenu(
+  BuildContext context,
+  Offset at,
+  List<ChatMenuItem> items,
+) async {
+  if (items.isEmpty) {
+    return;
+  }
+  final RenderBox overlay =
+      Overlay.of(context).context.findRenderObject()! as RenderBox;
+  final String? choice = await showMenu<String>(
+    context: context,
+    position: RelativeRect.fromRect(
+      at & const Size(1, 1),
+      Offset.zero & overlay.size,
+    ),
+    items: <PopupMenuEntry<String>>[
+      for (final ChatMenuItem item in items)
+        PopupMenuItem<String>(
+          key: Key('bubble-${item.id}'),
+          value: item.id,
+          child: ListTile(
+            dense: true,
+            leading: Icon(item.icon),
+            title: Text(item.label),
+          ),
+        ),
+    ],
+  );
+  for (final ChatMenuItem item in items) {
+    if (item.id == choice) {
+      item.onSelected();
+    }
+  }
+}
+
 /// Text that can be copied from a long-press / right-click menu. Used for
 /// chat bubbles and comments. With [onReport] the menu also has "Zgłoś"
-/// — for what others wrote.
+/// — for what others wrote; [actions] come first (react, reply, …).
 class CopyableText extends StatelessWidget {
   const CopyableText(
     this.text, {
     required this.style,
     this.onReport,
+    this.actions = const <ChatMenuItem>[],
     super.key,
   });
 
   final String text;
   final TextStyle style;
   final VoidCallback? onReport;
+  final List<ChatMenuItem> actions;
 
-  Future<void> _menu(BuildContext context, Offset at) async {
-    final RenderBox overlay =
-        Overlay.of(context).context.findRenderObject()! as RenderBox;
-    final String? choice = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromRect(
-        at & const Size(1, 1),
-        Offset.zero & overlay.size,
-      ),
-      items: <PopupMenuEntry<String>>[
-        PopupMenuItem<String>(
-          key: const Key('bubble-copy'),
-          value: 'copy',
-          child: ListTile(
-            dense: true,
-            leading: const Icon(Icons.copy_rounded),
-            title: Text(t('Kopiuj')),
-          ),
+  Future<void> _menu(BuildContext context, Offset at) =>
+      showChatContextMenu(context, at, <ChatMenuItem>[
+        ...actions,
+        ChatMenuItem(
+          id: 'copy',
+          icon: Icons.copy_rounded,
+          label: t('Kopiuj'),
+          // Like every other copy from the app: cleared from the clipboard
+          // after a minute, unless something else was copied.
+          onSelected: () => unawaited(copyWithExpiry(text)),
         ),
         if (onReport != null)
-          PopupMenuItem<String>(
-            key: const Key('bubble-report'),
-            value: 'report',
-            child: ListTile(
-              dense: true,
-              leading: const Icon(Icons.flag_outlined),
-              title: Text(t('Zgłoś')),
-            ),
+          ChatMenuItem(
+            id: 'report',
+            icon: Icons.flag_outlined,
+            label: t('Zgłoś'),
+            onSelected: onReport!,
           ),
-      ],
-    );
-    if (choice == 'copy') {
-      // Like every other copy from the app: cleared from
-      // the clipboard after a minute, unless something else was copied.
-      await copyWithExpiry(text);
-    } else if (choice == 'report') {
-      onReport?.call();
-    }
-  }
+      ]);
 
   @override
   Widget build(BuildContext context) => GestureDetector(

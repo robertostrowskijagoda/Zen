@@ -31,6 +31,7 @@ import 'package:zen/src/features/calls/group_call_media.dart';
 import 'package:zen/src/features/chat/attachment_transfer_runner.dart';
 import 'package:zen/src/features/chat/attachment_transfer_store.dart';
 import 'package:zen/src/features/chat/chat_attachment_transport_codec.dart';
+import 'package:zen/src/features/chat/chat_media_blocks.dart';
 import 'package:zen/src/features/chat/conversation_history_preview.dart';
 import 'package:zen/src/features/chat/disappearing_messages.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
@@ -71,6 +72,7 @@ part 'social_hub_controller_profile.dart';
 part 'social_hub_controller_devices.dart';
 part 'social_hub_controller_disappearing.dart';
 part 'social_hub_controller_strangers.dart';
+part 'social_hub_controller_chat_extras.dart';
 
 final Provider<SignalQueueStore> signalQueueStoreProvider =
     Provider<SignalQueueStore>((Ref ref) {
@@ -1179,7 +1181,61 @@ abstract class _SocialHubControllerBase extends Notifier<SocialHubState> {
     required String text,
     required int timestamp,
     required Set<String> skip,
+    Map<String, dynamic> extra = const <String, dynamic>{},
   });
+
+  /// Chat messages (`social_hub_controller_messages.dart`), group messages
+  /// (`social_hub_controller_social.dart`): also used to forward.
+  Future<void> sendLocalMessage({
+    required String peerAddress,
+    required String text,
+    String? displayName,
+    int? sentAtMillis,
+    ChatReply? replyTo,
+    bool forwarded = false,
+  });
+
+  Future<void> sendLocalAttachment({
+    required String peerAddress,
+    Uint8List? bytes,
+    String? attachmentPath,
+    required String fileName,
+    String? mimeType,
+    String? displayName,
+    int? sentAtMillis,
+    ChatMessageType? type,
+    int? durationMs,
+    ChatReply? replyTo,
+    bool forwarded = false,
+  });
+
+  Future<void> sendGroupMessage({
+    required String groupId,
+    required String text,
+    ChatReply? replyTo,
+    bool forwarded = false,
+  });
+
+  /// Reactions, edits, deletions, files in groups
+  /// (`social_hub_controller_chat_extras.dart`).
+  Future<void> _sendGroupFile(
+    GroupProfile group,
+    ChatMessage message, {
+    required Set<String> skip,
+  });
+
+  Future<void> _storeIncomingGroupMessage(
+    ZenSignal signal,
+    String messageId,
+    int timestamp,
+  );
+
+  Future<void> _handleChatChange(ZenSignal signal, int timestamp);
+
+  Future<void> _applyMirroredChatChange(
+    String peerAddress,
+    Map<String, dynamic> payload,
+  );
 
   Future<void> _sendCallSignal({
     required String remoteAddress,
@@ -1273,6 +1329,7 @@ final class SocialHubController extends _SocialHubControllerBase
         _SocialHubMessagesMixin,
         _SocialHubTransfersMixin,
         _SocialHubSocialMixin,
+        _SocialHubChatExtrasMixin,
         _SocialHubRetentionMixin,
         _SocialHubGroupCallMixin,
         _SocialHubProfileMixin,

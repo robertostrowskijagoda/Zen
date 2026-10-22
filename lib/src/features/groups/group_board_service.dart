@@ -113,14 +113,19 @@ final class GroupBoardService extends ChangeNotifier {
   ].join();
 
   /// Writes a new post on the board of [groupId] and sends it to every
-  /// member. Null when this person is not in the group or [text] is empty
-  /// or too long.
-  Future<GroupBoardPost?> publish(String groupId, String text) async {
+  /// member; [media] is the reference of its photo (already kept as
+  /// blocks). Null when this person is not in the group, or the post has
+  /// neither text nor a photo, or its text is too long.
+  Future<GroupBoardPost?> publish(
+    String groupId,
+    String text, {
+    Map<String, dynamic>? media,
+  }) async {
     final GroupBoardHost h = host;
     final String body = text.trim();
     final List<String>? members = h.membersOf(groupId);
     if (members == null ||
-        body.isEmpty ||
+        (body.isEmpty && media == null) ||
         body.length > kMaxBoardPostChars ||
         h.ownAddress().isEmpty) {
       return null;
@@ -133,7 +138,15 @@ final class GroupBoardService extends ChangeNotifier {
       text: body,
       createdAt: at,
       version: at,
+      media: media,
     );
+    // Checked as any post from the network is: a photo's reference the
+    // others would drop (too large, malformed) does not go out, not even
+    // as a post without its photo.
+    final GroupBoardPost? checked = GroupBoardPost.fromJson(post.toJson());
+    if (checked == null || (media != null && checked.media == null)) {
+      return null;
+    }
     await _store(groupId, post);
     await _broadcast(groupId, members, post);
     return post;
@@ -148,7 +161,7 @@ final class GroupBoardService extends ChangeNotifier {
     if (had == null ||
         had.deleted ||
         !_isOwn(had) ||
-        body.isEmpty ||
+        (body.isEmpty && had.media == null) ||
         body.length > kMaxBoardPostChars ||
         body == had.text) {
       return false;

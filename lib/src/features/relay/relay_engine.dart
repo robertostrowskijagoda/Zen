@@ -281,6 +281,10 @@ const Set<String> kReliablePayloadTypes = <String>{
   'message_ack',
   'message_read',
   'message_transfer_cancel',
+  // Reactions, edits and deletions for everyone (1:1 and groups).
+  'msg_react',
+  'msg_edit',
+  'msg_delete',
   'friend_request',
   'friend_accept',
   'friend_reject',
@@ -335,6 +339,8 @@ const Set<String> kReliablePayloadTypes = <String>{
   'intro_end',
   'intro_pay',
   'intro_paid',
+  'intro_more',
+  'intro_more_re',
   // Pyramid: records, co-signing, votes, payments, reports.
   'pyr_rec',
   'pyr_recs',

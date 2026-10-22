@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:zen/src/core/ledger/ledger_archive.dart';
+import 'package:zen/src/features/chat/chat_media_blocks.dart';
 import 'package:zen/src/features/groups/group_board.dart';
 import 'package:zen/src/features/groups/group_board_service.dart';
 import 'package:zen/src/features/groups/presentation/group_board_view.dart';
@@ -222,4 +226,108 @@ void main() {
     expect(find.text('Spotkanie w piątek'), findsOneWidget);
     expect(find.text('Ada'), findsOneWidget);
   });
+
+  test('a photo post carries only the photo\'s reference; removing it '
+      'drops the reference too', () async {
+    final _Group g = threeMembers();
+    final GroupBoardPost? post = await g.boards['bob']!.publish(
+      'g1',
+      '',
+      media: <String, dynamic>{'id': 'blk-1', 'mime': 'image/jpeg'},
+    );
+    expect(post, isNotNull);
+    final GroupBoardPost atCel = g.boards['cel']!.postsOf('g1').single;
+    expect(atCel.media?['id'], 'blk-1');
+    expect(atCel.text, isEmpty);
+
+    // Neither an empty post nor an oversized reference goes out.
+    expect(await g.boards['bob']!.publish('g1', '  '), isNull);
+    expect(
+      await g.boards['bob']!.publish(
+        'g1',
+        'Za dużo',
+        media: <String, dynamic>{'id': 'blk-2', 'x': 'y' * 4000},
+      ),
+      isNull,
+    );
+
+    g.now += 10;
+    expect(await g.boards['ada']!.remove('g1', post!.id), isTrue);
+    expect(g.boards['cel']!.postsOf('g1'), isEmpty);
+    // A removal that still names a photo keeps nothing of it.
+    final GroupBoardPost removed = GroupBoardPost.fromJson(<String, dynamic>{
+      ...atCel.toJson(),
+      'd': true,
+      'v': g.now,
+    })!;
+    expect(removed.deleted, isTrue);
+    expect(removed.media, isNull);
+    expect(atCel.copyWith(deleted: true).media, isNull);
+  });
+
+  testWidgets('the board shows a post\'s photo once it is fetched', (
+    WidgetTester tester,
+  ) async {
+    final _Group g = threeMembers();
+    final Uint8List png = Uint8List.fromList(
+      img.encodePng(img.Image(width: 4, height: 4)),
+    );
+    final _Blocks blocks = _Blocks(<String, Uint8List>{'blk-1': png});
+    final GroupBoardPost post = (await g.boards['ada']!.publish(
+      'g1',
+      'Zdjęcie z wyjazdu',
+      media: <String, dynamic>{'id': 'blk-1', 'mime': 'image/png'},
+    ))!;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: GroupBoardView(
+            board: g.boards['cel']!,
+            groupId: 'g1',
+            nameOf: (GroupBoardPost p) => 'Ada',
+            canPost: true,
+            blocks: blocks,
+            sourcesOf: (GroupBoardPost p) => <String>[p.author, 'bob'],
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+    expect(find.text('Zdjęcie z wyjazdu'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(Key('group-board-photo-${post.id}')),
+        matching: find.byType(Image),
+      ),
+      findsOneWidget,
+    );
+    expect(blocks.asked.single, <String>['ada', 'bob']);
+  });
+}
+
+final class _Blocks implements ChatMediaBlocks {
+  _Blocks(this.held);
+
+  final Map<String, Uint8List> held;
+  final List<List<String>> asked = <List<String>>[];
+
+  @override
+  Future<Map<String, dynamic>> store(
+    Uint8List bytes, {
+    required String mime,
+    int? durationMs,
+  }) async => <String, dynamic>{'id': 'blk-${held.length}', 'mime': mime};
+
+  @override
+  Future<Uint8List?> fetch(
+    Map<String, dynamic> ref,
+    List<String> sources, {
+    Duration timeout = const Duration(minutes: 10),
+  }) async {
+    asked.add(sources);
+    return held[ref['id']];
+  }
 }

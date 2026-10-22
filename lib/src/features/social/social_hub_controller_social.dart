@@ -1906,9 +1906,14 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
     }
   }
 
+  /// Sends [text] to a group; as a reply to [replyTo], or marked as
+  /// [forwarded] from another chat.
+  @override
   Future<void> sendGroupMessage({
     required String groupId,
     required String text,
+    ChatReply? replyTo,
+    bool forwarded = false,
   }) async {
     final GroupProfile? group = state.groups[groupId];
     if (group == null || text.trim().isEmpty) {
@@ -1932,6 +1937,8 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
         // "Sent" once every member's copy is queued, "delivered" once all
         // confirmed it (the relay layer's report).
         deliveryState: ChatMessageDeliveryState.sending,
+        reply: replyTo,
+        forwarded: forwarded,
       ),
     );
     _bumpTimelineRevision();
@@ -1952,6 +1959,10 @@ mixin _SocialHubSocialMixin on _SocialHubControllerBase {
       text: trimmed,
       timestamp: timestamp,
       skip: const <String>{},
+      extra: <String, dynamic>{
+        if (replyTo != null) 're': replyTo.toJson(),
+        if (forwarded) 'fwd': true,
+      },
     );
   }
 

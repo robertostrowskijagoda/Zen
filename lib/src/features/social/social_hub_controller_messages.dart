@@ -1,11 +1,16 @@
 part of 'social_hub_controller.dart';
 
 mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
+  /// Sends [text] to [peerAddress]; as a reply to [replyTo], or marked as
+  /// [forwarded] from another chat.
+  @override
   Future<void> sendLocalMessage({
     required String peerAddress,
     required String text,
     String? displayName,
     int? sentAtMillis,
+    ChatReply? replyTo,
+    bool forwarded = false,
   }) async {
     final int timestamp = sentAtMillis ?? DateTime.now().millisecondsSinceEpoch;
     final String trimmed = text.trim();
@@ -32,6 +37,8 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         deliveryState: requiresDeliveryAck
             ? ChatMessageDeliveryState.sending
             : ChatMessageDeliveryState.delivered,
+        reply: replyTo,
+        forwarded: forwarded,
       ),
     );
     _bumpTimelineRevision();
@@ -51,6 +58,8 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         text: trimmed,
         sentAtMillis: timestamp,
         miniProfile: mini,
+        reply: replyTo,
+        forwarded: forwarded,
       );
       await _markMessageQueued(
         conversationKey: peerAddress,
@@ -91,6 +100,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     }
   }
 
+  @override
   Future<void> sendLocalAttachment({
     required String peerAddress,
     Uint8List? bytes,
@@ -101,6 +111,8 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     int? sentAtMillis,
     ChatMessageType? type,
     int? durationMs,
+    ChatReply? replyTo,
+    bool forwarded = false,
   }) async {
     final String normalizedFileName = fileName.trim();
     final Uint8List? initialBytes = bytes == null || bytes.isEmpty
@@ -171,6 +183,8 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       mimeType: resolvedMimeType,
       attachmentSizeBytes: attachmentSizeBytes,
       durationMs: durationMs,
+      reply: replyTo,
+      forwarded: forwarded,
       deliveryState: requiresDeliveryAck
           ? (sendInline
                 ? ChatMessageDeliveryState.sending
@@ -297,6 +311,8 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
           messageId: message.id,
           text: message.text,
           sentAtMillis: message.sentAtMillis,
+          reply: message.reply,
+          forwarded: message.forwarded,
           // The same message again: no new message against the limits.
           miniProfile: _isStrangerChatPeer(peerAddress)
               ? _ownStrangerMini()
@@ -411,12 +427,17 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       messageId: message.id,
       deliveryState: ChatMessageDeliveryState.sending,
     );
+    if (message.type != ChatMessageType.text) {
+      await _sendGroupFile(group, message, skip: confirmed);
+      return;
+    }
     await _sendGroupMessageToMembers(
       group: group,
       messageId: message.id,
       text: message.text,
       timestamp: message.sentAtMillis,
       skip: confirmed,
+      extra: _outgoingChatExtras(message),
     );
   }
 
@@ -432,6 +453,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     required String text,
     required int timestamp,
     required Set<String> skip,
+    Map<String, dynamic> extra = const <String, dynamic>{},
   }) async {
     final String key = 'group:${group.id}';
     final String senderDisplayName = ref
@@ -465,6 +487,8 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
             'senderName': senderDisplayName,
             'timestamp': timestamp,
             'ttl': ?ttl,
+            // A reply, forwarding, a file.
+            ...extra,
           },
         ),
       );
@@ -576,23 +600,26 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
         if (!exists) {
           await _messageTimelineStore.append(
             signal.sender,
-            ChatMessage(
-              id: messageId,
-              sender: signal.sender,
-              text: resolvedText,
-              sentAtMillis: _effectiveSentAt(signal, timestamp),
-              direction: ChatMessageDirection.incoming,
-              // A stored attachment is what it really is (media guard).
-              type: stored?.type ?? resolvedType,
-              attachmentBytes: attachmentBytes,
-              attachmentPath: stored?.path,
-              fileName: stored?.fileName ?? signal.fileName,
-              mimeType: stored?.mimeType ?? signal.mimeType,
-              attachmentSizeBytes:
-                  stored?.sizeBytes ??
-                  signal.attachmentSizeBytes ??
-                  attachmentByteCount,
-              durationMs: signal.durationMs,
+            _withSignalExtras(
+              ChatMessage(
+                id: messageId,
+                sender: signal.sender,
+                text: resolvedText,
+                sentAtMillis: _effectiveSentAt(signal, timestamp),
+                direction: ChatMessageDirection.incoming,
+                // A stored attachment is what it really is (media guard).
+                type: stored?.type ?? resolvedType,
+                attachmentBytes: attachmentBytes,
+                attachmentPath: stored?.path,
+                fileName: stored?.fileName ?? signal.fileName,
+                mimeType: stored?.mimeType ?? signal.mimeType,
+                attachmentSizeBytes:
+                    stored?.sizeBytes ??
+                    signal.attachmentSizeBytes ??
+                    attachmentByteCount,
+                durationMs: signal.durationMs,
+              ),
+              signal,
             ),
           );
           _bumpTimelineRevision();
@@ -973,17 +1000,8 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
             return;
           }
           await _adoptDisappearTimerOf(signal, timestamp);
-          await _messageTimelineStore.append(
-            'group:${signal.groupId}',
-            ChatMessage(
-              id: messageId,
-              sender: signal.sender,
-              text: signal.content!,
-              sentAtMillis: _effectiveSentAt(signal, timestamp),
-              direction: ChatMessageDirection.incoming,
-            ),
-          );
-          _bumpTimelineRevision();
+          // With its file (inline, or fetched as blocks), reply, forwarding.
+          await _storeIncomingGroupMessage(signal, messageId, timestamp);
         }
         return;
       case ZenSignalType.groupLeave:
@@ -1021,6 +1039,9 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       case ZenSignalType.groupCallDecline:
       case ZenSignalType.profileUpdate:
       case ZenSignalType.disappearTimer:
+      case ZenSignalType.messageReaction:
+      case ZenSignalType.messageEdit:
+      case ZenSignalType.messageDelete:
       case ZenSignalType.friendRequest:
       case ZenSignalType.deepLink:
       case ZenSignalType.presence:
@@ -1104,6 +1125,8 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
     required String text,
     required int sentAtMillis,
     Map<String, dynamic>? miniProfile,
+    ChatReply? reply,
+    bool forwarded = false,
   }) async {
     if (!isRoutablePeerAddress(peerAddress)) {
       return;
@@ -1120,6 +1143,8 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
               ttl: state.disappearSecondsFor(peerAddress),
             ),
             'mp': ?miniProfile,
+            if (reply != null) 're': reply.toJson(),
+            if (forwarded) 'fwd': true,
           },
         );
   }
@@ -1147,6 +1172,7 @@ mixin _SocialHubMessagesMixin on _SocialHubControllerBase {
       if (message.attachmentSizeBytes != null)
         'attachmentSizeBytes': message.attachmentSizeBytes,
       if (message.durationMs != null) 'durationMs': message.durationMs,
+      ..._outgoingChatExtras(message),
     };
     if (attachmentEncoding != null) {
       payload['attachmentEncoding'] = attachmentEncoding;
