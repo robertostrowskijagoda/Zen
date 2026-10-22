@@ -636,6 +636,31 @@ final class ZenLook extends ThemeExtension<ZenLook> {
     };
   }
 
+  /// A coloured lift under an element of [tone] (a hero card, a big
+  /// button, a floating bar): a soft tinted shadow, a glow in a glowing
+  /// look, a hard offset shadow in a drawn look, nothing in a flat one.
+  List<BoxShadow>? tinted(
+    ZenColors zen,
+    Color tone, {
+    double radius = 20,
+    double alpha = 0.2,
+    Offset offset = Offset.zero,
+  }) {
+    return switch (elevation) {
+      ZenElevation.flat => null,
+      ZenElevation.hard => lift(zen),
+      ZenElevation.glow => zen.neonGlow(tone, radius: radius),
+      ZenElevation.shadow => <BoxShadow>[
+        BoxShadow(
+          color: tone.withValues(alpha: alpha),
+          blurRadius: radius,
+          spreadRadius: -4,
+          offset: offset,
+        ),
+      ],
+    };
+  }
+
   /// A panel as a decoration (fill, outline and, for a highlighted lit
   /// panel, its glow).
   ShapeDecoration panel(

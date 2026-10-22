@@ -7,6 +7,7 @@ import 'package:zen/src/app/theme/zen_look.dart';
 import 'package:zen/src/app/theme/zen_palettes.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 
+export 'package:zen/src/app/theme/zen_fixed.dart';
 export 'package:zen/src/app/theme/zen_look.dart';
 export 'package:zen/src/app/theme/zen_tones.dart';
 
