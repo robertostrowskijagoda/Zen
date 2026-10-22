@@ -1534,6 +1534,7 @@
   "Nagranie jeszcze się pobiera…": "La registrazione si sta ancora scaricando…",
   "Nagranie nie zawiera danych.": "La registrazione non contiene dati.",
   "Nagranie nie zawiera dźwięku.": "La registrazione non contiene audio.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "La registrazione della chiamata non è stata salvata. Riprova prima di chiudere l'app, altrimenti andrà persa.",
   "Nagranie zapisane (zaszyfrowane).": "Registrazione salvata (cifrata).",
   "Nagranie {number}": "Registrazione {number}",
   "Nagrywaj": "Registra",

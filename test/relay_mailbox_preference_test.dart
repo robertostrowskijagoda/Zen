@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/features/relay/relay_engine.dart';
 import 'package:zen/src/features/relay/relay_models.dart';
+import 'package:zen/src/features/relay/relay_providers.dart';
 import 'package:zen/src/features/relay/relay_state_store.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
@@ -252,5 +254,15 @@ void main() {
         isFalse,
       );
     });
+  });
+
+  test('only computers count as staying online, not phones', () {
+    // An Android phone, locked or a while in the background, holds no mail
+    // for friends: picked as a mailbox it would be woken for nothing.
+    expect(zenPlatformStaysOnline(TargetPlatform.android), isFalse);
+    expect(zenPlatformStaysOnline(TargetPlatform.iOS), isFalse);
+    expect(zenPlatformStaysOnline(TargetPlatform.linux), isTrue);
+    expect(zenPlatformStaysOnline(TargetPlatform.macOS), isTrue);
+    expect(zenPlatformStaysOnline(TargetPlatform.windows), isTrue);
   });
 }

@@ -13,6 +13,7 @@ import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
 import 'package:zen/src/features/security/hybrid_kem.dart';
@@ -427,6 +428,36 @@ void main() {
         ),
       );
     }
+
+    test('the phone stays awake only for what is kept or rings', () async {
+      final _WakeCalls wake = _WakeCalls();
+      ZenWake.platform = wake;
+      addTearDown(() => ZenWake.platform = const TimerWakePlatform());
+      await startReceiver(await publishFor(_masterKey()));
+
+      // Dropped at once: nothing more than the arrival's own moment.
+      await receive(_ada, const <String, dynamic>{'type': 'pong'});
+      await receive(_ada, const <String, dynamic>{'type': 'away'});
+      await receive(_ada, const <String, dynamic>{'type': 'lg_hello'});
+      await receive(_ada, const <String, dynamic>{'type': 'rly_deposit'});
+      expect(wake.calls, isEmpty);
+
+      // Kept: held while it goes into the inbox, let go right after.
+      await receive(_ada, <String, dynamic>{
+        'type': 'message',
+        '_rid': 'w1',
+        'text': 'Hej',
+      });
+      expect(wake.calls, <String>[
+        'hold locked-keep 20',
+        'release locked-keep 1000',
+      ]);
+      wake.calls.clear();
+
+      // A ring: awake while it rings, so its end is noticed.
+      await receive(_bob, const <String, dynamic>{'type': 'call_invite'});
+      expect(wake.calls, <String>['hold ring 8']);
+    });
 
     test(
       'keeps a friend\'s message sealed, acknowledges it after, and tells only '
@@ -963,4 +994,40 @@ void main() {
       isNull,
     );
   });
+}
+
+/// Holds and releases asked of the phone (alarms as plain timers).
+final class _WakeCalls implements ZenWakePlatform {
+  final List<String> calls = <String>[];
+
+  @override
+  WakeTimer after(
+    String name,
+    Duration delay,
+    FutureOr<void> Function() fire, {
+    required Duration hold,
+    required bool exact,
+    bool whileIdle = true,
+  }) => const TimerWakePlatform().after(
+    name,
+    delay,
+    fire,
+    hold: hold,
+    exact: exact,
+    whileIdle: whileIdle,
+  );
+
+  @override
+  Future<void> holdForCall(bool on) async {}
+
+  @override
+  Stream<void> get appGone => const Stream<void>.empty();
+
+  @override
+  Future<void> hold(String tag, Duration duration) async =>
+      calls.add('hold $tag ${duration.inSeconds}');
+
+  @override
+  Future<void> release(String tag, {Duration after = Duration.zero}) async =>
+      calls.add('release $tag ${after.inMilliseconds}');
 }

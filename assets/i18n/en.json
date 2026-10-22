@@ -1534,6 +1534,7 @@
   "Nagranie jeszcze się pobiera…": "The recording is still downloading…",
   "Nagranie nie zawiera danych.": "The recording contains no data.",
   "Nagranie nie zawiera dźwięku.": "The recording has no sound.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "The call recording was not saved. Retry before you close the app, or it will be lost.",
   "Nagranie zapisane (zaszyfrowane).": "Recording saved (encrypted).",
   "Nagranie {number}": "Recording {number}",
   "Nagrywaj": "Record",

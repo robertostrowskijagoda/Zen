@@ -4,13 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
-import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/calls/call_invite_kind.dart';
 import 'package:zen/src/features/calls/call_media_e2ee.dart';
 import 'package:zen/src/features/calls/call_media_session.dart';
 import 'package:zen/src/features/calls/call_recordings.dart';
 import 'package:zen/src/features/calls/call_screen_share.dart';
-import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 
 /// Where one participant's connection stands.
@@ -136,8 +134,9 @@ abstract class GroupCallMedia extends ChangeNotifier {
     throw UnsupportedError(t('Nagrywanie nie jest tu dostępne.'));
   }
 
-  /// Stops recording; returns the file path, or null when nothing ran.
-  Future<String?> stopRecording() async => null;
+  /// Stops recording and waits until the recording is stored (encrypted)
+  /// in the app; null when nothing ran.
+  Future<CallRecordingOutcome?> stopRecording() async => null;
 
   /// Gets every finished recording to be kept (encrypted) in the app.
   CallRecordingFinished? onRecordingFinished;
@@ -169,15 +168,9 @@ final Provider<GroupCallMedia> groupCallMediaProvider =
         transport: ref.read(signalTransportProvider),
       );
       media.onRecordingFinished = (String path, String mime, String label) =>
-          unawaitedLogged(
-            keepCallRecording(
-              ref.read(ledgerDiskProvider),
-              path: path,
-              mime: mime,
-              label: label,
-            ),
-            context: 'Saving the group call recording failed',
-          );
+          ref
+              .read(callRecordingKeeperProvider)
+              .keep(path: path, mime: mime, label: label);
       ref.onDispose(media.dispose);
       return media;
     });

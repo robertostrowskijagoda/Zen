@@ -420,6 +420,40 @@ List<String> constStringList(String source, String name) {
   ];
 }
 
+/// The release signing keys the app pins: kReleaseMaintainers in
+/// [releaseDart] (lib/src/features/update/release.dart).
+List<String> pinnedReleaseKeys(String releaseDart) =>
+    constStringList(releaseDart, 'kReleaseMaintainers');
+
+/// Why a signed file whose signatures by [signers] hold (both halves) is
+/// not one the app built from this tree accepts: it pins no release key at
+/// all ([pinned] is empty, so its computers would take an update whose
+/// SHA256SUMS nobody signed), or fewer than [needed] of [signers] are
+/// pinned (the key in CI is not the one in the app, so every computer
+/// would refuse the update). [needed]: 1 for SHA256SUMS.sig, 2 for a
+/// release for network updates or a canary (kReleaseThreshold).
+List<String> pinnedSignatureProblems({
+  required List<String> signers,
+  required List<String> pinned,
+  int needed = 1,
+}) {
+  if (pinned.isEmpty) {
+    return <String>[
+      'kReleaseMaintainers is empty: pin the release signing key '
+          '(dart run tool/zen_release.dart maintainers --write <id>; '
+          'docs/RELEASES.md, 8.6)',
+    ];
+  }
+  final Set<String> pins = pinned.toSet();
+  final int trusted = signers.toSet().where(pins.contains).length;
+  return <String>[
+    if (trusted < needed)
+      'signed by $trusted of the keys the app pins (kReleaseMaintainers), '
+          '$needed needed; valid signatures by: '
+          '${signers.isEmpty ? 'none' : signers.join(', ')}',
+  ];
+}
+
 /// Why a release must not be prepared yet: the app does not pin the keys
 /// its updates are checked with ([releaseDart] is
 /// lib/src/features/update/release.dart, [apkSignatureDart]

@@ -127,6 +127,71 @@ void main() {
     expect(sent('ping'), 3);
   });
 
+  testWidgets('a glance at another app pings no one again, and leaving '
+      'again sends no second "away"', (WidgetTester tester) async {
+    final MemorySignalTransport transport = MemorySignalTransport();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          signalTransportProvider.overrideWithValue(transport),
+          socialHubSeedProvider.overrideWithValue(_seedState()),
+        ],
+        child: const ZenRewriteApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    int sent(String type) => transport.sentSignals
+        .where((entry) => entry.payload['type'] == type)
+        .length;
+    void leave() {
+      for (final AppLifecycleState state in <AppLifecycleState>[
+        AppLifecycleState.inactive,
+        AppLifecycleState.hidden,
+        AppLifecycleState.paused,
+      ]) {
+        tester.binding.handleAppLifecycleStateChanged(state);
+      }
+    }
+
+    void comeBack() {
+      for (final AppLifecycleState state in <AppLifecycleState>[
+        AppLifecycleState.hidden,
+        AppLifecycleState.inactive,
+        AppLifecycleState.resumed,
+      ]) {
+        tester.binding.handleAppLifecycleStateChanged(state);
+      }
+    }
+
+    expect(sent('ping'), 1);
+    leave();
+    await tester.pump();
+    await tester.pump();
+    expect(sent('away'), 1);
+
+    await tester.pump(const Duration(seconds: 20));
+    comeBack();
+    await tester.pump();
+    await tester.pump();
+    expect(sent('ping'), 1, reason: 'pinged lately: the next round on time');
+
+    leave();
+    await tester.pump();
+    await tester.pump();
+    expect(sent('away'), 1, reason: 'friends already saw "away"');
+
+    comeBack();
+    await tester.pump();
+    // The round comes a ping interval after the last one.
+    await tester.pump(kPresencePingInterval);
+    expect(sent('ping'), 2);
+    leave();
+    await tester.pump();
+    await tester.pump();
+    expect(sent('away'), 2);
+  });
+
   testWidgets('a friend\'s ping and "away" show at once', (
     WidgetTester tester,
   ) async {

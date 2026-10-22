@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,6 +27,7 @@ import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
+import 'package:zen/src/features/profile/own_profile_images.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/pyramid/pyramid_providers.dart';
 import 'package:zen/src/features/pyramid/pyramid_service.dart';
@@ -219,27 +219,27 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
     final Object? profile = s[CircleBackupSections.profile];
     if (profile is Map<String, dynamic> && !merge) {
       final UserProfile p = UserProfile.fromJson(profile);
-      Future<String?> photo(Object? id) async {
+      Future<String?> photo(Object? id, {required bool cover}) async {
         final AccountArchiveBlob? blob = id is String ? file(id) : null;
         if (blob == null) {
           return null;
         }
-        // A plain file, written piece by piece: the profile seals it into
-        // the vault.
-        final Directory dir = await Directory.systemTemp.createTemp('zen-');
-        final File f = File('${dir.path}${Platform.pathSeparator}photo.jpg');
-        final IOSink sink = f.openWrite();
+        // Piece by piece straight into the vault: no plain copy outlives
+        // this (not even in the computer's temporary folder).
+        final String path;
         try {
-          await sink.addStream(blob.chunks());
+          path = await sealIncomingProfileImage(
+            MediaVault.current ?? ref.read(mediaVaultProvider),
+            blob.chunks(),
+            cover: cover,
+          );
         } on Object catch (error) {
           logZenWarning('A profile photo of the copy was not taken: $error');
           return null;
-        } finally {
-          await sink.close();
         }
         files++;
         bytes += blob.size;
-        return f.path;
+        return path;
       }
 
       await ref
@@ -251,8 +251,8 @@ final class AppAccountArchiveSink implements AccountArchiveSink {
             bio: profile['bio'] as String?,
             visibility: p.visibility,
             nationalities: p.nationalities,
-            avatarPath: await photo(profile[kAccountAvatarFile]),
-            coverPath: await photo(profile[kAccountCoverFile]),
+            avatarPath: await photo(profile[kAccountAvatarFile], cover: false),
+            coverPath: await photo(profile[kAccountCoverFile], cover: true),
           );
     }
     step();

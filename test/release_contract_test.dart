@@ -127,6 +127,77 @@ void main() {
       );
     });
 
+    test('a signature counts only by a pinned key', () {
+      const String key =
+          "const List<String> kReleaseMaintainers = <String>[\n  'zh1abc',\n];";
+      expect(pinnedReleaseKeys(key), <String>['zh1abc']);
+      expect(
+        pinnedSignatureProblems(
+          signers: <String>['zh1abc'],
+          pinned: pinnedReleaseKeys(key),
+        ),
+        isEmpty,
+      );
+      // Signed with another key than the app's: every computer would
+      // refuse the update.
+      expect(
+        pinnedSignatureProblems(
+          signers: <String>['zh1other'],
+          pinned: <String>['zh1abc'],
+        ),
+        <Matcher>[contains('zh1other')],
+      );
+      // A part of a pinned key is not the key.
+      expect(
+        pinnedSignatureProblems(
+          signers: <String>['zh1ab'],
+          pinned: <String>['zh1abc'],
+        ),
+        hasLength(1),
+      );
+      // Nothing pinned: the computers would take unsigned updates.
+      expect(
+        pinnedSignatureProblems(
+          signers: <String>['zh1abc'],
+          pinned: const <String>[],
+        ),
+        <Matcher>[contains('kReleaseMaintainers is empty')],
+      );
+      // A release for network updates needs two pinned signatures.
+      expect(
+        pinnedSignatureProblems(
+          signers: <String>['zh1abc', 'zh1other'],
+          pinned: <String>['zh1abc', 'zh1x', 'zh1y'],
+          needed: 2,
+        ),
+        hasLength(1),
+      );
+    });
+
+    test('a tag build stops without pinned keys or with a foreign one', () {
+      final String yml = File(
+        '.github/workflows/release.yml',
+      ).readAsStringSync();
+      // The pins are checked in the tag-only android job, before any key.
+      final int android = yml.indexOf('\n  android:\n');
+      final int windows = yml.indexOf('\n  windows:\n');
+      final String androidJob = yml.substring(android, windows);
+      expect(androidJob, contains('dart run tool/release.dart pinned'));
+      expect(
+        androidJob.indexOf('tool/release.dart pinned'),
+        lessThan(androidJob.indexOf('name: Release key')),
+      );
+      // The signature is checked against the pins.
+      final String signJob = yml.substring(yml.indexOf('\n  sign:\n'));
+      expect(
+        signJob,
+        contains(
+          'dart run tool/zen_release.dart verify --pinned '
+          'signed/SHA256SUMS.sig',
+        ),
+      );
+    });
+
     test('bumps pubspec.yaml and app_version.dart', () {
       const String pubspec = 'name: zen\nversion: 1.11.0+11\n\nenvironment:\n';
       expect(

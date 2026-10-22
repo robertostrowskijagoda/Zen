@@ -1534,6 +1534,7 @@
   "Nagranie jeszcze się pobiera…": "Kayıt hâlâ iniyor…",
   "Nagranie nie zawiera danych.": "Kayıtta veri yok.",
   "Nagranie nie zawiera dźwięku.": "Kayıtta ses yok.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "Arama kaydı kaydedilmedi. Uygulamayı kapatmadan önce yeniden dene, yoksa kaybolacak.",
   "Nagranie zapisane (zaszyfrowane).": "Kayıt kaydedildi (şifreli).",
   "Nagranie {number}": "Kayıt {number}",
   "Nagrywaj": "Kayda al",

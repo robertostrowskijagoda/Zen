@@ -1556,6 +1556,7 @@
   "Nagranie jeszcze się pobiera…": "Înregistrarea încă se descarcă…",
   "Nagranie nie zawiera danych.": "Înregistrarea nu conține date.",
   "Nagranie nie zawiera dźwięku.": "Înregistrarea nu conține sunet.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "Înregistrarea apelului nu a fost salvată. Încearcă din nou înainte de a închide aplicația, altfel se pierde.",
   "Nagranie zapisane (zaszyfrowane).": "Înregistrare salvată (criptată).",
   "Nagranie {number}": "Înregistrarea {number}",
   "Nagrywaj": "Înregistrează",

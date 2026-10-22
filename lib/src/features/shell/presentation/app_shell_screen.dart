@@ -34,6 +34,7 @@ import 'package:zen/src/features/account/presentation/account_recovery_screen.da
 import 'package:zen/src/features/account/presentation/accounts_ui.dart';
 import 'package:zen/src/features/account/presentation/circle_reminder_card.dart';
 import 'package:zen/src/features/calls/call_platform_channel.dart';
+import 'package:zen/src/features/calls/presentation/call_recording_notice.dart';
 import 'package:zen/src/features/calls/presentation/call_recordings_screen.dart';
 import 'package:zen/src/features/chat/chat_gif_catalog.dart';
 import 'package:zen/src/features/chat/presentation/conversation_screen.dart';
@@ -311,6 +312,8 @@ class AppShellScreen extends ConsumerWidget {
             _StatusBar(),
             // A newer release on GitHub, or GitHub blocked.
             GithubUpdateBanner(),
+            // A call recording that could not be stored yet.
+            UnsavedCallRecordingsBanner(),
             // The chat list shows the last messages.
             Expanded(
               child: SecureScreen(child: _ChatsPage(key: Key('chats-page'))),

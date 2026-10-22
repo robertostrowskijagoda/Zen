@@ -1512,6 +1512,7 @@
   "Nagranie jeszcze się pobiera…": "录音仍在下载…",
   "Nagranie nie zawiera danych.": "录音不含数据。",
   "Nagranie nie zawiera dźwięku.": "录音中没有声音。",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "通话录音未保存。请在关闭应用前重试，否则录音将丢失。",
   "Nagranie zapisane (zaszyfrowane).": "录音已保存（已加密）。",
   "Nagranie {number}": "录音 {number}",
   "Nagrywaj": "录音",

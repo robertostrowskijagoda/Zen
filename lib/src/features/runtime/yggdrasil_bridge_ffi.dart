@@ -20,6 +20,9 @@ abstract interface class NodeSignalBridge
   /// Adds a mesh peer (e.g. a bridge learnt from friends) at runtime.
   Map<String, dynamic> addPeer(int handle, String uri);
 
+  /// Drops a mesh peer added with [addPeer] (a bridge no longer chosen).
+  Map<String, dynamic> removePeer(int handle, String uri);
+
   /// Runs the flat's door next to the node [handle]: a second node with its
   /// own key ([seedHex], a 32-byte ed25519 seed as hex), never peered to
   /// this one, that takes only flat frames (they come in through
@@ -185,6 +188,10 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
           .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
             'YggAddPeer',
           ),
+      _removePeer = library
+          .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
+            'YggRemovePeer',
+          ),
       _startDoorNode = library
           .lookupFunction<_NativeIntStringArgCall, _DartIntStringArgCall>(
             'YggStartDoorNode',
@@ -263,6 +270,7 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
   final Pointer<Utf8> Function(int, Pointer<Utf8>) _openRelay;
   final Pointer<Utf8> Function(int, Pointer<Utf8>) _closeRelay;
   final Pointer<Utf8> Function(int, Pointer<Utf8>) _addPeer;
+  final Pointer<Utf8> Function(int, Pointer<Utf8>) _removePeer;
   final Pointer<Utf8> Function(int, Pointer<Utf8>) _startDoorNode;
   final Pointer<Utf8> Function(int) _stopDoorNode;
   final Pointer<Utf8> Function(int) _getDoorNode;
@@ -431,6 +439,16 @@ final class YggdrasilBridgeFfi implements NodeSignalBridge {
     final Pointer<Utf8> nativeUri = uri.toNativeUtf8();
     try {
       return _extractMap(_readEnvelope(_addPeer(handle, nativeUri)));
+    } finally {
+      malloc.free(nativeUri);
+    }
+  }
+
+  @override
+  Map<String, dynamic> removePeer(int handle, String uri) {
+    final Pointer<Utf8> nativeUri = uri.toNativeUtf8();
+    try {
+      return _extractMap(_readEnvelope(_removePeer(handle, nativeUri)));
     } finally {
       malloc.free(nativeUri);
     }

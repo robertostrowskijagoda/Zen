@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,6 +27,7 @@ import 'package:zen/src/features/meet/meet_providers.dart';
 import 'package:zen/src/features/meet/plan/plan_providers.dart';
 import 'package:zen/src/features/neighbors/household_sync.dart';
 import 'package:zen/src/features/neighbors/neighbors_providers.dart';
+import 'package:zen/src/features/profile/own_profile_images.dart';
 import 'package:zen/src/features/profile/user_profile_store.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
@@ -311,9 +311,13 @@ final class ProfileSyncDomain extends _PokedDomain {
     return <String, Object?>{...json, 'avatar': ?avatar, 'cover': ?cover};
   }
 
-  /// The photo [value] as a plain file for the profile, or null when it is
-  /// the one here already; throws when it has not come yet.
-  Future<String?> _takePhoto(Object? value, String? currentPath) async {
+  /// The photo [value] put into the media vault for the profile, or null
+  /// when it is the one here already; throws when it has not come yet.
+  Future<String?> _takePhoto(
+    Object? value,
+    String? currentPath, {
+    required bool cover,
+  }) async {
     if (value is! Map) {
       return null;
     }
@@ -334,15 +338,12 @@ final class ProfileSyncDomain extends _PokedDomain {
     )) {
       throw StateError('The photo has not come yet.');
     }
-    final Directory dir = await Directory.systemTemp.createTemp('zen-');
-    final File f = File('${dir.path}${Platform.pathSeparator}photo.jpg');
-    final IOSink sink = f.openWrite();
-    try {
-      await sink.addStream(openMediaStreamed(node.blobs, media));
-    } finally {
-      await sink.close();
-    }
-    return f.path;
+    // Straight into the vault: no plain copy outlives this.
+    return sealIncomingProfileImage(
+      MediaVault.current ?? ref.read(mediaVaultProvider),
+      openMediaStreamed(node.blobs, media),
+      cover: cover,
+    );
   }
 
   @override
@@ -351,8 +352,23 @@ final class ProfileSyncDomain extends _PokedDomain {
     final UserProfile p = UserProfile.fromJson(
       Map<String, dynamic>.from(state),
     );
-    final String? avatar = await _takePhoto(state['avatar'], now.avatarPath);
-    final String? cover = await _takePhoto(state['cover'], now.coverPath);
+    final String? avatar = await _takePhoto(
+      state['avatar'],
+      now.avatarPath,
+      cover: false,
+    );
+    final String? cover;
+    try {
+      cover = await _takePhoto(state['cover'], now.coverPath, cover: true);
+    } on Object {
+      // Tried again later, from the start: no stray copy of the photo.
+      if (avatar != null) {
+        final MediaVault vault =
+            MediaVault.current ?? ref.read(mediaVaultProvider);
+        await vault.delete(avatar);
+      }
+      rethrow;
+    }
     await ref
         .read(userProfileControllerProvider.notifier)
         .updateProfile(

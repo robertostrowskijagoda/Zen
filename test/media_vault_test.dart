@@ -152,6 +152,61 @@ void main() {
   });
 
   test(
+    'a big file goes in and out piece by piece, whatever its size',
+    () async {
+      for (final int length in <int>[0, 65536, 65537, 300001]) {
+        final File source = File(
+          '${temporary.path}${Platform.pathSeparator}src-$length.wav',
+        )..writeAsBytesSync(_bytes(length));
+        final String path = await vault().putFile(source, deleteSource: false);
+        expect(source.existsSync(), isTrue, reason: '$length');
+        expect(await vault().length(path), length);
+        expect(await vault().read(path), _bytes(length), reason: '$length');
+        expect(
+          await vault().readRange(path, length ~/ 2, length),
+          Uint8List.sublistView(_bytes(length), length ~/ 2, length),
+        );
+        final File out = File(
+          '${temporary.path}${Platform.pathSeparator}out-$length.wav',
+        );
+        await vault().decryptToFile(path, out);
+        expect(out.readAsBytesSync(), _bytes(length), reason: '$length');
+      }
+    },
+  );
+
+  test('a locked vault leaves the plain file and no half file', () async {
+    final File source = File(
+      '${temporary.path}${Platform.pathSeparator}locked.wav',
+    )..writeAsBytesSync(_bytes(100000));
+    masterKey = null;
+    await expectLater(vault().putFile(source), throwsStateError);
+    expect(source.existsSync(), isTrue);
+    final Directory folder = Directory(
+      '${support.path}${Platform.pathSeparator}$kMediaVaultFolder',
+    );
+    expect(folder.existsSync() ? folder.listSync() : <Object>[], isEmpty);
+  });
+
+  test('a damaged file is not written out in plain form', () async {
+    final String path = await vault().put(_bytes(200000));
+    final Uint8List sealed = await File(path).readAsBytes();
+    sealed[sealed.length - 10] ^= 0xFF;
+    await File(path).writeAsBytes(sealed);
+    final File out = File('${temporary.path}${Platform.pathSeparator}bad.m4a');
+    await expectLater(vault().decryptToFile(path, out), throwsA(anything));
+    expect(out.existsSync(), isFalse);
+  });
+
+  test('an index keeps a name that finds the file again', () async {
+    final String path = await vault().put(_bytes(10));
+    final String name = MediaVault.fileNameOf(path);
+    expect(name, isNot(contains(Platform.pathSeparator)));
+    expect(await vault().pathOf(name), path);
+    await expectLater(vault().pathOf('../x.zmedia'), throwsFormatException);
+  });
+
+  test(
     'an outgoing transfer reads its chunks from an encrypted file',
     () async {
       final Uint8List plain = _bytes(kAttachmentChunkSizeBytes * 2 + 100);

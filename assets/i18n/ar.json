@@ -1622,6 +1622,7 @@
   "Nagranie jeszcze się pobiera…": "التسجيل قيد التنزيل…",
   "Nagranie nie zawiera danych.": "التسجيل لا يحتوي على بيانات.",
   "Nagranie nie zawiera dźwięku.": "التسجيل لا يحتوي على صوت.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "لم يُحفظ تسجيل المكالمة. أعد المحاولة قبل إغلاق التطبيق، وإلا فسيضيع.",
   "Nagranie zapisane (zaszyfrowane).": "تم حفظ التسجيل (مشفّر).",
   "Nagranie {number}": "تسجيل {number}",
   "Nagrywaj": "سجّل",

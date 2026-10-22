@@ -26,9 +26,11 @@ import io.flutter.plugin.common.MethodChannel
  *  - work that comes back (a look around nearby, asking the mailboxes for
  *    mail, the locked phone's outbox, the watchdog) is an alarm
  *    ([schedule]: `setAndAllowWhileIdle`, or `setExactAndAllowWhileIdle`
- *    where it must be on time and the person allowed exact alarms) that
- *    wakes the phone and holds it awake for the alarm's window, then tells
- *    the engines ("wake" with its id);
+ *    where it must be on time and the person allowed exact alarms; a plain
+ *    `set` that Doze puts off for work Doze would skip anyway) that wakes
+ *    the phone and holds it awake for at most the alarm's window under the
+ *    alarm's own tag, then tells the engines ("wake" with its id); Dart
+ *    releases that tag as soon as the work is done;
  *  - a signal that arrives wakes the phone by itself; Dart holds it awake
  *    a few seconds more to handle it ([hold] with a time limit);
  *  - only a call holds the phone (and Wi-Fi) awake for as long as it runs
@@ -40,6 +42,7 @@ object ZenPower {
     private const val ACTION_WAKE = "com.roj.zen.WAKE"
     private const val WAKE_SCHEME = "zen-wake"
     private const val EXTRA_HOLD_MS = "holdMs"
+    private const val EXTRA_TAG = "tag"
 
     /** No timed hold lasts longer than this. */
     private const val MAX_HOLD_MS = 2 * 60 * 60_000L
@@ -93,7 +96,13 @@ object ZenPower {
                         result.success(null)
                     }
                     "release" -> {
-                        release(call.argument<String>("tag") ?: "work")
+                        val tag = call.argument<String>("tag") ?: "work"
+                        val after = (call.argument<Number>("afterMs") ?: 0).toLong()
+                        if (after > 0) {
+                            releaseAfter(tag, after)
+                        } else {
+                            release(tag)
+                        }
                         result.success(null)
                     }
                     "schedule" -> {
@@ -107,6 +116,8 @@ object ZenPower {
                                 (call.argument<Number>("delayMs") ?: 0).toLong(),
                                 call.argument<Boolean>("exact") ?: false,
                                 (call.argument<Number>("holdMs") ?: 0).toLong(),
+                                call.argument<String>("tag"),
+                                call.argument<Boolean>("whileIdle") ?: true,
                             )
                             result.success(true)
                         }
@@ -190,6 +201,30 @@ object ZenPower {
         }
     }
 
+    /**
+     * Ends [tag]'s hold in [ms] instead of at its old limit (the work is
+     * done; what it set off gets a moment). Nothing when it is not held.
+     */
+    fun releaseAfter(tag: String, ms: Long) {
+        val lock = locks[tag] ?: return
+        try {
+            if (!lock.isHeld) {
+                holdUntil.remove(tag)
+                return
+            }
+            val until = holdUntil[tag]
+            val now = SystemClock.elapsedRealtime()
+            if (until != null && until <= now + ms) {
+                return
+            }
+            // Not reference counted: a new acquire replaces the time limit.
+            lock.acquire(ms)
+            holdUntil[tag] = now + ms
+        } catch (error: Exception) {
+            Log.w(TAG, "Shortening a hold failed", error)
+        }
+    }
+
     private fun lockFor(context: Context, tag: String): PowerManager.WakeLock? {
         locks[tag]?.let { return it }
         val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return null
@@ -237,19 +272,34 @@ object ZenPower {
     }
 
     /**
-     * Wakes the phone in [delayMs] and holds it awake for [holdMs]; then the
-     * engines hear "wake" with [id]. A new schedule of the same id replaces
-     * the old one.
+     * Wakes the phone in [delayMs] and holds it awake for at most [holdMs]
+     * under [tag] (Dart releases it once the work is done); then the engines
+     * hear "wake" with [id]. A new schedule of the same id replaces the old
+     * one. Not [whileIdle]: Doze puts it off to its next window.
      */
-    fun schedule(context: Context, id: String, delayMs: Long, exact: Boolean, holdMs: Long) {
+    fun schedule(
+        context: Context,
+        id: String,
+        delayMs: Long,
+        exact: Boolean,
+        holdMs: Long,
+        tag: String? = null,
+        whileIdle: Boolean = true,
+    ) {
         val alarms = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         ensureReceiver(context)
         val at = SystemClock.elapsedRealtime() + delayMs.coerceAtLeast(0)
-        val pending = pendingIntent(context, id, holdMs, create = true) ?: return
+        val pending = pendingIntent(context, id, holdMs, create = true, tag = tag) ?: return
         val canExact = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             alarms.canScheduleExactAlarms()
         } else {
             true
+        }
+        if (!whileIdle) {
+            // Work Doze would skip anyway (a look around): not worth a
+            // wake in Doze, and batched with other alarms.
+            alarms.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pending)
+            return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (exact && canExact) {
@@ -283,12 +333,21 @@ object ZenPower {
         schedule(context, id, delayMs, exact, holdMs)
     }
 
-    private fun pendingIntent(context: Context, id: String, holdMs: Long, create: Boolean): PendingIntent? {
+    private fun pendingIntent(
+        context: Context,
+        id: String,
+        holdMs: Long,
+        create: Boolean,
+        tag: String? = null,
+    ): PendingIntent? {
         val intent = Intent(ACTION_WAKE)
             .setPackage(context.packageName)
             // The id in the data: two ids are two different alarms.
             .setData(Uri.fromParts(WAKE_SCHEME, id, null))
             .putExtra(EXTRA_HOLD_MS, holdMs)
+        if (tag != null) {
+            intent.putExtra(EXTRA_TAG, tag)
+        }
         var flags = PendingIntent.FLAG_IMMUTABLE
         flags = flags or if (create) PendingIntent.FLAG_UPDATE_CURRENT else PendingIntent.FLAG_NO_CREATE
         return PendingIntent.getBroadcast(context, 0, intent, flags)
@@ -304,7 +363,12 @@ object ZenPower {
                     return
                 }
                 val id = intent.data?.schemeSpecificPart ?: return
-                onWake(context.applicationContext, id, intent.getLongExtra(EXTRA_HOLD_MS, 0))
+                onWake(
+                    context.applicationContext,
+                    id,
+                    intent.getLongExtra(EXTRA_HOLD_MS, 0),
+                    intent.getStringExtra(EXTRA_TAG),
+                )
             }
         }
         val filter = IntentFilter(ACTION_WAKE).apply { addDataScheme(WAKE_SCHEME) }
@@ -321,9 +385,11 @@ object ZenPower {
         }
     }
 
-    private fun onWake(context: Context, id: String, holdMs: Long) {
+    private fun onWake(context: Context, id: String, holdMs: Long, tag: String?) {
         // First the hold: the phone may fall asleep again right after this.
-        hold(context, "wake", holdMs.coerceAtLeast(3_000))
+        // Under the alarm's own tag, which Dart releases once its work is
+        // done (one alarm's end never cuts another's work short).
+        hold(context, tag ?: "wake", holdMs.coerceAtLeast(3_000))
         val native = nativeAlarms.remove(id)
         if (native != null) {
             try {

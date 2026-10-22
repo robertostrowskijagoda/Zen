@@ -13,6 +13,7 @@ import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_native_signal_transport.dart';
 import 'package:zen/src/features/runtime/runtime_signal_parser.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 import 'package:zen/src/features/social/social_hub_controller.dart';
@@ -97,6 +98,17 @@ final class RuntimeSignalModule extends ZenModule {
   /// after it was).
   bool _wasInteractive = false;
 
+  /// Pings went out since the last "away": friends see Zen on the screen,
+  /// so leaving it is worth telling. Coming back for a moment and leaving
+  /// again sends nothing new.
+  bool _awayOwed = false;
+
+  /// The last round of pings (wall time: a sleeping phone's timers stand
+  /// still) and a timer that runs out a ping interval after it; while both
+  /// say it was lately, coming back on the screen pings no one at once.
+  DateTime? _pingedAt;
+  Timer? _pingedLately;
+
   @override
   String get id => 'signal';
 
@@ -135,6 +147,8 @@ final class RuntimeSignalModule extends ZenModule {
     _presenceTimer = null;
     _settleTimer?.cancel();
     _settleTimer = null;
+    _pingedLately?.cancel();
+    _pingedLately = null;
     final StreamSubscription<SignalTransportFrame>? subscription =
         _subscription;
     _subscription = null;
@@ -162,8 +176,9 @@ final class RuntimeSignalModule extends ZenModule {
       _presenceTimer = null;
       _settleTimer?.cancel();
       _settleTimer = null;
-      if (_wasInteractive) {
+      if (_wasInteractive && _awayOwed) {
         _wasInteractive = false;
+        _awayOwed = false;
         // "Leaving the screen": friends see it at once, without pinging.
         scheduleMicrotask(() {
           if (_running) {
@@ -174,10 +189,22 @@ final class RuntimeSignalModule extends ZenModule {
           }
         });
       }
+      _wasInteractive = false;
       return;
     }
     _wasInteractive = true;
-    _restartPresenceLoop();
+    // Back within a ping interval of the last round (a glance at another
+    // app): friends are not pinged again at once; the next round comes on
+    // time. Each ping wakes every friend's phone.
+    final Duration? sincePing = _sinceLastPing();
+    final Duration interval = _ref
+        .read(runtimePresenceConfigProvider)
+        .pingInterval;
+    final Duration? rest = sincePing != null && sincePing < interval
+        ? interval - sincePing
+        : null;
+    final bool pingNow = rest == null;
+    _restartPresenceLoop(firstAfter: rest);
     // After the current frame: this comes from a widget's build.
     scheduleMicrotask(() {
       if (!_running) {
@@ -190,6 +217,9 @@ final class RuntimeSignalModule extends ZenModule {
         _transport?.start(),
         context: 'Runtime transport restart after resume failed',
       );
+      if (!pingNow) {
+        return;
+      }
       // "I am here": a ping to every friend now. Who did not answer counts
       // as offline only once the answers had time to come.
       unawaitedLogged(
@@ -293,7 +323,15 @@ final class RuntimeSignalModule extends ZenModule {
     if (signal == null) {
       return;
     }
-    await hub.receiveSignal(signal, receivedAtMillis: frame.receivedAtMillis);
+    // The phone may be asleep but for this frame (the app in the
+    // background, screen off): awake until it is handled (a message kept,
+    // a notice shown, a call ringing), then free to sleep again.
+    await ZenWake.holdWhile(
+      () => hub.receiveSignal(signal, receivedAtMillis: frame.receivedAtMillis),
+      tag: 'signal-work',
+      limit: const Duration(seconds: 15),
+      linger: const Duration(seconds: 2),
+    );
   }
 
   /// What app version a friend named: only for the "newer Zen" hint.
@@ -344,6 +382,7 @@ final class RuntimeSignalModule extends ZenModule {
         .read(runtimeNodeSnapshotProvider)
         .localAddress;
     final Set<String> peersToPing = presencePingTargets(hubState);
+    _notePingRound();
     for (final String address in peersToPing) {
       if (localAddr.isNotEmpty &&
           PeerShareCodec.addressesEqual(address, localAddr)) {
@@ -420,12 +459,50 @@ final class RuntimeSignalModule extends ZenModule {
         );
   }
 
-  void _restartPresenceLoop() {
+  /// Since the last round of pings, or `null` when it was not lately.
+  Duration? _sinceLastPing() {
+    final DateTime? at = _pingedAt;
+    if (at == null || _pingedLately == null) {
+      return null;
+    }
+    final Duration since = DateTime.now().difference(at);
+    return since.isNegative ? Duration.zero : since;
+  }
+
+  void _notePingRound() {
+    _awayOwed = true;
+    _pingedAt = DateTime.now();
+    _pingedLately?.cancel();
+    final Duration interval = _ref
+        .read(runtimePresenceConfigProvider)
+        .pingInterval;
+    _pingedLately = interval <= Duration.zero
+        ? null
+        : Timer(interval, () => _pingedLately = null);
+  }
+
+  /// Pings every interval; the first round after [firstAfter] when given
+  /// (the rest of an interval that began before).
+  void _restartPresenceLoop({Duration? firstAfter}) {
     _presenceTimer?.cancel();
+    _presenceTimer = null;
     final Duration interval = _ref
         .read(runtimePresenceConfigProvider)
         .pingInterval;
     if (interval <= Duration.zero) {
+      return;
+    }
+    if (firstAfter != null) {
+      _presenceTimer = Timer(firstAfter, () {
+        if (!_running) {
+          return;
+        }
+        _restartPresenceLoop();
+        unawaitedLogged(
+          _tickPresenceLoop(),
+          context: 'Runtime presence loop tick failed',
+        );
+      });
       return;
     }
     _presenceTimer = Timer.periodic(interval, (_) {

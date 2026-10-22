@@ -1534,6 +1534,7 @@
   "Nagranie jeszcze się pobiera…": "रिकॉर्डिंग अभी डाउनलोड हो रही है…",
   "Nagranie nie zawiera danych.": "रिकॉर्डिंग में कोई डेटा नहीं है।",
   "Nagranie nie zawiera dźwięku.": "रिकॉर्डिंग में आवाज़ नहीं है।",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "कॉल रिकॉर्डिंग सेव नहीं हुई। ऐप बंद करने से पहले फिर से कोशिश करें, नहीं तो यह खो जाएगी।",
   "Nagranie zapisane (zaszyfrowane).": "रिकॉर्डिंग सेव हो गई (एन्क्रिप्टेड)।",
   "Nagranie {number}": "रिकॉर्डिंग {number}",
   "Nagrywaj": "रिकॉर्ड करें",

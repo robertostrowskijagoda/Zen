@@ -1534,6 +1534,7 @@
   "Nagranie jeszcze się pobiera…": "A felvétel még töltődik…",
   "Nagranie nie zawiera danych.": "A felvétel nem tartalmaz adatot.",
   "Nagranie nie zawiera dźwięku.": "A felvétel nem tartalmaz hangot.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "A hívásfelvétel nem lett mentve. Próbáld újra, mielőtt bezárod az alkalmazást, különben elvész.",
   "Nagranie zapisane (zaszyfrowane).": "Felvétel elmentve (titkosítva).",
   "Nagranie {number}": "Felvétel {number}",
   "Nagrywaj": "Rögzítés",

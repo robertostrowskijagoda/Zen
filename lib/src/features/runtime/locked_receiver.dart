@@ -474,6 +474,7 @@ final class LockedReceiver {
     this.ringTimeout = const Duration(seconds: 6),
     this.noticeThrottle = const Duration(minutes: 1),
     this.mailboxPollInterval = kLockedMailboxPollInterval,
+    this.pollAnswerGrace = const Duration(seconds: 4),
     this.pongEvery = kLockedPongEvery,
   }) : _transport = transport,
        _capability = capability,
@@ -508,6 +509,9 @@ final class LockedReceiver {
   /// The same kind of notice at most this often.
   final Duration noticeThrottle;
   final Duration mailboxPollInterval;
+
+  /// How long a poll's wake waits for the mailboxes' first answers.
+  final Duration pollAnswerGrace;
 
   /// A contact's pings get a pong at most this often: friends ping only
   /// while Zen is on their screen, and a pong every other ping keeps this
@@ -550,7 +554,12 @@ final class LockedReceiver {
     );
     _doorSubscription = _doorFrames?.listen(
       (SignalTransportFrame frame) => unawaitedLogged(
-        handleDoorFrame(frame),
+        // Kept and rung (a knock): the phone stays awake until done.
+        ZenWake.holdWhile(
+          () => handleDoorFrame(frame),
+          tag: _keepHoldTag,
+          limit: _keepHoldLimit,
+        ),
         context: 'A door frame for the locked inbox failed',
       ),
     );
@@ -568,11 +577,13 @@ final class LockedReceiver {
     await _pollMailboxes();
     if (mailboxPollInterval > Duration.zero &&
         _capability.mailboxes.isNotEmpty) {
-      // An alarm that wakes the sleeping phone for the poll and its answers.
-      _pollTimer = ZenWake.every(
+      // On the shared beat: one wake of the phone for the polls of every
+      // account (and a look around nearby), held for the polls and their
+      // first answers and let go then.
+      _pollTimer = ZenWake.beat(
         'mailbox-poll',
         mailboxPollInterval,
-        () => unawaitedLogged(_pollMailboxes(), context: 'Mailbox poll'),
+        _pollOnWake,
         hold: const Duration(seconds: 15),
       );
     }
@@ -693,6 +704,19 @@ final class LockedReceiver {
     return true;
   }
 
+  /// The polls on a wake, then a moment for the answers (mail that comes
+  /// later wakes the phone itself, like any frame).
+  Future<void> _pollOnWake() async {
+    try {
+      await _pollMailboxes();
+    } on Object catch (error, stackTrace) {
+      logZenError('Mailbox poll failed', error, stackTrace);
+    }
+    if (_running) {
+      await Future<void>.delayed(pollAnswerGrace);
+    }
+  }
+
   Future<void> _pollMailboxes() async {
     for (final String mailbox in _capability.mailboxes) {
       if (!_running) {
@@ -784,7 +808,25 @@ final class LockedReceiver {
     return true;
   }
 
+  /// Keeps [frame] in the inbox (and tells about it): the phone stays
+  /// awake until that is done, then may sleep (a frame that is dropped
+  /// costs only the short hold of its arrival).
   Future<void> _keep(
+    SignalTransportFrame frame,
+    String from,
+    String type,
+    BackgroundContactKind kind, {
+    required String? rid,
+  }) => ZenWake.holdWhile(
+    () => _keepHeld(frame, from, type, kind, rid: rid),
+    tag: _keepHoldTag,
+    limit: _keepHoldLimit,
+  );
+
+  static const String _keepHoldTag = 'locked-keep';
+  static const Duration _keepHoldLimit = Duration(seconds: 20);
+
+  Future<void> _keepHeld(
     SignalTransportFrame frame,
     String from,
     String type,
@@ -898,6 +940,11 @@ final class LockedReceiver {
     if (_ringTypes.contains(type)) {
       final bool fresh = _ringingFrom == null;
       _ringingFrom = from;
+      // Awake while it rings: the ring ends (and "missed call" shows) when
+      // the invites stop, which only a running timer notices.
+      unawaited(
+        ZenWake.hold(ringTimeout + const Duration(seconds: 2), tag: 'ring'),
+      );
       _ringTimer?.cancel();
       _ringTimer = Timer(ringTimeout, () {
         unawaitedLogged(_ringEnded(), context: 'Locked ring end');
@@ -930,19 +977,25 @@ final class LockedReceiver {
       return;
     }
     _ringingFrom = null;
-    await _notices.dismissSlot(kLockedCallSlot);
-    await _post(
-      RuntimeSystemNotification(
-        id: '$kLockedMissedCallSlot-${_now()}',
-        title: t('Nieodebrane połączenie'),
-        body: t('Ktoś dzwonił, gdy Zen był zablokowany.'),
-        createdAtMillis: _now(),
-        category: RuntimeSystemNotificationCategory.message,
-        routeKey: buildInboxRouteKey(),
-        slotKey: kLockedMissedCallSlot,
-        contentRedacted: true,
-      ),
-    );
+    try {
+      await _notices.dismissSlot(kLockedCallSlot);
+      await _post(
+        RuntimeSystemNotification(
+          id: '$kLockedMissedCallSlot-${_now()}',
+          title: t('Nieodebrane połączenie'),
+          body: t('Ktoś dzwonił, gdy Zen był zablokowany.'),
+          createdAtMillis: _now(),
+          category: RuntimeSystemNotificationCategory.message,
+          routeKey: buildInboxRouteKey(),
+          slotKey: kLockedMissedCallSlot,
+          contentRedacted: true,
+        ),
+      );
+    } finally {
+      unawaited(
+        ZenWake.release(tag: 'ring', after: const Duration(seconds: 1)),
+      );
+    }
   }
 
   /// The power-button shortcut while the app is locked or closed: the alarm

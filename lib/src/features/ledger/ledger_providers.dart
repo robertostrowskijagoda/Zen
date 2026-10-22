@@ -163,6 +163,12 @@ String get thisDeviceName {
   return 'Komputer (Linux)';
 }
 
+/// How many friends' bridges a device connects to besides its public
+/// peers: a phone one (its four public peers carry it; each connection
+/// costs traffic and keep-alives), a computer five (a computer on battery
+/// dials only one of them, peer_keepers.go).
+int ledgerBridgeConnections({required bool phone}) => phone ? 1 : 5;
+
 /// The running ledger node, or `null` while disabled. Reading it starts it.
 final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
   Ref ref,
@@ -197,8 +203,13 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     autoDownloadMedia: () => ref
         .read(appSettingsControllerProvider)
         .allowsAutoDownload(onUnmetered: UnmeteredNetwork.instance.onUnmetered),
+    // The chosen bridges replace the earlier choice (dropped ones are
+    // disconnected).
     onBridgesChosen: (List<String> uris) =>
-        ref.read(runtimeNodeRuntimeProvider).addMeshPeers(uris),
+        ref.read(runtimeNodeRuntimeProvider).setMeshPeers(uris),
+    bridgeConnections: ledgerBridgeConnections(
+      phone: !kIsWeb && (Platform.isAndroid || Platform.isIOS),
+    ),
     // On Android the background service may still be serving the ledger
     // (the app was closed): the background bridge resumes this node once
     // the service has handed it back.

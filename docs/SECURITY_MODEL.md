@@ -175,7 +175,11 @@ friend vouching for their key, is trust on first use.
   fresh `zen-media.XXXXXX` (`mkdtemp`) is used, and without a private
   folder nothing is written. Each file is created empty with mode 0600
   before its content goes in, under a random name. The folder is cleared at
-  start, at exit on computers, and when the account is deleted.
+  start, at exit on computers, and when the account is deleted. A call
+  recording is deleted only after it is encrypted into the vault (in
+  pieces, any length); one that could not be saved waits at most until the
+  app closes. A profile photo from another device or a backup passes through
+  `zen-media` and is deleted at once.
 - **Several accounts.** Each account has its own keys, mesh node, folder,
   keystore entries and password. Folders are named by a keyed hash of the
   account ID; every device has 2 to 5 decoy folders from the first start,

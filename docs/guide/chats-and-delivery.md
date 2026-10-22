@@ -100,14 +100,14 @@ you can try again once friends have picked up what waits.
 
 **Which friends keep your mail.** A mailbox is only useful when it is
 online while you are not. Each device tells its friends whether it
-usually stays online (a computer with Zen in the tray, an Android phone
-with the background service; an iPhone does not). Zen then picks, in this
+usually stays online (a computer with Zen in the tray; a phone does not:
+a locked phone takes only its own mail, to save the battery). Zen then picks, in this
 order: friends (not casual friends) with such a device seen in the last few
 days, close friends before friends, then whoever was seen most recently. A
 chosen mailbox stays, unless it has been silent for 3 days while someone
 fresher is around, or a friend with an always-online device appears (then
 the mailbox seen longest ago is swapped). One computer with Zen in the tray
-(or an Android phone) can be the mailbox for a whole group of friends;
+can be the mailbox for a whole group of friends;
 *Invite* says so too.
 
 ### iPhone
@@ -168,7 +168,10 @@ everyone hears a signal.
 **Recording** works on every system and only takes the call and your
 microphone, never other apps: Android writes `.mp4` (with the other side's
 video in a one-to-one video call), iPhone, iPad and Mac `.m4a`, Windows and
-Linux `.wav`. On Linux it needs PulseAudio or PipeWire.
+Linux `.wav`. On Linux it needs PulseAudio or PipeWire. A finished
+recording is encrypted into Zen's storage in small pieces, however long it
+is, and the plain file is deleted only after that; Zen says *saved* only
+then, and offers *Retry* when saving failed.
 
 ## Privacy
 

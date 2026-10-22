@@ -179,20 +179,42 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
   }
 
   @override
-  Future<String?> stopRecording() async {
-    final String? path = _recordingPath;
+  Future<CallRecordingOutcome?> stopRecording() async {
+    final String? path = await _stopRecorder(tell: true);
     if (path == null) {
       return null;
     }
-    await _finishRecording(tell: true);
     _notify();
-    return path;
+    return keepFinishedRecording(
+      onRecordingFinished,
+      path,
+      _recorder.mime,
+      _recordingLabel,
+    );
   }
 
-  Future<void> _finishRecording({required bool tell}) async {
+  /// The call ends while recording: the file is stored in the background
+  /// (leaving does not wait for the encryption).
+  Future<void> _finishRecording() async {
+    final String? path = await _stopRecorder(tell: false);
+    if (path != null) {
+      unawaited(
+        keepFinishedRecording(
+          onRecordingFinished,
+          path,
+          _recorder.mime,
+          _recordingLabel,
+        ),
+      );
+    }
+  }
+
+  /// Stops the recorder; returns the file to be kept, or null when nothing
+  /// ran.
+  Future<String?> _stopRecorder({required bool tell}) async {
     final String? path = _recordingPath;
     if (path == null) {
-      return;
+      return null;
     }
     _recordingPath = null;
     try {
@@ -207,7 +229,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
     if (tell) {
       await _announceRecording(false);
     }
-    onRecordingFinished?.call(path, _recorder.mime, _recordingLabel);
+    return path;
   }
 
   Future<void> _announceRecording(bool on, {String? only}) async {
@@ -1360,7 +1382,7 @@ final class WebRtcGroupCallMedia extends GroupCallMedia {
   @override
   Future<void> close() async {
     // The call ends: a recording still running is finished and kept.
-    await _finishRecording(tell: false);
+    await _finishRecording();
     _recordingPeers.clear();
     final MediaStream? screen = _screenStream;
     _screenStream = null;

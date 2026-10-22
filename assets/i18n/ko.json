@@ -1512,6 +1512,7 @@
   "Nagranie jeszcze się pobiera…": "녹음을 아직 받는 중이에요…",
   "Nagranie nie zawiera danych.": "녹음에 데이터가 없어요.",
   "Nagranie nie zawiera dźwięku.": "녹음에 소리가 없어요.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "통화 녹음이 저장되지 않았습니다. 앱을 닫기 전에 다시 시도하세요. 그렇지 않으면 사라집니다.",
   "Nagranie zapisane (zaszyfrowane).": "녹음이 저장되었어요(암호화됨).",
   "Nagranie {number}": "녹음 {number}",
   "Nagrywaj": "녹음",

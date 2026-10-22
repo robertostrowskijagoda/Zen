@@ -39,9 +39,12 @@
 #     * ZEN_RELEASE_SIGNING_KEY: the release signing key (the contents of
 #       the file `dart run tool/zen_release.dart keygen` wrote; its hybrid
 #       id is in kReleaseMaintainers, docs/RELEASES.md, section 8.6). The sign job
-#       signs SHA256SUMS with it. Without it SHA256SUMS.sig is not made (a
+#       signs SHA256SUMS with it and stops the run when the key is not one
+#       kReleaseMaintainers pins. Without it SHA256SUMS.sig is not made (a
 #       warning), and builds that know a release key refuse to update
 #       themselves from that release.
+# - A tag run stops at once (android job, before any key) while the app
+#   pins no release key or APK certificate (tool/release.dart pinned).
 #   Environments with reviewers are free for public repositories. A private
 #   repository needs a paid plan for environments (Pro, Team or Enterprise),
 #   and GitHub Enterprise for required reviewers. Until the environment
@@ -121,6 +124,15 @@ jobs:
 
       - name: Packages
         run: flutter pub get --enforce-lockfile
+
+      # A tag builds a release only when the app pins its release keys
+      # (kReleaseMaintainers, kOfficialApkCertificatesSha256): without them
+      # the computers would take an update whose SHA256SUMS nobody signed.
+      # `tool/release.dart prepare` checks the same, but a tag can be pushed
+      # without it. A run from a branch never gets here (no keys needed).
+      - name: The app pins its release keys
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: dart run tool/release.dart pinned
 
       - name: Release key
         id: key
@@ -721,7 +733,10 @@ jobs:
           printf '%s' "$SIGNING_KEY" > "$key"
           dart run tool/zen_release.dart sign signed/SHA256SUMS.sig "$key"
           rm -f "$key"
-          dart run tool/zen_release.dart verify signed/SHA256SUMS.sig
+          # Signed with a key the app of this tag pins (kReleaseMaintainers),
+          # or the run stops: a release signed with another key would be
+          # refused by every computer.
+          dart run tool/zen_release.dart verify --pinned signed/SHA256SUMS.sig
 
       - name: Forget the signing key
         if: always()

@@ -24,6 +24,7 @@ import 'package:zen/src/features/update/release.dart';
 import 'package:zen/src/features/update/update_book.dart';
 import 'package:zen/src/features/update/update_service.dart';
 
+import '../tool/release_contract.dart' show pinnedSignatureProblems;
 import '../tool/zen_release.dart' as tool;
 
 const int _day = 24 * 3600 * 1000;
@@ -614,6 +615,25 @@ void main() {
         File(at('SHA256SUMS.sig')).readAsStringSync(),
       )!;
       expect(signed.files.keys, <String>['Zen.apk', 'Zen-Windows.zip']);
+      // What CI checks after signing (verify --pinned): the key it signed
+      // with is one the app pins, and the app pins one at all.
+      final List<String> signers = await tool.validSigners(
+        jsonDecode(File(at('SHA256SUMS.sig')).readAsStringSync())
+            as Map<String, dynamic>,
+      );
+      expect(signers, <String>[key]);
+      expect(
+        pinnedSignatureProblems(signers: signers, pinned: <String>[key]),
+        isEmpty,
+      );
+      expect(
+        pinnedSignatureProblems(signers: signers, pinned: maintainers),
+        hasLength(1),
+      );
+      expect(
+        pinnedSignatureProblems(signers: signers, pinned: const <String>[]),
+        hasLength(1),
+      );
       Future<bool> confirms({
         String version = '1.12.0',
         String name = 'Zen.apk',

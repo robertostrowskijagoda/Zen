@@ -648,30 +648,36 @@ class ZenBlobAvatar extends StatelessWidget {
           // border inside a rounded clip showed its corners).
           ClipRRect(
             borderRadius: round ? BorderRadius.circular(size / 2) : corners,
+            // The border over the photo, as when the photo was part of the
+            // decoration.
             child: DecoratedBox(
+              position: DecorationPosition.foreground,
               decoration: BoxDecoration(
-                color: zen.surfaceSunk,
                 shape: round ? BoxShape.circle : BoxShape.rectangle,
                 borderRadius: round ? null : corners,
                 border: Border.all(color: ring, width: look.lit ? 1.4 : 1),
-                image: image == null
-                    ? null
-                    : DecorationImage(image: image!, fit: BoxFit.cover),
               ),
-              child: SizedBox.square(
-                dimension: size,
-                child: image == null
-                    ? Center(
-                        child: Text(
-                          initial,
-                          style: zen.display(
-                            color: zen.textPrimary,
-                            size: size * 0.38,
-                            weight: FontWeight.w600,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: zen.surfaceSunk,
+                  shape: round ? BoxShape.circle : BoxShape.rectangle,
+                  borderRadius: round ? null : corners,
+                ),
+                child: SizedBox.square(
+                  dimension: size,
+                  child: image == null
+                      ? Center(
+                          child: Text(
+                            initial,
+                            style: zen.display(
+                              color: zen.textPrimary,
+                              size: size * 0.38,
+                              weight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                      )
-                    : null,
+                        )
+                      : ZenStillableImage(image: image!),
+                ),
               ),
             ),
           ),
@@ -876,4 +882,128 @@ class _BracketPainter extends CustomPainter {
   @override
   bool shouldRepaint(_BracketPainter oldDelegate) =>
       oldDelegate.color != color || oldDelegate.glow != glow;
+}
+
+/// A picture that moves only where motion may play: an animated one (a GIF
+/// avatar) stays on the frame it shows in a hidden tab, on a page under
+/// another one, or when the system asks for reduced motion, and decodes
+/// nothing meanwhile. Fills its box ([BoxFit.cover]); empty until loaded
+/// or when it cannot be read.
+class ZenStillableImage extends StatefulWidget {
+  const ZenStillableImage({super.key, required this.image});
+
+  final ImageProvider image;
+
+  @override
+  State<ZenStillableImage> createState() => _ZenStillableImageState();
+}
+
+class _ZenStillableImageState extends State<ZenStillableImage> {
+  ImageStream? _stream;
+  ImageInfo? _info;
+  ImageStreamCompleterHandle? _keepAlive;
+  bool _listening = false;
+  bool _moves = true;
+  late final ImageStreamListener _listener = ImageStreamListener(
+    _onImage,
+    onError: _onError,
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _moves =
+        !(MediaQuery.maybeDisableAnimationsOf(context) ?? false) &&
+        TickerMode.valuesOf(context).enabled;
+    _resolve();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(ZenStillableImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.image != widget.image) {
+      _resolve();
+      _sync();
+    }
+  }
+
+  void _resolve() {
+    final ImageStream stream = widget.image.resolve(
+      createLocalImageConfiguration(context),
+    );
+    if (_stream != null && _stream!.key == stream.key) {
+      return;
+    }
+    _stopListening();
+    _keepAlive?.dispose();
+    _keepAlive = null;
+    _stream = stream;
+  }
+
+  /// Listens while it moves, and until the first frame in any case (to have
+  /// something to show); otherwise lets the stream rest (an animated image
+  /// decodes frames only for listeners).
+  void _sync() {
+    final bool listen = _moves || _info == null;
+    if (listen && !_listening) {
+      // Let go of the rest only once listening (a frame at hand comes at
+      // once and may stop it again).
+      final ImageStreamCompleterHandle? kept = _keepAlive;
+      _keepAlive = null;
+      _listening = true;
+      _stream?.addListener(_listener);
+      kept?.dispose();
+    } else if (!listen && _listening) {
+      // Kept in memory (not loaded again when it moves again).
+      _keepAlive ??= _stream?.completer?.keepAlive();
+      _stopListening();
+    }
+  }
+
+  void _stopListening() {
+    if (_listening) {
+      _stream?.removeListener(_listener);
+      _listening = false;
+    }
+  }
+
+  void _onImage(ImageInfo info, bool synchronousCall) {
+    final ImageInfo? old = _info;
+    setState(() => _info = info);
+    old?.dispose();
+    if (!_moves) {
+      _sync();
+    }
+  }
+
+  void _onError(Object error, StackTrace? stackTrace) {
+    // Unreadable: the background stays.
+    _stopListening();
+  }
+
+  @override
+  void dispose() {
+    _stopListening();
+    _keepAlive?.dispose();
+    _keepAlive = null;
+    _info?.dispose();
+    _info = null;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ImageInfo? info = _info;
+    if (info == null) {
+      return const SizedBox.expand();
+    }
+    return RawImage(
+      image: info.image,
+      scale: info.scale,
+      fit: BoxFit.cover,
+      width: double.infinity,
+      height: double.infinity,
+    );
+  }
 }

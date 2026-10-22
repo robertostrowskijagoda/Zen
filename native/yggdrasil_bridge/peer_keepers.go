@@ -225,6 +225,129 @@ func (node *bridgeNode) setDesktopOnBattery(onBattery bool) {
 		guard.setPaused(onBattery)
 	}
 	node.swapPublicPeers(before, after)
+	node.limitBridges(onBattery)
+}
+
+// dialledBridges are the friends' bridges in the node's list now (every
+// configured peer that is neither a public one nor on the local network),
+// in order.
+func (node *bridgeNode) dialledBridges() []string {
+	node.configMu.RLock()
+	defer node.configMu.RUnlock()
+	var bridges []string
+	for _, peer := range node.config.Peers {
+		if !node.publicPeers[peer] && !isLocalPeerURI(peer) {
+			bridges = append(bridges, peer)
+		}
+	}
+	return bridges
+}
+
+// splitBridges keeps the first keep of bridges and sets the rest aside.
+func splitBridges(bridges []string, keep int) (kept, aside []string) {
+	if keep < 0 {
+		keep = 0
+	}
+	if len(bridges) <= keep {
+		return append([]string(nil), bridges...), nil
+	}
+	return append([]string(nil), bridges[:keep]...),
+		append([]string(nil), bridges[keep:]...)
+}
+
+// withoutPeer is peers without uri.
+func withoutPeer(peers []string, uri string) ([]string, bool) {
+	out := make([]string, 0, len(peers))
+	found := false
+	for _, peer := range peers {
+		if peer == uri {
+			found = true
+			continue
+		}
+		out = append(out, peer)
+	}
+	return out, found
+}
+
+// limitBridges keeps at most desktopBatteryBridgeCount friends' bridges
+// dialled while a computer runs on battery, and dials the ones set aside
+// again once it is plugged in.
+func (node *bridgeNode) limitBridges(onBattery bool) {
+	saver := node.power
+	if saver == nil {
+		return
+	}
+	if onBattery {
+		_, aside := splitBridges(node.dialledBridges(), desktopBatteryBridgeCount)
+		if len(aside) == 0 {
+			return
+		}
+		saver.mu.Lock()
+		for _, uri := range aside {
+			saver.bridges, _ = withoutPeer(saver.bridges, uri)
+			saver.bridges = append(saver.bridges, uri)
+		}
+		saver.mu.Unlock()
+		for _, uri := range aside {
+			if parsed, err := url.Parse(uri); err == nil {
+				_ = node.core.RemovePeer(parsed, "")
+			}
+			node.updateConfiguredPeer(uri, false)
+		}
+		node.logger.Infof("on battery: %d friends' bridge(s) set aside", len(aside))
+		return
+	}
+	saver.mu.Lock()
+	again := saver.bridges
+	saver.bridges = nil
+	saver.mu.Unlock()
+	for _, uri := range again {
+		parsed, err := url.Parse(uri)
+		if err != nil {
+			continue
+		}
+		if err := node.core.AddPeer(parsed, ""); err == nil {
+			node.updateConfiguredPeer(uri, true)
+		}
+	}
+}
+
+// setBridgeAside keeps a friend's bridge asked for while the computer runs
+// on battery and already dials its share for later instead of dialling it.
+// Reports whether it did.
+func (node *bridgeNode) setBridgeAside(uri string) bool {
+	saver := node.power
+	if saver == nil || !node.onDesktopBattery() {
+		return false
+	}
+	dialled := node.dialledBridges()
+	for _, peer := range dialled {
+		if peer == uri {
+			return false
+		}
+	}
+	if len(dialled) < desktopBatteryBridgeCount {
+		return false
+	}
+	saver.mu.Lock()
+	defer saver.mu.Unlock()
+	saver.bridges, _ = withoutPeer(saver.bridges, uri)
+	saver.bridges = append(saver.bridges, uri)
+	return true
+}
+
+// forgetBridgeAside drops uri from the bridges set aside; reports whether
+// it was there (and so not dialled).
+func (node *bridgeNode) forgetBridgeAside(uri string) bool {
+	saver := node.power
+	if saver == nil {
+		return false
+	}
+	saver.mu.Lock()
+	defer saver.mu.Unlock()
+	var found bool
+	saver.bridges, found = withoutPeer(saver.bridges, uri)
+	return found
 }
 
 // limitPublicPeers is what a node dials of desired, the public peers asked

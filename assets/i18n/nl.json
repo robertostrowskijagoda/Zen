@@ -1534,6 +1534,7 @@
   "Nagranie jeszcze się pobiera…": "De opname wordt nog gedownload…",
   "Nagranie nie zawiera danych.": "De opname bevat geen gegevens.",
   "Nagranie nie zawiera dźwięku.": "De opname bevat geen geluid.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "De gespreksopname is niet opgeslagen. Probeer het opnieuw voordat je de app sluit, anders gaat hij verloren.",
   "Nagranie zapisane (zaszyfrowane).": "Opname opgeslagen (versleuteld).",
   "Nagranie {number}": "Opname {number}",
   "Nagrywaj": "Opnemen",

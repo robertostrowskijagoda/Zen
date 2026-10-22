@@ -321,6 +321,8 @@ class _TabbedShellState extends ConsumerState<_TabbedShell> {
             const ClockSkewBanner(),
             // A newer release on GitHub, or GitHub blocked.
             const GithubUpdateBanner(),
+            // A call recording that could not be stored yet.
+            const UnsavedCallRecordingsBanner(),
             Expanded(
               child: Row(
                 children: <Widget>[

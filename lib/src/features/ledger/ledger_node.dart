@@ -159,6 +159,10 @@ const List<String> kFollowedFriendSpaces = <String>[
   'private',
 ];
 
+/// Every this many periodic rounds the ledger greets everyone, not only
+/// who was heard from lately (an hour with the default 10 min rounds).
+const int kLedgerGreetAllEvery = 6;
+
 /// Spaces anyone may read (followers who are not friends).
 const List<String> kPublicSpaceKinds = <String>['feed', 'profile'];
 
@@ -221,6 +225,7 @@ final class LedgerNode {
   Completer<void>? _resumed;
   bool _loaded = false;
   Timer? _syncTimer;
+  int _syncRound = 0;
 
   bool get isSuspended => _suspended;
 
@@ -482,6 +487,24 @@ final class LedgerNode {
   final Map<String, String> _accounts = <String, String>{};
   final Map<String, int> _helloSentAt = <String, int>{};
 
+  /// Friends sent this device's whole certificate in this run: they keep
+  /// it, so later hellos only name it (about 10 KB less each).
+  final Set<String> _certificateSentTo = <String>{};
+
+  /// When each address last asked for the whole certificate, or was asked
+  /// for its own (each at most once a minute).
+  final Map<String, int> _certificateAskedAt = <String, int>{};
+  final Map<String, int> _certificateResentAt = <String, int>{};
+
+  /// The hello's proof: signed once for this address, session key and
+  /// device key (what it signs does not change between hellos).
+  ({String address, String key, String device, String proof})? _helloProof;
+
+  /// When something last came from each address: the periodic hellos go
+  /// only to who was heard from lately ([_heardRecently]).
+  final Map<String, int> _heardAt = <String, int>{};
+  static const int _maxHeard = 5000;
+
   /// Followed addresses (not friends) → account key ('' until known).
   final Map<String, String> _followed = <String, String>{};
 
@@ -710,8 +733,11 @@ final class LedgerNode {
     }
     _syncTimer = Timer.periodic(syncInterval, (_) {
       if (!_suspended && !_stopped) {
+        // Everyone every [kLedgerGreetAllEvery] rounds (catching up after
+        // a long gap on the network); in between only who was heard from.
+        _syncRound += 1;
         unawaitedLogged(
-          greetFriends(),
+          greetFriends(onlyHeard: _syncRound % kLedgerGreetAllEvery != 0),
           context: 'Okresowa synchronizacja dziennika nie udała się',
         );
         unawaitedLogged(
@@ -765,12 +791,22 @@ final class LedgerNode {
   }
 
   /// Sends a hello to every friend (again at most every [helloInterval]).
-  Future<void> greetFriends() async {
+  ///
+  /// [onlyHeard] (most periodic rounds, [kLedgerGreetAllEvery]): only to
+  /// those heard from lately.
+  /// A hello to a phone that is locked or offline does nothing but wake it
+  /// (a locked phone drops it); anyone who comes back greets first (on
+  /// start and when Zen comes back), and any frame from them is answered
+  /// with a hello.
+  Future<void> greetFriends({bool onlyHeard = false}) async {
     if (_suspended) {
       return;
     }
+    bool due(String address) => !onlyHeard || _heardRecently(address);
     for (final String friend in friendAddresses()) {
-      _hello(friend);
+      if (due(friend)) {
+        _hello(friend);
+      }
     }
     for (final String device in <String>{
       ..._liveDeviceAddresses(),
@@ -779,7 +815,7 @@ final class LedgerNode {
       ..._hintAddresses(),
       ...?greetAlso?.call().map(PeerShareCodec.normalizeAddress),
     }) {
-      if (device != _ownAddress) {
+      if (device != _ownAddress && due(device)) {
         _hello(device);
       }
     }
@@ -788,10 +824,29 @@ final class LedgerNode {
     // A followed account answers a hello with its own, which starts a sync.
     // (Forced: the answer never answers back, so this cannot loop.)
     for (final String address in _followed.keys) {
-      if (!_isFriend(address)) {
+      if (!_isFriend(address) && due(address)) {
         _hello(address, force: true);
       }
     }
+  }
+
+  /// Whether anything came from [address] within three sync rounds (half
+  /// an hour without a periodic round).
+  bool _heardRecently(String address) {
+    final int? at = _heardAt[PeerShareCodec.normalizeAddress(address)];
+    final Duration window = syncInterval > Duration.zero
+        ? syncInterval * 3
+        : const Duration(minutes: 30);
+    return at != null && _clock.wallMillis() - at <= window.inMilliseconds;
+  }
+
+  void _noteHeard(String address) {
+    final String normalized = PeerShareCodec.normalizeAddress(address);
+    _heardAt.remove(normalized);
+    if (_heardAt.length >= _maxHeard) {
+      _heardAt.remove(_heardAt.keys.first);
+    }
+    _heardAt[normalized] = _clock.wallMillis();
   }
 
   /// Follows the public posts and profile of [address] — anyone, no
@@ -1701,7 +1756,12 @@ final class LedgerNode {
     );
   }
 
-  void _hello(String friend, {bool force = false, bool reply = false}) {
+  void _hello(
+    String friend, {
+    bool force = false,
+    bool reply = false,
+    bool askCertificate = false,
+  }) {
     final String normalized = PeerShareCodec.normalizeAddress(friend);
     final int now = _clock.wallMillis();
     final int? last = _helloSentAt[normalized];
@@ -1716,27 +1776,130 @@ final class LedgerNode {
     }
     _helloSentAt[normalized] = now;
     final String me = _ownAddress;
+    final bool friendly = _isFriend(friend);
+    // A friend keeps the certificate from the first hello of this run: the
+    // later ones only name it (it asks for the whole one when it lacks it).
+    final bool named = friendly && !_certificateSentTo.add(normalized);
     unawaitedLogged(() async {
+      final DeviceCertificate cert = identity.certificate;
       // Proves the device key holder is at this address (the certificate
       // alone is public and could be shown by anyone).
       // ... and holds the post-quantum device key that seals this frame.
       final String key = _ownSessionKey;
-      final Uint8List proof = await identity.deviceKey.sign(
-        _proofBytes(me, key),
-      );
+      final String proof = await _proofFor(me, key);
       _send(friend, <String, dynamic>{
         ...?helloExtras?.call(normalized),
-        if (_isFriend(friend)) 'caps': kZenCaps,
+        if (friendly) 'caps': kZenCaps,
         'type': kLedgerHelloType,
-        'cert': identity.certificate.toJson(),
+        if (named)
+          'cd': <String, dynamic>{'a': cert.account, 'd': cert.device}
+        else
+          'cert': cert.toJson(),
         'p': <String, dynamic>{
           'f': me,
           if (key.isNotEmpty) 'k': key,
-          's': b64(proof),
+          's': proof,
         },
         if (reply) 'r': 1,
+        if (askCertificate) 'nc': 1,
       });
     }(), context: 'Powitanie dziennika nie wyszło');
+  }
+
+  /// The hello's proof for [me] and [key], signed once (a hybrid signature
+  /// costs time and battery; what it signs stays the same).
+  Future<String> _proofFor(String me, String key) async {
+    final String device = identity.deviceKey.id;
+    final ({String address, String key, String device, String proof})? cached =
+        _helloProof;
+    if (cached != null &&
+        cached.address == me &&
+        cached.key == key &&
+        cached.device == device) {
+      return cached.proof;
+    }
+    final String proof = b64(
+      await identity.deviceKey.sign(_proofBytes(me, key)),
+    );
+    _helloProof = (address: me, key: key, device: device, proof: proof);
+    return proof;
+  }
+
+  /// The certificate of a hello: carried whole, or only named by account
+  /// and device (a friend's later hellos) and taken from the directory.
+  /// When a named one is not known here, [ask] asks [from] for the whole
+  /// one (at most once a minute).
+  DeviceCertificate? _helloCertificate(
+    String from,
+    Map<String, dynamic> payload, {
+    required bool ask,
+  }) {
+    final Object? whole = payload['cert'];
+    if (whole != null) {
+      return DeviceCertificate.fromJson(whole);
+    }
+    final Object? named = payload['cd'];
+    if (named is! Map) {
+      return null;
+    }
+    final Object? a = named['a'];
+    final Object? d = named['d'];
+    if (a is! String || d is! String || a.length > 200 || d.length > 200) {
+      return null;
+    }
+    final DeviceCertificate? known = store.directory.certificateOf(a, d);
+    if (known == null &&
+        ask &&
+        _onceAMinute(
+          _certificateAskedAt,
+          PeerShareCodec.normalizeAddress(from),
+        )) {
+      _hello(from, force: true, askCertificate: true);
+    }
+    return known;
+  }
+
+  bool _namesKnownAccount(Map<String, dynamic> payload) {
+    final Object? named = payload['cd'];
+    final Object? a = named is Map ? named['a'] : null;
+    return a is String && (a == account || _accounts.containsValue(a));
+  }
+
+  /// A friend's hello asked for this device's whole certificate: the next
+  /// hello carries it (at most once a minute).
+  ///
+  /// Counted per address and asking device ([payload] names it): a phone
+  /// set up again at the same address is a new device and gets it at once.
+  void _resendCertificateTo(String from, Map<String, dynamic> payload) {
+    final Object? cert = payload['cert'];
+    final Object? named = payload['cd'];
+    final Object? device = cert is Map
+        ? cert['device']
+        : named is Map
+        ? named['d']
+        : null;
+    final String asker = device is String && device.length <= 200 ? device : '';
+    final String normalized = PeerShareCodec.normalizeAddress(from);
+    if (_onceAMinute(_certificateResentAt, '$normalized|$asker')) {
+      _certificateSentTo.remove(normalized);
+      _hello(from, force: true);
+    }
+  }
+
+  /// Whether [key] was not let through within the last minute (and notes
+  /// it now).
+  bool _onceAMinute(Map<String, int> at, String key) {
+    final int now = _clock.wallMillis();
+    final int? last = at[key];
+    if (last != null && now - last < 60000) {
+      return false;
+    }
+    at.remove(key);
+    if (at.length >= 1000) {
+      at.remove(at.keys.first);
+    }
+    at[key] = now;
+    return true;
   }
 
   /// What a hello's proof signs: the address and the post-quantum device
@@ -1907,6 +2070,13 @@ final class LedgerNode {
   Future<void> _onStrangerFrame(SignalTransportFrame frame) async {
     final String from = PeerShareCodec.normalizeAddress(frame.from);
     final Object? type = frame.payload['type'];
+    if (_followed.containsKey(from) ||
+        _strangerDevices.containsKey(from) ||
+        _isSeed(from)) {
+      // Someone greeted on purpose (a followed account, a group member
+      // known by a proven hello, a seed): heard from lately.
+      _noteHeard(from);
+    }
     if (type != kLedgerHelloType && !isLedgerMessage(frame.payload)) {
       return;
     }
@@ -1914,8 +2084,13 @@ final class LedgerNode {
       return;
     }
     if (type == kLedgerHelloType) {
-      final DeviceCertificate? cert = DeviceCertificate.fromJson(
-        frame.payload['cert'],
+      // A stranger is asked for its certificate only when it names this
+      // account or a friend's (a device of theirs not known yet), never
+      // for anyone else's.
+      final DeviceCertificate? cert = _helloCertificate(
+        from,
+        frame.payload,
+        ask: _namesKnownAccount(frame.payload),
       );
       if (cert == null || !await _checkStrangerCertificate(cert)) {
         return;
@@ -2119,6 +2294,7 @@ final class LedgerNode {
       await _onStrangerFrame(frame);
       return;
     }
+    _noteHeard(frame.from);
     // Any sign of life from a friend (a chat message, a call…) is a chance
     // to catch up: the hello (at most every [helloInterval]) makes them
     // sync with us.
@@ -2168,8 +2344,13 @@ final class LedgerNode {
   }
 
   Future<void> _onHello(String from, SignalTransportFrame frame) async {
-    final DeviceCertificate? cert = DeviceCertificate.fromJson(
-      frame.payload['cert'],
+    if (frame.payload['nc'] == 1) {
+      _resendCertificateTo(from, frame.payload);
+    }
+    final DeviceCertificate? cert = _helloCertificate(
+      from,
+      frame.payload,
+      ask: true,
     );
     if (cert == null || !await store.directory.addCertificate(cert)) {
       return;

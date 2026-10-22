@@ -22,10 +22,14 @@ abstract final class ZenMotion {
   @visibleForTesting
   static bool get clockRunning => _LowRateClock.instance.isRunning;
 
-  /// Whether motion may play here: [enabled], and the system does not ask
-  /// for reduced motion (`MediaQuery.disableAnimations`).
+  /// Whether motion may play here: [enabled], the system does not ask for
+  /// reduced motion (`MediaQuery.disableAnimations`), and the widget is not
+  /// in a hidden part of the tree (a tab in the background, a page under
+  /// another one: `TickerMode` off there).
   static bool allowedIn(BuildContext context) =>
-      enabled && !(MediaQuery.maybeDisableAnimationsOf(context) ?? false);
+      enabled &&
+      !(MediaQuery.maybeDisableAnimationsOf(context) ?? false) &&
+      TickerMode.valuesOf(context).enabled;
 
   static bool _detectDefault() {
     if (kIsWeb) {

@@ -1556,6 +1556,7 @@
   "Nagranie jeszcze się pobiera…": "Nahrávka se ještě stahuje…",
   "Nagranie nie zawiera danych.": "Nahrávka neobsahuje žádná data.",
   "Nagranie nie zawiera dźwięku.": "Nahrávka neobsahuje zvuk.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "Záznam hovoru se neuložil. Zkus to znovu, než aplikaci zavřeš, jinak se ztratí.",
   "Nagranie zapisane (zaszyfrowane).": "Nahrávka uložena (zašifrovaná).",
   "Nagranie {number}": "Nahrávka {number}",
   "Nagrywaj": "Nahrávat",

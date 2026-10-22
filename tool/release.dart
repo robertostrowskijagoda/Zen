@@ -4,6 +4,9 @@
 //   dart run tool/release.dart check
 //       Do the app and .github/workflows/release.yml agree on the file
 //       names (and the version in pubspec.yaml and app_version.dart)?
+//   dart run tool/release.dart pinned
+//       Does the app pin its release keys (kReleaseMaintainers,
+//       kOfficialApkCertificatesSha256)? CI runs it for every tag build.
 //   dart run tool/release.dart prepare 1.12.0 [--build 12] [--skip-checks]
 //       [--allow-dirty] [--no-tag] [--allow-unpinned-keys]
 //       Clean tree, the app pins its release keys (kReleaseMaintainers,
@@ -30,7 +33,7 @@ import 'zen_release.dart' as signing;
 Future<void> main(List<String> args) async {
   if (args.isEmpty) {
     stderr.writeln(
-      'Usage: dart run tool/release.dart check | prepare <x.y.z> | '
+      'Usage: dart run tool/release.dart check | pinned | prepare <x.y.z> | '
       'verify <folder> --version <x.y.z>',
     );
     exitCode = 64;
@@ -40,6 +43,8 @@ Future<void> main(List<String> args) async {
     switch (args.first) {
       case 'check':
         exitCode = _report('check', _check()) ? 0 : 1;
+      case 'pinned':
+        exitCode = _report('release keys', _pinnedKeys()) ? 0 : 1;
       case 'prepare':
         exitCode = await _prepare(args.skip(1).toList()) ? 0 : 1;
       case 'verify':
@@ -90,6 +95,14 @@ bool _report(String what, List<String> problems) {
   }
   return false;
 }
+
+/// What the app of this tree does not pin yet (see [pinnedKeyProblems]).
+List<String> _pinnedKeys() => pinnedKeyProblems(
+  releaseDart: File('lib/src/features/update/release.dart').readAsStringSync(),
+  apkSignatureDart: File(
+    'lib/src/features/update/apk_signature.dart',
+  ).readAsStringSync(),
+);
 
 /// The app and the workflow agree on names and versions.
 List<String> _check() {
@@ -217,14 +230,7 @@ Future<bool> _prepare(List<String> args) async {
 
   // 2. The app pins the keys its updates are checked with; without them
   // the release cannot be told from a forged one.
-  final List<String> keys = pinnedKeyProblems(
-    releaseDart: File(
-      'lib/src/features/update/release.dart',
-    ).readAsStringSync(),
-    apkSignatureDart: File(
-      'lib/src/features/update/apk_signature.dart',
-    ).readAsStringSync(),
-  );
+  final List<String> keys = _pinnedKeys();
   if (keys.isNotEmpty) {
     if (!_flag(args, 'allow-unpinned-keys')) {
       _report('release keys', keys);
@@ -380,9 +386,9 @@ Future<bool> _verify(List<String> args) async {
       final List<String> signers = await signing.validSigners(
         jsonDecode(sig.readAsStringSync()) as Map<String, dynamic>,
       );
-      final String pinned = File(
-        'lib/src/features/update/release.dart',
-      ).readAsStringSync();
+      final Set<String> pinned = pinnedReleaseKeys(
+        File('lib/src/features/update/release.dart').readAsStringSync(),
+      ).toSet();
       final List<String> trusted = <String>[
         for (final String id in signers)
           if (pinned.contains(id)) id,

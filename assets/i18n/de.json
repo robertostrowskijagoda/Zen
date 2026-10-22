@@ -1534,6 +1534,7 @@
   "Nagranie jeszcze się pobiera…": "Die Aufnahme wird noch heruntergeladen…",
   "Nagranie nie zawiera danych.": "Die Aufnahme enthält keine Daten.",
   "Nagranie nie zawiera dźwięku.": "Die Aufnahme enthält keinen Ton.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "Die Gesprächsaufnahme wurde nicht gespeichert. Versuche es erneut, bevor du die App schließt, sonst geht sie verloren.",
   "Nagranie zapisane (zaszyfrowane).": "Aufnahme gespeichert (verschlüsselt).",
   "Nagranie {number}": "Aufnahme {number}",
   "Nagrywaj": "Aufnehmen",

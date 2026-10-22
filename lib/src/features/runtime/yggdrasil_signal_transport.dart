@@ -168,8 +168,9 @@ final class YggdrasilSignalTransport implements SignalTransport {
           break;
         }
         if (result['available'] == true) {
-          // The packet woke the phone; it stays awake a few seconds so the
-          // signal is handled (no lock holds it otherwise).
+          // The packet woke the phone; it stays awake a moment so the
+          // signal is read (no lock holds it otherwise). Whoever keeps it
+          // (the inbox, a notice, a ring) holds the phone until done.
           ZenWake.signalArrived();
           await _processSignalResult(result);
           // Whatever queued up meanwhile, without another round trip.

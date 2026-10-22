@@ -292,6 +292,7 @@ final class RuntimeNodeSession {
     required this.snapshot,
     this.refreshSnapshot,
     this.addPeer,
+    this.removePeer,
     this.startDoor,
     this.stopDoor,
     this.setMailboxDoors,
@@ -307,6 +308,9 @@ final class RuntimeNodeSession {
 
   /// Adds a mesh peer at runtime (bridges learnt from friends).
   final void Function(String uri)? addPeer;
+
+  /// Drops a mesh peer added with [addPeer] (a bridge no longer chosen).
+  final void Function(String uri)? removePeer;
 
   /// Runs the flat's door with a key (hex seed) and returns its address.
   /// (door_node.go in the bridge).
@@ -712,6 +716,24 @@ final class RuntimeNodeRuntime extends ChangeNotifier
     }
   }
 
+  /// Makes [uris] the additional mesh peers (the bridges chosen now): new
+  /// ones are connected, ones no longer chosen dropped (every connection
+  /// costs traffic and keep-alives). Safe to call before the node is up.
+  void setMeshPeers(Iterable<String> uris) {
+    final Set<String> wanted = uris.toSet();
+    for (final String uri in _extraPeers.toList()) {
+      if (!wanted.contains(uri)) {
+        _extraPeers.remove(uri);
+        _removePeerNow(uri);
+      }
+    }
+    addMeshPeers(wanted);
+  }
+
+  /// The additional mesh peers asked for now (tests).
+  @visibleForTesting
+  Set<String> get meshPeers => Set<String>.unmodifiable(_extraPeers);
+
   /// The key (hex seed) of the flat's door the neighbours section wants
   /// running; kept so the door comes back after the node restarts.
   String? _doorSeed;
@@ -822,6 +844,18 @@ final class RuntimeNodeRuntime extends ChangeNotifier
       add(uri);
     } catch (error) {
       logZenWarning('Dodanie mostu $uri nie udało się: $error');
+    }
+  }
+
+  void _removePeerNow(String uri) {
+    final void Function(String uri)? remove = _session?.removePeer;
+    if (remove == null) {
+      return;
+    }
+    try {
+      remove(uri);
+    } catch (error) {
+      logZenWarning('Usunięcie mostu $uri nie udało się: $error');
     }
   }
 
@@ -1307,6 +1341,7 @@ Future<RuntimeNodeSession> _bootstrapDefaultRuntimeSession({
     refreshSnapshot: () async =>
         _snapshotFromNodeInfo(bridge.getNodeInfo(handle)),
     addPeer: (String uri) => bridge.addPeer(handle, uri),
+    removePeer: (String uri) => bridge.removePeer(handle, uri),
     startDoor: (String seedHex) =>
         bridge.startDoorNode(handle, seedHex)['address'] as String?,
     stopDoor: () => bridge.stopDoorNode(handle),

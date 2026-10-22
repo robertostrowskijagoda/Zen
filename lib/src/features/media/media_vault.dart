@@ -32,7 +32,9 @@ const String kMediaVaultFolder = 'vault';
 /// Plain bytes in one encrypted segment.
 const int kMediaVaultSegmentBytes = 64 * 1024;
 
-const int _headerBytes = 16;
+/// Magic (6), version (1), reserved (1), segment size (4), plain length
+/// (8: a recording of a long call can pass 4 GiB).
+const int _headerBytes = 20;
 
 /// Nonce (12) and tag (16) of one AES-GCM segment.
 const int _sealOverheadBytes = 28;
@@ -115,15 +117,41 @@ final class MediaVault {
     return path;
   }
 
-  /// Encrypts the plain file [source] into a new file (and by default
-  /// deletes [source]); returns the new path.
+  /// Encrypts the plain file [source] into a new file, segment by segment
+  /// (memory stays at one segment whatever the size), and by default
+  /// deletes [source] once the new file is complete; returns the new path.
+  /// On failure nothing new is left behind and [source] stays.
   Future<String> putFile(File source, {bool deleteSource = true}) async {
-    final Uint8List bytes = await source.readAsBytes();
-    final String path = await put(bytes);
+    final Uint8List key = await _key();
+    final Directory folder = await _folder();
+    final String id = _newId();
+    final String path =
+        '${folder.path}${Platform.pathSeparator}$id$kMediaVaultExtension';
+    await _sealFileToFileIn(
+      key,
+      id,
+      source.path,
+      path,
+      background: await source.length() > _isolateThresholdBytes,
+    );
     if (deleteSource) {
       await _deleteQuietly(source);
     }
     return path;
+  }
+
+  /// The name of the vault file at [path]: what an index keeps instead of
+  /// the whole path, which changes when the app's folder moves.
+  static String fileNameOf(String path) {
+    final String id = _idOf(path);
+    return '$id$kMediaVaultExtension';
+  }
+
+  /// The path of the vault file [name] (see [fileNameOf]) in this vault.
+  Future<String> pathOf(String name) async {
+    final String id = _idOf(name);
+    final Directory folder = await _folder();
+    return '${folder.path}${Platform.pathSeparator}$id$kMediaVaultExtension';
   }
 
   /// Encrypts [length] plain bytes arriving as [plain] (pieces of any
@@ -131,6 +159,7 @@ final class MediaVault {
   /// segment whatever the size; returns its path. Throws (and leaves
   /// nothing behind) when [plain] brings more or fewer bytes.
   Future<String> putStream(int length, Stream<List<int>> plain) async {
+    _checkLength(length);
     final Uint8List key = await _key();
     final Directory folder = await _folder();
     final String id = _newId();
@@ -306,14 +335,43 @@ final class MediaVault {
       '${folder.path}${Platform.pathSeparator}'
       '${_newId()}${_cleanExtension(extension)}',
     );
-    await _openToFileIn(
-      key,
-      id,
-      path,
-      target.path,
-      background: size > _isolateThresholdBytes,
-    );
+    try {
+      await _openToFileIn(
+        key,
+        id,
+        path,
+        target.path,
+        background: size > _isolateThresholdBytes,
+      );
+    } on Object {
+      await _deleteQuietly(target);
+      rethrow;
+    }
     return target;
+  }
+
+  /// Decrypts the vault file at [path] into the plain file [target] (made
+  /// or emptied), segment by segment: memory stays at one segment whatever
+  /// the size. On failure the half-written [target] is deleted.
+  Future<void> decryptToFile(String path, File target) async {
+    if (!isMediaVaultPath(path)) {
+      throw ArgumentError.value(path, 'path', 'Not an encrypted media file.');
+    }
+    final String id = _idOf(path);
+    final Uint8List key = await _key();
+    final int size = await File(path).length();
+    try {
+      await _openToFileIn(
+        key,
+        id,
+        path,
+        target.path,
+        background: size > _isolateThresholdBytes,
+      );
+    } on Object {
+      await _deleteQuietly(target);
+      rethrow;
+    }
   }
 
   /// Deletes the vault file at [path]. Anything else (a file the user
@@ -465,6 +523,15 @@ String _idOf(String path) {
   return id;
 }
 
+/// Largest plain length a vault file holds (far beyond any recording).
+const int _maxPlainBytes = 1 << 46;
+
+void _checkLength(int length) {
+  if (length < 0 || length > _maxPlainBytes) {
+    throw const FormatException('Encrypted media file is too large.');
+  }
+}
+
 int _segmentCount(int length) => length == 0
     ? 1
     : (length + kMediaVaultSegmentBytes - 1) ~/ kMediaVaultSegmentBytes;
@@ -488,7 +555,8 @@ List<int> _segmentAad(String id, int index, int count, int length) =>
   if (data.getUint32(8, Endian.little) != kMediaVaultSegmentBytes) {
     throw const FormatException('Unsupported encrypted media segment size.');
   }
-  final int length = data.getUint32(12, Endian.little);
+  final int length = data.getUint64(12, Endian.little);
+  _checkLength(length);
   final int count = _segmentCount(length);
   if (fileLength != _headerBytes + count * _sealOverheadBytes + length) {
     throw const FormatException('Encrypted media file has the wrong size.');
@@ -498,6 +566,7 @@ List<int> _segmentAad(String id, int index, int count, int length) =>
 
 /// The header of a file of [length] plain bytes.
 Uint8List _headerFor(int length) {
+  _checkLength(length);
   final ByteData header = ByteData(_headerBytes);
   for (int index = 0; index < _magic.length; index++) {
     header.setUint8(index, _magic[index]);
@@ -506,24 +575,14 @@ Uint8List _headerFor(int length) {
     ..setUint8(6, _formatVersion)
     ..setUint8(7, 0)
     ..setUint32(8, kMediaVaultSegmentBytes, Endian.little)
-    ..setUint32(12, length, Endian.little);
+    ..setUint64(12, length, Endian.little);
   return header.buffer.asUint8List();
 }
 
 Future<Uint8List> _sealMedia(Uint8List key, String id, Uint8List plain) async {
   final int length = plain.length;
   final int count = _segmentCount(length);
-  final ByteData header = ByteData(_headerBytes);
-  for (int index = 0; index < _magic.length; index++) {
-    header.setUint8(index, _magic[index]);
-  }
-  header
-    ..setUint8(6, _formatVersion)
-    ..setUint8(7, 0)
-    ..setUint32(8, kMediaVaultSegmentBytes, Endian.little)
-    ..setUint32(12, length, Endian.little);
-  final BytesBuilder out = BytesBuilder(copy: false)
-    ..add(header.buffer.asUint8List());
+  final BytesBuilder out = BytesBuilder(copy: false)..add(_headerFor(length));
   for (int index = 0; index < count; index++) {
     final int start = index * kMediaVaultSegmentBytes;
     final int end = min(start + kMediaVaultSegmentBytes, length);
@@ -579,14 +638,94 @@ Future<Uint8List> _openFile(Uint8List key, String id, String path) async {
   return _openMedia(key, id, await File(path).readAsBytes());
 }
 
+/// Encrypts the plain file [source] into [path] one segment at a time,
+/// through `<path>.tmp` (removed on failure).
+Future<void> _sealFileToFile(
+  Uint8List key,
+  String id,
+  String source,
+  String path,
+) async {
+  final File temporary = File('$path.tmp');
+  final RandomAccessFile input = await File(source).open();
+  bool done = false;
+  try {
+    final RandomAccessFile output = await temporary.open(mode: FileMode.write);
+    try {
+      final int length = await input.length();
+      final int count = _segmentCount(length);
+      await output.writeFrom(_headerFor(length));
+      for (int index = 0; index < count; index++) {
+        final int plainLength = min(
+          kMediaVaultSegmentBytes,
+          length - index * kMediaVaultSegmentBytes,
+        );
+        final Uint8List plain = await input.read(plainLength);
+        if (plain.length != plainLength) {
+          throw FileSystemException('The file changed while sealing.', source);
+        }
+        await output.writeFrom(
+          await encryptSecurityBytes(
+            plain,
+            key,
+            aad: _segmentAad(id, index, count, length),
+          ),
+        );
+      }
+      await output.flush();
+    } finally {
+      await output.close();
+    }
+    await temporary.rename(path);
+    done = true;
+  } finally {
+    await input.close();
+    if (!done) {
+      await _deleteQuietly(temporary);
+    }
+  }
+}
+
+/// Decrypts the vault file at [path] into the plain file [target] one
+/// segment at a time.
 Future<void> _openToFile(
   Uint8List key,
   String id,
   String path,
   String target,
 ) async {
-  final Uint8List plain = await _openFile(key, id, path);
-  await File(target).writeAsBytes(plain, flush: true);
+  final RandomAccessFile input = await File(path).open();
+  try {
+    final ({int length, int count}) header = _readHeader(
+      await input.read(_headerBytes),
+      await input.length(),
+    );
+    final RandomAccessFile output = await File(
+      target,
+    ).open(mode: FileMode.write);
+    try {
+      for (int index = 0; index < header.count; index++) {
+        final int plainLength = min(
+          kMediaVaultSegmentBytes,
+          header.length - index * kMediaVaultSegmentBytes,
+        );
+        final Uint8List plain = await decryptSecurityBytes(
+          await input.read(plainLength + _sealOverheadBytes),
+          key,
+          aad: _segmentAad(id, index, header.count, header.length),
+        );
+        if (plain.length != plainLength) {
+          throw const FormatException('Encrypted media segment is damaged.');
+        }
+        await output.writeFrom(plain);
+      }
+      await output.flush();
+    } finally {
+      await output.close();
+    }
+  } finally {
+    await input.close();
+  }
 }
 
 // Top-level, so the closures sent to another isolate capture only these
@@ -603,6 +742,19 @@ Future<void> _sealToFileIn(
     return _sealToFile(key, id, plain, path);
   }
   return Isolate.run<void>(() => _sealToFile(key, id, plain, path));
+}
+
+Future<void> _sealFileToFileIn(
+  Uint8List key,
+  String id,
+  String source,
+  String path, {
+  required bool background,
+}) {
+  if (!background) {
+    return _sealFileToFile(key, id, source, path);
+  }
+  return Isolate.run<void>(() => _sealFileToFile(key, id, source, path));
 }
 
 Future<Uint8List> _openFileIn(

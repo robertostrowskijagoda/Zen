@@ -1512,6 +1512,7 @@
   "Nagranie jeszcze się pobiera…": "Rekaman masih diunduh…",
   "Nagranie nie zawiera danych.": "Rekaman tidak berisi data.",
   "Nagranie nie zawiera dźwięku.": "Rekaman tidak berisi suara.",
+  "Nagranie rozmowy nie zostało zapisane. Ponów przed zamknięciem aplikacji, inaczej zniknie.": "Rekaman panggilan tidak tersimpan. Coba lagi sebelum menutup aplikasi, atau rekaman akan hilang.",
   "Nagranie zapisane (zaszyfrowane).": "Rekaman disimpan (terenkripsi).",
   "Nagranie {number}": "Rekaman {number}",
   "Nagrywaj": "Rekam",

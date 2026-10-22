@@ -452,6 +452,9 @@ final class LockedNearby {
   /// Reminders of the kit shown in this run.
   final Set<String> _reminded = <String>{};
   bool _running = false;
+
+  /// This phone can look around at all (Bluetooth LE, permission).
+  bool _lookPossible = false;
   bool _claimed = false;
   bool _windowOpen = false;
   int _held = 0;
@@ -506,14 +509,12 @@ final class LockedNearby {
       _claimed = true;
     }
     if (kit.look && kit.record) {
-      // An alarm wakes the sleeping phone for the look and holds it awake
-      // for the scan and the results it batches.
-      _lookTimer = ZenWake.every(
-        'nearby-look',
-        lookEvery,
-        () => unawaitedLogged(lookNow(), context: 'Locked nearby: look'),
-        hold: lookFor + batchGrace + const Duration(seconds: 4),
-      );
+      final Map<Object?, Object?> state = await radio.state();
+      // No Bluetooth LE or no permission: no look can run until the app is
+      // opened again (which starts this anew), so none is planned.
+      _lookPossible = state['supported'] != false && state['permitted'] == true;
+      // Bluetooth off: planned once it is back on (a `bluetooth` event).
+      _planLooks(radioOn: state['enabled'] == true);
     }
     if (kit.reminders.isNotEmpty) {
       await remindIfDue();
@@ -536,8 +537,7 @@ final class LockedNearby {
       return;
     }
     _running = false;
-    _lookTimer?.cancel();
-    _lookTimer = null;
+    _planLooks(radioOn: false);
     _remindTimer?.cancel();
     _remindTimer = null;
     _remindWake?.cancel();
@@ -557,6 +557,43 @@ final class LockedNearby {
       await radio.stopScan();
     }
     await keepEncounters();
+  }
+
+  /// Plans the looks around while they can run ([radioOn]), or drops them.
+  ///
+  /// They go on the shared beat: the same wake as the mailbox polls, not
+  /// one of their own. A wake holds the phone for the look and the results
+  /// the scan batches, and lets it sleep as soon as that is done (a look
+  /// skipped on low battery or in battery saver: at once). Not in Doze: an
+  /// ordinary alarm that Doze puts off (the look is skipped in Doze).
+  void _planLooks({required bool radioOn}) {
+    if (!_running || !_lookPossible || !radioOn || !kit.look || !kit.record) {
+      _lookTimer?.cancel();
+      _lookTimer = null;
+      return;
+    }
+    _lookTimer ??= ZenWake.beat(
+      'nearby-look',
+      lookEvery,
+      _lookOnWake,
+      hold: lookFor + batchGrace + const Duration(seconds: 4),
+      whileIdle: false,
+    );
+  }
+
+  /// Whether looks are planned now (tests).
+  @visibleForTesting
+  bool get looksPlanned => _lookTimer != null;
+
+  /// A look on a wake; after it, the results the scan batched still come.
+  Future<void> _lookOnWake() async {
+    try {
+      if (await lookNow()) {
+        await Future<void>.delayed(batchGrace);
+      }
+    } on Object catch (error, stackTrace) {
+      logZenError('Locked nearby: look', error, stackTrace);
+    }
   }
 
   /// Sets an alarm for the next reminder not shown yet.
@@ -666,6 +703,8 @@ final class LockedNearby {
       return;
     }
     switch (event['type']) {
+      case 'bluetooth':
+        _planLooks(radioOn: event['on'] == true);
       case 'seen':
         if (!kit.record ||
             (!_windowOpen && _held == 0 && _now() > _graceUntil)) {

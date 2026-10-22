@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -8,21 +9,62 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/core/storage/unmetered_network.dart';
+import 'package:zen/src/features/feed/presentation/video_autoplay.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
 import 'package:zen/src/features/settings/app_settings_controller.dart';
 
-/// Longest side, in pixels, an animated image is decoded at. Every frame is
-/// decoded at this size; a GIF declaring huge dimensions would otherwise
-/// cost gigabytes per frame.
+/// Longest side, in pixels, a still image is decoded at. (The engine
+/// decodes the frames of an animated one at full size whatever is asked;
+/// media_guard keeps GIFs within kMaxGifSide.)
 const int _maxDecodePx = 1024;
 
-ui.TargetImageSize _boundedDecodeSize(int width, int height) {
-  if (width <= _maxDecodePx && height <= _maxDecodePx) {
+/// Frames decoded by every animated image so far (for tests: a GIF that is
+/// not seen must not decode frames).
+@visibleForTesting
+int debugGifFramesDecoded = 0;
+
+/// The size, in device pixels, a [width] x [height] image is asked to be
+/// decoded at to fill a box of [box] device pixels with [fit] (a still
+/// image is; an animated one's frames come at full size): never larger
+/// than the image itself, nor than [_maxDecodePx] on its longest side. An
+/// unknown box ([Size.infinite] or a side that is not finite) only bounds
+/// by what is known.
+@visibleForTesting
+ui.TargetImageSize gifDecodeSize(
+  int width,
+  int height, {
+  Size box = Size.infinite,
+  BoxFit fit = BoxFit.cover,
+}) {
+  if (width <= 0 || height <= 0) {
     return const ui.TargetImageSize();
   }
+  final bool wide = box.width.isFinite && box.width > 0;
+  final bool tall = box.height.isFinite && box.height > 0;
+  double scale = 1;
+  if (wide && tall) {
+    final double sx = box.width / width;
+    final double sy = box.height / height;
+    // Covering a box needs the larger scale; fitting into it the smaller.
+    scale = fit == BoxFit.cover || fit == BoxFit.fill
+        ? (sx > sy ? sx : sy)
+        : (sx < sy ? sx : sy);
+  } else if (wide) {
+    scale = box.width / width;
+  } else if (tall) {
+    scale = box.height / height;
+  }
+  if (scale > 1) {
+    scale = 1;
+  }
   final int longest = width >= height ? width : height;
-  final double scale = _maxDecodePx / longest;
+  if (longest * scale > _maxDecodePx) {
+    scale = _maxDecodePx / longest;
+  }
+  if (scale >= 1) {
+    return const ui.TargetImageSize();
+  }
   final int targetWidth = (width * scale).round();
   final int targetHeight = (height * scale).round();
   return ui.TargetImageSize(
@@ -106,7 +148,8 @@ class ZenAnimatedImage extends StatefulWidget {
   State<ZenAnimatedImage> createState() => _ZenAnimatedImageState();
 }
 
-class _ZenAnimatedImageState extends State<ZenAnimatedImage> {
+class _ZenAnimatedImageState extends State<ZenAnimatedImage>
+    with WidgetsBindingObserver {
   ui.Codec? _codec;
   ui.Image? _frame;
   Timer? _timer;
@@ -119,17 +162,45 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage> {
   /// A frame is being decoded (the chain of frames goes on by itself).
   bool _decoding = false;
 
-  bool get _playing =>
-      _started ||
-      (widget.autoplay &&
-          !(MediaQuery.maybeDisableAnimationsOf(context) ?? false));
+  /// The system asks for reduced motion.
+  bool _reducedMotion = false;
+
+  /// Not in a hidden tab nor on a page under another one.
+  bool _onScreen = true;
+
+  /// The box it is shown in, in device pixels: frames are decoded for it.
+  /// Known after the first layout; loading starts then.
+  Size? _box;
+
+  /// The image's own width (what the codec reported before decoding).
+  int _sourceWidth = 0;
+
+  /// Decoded width over the image's own width (below 1 when decoded
+  /// smaller): keeps its natural size on screen the same. Taken from the
+  /// frames themselves: the engine decodes the frames of an animated image
+  /// at full size whatever size is asked for (only a still one is decoded
+  /// smaller).
+  double _decodeScale = 1;
+
+  /// It should move (autoplay or a tap), wherever it is.
+  bool get _wantsPlay => _started || (widget.autoplay && !_reducedMotion);
+
+  /// The app is in front (a window hidden in the tray, behind others or the
+  /// app in the background shows nothing).
+  static bool get _appShown {
+    final AppLifecycleState? state = WidgetsBinding.instance.lifecycleState;
+    return state == null || state == AppLifecycleState.resumed;
+  }
+
+  /// Frames are decoded now: it should move and can be seen.
+  bool get _advancing => _wantsPlay && _onScreen && _appShown;
 
   bool get _animated => (_codec?.frameCount ?? 0) > 1;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_load());
+    WidgetsBinding.instance.addObserver(this);
   }
 
   @override
@@ -138,7 +209,9 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage> {
     if (!identical(oldWidget.bytes, widget.bytes) ||
         oldWidget.file?.path != widget.file?.path) {
       _stop();
-      unawaited(_load());
+      if (_box != null) {
+        unawaited(_load());
+      }
     } else {
       _resumeOrPause();
     }
@@ -147,17 +220,23 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Reduced motion may be switched on or off while it is on screen.
+    // Reduced motion may be switched on or off while it is on screen; the
+    // tab or page it is on may be hidden or shown again.
+    _reducedMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    _onScreen = mayAutoplayAt(context);
     _resumeOrPause();
   }
 
-  /// Starts the frame timer when it should play and is waiting, or stops
-  /// it (on the frame shown) when it should not.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) => _resumeOrPause();
+
+  /// Starts the frame timer when it should advance and is waiting, or
+  /// stops it (on the frame shown) when it should not.
   void _resumeOrPause() {
     if (_codec == null || _frame == null || !_animated) {
       return;
     }
-    if (_playing) {
+    if (_advancing) {
       if (_timer == null && !_decoding) {
         final int generation = _generation;
         _timer = Timer(
@@ -176,8 +255,42 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage> {
     _resumeOrPause();
   }
 
+  /// Notes the box of the first layout (and loads for it), or a much larger
+  /// one later (decodes again, sharper).
+  void _noteBox(BuildContext context, BoxConstraints constraints) {
+    final double ratio = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1;
+    double side(double? wanted, double max) {
+      final double logical = wanted != null && wanted.isFinite
+          ? math.min(wanted, max)
+          : max;
+      return logical * ratio;
+    }
+
+    final Size box = Size(
+      side(widget.width, constraints.maxWidth),
+      side(widget.height, constraints.maxHeight),
+    );
+    final Size? old = _box;
+    if (old != null && !_muchLarger(box, old)) {
+      return;
+    }
+    _box = box;
+    if (old != null) {
+      _stop();
+    }
+    unawaited(_load());
+  }
+
+  static bool _muchLarger(Size box, Size old) {
+    bool larger(double now, double before) =>
+        now.isFinite && before.isFinite && now > before * 1.5;
+    return larger(box.width, old.width) || larger(box.height, old.height);
+  }
+
   Future<void> _load() async {
     final int generation = ++_generation;
+    final Size box = _box ?? Size.infinite;
+    final BoxFit fit = widget.fit;
     try {
       Uint8List? bytes = widget.bytes;
       if (bytes == null && widget.file != null) {
@@ -190,15 +303,20 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage> {
       final ui.ImmutableBuffer buffer = await ui.ImmutableBuffer.fromUint8List(
         bytes,
       );
+      int sourceWidth = 0;
       final ui.Codec codec = await ui.instantiateImageCodecWithSize(
         buffer,
-        getTargetSize: _boundedDecodeSize,
+        getTargetSize: (int width, int height) {
+          sourceWidth = width;
+          return gifDecodeSize(width, height, box: box, fit: fit);
+        },
       );
       if (!mounted || generation != _generation) {
         codec.dispose();
         return;
       }
       _codec = codec;
+      _sourceWidth = sourceWidth;
       await _showNextFrame(generation);
     } catch (error) {
       if (mounted && generation == _generation) {
@@ -215,6 +333,7 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage> {
     final ui.FrameInfo info;
     _decoding = true;
     try {
+      debugGifFramesDecoded++;
       info = await codec.getNextFrame();
     } finally {
       _decoding = false;
@@ -224,13 +343,21 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage> {
       return;
     }
     final ui.Image? previous = _frame;
-    setState(() => _frame = info.image);
+    setState(() {
+      _frame = info.image;
+      _decodeScale = _sourceWidth > 0 && info.image.width < _sourceWidth
+          ? info.image.width / _sourceWidth
+          : 1;
+    });
     if (previous != null) {
       // Still on screen until the next frame is painted.
       WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
     }
     _timer = null;
-    if (codec.frameCount > 1 && _playing) {
+    // Hidden (another tab, a page above, the app in the background or the
+    // window in the tray): it stays on this frame and decodes nothing until
+    // it is seen again.
+    if (codec.frameCount > 1 && _advancing) {
       final Duration delay = info.duration < const Duration(milliseconds: 20)
           ? const Duration(milliseconds: 100)
           : info.duration;
@@ -249,6 +376,7 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _stop();
     final ui.Image? frame = _frame;
     _frame = null;
@@ -257,7 +385,14 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (BuildContext context, BoxConstraints constraints) {
+      _noteBox(context, constraints);
+      return _content(context);
+    },
+  );
+
+  Widget _content(BuildContext context) {
     final Object? error = _error;
     if (error != null) {
       return widget.errorBuilder?.call(context, error, null) ??
@@ -278,11 +413,12 @@ class _ZenAnimatedImageState extends State<ZenAnimatedImage> {
     }
     final Widget picture = RawImage(
       image: frame,
+      scale: _decodeScale,
       fit: widget.fit,
       width: widget.width,
       height: widget.height,
     );
-    if (!_animated || _playing) {
+    if (!_animated || _wantsPlay) {
       return picture;
     }
     // Waiting on its first frame: a tap plays it (and does not reach what
