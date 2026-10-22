@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/core/ledger/ledger_codec.dart';
@@ -8,14 +9,122 @@ import 'package:zen/src/features/pyramid/pyramid_record.dart';
 /// (the hash of its signed content) is the pyramid's id, so no other
 /// pyramid can pass for it. Phones keep and pass on only its records.
 ///
-/// Made once with `dart run tool/zen_pyramid.dart genesis` (it also makes
-/// the first power key, kept by the founder); empty until then — the
-/// pyramid is not open yet.
-const String kZenPyramidGenesis = '';
+/// Made once with `dart run tool/zen_pyramid.dart genesis` (it also made
+/// the first power key, kept by the founder). It never changes: another
+/// genesis would be another pyramid.
+const String kZenPyramidGenesis =
+    '{"b":{"t":"genesis","at":1792693735335,"by":["qWQ7R3L0DoTBiE00ZDUpeQMlar'
+    'bwtImZZENQZ01oxfQ="],'
+    '"name":"Zen",'
+    '"pk":"qWQ7R3L0DoTBiE00ZDUpeQMlarbwtImZZENQZ01oxfQ=","pq":"WGXXyDSaDvQpxh'
+    'AGlSvubZUcUu0cYr4um7cUl8Uzp5E="},'
+    '"s":{"qWQ7R3L0DoTBiE00ZDUpeQMlarbwtImZZENQZ01oxfQ=":"'
+    'RTEFcdowmodCHrXuCqPCC_P9kIC_jQn_KwyofEP_YLnXLLGMfWec74s19vsktIV8BAXG34'
+    'EBF-CeGZJSztYkDrE4XjcywCpDa2FfmUq7EJnmVt8SlW9GQIu4yvkqpa4tte7dIZFMJHLk'
+    'GMEUJrJ73B-vxd7ekmN0qf-kJltzBj1yuOA6DrhnUfE_6KemyDHi12yMRaSWavpywqacE-'
+    'UlcV9jsJuS3Jiv1fNqnRTjmVSl8pZ1oddztVBXVGwUIYxydXTdLrb0u-MXuFQyccoDiCoL'
+    'K44H7X00iO-NR2GeZ2eyMGUbHU-i8k8ONQLXL1Kjm1rdIApYv-xy45DxuhLM2epmIIfHx7'
+    'nzqkA8iWlSNAk7pJDOddypv7vaxlOI9BdcdQerEmop3bZUNu8siQbzddIxPrPmqSoUz89r'
+    'InOorVNnOxhK79x5j0EMeZmPLnQBQ2-5FOu9pTuLpvBbp6UaQ4QxGMFJuL5cvaQKGAfMA7'
+    'MiDBpQ_6R60300Ob3AYZIFnR2yOutm6Ne8S4xg6mMdgx2NWqv62I9q-7Uwvo-bG0USnFW5'
+    'IFT6WtRF9vLur7O7aVMpNwjwpKq7_zg35Zyo81v-7jUOm33iMmHfwlPtPIRzCuptE4p5kE'
+    '_LCUbk3V7Tk4b9UvwCmRJKxM8Uwi39YDfcO2e1uziojAtHLixQ7lgSmVL6M7XdBB930Y7o'
+    'oEn-d_x2It5XrGoUUSfYgg2VGGEuw3WHx9j3mgLiVG9KC-Q82Ac3tsb8l6zeCqlKtGNp8Y'
+    'emFWdRcrS4GYVjyXH5wASvbMxGwHIuvbkiJlRp99h7gyq_deIWLlPynyfF43i80gmOj3vR'
+    'CdPzKb8CkIuuWfPgTnwce3XPZsiNvo4RGZQhyNo0TOtahGkPQKt7N2qdQLlhMe0D-XeypR'
+    'tKL2as8FMfNY8FDS7qO8ZWKUswEtxbTmiBjTMjT9Piil_3Oze2KvBwGzJEAAABkhAPxC5Z'
+    'lGES3rwOXWKmZElpmm0Q8lMpswF8RGbM04j6N-Z5DntOomF1iNLdVlM4Lohz2W-FyzKmOo'
+    'SBZzycql_nAcJZQwmgLPF7oXSn3P2ZypIrpJH6m5TcXyyOG1zTjK1hzO16kc-Gl3HTmX9j'
+    'tZrj76jv1AWTu3fGCVV5CfZBV2TusL417fj-WhN0L47P-vA-5slcbuQtgO9xe7tUFHD7Q7'
+    'Etw8_zsd438sQYkQ-v6N_X1_HRHUKmBXsX3SF220wDDdYh8G35B7K11fbOpzE4MmR3JKna'
+    'qb-ExuKhaeiDP_q7zronWH7gAug9Cq5nxmBuFqfh3P4Vn82wNNz3kF402QS2P-oeQUqdy5'
+    'C3vdHOMUOs7GhSdB6Hnecd5vOZVr46aAd_AdFlo64SYDTzgOuwmU_pJG1ElBvNRLm0-Bwb'
+    'z0yRpxZJFekx2rURdFVoKoGqCOoZv0zowYPvIOQjnBkU_XQyngoJW3cNY6n4uxdq7F6-Ud'
+    'IX4OTT4bndBXx8-lyxDAcPOgwnXPr4XOgdSmwb_YI8b8WtD773Jj2aAGSIRL6h0-tuQ88Q'
+    'zetRFxKxQm8BLVmkWXx1gWfSiVEqSDNTcjcvtao50D_nTHyiog4MhlNvmhTTXJ0x3Z_55J'
+    'NxwH5bmDIQ_NpIvWh46aF9Q4-LwdSVpGsenJN35taD6m4_l0tz59It0sQ2QVjMfUzgMCWg'
+    '4aMBEB6NWvTjoAyQ-b-jKv92L2jXtHZjpqpC-zBR0R30vr-KQirPAAq7qmCgy3XM3l9T1V'
+    'Ckg8VGqVYQtpzAHM_fRloJGwIYxdV4CS3yrHyyPPsf7_LrzEt7oVD5ZNbODtClcc1Xjcju'
+    'pa-JBXRHQ16PR3w8qbhhTaWkogXwQkgXStKlTX8yQVNd0Q4VsK1BjPV1Cpx30NGMs_DGYw'
+    'KRy8b8WU_1jjRLNkmtOzEn6kVo-5SJ1oTvbyBRuT5UHCGh8YS8BS1WCgDOvB7H2o2AG2bE'
+    'S6Lrq7zc7Mj244spEOuKOwCDee1EJGwRR5BQReTcWYS6Z4inFQmq594jyBF2b5avd2gHgZ'
+    'lJm1_b9n3Oaum-z9hFxHDxGBhIF8rCiORG8YwotYzRh5K1iZvHGp6JfFG0kOv2EO5_ukeJ'
+    'Up_0CEUxZ1JCq0sJ6ZcSJyZRSMM0b6TJv22hY6Kq1nNAr0BtOrNRVnDpYRjjmxhtvIJ9kr'
+    'DX_89_-xbiSW-Vgcodr-Nd1-2fLofr8l90R1bdbIK2_i0uS9BVKAZI_fSxNF2eYUrEbEiI'
+    'QYRG3utG4H10Unb-25wApALJWSkODEr4IV2Py8IuGif2vdxKpi2DetU_pVceyKt-giUTES'
+    'cDhOwxEzOR1czau96h3xTA22lvQREHLUdExZL6M-ERhHwz3Vc4DDYI7VHKmir9AIbf2u5w'
+    '6nKucWXxuTVbLXV6yaP-qKuO2dBgauPctww04XSqzP-cShGCaH4zqHvf2uFEQowjq0KQj9'
+    'PWNEgqik6pBVLj7P8GM_oSoTP8b2VNpSI6qHz-7WK5sABW2I8P3f1ocXb7U1xDEA9oIioX'
+    '_dj7p4HFyDJqqzblLJl411TeOaeWQm5W5jgfEzOZLJ-nwj09ihmwabM_msZowfGu8npoFt'
+    'LGCZ87rjJOmvE_JHLyfT4rXEq4WeKojdAY5edtdLfTtLDbyZ8KqD7ru1uCyYDLNP1CYKet'
+    'uCP1sIxhjgnn2kjQuX78D7Iuwc_jRTL-S6MweVh2OUt0m7OgJ5k4wEubfkwzQLVA2DPzZI'
+    'XEHflcwZhXBGQkJOtobmOcKDLiFanGJwFVu1pWg5qnnM-GKDxiuOJfwo5v7A3lJQtkxtDA'
+    'WQpY-pAF_9-oh7-tRxszTX81Q6xkio7mxYpiAakiYC2q1c5PvvtWSN3XdgORoVkrZE5xoy'
+    'XRsP1yRmYTSGhD5wLAnaSvSU6pbf4nvjjDBqoPqVa3OJHEBHoXGi2jdGC-lC9dfwUr2vCE'
+    'MnAqSWh7wAlI1ZEneh0luiI5ohmAazWXJLyk0b4z3BNNHQSkag42rJsK8yruMVj0ZvGOLr'
+    'iDgi45XgoaeXZIvfS5OoZ0MArSUd7CEDFigruClhfpnxB7F2LRJy281-MsJ7uV7owB0Ss4'
+    'rqqVAJh1es5pvqVPerEcY3lZ1Rvz1ojv6f4k5RF8E49LyM_mh1rri3DgHtYgYJBpdOtO-t'
+    'pxLLKzwcQL_KeFRvELQ6ESsWjMnZi3p8vc8rTX2SRUHefm-im_MXpH-IH126_ZNKs8joT1'
+    'Sk6FWnacvCEN5Va9LK9CLkW3UVeiLWUxs4Rh24511S3XkfVPR5BsKFQaj0Vn3PowM6eKsN'
+    '89Lg_3xC9tC5GlH4m4pr3prLkiHLsKsloSdRsHPwy3pWrMv_lkgwHm_WJ082aZOKCr4gu7'
+    'nYAWUHhYTonW2IYe4HB2x5tAewZOJUKxlxfSVns2CEVCnRIbObvnRbTa54rVR0hIu1XODE'
+    'VEPk_LKDyRAewR_RWwTnqc4FaZJrv8GBgfRYPqd6kYousmesZnAWKAW08cA66Y6fqQq_zb'
+    'ejxeTMgVGeSoCRq6PERFxp7cY1eRQ_QzHRLtWX2x0vGH0D_N1YXFhlYpZjmY291PjWvRw2'
+    '6z9rw7bJx8a7s9jqEWJDdrff4c0yR38YtSYblHjiD-yfnJHSG58KD4GC8UFIziFoCGfDIb'
+    'tEDVKKh6M82xwYftIfDOD3YMHUDhKfKR2eRWmwwiBcdvIyVbOyUZEGcZXA-sGN8nM8StHH'
+    'El94f2Xnyu6eYXxvjcq8TwBt_vUVWLk6rsTrCP-Pwsbnthm4DntymoILfQC_PwET0BdKss'
+    'Rjb748JE5FVkpXS2S1mzRqG59Ggemls7PQG1dmD5xUd428klq3iT8T25N0VIj8d4uPGUWm'
+    'uepkLyOKY2SN9yLbfrNYPBKVtsFOZXnj-NIljcIOM5S8ZOhoOg499Lw5cW_usGPYJVvLEq'
+    'UUSKhHQh1kw2GAPmeCL4RWfICc_TtyrjQbTxu9Sov76lmyFUwuHTQ3qINVbRsCU7bVBeSi'
+    'jbeqgHRGbnANbrRBia3upmDa00RVAeoV5__J3XKU73ySAuyqRJoWQ3c1M_6kfr38xj0UV2'
+    '6bN_Cj688yLQFNY-ErE2_UxdqxzgMrjcG6xIuWynqoDgnp-J9yoUoKYcMuUVHsSPHt73vQ'
+    'pd1guLxGEogtpH2APAZ5y4bn32cL_LinFZWbsq3gYHz2EqiMhZdAW6vxPChDMLZyeA_UeE'
+    'sL65GkmsPEzFyCjLNHjYE225VuA5S_vfwnvdPwcKCMBXnNTVN__fjupx7MPDf8lu3TOZBb'
+    'qOnkmpYxU_BdsHBf5oI0oI2gRVHEtpRdcSmV8b7XmCrJnc1u90ANWAoPp210J8w2AivmLi'
+    '2C2nsvbtvKVEV0lfroicPAW9DxWdCwenTUC2vZW374JSrSSy1FW29TkhnBMHgNZ4tSLbtW'
+    'F8FD5i-b594UCircOv41J_BrkdfR3bbp7LtXi_ehZ3HzIb2OrYm5lyTOkPDHAYny-ljWHn'
+    'MtYNYeiXMwnyhvmbykbCdf04-xiJbvA4aERawS0CTVnOAgLq5FGDTNIXvkTRHNRpCrcrbp'
+    'cnK0oKeTgycJhkQ4xXJlsnAxLS6sKUI1IUPZQrpCB1jRzoR4dj7v_KVvBRk2pyuuiOUWVu'
+    '7nFtQLBZky5lPMKcWp05tXdbTLdo7RVsD1aUJeZKE1SvKIWjx8TsAdUZaGP3y_pOr7HBx9'
+    'pH51qSJWqPhXtXz7bp38xO_73jf9kkDXafwXK7lrJr0t2U3hLzx1RKUwzItNomKXUKRKmq'
+    'PEUZRwTA9G348KYPHX1NwujLPA02FeIg5fcqMou4fz4pV-Vp_JHp1uBeW5hTM5-zAq5FVq'
+    'AlFFn8AVmiqRQpODzkDO7_Ne8GvJuCC-dMcCj0Wlfurmd-efpY8WfaLiTtYTt3E-Rfab0o'
+    'jIVhBoPF_Y6NBNr7C1_DykF_0pHerjmRXxUWSF4DzatuJYGowYTGwAXAnUrbGBhkYsQtn0'
+    '7UqlSgEpLx5PTAUuyy0BEmR57W4BF_1gyhSjrIf1AP9B2YqQSfkY0JVzYjNx4UK4yRU2v_'
+    'PdHmU2CU2GxavpwTOozDUDNxAU3Z4cNC7-rq5m37f7b-AUdCSAvhaX_ExWj9Me3A7hpZOI'
+    '3-OExUmMS1ubHAf0MgL5AieswOH2JKiznH8b6llyuZfXEJFq6bDtB-Nwvfb141S4fTdS4i'
+    'ib6vU95LniX4JDJhNXVFcy0pxnFs-i5yBMxKOYOFJmR8ItA0iiEZGRKwi5soC6o9RNaOTF'
+    'Beof50kFA8IMoxGwEfWlUPO3koiKLQWn3A5tPKsoKoH7eE-5_rs4fWcCmaQGloQCy58mud'
+    '7rRxsvEPiWFsHjR3o9Hc5Sf7C-y_oNvJWI0nhM9oEe_NLsZFwtdGCu9RjqFzUiFNVamo4X'
+    'vdvG-pHyqbSakaUSGOyfl7yzDM49xyCGS6QNApW4CXo5BGF8Y0pFiiw082TxSh13WBaWrP'
+    'TYqPA6V80sEC2VsFtK-Ujk69Z7qDsOpl7NlCahyZDaJEFt-LhJem9W6GL9lo8h1xjyxNtv'
+    'IbyP8YJAZlau0EtCYnFadJQ64xJdTI3tha6gtlFPE4ZPJLfHqX4MHuO_Tw9ArVU2zQdA8l'
+    'u4SpyaZ1Qa2VlMKkFruR2O2fmlsn8ARY8ym2Yuaw5jVHXpr80E5qcRzZFnZiU31ZsVyJOm'
+    '1pvmW4ZsQcJ2cPDVwfqSfTOFyh8SEs0Qgzhug4UwhVJc8IPSZ99bFhx0ouCjqpoz4XOv4r'
+    'T6GqvoZ_C6dacFX7rprceKWOdzkw-Ihl80UAtQqxW1tnYZ5PVMwFusQwsZLGQfSJoFyhiY'
+    'beRaAN7EvqwTZ9uYAyIRywiDy2ZQW5QQsVP1BO1WOsSryV-EigcUi1xBGrdlqyIXDlSt2X'
+    't-DiBrJlWAawOEdzE8MRcGqy3jFbzkzCxnT8314qv8PWK96-MZLGayRHEq884ZkZbrnm2N'
+    'RvamA5og7HTN8JIihfUGhFj6dooAw9EDkw0q1_FJvVZGYEmDMKazzmY9wGmII5nxkj557C'
+    'Z-B2JHOsiuni-jhcpeuDhumqruAV3EQvSP4VYxHFLF0r7jTluqAPji5nLrQrr_DsVOLzIp'
+    '4fINIgSHy8V3JYmVO2W01YbJfIenRfIPqXvM7NzR_1Oj3d6xuyJGO9DzzA9XDriQTD_3Fm'
+    'ictnAWMHyeDmCmx1lkbF6WaHp3XlnuKCczrPIFxm3pBlKYAxkFl8LV9HytwsyNVVs-2_32'
+    'x4Rd93V1qYyXary6_9CkGt25-AwUSZ6_dwpnuN_w_9VsSncwHZt2koCe-NKNpMFHoFfD4P'
+    'YvkOeNFEwjiINWhfJpDbooboe9jJiEXaNbnfMju18l4wG9980Y7KbBZNck3NWEP6B4WpaQ'
+    'j-jydOV-W_zymca_UqIsDODOAbEbnjXVi1lxlbzQWEPL2rv71O50kLXFqdIb2lRQf6uc7j'
+    '2Dy821ubI2N1Je4bFaERiFvcwWeNZ0NCSCUvaJTvEX8tqJuJ9HbanIaKetlBQ3Ugqu1W8B'
+    'alIxAMiZA1YCMvEKLxjdYzRGsNOjmhM1-QtmhCkwaR9cCTUdfLv0MeT5fmVZZJKMLDUrfb'
+    'elMvDKTWbDSWx2HAgxalMbI58C3MrkyvkfkRLb8KGg5b4BO92hzu-jeNW0BoOCWdkJhKpy'
+    'mFeodGkFXLz7EW6f0O-4C0MB89JJhnltMKxnuRt2Cd1J0TV-NKo3ovlp7Xm1wPc1iwwkyV'
+    'w82X7GWjliAuMwFOCHI2fR2i1gFdsIU37fKX5vARA_rSU5cccnv9c8s8_PGiVmKpgwzKmg'
+    'dC8cvp8pNgpclp3pRSziZmGUrX0RqzgieUtBRbIxjx46hsj5eIdJQ2TXZXEP0n4p1RGQ1m'
+    'QTBzyW6zXa9fXX6g0w3_Qyc36-XZskWnfuJJRGaCKfwmkH98q_8mC0f5YgmgntujigG4sW'
+    'Ui9oiksjRRwNALUZuy1XclN7uE4cMLUyyk4lhPRjON8UE8BIKLbuIAknML6egw3m7Gy3HW'
+    'SjYpF8Xf0JkiPwIMOlFLg7jvFSJfaXqotB8gRmOMlb7xGS07P01bXZKbrsrs8AULSqWvxP'
+    'MJNHeLqgAAAAAAAAAAAAAABAsTICcs"}}';
 
-/// The genesis of the test pyramid (tests, the simulator, debug builds
-/// while [kZenPyramidGenesis] is empty or with
-/// `--dart-define=ZEN_PYRAMID_TEST=true`). A release build never uses it.
+/// The genesis of the test pyramid (tests, and the simulator and debug
+/// builds with `--dart-define=ZEN_PYRAMID_TEST=true`). A release build
+/// never uses it.
 /// `dart run tool/zen_pyramid.dart test-pin` prints it again.
 const String kZenTestPyramidGenesis =
     '{"b":{"at":1600000000000,"by":["fqYYVc7Xq7McGfJVv19kLU9HelAXejJ8bQBcT73kFO8="],'
@@ -181,13 +290,15 @@ final PyramidRoot kZenTestPyramidRoot = PyramidRoot.parse(
   powerSeed: unb64(kZenTestPowerSeed, length: 32),
 )!;
 
-/// The pyramid this app keeps: the original one in a release build (none
-/// until it is pinned), the test one in tests and in debug builds without
-/// a pin or with [kZenPyramidTestPin].
+/// The pyramid this app keeps: the original one, except the test one in
+/// `flutter test` runs and in debug builds with [kZenPyramidTestPin]
+/// (a release build always keeps the original).
 PyramidRoot? get zenPyramidRoot {
   final PyramidRoot? pinned = PyramidRoot.parse(kZenPyramidGenesis);
   if (kReleaseMode) {
     return pinned;
   }
-  return kZenPyramidTestPin || pinned == null ? kZenTestPyramidRoot : pinned;
+  final bool test =
+      kZenPyramidTestPin || Platform.environment.containsKey('FLUTTER_TEST');
+  return test || pinned == null ? kZenTestPyramidRoot : pinned;
 }

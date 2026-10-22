@@ -250,8 +250,9 @@ pyramid).
 
 ## Limits
 
-- Until the original genesis is pinned in a release, a release build shows
-  that the pyramid has not started; development builds use a test pyramid.
+- Tests, and development builds started with
+  `--dart-define=ZEN_PYRAMID_TEST=true`, use a separate test pyramid; a
+  release build always keeps the original one.
 - The treasurers (everyone down to level 3) see every transfer, like a
   bank. A dishonest **majority** of treasurers could sign a spending twice
   or a false statement: it would leave proof, but could not be stopped.

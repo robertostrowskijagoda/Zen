@@ -68,7 +68,7 @@ String? _option(List<String> args, String name) {
 /// The genesis record ({b, s}) signed by the power key of [seed]. The
 /// original pyramid's names the key's ML-DSA fingerprint too ([anchor]);
 /// the test pyramid's key is public, so its genesis does not.
-Future<({Map<String, dynamic> record, String id, String pk})> _makeGenesis(
+Future<({Map<String, dynamic> record, String id, String pk})> makeGenesis(
   Uint8List seed, {
   required String name,
   required int at,
@@ -115,7 +115,7 @@ Future<void> _genesis(List<String> args) async {
     List<int>.generate(32, (_) => random.nextInt(256)),
   );
   final ({Map<String, dynamic> record, String id, String pk}) g =
-      await _makeGenesis(
+      await makeGenesis(
         seed,
         name: name,
         at: DateTime.now().millisecondsSinceEpoch,
@@ -171,7 +171,7 @@ String? _constant(String src, String name) {
 
 /// Checks a pinned genesis: well formed, signed (both halves) by its own
 /// power key — with the ML-DSA key its `pq` names, when it names one.
-Future<String?> _verify(String json) async {
+Future<String?> verifyGenesis(String json) async {
   final Object? r = jsonDecode(json);
   if (r is! Map || r['b'] is! Map || r['s'] is! Map) {
     return null;
@@ -202,7 +202,7 @@ Future<void> _check() async {
       print('$name: nic nie jest przypięte.');
       continue;
     }
-    final String? id = await _verify(json);
+    final String? id = await verifyGenesis(json);
     print(
       id == null
           ? '$name: ZŁY PODPIS albo zły rekord.'
@@ -216,7 +216,7 @@ Future<void> _testPin() async {
     sha256Bytes(utf8.encode(kTestSeedText)),
   );
   final ({Map<String, dynamic> record, String id, String pk}) g =
-      await _makeGenesis(seed, name: kTestName, at: kTestAt, anchor: false);
+      await makeGenesis(seed, name: kTestName, at: kTestAt, anchor: false);
   print('kZenTestPyramidGenesis = ${jsonEncode(g.record)}');
   print('kZenTestPowerSeed = ${b64(seed)}');
   print('id ${g.id}');

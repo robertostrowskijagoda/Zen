@@ -171,9 +171,32 @@ void main() {
         )!.id,
         root.id,
       );
-      // Not pinned yet: tests and debug builds use the test pyramid.
-      expect(kZenPyramidGenesis, isEmpty);
+      // Tests keep the test pyramid, also with the original one pinned.
       expect(zenPyramidRoot?.id, root.id);
+    });
+
+    test('the original pin is a genesis its power key signed', () async {
+      final PyramidRoot original = PyramidRoot.parse(kZenPyramidGenesis)!;
+      expect(
+        original.id,
+        '4f89d0e4eef9766f8b1c7be7af53898c3a22637edee5e4c90fdd82b52760fc31',
+      );
+      expect(original.name, 'Zen');
+      expect(original.powerSeed, isNull);
+      expect(original.genesis.signers, <String>[original.powerKey]);
+      // The power key's ML-DSA half is anchored in the genesis itself.
+      final String sig = original.genesis.sigs[original.powerKey]!;
+      expect(sig, hasLength(kKeyedHybridSignatureChars));
+      expect(hybridSignaturePqId(sig), original.genesis.str('pq'));
+      expect(
+        await verifyHybridEd25519Half(
+          unb64(original.powerKey, length: 32)!,
+          hybridDigest(original.genesis.signedBytes),
+          decodeHybridSignature(sig)!,
+        ),
+        isTrue,
+      );
+      expect(original.id, isNot(kZenTestPyramidRoot.id));
     });
 
     test(
