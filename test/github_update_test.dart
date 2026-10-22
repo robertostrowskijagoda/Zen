@@ -752,7 +752,7 @@ void main() {
       final String ps = windowsSwapScript(
         pid: 4242,
         appDir: r'C:\Apps\Zen',
-        newDir: r'C:\Apps\.zen-update-1.12.0',
+        newDir: r'C:\Apps\.zen-update-1.12.0\Zen',
         oldDir: r'C:\Apps\Zen.old-1.12.0',
         stagingDir: r'C:\Apps\.zen-update-1.12.0',
         exeName: 'zen.exe',
@@ -781,6 +781,74 @@ void main() {
       expect(sh, contains("nohup '/home/a/Zen/zen'"));
       // The script lives in a private folder of its own and takes it along.
       expect(sh, contains(r'rmdir "$(dirname "$0")"'));
+    });
+
+    test('only a folder that is provably Zen\'s own is swapped', () {
+      const String marker = 'zen-app 1\nzen.exe\nflutter_windows.dll\ndata\n';
+      const List<String> release = <String>[
+        'zen.exe',
+        'flutter_windows.dll',
+        'data',
+        'zen-app.marker',
+      ];
+      bool own(String? text, List<String> entries, {bool ignoreCase = false}) =>
+          isOwnAppFolderListing(
+            marker: text,
+            entries: entries,
+            exeName: 'zen.exe',
+            ignoreCase: ignoreCase,
+          );
+      expect(kAppFolderMarker, 'zen-app.marker');
+      expect(own(marker, release), isTrue);
+      // Downloads or the Desktop with Zen's files unpacked loose into it:
+      // the person's own files are there too.
+      expect(own(marker, <String>[...release, 'tax-return.pdf']), isFalse);
+      expect(own(marker, <String>[...release, 'Photos']), isFalse);
+      // No marker, another format, or one that does not name the program.
+      expect(own(null, release), isFalse);
+      expect(own('', release), isFalse);
+      final String other = marker.replaceFirst('zen-app 1', 'zen-app 2');
+      expect(own(other, release), isFalse);
+      expect(
+        own('zen-app 1\nflutter_windows.dll\ndata\n', <String>['data']),
+        isFalse,
+      );
+      // The program itself must be there.
+      expect(own(marker, <String>['data', 'zen-app.marker']), isFalse);
+      // Windows: names ignore case, lines end with CRLF.
+      const String windows = 'zen-app 1\r\nZEN.EXE\r\nData\r\n';
+      expect(
+        own(windows, <String>['zen.exe', 'data'], ignoreCase: true),
+        isTrue,
+      );
+      expect(own(windows, <String>['zen.exe', 'data']), isFalse);
+    });
+
+    test('a folder on disk is checked by its marker and its files', () async {
+      final Directory root = await Directory.systemTemp.createTemp('zen_own_');
+      addTearDown(() => root.delete(recursive: true));
+      final Directory app = await Directory('${root.path}/Zen').create();
+      await File('${app.path}/zen').writeAsString('');
+      await Directory('${app.path}/lib').create();
+      await Directory('${app.path}/data').create();
+      await File(
+        '${app.path}/$kAppFolderMarker',
+      ).writeAsString('$kAppFolderMarkerHeader\ndata\nlib\nzen\n');
+      expect(
+        await isOwnAppFolder(app, exeName: 'zen', ignoreCase: false),
+        isTrue,
+      );
+      // The folder around it holds no marker.
+      expect(
+        await isOwnAppFolder(root, exeName: 'zen', ignoreCase: false),
+        isFalse,
+      );
+      // Someone else's file next to Zen's: the folder is never swapped.
+      await File('${app.path}/notes.txt').writeAsString('mine');
+      expect(
+        await isOwnAppFolder(app, exeName: 'zen', ignoreCase: false),
+        isFalse,
+      );
     });
   });
 

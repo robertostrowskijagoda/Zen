@@ -124,13 +124,13 @@ List<InstallStep> installStepsFor(InstallSystem system) => switch (system) {
     InstallStep(
       t(
         'Pobierz Zen-Windows.zip ze strony instalacji (komputery ARM: '
-        'Zen-Windows-arm64.zip) i rozpakuj.',
+        'Zen-Windows-arm64.zip) i rozpakuj cały plik: powstanie folder Zen.',
       ),
     ),
     InstallStep(
       t(
-        'Uruchom zen.exe. Jeśli SmartScreen ostrzega: „Więcej informacji → '
-        'Uruchom mimo to”.',
+        'Uruchom zen.exe z folderu Zen i nie wkładaj tam innych plików. '
+        'Jeśli SmartScreen ostrzega: „Więcej informacji → Uruchom mimo to”.',
       ),
     ),
   ],

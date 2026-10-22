@@ -87,8 +87,10 @@ LinuxInstall currentLinuxInstall() {
 /// * Windows (zip), Linux (tar.gz), macOS (zip): unpacked next to the app's
 ///   folder, then a small helper swaps the folders after Zen exits and
 ///   starts the new version. Where that folder cannot be written (Program
-///   Files, `/opt/zen` of the .deb) the file is saved to Downloads and its
-///   folder opened instead.
+///   Files, `/opt/zen` of the .deb), or is not provably Zen's own (Windows
+///   and Linux: [isOwnAppFolder], so never Downloads or the Desktop with
+///   Zen's files unpacked loose into it), the file is saved to Downloads
+///   and its folder opened instead.
 /// * Flatpak: nothing ([assetName] is null). The sandbox can neither write
 ///   to Downloads nor run `flatpak install`; the banner opens the release
 ///   page instead ([flatpakUpdateHint]).
@@ -138,11 +140,14 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
       return _installApk(file);
     }
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      final bool swapped =
-          (!Platform.isLinux ||
-              currentLinuxInstall() == LinuxInstall.tarball) &&
-          await _swapInPlace(file, release);
-      if (swapped) {
+      final _Swap swap =
+          !Platform.isLinux || currentLinuxInstall() == LinuxInstall.tarball
+          ? await _swapInPlace(file, release)
+          : _Swap.failed;
+      if (swap == _Swap.notOwnFolder) {
+        return _saveForPerson(file, notOwnFolder: true);
+      }
+      if (swap == _Swap.swapped) {
         // A moment to read the message; the helper waits for Zen to exit.
         Timer(const Duration(seconds: 2), () => unawaited(_quit()));
         return GithubInstallOutcome(
@@ -177,21 +182,36 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
   }
 
   /// Unpacks [archive] next to the app's folder and starts the helper that
-  /// swaps the folders once Zen has exited. False where that cannot be
-  /// done (nothing is changed then).
-  Future<bool> _swapInPlace(File archive, GithubRelease release) async {
+  /// swaps the folders once Zen has exited. Anything but [_Swap.swapped]
+  /// changes nothing.
+  ///
+  /// The helper moves the whole folder aside and deletes it, so on Windows
+  /// and Linux it runs only on a folder that is provably Zen's own
+  /// ([isOwnAppFolder]): never on Downloads or the Desktop into which
+  /// someone unpacked the files loose.
+  Future<_Swap> _swapInPlace(File archive, GithubRelease release) async {
     final String sep = Platform.pathSeparator;
     final File exe = File(Platform.resolvedExecutable);
     final String exeName = exe.uri.pathSegments.last;
     final Directory appDir = Platform.isMacOS
         ? exe.parent.parent.parent
         : exe.parent;
-    if (Platform.isMacOS && !appDir.path.endsWith('.app')) {
-      return false;
+    final String oldDir = '${appDir.path}.old-${release.version}';
+    if (Platform.isMacOS) {
+      if (!appDir.path.endsWith('.app')) {
+        return _Swap.failed;
+      }
+    } else if (!await isOwnAppFolder(appDir, exeName: exeName)) {
+      logZenWarning('Aktualizacja w miejscu: folder nie jest folderem Zen');
+      return _Swap.notOwnFolder;
+    } else if (await Directory(oldDir).exists() &&
+        !await isOwnAppFolder(Directory(oldDir), exeName: exeName)) {
+      // The helper would delete it first.
+      return _Swap.failed;
     }
     final Directory parent = appDir.parent;
     if (!await _writable(parent) || !await _writable(appDir)) {
-      return false;
+      return _Swap.failed;
     }
     final Directory staging = Directory(
       '${parent.path}$sep.zen-update-${release.version}',
@@ -202,22 +222,21 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
       }
       await staging.create();
       final ProcessResult unpacked = await _unpack(archive, staging);
-      // Windows: the zip holds the app's files; Linux: a Zen folder;
-      // macOS: Zen.app.
-      final String newDir = Platform.isWindows
-          ? staging.path
-          : Platform.isMacOS
+      // Windows and Linux: a Zen folder; macOS: Zen.app.
+      final String newDir = Platform.isMacOS
           ? '${staging.path}${sep}Zen.app'
           : '${staging.path}${sep}Zen';
       final String newExe = Platform.isMacOS
           ? '$newDir/Contents/MacOS/$exeName'
           : '$newDir$sep$exeName';
-      if (unpacked.exitCode != 0 || !await File(newExe).exists()) {
+      if (unpacked.exitCode != 0 ||
+          !await File(newExe).exists() ||
+          (!Platform.isMacOS &&
+              !await isOwnAppFolder(Directory(newDir), exeName: exeName))) {
         logZenWarning('Rozpakowanie aktualizacji: ${unpacked.stderr}');
         await staging.delete(recursive: true);
-        return false;
+        return _Swap.failed;
       }
-      final String oldDir = '${appDir.path}.old-${release.version}';
       final Directory temp = Directory.systemTemp;
       if (Platform.isWindows) {
         final File script = File(
@@ -281,7 +300,7 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
         ], mode: ProcessStartMode.detached);
       }
       await _deleteQuietly(archive);
-      return true;
+      return _Swap.swapped;
     } on Object catch (error, stack) {
       logZenError('Aktualizacja w miejscu', error, stack);
       try {
@@ -291,7 +310,7 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
       } on Object {
         // Left for the next attempt, which deletes it first.
       }
-      return false;
+      return _Swap.failed;
     }
   }
 
@@ -320,7 +339,12 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
   }
 
   /// Saves [file] to Downloads and shows it, for the person to install.
-  Future<GithubInstallOutcome> _saveForPerson(File file) async {
+  /// [notOwnFolder]: Zen was not updated in place because its files do not
+  /// sit in a folder of their own.
+  Future<GithubInstallOutcome> _saveForPerson(
+    File file, {
+    bool notOwnFolder = false,
+  }) async {
     final String sep = Platform.pathSeparator;
     final Directory? downloads = await getDownloadsDirectory();
     final Directory dir = downloads ?? await ZenInstance.supportDirectory();
@@ -344,12 +368,117 @@ final class SystemGithubInstaller implements GithubUpdateInstaller {
     } on Object catch (error) {
       logZenWarning('Pokazanie pobranej aktualizacji: $error');
     }
+    if (notOwnFolder) {
+      return GithubInstallOutcome(
+        t(
+          'Zen nie ma własnego folderu, więc nie podmienię go sam. Zapisano '
+          '{file} w {folder}: rozpakuj całe archiwum i uruchamiaj Zen z '
+          'powstałego folderu Zen.',
+          {'file': name, 'folder': dir.path},
+        ),
+      );
+    }
     return GithubInstallOutcome(
       t('Zapisano {file} w {folder}. Uruchom go, żeby zaktualizować Zen.', {
         'file': name,
         'folder': dir.path,
       }),
     );
+  }
+}
+
+/// What came of trying to update the app's folder in place.
+enum _Swap { swapped, notOwnFolder, failed }
+
+/// The file in the folder of every Windows and Linux release (written by
+/// .github/workflows/release.yml): the line [kAppFolderMarkerHeader], then
+/// the name of every file and folder the release put next to it.
+const String kAppFolderMarker = 'zen-app.marker';
+
+/// The first line of [kAppFolderMarker].
+const String kAppFolderMarkerHeader = 'zen-app 1';
+
+/// Whether a folder whose files and folders are [entries] (names only,
+/// without the path) and whose [kAppFolderMarker] reads [marker] is a Zen
+/// release folder and nothing else: the marker is Zen's, lists [exeName],
+/// and lists every entry. Downloads or the Desktop with Zen's files
+/// unpacked loose into it hold other files, so they never qualify.
+/// [ignoreCase]: Windows, whose file names ignore case.
+bool isOwnAppFolderListing({
+  required String? marker,
+  required Iterable<String> entries,
+  required String exeName,
+  bool ignoreCase = false,
+}) {
+  if (marker == null) {
+    return false;
+  }
+  String key(String name) => ignoreCase ? name.toLowerCase() : name;
+  final List<String> lines = const LineSplitter()
+      .convert(marker)
+      .map((String l) => l.trim())
+      .toList();
+  if (lines.isEmpty || lines.first != kAppFolderMarkerHeader) {
+    return false;
+  }
+  final Set<String> listed = <String>{
+    for (final String l in lines.skip(1))
+      if (l.isNotEmpty) key(l),
+  };
+  if (!listed.contains(key(exeName))) {
+    return false;
+  }
+  bool sawExe = false;
+  for (final String entry in entries) {
+    if (key(entry) == key(kAppFolderMarker)) {
+      continue;
+    }
+    if (!listed.contains(key(entry))) {
+      return false;
+    }
+    sawExe = sawExe || key(entry) == key(exeName);
+  }
+  return sawExe;
+}
+
+/// [isOwnAppFolderListing] for [dir] on disk (never a drive's or the file
+/// system's root).
+Future<bool> isOwnAppFolder(
+  Directory dir, {
+  required String exeName,
+  bool? ignoreCase,
+}) async {
+  try {
+    final Directory absolute = dir.absolute;
+    if (absolute.parent.path == absolute.path) {
+      return false;
+    }
+    final File marker = File(
+      '${absolute.path}${Platform.pathSeparator}$kAppFolderMarker',
+    );
+    if (!await marker.exists() || await marker.length() > 64 * 1024) {
+      return false;
+    }
+    final String prefix = absolute.path.endsWith(Platform.pathSeparator)
+        ? absolute.path
+        : '${absolute.path}${Platform.pathSeparator}';
+    final List<String> entries = await absolute
+        .list(followLinks: false)
+        .map(
+          (FileSystemEntity e) => e.path.startsWith(prefix)
+              ? e.path.substring(prefix.length)
+              : e.path,
+        )
+        .toList();
+    return isOwnAppFolderListing(
+      marker: await marker.readAsString(),
+      entries: entries,
+      exeName: exeName,
+      ignoreCase: ignoreCase ?? Platform.isWindows,
+    );
+  } on Object catch (error) {
+    logZenWarning('Sprawdzenie folderu Zen: $error');
+    return false;
   }
 }
 
