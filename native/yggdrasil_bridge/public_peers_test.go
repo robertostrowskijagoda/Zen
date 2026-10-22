@@ -69,9 +69,9 @@ func TestDesktopRuntimePeersDropStalePublicEntriesButKeepLocalOnes(t *testing.T)
 }
 
 func TestAndroidBootstrapPeersAreStableTLS(t *testing.T) {
-	peers := selectAndroidBootstrapPeers(publicPeerPool, androidBootstrapPeerCount)
-	if len(peers) != androidBootstrapPeerCount {
-		t.Fatalf("want %d android peers, got %d", androidBootstrapPeerCount, len(peers))
+	peers := selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize)
+	if len(peers) != phonePeerPoolSize {
+		t.Fatalf("want %d android peers, got %d", phonePeerPoolSize, len(peers))
 	}
 	stable := map[string]bool{}
 	for _, peer := range publicPeerPool {

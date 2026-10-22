@@ -63,7 +63,8 @@ func desiredPublicPeers() []string {
 // leaving every other peer (friends' bridges, devices on the LAN) alone.
 // Returns how many were added and removed.
 func (node *bridgeNode) applyPublicPeers() (int, int) {
-	desired := desiredPublicPeers()
+	// A phone dials its share of the list, a computer on battery a few.
+	desired := node.limitPublicPeers(desiredPublicPeers())
 	desiredSet := make(map[string]bool, len(desired))
 	for _, peer := range desired {
 		desiredSet[peer] = true
@@ -138,7 +139,7 @@ type publicPeerJSON struct {
 func builtInPeerListing() []publicPeerJSON {
 	var chosen []string
 	if isPhoneOS() {
-		chosen = selectAndroidBootstrapPeers(publicPeerPool, androidBootstrapPeerCount)
+		chosen = selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize)
 	} else {
 		chosen = builtInDesktopPeers(desktopPublicPeerCount)
 	}

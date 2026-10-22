@@ -17,6 +17,7 @@ import 'package:zen/src/features/runtime/locked_receiver.dart';
 import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -442,8 +443,11 @@ final class LockedNearby {
   final Map<String, String?> _known = <String, String?>{};
 
   StreamSubscription<Map<Object?, Object?>>? _events;
-  Timer? _lookTimer;
+  WakeTimer? _lookTimer;
   Timer? _remindTimer;
+
+  /// Wakes the phone for the next reminder that is due.
+  WakeTimer? _remindWake;
 
   /// Reminders of the kit shown in this run.
   final Set<String> _reminded = <String>{};
@@ -502,17 +506,24 @@ final class LockedNearby {
       _claimed = true;
     }
     if (kit.look && kit.record) {
-      _lookTimer = Timer.periodic(
+      // An alarm wakes the sleeping phone for the look and holds it awake
+      // for the scan and the results it batches.
+      _lookTimer = ZenWake.every(
+        'nearby-look',
         lookEvery,
-        (_) => unawaitedLogged(lookNow(), context: 'Locked nearby: look'),
+        () => unawaitedLogged(lookNow(), context: 'Locked nearby: look'),
+        hold: lookFor + batchGrace + const Duration(seconds: 4),
       );
     }
     if (kit.reminders.isNotEmpty) {
       await remindIfDue();
+      // Each minute while the phone is awake anyway (the timer stands still
+      // while it sleeps), and an exact alarm for the next one due.
       _remindTimer = Timer.periodic(
         const Duration(minutes: 1),
         (_) => unawaitedLogged(remindIfDue(), context: 'Locked reminders'),
       );
+      _wakeForNextReminder();
     }
     logZenMessage(
       'Locked nearby runs (shown: ${kit.visible}, alarm waves: ${kit.alarms}, '
@@ -529,6 +540,8 @@ final class LockedNearby {
     _lookTimer = null;
     _remindTimer?.cancel();
     _remindTimer = null;
+    _remindWake?.cancel();
+    _remindWake = null;
     await _events?.cancel();
     _events = null;
     if (_claimed) {
@@ -544,6 +557,38 @@ final class LockedNearby {
       await radio.stopScan();
     }
     await keepEncounters();
+  }
+
+  /// Sets an alarm for the next reminder not shown yet.
+  void _wakeForNextReminder() {
+    _remindWake?.cancel();
+    _remindWake = null;
+    if (!_running) {
+      return;
+    }
+    final int at = _now();
+    int? next;
+    for (final LockedReminder r in kit.reminders) {
+      if (_reminded.contains(r.id) || r.at < at) {
+        continue;
+      }
+      if (next == null || r.at < next) {
+        next = r.at;
+      }
+    }
+    if (next == null) {
+      return;
+    }
+    _remindWake = ZenWake.after(
+      'reminder',
+      Duration(milliseconds: next - at),
+      () => unawaitedLogged(
+        remindIfDue().whenComplete(_wakeForNextReminder),
+        context: 'Locked reminders',
+      ),
+      hold: const Duration(seconds: 5),
+      exact: true,
+    );
   }
 
   /// Shows the kit's reminders whose time came (each once a run). Returns

@@ -202,14 +202,31 @@ String accountStateHash(Object? value) =>
     sha256Hex(utf8.encode(jsonEncode(_canonical(value)))).substring(0, 32);
 
 final class _Unit {
-  const _Unit(this.clock, this.writer, this.hash, {this.deleted = false});
+  const _Unit(
+    this.clock,
+    this.writer,
+    this.hash, {
+    this.deleted = false,
+    this.held = false,
+  });
 
   final int clock;
   final String writer;
   final String hash;
   final bool deleted;
 
-  List<Object> toJson() => <Object>[clock, writer, hash, if (deleted) 1];
+  /// Sent by another device, but this build's domain does not keep it (a
+  /// field a newer build added): kept aside with its value
+  /// ([AccountStateSync]'s held values), never taken for a deletion, and
+  /// written into the domain first once an update makes it understood.
+  final bool held;
+
+  List<Object> toJson() => <Object>[
+    clock,
+    writer,
+    hash,
+    if (deleted) 1 else if (held) 2,
+  ];
 
   static _Unit? fromJson(Object? json) {
     if (json is! List ||
@@ -224,6 +241,7 @@ final class _Unit {
       json[1] as String,
       json[2] as String,
       deleted: json.length > 3 && json[3] == 1,
+      held: json.length > 3 && json[3] == 2,
     );
   }
 
@@ -233,6 +251,11 @@ final class _Unit {
       (clock == this.clock && writer.compareTo(this.writer) > 0);
 }
 
+/// How often [AccountStateSync] reads and hashes every state anyway. Each
+/// scan decrypts about ten stores, so not often: changes do not wait for
+/// it.
+const Duration kAccountSyncScanEvery = Duration(minutes: 15);
+
 /// Keeps [domains] the same on the account's devices through [channel];
 /// its own bookkeeping lives on [disk].
 final class AccountStateSync {
@@ -241,7 +264,7 @@ final class AccountStateSync {
     required this.disk,
     required List<AccountSyncDomain> domains,
     this.delay = const Duration(seconds: 2),
-    this.scanEvery = const Duration(minutes: 1),
+    this.scanEvery = kAccountSyncScanEvery,
   }) : _domains = <String, AccountSyncDomain>{
          for (final AccountSyncDomain d in domains) d.id: d,
        };
@@ -253,13 +276,21 @@ final class AccountStateSync {
   /// Quiet time after a change before it is sent.
   final Duration delay;
 
-  /// How often every state is looked at anyway.
+  /// How often every state is looked at anyway (a safety net: every
+  /// domain tells its changes, which are sent [delay] after they come).
   final Duration scanEvery;
 
   static const String _stateKey = 'account/sync/state';
 
   int _lamport = 0;
   final Map<String, Map<String, _Unit>> _units = <String, Map<String, _Unit>>{};
+
+  /// Domain → the values of its held units ([_Unit.held]).
+  final Map<String, Map<String, Object?>> _held =
+      <String, Map<String, Object?>>{};
+
+  Map<String, Object?> _heldOf(String domain) =>
+      _held[domain] ??= <String, Object?>{};
 
   /// Changes from other devices that could not be taken yet.
   final List<Map<String, dynamic>> _deferred = <Map<String, dynamic>>[];
@@ -371,6 +402,18 @@ final class AccountStateSync {
       if (unsent is List) {
         _unsent.addAll(unsent.whereType<String>());
       }
+      final Object? held = json['h'];
+      if (held is Map) {
+        for (final MapEntry<Object?, Object?> e in held.entries) {
+          final Object? values = e.value;
+          if (e.key is String && values is Map) {
+            _held[e.key! as String] = <String, Object?>{
+              for (final MapEntry<Object?, Object?> v in values.entries)
+                if (v.key is String) v.key! as String: v.value,
+            };
+          }
+        }
+      }
     } on FormatException {
       // Starts over: every unit is sent again once.
     }
@@ -390,6 +433,12 @@ final class AccountStateSync {
               },
           },
           'n': _unsent.toList(),
+          if (_held.values.any((Map<String, Object?> m) => m.isNotEmpty))
+            'h': <String, Object>{
+              for (final MapEntry<String, Map<String, Object?>> e
+                  in _held.entries)
+                if (e.value.isNotEmpty) e.key: e.value,
+            },
         }),
       ),
     ),
@@ -415,10 +464,17 @@ final class AccountStateSync {
         whole: d.wholeKeys,
       );
       final Map<String, _Unit> known = _units[d.id] ??= <String, _Unit>{};
+      if (await _writeHeld(d, state, units, known)) {
+        dirty = true;
+      }
       final Map<String, Object?> delta = <String, Object?>{};
       for (final MapEntry<String, Object?> u in units.entries) {
         final String h = accountStateHash(u.value);
         final _Unit? old = known[u.key];
+        if (old != null && old.held) {
+          // Still not kept here: stays held (never this device's default).
+          continue;
+        }
         if (old == null || old.deleted || old.hash != h) {
           final int c = ++_lamport;
           known[u.key] = _Unit(c, channel.device, h);
@@ -430,7 +486,7 @@ final class AccountStateSync {
         }
       }
       for (final MapEntry<String, _Unit> u in known.entries.toList()) {
-        if (!u.value.deleted && !units.containsKey(u.key)) {
+        if (!u.value.deleted && !u.value.held && !units.containsKey(u.key)) {
           final int c = ++_lamport;
           known[u.key] = _Unit(c, channel.device, '', deleted: true);
           delta[u.key] = <String, Object?>{'c': c, 'w': channel.device, 'x': 1};
@@ -482,6 +538,12 @@ final class AccountStateSync {
               'c': u.value.clock,
               'w': u.value.writer,
               'x': 1,
+            }
+          else if (u.value.held && _heldOf(d.id).containsKey(u.key))
+            u.key: <String, Object?>{
+              'c': u.value.clock,
+              'w': u.value.writer,
+              'v': _heldOf(d.id)[u.key],
             }
           else if (units.containsKey(u.key))
             u.key: <String, Object?>{
@@ -567,11 +629,69 @@ final class AccountStateSync {
       );
       for (final String key in taken) {
         final _Unit got = known[key]!;
-        known[key] = now.containsKey(key)
-            ? _Unit(got.clock, got.writer, accountStateHash(now[key]))
-            : _Unit(got.clock, got.writer, '', deleted: true);
+        if (now.containsKey(key)) {
+          known[key] = _Unit(got.clock, got.writer, accountStateHash(now[key]));
+          _heldOf(d.id).remove(key);
+        } else if (got.deleted) {
+          known[key] = _Unit(got.clock, got.writer, '', deleted: true);
+          _heldOf(d.id).remove(key);
+        } else {
+          // Not kept by this build (a newer build's field): held with its
+          // value, not deleted — after an update it is written in first
+          // instead of this device's default going out as a change.
+          known[key] = _Unit(got.clock, got.writer, got.hash, held: true);
+          _heldOf(d.id)[key] = units[key];
+        }
       }
     }
     await _save();
+  }
+
+  /// Writes the held units [d] now keeps (this build was updated and
+  /// understands them) into it, with their values, before anything of
+  /// this device is sent. Returns whether any unit changed.
+  Future<bool> _writeHeld(
+    AccountSyncDomain d,
+    Map<String, Object?> state,
+    Map<String, Object?> units,
+    Map<String, _Unit> known,
+  ) async {
+    final Map<String, Object?> held = _heldOf(d.id);
+    final List<String> ready = <String>[
+      for (final String key in held.keys)
+        if (units.containsKey(key) && (known[key]?.held ?? false)) key,
+    ];
+    if (ready.isEmpty) {
+      return false;
+    }
+    final Map<String, Object?> merged = Map<String, Object?>.of(units);
+    for (final String key in ready) {
+      merged[key] = held[key];
+    }
+    try {
+      await d.write(unflattenAccountState(merged, state));
+    } on Object catch (error) {
+      logZenWarning('Stan konta ${d.id}: $error');
+      return false;
+    }
+    final Map<String, Object?>? after = await d.read();
+    if (after == null) {
+      return false;
+    }
+    final Map<String, Object?> now = flattenAccountState(
+      after,
+      whole: d.wholeKeys,
+    );
+    for (final String key in ready) {
+      final _Unit got = known[key]!;
+      if (now.containsKey(key)) {
+        known[key] = _Unit(got.clock, got.writer, accountStateHash(now[key]));
+        held.remove(key);
+      }
+    }
+    units
+      ..clear()
+      ..addAll(now);
+    return true;
   }
 }

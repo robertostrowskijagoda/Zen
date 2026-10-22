@@ -183,6 +183,10 @@ object ZenNearbyBridge {
 
     /** After a slot boundary, so the new slot has surely begun. */
     private const val ROTATION_MARGIN_MS = 500L
+
+    /** The alarm of the token's change, and how long it holds the phone awake. */
+    private const val ROTATION_ALARM = "nearby-rotation"
+    private const val ROTATION_HOLD_MS = 5_000L
     private const val MAX_ALARM_KEYS = 4096
     private val ALARM_ID = Regex("^[0-9A-Za-z_-]{1,40}$")
     private val HEX32 = Regex("^[0-9a-f]{32}$")
@@ -508,11 +512,13 @@ object ZenNearbyBridge {
 
     /**
      * While any engine follows a schedule, applies it again right after the
-     * next slot boundary (the foreground service keeps the CPU awake, so the
-     * delay holds).
+     * next slot boundary. An exact alarm that wakes the phone (nothing holds
+     * it awake in between), so a token never stays on air past its slot.
      */
     private fun scheduleRotation(context: Context) {
-        rotation?.let { main.removeCallbacks(it) }
+        if (rotation != null) {
+            ZenPower.cancel(context, ROTATION_ALARM)
+        }
         rotation = null
         if (clients.none { it.schedule != null }) {
             return
@@ -528,7 +534,13 @@ object ZenNearbyBridge {
             }
         }
         rotation = task
-        main.postDelayed(task, next - now + ROTATION_MARGIN_MS)
+        ZenPower.scheduleNative(
+            context,
+            ROTATION_ALARM,
+            next - now + ROTATION_MARGIN_MS,
+            exact = true,
+            holdMs = ROTATION_HOLD_MS,
+        ) { task.run() }
     }
 
     /**
@@ -976,6 +988,9 @@ object ZenNearbyBridge {
         }
         val serviceTakesAlarms =
             clients.any { it.background && it.alarmReceiver && it.sink != null }
+        // A friend's alarm (or a hello) is answered by Dart: the phone stays
+        // awake for it (nothing else holds it).
+        appContext?.let { ZenPower.hold(it, "nearby-wave", 30_000) }
         for (client in clients.toList()) {
             val elsewhere = if (client.background) !serviceTakesAlarms else serviceTakesAlarms
             send(

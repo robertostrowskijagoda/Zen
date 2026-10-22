@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zen/src/app/app.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/domain/groups/group_profile.dart';
+import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/settings/app_settings.dart';
@@ -42,6 +44,123 @@ void main() {
           .remoteAddress,
       _adaAddress,
     );
+  });
+
+  test('presence pings go to friends and unconfirmed invitees only', () {
+    final SocialHubState state = _seedState().copyWith(
+      groups: <String, GroupProfile>{
+        'g1': const GroupProfile(
+          id: 'g1',
+          name: 'Klub',
+          createdById: 'self',
+          createdAtMillis: 1,
+          memberAddresses: <String>[_adaAddress, _memberAddress, _invitee],
+          pendingInviteAddresses: <String>[_invitee],
+        ),
+      },
+    );
+    expect(
+      presencePingTargets(state),
+      unorderedEquals(<String>[_adaAddress, _invitee]),
+    );
+    // Rarely: every ping wakes the radio of the phone it goes to.
+    expect(
+      const RuntimePresenceConfig().pingInterval,
+      greaterThanOrEqualTo(const Duration(minutes: 2)),
+    );
+    expect(
+      const RuntimePresenceConfig().offlineAfter,
+      greaterThan(const RuntimePresenceConfig().pingInterval * 2),
+    );
+  });
+
+  testWidgets('presence pings stop off the screen; friends hear "away" and '
+      '"I am here"', (WidgetTester tester) async {
+    final MemorySignalTransport transport = MemorySignalTransport();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          signalTransportProvider.overrideWithValue(transport),
+          socialHubSeedProvider.overrideWithValue(_seedState()),
+        ],
+        child: const ZenRewriteApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    int sent(String type) => transport.sentSignals
+        .where((entry) => entry.payload['type'] == type)
+        .length;
+    expect(sent('ping'), 1);
+
+    for (final AppLifecycleState state in <AppLifecycleState>[
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+    ]) {
+      tester.binding.handleAppLifecycleStateChanged(state);
+    }
+    await tester.pump();
+    await tester.pump();
+    expect(sent('away'), 1);
+    expect(
+      transport.sentSignals
+          .lastWhere((entry) => entry.payload['type'] == 'away')
+          .remoteAddress,
+      _adaAddress,
+    );
+    // Off the screen nobody is pinged, however long it stays there.
+    await tester.pump(const Duration(minutes: 20));
+    expect(sent('ping'), 1);
+
+    for (final AppLifecycleState state in <AppLifecycleState>[
+      AppLifecycleState.hidden,
+      AppLifecycleState.inactive,
+      AppLifecycleState.resumed,
+    ]) {
+      tester.binding.handleAppLifecycleStateChanged(state);
+    }
+    await tester.pump();
+    await tester.pump();
+    expect(sent('ping'), 2, reason: '"I am here" on coming back');
+    await tester.pump(kPresencePingInterval);
+    expect(sent('ping'), 3);
+  });
+
+  testWidgets('a friend\'s ping and "away" show at once', (
+    WidgetTester tester,
+  ) async {
+    final MemorySignalTransport transport = MemorySignalTransport();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          signalTransportProvider.overrideWithValue(transport),
+          socialHubSeedProvider.overrideWithValue(_seedState()),
+        ],
+        child: const ZenRewriteApp(),
+      ),
+    );
+    await tester.pump();
+    final ProviderContainer container = ProviderScope.containerOf(
+      tester.element(find.byType(AppShellScreen)),
+    );
+    await transport.injectIncoming(
+      from: _adaAddress,
+      payload: const <String, dynamic>{'type': 'ping'},
+    );
+    await tester.pumpAndSettle();
+    FriendProfile ada() =>
+        container.read(socialHubControllerProvider).friends[_adaAddress]!;
+    expect(ada().isOnline, isTrue);
+    expect(ada().lastActivityLabel, 'Teraz');
+
+    await transport.injectIncoming(
+      from: _adaAddress,
+      payload: const <String, dynamic>{'type': 'away'},
+    );
+    await tester.pumpAndSettle();
+    expect(ada().isOnline, isTrue);
+    expect(ada().lastActivityLabel, 'W tle');
   });
 
   testWidgets('runtime signal bridge answers ping and applies pong presence', (
@@ -351,6 +470,8 @@ final class _OrderRecordingTransport implements SignalTransport {
 }
 
 const String _adaAddress = '200:1111:2222:3333:4444:5555:6666:7777';
+const String _memberAddress = '200:1111:2222:3333:4444:5555:6666:8888';
+const String _invitee = '200:1111:2222:3333:4444:5555:6666:9999';
 
 SocialHubState _seedState() {
   return SocialHubState.empty().copyWith(

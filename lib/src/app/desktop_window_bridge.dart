@@ -11,6 +11,7 @@ import 'package:zen/src/app/single_instance_guard.dart';
 import 'package:zen/src/app/zen_instance.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/calls/call_compact_mode.dart';
+import 'package:zen/src/features/media/media_temp_folder.dart';
 
 typedef DesktopTrayIconLoader = Future<String?> Function();
 
@@ -252,6 +253,11 @@ class _DesktopWindowBridgeState extends State<DesktopWindowBridge>
       await coordinator.handleWindowClose();
       return;
     }
+    // No plain copy of a film or a recording outlives the app.
+    await wipeMediaTemporaryFiles().timeout(
+      const Duration(seconds: 2),
+      onTimeout: () {},
+    );
     try {
       await ZenSingleInstance.release();
       await windowManager.destroy();
@@ -407,6 +413,11 @@ final class _PlatformDesktopWindowShellApi implements DesktopWindowShellApi {
 
   @override
   Future<void> close() async {
+    // No plain copy of a film or a recording outlives the app.
+    await wipeMediaTemporaryFiles().timeout(
+      const Duration(seconds: 2),
+      onTimeout: () {},
+    );
     try {
       await ZenSingleInstance.release();
       await windowManager.destroy();

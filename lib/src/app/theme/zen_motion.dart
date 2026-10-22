@@ -12,6 +12,16 @@ import 'package:flutter/material.dart';
 abstract final class ZenMotion {
   static bool enabled = _detectDefault();
 
+  /// Frames a second of the perpetual animations (the display would draw
+  /// 60-120): enough to read as alive, little enough for the battery.
+  static const int framesPerSecond = 15;
+
+  /// Whether the shared clock of the perpetual animations runs now (it
+  /// stops when nothing animates, motion is off or the window is not
+  /// active).
+  @visibleForTesting
+  static bool get clockRunning => _LowRateClock.instance.isRunning;
+
   /// Whether motion may play here: [enabled], and the system does not ask
   /// for reduced motion (`MediaQuery.disableAnimations`).
   static bool allowedIn(BuildContext context) =>
@@ -57,23 +67,123 @@ double _warp(double t, double s1, double s2) {
   return t + 0.55 * math.sin(t * 0.23 + s1) + 0.27 * math.sin(t * 0.61 + s2);
 }
 
-/// Free-running seconds clock shared by the perpetual animations: one ticker
-/// whose value is elapsed seconds, wrapping every hour so it never grows large
-/// enough to cost precision. Waveforms are then plain functions of time, which
-/// is what makes randomised speeds cheap.
-AnimationController _startMotionClock(TickerProvider vsync) {
-  return AnimationController(
-    vsync: vsync,
-    duration: const Duration(hours: 1),
-    lowerBound: 0,
-    upperBound: 3600,
-  )..repeat();
+/// The shared clock of the perpetual animations: elapsed seconds (wrapping
+/// every hour), moved by a timer at [ZenMotion.framesPerSecond] — not by a
+/// ticker at the display's 60-120 frames a second — and only while some
+/// animation listens and the window is shown and active. A window behind
+/// others (inactive on a computer) or in the background draws nothing.
+final class _LowRateClock extends ChangeNotifier with WidgetsBindingObserver {
+  _LowRateClock._();
+
+  static final _LowRateClock instance = _LowRateClock._();
+
+  final Stopwatch _elapsed = Stopwatch();
+  Timer? _timer;
+  int _clients = 0;
+  bool _observing = false;
+
+  double get seconds => (_elapsed.elapsedMicroseconds / 1e6) % 3600;
+
+  bool get isRunning => _timer != null;
+
+  void attach(VoidCallback listener) {
+    addListener(listener);
+    _clients += 1;
+    _sync();
+  }
+
+  void detach(VoidCallback listener) {
+    removeListener(listener);
+    _clients = math.max(0, _clients - 1);
+    _sync();
+  }
+
+  bool get _shown {
+    final AppLifecycleState? state = WidgetsBinding.instance.lifecycleState;
+    return state == null || state == AppLifecycleState.resumed;
+  }
+
+  void _sync() {
+    if (_clients > 0 && !_observing) {
+      WidgetsBinding.instance.addObserver(this);
+      _observing = true;
+    } else if (_clients == 0 && _observing) {
+      WidgetsBinding.instance.removeObserver(this);
+      _observing = false;
+    }
+    final bool run = _clients > 0 && _shown;
+    if (run && _timer == null) {
+      _elapsed.start();
+      _timer = Timer.periodic(
+        const Duration(microseconds: 1000000 ~/ ZenMotion.framesPerSecond),
+        (_) => notifyListeners(),
+      );
+    } else if (!run && _timer != null) {
+      _timer?.cancel();
+      _timer = null;
+      _elapsed.stop();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) => _sync();
+}
+
+/// A state that follows the shared low-rate clock while [wantsMotion].
+mixin _LowRateMotion<T extends StatefulWidget> on State<T> {
+  bool _onClock = false;
+
+  /// Whether this widget animates now (checked on every change).
+  bool get wantsMotion;
+
+  double get clockSeconds => _LowRateClock.instance.seconds;
+
+  bool get onClock => _onClock;
+
+  /// Called on every tick while on the clock.
+  void onClockTick() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void syncClock() {
+    final bool want = wantsMotion;
+    if (want && !_onClock) {
+      _onClock = true;
+      _LowRateClock.instance.attach(onClockTick);
+    } else if (!want && _onClock) {
+      _onClock = false;
+      _LowRateClock.instance.detach(onClockTick);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    syncClock();
+  }
+
+  @override
+  void didUpdateWidget(covariant T oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    syncClock();
+  }
+
+  @override
+  void dispose() {
+    if (_onClock) {
+      _onClock = false;
+      _LowRateClock.instance.detach(onClockTick);
+    }
+    super.dispose();
+  }
 }
 
 /// A row of dots that light up in a wave — the animated companion for
 /// "Łączenie…" style status labels. Each dot runs at its own speed and drifts
-/// in and out of phase with its neighbours. Falls back to static dots when
-/// [ZenMotion.enabled] is false.
+/// in and out of phase with its neighbours. Static dots when motion is off
+/// ([ZenMotion.allowedIn]); otherwise at a low frame rate.
 class ZenAnimatedDots extends StatefulWidget {
   const ZenAnimatedDots({
     super.key,
@@ -137,17 +247,16 @@ class _DotWave {
 }
 
 class _ZenAnimatedDotsState extends State<ZenAnimatedDots>
-    with SingleTickerProviderStateMixin {
-  AnimationController? _clock;
+    with _LowRateMotion<ZenAnimatedDots> {
   late List<_DotWave> _waves;
+
+  @override
+  bool get wantsMotion => ZenMotion.allowedIn(context);
 
   @override
   void initState() {
     super.initState();
     _waves = _buildWaves();
-    if (ZenMotion.enabled) {
-      _clock = _startMotionClock(this);
-    }
   }
 
   @override
@@ -167,29 +276,20 @@ class _ZenAnimatedDotsState extends State<ZenAnimatedDots>
   }
 
   @override
-  void dispose() {
-    _clock?.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final Color resolved =
         widget.color ??
         DefaultTextStyle.of(context).style.color ??
         Colors.white;
-    final AnimationController? clock = _clock;
-    if (clock == null) {
+    if (!onClock) {
       return _buildDots(resolved, (int _) => 1);
     }
-    return AnimatedBuilder(
-      animation: clock,
-      builder: (BuildContext context, Widget? child) {
-        return _buildDots(
-          resolved,
-          (int index) => _waves[index].intensity(clock.value),
-        );
-      },
+    final double seconds = clockSeconds;
+    return RepaintBoundary(
+      child: _buildDots(
+        resolved,
+        (int index) => _waves[index].intensity(seconds),
+      ),
     );
   }
 
@@ -199,7 +299,9 @@ class _ZenAnimatedDotsState extends State<ZenAnimatedDots>
       children: <Widget>[
         for (int index = 0; index < widget.dotCount; index += 1)
           Padding(
-            padding: EdgeInsets.only(left: index == 0 ? 0 : widget.spacing),
+            padding: EdgeInsetsDirectional.only(
+              start: index == 0 ? 0 : widget.spacing,
+            ),
             child: _buildDot(color, intensity(index).clamp(0.0, 1.0), index),
           ),
       ],
@@ -207,11 +309,11 @@ class _ZenAnimatedDotsState extends State<ZenAnimatedDots>
   }
 
   Widget _buildDot(Color color, double intensity, int index) {
-    final double floor = _clock == null ? 1 : _waves[index].floor;
+    final double floor = onClock ? _waves[index].floor : 1;
     final double opacity = floor + (1 - floor) * intensity;
     // The dots swell as they brighten — a flat opacity fade reads as a
     // progress spinner, the scale is what makes it read as a signal.
-    final double scale = _clock == null ? 1 : 0.76 + 0.44 * intensity;
+    final double scale = onClock ? 0.76 + 0.44 * intensity : 1;
     return Transform.scale(
       scale: scale,
       child: Opacity(
@@ -228,6 +330,11 @@ class _ZenAnimatedDotsState extends State<ZenAnimatedDots>
 /// Status dot with a living pulse: a fast attack and slow release, at a speed
 /// that wanders, and with an echo beat on roughly half the cycles — closer to
 /// a heartbeat than to a blinking LED.
+///
+/// [continuous]: it pulses for as long as it is shown (a call going on),
+/// at a low frame rate. Otherwise it is still and pulses only briefly
+/// ([kZenBriefPulse]): when it becomes [active], or from the start with
+/// [pulseOnStart]. Still whenever motion is off ([ZenMotion.allowedIn]).
 class ZenPulsingDot extends StatefulWidget {
   const ZenPulsingDot({
     super.key,
@@ -235,21 +342,27 @@ class ZenPulsingDot extends StatefulWidget {
     this.active = true,
     this.dimension = 12,
     this.dotSize = 6,
+    this.continuous = true,
+    this.pulseOnStart = false,
   });
 
   final Color color;
   final bool active;
   final double dimension;
   final double dotSize;
+  final bool continuous;
+  final bool pulseOnStart;
 
   @override
   State<ZenPulsingDot> createState() => _ZenPulsingDotState();
 }
 
-class _ZenPulsingDotState extends State<ZenPulsingDot>
-    with TickerProviderStateMixin {
-  AnimationController? _clock;
+/// How long a dot that is not [ZenPulsingDot.continuous] pulses when its
+/// state changes.
+const Duration kZenBriefPulse = Duration(seconds: 3);
 
+class _ZenPulsingDotState extends State<ZenPulsingDot>
+    with _LowRateMotion<ZenPulsingDot> {
   // Waveform parameters — redrawn only when the widget is recreated, so the
   // pulse a user sees on one screen keeps its personality while it is visible.
   final double _period = _rand(1.05, 2.15);
@@ -258,32 +371,50 @@ class _ZenPulsingDotState extends State<ZenPulsingDot>
   final double _offset = _rand(0, 4);
   final int _echoSeed = _entropy.nextInt(1 << 20);
 
+  /// A brief pulse plays (until [_briefTimer] ends it).
+  bool _brief = false;
+  Timer? _briefTimer;
+
+  @override
+  bool get wantsMotion =>
+      widget.active &&
+      ZenMotion.allowedIn(context) &&
+      (widget.continuous || _brief);
+
   @override
   void initState() {
     super.initState();
-    _syncClock();
-  }
-
-  @override
-  void didUpdateWidget(ZenPulsingDot oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _syncClock();
-  }
-
-  void _syncClock() {
-    final bool shouldAnimate = ZenMotion.enabled && widget.active;
-    if (shouldAnimate && _clock == null) {
-      _clock = _startMotionClock(this);
-    } else if (!shouldAnimate && _clock != null) {
-      _clock!.dispose();
-      _clock = null;
+    if (widget.pulseOnStart) {
+      _startBrief();
     }
   }
 
   @override
+  void didUpdateWidget(ZenPulsingDot oldWidget) {
+    if (!oldWidget.active && widget.active) {
+      _startBrief();
+    }
+    super.didUpdateWidget(oldWidget);
+  }
+
+  @override
   void dispose() {
-    _clock?.dispose();
+    _briefTimer?.cancel();
     super.dispose();
+  }
+
+  void _startBrief() {
+    _brief = true;
+    _briefTimer?.cancel();
+    _briefTimer = Timer(kZenBriefPulse, () {
+      _briefTimer = null;
+      _brief = false;
+      if (mounted) {
+        // Back to still: off the clock, one last frame.
+        syncClock();
+        setState(() {});
+      }
+    });
   }
 
   /// 0..1 beat intensity at [seconds].
@@ -305,16 +436,13 @@ class _ZenPulsingDotState extends State<ZenPulsingDot>
 
   @override
   Widget build(BuildContext context) {
-    final AnimationController? clock = _clock;
-    if (clock == null) {
+    if (!onClock) {
       return _buildDot(1, 6, 1);
     }
-    return AnimatedBuilder(
-      animation: clock,
-      builder: (BuildContext context, Widget? child) {
-        final double v = _pulse(clock.value);
-        return _buildDot(0.46 + 0.54 * v, 3 + 11 * v, 0.86 + 0.26 * v);
-      },
+    final double v = _pulse(clockSeconds);
+    // The glow's blur changes every frame: kept to this small layer.
+    return RepaintBoundary(
+      child: _buildDot(0.46 + 0.54 * v, 3 + 11 * v, 0.86 + 0.26 * v),
     );
   }
 
@@ -363,10 +491,10 @@ enum _FlickerProfile {
   coldStart,
 }
 
-/// Authentic flickering neon lamp simulation. Between bursts the glow keeps a
-/// slow, barely visible hum instead of sitting perfectly still, and every
-/// burst draws its own profile *and* its own speed, so no two look alike.
-/// Renders a stable glowing child when [ZenMotion.enabled] is false.
+/// A neon lamp: it flickers once — a short burst with its own profile and
+/// speed — when it appears and whenever [trigger] changes (a new count),
+/// and glows still in between, so a screen that shows it draws nothing.
+/// Still when motion is off ([ZenMotion.allowedIn]).
 class ZenNeonFlicker extends StatefulWidget {
   const ZenNeonFlicker({
     super.key,
@@ -374,94 +502,67 @@ class ZenNeonFlicker extends StatefulWidget {
     required this.color,
     this.glowRadius = 14,
     this.glowAlpha = 0.5,
-    this.minQuietSeconds = 3,
-    this.maxQuietSeconds = 9,
+    this.trigger,
   });
 
   final Widget child;
   final Color color;
   final double glowRadius;
   final double glowAlpha;
-  final int minQuietSeconds;
-  final int maxQuietSeconds;
+
+  /// A change of this value flickers the lamp again.
+  final Object? trigger;
 
   @override
   State<ZenNeonFlicker> createState() => _ZenNeonFlickerState();
 }
 
-class _ZenNeonFlickerState extends State<ZenNeonFlicker>
-    with TickerProviderStateMixin {
-  Timer? _quietTimer;
+class _ZenNeonFlickerState extends State<ZenNeonFlicker> {
   Timer? _stepTimer;
-  AnimationController? _clock;
   double _burstOpacity = 1.0;
-
-  // Idle-hum parameters: a mains-frequency-ish shimmer plus a slow breath.
-  final double _humSeedA = _rand(0, math.pi * 2);
-  final double _humSeedB = _rand(0, math.pi * 2);
-  final double _humSpeed = _rand(0.22, 0.48);
-  final double _humDepth = _rand(0.04, 0.11);
+  bool _started = false;
 
   @override
-  void initState() {
-    super.initState();
-    if (ZenMotion.enabled) {
-      _clock = _startMotionClock(this);
-      _scheduleNextFlicker();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_started) {
+      _started = true;
+      _triggerFlickerBurst();
+    } else if (!ZenMotion.allowedIn(context)) {
+      _settle();
     }
   }
 
   @override
   void didUpdateWidget(ZenNeonFlicker oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (ZenMotion.enabled) {
-      _clock ??= _startMotionClock(this);
-      if (_quietTimer == null && _stepTimer == null) {
-        _scheduleNextFlicker();
-      }
-    } else {
-      _cancelTimers();
-      _clock?.dispose();
-      _clock = null;
-      _burstOpacity = 1.0;
+    if (oldWidget.trigger != widget.trigger) {
+      _triggerFlickerBurst();
     }
   }
 
   @override
   void dispose() {
-    _cancelTimers();
-    _clock?.dispose();
+    _stepTimer?.cancel();
     super.dispose();
   }
 
-  void _cancelTimers() {
-    _quietTimer?.cancel();
-    _quietTimer = null;
+  void _settle() {
     _stepTimer?.cancel();
     _stepTimer = null;
-  }
-
-  void _scheduleNextFlicker() {
-    if (!mounted || !ZenMotion.enabled) return;
-    _cancelTimers();
-    final int span = (widget.maxQuietSeconds - widget.minQuietSeconds).clamp(
-      1,
-      60,
-    );
-    // Skewing the draw makes short gaps common and long gaps rare, which is
-    // how real intermittent faults are distributed.
-    final double skew = math.pow(_entropy.nextDouble(), 1.5).toDouble();
-    final int delayMs = (widget.minQuietSeconds * 1000 + skew * span * 1000)
-        .toInt();
-    _quietTimer = Timer(Duration(milliseconds: delayMs), _triggerFlickerBurst);
+    _burstOpacity = 1.0;
   }
 
   void _triggerFlickerBurst() {
-    if (!mounted || !ZenMotion.enabled) return;
+    _stepTimer?.cancel();
+    _stepTimer = null;
+    if (!mounted || !ZenMotion.allowedIn(context)) {
+      _burstOpacity = 1.0;
+      return;
+    }
     final _FlickerProfile profile =
         _FlickerProfile.values[_entropy.nextInt(_FlickerProfile.values.length)];
-    // The speed multiplier is the point of the whole rework: the same profile
-    // plays frantically one time and lazily the next.
+    // The same profile plays frantically one time and lazily the next.
     final double speed = _rand(0.55, 1.9);
     final int totalSteps = switch (profile) {
       _FlickerProfile.buzz => 9 + _entropy.nextInt(9),
@@ -472,10 +573,10 @@ class _ZenNeonFlickerState extends State<ZenNeonFlicker>
     int stepIndex = 0;
 
     void nextStep() {
-      if (!mounted || !ZenMotion.enabled) return;
-      if (stepIndex >= totalSteps) {
+      if (!mounted) return;
+      if (stepIndex >= totalSteps || !ZenMotion.allowedIn(context)) {
+        _stepTimer = null;
         setState(() => _burstOpacity = 1.0);
-        _scheduleNextFlicker();
         return;
       }
 
@@ -501,6 +602,8 @@ class _ZenNeonFlickerState extends State<ZenNeonFlicker>
               : (0.35 + 0.6 * progress) + _entropy.nextDouble() * 0.08,
       };
 
+      // Never faster than the low frame rate of the other animations.
+      final int minStepMs = 1000 ~/ ZenMotion.framesPerSecond;
       final int baseMs = switch (profile) {
         _FlickerProfile.buzz =>
           isDip ? 14 + _entropy.nextInt(22) : 16 + _entropy.nextInt(26),
@@ -515,34 +618,19 @@ class _ZenNeonFlickerState extends State<ZenNeonFlicker>
       setState(() => _burstOpacity = target.clamp(0.04, 1.0));
       stepIndex++;
       _stepTimer = Timer(
-        Duration(milliseconds: math.max(10, (baseMs / speed).round())),
+        Duration(milliseconds: math.max(minStepMs, (baseMs / speed).round())),
         nextStep,
       );
     }
 
-    nextStep();
-  }
-
-  /// Slow idle shimmer, so a lamp that is not currently glitching still is not
-  /// perfectly, obviously static.
-  double _hum(double seconds) {
-    final double x = _warp(seconds * _humSpeed, _humSeedA, _humSeedB);
-    final double wave = 0.5 + 0.5 * math.sin(x * math.pi * 2);
-    return 1 - _humDepth * (1 - wave);
+    // After the current build: this can come from didChangeDependencies.
+    _stepTimer = Timer(Duration.zero, nextStep);
   }
 
   @override
   Widget build(BuildContext context) {
-    final AnimationController? clock = _clock;
-    if (!ZenMotion.enabled || clock == null) {
-      return _buildGlow(1);
-    }
-    return AnimatedBuilder(
-      animation: clock,
-      builder: (BuildContext context, Widget? child) {
-        return _buildGlow(_burstOpacity * _hum(clock.value));
-      },
-    );
+    final Widget glow = _buildGlow(_burstOpacity);
+    return _stepTimer == null ? glow : RepaintBoundary(child: glow);
   }
 
   Widget _buildGlow(double opacity) {
@@ -570,7 +658,8 @@ class _ZenNeonFlickerState extends State<ZenNeonFlicker>
 /// Expanding sonar-style rings behind [child] — used for the incoming-call
 /// hero icon and the "connecting" state on the call surface. Ring spacing,
 /// reach and speed are jittered per instance so the sonar reads as organic.
-/// Renders only the child when [ZenMotion.enabled] is false.
+/// Only the child when motion is off ([ZenMotion.allowedIn]); otherwise at
+/// a low frame rate.
 class ZenPulseRings extends StatefulWidget {
   const ZenPulseRings({
     super.key,
@@ -615,8 +704,7 @@ class _RingJitter {
 }
 
 class _ZenPulseRingsState extends State<ZenPulseRings>
-    with TickerProviderStateMixin {
-  AnimationController? _clock;
+    with _LowRateMotion<ZenPulseRings> {
   late List<_RingJitter> _rings;
 
   final double _speed = _rand(0.78, 1.24);
@@ -624,19 +712,20 @@ class _ZenPulseRingsState extends State<ZenPulseRings>
   final double _seedB = _rand(0, math.pi * 2);
 
   @override
+  bool get wantsMotion => widget.ringCount > 0 && ZenMotion.allowedIn(context);
+
+  @override
   void initState() {
     super.initState();
     _rings = _buildRings();
-    _syncController();
   }
 
   @override
   void didUpdateWidget(ZenPulseRings oldWidget) {
-    super.didUpdateWidget(oldWidget);
     if (oldWidget.ringCount != widget.ringCount) {
       _rings = _buildRings();
-      _syncController();
     }
+    super.didUpdateWidget(oldWidget);
   }
 
   List<_RingJitter> _buildRings() {
@@ -647,26 +736,9 @@ class _ZenPulseRingsState extends State<ZenPulseRings>
     );
   }
 
-  void _syncController() {
-    final bool shouldAnimate = ZenMotion.enabled && widget.ringCount > 0;
-    if (shouldAnimate && _clock == null) {
-      _clock = _startMotionClock(this);
-    } else if (!shouldAnimate && _clock != null) {
-      _clock!.dispose();
-      _clock = null;
-    }
-  }
-
-  @override
-  void dispose() {
-    _clock?.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final AnimationController? clock = _clock;
-    if (clock == null) {
+    if (!onClock) {
       return SizedBox(
         width: widget.baseSize,
         height: widget.baseSize,
@@ -675,27 +747,30 @@ class _ZenPulseRingsState extends State<ZenPulseRings>
     }
     final double periodSeconds =
         widget.period.inMilliseconds / 1000 * (1 / _speed);
+    final double t = _warp(
+      clockSeconds / math.max(0.2, periodSeconds),
+      _seedA,
+      _seedB,
+    );
     return SizedBox(
       width: widget.baseSize,
       height: widget.baseSize,
-      child: AnimatedBuilder(
-        animation: clock,
-        builder: (BuildContext context, Widget? child) {
-          final double t = _warp(
-            clock.value / math.max(0.2, periodSeconds),
-            _seedA,
-            _seedB,
-          );
-          return Stack(
-            alignment: Alignment.center,
-            clipBehavior: Clip.none,
-            children: <Widget>[
-              for (int index = 0; index < _rings.length; index += 1)
-                _buildRing((t + _rings[index].phase) % 1.0, _rings[index]),
-              widget.child,
-            ],
-          );
-        },
+      child: Stack(
+        alignment: Alignment.center,
+        clipBehavior: Clip.none,
+        children: <Widget>[
+          RepaintBoundary(
+            child: Stack(
+              alignment: Alignment.center,
+              clipBehavior: Clip.none,
+              children: <Widget>[
+                for (int index = 0; index < _rings.length; index += 1)
+                  _buildRing((t + _rings[index].phase) % 1.0, _rings[index]),
+              ],
+            ),
+          ),
+          widget.child,
+        ],
       ),
     );
   }
@@ -870,235 +945,6 @@ class _ZenPressableState extends State<ZenPressable> {
         curve: Curves.easeOutCubic,
         child: widget.child,
       ),
-    );
-  }
-}
-
-/// How a single letter fails during a glitch burst.
-enum _GlitchProfile {
-  /// Two or three quick twitches.
-  twitch,
-
-  /// A long, chaotic run of unequal stutters.
-  stutter,
-
-  /// A deep sag that takes its time coming back.
-  sag,
-}
-
-/// Renders text with organic, highly randomised dying-neon flicker. Letters
-/// glitch independently — each one picks its own profile, its own step count
-/// and its own playback speed — and once in a while the whole word browns out
-/// together. Quiet gaps between bursts are drawn from a skewed distribution,
-/// so short gaps are common and long ones rare.
-class ZenNeonGlitchText extends StatefulWidget {
-  const ZenNeonGlitchText({
-    super.key,
-    required this.text,
-    this.style,
-    this.glowColor,
-    this.glowRadius = 8,
-    this.minQuietSeconds = 8,
-    this.maxQuietSeconds = 38,
-  });
-
-  final String text;
-  final TextStyle? style;
-  final Color? glowColor;
-  final double glowRadius;
-  final int minQuietSeconds;
-  final int maxQuietSeconds;
-
-  @override
-  State<ZenNeonGlitchText> createState() => _ZenNeonGlitchTextState();
-}
-
-class _ZenNeonGlitchTextState extends State<ZenNeonGlitchText> {
-  Timer? _quietTimer;
-  final List<Timer> _letterTimers = <Timer>[];
-  final Map<int, double> _letterOpacity = <int, double>{};
-  int _runningLetters = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    if (ZenMotion.enabled && widget.text.isNotEmpty) {
-      _scheduleNextFlicker();
-    }
-  }
-
-  @override
-  void didUpdateWidget(ZenNeonGlitchText oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (ZenMotion.enabled) {
-      if (_quietTimer == null && _runningLetters == 0) {
-        _scheduleNextFlicker();
-      }
-    } else {
-      _cancelTimers();
-    }
-  }
-
-  @override
-  void dispose() {
-    _cancelTimers();
-    super.dispose();
-  }
-
-  void _cancelTimers() {
-    _quietTimer?.cancel();
-    _quietTimer = null;
-    for (final Timer timer in _letterTimers) {
-      timer.cancel();
-    }
-    _letterTimers.clear();
-    _runningLetters = 0;
-    _letterOpacity.clear();
-  }
-
-  void _scheduleNextFlicker() {
-    if (!mounted || !ZenMotion.enabled || widget.text.isEmpty) return;
-    _cancelTimers();
-    final int span = (widget.maxQuietSeconds - widget.minQuietSeconds).clamp(
-      2,
-      90,
-    );
-    // Exponential-ish skew: most gaps sit near the minimum, the occasional one
-    // stretches out — the pattern never becomes predictable.
-    final double skew = math.pow(_entropy.nextDouble(), 1.7).toDouble();
-    final int delayMs = (widget.minQuietSeconds * 1000 + skew * span * 1000)
-        .toInt();
-    _quietTimer = Timer(Duration(milliseconds: delayMs), _triggerGlitch);
-  }
-
-  void _triggerGlitch() {
-    if (!mounted || !ZenMotion.enabled || widget.text.isEmpty) return;
-    final List<int> validIndices = <int>[];
-    for (int i = 0; i < widget.text.length; i++) {
-      if (widget.text[i].trim().isNotEmpty) {
-        validIndices.add(i);
-      }
-    }
-    if (validIndices.isEmpty) {
-      _scheduleNextFlicker();
-      return;
-    }
-
-    _letterOpacity.clear();
-    final double roll = _entropy.nextDouble();
-    final List<int> chosen;
-    if (roll < 0.06) {
-      // Rare full-word brownout: every letter sags at once, then recovers.
-      chosen = validIndices;
-    } else {
-      final int count = roll < 0.3 && validIndices.length > 2 ? 2 : 1;
-      final List<int> pool = List<int>.of(validIndices)..shuffle(_entropy);
-      chosen = pool.take(count).toList(growable: false);
-    }
-
-    _runningLetters = chosen.length;
-    for (final int index in chosen) {
-      _runLetter(index);
-    }
-  }
-
-  /// Drives one letter through its own independent glitch timeline.
-  void _runLetter(int index) {
-    final _GlitchProfile profile =
-        _GlitchProfile.values[_entropy.nextInt(_GlitchProfile.values.length)];
-    // Per-letter speed: two letters glitching at once do so at different rates.
-    final double speed = _rand(0.6, 1.75);
-    final int steps = switch (profile) {
-      _GlitchProfile.twitch => 2 + _entropy.nextInt(2),
-      _GlitchProfile.stutter => 5 + _entropy.nextInt(7),
-      _GlitchProfile.sag => 3 + _entropy.nextInt(3),
-    };
-    int step = 0;
-
-    void nextStep() {
-      if (!mounted || !ZenMotion.enabled) return;
-      if (step >= steps) {
-        setState(() => _letterOpacity.remove(index));
-        _runningLetters -= 1;
-        if (_runningLetters <= 0) {
-          _runningLetters = 0;
-          _scheduleNextFlicker();
-        }
-        return;
-      }
-
-      final bool isLow = step.isEven;
-      final double target = switch (profile) {
-        _GlitchProfile.twitch =>
-          isLow
-              ? 0.28 + _entropy.nextDouble() * 0.38
-              : 0.93 + _entropy.nextDouble() * 0.07,
-        _GlitchProfile.stutter =>
-          isLow
-              ? 0.12 + _entropy.nextDouble() * 0.42
-              : 0.9 + _entropy.nextDouble() * 0.1,
-        _GlitchProfile.sag =>
-          isLow
-              ? 0.04 + _entropy.nextDouble() * 0.12
-              : 0.88 + _entropy.nextDouble() * 0.12,
-      };
-
-      final int baseMs = switch (profile) {
-        _GlitchProfile.twitch =>
-          isLow ? 28 + _entropy.nextInt(34) : 34 + _entropy.nextInt(46),
-        _GlitchProfile.stutter =>
-          isLow ? 18 + _entropy.nextInt(48) : 22 + _entropy.nextInt(52),
-        _GlitchProfile.sag =>
-          isLow ? 70 + _entropy.nextInt(140) : 60 + _entropy.nextInt(110),
-      };
-
-      setState(() => _letterOpacity[index] = target.clamp(0.04, 1.0));
-      step++;
-      _letterTimers.add(
-        Timer(
-          Duration(milliseconds: math.max(12, (baseMs / speed).round())),
-          nextStep,
-        ),
-      );
-    }
-
-    nextStep();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final TextStyle baseStyle =
-        widget.style ?? DefaultTextStyle.of(context).style;
-    if (!ZenMotion.enabled || _letterOpacity.isEmpty) {
-      return Text(widget.text, style: baseStyle);
-    }
-
-    final Color glow = widget.glowColor ?? baseStyle.color ?? Colors.amber;
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List<Widget>.generate(widget.text.length, (int i) {
-        final double? opacity = _letterOpacity[i];
-        if (opacity == null) {
-          return Text(widget.text[i], style: baseStyle);
-        }
-        return Opacity(
-          opacity: opacity.clamp(0.04, 1.0),
-          child: Text(
-            widget.text[i],
-            style: baseStyle.copyWith(
-              shadows: <Shadow>[
-                Shadow(
-                  color: glow.withValues(
-                    alpha: (0.75 * opacity).clamp(0.0, 1.0),
-                  ),
-                  blurRadius: widget.glowRadius * opacity,
-                ),
-              ],
-            ),
-          ),
-        );
-      }),
     );
   }
 }

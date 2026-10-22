@@ -88,6 +88,7 @@ class MainActivity : FlutterFragmentActivity() {
         ZenLocationBridge.register(flutterEngine, this, this)
         ZenAlarmShortcut.register(flutterEngine, this, background = false)
         ZenVideoBridge.register(flutterEngine, this)
+        ZenPower.register(flutterEngine, this, background = false)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
@@ -98,6 +99,10 @@ class MainActivity : FlutterFragmentActivity() {
         ZenWifiDirectBridge.unregister(flutterEngine)
         ZenBluetoothLinkBridge.unregister(flutterEngine)
         ZenAlarmShortcut.unregister(flutterEngine)
+        ZenPower.unregister(flutterEngine)
+        // The background service takes the node over now, not after its
+        // watchdog misses the heartbeats.
+        ZenPower.appEngineGone(this)
         super.cleanUpFlutterEngine(flutterEngine)
     }
 

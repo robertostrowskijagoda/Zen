@@ -223,3 +223,69 @@ func TestPeerGuardRefusesFilteredAddresses(t *testing.T) {
 		t.Fatal("a filtered address must be closed at once")
 	}
 }
+
+func TestPeerGuardPausedTakesNoPeersAndDropsItsLinks(t *testing.T) {
+	backend, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Close()
+	go func() {
+		for {
+			conn, err := backend.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				_, _ = io.Copy(conn, conn)
+			}()
+		}
+	}()
+	public, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := newPeerListenGuard(public, backend.Addr().String(), defaultPeerGuardLimits)
+	go guard.serve()
+	defer guard.close()
+
+	echo := func() (net.Conn, error) {
+		conn, err := net.Dial("tcp", guard.listener.Addr().String())
+		if err != nil {
+			return nil, err
+		}
+		if _, err := conn.Write([]byte("hi\n")); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if _, err := bufio.NewReader(conn).ReadString('\n'); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		return conn, nil
+	}
+	linked, err := echo()
+	if err != nil {
+		t.Fatalf("a peer gets in while plugged in: %v", err)
+	}
+	defer linked.Close()
+
+	guard.setPaused(true)
+	_ = linked.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := linked.Read(make([]byte, 1)); err == nil {
+		t.Fatal("pausing drops the links the bridge carries")
+	}
+	if conn, err := echo(); err == nil {
+		conn.Close()
+		t.Fatal("a paused bridge takes no peers")
+	}
+
+	guard.setPaused(false)
+	again, err := echo()
+	if err != nil {
+		t.Fatalf("a bridge plugged in again takes peers: %v", err)
+	}
+	again.Close()
+}

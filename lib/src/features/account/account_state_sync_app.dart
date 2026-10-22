@@ -445,9 +445,18 @@ final class OwnMediaKeeper {
   Timer? _timer;
   StreamSubscription<LogEntry>? _added;
   Timer? _soon;
+  bool _stopped = false;
+
+  /// Whether its periodic look runs (tests).
+  @visibleForTesting
+  bool get ticking => _timer != null;
 
   Future<void> start() async {
     await node.start();
+    if (_stopped) {
+      // Stopped while the node was starting: nothing may outlive the stop.
+      return;
+    }
     _timer = Timer.periodic(every, (_) => unawaited(check()));
     _added = node.store.added.listen((LogEntry e) {
       if (e.account == node.account && e.blobs.isNotEmpty) {
@@ -459,9 +468,13 @@ final class OwnMediaKeeper {
   }
 
   void stop() {
+    _stopped = true;
     _timer?.cancel();
+    _timer = null;
     _soon?.cancel();
+    _soon = null;
     unawaited(_added?.cancel());
+    _added = null;
   }
 
   /// The files of the account's own entries this device does not hold
@@ -515,6 +528,10 @@ final class AccountDevicesKeeper {
   final List<_PokedDomain> _domains = <_PokedDomain>[];
   final List<void Function()> _unlisten = <void Function()>[];
 
+  /// Stopped with its owner: a start still going on stops at its next
+  /// step instead of leaving timers behind.
+  bool _stopped = false;
+
   void _listen(Listenable l, _PokedDomain d) {
     l.addListener(d.poke);
     _unlisten.add(() => l.removeListener(d.poke));
@@ -522,10 +539,13 @@ final class AccountDevicesKeeper {
 
   Future<void> start() async {
     final LedgerNode? node = ref.read(ledgerNodeProvider);
-    if (node == null || _sync != null) {
+    if (node == null || _sync != null || _stopped) {
       return;
     }
     await node.start();
+    if (_stopped) {
+      return;
+    }
     final LedgerDisk disk = ref.read(ledgerDiskProvider);
     final AccountMediaPolicy policy = ref.read(accountMediaPolicyProvider);
     final SettingsSyncDomain settings = SettingsSyncDomain(ref);
@@ -607,12 +627,17 @@ final class AccountDevicesKeeper {
     );
     _sync = sync;
     await sync.start();
+    if (_stopped) {
+      await sync.stop();
+      return;
+    }
     final OwnMediaKeeper media = OwnMediaKeeper(node: node, policy: policy);
     _media = media;
     await media.start();
   }
 
   Future<void> stop() async {
+    _stopped = true;
     for (final void Function() u in _unlisten) {
       u();
     }

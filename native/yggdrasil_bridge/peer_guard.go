@@ -74,6 +74,8 @@ type peerListenGuard struct {
 	dayBytes   int64
 	open       map[net.Conn]struct{}
 	closed     bool
+	// Takes no peers for now (the computer runs on battery).
+	paused bool
 	// Connections refused by a limit so far.
 	refusedConn int
 
@@ -151,7 +153,7 @@ func remoteIPOf(conn net.Conn) net.IP {
 func (guard *peerListenGuard) admit(key string) bool {
 	guard.mu.Lock()
 	defer guard.mu.Unlock()
-	if guard.closed {
+	if guard.closed || guard.paused {
 		return false
 	}
 	now := guard.now()
@@ -333,6 +335,28 @@ func (guard *peerListenGuard) copyMetered(dst io.Writer, src io.Reader, key stri
 		if err != nil {
 			return
 		}
+	}
+}
+
+// setPaused stops taking peers and drops the ones it carries (paused), or
+// takes them again. The port stays open, so nothing has to be bound again.
+func (guard *peerListenGuard) setPaused(paused bool) {
+	guard.mu.Lock()
+	if guard.closed || guard.paused == paused {
+		guard.mu.Unlock()
+		return
+	}
+	guard.paused = paused
+	var open []net.Conn
+	if paused {
+		open = make([]net.Conn, 0, len(guard.open))
+		for conn := range guard.open {
+			open = append(open, conn)
+		}
+	}
+	guard.mu.Unlock()
+	for _, conn := range open {
+		_ = conn.Close()
 	}
 }
 

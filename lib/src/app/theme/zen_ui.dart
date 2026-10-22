@@ -460,7 +460,7 @@ class ZenSectionBar extends StatelessWidget implements PreferredSizeWidget {
       children: <Widget>[
         Flexible(
           child: Container(
-            padding: const EdgeInsets.fromLTRB(10, 2, 12, 2),
+            padding: const EdgeInsetsDirectional.fromSTEB(10, 2, 12, 2),
             decoration: ShapeDecoration(
               color: zen.surfaceSunk,
               shape: ZenBevelBorder.of(zen, sunken: true),
@@ -538,21 +538,43 @@ class ZenHairline extends StatelessWidget {
   }
 }
 
-class ZenStatusDot extends StatelessWidget {
+/// Online (a green dot) or not (a ring). Still: it pulses briefly only when
+/// it turns on, so a screen full of online friends draws nothing.
+class ZenStatusDot extends StatefulWidget {
   const ZenStatusDot({super.key, required this.on, this.size = 6});
 
   final bool on;
   final double size;
 
   @override
+  State<ZenStatusDot> createState() => _ZenStatusDotState();
+}
+
+class _ZenStatusDotState extends State<ZenStatusDot> {
+  /// How often it turned on while shown (each time a brief pulse).
+  int _turnedOn = 0;
+
+  @override
+  void didUpdateWidget(ZenStatusDot oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.on && widget.on) {
+      _turnedOn += 1;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
-    if (on) {
+    final double size = widget.size;
+    if (widget.on) {
       return ZenPulsingDot(
+        key: ValueKey<int>(_turnedOn),
         color: zen.success,
         active: true,
         dimension: size + 6,
         dotSize: size,
+        continuous: false,
+        pulseOnStart: _turnedOn > 0,
       );
     }
     return SizedBox.square(
@@ -654,8 +676,8 @@ class ZenBlobAvatar extends StatelessWidget {
             ),
           ),
           if (showStatus)
-            Positioned(
-              right: -2,
+            PositionedDirectional(
+              end: -2,
               bottom: -2,
               child: DecoratedBox(
                 decoration: BoxDecoration(

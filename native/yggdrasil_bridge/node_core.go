@@ -50,12 +50,27 @@ func createNode(configJSON string) (*bridgeNode, error) {
 	cfg := config.GenerateConfig()
 	cfg.IfName = "none"
 	cfg.AdminListen = "none"
+	configJSON, peerTarget := takeZenPeerTarget(configJSON)
 	if err := cfg.UnmarshalHJSON([]byte(configJSON)); err != nil {
 		return nil, err
 	}
 	ensureDefaultRuntimeConfig(cfg)
 	cfg.IfName = "none"
 	cfg.AdminListen = "none"
+	// A phone dials a few of its pool (phone_peers.go); a computer on
+	// battery is no bridge and dials a few too (power_source.go).
+	var phonePeers *phonePeerKeeper
+	var power *desktopPowerSaver
+	if isPhoneOS() {
+		phonePeers = newPhonePeerKeeper(cfg.Peers, phonePeerTarget(peerTarget))
+		cfg.Peers = append([]string(nil), phonePeers.dialled...)
+	} else {
+		onBattery := onBatteryPower()
+		power = newDesktopPowerSaver(onBattery, cfg.Peers)
+		if onBattery {
+			cfg.Peers = firstPeers(cfg.Peers, desktopBatteryPeerCount)
+		}
+	}
 
 	iprange := net.IPNet{
 		IP:   net.ParseIP("200::"),
@@ -177,6 +192,20 @@ func createNode(configJSON string) (*bridgeNode, error) {
 		peerProbe:      newPeerProbeState(),
 		nudgeStop:      make(chan struct{}),
 		peerGuards:     peerGuards,
+		phonePeers:     phonePeers,
+		power:          power,
+	}
+	if phonePeers != nil {
+		go node.watchPhonePeers()
+	}
+	if power != nil {
+		if power.onBattery {
+			// The full list stays in power for when it is plugged in again.
+			for _, guard := range peerGuards {
+				guard.setPaused(true)
+			}
+		}
+		go node.watchDesktopPower()
 	}
 	if !isPhoneOS() {
 		node.startPeerProbeMonitor()

@@ -33,25 +33,76 @@ class DesktopQrScannerPage extends StatefulWidget {
   State<DesktopQrScannerPage> createState() => _DesktopQrScannerPageState();
 }
 
-class _DesktopQrScannerPageState extends State<DesktopQrScannerPage> {
+class _DesktopQrScannerPageState extends State<DesktopQrScannerPage>
+    with WidgetsBindingObserver {
   bool _opening = true;
   bool _hasCamera = false;
   bool _done = false;
   String? _error;
 
+  /// The window is hidden (the tray): the camera is off and nothing looks.
+  bool _suspended = false;
+  bool _looking = false;
+  FilmLens? _lens;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_start());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      unawaited(_suspend());
+    } else if (state == AppLifecycleState.resumed) {
+      unawaited(_resume());
+    }
+  }
+
+  Future<void> _suspend() async {
+    if (_suspended || !_hasCamera || _done) {
+      return;
+    }
+    _suspended = true;
+    try {
+      await widget.camera.close();
+    } on Object {
+      // Already closed.
+    }
+  }
+
+  Future<void> _resume() async {
+    final FilmLens? lens = _lens;
+    if (!_suspended || lens == null || _done || !mounted) {
+      return;
+    }
+    _suspended = false;
+    try {
+      await widget.camera.open(lens);
+    } on Object catch (e) {
+      if (mounted) {
+        setState(
+          () =>
+              _error = t('Nie udało się włączyć kamery: {error}', {'error': e}),
+        );
+      }
+      return;
+    }
+    unawaited(_look());
   }
 
   Future<void> _start() async {
     try {
       final List<FilmLens> lenses = await widget.camera.lenses();
       if (lenses.isNotEmpty) {
-        await widget.camera.open(
-          lenses.contains(FilmLens.back) ? FilmLens.back : lenses.first,
-        );
+        final FilmLens lens = lenses.contains(FilmLens.back)
+            ? FilmLens.back
+            : lenses.first;
+        await widget.camera.open(lens);
+        _lens = lens;
         _hasCamera = true;
       }
     } on Object catch (e) {
@@ -68,7 +119,19 @@ class _DesktopQrScannerPageState extends State<DesktopQrScannerPage> {
 
   /// Takes pictures until one has a code (or the page is left).
   Future<void> _look() async {
-    while (mounted && !_done) {
+    if (_looking) {
+      return;
+    }
+    _looking = true;
+    try {
+      await _lookLoop();
+    } finally {
+      _looking = false;
+    }
+  }
+
+  Future<void> _lookLoop() async {
+    while (mounted && !_done && !_suspended) {
       try {
         final LumaFrame? frame = await widget.camera.lumaFrame();
         final String? text = frame == null ? null : await widget.decode(frame);
@@ -98,6 +161,7 @@ class _DesktopQrScannerPageState extends State<DesktopQrScannerPage> {
   @override
   void dispose() {
     _done = true;
+    WidgetsBinding.instance.removeObserver(this);
     unawaited(widget.camera.close());
     super.dispose();
   }

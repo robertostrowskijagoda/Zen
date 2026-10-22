@@ -87,13 +87,21 @@ void main() {
       );
     }
     expect(cost(5, 4), lessThan(cost(5, 15)));
-    // Even the most often and longest stays well under 1 % of a battery.
+    // Honest numbers: the most often and longest costs a few per cent of a
+    // battery a day (the phone is woken 720 times), the rarest a fraction.
     expect(
       nearbyLookBatteryPercentPerDay(
         every: const Duration(minutes: 2),
         window: const Duration(seconds: 15),
       ),
-      lessThan(1),
+      inInclusiveRange(3, 10),
+    );
+    expect(
+      nearbyLookBatteryPercentPerDay(
+        every: const Duration(minutes: 30),
+        window: const Duration(seconds: 4),
+      ),
+      lessThan(0.5),
     );
   });
 

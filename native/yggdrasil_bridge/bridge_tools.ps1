@@ -26,7 +26,10 @@ function Find-ZenAndroidNdk {
   foreach ($sdkRoot in $sdkRoots) {
     $ndkDir = Join-Path $sdkRoot 'ndk'
     if (Test-Path $ndkDir) {
-      $ndk = Get-ChildItem $ndkDir -Directory | Sort-Object Name -Descending | Select-Object -First 1
+      # By version, not by name ("9.x" would sort above "28.x").
+      $ndk = Get-ChildItem $ndkDir -Directory |
+        Sort-Object { $v = $null; if ([version]::TryParse($_.Name, [ref]$v)) { $v } else { [version]'0.0' } } -Descending |
+        Select-Object -First 1
       if ($ndk) {
         return $ndk
       }

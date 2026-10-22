@@ -77,7 +77,7 @@ func TestApplyAndroidRuntimeConfigUsesCuratedPeersAndDisablesMulticast(t *testin
 
 func TestPrioritizedPublicPeersPuts443First(t *testing.T) {
 	peers := prioritizedPublicPeers()
-	if len(peers) < androidBootstrapPeerLimit {
+	if len(peers) < phonePeerPoolSize {
 		t.Fatalf("public peer list is too short: %d", len(peers))
 	}
 	first := peers[0]

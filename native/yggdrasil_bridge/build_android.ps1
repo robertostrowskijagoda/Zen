@@ -66,7 +66,10 @@ try {
 
     $output = Join-Path $outDir 'libyggdrasil_bridge.so'
     Write-Host "Go bridge: building android/$($abi.Abi)"
-    & $go.Exe build -trimpath -buildmode=c-shared -ldflags='-s -w -checklinkname=0' -o $output .
+    # 16 KB pages (Android 15+ devices, required by Google Play): Go's
+    # linker does not choose the page size, the NDK's does (16 KB only from
+    # r28), so it is asked for explicitly (tool/ci/check_page_alignment.py).
+    & $go.Exe build -trimpath -buildmode=c-shared -ldflags='-s -w -checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384' -o $output .
     if ($LASTEXITCODE -ne 0) {
       throw "go build failed for $($abi.Abi)"
     }

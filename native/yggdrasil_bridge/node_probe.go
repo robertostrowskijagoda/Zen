@@ -73,10 +73,10 @@ func countNonLoopbackPeers(peers []string) int {
 }
 
 func androidBootstrapPeers() []string {
-	if uris, ok := firstUserPeers(androidBootstrapPeerCount); ok {
+	if uris, ok := firstUserPeers(phonePeerPoolSize); ok {
 		return uris
 	}
-	return selectAndroidBootstrapPeers(publicPeerPool, androidBootstrapPeerCount)
+	return selectAndroidBootstrapPeers(publicPeerPool, phonePeerPoolSize)
 }
 
 func ipv4LiteralPublicPeers() []string {
@@ -417,7 +417,9 @@ func (node *bridgeNode) startPeerProbeMonitor() {
 		return
 	}
 	go func() {
-		wait := time.Duration(0)
+		// Not at start: the probe only feeds the diagnostics, so it runs
+		// every few hours or when the peers change (triggerNow).
+		wait := runtimePeerProbeRefreshInterval()
 		for {
 			if wait > 0 {
 				timer := time.NewTimer(wait)
@@ -450,7 +452,6 @@ func (node *bridgeNode) startPeerProbeMonitor() {
 			wait = node.runPeerProbeCycle()
 		}
 	}()
-	node.peerProbe.triggerNow()
 }
 
 func (node *bridgeNode) stopPeerProbeMonitor() {
@@ -461,6 +462,10 @@ func (node *bridgeNode) stopPeerProbeMonitor() {
 }
 
 func (node *bridgeNode) runPeerProbeCycle() time.Duration {
+	if node.onDesktopBattery() {
+		// Dozens of connections only to show a latency: not on battery.
+		return runtimePeerProbeRefreshInterval()
+	}
 	results, availableCount, candidateCount, _ := node.probePeerPoolResults("")
 	var (
 		bestPeer    string

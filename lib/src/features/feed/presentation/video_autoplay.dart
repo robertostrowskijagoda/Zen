@@ -1,4 +1,11 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+
+/// Whether a video at [context] may play by itself: not in a hidden tab of
+/// the shell (its tickers are off) nor on a page under another one. Its
+/// position alone cannot tell: a hidden tab keeps its size and place.
+bool mayAutoplayAt(BuildContext context) =>
+    TickerMode.valuesOf(context).enabled &&
+    (ModalRoute.of(context)?.isCurrent ?? true);
 
 /// Decides which video in the feed plays: the topmost one that is
 /// mostly on screen and has not finished yet. One at a time — when it ends,

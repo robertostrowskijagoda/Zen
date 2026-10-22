@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/app/zen_web.dart';
 import 'package:zen/src/features/neighbors/flat_model.dart';
 import 'package:zen/src/features/social/peer_share_codec.dart';
 
@@ -285,7 +286,7 @@ RuntimeRouteIntent? runtimeRouteIntentFromRouteKey({
   // adding that friend, the same as an in-app QR scan.
   if (uri.scheme == 'https' || uri.scheme == 'http') {
     // The door sticker's page (`…/m#<code>`) opened in Zen: knock there.
-    if (trimmed.startsWith('${PeerShareCodec.invitePageUrl}m#')) {
+    if (isZenPage(uri, path: 'm') && uri.fragment.isNotEmpty) {
       return _flatDoorIntent(id, uri.fragment);
     }
     return PeerShareCodec.inviteCodeFromLink(trimmed) == null

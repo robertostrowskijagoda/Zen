@@ -47,6 +47,7 @@ import 'package:zen/src/features/runtime/runtime_route_intent.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/runtime/runtime_system_notifications.dart';
 import 'package:zen/src/features/runtime/signal_transport.dart';
+import 'package:zen/src/features/runtime/zen_wake.dart';
 import 'package:zen/src/features/security/app_security_crypto.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 import 'package:zen/src/features/security/background_keys.dart';
@@ -183,8 +184,40 @@ const Duration kAndroidBackgroundHeartbeatInterval = Duration(seconds: 5);
 /// over, and the service sat parked and silent until the next launch. That is
 /// exactly the "no notification for an incoming call once the app is closed"
 /// case. The window is generous enough that a briefly janky UI isolate cannot
-/// trigger a second node while the first one is still up.
+/// trigger a second node while the first one is still up. It is counted on a
+/// monotonic clock that stands still while the phone sleeps (both isolates'
+/// timers do too): after a long sleep the service never mistakes the app's
+/// silence for its end. The end itself comes as a signal (ZenPower
+/// "appGone", when the app's engine goes).
 const Duration kAndroidBackgroundHeartbeatTimeout = Duration(seconds: 20);
+
+/// How often the parked service wakes the phone to look at the heartbeats.
+const Duration kAndroidStandbyWatchdogEvery = Duration(minutes: 1);
+
+/// After this long in the background, unlocked or not, the app hands the
+/// node to the service's receive-only mode, whatever the lock setting: no
+/// presence, no account scans, no Wi-Fi Direct or Bluetooth links, no
+/// ledger sync — only what friends send is kept (and calls and alarms ring).
+const Duration kAndroidReceiveOnlyAfter = Duration(minutes: 5);
+
+/// The receive-only threshold (tests make it shorter).
+final Provider<Duration> androidReceiveOnlyAfterProvider = Provider<Duration>(
+  (Ref ref) => kAndroidReceiveOnlyAfter,
+);
+
+/// Whether the app, in the background since [backgroundSince], should drop
+/// to the service's receive-only mode at [now].
+bool shouldDropToReceiveOnly({
+  required DateTime? backgroundSince,
+  required DateTime now,
+  Duration after = kAndroidReceiveOnlyAfter,
+}) {
+  if (backgroundSince == null) {
+    return false;
+  }
+  return !now.difference(backgroundSince).isNegative &&
+      now.difference(backgroundSince) >= after;
+}
 
 String _backgroundServiceNotificationText(
   CallSession? session, {
@@ -547,8 +580,12 @@ final class FlutterForegroundAndroidBackgroundServiceController
         ),
         autoRunOnBoot: true,
         autoRunOnMyPackageReplaced: true,
-        allowWakeLock: true,
-        allowWifiLock: true,
+        // No lock for the whole life of the service: with the screen off the
+        // phone sleeps. Alarms wake it for the work that comes back and a
+        // signal wakes it by itself; each holds it awake briefly
+        // (zen_wake.dart, ZenPower.kt). Only a call holds it longer.
+        allowWakeLock: false,
+        allowWifiLock: false,
       ),
     );
     // Notifications and the rest are asked for on the permissions screen
@@ -801,6 +838,13 @@ final class _AndroidBackgroundRuntimeBridgeState
   bool _isObserving = false;
   Timer? _heartbeatTimer;
 
+  /// Since when the app is in the background (wall clock: the time that
+  /// counts here passes while the phone sleeps too); `null` on screen.
+  DateTime? _backgroundSince;
+
+  /// The phone (and Wi-Fi) is held awake for a call.
+  bool _callHeld = false;
+
   AppSecurityService? _security;
 
   /// The public part of the inbox key (not a secret): kept, so the
@@ -908,6 +952,10 @@ final class _AndroidBackgroundRuntimeBridgeState
     _kitMeet = null;
     _kitNeighbors?.removeListener(_onKitSourceChanged);
     _kitNeighbors = null;
+    if (_callHeld) {
+      _callHeld = false;
+      unawaited(ZenWake.holdForCall(false));
+    }
     if (_isObserving) {
       WidgetsBinding.instance.removeObserver(this);
     }
@@ -939,6 +987,20 @@ final class _AndroidBackgroundRuntimeBridgeState
         _scheduleSync();
       }
     });
+  }
+
+  /// Holds the phone and Wi-Fi awake exactly while a call runs (the only
+  /// long hold Zen takes).
+  void _syncCallHold() {
+    final CallSession? call = ref.read(socialHubControllerProvider).activeCall;
+    final bool inCall =
+        call != null &&
+        !(call.isIncoming && call.status == CallSessionStatus.ringing);
+    if (inCall == _callHeld) {
+      return;
+    }
+    _callHeld = inCall;
+    unawaited(ZenWake.holdForCall(inCall));
   }
 
   /// Whether the WebRTC session in *this* isolate is on a live call.
@@ -978,7 +1040,13 @@ final class _AndroidBackgroundRuntimeBridgeState
       return widget.child;
     }
     ref.watch(appSettingsControllerProvider);
-    ref.watch(runtimeNodeSnapshotProvider);
+    // Whether the node runs, not every refresh of its numbers: a sync
+    // writes kits and hashes them.
+    ref.watch(
+      runtimeNodeSnapshotProvider.select(
+        (RuntimeTransportSnapshot snapshot) => snapshot.serviceRunning,
+      ),
+    );
     ref.watch(
       socialHubControllerProvider.select(
         (SocialHubState state) => state.lifecycle,
@@ -1100,6 +1168,7 @@ final class _AndroidBackgroundRuntimeBridgeState
     if (!mounted) {
       return;
     }
+    _syncCallHold();
     if (isSecurityBlockingUi(ref.read(appSecurityServiceProvider))) {
       await _handoffToReceiver();
       return;
@@ -1108,12 +1177,24 @@ final class _AndroidBackgroundRuntimeBridgeState
         .read(socialHubControllerProvider)
         .lifecycle;
     if (lifecycle.isBackgroundLike) {
+      final DateTime now = DateTime.now();
+      final DateTime since = _backgroundSince ??= now;
       // Unlocked in the background: this isolate keeps the node and the
-      // core, so the master key never leaves it. The parked service waits
-      // for the heartbeat and takes over (receive-only) only once the app
-      // locks or its engine is gone.
+      // core for a while, so the master key never leaves it. After
+      // kAndroidReceiveOnlyAfter it hands the node to the service's
+      // receive-only mode anyway, whatever the lock setting ("Nigdy" and
+      // long delays too): everything else the core does costs battery.
+      if (shouldDropToReceiveOnly(
+        backgroundSince: since,
+        now: now,
+        after: ref.read(androidReceiveOnlyAfterProvider),
+      )) {
+        logZenMessage('Long in the background: the service only receives.');
+        await _handoffToReceiver();
+      }
       return;
     }
+    _backgroundSince = null;
     await _restoreForegroundRuntime();
   }
 
@@ -1143,6 +1224,9 @@ final class _AndroidBackgroundRuntimeBridgeState
     }
     _handoffInFlight = true;
     _inboxDrained = false;
+    // The phone may be asleep but for the alarm that woke it: it stays
+    // awake until the service runs the node.
+    unawaited(ZenWake.hold(const Duration(seconds: 45), tag: 'handoff'));
     final AndroidBackgroundServiceController controller = ref.read(
       androidBackgroundServiceControllerProvider,
     );
@@ -1204,6 +1288,7 @@ final class _AndroidBackgroundRuntimeBridgeState
       logZenError('Handing the node to the service failed', error, stackTrace);
     } finally {
       _handoffInFlight = false;
+      unawaited(ZenWake.release(tag: 'handoff'));
     }
   }
 
@@ -1959,8 +2044,15 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   Future<void> _transitions = Future<void>.value();
   bool _destroyed = false;
 
-  /// When the app last proved it is alive. Only meaningful while parked.
-  DateTime? _lastAppHeartbeat;
+  /// Since the app last proved it is alive (monotonic: it stands still
+  /// while the phone sleeps). Only meaningful while parked.
+  Stopwatch? _sinceAppHeartbeat;
+
+  /// Wakes the phone now and then while parked, to look at the heartbeats.
+  WakeTimer? _watchdog;
+
+  /// The app's engine went away (ZenPower "appGone").
+  StreamSubscription<void>? _appGone;
 
   /// Where the service's own notices go (tests); `null`: the system's.
   final RuntimeSystemNotificationService Function()? _noticeServiceFactory;
@@ -2001,6 +2093,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     _powerShortcut = const AlarmShortcutChannel().presses.listen(
       (_) => _onPowerShortcut(),
     );
+    _appGone = ZenWake.appGone.listen((_) => _onAppGone());
     // Running again: a "Zen nie odbiera w tle" notice from an earlier end
     // of the service is no longer true. Before the node comes up, so the
     // node's own notification handlers are the last ones set up.
@@ -2020,14 +2113,20 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
 
   @override
   void onRepeatEvent(DateTime timestamp) {
-    _checkStandbyWatchdog(timestamp);
+    _checkStandbyWatchdog();
+  }
+
+  /// The app's engine is gone: no heartbeat will come, take the node now.
+  void _onAppGone() {
+    logZenMessage('The app\'s engine is gone.');
+    _checkStandbyWatchdog(appGone: true);
   }
 
   @override
   void onReceiveData(Object data) {
     if (data is Map<Object?, Object?> &&
         data['type'] == _kRuntimeHeartbeatType) {
-      _lastAppHeartbeat = DateTime.now();
+      _noteAppAlive();
       return;
     }
     if (data is Map<Object?, Object?> &&
@@ -2052,7 +2151,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   /// Without it, an app whose engine is destroyed (swiped from recents) leaves
   /// the service parked with no node at all: no mesh, no incoming calls, no
   /// notifications — until the app is opened again.
-  void _checkStandbyWatchdog(DateTime now) {
+  void _checkStandbyWatchdog({bool appGone = false}) {
     if (_destroyed) {
       return;
     }
@@ -2061,18 +2160,45 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
         desired.mode != AndroidBackgroundRuntimeMode.standby) {
       return;
     }
-    final DateTime? lastHeartbeat = _lastAppHeartbeat;
-    if (lastHeartbeat != null &&
-        now.difference(lastHeartbeat) < kAndroidBackgroundHeartbeatTimeout) {
+    final Stopwatch? since = _sinceAppHeartbeat;
+    if (!appGone &&
+        since != null &&
+        since.elapsed < kAndroidBackgroundHeartbeatTimeout) {
       return;
     }
     logZenWarning(
-      'No app heartbeat for '
-      '${kAndroidBackgroundHeartbeatTimeout.inSeconds}s while parked — the '
-      'service is taking the runtime node over.',
+      appGone
+          ? 'The app is gone while parked — the service is taking the '
+                'runtime node over.'
+          : 'No app heartbeat for '
+                '${kAndroidBackgroundHeartbeatTimeout.inSeconds}s while parked '
+                '— the service is taking the runtime node over.',
     );
-    _lastAppHeartbeat = now;
+    _noteAppAlive();
     _request(desired.withMode(AndroidBackgroundRuntimeMode.active));
+  }
+
+  void _noteAppAlive() {
+    (_sinceAppHeartbeat ??= Stopwatch())
+      ..reset()
+      ..start();
+  }
+
+  /// While parked, an alarm now and then wakes the phone to look at the
+  /// heartbeats (and lets the app's own timers run); none while this
+  /// service runs the node.
+  void _syncWatchdog(AndroidBackgroundRuntimeMode mode) {
+    if (mode == AndroidBackgroundRuntimeMode.standby && !_destroyed) {
+      _watchdog ??= ZenWake.every(
+        'watchdog',
+        kAndroidStandbyWatchdogEvery,
+        _checkStandbyWatchdog,
+        hold: const Duration(seconds: 5),
+      );
+    } else {
+      _watchdog?.cancel();
+      _watchdog = null;
+    }
   }
 
   @override
@@ -2083,6 +2209,9 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     _destroyed = true;
+    _syncWatchdog(AndroidBackgroundRuntimeMode.active);
+    await _appGone?.cancel();
+    _appGone = null;
     if (isTimeout) {
       logZenWarning(
         'Android ended the background service: its type ran out of time.',
@@ -2182,7 +2311,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
     _pendingPowerAlarmAt = DateTime.now();
     if (_session == null) {
       // Nobody runs the network: take it over now if the app is gone.
-      _checkStandbyWatchdog(DateTime.now());
+      _checkStandbyWatchdog();
     }
     _transitions = _transitions.then((_) => _servePowerShortcut()).catchError((
       Object error,
@@ -2215,7 +2344,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
   void _request(AndroidBackgroundBootstrapPayload payload) {
     if (payload.mode == AndroidBackgroundRuntimeMode.standby) {
       // A park request is itself proof the app is on screen and alive.
-      _lastAppHeartbeat = DateTime.now();
+      _noteAppAlive();
     }
     _desired = payload;
     _transitions = _transitions.then((_) => _reconcile()).catchError((
@@ -2296,6 +2425,7 @@ final class _ZenRewriteAndroidBackgroundTaskHandler extends TaskHandler {
       await _updateServiceNotification(AndroidBackgroundRuntimeMode.standby);
     }
     logZenMessage('Service reached "${mode.name}".');
+    _syncWatchdog(mode);
     _acknowledge(mode);
     if (mode == AndroidBackgroundRuntimeMode.active) {
       await _servePowerShortcut();
