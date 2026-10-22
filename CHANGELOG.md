@@ -2,96 +2,90 @@
 
 ## Unreleased
 
+### Installing and releasing
+- **Install page** on GitHub Pages (`/install/`, English and Polish): recognises the visitor's system and shows only its steps: Android (APK, signing certificate fingerprint, one-tap Obtainium), iPhone (SideStore in 8 short steps with a one-tap "Add Zen source"), Windows, macOS and Linux.
+- **SideStore / AltStore source** (`apps.json`), rebuilt from the latest published release by the Pages workflow (version, date, size, `Zen-unsigned.ipa`, permissions from `Info.plist`). The release run fails without the iPhone file.
+- In the app: **Settings → Invite → Friend doesn't have Zen? → How to install Zen on another phone / computer**: a QR code to the install page and the steps per system.
+- **`tool/release.dart`** (`check`, `prepare <version>`, `verify <folder>`): checks that the release workflow still produces every file the in-app updater expects, sets the version everywhere, moves these notes under the new version, commits and tags (it never pushes), and verifies downloaded release files against `SHA256SUMS` and its signature. CI runs `check` on every push; the release run fails when the tag differs from the version in the build.
+
 ### Documentation and GitHub
-- **User guide** (`docs/guide`): one short page per area, with hand-drawn diagrams (how messages travel, the encryption layers, the pyramid and its appeal path, a route through gates) and screenshots in light and dark made by `tool/ui_tour/docs_screens_test.dart`.
-- **`docs/SECURITY_MODEL.md`** (threat model, what is post-quantum, what is still classical and why, device hardening, limits) and **`docs/DEPENDENCIES.md`** (what every library and platform API is for, and its licence).
-- **README** rewritten: badges (CI, release build, latest release, licence, platforms, Flutter, Go, post-quantum, last commit), a Post-quantum section, a feature list linking to the guide, platforms.
-- **CI summaries:** the test jobs write format, analyzer, test counts and failed tests (and the Go tests) to the run's summary page (`tool/ci/ci_summary.py`); the release run lists every file with its size and SHA-256.
+- **User guide** (`docs/guide`): one short page per area with diagrams and light and dark screenshots made from the app by `tool/ui_tour/docs_screens_test.dart`.
+- **`docs/SECURITY_MODEL.md`** (threats, what is post-quantum, what stays classical and why, hardening, limits) and **`docs/DEPENDENCIES.md`** (what every library and platform API is for, and its licence).
+- **README** rewritten: badges, a Post-quantum section, a feature list linking to the guide, platforms.
+- **CI summaries:** format, analyzer, test counts, failed tests and Go tests on the run's summary page; the release run lists every file with its size and SHA-256.
 
-### Installing
-- **Install page** on GitHub Pages (`/install/`, English and Polish): recognises the visitor's system, with a picker for Android (APK, signing certificate fingerprint, one-tap Obtainium), iPhone (SideStore in 8 short steps with pictures and a one-tap "Add Zen source"), Windows, macOS and Linux.
-- **SideStore / AltStore source** (`apps.json`) made from the latest published release by the Pages workflow (version, date, size, `Zen-unsigned.ipa`, permissions from `Info.plist`); publishing a release refreshes it. The release run now fails without the iPhone file.
-- In the app: **Invite → Friend doesn't have Zen? → How to install Zen on another phone / computer**: a QR code to the install page and the steps per system, with the SideStore source.
+### License and legal texts
+- **GPL-3.0-only** with additional terms in `NOTICE` (author attribution and donation link in About, modified versions marked and renamed). `THIRD_PARTY_NOTICES.md` covers every component, including camera_windows, OpenH264, vo-aacenc, fonts, ZXing and KLIPY; the licences are also in the app (About → Licenses).
+- **Consent at the first start:** terms, privacy policy and licence, each readable in the app; asked again when a document changes. **Polish versions** of the terms, the privacy policy and the notice (`docs/*.pl.md`); the English notice stays binding.
 
-### Post-quantum, all the way
-- **Device identity:** sessions are authenticated post-quantum (a challenge encapsulated to the sender's device key); device keys are pinned per address, the ledger hello signs the address together with the device key (hybrid), device entries and friend lists carry the keys, and a mismatch shows a warning in the chat.
-- **Calls:** every media packet (RTP, RTCP, ICE, DTLS) is sealed again in the relay with ChaCha20-Poly1305 under a 256-bit key of the two devices' hybrid session, around the AES-128-GCM frame encryption and DTLS-SRTP.
-- **Cell votes** with one-time hybrid voting cards and a ballot signed by the cell; only the anonymous request stays a ring signature. **Event tickets** are HMAC-based (no signatures, QR under 400 characters).
-- **Bluetooth hellos**, **local link handshakes** (one-time ML-KEM-768 from both sides) and **neighbours' doors** (the session layer on every door, a second layer on sealed knocks) are post-quantum; so are **dating boxes**, with hybrid-signed dating profiles.
-- **Yggdrasil:** the node answers no NodeInfo questions, Zen picks only encrypted peer links (TLS 1.3 with X25519MLKEM768), peer addresses are validated strictly, QUIC peers can be checked.
-- **Memory and tampering:** secrets are wiped after use and link keys kept in locked memory; the desktop process is not dumpable on Linux; debuggers, Frida, hooking frameworks, injected libraries and re-signed copies are detected on every platform, and then transfers and the pyramid power key are blocked.
+### Security and post-quantum
+- **Hybrid ML-KEM-768 + X25519** for every signal between devices (no plaintext mode), offline mailbox mail, the locked phone's inbox, Bluetooth hellos, local link handshakes, neighbours' doors, dating boxes, food pickup and Table for six addresses, and private transfers.
+- **Hybrid signatures (Ed25519 + ML-DSA-65)** on account and device records, posts, pyramid records, ballots, voting cards and releases. **Device identity** is post-quantum: device keys are pinned per address, and a key mismatch shows a warning in the chat.
+- **Calls:** frame encryption (AES-128-GCM, per-call hybrid keys rotated every 5 minutes and on every join or leave) inside DTLS-SRTP, and every packet sealed again in Zen's relay with a 256-bit ChaCha20-Poly1305 key of the two devices.
+- **Cell votes** with one-time hybrid voting cards; only the card registration stays a ring signature. **Event tickets** are HMAC-based. **Dating lanterns** commit to a one-time hybrid key, and the match test is a sealed offer.
+- **Yggdrasil:** no NodeInfo answers, no admin socket, only encrypted peer links (TLS 1.3 with X25519MLKEM768), strict peer address checks.
+- **Memory and tampering:** secrets are wiped after use and link keys kept in locked memory; debuggers, Frida, hooking frameworks, injected libraries and re-signed copies are detected on every platform, and then transfers and the pyramid power key are blocked.
+- Still classical: the Yggdrasil node key, the voting card registration, the pair secret of local links before devices first meet over the mesh, and the 128-bit AES key inside call frames (see `docs/SECURITY_MODEL.md`).
 
-### Accounts
-- **Several accounts on one device**, each a separate person (keys, mesh address, password, data, notifications). Accounts kept off the list are opened with their ID and password; decoy folders and hashed keystore names hide how many there are. Switching from the avatar menu; removing one account or all of them.
-- A recovered account gets its **pyramid place and wallet** back.
+### Accounts and recovery
+- **Several accounts on one device**, each a separate person (keys, mesh address, password, data, notifications). Accounts kept off the list open with their ID and password; decoy folders and hashed keystore names hide how many there are. Switching from the avatar menu; removing one account or all of them.
+- **Receive in the background** per account (Android, and computers in the tray), with a battery and hiding warning; notifications of extra accounts are generic.
+- **Copy at the circle:** each person of the recovery circle keeps an encrypted copy (up to 10 MB) of the profile, friends, groups, levels, settings, pyramid, wallet, household, dating profile and, by default, the text of conversations. After recovery Zen fetches and restores it by itself.
+- A recovered account gets its **pyramid place, wallet and power key** back.
 
-### Messages and delivery
-- Every reliable message is written to the outbox before the first attempt and retried with a battery-friendly schedule for up to 14 days, also after a restart; mailbox copies after 4 seconds.
-- **Delivery icons** under every message (sending, waiting on your phone, waiting with the recipient's trusted friends, sent, delivered, read, failed) with details and **Retry**; group messages show *Delivered d of n*.
+### Chats and delivery
+- **Full chats, also in groups and pyramid cell chats:** photos, videos, files, voice notes and GIFs; **reactions, replies, editing (24 h), forwarding and delete for everyone**. Group files up to 64 KB travel in the message; larger ones, up to 24 MB, are sealed once and fetched from the sender or other members. A photo on the group **Board**.
+- **GIF files** from the gallery or disk stay animated (metadata removed, up to 8 MB); Android keyboard GIFs arrive animated; a GIF that won't play can go as a file.
+- **Drag and drop and paste** (Ctrl/⌘+V) of photos, GIFs, videos and files into chats, the post editor and the gallery on Windows, macOS and Linux; on iPhone, **Paste image from clipboard** for keyboard GIFs.
+- **Outbox:** every reliable message is written to disk before the first attempt and retried on a battery-friendly schedule for up to 14 days, also after a restart; mailbox copies after 4 seconds; large payloads split across mailboxes; new posts and comments reach offline friends through their mailboxes. On a locked Android phone a sealed copy of the queue keeps sending.
+- **Delivery icons** under every message (sending, waiting on your phone, waiting with the recipient's trusted friends, sent, delivered, read, failed) with details and **Retry**; groups show *Delivered d of n*.
+- **GIF search switch** (Settings → Messages and calls → GIFs): off, Zen sends nothing to KLIPY and hides the GIF button.
 
-### Pyramid: limits, court, promotion, history
-- **Issuance limit as a hard rule:** lowering applies at once (hold to confirm), raising is announced to every member and applies after 30 days unless the top cancels it.
-- **Court and appeals:** complaints with verdicts visible on the person's profile; appeals one level above whoever decided, up to the top, with the time doubling per level.
-- **Promotion one level at a time**, at most every 7 days; moving between cells with the same rule.
-- National sections without a size threshold; posts ordered like the pyramid.
-- **Places over time:** an animated history of the tree with a slider, play and speeds.
+### Feed and videos
+- A new **Videos** section: a vertical full-screen player, recording and trimming, compression to about 720p and 20 MB on the device, an order worked out on the phone, block-by-block download from friends and mailboxes, views only for the author, videos from friends of friends (opt-in).
+- **Cameras on computers:** Windows (camera_windows, Media Foundation compression and covers), macOS (own capture and export) and Linux (GStreamer, with OpenH264 and vo-aacenc built into Zen). QR codes can be scanned with a computer's camera too.
+- Feed filters **All · Friends · Close friends · Pyramid · Country**, always shown.
+
+### Pyramid and wallet
+- **Private transfers:** orders go sealed to the treasurers only; a transfer counts when a majority of them sign it; signed statements, a dispute button and a court complaint for a wrong balance. A **daily transfer limit** (5 to 200, 30 by default).
+- **Issuance limit as a hard rule:** lowering applies at once (hold to confirm), raising is announced and applies after 30 days unless cancelled; the same for the transfer limit.
+- **Court and appeals:** verdicts visible on the person's profile; appeals one level above whoever decided, the time doubling per level.
+- **Promotion one level at a time**, at most every 7 days. **Top immunity:** removing or banning a member of the top cell needs 2 of 3 of the top and a majority of level 2.
+- **Posts to the whole pyramid** by the head, who can delegate them; the **Country** chip for everyone, with countries from the profile or the phone's region (several at once).
+- National sections without a size threshold, ordered like the pyramid; referral joining, voting after 14 days or a confirmed acquaintance; advisory referenda; rule changes by the top (2 of 3) within hard limits; a group chat for every cell.
+- **Places over time:** an animated history of the tree. The wallet has its own rail icon and opens from your profile too.
 
 ### Graph, introductions and gates
-- Routes through **any number of gates**; gate terms travel up to 6 steps.
-- Graph **timeline**, **trust map**, **who's worth meeting**, **bridges and lonely islands**, **long ago**, private circle names, the answer path of *Ask the network*, a snapshot without personal data, and **full screen**.
-- **Add friends of friends** without a code, through a mutual friend.
+- **Gates with three prices** (close friends, friends, further away; each may be free) and an **Open for free** list; routes through any number of gates, the cheapest first.
+- Graph **timeline**, **trust map**, **who's worth meeting**, **bridges and lonely islands**, **long ago**, private circle names, the answer path of *Ask the network*, a snapshot without personal data, **full screen**; **add friends of friends** without a code.
 
-### Meeting people, neighbours, dating
-- Nearby is visible by default and looks around in the background every 5 minutes (also with Zen locked on Android), sparing the battery.
-- Dinner circles with invitations, *Leave circle*, *Who's coming* with diets, a chat per dinner, *Who owes whom* and *How was it?*; **Cooking today, join me**; the food pickup address sealed for the accepted person; event guest lists without addresses for far circles; *close friends* reach everywhere.
-- Neighbours: a knock rings every household phone (also on a locked Android phone), *Leave* changes the household key, *What a knocker sees*.
-- Dating: up to 3 steps and through open gates, *How far you want to see*, a distance nobody can fake, hiding *from them and their circle*, fixed-size answers, matchmaking and opinions only from people who know the person, free interests, up to 50 recommendations, no extra password.
+### Meeting people and Nearby
+- **Nearby** visible by default; a cheap look around in the background every 5 minutes (adjustable in **Settings → App → Looking around in the background**, Android), also with Zen locked. **Nearby on computers** with Bluetooth LE (Windows and Linux broadcast and look; a Mac only looks). The Nearby icon shows only where it works.
+- **Met?** from *Passed by* for up to 7 days; **New at the table** after a dinner.
+- Dinner circles with invitations, *Leave circle*, *Who's coming* with diets, a chat per dinner, *Who owes whom*, *How was it?* and reminders even with Zen locked; **Cooking today, join me**; food sharing (eat in or take away; free, swap, points or money) with the pickup address sealed for the accepted person; **Table for six through a go-between**, who never sees the address; event guest lists without addresses for far circles.
 
-### Videos
-- A new **Videos** section: a vertical full-screen player, recording and trimming, compression to about 720p and 20 MB on the device, order worked out on the phone, block-by-block download from friends and mailboxes.
+### Neighbours
+- A knock rings every household phone, also on a locked Android phone; *Leave* changes the household key; *What a knocker sees*.
+- A **one-time housemate code** (10 minutes, confirmed on the phone that showed it), a **24-hour code** for inviting people nearby, messages signed with **your name in the flat**, and removing a housemate of a two-person flat only with their consent or after 7 days.
 
-### Look and navigation
-- **Fourteen themes** in four groups (Classic, Muted, Cool, Elegant), each with its own shapes, lines, surfaces, buttons, backgrounds and motion; colours with fixed meanings; contrast checked everywhere. *Retro* is now *Player*.
-- A rail with every section one tap away (no *More*); lock and rail toggle in the top bar; a **Close friends** filter on the feed and in chats.
-- **Consent screen** at the first start (terms, privacy policy, licence), a new **About** with its own pages, selectable text, settings rows that wrap instead of cutting text.
-- **Public peers editor** (add, remove, switch off, check, pin key, restore defaults).
-- Media download over mobile data is on by default; the *Experimental features* screen is gone.
+### Dating
+- Up to 3 steps and through open gates, *How far you want to see*, a distance nobody can fake, hiding *from them and their circle*, fixed-size answers, matchmaking, opinions only from people who know the person, free interests, meeting without romantic intent, filters, no extra password.
 
-### License and notices
-- **GPL-3.0-only** with additional terms in `NOTICE` (author attribution and donation link in About, modified versions marked and renamed). `THIRD_PARTY_NOTICES.md` lists the components; the licenses are also shown in the app (About → Licenses). Zen uses no Google Play services, so it can go to F-Droid and IzzyOnDroid (not set up yet).
+### Offline links and the locked phone
+- Direct links over the **same Wi-Fi** (on by default), **Wi-Fi Direct** (Android, Windows), **Bluetooth** (all platforms) and **Apple Multipeer** (iPhone, Mac); strangers see only random-looking adverts.
+- The Android background service works **without the master key**: a separate background key and small kits let it send the alarm, show you nearby, take knocks and send queued messages while Zen is locked.
 
-### Encryption
-- **Post-quantum hybrid encryption (ML-KEM-768 + X25519)** for every signal between devices, offline mailbox mail and the Android locked inbox.
-- **Hybrid signatures (Ed25519 + ML-DSA-65)** on account and device records, posts and other ledger entries, pyramid records and releases; backups and recovery restore both keys.
-- **Calls are end-to-end encrypted** frame by frame (audio, video, screen), with keys from a post-quantum exchange, rotated every 5 minutes and when somebody joins or leaves a group call. The call screen says which protection a call has. Frames use AES-128-GCM.
-- Still classical: the Yggdrasil node key, the anonymous request for a cell vote, the pair secret of local links, the dating lantern and first match question, and the 128-bit AES key of call frames (see `docs/SECURITY_MODEL.md`).
+### Look, navigation and settings
+- **27 themes in five groups** (Classic, Wild, Muted, Cool, Elegant), every one in a light and a dark version, each with its own shapes, borders, surfaces, buttons, backgrounds, transitions and motion; colours with fixed meanings; contrast checked everywhere. The default stays **Classic**; *Retro* is now *Player*.
+- A **rail** with every section one tap away (no *More*); lock and rail toggle in the top bar; Invite and About at the top of Settings; a **Close friends** filter in chats.
+- A new **About** with its own pages and **network census**: about how many people use Zen (an anonymous estimate) and the exact number in the pyramid.
+- **Public peers editor** (add, remove, switch off, check, pin key, restore defaults); selectable text across the app; settings rows that wrap instead of cutting text.
+- Media download over mobile data is on by default; the *Experimental features* screen and the unused notification delay setting are gone.
 
-### Pyramid
-- **One original pyramid** whose genesis is pinned in the app (until it is pinned in a build, only the test pyramid exists); the power key passes from head to head by signed handover.
-- **Joining by referral ("Polecenie")**: any member brings someone to a free place in their branch. A newcomer **votes after 14 days** or as soon as a member of their cell confirms they know each other.
-- **Group chat for every cell**, with no invitations.
-- **Advisory referenda** are called by the top. **The top changes the rules** (2 of 3), applied after 24 hours and never past hard limits.
-- **Pyramid posts on the feed** with filters (everything · friends · pyramid · country). People outside the pyramid can read the top's and national-section posts that friends pass on.
-
-### Meeting people
-- **Gates and message prices** (free, a price or consent) for writing to someone or being introduced, with a **route planner** (shortest or cheapest way to a person).
-- **Graph modes** (statuses, closeness, pyramid line, gate prices, routes) and the opt-in **"open to meet"** (off by default).
-- **Dating:** intention (dates, new friends or both), interests and filters.
-- **Food sharing** in dinner circles (eat at the cook's or take away).
-- **"Mijani":** a private log of friends passed in the street, built only from what "People nearby" hears, kept on the phone for 30 days.
-
-### Offline links (no internet needed)
-- Friends and your own devices link directly over the **same Wi-Fi** (on by default), **Wi-Fi Direct** (Android, Windows), **Bluetooth** (all platforms, including Windows) and **Apple Multipeer** (iPhone, Mac). Wi-Fi Direct, Bluetooth and Multipeer are off until you turn them on. Strangers see only random-looking adverts.
-- **Neighbours:** knocks reach a flat even when nobody is home through friends' "mailbox doors", sealed so the friend learns nothing; a phone can host such a door for friends.
-
-### Locked phone (Android)
-- The background service now works **without the master key**: a separate background key and small kits (alarm kit, nearby kit, door kit) let it send the alarm, show you to friends nearby and take knocks at your doors while Zen is locked (they are answered after you unlock). What arrives meanwhile is stored sealed until you unlock.
-
-### Updates and platform
-- **GitHub release check and self-update** (not in the store build): Zen looks for a new release at start and every 12 hours, downloads it on "Update" and checks it against `SHA256SUMS` (and Zen's signing certificate on Android). The maintainers' signature (`SHA256SUMS.sig`) is checked as soon as their keys are pinned in the app.
-- **Built-in location** (system location service, no Google Play services).
-- Zen's own **sounds** (messages, calls, knocks, alarm).
-- The store build is called "Zen" everywhere; only About says it is the store version.
+### Updates and store build
+- **GitHub release check and self-update:** at start and every 12 hours; the download is checked against `SHA256SUMS` (and Zen's signing certificate on Android), and against the maintainers' signature once their keys are pinned. Updates from friends over the network stay off until then, and the Updates screen says so.
+- **The store build** (`appStoreOnly`, Google Play and Galaxy Store) is the same app with three forced differences: no self-update, no handing on of the APK (a link instead) and no launcher disguise. It also skips the check of its own signing certificate, since the store signs it.
+- Built-in location (system service, no Google Play services) and Zen's own sounds.
 
 ## 1.11.0 — 20.10.2026
 

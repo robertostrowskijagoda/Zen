@@ -33,6 +33,9 @@ friends, or close friends only.
 - Likes, reactions, comments and shares. "Liked by you, Bob and 1,284
   others" counts only what your phone has seen.
 - Public posts can be **followed** by people who are not your friends.
+- GIFs in a post stay animated. On a computer you can drop or paste photos,
+  GIFs and videos (up to 50 MB) into the post editor and into *Add to
+  gallery*.
 - You can hide comments and block people in your own threads; **Report**
   keeps the signed original as evidence and can remove the post from your
   device.
@@ -74,11 +77,15 @@ reactions, comments, **Reply with a video**, **Send to chat**.
 
 ## Limits
 
-- On computers there is no in-app camera (pick a file instead). Linux has
-  no encoder: a video is published as it is if it is at most 20 MB and
-  90 seconds. Windows makes no cover pictures.
-- Likes and comments of friends of friends do not reach the author (there
-  is no channel between them); mutual friends see them.
+- **Computers.** Windows records with the webcam (no torch) and shrinks
+  videos with Media Foundation. A Mac records and shrinks with the system's
+  own video tools. Linux records through GStreamer and shrinks with an
+  H.264 encoder (OpenH264) and an AAC encoder (vo-aacenc) built into Zen;
+  it needs GStreamer (or ffmpeg) to read the input. Without either, a video
+  is published as it is if it is at most 20 MB and 90 seconds, without
+  trimming.
+- Likes and comments of friends of friends reach the author through the
+  friend who passed the video on, shown as "Ada (via Bob)".
 - The feed and video lists are only as complete as what your friends'
   devices have passed on.
 

@@ -5,7 +5,12 @@
 
 ## How releases are made
 
-A version tag on GitHub starts the **Release** workflow: it builds every
+The maintainer prepares a version with `dart run tool/release.dart prepare
+<version>`: it checks that the release files still match what the app's
+updater expects, sets the version in every place, moves the *Unreleased*
+notes in the CHANGELOG under the new version, commits and tags. Pushing the
+tag starts the **Release** workflow, which first checks that the tag equals
+the version in the build: it builds every
 file (Android, Windows x64 and ARM64, Linux tarballs, `.deb` and Flatpak,
 macOS, the unsigned iPhone file), writes `SHA256SUMS` with the checksum of
 each, signs that list (`SHA256SUMS.sig`, once the signing key is set up)
@@ -54,6 +59,12 @@ on the same screen shows a QR code to the install page and the steps for
 every system, with the SideStore source for an iPhone. Zen also notices when
 friends have a newer version and shows a quiet hint.
 
+**Updates from friends** over the network (a friend's device passing a new
+version on, with no GitHub) switch on once the maintainers' keys are
+published in the app: such an update needs two of three maintainer
+signatures. Until then the card in *Updates* says so; GitHub updates work
+already.
+
 ## Checking a download yourself
 
 1. Download only from `github.com/robertostrowskijagoda/Zen` or from a friend.
@@ -65,7 +76,11 @@ friends have a newer version and shows a quiet hint.
 
 ## Limits
 
-- The store build (for Google Play and Galaxy Store) never updates itself.
+- The store build (for Google Play and Galaxy Store) is the same app with
+  three differences the stores require: it never updates itself, passes Zen
+  on only as a link (never as an APK) and has no launcher disguise. Because
+  the store signs it, it also skips the check of its own signing
+  certificate.
 - On iPhone Zen updates through SideStore (the source above), not by itself.
 - `SHA256SUMS` from the same release protects against a damaged download,
   not against a forged release; that is what the signature is for, once it

@@ -82,10 +82,10 @@ Development only: `flutter_test`, `integration_test`, `flutter_lints`.
 | Platform | What Zen uses |
 |---|---|
 | Android | Bluetooth LE advertising, scanning and GATT (Nearby, alarm wave, links); Wi-Fi Direct; Android Keystore and StrongBox; MediaCodec and MediaMuxer (video compression); the system location service (no Google Play services); a foreground service; `FLAG_SECURE`; the package installer (self-update); AndroidX Biometric; Tink (via `flutter_secure_storage`); AudioSwitch (via `flutter_webrtc`) |
-| iOS | Multipeer Connectivity (offline links); Keychain; LocalAuthentication; AVAssetExportSession; Core Location; process integrity checks |
-| macOS | Multipeer Connectivity; the Secure Enclave with Touch ID; Keychain; AVAssetExportSession; AVCaptureSession (the films' camera); Core Location; window capture protection |
-| Windows | Media Foundation (video); WinRT Wi-Fi Direct and Bluetooth (RFCOMM); the TPM (Platform Crypto Provider) with Windows Hello; `WDA_EXCLUDEFROMCAPTURE`; the location API; heap and DLL-loading hardening |
-| Linux | BlueZ over D-Bus; GStreamer (playback; decoding films, the camera and the microphone for the Videos section; a system AAC encoder when one is installed); OpenH264 and vo-aacenc (Zen's own H.264 and AAC encoders, built from source with the app); ffmpeg when installed (a fallback decoder); libsecret (GNOME Keyring or KWallet); libayatana-appindicator (tray); GTK |
+| iOS | Multipeer Connectivity (offline links); Keychain; LocalAuthentication; AVAssetExportSession; UIPasteboard (pasting keyboard GIFs and images); Core Location; process integrity checks |
+| macOS | Multipeer Connectivity; CoreBluetooth (Nearby, looking around only); the Secure Enclave with Touch ID; Keychain; AVAssetExportSession; AVCaptureSession (the films' camera and QR scanning); window drag and drop and NSPasteboard (dropping and pasting files and images); Core Location; window capture protection |
+| Windows | Media Foundation (video compression and covers) and WIC (cover JPEGs); WinRT Wi-Fi Direct, Bluetooth (RFCOMM) and Bluetooth LE advertising and scanning (Nearby); `WM_DROPFILES` and the clipboard (dropping and pasting files and images); WASAPI process loopback (call recording); the TPM (Platform Crypto Provider) with Windows Hello; `WDA_EXCLUDEFROMCAPTURE`; the location API; heap and DLL-loading hardening |
+| Linux | BlueZ over D-Bus (links, and LE advertising and discovery for Nearby); GTK drag and drop and clipboard (dropping and pasting files and images); GStreamer (playback; decoding films, the camera and the microphone for the Videos section; a system AAC encoder when one is installed); OpenH264 and vo-aacenc (Zen's own H.264 and AAC encoders, built from source with the app); ffmpeg when installed (a fallback decoder); libsecret (GNOME Keyring or KWallet); libayatana-appindicator (tray); GTK |
 
 System libraries keep their own licences (LGPL-2.1+ for GTK, GLib,
 GStreamer and libsecret; see [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)).
@@ -118,6 +118,6 @@ Zen has no servers. These outside services are used, and their terms apply:
 |---|---|
 | Public Yggdrasil peers | joining the mesh ([editable](guide/settings-and-peers.md#public-peers)) |
 | GitHub | checking for and downloading updates |
-| KLIPY | GIF search, only when you use it |
+| KLIPY | GIF search, only when you use it; Settings → Messages and calls → GIFs switches it off |
 | Quad9, Cloudflare, Google Public DNS over TLS | name lookups, only when the system resolver does not work |
 | OpenStreetMap | opening a shared location in the browser |

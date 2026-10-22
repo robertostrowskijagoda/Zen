@@ -36,7 +36,8 @@ everywhere alike. There is no server that could be bribed or shut down.
   cells: under their head, and as the head of their own.
 - The **top** is the cell at the very top: three people who decide together,
   2 of 3.
-- Every cell has its own group chat, made automatically.
+- Every cell has its own group chat, made automatically, with everything
+  other group chats have (files, voice notes, GIFs, reactions, replies).
 
 ## Joining
 

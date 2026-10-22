@@ -22,7 +22,7 @@ stays private, and the limits.
 |---|---|---|
 | 1 | [Getting started](getting-started.md) | Install, the first start, the password, several accounts on one device, getting your account back |
 | 2 | [Friends and the graph](friends-and-graph.md) | Friendship levels, the graph and its modes, the timeline, full screen, adding friends of friends |
-| 3 | [Chats, delivery and calls](chats-and-delivery.md) | Messages and groups, offline mailboxes, what the delivery icons mean, calls |
+| 3 | [Chats, delivery and calls](chats-and-delivery.md) | Messages and groups, reactions, replies, edits, files, GIFs, drag and drop, offline mailboxes, delivery icons, calls |
 | 4 | [Feed and videos](feed-and-videos.md) | Posts for chosen people, the short-video section |
 | 5 | [Meeting people](meeting-people.md) | Right now, events, dinner circles, sharing food, Nearby, the alarm, asking the network |
 | 6 | [Neighbours](neighbours.md) | A code on your door, knocking, who sees what |
@@ -30,7 +30,7 @@ stays private, and the limits.
 | 8 | [The pyramid](pyramid.md) | Cells of three, promotion step by step, votes, referendums, the court and appeals, the wallet |
 | 9 | [Introductions and gates](introductions-and-gates.md) | Reaching people further away through friends, free or for points |
 | 10 | [Offline links](offline-links.md) | Same Wi-Fi, Wi-Fi Direct, Bluetooth: Zen without the internet |
-| 11 | [Themes and appearance](themes.md) | Fourteen looks, light and dark |
+| 11 | [Themes and appearance](themes.md) | 27 looks in five groups, each light and dark |
 | 12 | [Settings and public peers](settings-and-peers.md) | Where things are, the public peers Zen connects through |
 | 13 | [Updates and releases](updates.md) | How Zen updates itself and how to check a download |
 
@@ -41,7 +41,8 @@ More for the technically minded:
 - [Dependencies](../DEPENDENCIES.md): the libraries Zen is built on, and their
   licences.
 - [Protocol specification](../PROTOCOL.md): the frames and records on the wire.
-- [Privacy policy](../PRIVACY.md) and [terms of use](../TERMS.md).
+- [Privacy policy](../PRIVACY.md) and [terms of use](../TERMS.md) (also in
+  Polish: [polityka prywatności](../PRIVACY.pl.md), [regulamin](../TERMS.pl.md)).
 
 ## Words used in this guide
 

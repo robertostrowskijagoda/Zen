@@ -59,11 +59,11 @@
 > **Did someone show you a QR code?** The code opens an invitation page: if you
 > have Zen, the page opens it right away with the invitation; if you don't, it
 > shows the download buttons. After installing, come back to that page and tap
-> **Open in Zen** (or in Zen: **Invite → I have someone's code** and scan the
-> code again).
+> **Open in Zen** (or in Zen: **Settings → Invite → I have someone's code**
+> and scan the code again).
 >
-> **Already have Zen on Android?** Turn this on once in Zen: **Invite → Zen codes
-> straight into the app → Open supported links**. From then on a code scanned
+> **Already have Zen on Android?** Turn this on once in Zen: **Settings → Invite
+> → Zen codes straight into the app → Open supported links**. From then on a code scanned
 > with the ordinary camera opens straight in Zen.
 
 ## What it is
@@ -110,10 +110,12 @@ Why, and what an attacker could do: [Security model](docs/SECURITY_MODEL.md).
 
 ## What it can do
 
-- 💬 **[Chats and calls](docs/guide/chats-and-delivery.md):** chats, groups
-  with a board, voice notes, audio and video calls, screen sharing. Messages
-  for offline friends wait sealed with their trusted friends, and the icons
-  tell you exactly where a message is.
+- 💬 **[Chats and calls](docs/guide/chats-and-delivery.md):** one-to-one
+  and group chats with photos, videos, files, voice notes and GIFs,
+  reactions, replies, editing, forwarding and delete for everyone; a board
+  for every group; drag and drop and paste on computers; audio and video
+  calls with screen sharing. Messages for offline friends wait sealed with
+  their trusted friends, and the icons tell you exactly where a message is.
 - 🕸️ **[Friends and the graph](docs/guide/friends-and-graph.md):** friendship
   levels that decide who sees what; a graph of who knows whom with a
   timeline, bridges between your circles, *who's worth meeting*, full screen.
@@ -136,11 +138,12 @@ Why, and what an attacker could do: [Security model](docs/SECURITY_MODEL.md).
   planner.
 - 📡 **[Offline links](docs/guide/offline-links.md):** same Wi-Fi, Wi-Fi
   Direct and Bluetooth: Zen without the internet.
-- 🎨 **[Themes](docs/guide/themes.md):** fourteen looks, from Classic to
-  Digital rain, light and dark.
+- 🎨 **[Themes](docs/guide/themes.md):** 27 looks in five groups, from
+  Classic to Brass & Steam, each in a light and a dark version.
 - 👥 **[Several accounts](docs/guide/getting-started.md#several-accounts-on-one-device)**
   on one device, hidden ones included, and account recovery through trusted
-  friends or a paper backup.
+  friends or a paper backup, with an encrypted copy of your data kept by
+  your recovery circle.
 - ⚙️ **[Settings, public peers](docs/guide/settings-and-peers.md)** and
   **[self-updates](docs/guide/updates.md)**, *Why isn't it working?*
   diagnostics, and **21 languages**.
@@ -162,8 +165,8 @@ One account can run on several devices. Everything is on
 
 **The simplest way: [the install page](https://robertostrowskijagoda.github.io/Zen/install/)**
 picks your system by itself and shows the few steps for it (English and
-Polish). In Zen: **Invite → Friend doesn't have Zen? → How to install Zen on
-another phone / computer** shows the same steps and a QR code to that page.
+Polish). In Zen: **Settings → Invite → Friend doesn't have Zen? → How to install Zen
+on another phone / computer** shows the same steps and a QR code to that page.
 
 ### Android
 
@@ -228,8 +231,8 @@ signers take the same file.
 
 **What Zen can't do on iPhone** (iOS doesn't allow it): it doesn't run in
 the background (messages and calls arrive only while Zen is open, no push
-notifications); "People nearby" is Android-only (offline links with friends
-use Apple's Multipeer while Zen is open).
+notifications); there is no Nearby (offline links with friends use Apple's
+Multipeer while Zen is open).
 
 **Won't work:** AltStore PAL (EU) installs only apps notarized by Apple
 (Zen isn't there yet); TrollStore works only up to iOS 17.0; "signers" with
@@ -264,12 +267,16 @@ Anyway** (or in Terminal
 `xattr -dr com.apple.quarantine /Applications/Zen.app`). After an update macOS
 may ask for keychain access — choose **Always Allow**.
 
-On a computer there is no "People nearby" (Bluetooth presence), call
-recording or camera. Offline links (Wi-Fi Direct on Windows, Bluetooth) work.
+On a computer the camera works (videos and QR codes), and so does Nearby when
+the computer has Bluetooth LE (a Mac only looks around, it cannot be seen).
+Call recording is on Android and Windows only. Offline links (Wi-Fi Direct on
+Windows, Bluetooth) work. Linux records and shrinks videos with GStreamer and
+encoders built into Zen.
 
 ### From a friend
 
-Someone already has Zen? In the app: **Invite → Friend doesn't have Zen?** — it will send you the app
+Someone already has Zen? In the app: **Settings → Invite → Friend doesn't have
+Zen?** — it will send you the app
 over Quick Share, Bluetooth or Wi-Fi, even without internet.
 
 ## Isn't it a virus? How to check
@@ -292,11 +299,13 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
 
 - **Independence.** A store can remove an app or demand changes at any time.
   Zen is meant to be independent — also of big companies and of politics.
-- **No fees, no rework.** Stores demand fees (the App Store — every year),
-  agreement to their rules and a separate version of the app (without "Pass it on"
-  and updates from friends), while Zen is made by one person, for free. A version
-  for the stores is planned (`docs/RELEASES.md`, point 6); the `appStoreOnly` flavor
-  for Google Play and Galaxy Store can already be built.
+- **No fees, no rework.** Stores demand fees (the App Store — every year) and
+  agreement to their rules, while Zen is made by one person, for free.
+- **A store build exists anyway.** The `appStoreOnly` flavor for Google Play
+  and Galaxy Store can already be built. It is the same app with three
+  differences the stores force: it does not update itself, does not hand
+  its APK to others (it shares a link instead) and has no launcher disguise.
+  It is not published yet ([docs/RELEASES.md](docs/RELEASES.md), point 6).
 - **Privacy.** Nobody, not even a store, knows you have Zen.
 
 ## Privacy and security
@@ -321,9 +330,11 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
 - **Files from others are checked:** every photo is unpacked and saved again
   before it is shown; a video or recording must really be one; Zen never
   opens files by itself and warns before saving a program.
-- **GIFs go through an outside company**, KLIPY: it sees what you search for
-  and your IP address (also when you open a GIF a friend sent). Don't use
-  GIFs if you mind that.
+- **GIF search goes through an outside company**, KLIPY: it sees what you
+  search for, the GIF you pick and your IP address. The GIF then goes to
+  your friend as an ordinary encrypted picture, so the friend never contacts
+  KLIPY. **Settings → Messages and calls → GIFs** turns the search off; GIFs
+  from your keyboard and GIF files keep working.
 - **Location** comes from the system's own service (never Google Play
   services) and goes only where a feature says (an alarm, a date-safety
   request).
@@ -332,7 +343,8 @@ over Quick Share, Bluetooth or Wi-Fi, even without internet.
   against `SHA256SUMS` and, on Android, Zen's signing certificate
   ([details](docs/guide/updates.md)).
 - The legal texts: [privacy policy](docs/PRIVACY.md) and
-  [terms of use](docs/TERMS.md). Zen asks no one for their age, except the
+  [terms of use](docs/TERMS.md), also in Polish
+  ([polityka prywatności](docs/PRIVACY.pl.md), [regulamin](docs/TERMS.pl.md)). Zen asks no one for their age, except the
   pyramid, which asks for the birth year at entry.
 
 Found a vulnerability? Please report it privately: [SECURITY.md](SECURITY.md).
@@ -380,7 +392,7 @@ when its sources changed (details: `docs/RELEASES.md`, point 3.1).
 | System | You need | Command |
 |---|---|---|
 | Android (one APK: arm64-v8a, armeabi-v7a, x86_64) | Android Studio (SDK and NDK), JDK 17 | `flutter build apk --release` |
-| Android for a store only (Google Play, Galaxy Store; no self-update; app name "Zen", only About says "Wersja ze sklepu"; the build writes `Zen-APP-STORE-ONLY-do-not-install-manually.aab` and `.apk` to `build/app/outputs/app-store-only/`; never install this build by hand) | as above | `flutter build appbundle --release --flavor appStoreOnly` |
+| Android for a store only (Google Play, Galaxy Store; the same app without self-update, APK handing and launcher disguise; the build writes `Zen-APP-STORE-ONLY-do-not-install-manually.aab` and `.apk` to `build/app/outputs/app-store-only/`; never install this build by hand) | as above | `flutter build appbundle --release --flavor appStoreOnly` |
 | Windows | Visual Studio 2022 ("Desktop development with C++"), gcc for Go (e.g. Strawberry Perl) | `flutter build windows --release` |
 | Windows on ARM (on an ARM64 computer) | as above, with ARM64 tools; for Go [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) instead of gcc | `flutter build windows --release` |
 | Linux | packages below | `flutter build linux --release` |

@@ -19,6 +19,10 @@ The **rail** on the left holds every section, one tap each, in four groups:
 - community: **Pyramid · Wallet**
 - and, apart at the bottom, the red **Alarm**.
 
+**Nearby** is on the rail only where it works: not on iPhone, iPad or a
+computer without Bluetooth LE. The wallet also opens from your own profile
+(the wallet icon in its title bar).
+
 The open tab shows its name under the icon. The **top bar** shows the
 connection state (with *Why isn't it working?* when there is no network),
 **Lock now**, the account menu (your avatar) and opens **Settings** when
@@ -30,10 +34,23 @@ tapped. The first button hides or shows the rail.
 |---|---|
 | Invite | your QR code, scanning someone's code, sending Zen to a friend |
 | About | version, about how many people use Zen and how many are in the pyramid, what Zen is, security and privacy, licences, documents (with the date you accepted them), contact, support |
-| Privacy and security | password and app lock, notifications without content (on by default), account and recovery, accounts on this device, devices, blocked people, group invitations, messages from non-friends, call recordings, GIFs |
-| Messages and calls | downloading photos and videos (also over mobile data by default; *Media over Wi-Fi only* turns that off), in-app sounds, storage limits |
-| App | notifications and background operation, permissions and Bluetooth, *Why isn't it working?*, appearance, language, data and storage, updates and Pass it on |
+| Privacy and security | password and app lock, notifications without content (on by default), account and recovery (with the circle backup), accounts on this device (with *Receive in the background*), devices, blocked people, group invitations, messages from non-friends |
+| Messages and calls | call recordings, **GIFs** (the *GIF search* switch), downloading photos and videos (also over mobile data by default; *Media over Wi-Fi only* turns that off), in-app sounds, storage limits, notifications and background operation (Android) |
+| App | permissions and Bluetooth, **Looking around in the background** (Android: how often and how long Bluetooth looks for people nearby), *Why isn't it working?*, appearance, language, data and storage, updates and Pass it on |
 | Advanced | network and service (offline mailboxes, [offline links](offline-links.md)), public peers, diagnostics, delete all data |
+
+**Looking around in the background** (Android) lets Bluetooth look for
+people nearby without the Nearby screen open: by default for 8 seconds
+every 5 minutes (choices: every 2, 5, 10, 15 or 30 minutes, for 4, 8 or 15
+seconds, or off). The page shows an estimate of what it costs the battery
+a day. It skips its turn below 15 % battery, in battery saver and while the
+phone sleeps, unless it is charging.
+
+**GIFs.** The GIF button in chats searches KLIPY, an outside company (the
+only chat feature that talks to one). Switch off *GIF search* and the GIF button disappears and Zen
+sends nothing to KLIPY. GIFs from your phone's keyboard and GIF files keep
+working. The same page takes your own KLIPY API key, in case the app's
+default key runs out.
 
 Text on these pages can be selected and copied. *Why isn't it working?*
 checks the network, background work, notifications, battery, the clock and

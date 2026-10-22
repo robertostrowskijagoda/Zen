@@ -41,3 +41,7 @@ key.properties
 *.jks
 *.keystore
 maintainer.key
+
+# Python
+__pycache__/
+*.pyc

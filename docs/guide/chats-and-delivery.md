@@ -13,10 +13,67 @@
 
 ## What you can do
 
-- One-to-one chats and groups: text, photos, videos, files, voice notes,
-  GIFs, reactions. Groups have a **Board** tab with their own posts.
+- One-to-one chats and groups (the pyramid's cell chats too): text, photos,
+  videos, files, voice notes and GIFs.
+- **GIF files** picked from the gallery or from disk stay animated (up to
+  8 MB, 2560 px a side and 400 frames); their comments and metadata are
+  removed. A GIF that would not play can go as an ordinary file.
+- On a computer, **drop** files anywhere on a conversation or **paste** them
+  with Ctrl+V (⌘V on a Mac): photos, GIFs, videos, files. Text in the
+  clipboard pastes as text, as usual.
+- **Keyboard GIFs and stickers.** On Android, GIFs from the keyboard (for
+  example Gboard or SwiftKey) arrive animated. iPhone keyboards copy a GIF
+  to the clipboard instead: use **Paste image from clipboard** in the chat
+  or in the attachment sheet.
+- Long-press a message to **react**, **reply**, **edit**, **forward**,
+  **delete for everyone**, copy it or report it.
+- Groups have a **Board** tab with their own posts: text, a photo, or both.
 - Audio and video calls, also in groups, with screen sharing.
 - Filters in the chat list: all, unread, online, close friends.
+
+## Reactions, replies, edits, forwarding
+
+- **Reactions.** One per person per message. Tap the same emoji again to
+  take it back; picking another one replaces it. Long-press the reactions
+  under a message to see who reacted with what.
+- **Replies** quote the original: who wrote it and the start of its text.
+  Tap the quote to jump to the original. A reply to a disappearing message
+  carries none of its text, so the quote shows only while the original is
+  still there.
+- **Editing.** Only your own text messages, within 24 hours of sending.
+  The message is marked *edited*; the earlier text is not kept. Other
+  devices take an edit only from the message's author, and only up to 25
+  hours after it was sent (one hour of leeway for clocks).
+- **Delete for everyone.** Your own messages; in a group, its creator may
+  also delete anyone's message (a pyramid cell chat has no creator, so
+  there only authors can). A *Message deleted* note stays in its place,
+  replies lose the quoted words and the message's file is erased. Be
+  aware: whoever already read it may remember it, and a modified app can
+  ignore the deletion and keep a copy.
+- **Forwarding** passes a text or a file to a friend or a group, marked
+  *Forwarded*. Disappearing messages cannot be forwarded.
+
+Reactions, edits and deletions travel like messages (queue, mailboxes) to
+everyone in the chat and to your other devices, without notifications.
+What a new device copies from your other devices, and the circle backup,
+keep each message as it is now: edited, deleted (only the note), with its
+reactions and reply.
+
+## Files in groups
+
+- Up to **64 KB** a file travels inside the group message itself, so it
+  waits in each member's mailboxes like any message.
+- Larger files, up to **24 MB**, are sealed once with a fresh key and kept
+  as content-addressed blocks. The message carries only their reference
+  (with the key); each member fetches the blocks from the sender or from
+  any member who already has them, so your phone does not upload a copy
+  per member. Until Zen's network is running, files up to 1 MB go inside
+  the message instead.
+- A file that has not arrived yet is asked for again when you open the
+  chat. Every file is checked like in one-to-one chats: pictures are
+  unpacked and saved again before they are shown.
+- A photo on the **Board** is shared the same way: the post carries its
+  reference, the members fetch the photo.
 
 ## How a message travels
 
@@ -53,6 +110,7 @@ and **Retry**.
 | two ticks | Delivered | the recipient's device confirmed it |
 | two ticks, coloured | Read | the recipient opened it (one-to-one chats) |
 | warning | Failed, retry | it expired unconfirmed; **Retry** sends it again under the same id |
+| outbox | Waiting on your phone, will go when you are both online | a large file the mailboxes cannot take |
 
 In groups the icon follows the furthest-behind member and the label says
 *Delivered {d} of {n}*. **Retry** in a group goes only to those who did not
@@ -85,18 +143,32 @@ everyone hears a signal.
 - Photos from others are unpacked and saved again before they are shown, so
   a "poisoned" image never reaches the system. Zen never opens files by
   itself and warns before saving a program.
-- **GIFs** come from an outside company, KLIPY: it sees what you type in the
-  GIF search and your IP address, and the IP address of anyone who opens a
-  GIF you sent. Don't use GIFs if you mind that.
+- **GIF search** uses an outside company, KLIPY: it sees what you type in
+  the GIF search, the GIF you pick and your IP address. The GIF then goes
+  to your friend as an ordinary encrypted picture; the friend's device never
+  contacts KLIPY.
+  **Settings → Messages and calls → GIFs → GIF search** turns it off: the
+  GIF button disappears and nothing goes to KLIPY. GIFs from your keyboard
+  and GIF files are sent like photos and keep working.
+- Pasted and dropped photos are saved again as a fresh JPEG without
+  metadata, the same as photos picked in the app.
 - A friend's name comes from their own profile; your nickname for them is
   shown under it.
 
 ## Limits
 
-- While Zen is locked, the outbox is not retried (its state is under your
-  key); receiving still works, and retrying resumes after you unlock.
-- Large attachments that do not fit in mailboxes wait on your device until
-  both of you are online.
+- While Zen is locked (Android), messages still waiting go out from a
+  sealed copy of the queue prepared while it was unlocked (up to 300
+  messages, 4 MB). What can only go directly waits until you unlock.
+- A file over 1 MB to a friend whose mailboxes do not take files waits on
+  your device until both of you are online.
+- A group file sent as blocks arrives only while the sender or another
+  member who has it is online.
+- Only text messages can be edited; a Board post may have one photo.
+- Comments take no pictures. Events, food sharing and neighbours take
+  small still pictures only: a GIF there keeps its first frame.
+- Dropping files shows no highlight while you drag (the system reports only
+  the drop).
 - On iPhone Zen receives only while it is open (iOS does not allow it to run
   in the background).
 - Read receipts exist only in one-to-one chats.

@@ -43,8 +43,9 @@ stay classical, for reasons explained below.
   mesh routing, and to the friends who relay or keep mail for you.
 - What friends do with what you show them (screenshots, retelling).
 - Denial of service: anyone on the path can drop traffic.
-- Outside services you choose to use: GIF search (KLIPY), GitHub for
-  updates, OpenStreetMap when you open a shared location.
+- Outside services you choose to use: GIF search (KLIPY; it can be switched
+  off in Settings → Messages and calls → GIFs), GitHub for updates,
+  OpenStreetMap when you open a shared location.
 
 ## The layers
 
@@ -69,7 +70,9 @@ or X25519 holds. It protects:
 | The pair secret of local links between friends' and own devices (adverts, handshake authentication) | each device sends 32 random bytes inside the sealed session above (`local_pair`, address checked against the proven device list); once both confirm, the secret is HKDF of the X25519 pair secret and both contributions, re-made after a reinstall |
 | Call keys | a fresh exchange in every call's offer and answer |
 | Dating: questions, answers, profiles, "Yes", messages, matchmaking | a fresh encapsulation for every box, so boxes cannot be linked; the weekly lantern is a SHA-256 commitment to a one-time hybrid key, and the match test is a sealed offer (no Diffie–Hellman) |
-| Food sharing pickup address | sealed for the accepted person's one-time hybrid key |
+| Food sharing pickup address, Table for six address | sealed for the accepted person's one-time hybrid key; a go-between sees only ciphertext |
+| Pyramid private transfers | each order sealed (ML-KEM-768 + X25519, AES-GCM) for each treasurer separately; other members receive nothing |
+| Housemate join | the flat key goes sealed for the new phone's hybrid key, only after the phone that showed the one-time code confirms |
 
 ### Signatures: hybrid Ed25519 + ML-DSA-65
 
@@ -165,7 +168,51 @@ friend vouching for their key, is trust on first use.
   and a deleted account is replaced by a decoy, so the number of folders
   stays the same. Keystore entries of extra accounts have hashed names. There
   is no list of hidden accounts. A panic password erases its account
-  silently.
+  silently. An account with **"Receive in background"** on (off by default
+  for extra accounts) keeps its mesh node and a small receive kit under a
+  separate background key, so the background service (Android) or the tray
+  (computers) runs it without the password; someone with full access to the
+  device (root, or on a computer any program of the same user) can then tell
+  that the account exists and read its mesh address and whom it accepts
+  messages from. Its notifications are generic.
+- **The copy at the recovery circle.** Each person of your recovery circle
+  keeps an encrypted copy of your data: profile (no photos), friends and
+  groups with their levels, settings, your pyramid state and a wallet
+  statement, your household (flat key, resident key, household profile and
+  housemates' names; not the door key or the neighbours), your dating
+  profile and its settings, and (switchable) the text of your one-to-one and
+  group conversations — no photos, videos, files or disappearing messages; at most 10 MB, the oldest messages go first. Every
+  section and every month of every conversation is split into chunks sealed
+  with ChaCha20-Poly1305 under a key derived (HKDF) from the account key, so
+  only a recovered account opens it; an unchanged chunk stays the same, so a
+  refresh (at most daily, sooner after a new friend or group change) sends
+  only what changed. Holders see only chunk hashes and sizes; the list of
+  chunks is signed (hybrid Ed25519 + ML-DSA-65) by your device, whose
+  certificate the account key signed. A holder keeps copies only of accounts
+  whose recovery key it holds (100 MB in all), drops one when that key goes,
+  and gives a copy back only to a device the account certified (a signed,
+  fresh request). After any recovery Zen asks the circle and friends for the
+  newest copy, checks it and restores it with progress shown.
+- **The backup file.** "Create a backup" writes the chosen parts of the
+  account (always the account key) into one file, in parts of 1 GB when
+  larger. It is sealed in frames of 1 MiB with AES-256-GCM under a key from
+  the backup password (Argon2id, 64 MiB, 2 passes; symmetric only, so
+  post-quantum safe); each frame's number and whether it is the last are
+  bound to it, so frames cannot be cut, swapped or added, and every file
+  inside is checked by its SHA-256. A wrong password is told apart from a
+  damaged file. A copy of another account is refused before its files are
+  read on a device that already holds an account with data.
+- **Moving the account to another device.** The device with the account
+  shows a one-time QR code: its address, a one-time X25519 key and a
+  random 128-bit token. The new device answers with its own one-time key
+  and an HMAC of it under the token, so only a device that saw the screen
+  can ask; both screens show six digits from the shared key, and nothing
+  leaves until the person taps "Allow" on the old device. Everything after
+  that (the account key, the list of contents, the files in blocks of
+  192 KB, each file checked by its SHA-256) is sealed with
+  ChaCha20-Poly1305 under that key, inside the post-quantum session every
+  signal already travels in. Blocks wait in the encrypted store, so a
+  transfer cut short goes on from where it stopped.
 
 ## Memory hardening and tamper detection
 
@@ -188,8 +235,11 @@ friend vouching for their key, is trust on first use.
   warning only, it is your device. Someone inside Zen's process (a debugger,
   Frida, hooks, an injected library, a re-signed copy): a warning, and Zen
   refuses to send transfers or use the pyramid power key, checked at least
-  every minute. Even then a modified phone cannot create money: balances come
-  from signed records that every member's phone checks.
+  every minute. Even then a modified phone cannot create money: issuance is
+  in signed records that every member's phone checks, and a transfer counts
+  only with the signatures of a majority of the treasurers.
+- The store build skips the re-signed-copy check, because a store may sign
+  the app with its own key; every other check stays.
 
 ## Honest limits
 
@@ -203,10 +253,16 @@ friend vouching for their key, is trust on first use.
   (this needs a change in Yggdrasil itself).
 - libwebrtc logs key material at its info log level; release builds keep
   WebRTC logging off, and it must stay off.
-- Pyramid transfers are public to members (amounts and parties).
+- Pyramid transfers are private, but not from the treasurers: every
+  treasurer (the top levels) sees every transfer, like a bank. A dishonest
+  majority of treasurers could sign a double spend or a false statement;
+  that is provable afterwards, not preventable.
 - Self-update checks the maintainers' signature only once their keys are
   pinned in the app; until then it relies on `SHA256SUMS` and, on Android,
   the signing certificate.
 - The recovery circle's waiting time is kept by the helpers' honest apps.
+- A lost device you have not cut off could still send a newer (validly
+  signed) circle copy; its data is yours anyway, but it could make the copy
+  smaller. Holders also see when and how much your copy changes.
 
 Found something? Please report it privately: [SECURITY.md](../SECURITY.md).

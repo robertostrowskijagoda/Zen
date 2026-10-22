@@ -1,6 +1,6 @@
-# Zen protocol specification (draft, from the code of 1.11.0)
+# Zen protocol specification (draft, from the code after 1.11.0)
 
-*Written 20.10.2026 by reading the code, revised 21.10.2026. Not a standard; the code is the
+*Written 20.10.2026 by reading the code, revised 21.10.2026 and 22.10.2026. Not a standard; the code is the
 reference. Markers: **[V]** read directly in code and consistent; **[P]**
 partly verified (shape known, details not all read); **[?]** uncertain or not
 read - check the file named. Field names are the JSON keys on the wire.
@@ -279,7 +279,7 @@ Direction is sender -> recipient unless stated. "Reliable" means the type is in
 
 | type | Fields | Notes |
 |---|---|---|
-| `message` | `msgId`, `senderName`, `text`, `messageType` (`text|image|file|voice|video`), `attachmentData` (base64), `attachmentEncoding`, `fileName`, `mimeType`, `attachmentSizeBytes`, `durationMs`, `createdAt` (sender clock, ms), `ttl` (seconds) | Reliable. One of `text`, `attachmentData` required. GIFs travel as ordinary image attachments. Frames up to 48 KB can be mailbox-relayed (section 3.2); the signal limit is 2 MiB. |
+| `message` | `msgId`, `senderName`, `text`, `messageType` (`text|image|file|voice|video`), `attachmentData` (base64), `attachmentEncoding`, `fileName`, `mimeType`, `attachmentSizeBytes`, `durationMs`, `createdAt` (sender clock, ms), `ttl` (seconds), `re` (reply: `{id, s?: sender, t?: start of its text <=200}`), `fwd` (true: forwarded) | Reliable. One of `text`, `attachmentData` required. GIFs travel as ordinary image attachments. Frames up to 48 KB can be mailbox-relayed (section 3.2); the signal limit is 2 MiB. A reply to a disappearing message carries no `t`. |
 | `message_placeholder` | as `message` plus `chunkCount`, `chunkIndex`, `attachmentTransferBytes` | Announces a large attachment sent in chunks. |
 | `message_chunk` | `msgId`, `chunkIndex`, `chunkCount`, `chunkData` (base64), + placeholder fields | Not reliable; has its own protocol. Never compressed (high-entropy). |
 | `message_chunk_ack` | `msgId`, `chunkIndex` | |
@@ -288,6 +288,12 @@ Direction is sender -> recipient unless stated. "Reliable" means the type is in
 | `message_transfer_cancel` | `msgId` | Reliable. |
 | `transfer_offer` / `transfer_answer` | `transferId`, `description` (WebRTC SDP map), + file fields (`fileSize`, `fileName`, `mimeType`, `messageType`, ...) | File transfer over a WebRTC data channel [P]. |
 | `disappear_timer` | `groupId?`, `seconds` (0 = off), `at` | Reliable. Same `ttl` is carried by messages. |
+| `msg_react` | `msgId`, `groupId?`, `emoji` (<=16 chars; empty = taken back) | Reliable. One reaction per person per message. |
+| `msg_edit` | `msgId`, `groupId?`, `text`, `at` (sender clock, ms) | Reliable. Taken only from the message's author, only for text, and only while `at` is within 25 h of the message (24 h + 1 h clock leeway). The earlier text is not kept. |
+| `msg_delete` | `msgId`, `groupId?`, `at` | Reliable. Taken from the author, or in a group from its creator as recorded by the receiver. The content and file go; a note stays; replies drop the quoted text. |
+
+`msg_react`, `msg_edit` and `msg_delete` (like `message` and `disappear_timer`)
+are mirrored to the sender's other devices, which apply them as their own.
 
 ### 2.4 Groups
 
@@ -299,8 +305,10 @@ Groups are fan-out: the sender sends the frame to **each member** individually
 |---|---|---|
 | `group_invite` | `groupId`, `groupName` (<=100), `description` (<=1000), `memberAddresses`, `avatarPreset`, `senderName`, `inviteId` | Reliable. `inviteId` is a nonce: re-sends of the same invitation do not revive a declined group. |
 | `group_invite_ack` | `groupId` | Reliable. |
-| `group_message` | `groupId`, `groupName`, `msgId`, `text` (<=64k chars), `senderName`, `timestamp`, `ttl` | Reliable. |
+| `group_message` | `groupId`, `groupName`, `msgId`, `text` (<=64k chars), `senderName`, `timestamp`, `ttl`, `re`, `fwd`; for a file also `messageType`, `fileName`, `mimeType`, `attachmentSizeBytes`, `durationMs` and either `attachmentData` + `attachmentEncoding` (inline, files <=64 KB, or <=1 MB while no block store runs) or `media` (`{id, k, n, mime}`: the reference of `lg_blob_*` blocks, files <=24 MB) | Reliable. A member fetches `media` blocks with `lg_blob_want` from the sender or any other member; a member's device answers such requests from non-friends too. |
 | `group_leave` | `groupId` | Reliable. |
+| `group_post` | `groupId`, a board post `{id, a author, n name, x text <=2000, t created, v version, d? removed, m? photo reference {id, k, n, mime}}` | Reliable. A new, edited or removed post; the newest `v` wins. Photos up to 8 MB as `lg_blob_*` blocks. At most 20 new posts per member and group an hour; a board keeps 300. |
+| `group_board_have` / `group_board_put` | `groupId`, post ids and versions / up to 50 posts | Real-time sync between members: what I have, and the asker's missing posts written by the one answering. |
 
 ### 2.5 Calls (signalling) [V]
 
@@ -376,12 +384,28 @@ accepted (parkable types wait for the friendship to settle).
   copy sealed in advance; `alarm_own` / `alarm_own_audio` exist
   only in the sealed inbox (from the device's own address).
 - **Events**: `event`, `event_rsvp`, `event_plus1`, `event_pass`, `event_photo`,
-  `event_thanks` (ticket QR prefix `zen-ticket:`) [?] fields. Tickets and
-  their 30-second live codes are signed with **Ed25519 alone** (4.1): they
-  must fit one QR code at the door.
-- **Questions**: `ask`, `ask_answer`. **Table / circles**: `table_wish`,
-  `circle`, `circle_swap`, `circle_guest`. **Weekend plan**: `weekend_plan`,
-  `weekend_plan_ans`. [?] fields in the respective services.
+  `event_thanks` (ticket QR prefix `zen-ticket:`) [?] fields. Tickets carry
+  no signatures: the organiser's tag is HMAC-SHA256 under a key from the
+  event's secret, and the live code (valid +/-90 s, once) is an HMAC with a
+  pin known only to the guest's phone and the organiser (the RSVP carries
+  it inside the sealed signal). The organiser's phone checks them offline;
+  a ticket QR stays under 400 characters.
+- **Questions**: `ask`, `ask_answer`. **Circles**: `circle`, `circle_swap`,
+  `circle_guest`. **Food sharing**: `food_offer`, `food_req`, `food_ans` (the
+  pickup address sealed for the accepted person's one-time hybrid key).
+  **Weekend plan**: `weekend_plan`, `weekend_plan_ans`. [?] fields in the
+  respective services.
+- **Table for six** (`table_service.dart`): one type, `table_wish`. Without
+  `k` it carries a wish `w` (to friends with name and address; a go-between
+  passes it to its own friends "blind": first name, city, optional area
+  `ar` and days, no address; an empty `city` withdraws it). With `k` it is a
+  step of an invitation `{k, e: event id, w: wish id}`: `inv` (host to guest,
+  with a one-time hybrid key, directly or through the go-between), `ans`
+  (guest: yes with the address sealed for the host's key, or no), `ok` /
+  `no` (host's decision; `ok` brings the place and the host's address
+  sealed for the guest's key, then the event comes directly from the host).
+  The go-between sees only ciphertext. Wishes live 30 days, clock skew
+  10 minutes.
 - **Introductions and gates** (`intro_*`): `intro_ask` (X asks friend F for an
   introduction to Y, a letter for Y, or F's friend list; for a paid gate `x` =
   the pyramid payment id; someone introduced to F may ask F for the next
@@ -396,7 +420,7 @@ accepted (parkable types wait for the friendship to settle).
 
 ### 2.7 Neighbours (`flat_*`) [?]
 
-`flat_hello`, `flat_nope`, `flat_profile`, `flat_get`, `flat_msg`,
+`flat_hello`, `flat_nope`, `flat_profile`, `flat_card`, `flat_get`, `flat_msg`,
 `flat_signup`, `flat_signup_ok`, `flat_house`, `flat_join`, `flat_leave`,
 `flat_moved`, `flat_kick`, `flat_rekey`, `flat_newkey`, `flat_reveal`,
 `flat_ack`, and for mailbox doors `flat_seal`, `flat_slot`, `flat_held`
@@ -407,6 +431,17 @@ until the other door answers `flat_ack {id}` (knocks are never answered);
 (`flat_house`, `flat_join`, `flat_leave`, `flat_kick`, `flat_rekey`) they go
 phone to phone, reliable but only directly. A door QR gives a "door secret"
 that authorises `flat_hello`.
+
+**Joining a household:** the housemate code is a one-time token valid for
+10 minutes (no flat key in it). The new phone sends `flat_join {step: ask}`
+(name, device, resident key, X25519 and ML-KEM-768 keys); the phone that
+showed the code asks its owner and answers `step: ok` or `step: no`; only
+after `ok` does the flat key travel, sealed for the new phone's hybrid key,
+followed by the usual signed `flat_join`. An invitation shown nearby is a
+token of its own valid for 24 hours (shared by the household in
+`flat_house`), never the sticker's permanent code. Messages to neighbours
+are signed with the writer's name in the flat. In a household of two,
+removing the other phone waits for its consent or 7 days.
 
 **Mailbox doors** (`flat_door_mail.dart`): a door runs on a resident's phone
 and answers only while that phone is online, so the door sticker also lists up
@@ -446,19 +481,40 @@ relay engine and never reaches the app layer.
 
 See 3.3. Types: `lg_hello`, `lg_keys`, `lg_bridges`, `lg_reach`, `lg_reach_ok`,
 `lg_sibling`, `lg_heads`, `lg_want`, `lg_entries`, `lg_revoke`, `lg_cert_want`,
-`lg_certs`, `lg_blob_want`, `lg_blob_manifest`, `lg_blob_chunk`.
+`lg_certs`, `lg_blob_want`, `lg_blob_manifest`, `lg_blob_chunk`, `lg_push`.
+
+`lg_push` {`entries`} is the only reliable ledger frame: a device's new
+entries in `feed` and `acts` (not the bundled `rx` reactions) go after 30 s,
+in batches of at most 30 KB and 10 an hour per friend, through the reliable
+queue to friends who are offline, so they wait in those friends'
+mailboxes. The receiver takes them like `lg_entries`, with the same checks.
 
 ### 2.11 Pyramid (`pyr_*`)
 
 See 3.4. Types: `pyr_hello`, `pyr_rec`, `pyr_recs`, `pyr_ids`, `pyr_want`,
-`pyr_prop`, `pyr_sig`, `pyr_vote`, `pyr_pay`, `pyr_paysig`, `pyr_report`,
-`pyr_appeal`, `pyr_anon`, `pyr_dm`, `pyr_sum`, `pyr_nat`, `pyr_who`,
-`pyr_here`.
+`pyr_prop`, `pyr_sig`, `pyr_vote`, `pyr_card`, `pyr_priv`, `pyr_report`,
+`pyr_anon`, `pyr_dm`, `pyr_sum`, `pyr_nat`, `pyr_who`, `pyr_here`.
 
-### 2.12 Nearby (Bluetooth LE, Android) [V]
+**Private money** (`pyramid_treasury.dart`, `pyramid_ledger.dart`):
+`pyr_priv {c, b}` is a message sealed for one recipient's pyramid KEM key
+(`kemkey` record, 3.4): `c` the hybrid ML-KEM-768 + X25519 ciphertext, `b`
+the AES-GCM box, context `zen.pyr.priv.v1`; only from a member's address.
+Inside, `k` names the kind: `ord` (an order or settlement for a treasurer to
+sign: payer-signed, next account number), `tsig` (a treasurer's signature
+back), `fin` (an operation with a majority of treasurers' signatures, to the
+treasurers and the parties), `stq` / `st` (a member asks for a balance
+statement; a treasurer's signed answer, every 12 h), `note` (who gets an
+emission), `ldig` / `lwant` / `lops` (treasurers' ledger sync every 30 min).
+Transfers are never records; members who are not treasurers or parties
+receive nothing.
+
+### 2.12 Nearby (Bluetooth LE: Android and computers) [V]
 
 Not Yggdrasil. Implementation: `ZenNearbyBridge.kt`, `nearby.dart`,
-`nearby_crypto.dart`.
+`nearby_crypto.dart`; on computers the same advertisement through WinRT
+(`nearby_radio_bridge.cpp`), BlueZ over D-Bus, and CoreBluetooth on macOS
+(scanning only: macOS does not let apps advertise manufacturer data).
+Computers run no GATT server: they cannot receive waves.
 
 - **Advertisement**: BLE manufacturer data, company id `0xFFFF`, bytes
   `"ZN"` (`0x5A 0x4E`) + a 16-byte **token** + a 4-byte **hint**, new every
@@ -495,7 +551,34 @@ Not Yggdrasil. Implementation: `ZenNearbyBridge.kt`, `nearby.dart`,
 Unknown `type`, or a type the parser does not map, yields no signal
 (`zenSignalFromTransportPayload` returns `null`; relay engine returns `false`).
 
-### 2.14 Network census (`census`) [V]
+### 2.14 Circle copy (`cbk_*`) [V]
+
+`circle_backup_service.dart`, `circle_backup_holder.dart`. Between the
+owner's devices and the people of its recovery circle, over the signal
+transport:
+
+| type | Direction | Fields |
+|---|---|---|
+| `cbk_offer` | owner -> holder | `m`: a new manifest |
+| `cbk_need` | holder -> owner | `a` account, `mid` manifest id, `ids` chunks it lacks |
+| `cbk_chunk` | owner -> holder | `a`, `id`, `c` (one chunk) |
+| `cbk_ok` | holder -> owner | `a`, `at`: the copy is complete |
+| `cbk_no` | holder -> owner | `a`, `why`: refused |
+| `cbk_fetch` | recovered device -> holders | `r`: a signed, fresh request |
+| `cbk_manifest` | holder -> recovered device | `m`: the copy kept |
+| `cbk_get` | recovered device -> holder | `r`, `ids` |
+| `cbk_part` | holder -> recovered device | `a`, `id`, `c` |
+
+Every section, and every month of every conversation, is cut into chunks of
+at most 192 KB, sealed with ChaCha20-Poly1305 under a key from HKDF of the
+account's self key, with a nonce derived from the content (an unchanged
+chunk keeps its hash and is not sent again). An encrypted index names the
+chunks; the manifest is hybrid-signed by the device, whose certificate the
+account key signed. A holder takes copies only of accounts whose recovery
+key it holds, 10 MB (+10 %) per account and 100 MB in all, and answers
+`cbk_fetch` only for a device the account certified.
+
+### 2.15 Network census (`census`) [V]
 
 `census` {`e` month (months since January 2024), `c` sketch of that month,
 `p` sketch of the month before (optional)}, friends only, not reliable, at
@@ -527,8 +610,13 @@ still inflate it; it is a rough guide only.
   `sender|_rid` for 14 days. Types that must go direct only
   (`_directOnlyPayloadTypes`: `friend_request`, `flat_*`) are never mailboxed.
   `_once: true` marks a payload to send once, not queued.
-- Direct retry schedule: 3 s, 10 s, 30 s, 2 min, 10 min, 30 min. TTL 14 days
-  (`messageTtl`).
+- The payload is written to disk before the first direct attempt. Direct
+  retry schedule: 3 s, 10 s, 30 s, 2 min, 10 min, 30 min, 1 h, 2 h, 4 h, then
+  every 4 h; any sign of life of the recipient, and a restart or 10 minutes
+  of silence, start over. TTL 14 days (`messageTtl`).
+- Reactions, edits and deletions (`msg_react`, `msg_edit`, `msg_delete`),
+  group board posts (`group_post`), `lg_push`, `date_key` and `date_intro*`
+  are reliable too.
 - Calls, typing, presence and file chunks are not reliable.
 
 ### 3.2 Mailboxes (store and forward) [V]
@@ -560,7 +648,16 @@ relays.
   truncated to 16 bytes, where `depositKey = HMAC-SHA256(identityPrivate,
   "zen.relay.deposit-key.v1")`) proves the sender is someone the recipient
   announced to.
-- **[?] Not described in full:** `relay_crypto.dart` also contains
+- **Parts** (`zpart`): a payload too large for one envelope (up to about
+  1.5 MB of JSON, e.g. a photo inside a message) is cut into at most 64
+  parts `{p: rid of the whole, i, n, h: SHA-256 of its JSON, x: expiry, d:
+  piece}` of about 30 KB, deposited with at most 3 of the recipient's
+  mailboxes (the same for every part); the recipient joins them, checks `h`
+  and takes the whole as if sent directly. Parts are only deposited, never
+  sent directly. A mailbox keeps up to 4 MB per recipient.
+- **[?] Not described in full:** large attachments for mailboxes use the
+  `rly_bput`, `rly_bput_ack`, `rly_bput_no`, `rly_bget`, `rly_bchunk`,
+  `rly_bdone`, `rly_bdrop`, `rly_bnone` frames; `relay_crypto.dart` also contains
   `RelayBlobCipher` (chunk sealing of large attachments for mailboxes, AAD
   `zen.relay.blob.v1|blobId|sender|recipient|index|count`, nonce = chunk index).
   Its frames are not in this document; check `relay_engine.dart` and the
@@ -620,7 +717,11 @@ A signed, append-only, per-device **log** for each **space**.
   account's own devices.
 - **Kinds seen** [P]: `post`, `post_edit`, `post_del`, `reshare`, `comment`,
   `like`, `rx`, `thanks`, `gallery`, `gallery_del`, `profile`, `device`,
-  `contacts`, `contact_removed`, `chat`, `chat_history`.
+  `contacts`, `contact_removed`, `chat`, `chat_history`; for the Videos
+  section `film` (in `feed`, removed by `post_del`), and in `acts`
+  `film_react` (the latest per film wins), `film_seen` (`posts`: film ids the
+  author counts) and `film_pass` (a public film passed on to friends of
+  friends: the signed film with its certificate, like a reshare).
 - **Audience encryption**: bodies for non-public audiences are
   `{aud, kid, n, c}` sealed with ChaCha20-Poly1305 under a 32-byte audience key,
   AAD `"<account>|<kid>"`; keys are handed to friends in `lg_keys` according to
@@ -695,7 +796,9 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   `alive`, `addr`, `deleg`,
   `revoke`, `ban`, `unban`, `decision`, `post`, `comment`, `natpost`,
   `natgrant`, `natpin`, `badge`, `known`, `ref`, `tally`, `const`, `emit`,
-  `veto`, `xfer`, `settle`, `alarm`, `offer`. The genesis names the power key
+  `emitrule`, `emitcancel`, `veto`, `kemkey`, `suit`, `verdict`, `appeal`,
+  `appans`, `alarm`, `offer`; `xfer` and `settle` exist as kinds but the
+  fold refuses them: transfers are private (2.11). The genesis names the power key
   (`pk`) and the fingerprint of its ML-DSA half (`pq`; the original pyramid's
   must, the test pyramid's has none) and is signed by it; `found` (power key +
   founder) seats the first head; `hand` passes the power key to the head at
@@ -726,11 +829,17 @@ record = { "b": body, "s": {signerKey: signature}, "r": ringSignature?, "ts": {t
   counted per card; a `vote` is signed by one ballot card and counts once
   per card. Neither names a member; both are published through a friend
   outside the cell.
-  `xfer` and `settle` need treasurer signatures (`ts`).
+  `kemkey` publishes a member's hybrid KEM key (from the pyramid key's
+  seed, so it survives recovery) that private payments and statements are
+  sealed to. `emitrule` changes the emission limit or the daily transfer
+  limit (lower at once; higher announced and in force after 30 days unless
+  an `emitcancel` comes first). `suit` / `verdict` are the court; `appeal` /
+  `appans` go one level above whoever decided, each level twice as long.
 - Frames: `pyr_hello` (pyramids kept and fingerprints), `pyr_ids` (ids of a
   differing bucket), `pyr_want`, `pyr_rec` (one new record, passed on),
   `pyr_recs` (bulk), `pyr_prop` / `pyr_sig` (co-signing), `pyr_vote`,
-  `pyr_pay` / `pyr_paysig`, `pyr_report`, `pyr_appeal`, `pyr_anon` (an
+  `pyr_card` (voting cards), `pyr_priv` (private money, 2.11),
+  `pyr_report`, `pyr_anon` (an
   anonymous record published on someone's behalf), `pyr_dm` (access-market
   message), `pyr_sum` (anonymous branch sums), `pyr_nat` (national-section
   posts and the top's posts for friends outside; a frame with the top's posts
