@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zen/src/app/feature_flags.dart';
 import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/account/account_archive_app.dart';
+import 'package:zen/src/features/account/account_state_sync_app.dart';
 import 'package:zen/src/features/account/recovery_providers.dart';
 import 'package:zen/src/features/census/census_providers.dart';
 import 'package:zen/src/features/dating/dating_providers.dart';
@@ -49,6 +51,10 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
       // Starts the ledger (posts, profiles) once the transport is up.
       ref.read(ledgerNodeProvider);
       ref.read(recoveryServiceProvider);
+      // The copy of this account's data at its recovery circle.
+      ref.read(circleBackupServiceProvider);
+      // The rest of a copy of the account taken before a restart.
+      unawaited(ref.read(accountImportControllerProvider).start());
       // A computer offers itself as a mesh bridge.
       ref.read(bridgeHostProvider);
       // New versions of the app from friends.
@@ -74,6 +80,12 @@ List<ZenModule> zenAppModules(Ref ref) => <ZenModule>[
     start: () {
       // Friends' statuses and alarms; this phone shown nearby.
       ref.read(meetServiceProvider);
+      // Settings, dating, meetings, the profile and every file the same
+      // on all the account's devices.
+      unawaitedLogged(
+        ref.read(accountDevicesKeeperProvider).start(),
+        context: 'Stan konta na urządzeniach',
+      );
       ref.read(nearbyServiceProvider);
       ref.read(eventServiceProvider);
       ref.read(askServiceProvider);

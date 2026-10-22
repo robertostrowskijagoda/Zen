@@ -44,6 +44,11 @@ enum ZenSignalType {
   groupCallDecline,
   profileUpdate,
   disappearTimer,
+  // Reactions, edits and deletions of chat messages (`msg_react`,
+  // `msg_edit`, `msg_delete`).
+  messageReaction,
+  messageEdit,
+  messageDelete,
 }
 
 enum SignalPriority {
@@ -88,6 +93,7 @@ final class ZenSignal {
     this.cameraOn,
     this.disappearSeconds,
     this.miniProfile,
+    this.chatExtras,
   });
 
   final ZenSignalType type;
@@ -138,6 +144,11 @@ final class ZenSignal {
   /// (`{n: name, av: photo}`), so the person written to sees who it is.
   final Map<String, dynamic>? miniProfile;
 
+  /// What a chat message or a change to one carries besides the basics:
+  /// `re` (the message replied to), `fwd` (forwarded), `media` (a file as
+  /// content-addressed blocks), `emoji` (a reaction).
+  final Map<String, dynamic>? chatExtras;
+
   ZenSignal withSender(String sender) {
     if (sender == this.sender) {
       return this;
@@ -174,6 +185,7 @@ final class ZenSignal {
       cameraOn: cameraOn,
       disappearSeconds: disappearSeconds,
       miniProfile: miniProfile,
+      chatExtras: chatExtras,
     );
   }
 }

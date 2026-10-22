@@ -267,14 +267,11 @@ class _BootstrapSurface extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    // The logo's own white lettering (graphite on the light
-                    // theme, where white would vanish).
+                    // The logo lettering takes the theme's own ink, so it
+                    // reads on every background.
                     Builder(
                       builder: (BuildContext context) {
-                        final Color ink =
-                            Theme.of(context).brightness == Brightness.dark
-                            ? Colors.white
-                            : Colors.black;
+                        final Color ink = zen.textPrimary;
                         final Widget asText = Text(
                           title,
                           textAlign: TextAlign.center,

@@ -188,7 +188,7 @@ Future<void> pumpShellForFit(WidgetTester tester) => pumpTextFitHost(
 
 Future<void> pumpAboutForFit(WidgetTester tester) => pumpTextFitHost(
   tester,
-  const AboutScreen(storeBuild: false),
+  const AboutScreen(),
   overrides: [
     ownCopyCheckProvider.overrideWith(
       (Ref ref) async => const OwnCopyCheck(OwnCopyState.unknown),

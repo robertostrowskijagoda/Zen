@@ -196,8 +196,10 @@ class _CallCompactViewState extends ConsumerState<CallCompactView> {
                 textAlign: remote != null ? TextAlign.start : TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+                // Over the remote video the type stays white on a shadow
+                // (see ZenFixed); otherwise it follows the theme.
                 style: TextStyle(
-                  color: remote != null ? Colors.white : zen.textSecondary,
+                  color: remote != null ? ZenFixed.onPhoto : zen.textSecondary,
                   fontSize: 12.5,
                   fontWeight: FontWeight.w600,
                   fontFeatures: const <FontFeature>[

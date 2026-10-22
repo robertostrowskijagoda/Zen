@@ -1184,6 +1184,31 @@ final class LedgerNode {
     return newest;
   }
 
+  /// Peers asked for a file who are not friends (group members): their
+  /// answers are taken — only for files this device wants.
+  final Set<String> _askedForBlobs = <String>{};
+  static const int _maxAskedForBlobs = 512;
+
+  /// Fetches file [id] from [sources], friends or not (the members of a
+  /// group a file was shared in): whoever has its pieces hands them over.
+  void fetchBlobFrom(String id, Iterable<String> sources) {
+    final List<String> normalized = <String>[
+      for (final String s in sources)
+        if (PeerShareCodec.normalizeAddress(s).isNotEmpty &&
+            PeerShareCodec.normalizeAddress(s) != _ownAddress)
+          PeerShareCodec.normalizeAddress(s),
+    ];
+    for (final String s in normalized) {
+      _askedForBlobs
+        ..remove(s)
+        ..add(s);
+    }
+    while (_askedForBlobs.length > _maxAskedForBlobs) {
+      _askedForBlobs.remove(_askedForBlobs.first);
+    }
+    replicator.fetchBlob(id, normalized);
+  }
+
   /// Fetches files of [ids] from this account's other devices.
   void fetchFromOwnDevices(Iterable<String> ids) {
     final List<String> sources = siblingAddresses;
@@ -1987,7 +2012,7 @@ final class LedgerNode {
     // are taken).
     if ((type == LedgerMessages.blobManifest ||
             type == LedgerMessages.blobChunk) &&
-        _followedSpaces(from).isNotEmpty) {
+        (_followedSpaces(from).isNotEmpty || _askedForBlobs.contains(from))) {
       await replicator.handle(from, frame.payload);
     }
   }

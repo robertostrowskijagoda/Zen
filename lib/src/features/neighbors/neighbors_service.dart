@@ -1021,6 +1021,7 @@ final class NeighborsService extends ChangeNotifier {
         await _fromJson(json);
       }
       _loaded = true;
+      await _checkRestored();
       if (_syncDoorKey()) {
         await _save();
       }
@@ -1228,6 +1229,7 @@ final class NeighborsService extends ChangeNotifier {
     _resident = residentSeed == null
         ? null
         : await LedgerKeyPair.fromSeed(residentSeed);
+    _restoredAt = json['rest'] is int ? json['rest'] as int : null;
     _voteSigs.clear();
     final Object? kickSig = json['kickSig'];
     if (kickSig is Map) {
@@ -1487,6 +1489,7 @@ final class NeighborsService extends ChangeNotifier {
               if (_neighbors.containsKey(k)) k,
           ],
           'rseed': ?_residentSeed,
+          'rest': ?_restoredAt,
           'kickSig': _voteSigs,
           'sw': <Map<String, dynamic>>[
             for (final FlatKeySwitch s in _switches.values) s.toJson(),
@@ -2313,6 +2316,126 @@ final class NeighborsService extends ChangeNotifier {
     }
     _dropFlat();
     await _save();
+  }
+
+  // ---- the circle copy (after a recovery) ----
+
+  /// When the household was taken back from the circle copy, while no
+  /// housemate has confirmed it yet; null otherwise.
+  int? _restoredAt;
+
+  /// How long a household taken from the circle copy waits for a
+  /// housemate.
+  static const Duration restoreConfirmWait = Duration(days: 14);
+
+  /// Whether the household came from the circle copy and waits for a
+  /// housemate's confirmation.
+  bool get restoredUnconfirmed => _restoredAt != null;
+
+  /// What the circle copy keeps of the household: its key, this resident's
+  /// key, the profile, housemates' names and phones. Never the door key
+  /// (one phone runs one door) nor neighbours (they come back with the
+  /// household's state from a housemate). Null without a household.
+  Map<String, dynamic>? backupState() {
+    final FlatProfile? p = _profile;
+    final String? seed = _seed;
+    final String? residentSeed = _residentSeed;
+    if (p == null || seed == null || residentSeed == null || joining) {
+      return null;
+    }
+    return <String, dynamic>{
+      'seed': seed,
+      'rseed': residentSeed,
+      'p': p.toJson(),
+      'names': Map<String, String>.of(_names),
+      'phones': Map<String, String>.of(_phones),
+    };
+  }
+
+  /// Takes the household back from the circle copy (after a recovery),
+  /// held back until a housemate confirms it with the household's current
+  /// state: this phone asks the housemates to take it as the same resident
+  /// (signed with the resident key). A household that changed its key
+  /// meanwhile does not answer under the old one; after
+  /// [restoreConfirmWait] the old key is dropped, never put in place of the
+  /// new one (the person joins again from a housemate's code). Nothing when
+  /// this phone has a household already.
+  Future<bool> restoreFromBackup(Map<String, dynamic> json) async {
+    if (_profile != null || _pair != null || joining) {
+      return false;
+    }
+    final Object? seed = json['seed'];
+    final Object? residentSeed = json['rseed'];
+    final Uint8List? seedBytes = unb64(seed, length: 32);
+    final Uint8List? residentBytes = unb64(residentSeed, length: 32);
+    if (seed is! String ||
+        residentSeed is! String ||
+        seedBytes == null ||
+        residentBytes == null) {
+      return false;
+    }
+    final LedgerKeyPair pair = await LedgerKeyPair.fromSeed(seedBytes);
+    final LedgerKeyPair resident = await LedgerKeyPair.fromSeed(residentBytes);
+    final FlatProfile? p = await _verifiedProfile(pair.id, json['p']);
+    if (p == null || !p.members.containsKey(resident.id)) {
+      return false;
+    }
+    _seed = seed;
+    _pair = pair;
+    _profile = p;
+    _residentSeed = residentSeed;
+    _resident = resident;
+    _names
+      ..clear()
+      ..addAll(_stringMap(json['names']));
+    _phones
+      ..clear()
+      ..addAll(_phoneMap(json['phones']));
+    _restoredAt = _now();
+    await _ensureResident();
+    await _save();
+    await _announceRestored();
+    return true;
+  }
+
+  /// Tells the housemates this resident is on this phone now.
+  Future<void> _announceRestored() async {
+    final LedgerKeyPair? me = _resident;
+    final FlatProfile? p = _profile;
+    final String own = _own;
+    if (me == null || p == null || _pair == null || own.isEmpty) {
+      return;
+    }
+    final String moved = b64(
+      await me.signWithKey(flatMovedBytes(p.key, me.id, own)),
+    );
+    for (final String phone in _housemates) {
+      await _send(
+        phone,
+        await _envelope(FlatTypes.join, p.key, <String, dynamic>{
+          'a': own,
+          'n': _names[me.id] ?? _defaultName(),
+          'rk': me.id,
+          'rs': moved,
+        }),
+      );
+    }
+  }
+
+  /// At start: a household from the circle copy asks the housemates again,
+  /// or is dropped once [restoreConfirmWait] passed without an answer.
+  Future<void> _checkRestored() async {
+    final int? at = _restoredAt;
+    if (at == null) {
+      return;
+    }
+    if (_now() - at > restoreConfirmWait.inMilliseconds) {
+      _restoredAt = null;
+      _dropFlat();
+      await _save();
+      return;
+    }
+    await _announceRestored();
   }
 
   /// Forgets everything of the household on this phone (it left, was
@@ -3677,7 +3800,17 @@ final class NeighborsService extends ChangeNotifier {
     final String? phone = _phones[resident];
     if ((!p.members.containsKey(resident) &&
             (_approved[resident] ?? 0) <= _now()) ||
-        (phone != null && phone != sender) ||
+        (phone != null &&
+            phone != sender &&
+            // The resident's account came back on a new phone (signed with
+            // the resident's own key).
+            !(p.members.containsKey(resident) &&
+                b['rs'] is String &&
+                await verifyLedgerSignature(
+                  publicKey: resident,
+                  message: flatMovedBytes(p.key, resident, sender),
+                  signature: b['rs'] as String,
+                ))) ||
         (!p.members.containsKey(resident) &&
             p.members.length >= FlatProfile.maxMembers)) {
       // A resident key already someone else's, or no room.
@@ -3820,6 +3953,8 @@ final class NeighborsService extends ChangeNotifier {
     if (p == null) {
       return;
     }
+    // A household taken from the circle copy: a housemate confirmed it.
+    _restoredAt = null;
     final bool wasJoining = joining;
     final Map<String, String> before =
         _profile?.members ?? const <String, String>{};

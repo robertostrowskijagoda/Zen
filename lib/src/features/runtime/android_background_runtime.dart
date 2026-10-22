@@ -392,7 +392,6 @@ final class AndroidBackgroundBootstrapPayload {
       'type': 'bootstrap',
       'inboxLimitMb': settings.inboxLimitMb,
       'autoCleanupDays': settings.autoCleanupDays,
-      'notificationDelaySeconds': settings.notificationDelaySeconds,
       'lockMode': settings.lockMode.index,
       'backgroundLockDelaySeconds': settings.backgroundLockDelaySeconds,
       'mode': mode.name,
@@ -414,9 +413,6 @@ final class AndroidBackgroundBootstrapPayload {
         autoCleanupDays:
             (data['autoCleanupDays'] as num?)?.toInt() ??
             AppSettings.defaultAutoCleanupDays,
-        notificationDelaySeconds:
-            (data['notificationDelaySeconds'] as num?)?.toInt() ??
-            AppSettings.defaultNotificationDelaySeconds,
         lockMode: AppSettings.lockModeFromStorage(
           (data['lockMode'] as num?)?.toInt() ?? AppLockMode.background.index,
         ),

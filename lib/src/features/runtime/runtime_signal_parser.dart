@@ -143,6 +143,7 @@ ZenSignal? zenSignalFromTransportPayload({
         miniProfile: payload['mp'] is Map
             ? Map<String, dynamic>.from(payload['mp'] as Map)
             : null,
+        chatExtras: _readChatExtras(payload),
       );
     case 'message_transfer_cancel':
       return ZenSignal(
@@ -296,16 +297,66 @@ ZenSignal? zenSignalFromTransportPayload({
         // be matched to anything and would only produce a phantom group.
         return null;
       }
+      final ChatMessageType groupType = _readMessageType(
+        payload['messageType'],
+      );
       return ZenSignal(
         type: ZenSignalType.groupMessage,
         sender: sender,
         groupId: _readString(payload['groupId']),
         groupName: _readClipped(payload['groupName'], kMaxSignalGroupNameChars),
         messageId: _readString(payload['msgId']),
-        content: _readClipped(payload['text'], kMaxGroupMessageChars),
+        content:
+            _readClipped(payload['text'], kMaxGroupMessageChars) ??
+            (groupType == ChatMessageType.text
+                ? null
+                : chatMessageLabelForType(
+                    groupType,
+                    fileName: safeFileName(_readString(payload['fileName'])),
+                    mimeType: _readString(payload['mimeType']),
+                  )),
         displayName: _readName(payload['senderName']),
         sentAtMillis: _readTimestamp(payload['timestamp']),
         disappearSeconds: _readInt(payload['ttl']),
+        // A file in a group: inline, or as blocks to fetch (`media`).
+        messageType: groupType == ChatMessageType.text ? null : groupType,
+        attachmentData: _readString(payload['attachmentData']),
+        attachmentEncoding: _readString(payload['attachmentEncoding']),
+        fileName: safeFileName(_readString(payload['fileName'])),
+        mimeType: _readString(payload['mimeType']),
+        attachmentSizeBytes: _readInt(payload['attachmentSizeBytes']),
+        durationMs: _readInt(payload['durationMs']),
+        chatExtras: _readChatExtras(payload),
+      );
+    case 'msg_react':
+    case 'msg_edit':
+    case 'msg_delete':
+      final String? targetId = _readString(payload['msgId']);
+      if (targetId == null) {
+        return null;
+      }
+      final String? emoji = _readString(payload['emoji']);
+      return ZenSignal(
+        type: switch (type) {
+          'msg_react' => ZenSignalType.messageReaction,
+          'msg_edit' => ZenSignalType.messageEdit,
+          _ => ZenSignalType.messageDelete,
+        },
+        sender: sender,
+        messageId: targetId,
+        groupId: _readString(payload['groupId']),
+        content: type == 'msg_edit'
+            ? _readClipped(payload['text'], kMaxGroupMessageChars)
+            : null,
+        sentAtMillis: _readInt(payload['at']),
+        chatExtras: type == 'msg_react'
+            ? <String, dynamic>{
+                // Empty: the reaction is taken back.
+                'emoji': emoji != null && emoji.length <= kMaxReactionChars
+                    ? emoji
+                    : '',
+              }
+            : null,
       );
     case 'disappear_timer':
       return ZenSignal(
@@ -371,6 +422,19 @@ ZenSignal? zenSignalFromTransportPayload({
     default:
       return null;
   }
+}
+
+/// The reply (`re`), forwarding (`fwd`) and content-addressed file
+/// (`media`) a chat or group message carries; `null` when none.
+Map<String, dynamic>? _readChatExtras(Map<String, dynamic> payload) {
+  final ChatReply? reply = ChatReply.fromJson(payload['re']);
+  final Object? media = payload['media'];
+  final Map<String, dynamic> out = <String, dynamic>{
+    if (reply != null) 're': reply.toJson(),
+    if (payload['fwd'] == true) 'fwd': true,
+    if (media is Map) 'media': Map<String, dynamic>.from(media),
+  };
+  return out.isEmpty ? null : out;
 }
 
 ChatMessageType _readMessageType(Object? value) {

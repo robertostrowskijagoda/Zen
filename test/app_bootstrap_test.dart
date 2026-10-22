@@ -22,7 +22,7 @@ void main() {
       );
       addTearDown(() => supportDirectory.delete(recursive: true));
       final MemoryAppSettingsStore store = MemoryAppSettingsStore(
-        const AppSettings(notificationDelaySeconds: 9),
+        const AppSettings(autoCleanupDays: 9),
       );
 
       final ZenBootstrapper bootstrapper = ZenBootstrapper(
@@ -34,31 +34,31 @@ void main() {
 
       expect(state.supportDirectory.path, supportDirectory.path);
       expect(state.appSettingsStore, same(store));
-      expect(state.settings.notificationDelaySeconds, 9);
+      expect(state.settings.autoCleanupDays, 9);
     },
   );
 
-  test('initRuntime derives wait timeout from app settings', () async {
+  test('initRuntime uses the fixed signal wait timeout', () async {
     final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
     addTearDown(runtime.dispose);
     final ZenBootstrapper bootstrapper = ZenBootstrapper(
       runtimeBuilder: ({required RuntimeSignalBootstrapConfig config}) {
-        expect(config.waitTimeout, const Duration(seconds: 9));
+        expect(config.waitTimeout, const Duration(seconds: 5));
         return runtime;
       },
     );
 
     final ZenBootstrapRuntimeState state = await bootstrapper.initRuntime(
-      settings: const AppSettings(notificationDelaySeconds: 9),
+      settings: const AppSettings(),
     );
 
     expect(state.runtime, same(runtime));
-    expect(state.runtimeConfig.waitTimeout, const Duration(seconds: 9));
+    expect(state.runtimeConfig.waitTimeout, const Duration(seconds: 5));
   });
 
   test('bootstrap retries a critical step once before succeeding', () async {
     int prepareCalls = 0;
-    final AppSettings settings = const AppSettings(notificationDelaySeconds: 8);
+    const AppSettings settings = AppSettings(autoCleanupDays: 8);
     final MemoryAppSettingsStore store = MemoryAppSettingsStore(settings);
     final RuntimeNodeRuntime runtime = RuntimeNodeRuntime.preview();
     addTearDown(runtime.dispose);
@@ -98,7 +98,7 @@ void main() {
     final ZenBootstrapResult result = await bootstrapper.bootstrap();
 
     expect(prepareCalls, 2);
-    expect(result.initialSettings.notificationDelaySeconds, 8);
+    expect(result.initialSettings.autoCleanupDays, 8);
     expect(result.runtimeConfig.waitTimeout, settings.signalWaitTimeout);
     expect(result.appSecurityService.isReady, isTrue);
     expect(result.stores.appSettingsStore, same(store));

@@ -440,11 +440,7 @@ void main() {
     WidgetTester tester,
   ) async {
     final MemoryAppSettingsStore settingsStore = MemoryAppSettingsStore(
-      const AppSettings(
-        inboxLimitMb: 80,
-        autoCleanupDays: 6,
-        notificationDelaySeconds: 7,
-      ),
+      const AppSettings(inboxLimitMb: 80, autoCleanupDays: 6),
     );
     await tester.pumpWidget(
       ProviderScope(

@@ -13,6 +13,7 @@ import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/app/theme/zen_ui.dart';
 import 'package:zen/src/core/ledger/log_entry.dart';
 import 'package:zen/src/domain/friends/friend_profile.dart';
+import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/feed/feed_filter.dart';
 import 'package:zen/src/features/feed/feed_items.dart';
@@ -32,6 +33,7 @@ import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/media/audio_clip_player.dart';
+import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/media_stream_server.dart';
 import 'package:zen/src/features/media/media_vault.dart';
 import 'package:zen/src/features/moderation/content_moderation.dart';
@@ -1422,13 +1424,7 @@ class _PostCard extends StatelessWidget {
         color: zen.surface,
         borderRadius: context.zenRadius(24),
         border: Border.all(color: zen.outlineSoft),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: zen.textPrimary.withValues(alpha: 0.04),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
+        boxShadow: ZenLook.of(context).lift(zen, radius: 18),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2272,12 +2268,12 @@ class _PostVideoState extends State<PostVideo> {
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.black.withValues(alpha: 0.45),
+                      color: ZenFixed.photoBackdrop.withValues(alpha: 0.45),
                     ),
                     child: const Icon(
                       Icons.play_arrow_rounded,
                       size: 40,
-                      color: Colors.white,
+                      color: ZenFixed.onPhoto,
                     ),
                   ),
                 Positioned(
@@ -2286,7 +2282,7 @@ class _PostVideoState extends State<PostVideo> {
                   child: Container(
                     padding: const EdgeInsets.all(4),
                     decoration: const BoxDecoration(
-                      color: Colors.black45,
+                      color: ZenFixed.photoScrim,
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
@@ -2294,7 +2290,7 @@ class _PostVideoState extends State<PostVideo> {
                           ? Icons.volume_off_rounded
                           : Icons.volume_up_rounded,
                       size: 16,
-                      color: Colors.white,
+                      color: ZenFixed.onPhoto,
                     ),
                   ),
                 ),
@@ -2531,10 +2527,10 @@ class _PhotoViewerState extends State<_PhotoViewer> {
   Widget build(BuildContext context) {
     return Scaffold(
       key: const Key('feed-photo-viewer'),
-      backgroundColor: Colors.black,
+      backgroundColor: ZenFixed.photoBackdrop,
       appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
+        backgroundColor: ZenFixed.photoBackdrop,
+        foregroundColor: ZenFixed.onPhoto,
         title: widget.images.length > 1
             ? Text('${_index + 1} / ${widget.images.length}')
             : null,
@@ -2553,12 +2549,16 @@ class _PhotoViewerState extends State<_PhotoViewer> {
                 }
                 if (bytes == null) {
                   return const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
+                    child: CircularProgressIndicator(color: ZenFixed.onPhoto),
                   );
                 }
                 return InteractiveViewer(
                   maxScale: 5,
-                  child: Center(child: Image.memory(bytes)),
+                  child: Center(
+                    child: looksLikeGif(bytes)
+                        ? ZenAnimatedImage(bytes: bytes, fit: BoxFit.contain)
+                        : Image.memory(bytes),
+                  ),
                 );
               },
             ),
@@ -2671,6 +2671,20 @@ class _PostImageState extends State<_PostImage> {
                     ],
                   ),
                 ),
+        ),
+      );
+    }
+    if (looksLikeGif(bytes)) {
+      // Plays as far as the media settings allow; otherwise its first
+      // frame waits for a tap (the next tap opens it).
+      return GestureDetector(
+        onTap: widget.onOpen,
+        child: ZenAnimatedImage(
+          key: Key('feed-gif-${widget.ref.id}'),
+          bytes: bytes,
+          width: double.infinity,
+          height: double.infinity,
+          autoplay: widget.node.autoDownloadMedia(),
         ),
       );
     }

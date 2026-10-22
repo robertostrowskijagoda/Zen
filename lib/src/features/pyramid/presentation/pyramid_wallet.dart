@@ -887,13 +887,13 @@ class PyramidWallet extends StatelessWidget {
                 end: Alignment.bottomRight,
               ),
               border: Border.all(color: tone.withValues(alpha: 0.40)),
-              boxShadow: <BoxShadow>[
-                BoxShadow(
-                  color: tone.withValues(alpha: 0.18),
-                  blurRadius: 24,
-                  offset: const Offset(0, 10),
-                ),
-              ],
+              boxShadow: ZenLook.of(context).tinted(
+                zen,
+                tone,
+                radius: 24,
+                alpha: 0.18,
+                offset: const Offset(0, 10),
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

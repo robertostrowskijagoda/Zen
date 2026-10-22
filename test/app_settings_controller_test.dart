@@ -12,7 +12,6 @@ void main() {
         const AppSettings(
           inboxLimitMb: 80,
           autoCleanupDays: 9,
-          notificationDelaySeconds: 6,
           lockMode: AppLockMode.background,
           backgroundLockDelaySeconds: 9,
         ),
@@ -27,10 +26,6 @@ void main() {
 
       expect(container.read(appSettingsControllerProvider).inboxLimitMb, 80);
       expect(container.read(appSettingsControllerProvider).autoCleanupDays, 9);
-      expect(
-        container.read(appSettingsControllerProvider).notificationDelaySeconds,
-        6,
-      );
       expect(
         container.read(appSettingsControllerProvider).lockMode,
         AppLockMode.background,
@@ -54,9 +49,6 @@ void main() {
           .setAutoCleanupDays(-20);
       await container
           .read(appSettingsControllerProvider.notifier)
-          .setNotificationDelaySeconds(99);
-      await container
-          .read(appSettingsControllerProvider.notifier)
           .setBackgroundLockDelaySeconds(99999);
       await container
           .read(appSettingsControllerProvider.notifier)
@@ -68,7 +60,6 @@ void main() {
       final AppSettings state = container.read(appSettingsControllerProvider);
       expect(state.inboxLimitMb, 0);
       expect(state.autoCleanupDays, 0);
-      expect(state.notificationDelaySeconds, 10);
       expect(state.backgroundLockDelaySeconds, 3600);
       expect(state.lockMode, AppLockMode.appClose);
       expect(state.themeMode, AppThemeMode.light);
@@ -77,7 +68,6 @@ void main() {
       expect(persisted, isNotNull);
       expect(persisted!.inboxLimitMb, 0);
       expect(persisted.autoCleanupDays, 0);
-      expect(persisted.notificationDelaySeconds, 10);
       expect(persisted.backgroundLockDelaySeconds, 3600);
       expect(persisted.lockMode, AppLockMode.appClose);
       expect(persisted.themeMode, AppThemeMode.light);

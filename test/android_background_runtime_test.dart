@@ -419,12 +419,12 @@ void main() {
       final AndroidBackgroundBootstrapPayload payload =
           await loadStoredAndroidBackgroundBootstrapPayload(
             settingsStore: MemoryAppSettingsStore(
-              const AppSettings(inboxLimitMb: 91, notificationDelaySeconds: 44),
+              const AppSettings(inboxLimitMb: 91, autoCleanupDays: 44),
             ),
           );
 
       expect(payload.settings.inboxLimitMb, 91);
-      expect(payload.settings.notificationDelaySeconds, 44);
+      expect(payload.settings.autoCleanupDays, 44);
       expect(payload.mode, AndroidBackgroundRuntimeMode.active);
       final AndroidBackgroundBootstrapPayload? back =
           AndroidBackgroundBootstrapPayload.fromData(payload.toData());

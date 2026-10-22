@@ -85,10 +85,11 @@ class _IncomingCallOverlayState extends ConsumerState<_IncomingCallOverlay> {
     final CallSession session = widget.session;
     final ZenColors zen = ZenColors.of(context);
     final bool video = session.kind == CallInviteKind.video;
-    // Calls always sit on a dark stage, whatever the app theme.
-    const Color stage = Color(0xFF0D0D14);
-    const Color onStage = Colors.white;
-    final Color onStageSoft = Colors.white.withValues(alpha: 0.72);
+    // The ringing card: a raised panel of the theme, lit by its accent.
+    final ZenLook look = ZenLook.of(context);
+    final Color stage = zen.surfaceRaised;
+    final Color onStage = zen.textPrimary;
+    final Color onStageSoft = zen.textSecondary;
     final String kindLabel = video
         ? (session.isGroup
               ? t('Grupowe połączenie wideo')
@@ -138,7 +139,8 @@ class _IncomingCallOverlayState extends ConsumerState<_IncomingCallOverlay> {
     }
 
     return Material(
-      color: Colors.black.withValues(alpha: 0.65),
+      // A veil of the theme over the app below.
+      color: zen.surfaceSunk.withValues(alpha: 0.82),
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: SafeArea(
@@ -170,16 +172,14 @@ class _IncomingCallOverlayState extends ConsumerState<_IncomingCallOverlay> {
                         end: Alignment.bottomCenter,
                       ),
                       borderRadius: context.zenRadius(32),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.10),
+                      border: Border.all(color: zen.outlineSoft),
+                      boxShadow: look.tinted(
+                        zen,
+                        zen.accent,
+                        radius: 40,
+                        alpha: 0.25,
+                        offset: const Offset(0, 12),
                       ),
-                      boxShadow: <BoxShadow>[
-                        BoxShadow(
-                          color: zen.accent.withValues(alpha: 0.25),
-                          blurRadius: 40,
-                          offset: const Offset(0, 12),
-                        ),
-                      ],
                     ),
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
@@ -188,7 +188,7 @@ class _IncomingCallOverlayState extends ConsumerState<_IncomingCallOverlay> {
                         children: <Widget>[
                           DecoratedBox(
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.10),
+                              color: zen.textPrimary.withValues(alpha: 0.08),
                               borderRadius: context.zenRadius(999),
                             ),
                             child: Padding(
@@ -370,13 +370,13 @@ class _RoundCallAction extends StatelessWidget {
         DecoratedBox(
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            boxShadow: <BoxShadow>[
-              BoxShadow(
-                color: color.withValues(alpha: 0.45),
-                blurRadius: 22,
-                offset: const Offset(0, 6),
-              ),
-            ],
+            boxShadow: ZenLook.of(context).tinted(
+              ZenColors.of(context),
+              color,
+              radius: 22,
+              alpha: 0.45,
+              offset: const Offset(0, 6),
+            ),
           ),
           child: IconButton.filled(
             key: buttonKey,

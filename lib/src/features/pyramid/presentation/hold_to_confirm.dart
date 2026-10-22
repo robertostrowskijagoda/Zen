@@ -76,63 +76,66 @@ class _HoldToConfirmButtonState extends State<HoldToConfirmButton>
       button: true,
       label: widget.label,
       hint: t('Przytrzymaj, aby potwierdzić'),
-      child: Listener(
-        onPointerDown: (_) => _down(),
-        onPointerUp: (_) => _up(),
-        onPointerCancel: (_) => _up(),
-        child: AnimatedBuilder(
-          animation: _fill,
-          builder: (BuildContext context, Widget? _) => ClipPath(
-            clipper: ShapeBorderClipper(shape: shape),
-            child: Container(
-              key: const Key('hold-to-confirm'),
-              constraints: const BoxConstraints(minHeight: 52),
-              decoration: look.panel(zen, radius: 16, tone: tone),
-              child: Stack(
-                children: <Widget>[
-                  Positioned.fill(
-                    child: FractionallySizedBox(
-                      alignment: Alignment.centerLeft,
-                      widthFactor: _fill.value,
-                      child: ColoredBox(color: tone.withValues(alpha: 0.45)),
+      child: // Holding the button never starts a text selection around it.
+      SelectionContainer.disabled(
+        child: Listener(
+          onPointerDown: (_) => _down(),
+          onPointerUp: (_) => _up(),
+          onPointerCancel: (_) => _up(),
+          child: AnimatedBuilder(
+            animation: _fill,
+            builder: (BuildContext context, Widget? _) => ClipPath(
+              clipper: ShapeBorderClipper(shape: shape),
+              child: Container(
+                key: const Key('hold-to-confirm'),
+                constraints: const BoxConstraints(minHeight: 52),
+                decoration: look.panel(zen, radius: 16, tone: tone),
+                child: Stack(
+                  children: <Widget>[
+                    Positioned.fill(
+                      child: FractionallySizedBox(
+                        alignment: Alignment.centerLeft,
+                        widthFactor: _fill.value,
+                        child: ColoredBox(color: tone.withValues(alpha: 0.45)),
+                      ),
                     ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    child: Row(
-                      children: <Widget>[
-                        Icon(Icons.touch_app_rounded, color: tone, size: 20),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            widget.label,
-                            softWrap: true,
-                            style: TextStyle(
-                              color: zen.textPrimary,
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w700,
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Icon(Icons.touch_app_rounded, color: tone, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              widget.label,
+                              softWrap: true,
+                              style: TextStyle(
+                                color: zen.textPrimary,
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            key: const Key('hold-to-confirm-progress'),
-                            value: _fill.value,
-                            strokeWidth: 3,
-                            color: tone,
-                            backgroundColor: zen.surfaceSunk,
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              key: const Key('hold-to-confirm-progress'),
+                              value: _fill.value,
+                              strokeWidth: 3,
+                              color: tone,
+                              backgroundColor: zen.surfaceSunk,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

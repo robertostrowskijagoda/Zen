@@ -490,7 +490,10 @@ class _RecordButton extends StatelessWidget {
                 height: recording ? 34 : 66,
                 decoration: BoxDecoration(
                   color: zen.danger,
-                  borderRadius: BorderRadius.circular(recording ? 8 : 33),
+                  // Round to record, the theme's square to stop.
+                  borderRadius: recording
+                      ? context.zenRadius(8)
+                      : BorderRadius.circular(33),
                 ),
               ),
             ],

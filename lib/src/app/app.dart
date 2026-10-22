@@ -11,6 +11,7 @@ import 'package:zen/src/app/zen_app_modules.dart';
 import 'package:zen/src/app/zen_core.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/features/account/multi/desktop_background.dart';
+import 'package:zen/src/features/account/presentation/account_import_layer.dart';
 import 'package:zen/src/features/calls/presentation/call_compact_layer.dart';
 import 'package:zen/src/features/calls/presentation/call_floating_overlay.dart';
 import 'package:zen/src/features/calls/presentation/incoming_call_layer.dart';
@@ -154,7 +155,10 @@ class _ZenRewriteAppState extends ConsumerState<ZenRewriteApp>
                 child: RuntimeSignalBridge(
                   child: TestHarnessBridge(
                     child: AlarmWatcher(
-                      child: RuntimeRouteBridge(child: AppShellScreen()),
+                      child: RuntimeRouteBridge(
+                        // After a restore: its progress and what came back.
+                        child: AccountImportLayer(child: AppShellScreen()),
+                      ),
                     ),
                   ),
                 ),

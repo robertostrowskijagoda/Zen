@@ -44,68 +44,70 @@ class MeetHubScreen extends ConsumerWidget {
     return Scaffold(
       key: const Key('meet-hub'),
       appBar: ZenSectionBar(title: t('Spotkania')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
-        children: <Widget>[
-          ZenSection(t('Na teraz'), top: 4),
-          // "Ola jest niedaleko i chce coś zjeść — napisz?"
-          const EatTogetherCard(),
-          const IntentPanel(),
-          ZenSection(t('Poznawaj ludzi przez ludzi')),
-          ZenTileGrid(
-            children: <Widget>[
-              if (nearby)
+      body: SelectionArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+          children: <Widget>[
+            ZenSection(t('Na teraz'), top: 4),
+            // "Ola jest niedaleko i chce coś zjeść — napisz?"
+            const EatTogetherCard(),
+            const IntentPanel(),
+            ZenSection(t('Poznawaj ludzi przez ludzi')),
+            ZenTileGrid(
+              children: <Widget>[
+                if (nearby)
+                  tile(
+                    'meet-nearby',
+                    4,
+                    Icons.radar_rounded,
+                    t('W pobliżu'),
+                    t('Kto z Zen jest obok — przez Bluetooth'),
+                    NearbyScreen.open,
+                  ),
                 tile(
-                  'meet-nearby',
-                  4,
-                  Icons.radar_rounded,
-                  t('W pobliżu'),
-                  t('Kto z Zen jest obok — przez Bluetooth'),
-                  NearbyScreen.open,
+                  'meet-events',
+                  1,
+                  Icons.celebration_rounded,
+                  t('Wydarzenia'),
+                  t('Imprezy i spotkania tylko dla ludzi przez znajomych'),
+                  EventsScreen.open,
                 ),
-              tile(
-                'meet-events',
-                1,
-                Icons.celebration_rounded,
-                t('Wydarzenia'),
-                t('Imprezy i spotkania tylko dla ludzi przez znajomych'),
-                EventsScreen.open,
-              ),
-              tile(
-                'meet-table',
-                2,
-                Icons.dinner_dining_rounded,
-                t('Stół na sześć'),
-                t('Kolacja ze znajomymi Twoich znajomych'),
-                TableScreen.open,
-              ),
-              tile(
-                'meet-circles',
-                3,
-                Icons.soup_kitchen_rounded,
-                t('Kółka obiadowe'),
-                t('Gotujecie na zmianę, Zen pilnuje kolejki'),
-                CirclesScreen.open,
-              ),
-              tile(
-                'meet-seats',
-                6,
-                Icons.event_seat_rounded,
-                t('Gotuję dziś'),
-                t('Wolne miejsca przy Twoim stole i u znajomych'),
-                FoodScreen.open,
-              ),
-              tile(
-                'meet-plans',
-                5,
-                Icons.wb_sunny_rounded,
-                t('Plan na weekend'),
-                t('Luźny plan — gdy zbierze się ekipa, robi się wydarzenie'),
-                PlanScreen.open,
-              ),
-            ],
-          ),
-        ],
+                tile(
+                  'meet-table',
+                  2,
+                  Icons.dinner_dining_rounded,
+                  t('Stół na sześć'),
+                  t('Kolacja ze znajomymi Twoich znajomych'),
+                  TableScreen.open,
+                ),
+                tile(
+                  'meet-circles',
+                  3,
+                  Icons.soup_kitchen_rounded,
+                  t('Kółka obiadowe'),
+                  t('Gotujecie na zmianę, Zen pilnuje kolejki'),
+                  CirclesScreen.open,
+                ),
+                tile(
+                  'meet-seats',
+                  6,
+                  Icons.event_seat_rounded,
+                  t('Gotuję dziś'),
+                  t('Wolne miejsca przy Twoim stole i u znajomych'),
+                  FoodScreen.open,
+                ),
+                tile(
+                  'meet-plans',
+                  5,
+                  Icons.wb_sunny_rounded,
+                  t('Plan na weekend'),
+                  t('Luźny plan — gdy zbierze się ekipa, robi się wydarzenie'),
+                  PlanScreen.open,
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

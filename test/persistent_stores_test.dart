@@ -76,11 +76,7 @@ void main() {
       ),
     ]);
     await stores.appSettingsStore.save(
-      const AppSettings(
-        inboxLimitMb: 64,
-        autoCleanupDays: 21,
-        notificationDelaySeconds: 7,
-      ),
+      const AppSettings(inboxLimitMb: 64, autoCleanupDays: 21),
     );
 
     final List<QueuedSignal> queue = await stores.signalQueueStore.load();

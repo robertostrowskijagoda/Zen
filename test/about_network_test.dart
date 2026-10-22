@@ -30,7 +30,7 @@ void main() {
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
-        child: const MaterialApp(home: AboutScreen(storeBuild: false)),
+        child: const MaterialApp(home: AboutScreen()),
       ),
     );
     await tester.pump();

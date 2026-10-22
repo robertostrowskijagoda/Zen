@@ -94,10 +94,10 @@ class _PeerQrScannerPageState extends State<_PeerQrScannerPage> {
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: <Color>[
-                      Colors.black.withAlpha(170),
+                      ZenFixed.photoBackdrop.withAlpha(170),
                       Colors.transparent,
                       Colors.transparent,
-                      Colors.black.withAlpha(170),
+                      ZenFixed.photoBackdrop.withAlpha(170),
                     ],
                     stops: const <double>[0, 0.18, 0.82, 1],
                   ),
@@ -125,7 +125,7 @@ class _PeerQrScannerPageState extends State<_PeerQrScannerPage> {
                   padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: Colors.black.withAlpha(180),
+                      color: ZenFixed.photoBackdrop.withAlpha(180),
                       borderRadius: context.zenRadius(20),
                     ),
                     child: Padding(
@@ -137,7 +137,7 @@ class _PeerQrScannerPageState extends State<_PeerQrScannerPage> {
                         t('Skieruj aparat na kod QR znajomego.'),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                          color: Colors.white,
+                          color: ZenFixed.onPhoto,
                           height: 1.4,
                         ),
                       ),

@@ -44,7 +44,7 @@ class ScreenSourcePicker extends StatelessWidget {
                   borderRadius: context.zenRadius(12),
                   child: s.thumbnail == null
                       ? const ColoredBox(
-                          color: Colors.black26,
+                          color: ZenFixed.photoScrimLight,
                           child: Icon(Icons.desktop_windows_outlined),
                         )
                       : Image.memory(s.thumbnail!, fit: BoxFit.cover),

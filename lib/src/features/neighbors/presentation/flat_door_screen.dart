@@ -21,13 +21,13 @@ import 'package:zen/src/features/neighbors/presentation/neighbors_screen.dart';
 import 'package:zen/src/features/security/exported_files.dart';
 
 // A QR code scans only dark on light, and the sticker is printed on white
-// paper: these stay the same in every theme.
-const Color _paper = Color(0xFFFFFFFF);
-const Color _ink = Color(0xFF151515);
-const Color _inkSoft = Color(0xFF555555);
-const Color _inkFaint = Color(0xFF8A8A8A);
-const Color _paperTint = Color(0xFFF1F1F1);
-const Color _paperEdge = Color(0x22000000);
+// paper: these stay the same in every theme (see ZenFixed).
+const Color _paper = ZenFixed.paper;
+const Color _ink = ZenFixed.ink;
+const Color _inkSoft = ZenFixed.inkSoft;
+const Color _inkFaint = ZenFixed.inkFaint;
+const Color _paperTint = ZenFixed.paperTint;
+const Color _paperEdge = ZenFixed.paperEdge;
 
 /// The door sticker: QR, the flat's name and a line of invitation.
 class FlatDoorScreen extends ConsumerStatefulWidget {
@@ -240,166 +240,160 @@ class _FlatDoorScreenState extends ConsumerState<FlatDoorScreen> {
     return Scaffold(
       key: const Key('flat-door-screen'),
       appBar: AppBar(title: Text(t('Kod na drzwi'))),
-      body: ListenableBuilder(
-        listenable: service,
-        builder: (BuildContext context, Widget? _) {
-          final FlatDoorCode? code = service.doorCode;
-          if (code == null && service.hasFlat) {
-            // The door is a node of its own; it runs with the network.
-            return Center(
-              child: SingleChildScrollView(
-                child: ZenEmpty(
-                  icon: Icons.door_front_door_rounded,
-                  title: t('Otwieram drzwi…'),
-                  text: t(
-                    'Kod na drzwi pojawi się, gdy Zen połączy się z siecią.',
+      body: SelectionArea(
+        child: ListenableBuilder(
+          listenable: service,
+          builder: (BuildContext context, Widget? _) {
+            final FlatDoorCode? code = service.doorCode;
+            if (code == null && service.hasFlat) {
+              // The door is a node of its own; it runs with the network.
+              return Center(
+                child: SingleChildScrollView(
+                  child: ZenEmpty(
+                    icon: Icons.door_front_door_rounded,
+                    title: t('Otwieram drzwi…'),
+                    text: t(
+                      'Kod na drzwi pojawi się, gdy Zen połączy się z siecią.',
+                    ),
                   ),
                 ),
-              ),
-            );
-          }
-          if (code == null) {
-            return Center(
-              child: SingleChildScrollView(
-                child: ZenEmpty(
-                  icon: Icons.home_work_rounded,
-                  title: t('Najpierw profil mieszkania'),
-                  text: t(
-                    'Załóżcie profil w zakładce Sąsiedzi — wtedy pojawi się '
-                    'tu kod na drzwi i domownicy.',
+              );
+            }
+            if (code == null) {
+              return Center(
+                child: SingleChildScrollView(
+                  child: ZenEmpty(
+                    icon: Icons.home_work_rounded,
+                    title: t('Najpierw profil mieszkania'),
+                    text: t(
+                      'Załóżcie profil w zakładce Sąsiedzi — wtedy pojawi się '
+                      'tu kod na drzwi i domownicy.',
+                    ),
                   ),
                 ),
-              ),
-            );
-          }
-          // A link, so a plain camera reaches the /m page; Zen reads both.
-          final String qr = code.toLink();
-          final ZenColors zen = ZenColors.of(context);
-          final Color tone = neighborsTone(zen);
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-            children: <Widget>[
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: ShapeDecoration(
-                  shape: ZenLook.of(context).panelShape(zen, radius: 26),
-                  gradient: LinearGradient(
-                    colors: <Color>[
-                      Color.alphaBlend(
-                        tone.withValues(alpha: 0.22),
+              );
+            }
+            // A link, so a plain camera reaches the /m page; Zen reads both.
+            final String qr = code.toLink();
+            final ZenColors zen = ZenColors.of(context);
+            final Color tone = neighborsTone(zen);
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+              children: <Widget>[
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: ShapeDecoration(
+                    shape: ZenLook.of(context).panelShape(zen, radius: 26),
+                    gradient: LinearGradient(
+                      colors: <Color>[
+                        Color.alphaBlend(
+                          tone.withValues(alpha: 0.22),
+                          zen.surfaceSunk,
+                        ),
                         zen.surfaceSunk,
-                      ),
-                      zen.surfaceSunk,
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
                   ),
-                ),
-                child: Center(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        boxShadow: <BoxShadow>[
-                          BoxShadow(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.shadow.withValues(alpha: 0.25),
-                            blurRadius: 18,
-                            offset: const Offset(0, 6),
+                  child: Center(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          boxShadow: ZenLook.of(context).lift(zen, radius: 18),
+                        ),
+                        child: RepaintBoundary(
+                          key: _sticker,
+                          child: _Sticker(
+                            name: code.name,
+                            line: _line.text,
+                            qr: qr,
                           ),
-                        ],
-                      ),
-                      child: RepaintBoundary(
-                        key: _sticker,
-                        child: _Sticker(
-                          name: code.name,
-                          line: _line.text,
-                          qr: qr,
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Center(
-                child: Text(
-                  t('Podgląd naklejki (A6)'),
-                  style: TextStyle(color: zen.textMuted, fontSize: 12.5),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _line,
-                maxLength: 60,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: InputDecoration(
-                  labelText: t('Hasło na naklejce'),
-                  hintText: t('Zeskanuj — zapraszamy na kawę!'),
-                  prefixIcon: const Icon(Icons.edit_rounded),
-                ),
-                onChanged: (_) => setState(() {}),
-              ),
-              const SizedBox(height: 8),
-              FilledButton.icon(
-                key: const Key('flat-door-save'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(52),
-                ),
-                onPressed: () => unawaited(_save()),
-                icon: const Icon(Icons.print_rounded),
-                label: Text(t('Zapisz naklejkę')),
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                alignment: WrapAlignment.center,
-                children: <Widget>[
-                  OutlinedButton.icon(
-                    // Cleared from the clipboard after a minute.
-                    onPressed: () => unawaited(copyWithExpiry(qr)),
-                    icon: const Icon(Icons.copy_rounded),
-                    label: Text(t('Kopiuj kod')),
+                const SizedBox(height: 8),
+                Center(
+                  child: Text(
+                    t('Podgląd naklejki (A6)'),
+                    style: TextStyle(color: zen.textMuted, fontSize: 12.5),
                   ),
-                  OutlinedButton.icon(
-                    key: const Key('flat-door-new'),
-                    onPressed: () => unawaited(_newDoor(service)),
-                    icon: const Icon(Icons.autorenew_rounded),
-                    label: Text(t('Nowy kod')),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _line,
+                  maxLength: 60,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(
+                    labelText: t('Hasło na naklejce'),
+                    hintText: t('Zeskanuj — zapraszamy na kawę!'),
+                    prefixIcon: const Icon(Icons.edit_rounded),
                   ),
-                ],
-              ),
-              ..._knockerView(service, tone),
-              const SizedBox(height: 16),
-              ZenInfo(
-                icon: Icons.shield_outlined,
-                tone: tone,
-                title: t('Co jest w kodzie?'),
-                text: t(
-                  'Klucz mieszkania, hasło tej naklejki i adresy drzwi, pod '
-                  'które pukać — osobne adresy, nie adresy żadnego z Was. '
-                  'Kto go zeskanuje, puka: widzicie jego wizytówkę, a '
-                  'profilami wymieniacie się dopiero po „Wpuść”. Sąsiad bez '
-                  'aplikacji dostanie ją od kogoś, kto ją ma („Podaj dalej”).',
+                  onChanged: (_) => setState(() {}),
                 ),
-              ),
-              const SizedBox(height: 10),
-              ZenInfo(
-                icon: Icons.info_outline_rounded,
-                tone: tone,
-                text: t(
-                  'Pukanie widzą telefony wszystkich domowników, na Androidzie '
-                  'i komputerze także w tle. Gdy nikogo nie ma w sieci, '
-                  'pukanie do tygodnia przechowają znajomi z Waszymi '
-                  'skrzynkami. „Nowy kod” zmienia hasło naklejki i adresy '
-                  'drzwi.',
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  key: const Key('flat-door-save'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                  ),
+                  onPressed: () => unawaited(_save()),
+                  icon: const Icon(Icons.print_rounded),
+                  label: Text(t('Zapisz naklejkę')),
                 ),
-              ),
-            ],
-          );
-        },
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.center,
+                  children: <Widget>[
+                    OutlinedButton.icon(
+                      // Cleared from the clipboard after a minute.
+                      onPressed: () => unawaited(copyWithExpiry(qr)),
+                      icon: const Icon(Icons.copy_rounded),
+                      label: Text(t('Kopiuj kod')),
+                    ),
+                    OutlinedButton.icon(
+                      key: const Key('flat-door-new'),
+                      onPressed: () => unawaited(_newDoor(service)),
+                      icon: const Icon(Icons.autorenew_rounded),
+                      label: Text(t('Nowy kod')),
+                    ),
+                  ],
+                ),
+                ..._knockerView(service, tone),
+                const SizedBox(height: 16),
+                ZenInfo(
+                  icon: Icons.shield_outlined,
+                  tone: tone,
+                  title: t('Co jest w kodzie?'),
+                  text: t(
+                    'Klucz mieszkania, hasło tej naklejki i adresy drzwi, pod '
+                    'które pukać — osobne adresy, nie adresy żadnego z Was. '
+                    'Kto go zeskanuje, puka: widzicie jego wizytówkę, a '
+                    'profilami wymieniacie się dopiero po „Wpuść”. Sąsiad bez '
+                    'aplikacji dostanie ją od kogoś, kto ją ma („Podaj dalej”).',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                ZenInfo(
+                  icon: Icons.info_outline_rounded,
+                  tone: tone,
+                  text: t(
+                    'Pukanie widzą telefony wszystkich domowników, na Androidzie '
+                    'i komputerze także w tle. Gdy nikogo nie ma w sieci, '
+                    'pukanie do tygodnia przechowają znajomi z Waszymi '
+                    'skrzynkami. „Nowy kod” zmienia hasło naklejki i adresy '
+                    'drzwi.',
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -818,282 +812,287 @@ class _FlatHomeScreenState extends ConsumerState<FlatHomeScreen> {
     return Scaffold(
       key: const Key('flat-home-screen'),
       appBar: AppBar(title: Text(t('Domownicy'))),
-      body: ListenableBuilder(
-        listenable: service,
-        builder: (BuildContext context, Widget? _) {
-          final FlatHomeCode? code = _code;
-          final FlatProfile? p = service.profile;
-          if (p == null || !service.hasFlat) {
-            return Center(
-              child: SingleChildScrollView(
-                child: ZenEmpty(
-                  icon: Icons.home_work_rounded,
-                  title: t('Najpierw profil mieszkania'),
-                  text: t(
-                    'Załóżcie profil w zakładce Sąsiedzi — wtedy pojawi się '
-                    'tu kod na drzwi i domownicy.',
+      body: SelectionArea(
+        child: ListenableBuilder(
+          listenable: service,
+          builder: (BuildContext context, Widget? _) {
+            final FlatHomeCode? code = _code;
+            final FlatProfile? p = service.profile;
+            if (p == null || !service.hasFlat) {
+              return Center(
+                child: SingleChildScrollView(
+                  child: ZenEmpty(
+                    icon: Icons.home_work_rounded,
+                    title: t('Najpierw profil mieszkania'),
+                    text: t(
+                      'Załóżcie profil w zakładce Sąsiedzi — wtedy pojawi się '
+                      'tu kod na drzwi i domownicy.',
+                    ),
                   ),
                 ),
-              ),
-            );
-          }
-          final ZenColors zen = ZenColors.of(context);
-          final Color tone = neighborsTone(zen);
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-            children: <Widget>[
-              ZenHero(
-                title: t('Wasz dom w telefonach'),
-                icon: Icons.family_restroom_rounded,
-                tone: tone,
-                text: t(
-                  'Każdy domownik może zmieniać profil, zapraszać i odpisywać '
-                  'sąsiadom. Żeby dodać kolejnego, niech zeskanuje kod '
-                  'domownika w „Sąsiedzi → Dołącz”.',
+              );
+            }
+            final ZenColors zen = ZenColors.of(context);
+            final Color tone = neighborsTone(zen);
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+              children: <Widget>[
+                ZenHero(
+                  title: t('Wasz dom w telefonach'),
+                  icon: Icons.family_restroom_rounded,
+                  tone: tone,
+                  text: t(
+                    'Każdy domownik może zmieniać profil, zapraszać i odpisywać '
+                    'sąsiadom. Żeby dodać kolejnego, niech zeskanuje kod '
+                    'domownika w „Sąsiedzi → Dołącz”.',
+                  ),
+                  actions: <Widget>[
+                    ZenPill(
+                      text: t('Telefony domowników: {count}', {
+                        'count': p.members.length,
+                      }),
+                      tone: tone,
+                      icon: Icons.phone_android_rounded,
+                    ),
+                  ],
                 ),
-                actions: <Widget>[
-                  ZenPill(
-                    text: t('Telefony domowników: {count}', {
-                      'count': p.members.length,
-                    }),
-                    tone: tone,
-                    icon: Icons.phone_android_rounded,
+                if (service.removalAsked != null)
+                  Builder(
+                    builder: (BuildContext context) {
+                      final (String, int) asked = service.removalAsked!;
+                      final String who = service.residentName(asked.$1);
+                      return ZenCard(
+                        key: const Key('flat-removal-asked'),
+                        tone: zen.danger,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            Text(
+                              t('{name} chce odłączyć ten telefon', {
+                                'name': who.isEmpty ? t('Domownik') : who,
+                              }),
+                              style: TextStyle(
+                                color: zen.textPrimary,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              t('Bez odpowiedzi stanie się to {date}.', {
+                                'date': flatDate(asked.$2),
+                              }),
+                              style: TextStyle(
+                                color: zen.textSecondary,
+                                fontSize: 13.5,
+                                height: 1.4,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              alignment: WrapAlignment.end,
+                              children: <Widget>[
+                                TextButton(
+                                  key: const Key('flat-removal-refuse'),
+                                  onPressed: () =>
+                                      unawaited(service.refuseRemoval()),
+                                  child: Text(t('Nie zgadzam się')),
+                                ),
+                                FilledButton.tonal(
+                                  key: const Key('flat-removal-agree'),
+                                  onPressed: () => unawaited(_leave(service)),
+                                  child: Text(t('Zgadzam się')),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                for (final FlatJoinRequest r in service.joinRequests)
+                  FlatJoinRequestCard(service: service, request: r),
+                ZenInfo(
+                  icon: Icons.verified_user_outlined,
+                  tone: tone,
+                  text: t(
+                    'Kod domownika działa raz, przez 10 minut. Kto go zeskanuje, '
+                    'tylko prosi o dołączenie — potwierdzasz to na tym '
+                    'telefonie.',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (code != null)
+                  Center(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: _paper,
+                          borderRadius: BorderRadius.circular(
+                            ZenLook.of(context).radius(24),
+                          ),
+                          border: Border.all(color: zen.outlineSoft),
+                        ),
+                        child: QrImageView(
+                          key: const Key('flat-home-qr'),
+                          data: code.toQr(),
+                          size: 240,
+                          backgroundColor: _paper,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  FilledButton.icon(
+                    key: const Key('flat-home-show'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    onPressed: () =>
+                        setState(() => _code = service.inviteHousemate()),
+                    icon: const Icon(Icons.qr_code_rounded),
+                    label: Text(t('Pokaż kod domownika')),
+                  ),
+                if (code != null) ...<Widget>[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: <Widget>[
+                      TextButton.icon(
+                        key: const Key('flat-home-new'),
+                        onPressed: () =>
+                            setState(() => _code = service.inviteHousemate()),
+                        icon: const Icon(Icons.autorenew_rounded),
+                        label: Text(t('Nowy kod')),
+                      ),
+                      if (!Platform.isAndroid && !Platform.isIOS)
+                        TextButton.icon(
+                          // Gone from the clipboard after a minute.
+                          onPressed: () =>
+                              unawaited(copyWithExpiry(code.toQr())),
+                          icon: const Icon(Icons.copy_rounded),
+                          label: Text(
+                            t('Kopiuj kod (dla komputera domownika)'),
+                          ),
+                        ),
+                    ],
                   ),
                 ],
-              ),
-              if (service.removalAsked != null)
-                Builder(
-                  builder: (BuildContext context) {
-                    final (String, int) asked = service.removalAsked!;
-                    final String who = service.residentName(asked.$1);
-                    return ZenCard(
-                      key: const Key('flat-removal-asked'),
-                      tone: zen.danger,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
-                          Text(
-                            t('{name} chce odłączyć ten telefon', {
-                              'name': who.isEmpty ? t('Domownik') : who,
-                            }),
-                            style: TextStyle(
-                              color: zen.textPrimary,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            t('Bez odpowiedzi stanie się to {date}.', {
-                              'date': flatDate(asked.$2),
-                            }),
-                            style: TextStyle(
-                              color: zen.textSecondary,
-                              fontSize: 13.5,
-                              height: 1.4,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            alignment: WrapAlignment.end,
-                            children: <Widget>[
-                              TextButton(
-                                key: const Key('flat-removal-refuse'),
-                                onPressed: () =>
-                                    unawaited(service.refuseRemoval()),
-                                child: Text(t('Nie zgadzam się')),
-                              ),
-                              FilledButton.tonal(
-                                key: const Key('flat-removal-agree'),
-                                onPressed: () => unawaited(_leave(service)),
-                                child: Text(t('Zgadzam się')),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              for (final FlatJoinRequest r in service.joinRequests)
-                FlatJoinRequestCard(service: service, request: r),
-              ZenInfo(
-                icon: Icons.verified_user_outlined,
-                tone: tone,
-                text: t(
-                  'Kod domownika działa raz, przez 10 minut. Kto go zeskanuje, '
-                  'tylko prosi o dołączenie — potwierdzasz to na tym '
-                  'telefonie.',
-                ),
-              ),
-              const SizedBox(height: 12),
-              if (code != null)
-                Center(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: _paper,
-                        borderRadius: BorderRadius.circular(
-                          ZenLook.of(context).radius(24),
-                        ),
-                        border: Border.all(color: zen.outlineSoft),
-                      ),
-                      child: QrImageView(
-                        key: const Key('flat-home-qr'),
-                        data: code.toQr(),
-                        size: 240,
-                        backgroundColor: _paper,
-                      ),
-                    ),
-                  ),
-                )
-              else
-                FilledButton.icon(
-                  key: const Key('flat-home-show'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                  ),
-                  onPressed: () =>
-                      setState(() => _code = service.inviteHousemate()),
-                  icon: const Icon(Icons.qr_code_rounded),
-                  label: Text(t('Pokaż kod domownika')),
-                ),
-              if (code != null) ...<Widget>[
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  alignment: WrapAlignment.center,
+                ZenSection(t('Telefony domowników'), top: 28),
+                ZenGroup(
                   children: <Widget>[
-                    TextButton.icon(
-                      key: const Key('flat-home-new'),
-                      onPressed: () =>
-                          setState(() => _code = service.inviteHousemate()),
-                      icon: const Icon(Icons.autorenew_rounded),
-                      label: Text(t('Nowy kod')),
+                    ListTile(
+                      key: const Key('flat-my-name-tile'),
+                      leading: Icon(Icons.badge_rounded, color: tone),
+                      title: Text(t('Twoje imię w mieszkaniu')),
+                      subtitle: Text(service.myName),
+                      trailing: const Icon(Icons.edit_rounded),
+                      onTap: () => unawaited(_rename(service)),
                     ),
-                    if (!Platform.isAndroid && !Platform.isIOS)
-                      TextButton.icon(
-                        // Gone from the clipboard after a minute.
-                        onPressed: () => unawaited(copyWithExpiry(code.toQr())),
-                        icon: const Icon(Icons.copy_rounded),
-                        label: Text(t('Kopiuj kod (dla komputera domownika)')),
+                    for (final String m in p.members.keys)
+                      Builder(
+                        builder: (BuildContext context) {
+                          final String own = service.residentKey ?? '';
+                          final String known = service.residentName(m);
+                          final String name = m == own
+                              ? t('Ten telefon')
+                              : known.isNotEmpty
+                              ? known
+                              : t('Telefon …{suffix}', {
+                                  'suffix': m.length > 4
+                                      ? m.substring(m.length - 4)
+                                      : m,
+                                });
+                          final Set<String> votes = service.votesFor(m);
+                          final bool voted = votes.contains(own);
+                          return ListTile(
+                            key: Key('flat-member-$m'),
+                            leading: Icon(
+                              m == own
+                                  ? Icons.smartphone_rounded
+                                  : Icons.phone_android_rounded,
+                              color: votes.isEmpty ? tone : zen.danger,
+                            ),
+                            title: Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: service.removalDeadline(m) != null
+                                ? Text(
+                                    t(
+                                      'Czeka na zgodę — bez odpowiedzi '
+                                      'odłączenie {date}',
+                                      {
+                                        'date': flatDate(
+                                          service.removalDeadline(m)!,
+                                        ),
+                                      },
+                                    ),
+                                  )
+                                : votes.isEmpty
+                                ? null
+                                : Text(
+                                    t(
+                                      'Głosy za odłączeniem: {votes} z {needed}',
+                                      {
+                                        'votes': votes.length,
+                                        'needed': service.votesNeeded(m),
+                                      },
+                                    ),
+                                  ),
+                            trailing: m == own
+                                ? null
+                                : voted
+                                ? TextButton(
+                                    onPressed: () =>
+                                        unawaited(service.withdrawVote(m)),
+                                    child: Text(t('Cofnij')),
+                                  )
+                                : IconButton(
+                                    key: Key('flat-remove-$m'),
+                                    tooltip: t('Odłącz ten telefon'),
+                                    icon: Icon(
+                                      Icons.person_remove_rounded,
+                                      color: zen.danger,
+                                    ),
+                                    onPressed: () =>
+                                        unawaited(_remove(service, m, name)),
+                                  ),
+                          );
+                        },
                       ),
                   ],
                 ),
-              ],
-              ZenSection(t('Telefony domowników'), top: 28),
-              ZenGroup(
-                children: <Widget>[
-                  ListTile(
-                    key: const Key('flat-my-name-tile'),
-                    leading: Icon(Icons.badge_rounded, color: tone),
-                    title: Text(t('Twoje imię w mieszkaniu')),
-                    subtitle: Text(service.myName),
-                    trailing: const Icon(Icons.edit_rounded),
-                    onTap: () => unawaited(_rename(service)),
+                ZenSection(t('Zmiany'), top: 28),
+                ZenTile(
+                  key: const Key('flat-move-out'),
+                  icon: Icons.local_shipping_rounded,
+                  tone: zen.warning,
+                  title: t('Przeprowadzka'),
+                  subtitle: t(
+                    'Przeprowadzamy się — nowy kod, lista sąsiadów znika.',
                   ),
-                  for (final String m in p.members.keys)
-                    Builder(
-                      builder: (BuildContext context) {
-                        final String own = service.residentKey ?? '';
-                        final String known = service.residentName(m);
-                        final String name = m == own
-                            ? t('Ten telefon')
-                            : known.isNotEmpty
-                            ? known
-                            : t('Telefon …{suffix}', {
-                                'suffix': m.length > 4
-                                    ? m.substring(m.length - 4)
-                                    : m,
-                              });
-                        final Set<String> votes = service.votesFor(m);
-                        final bool voted = votes.contains(own);
-                        return ListTile(
-                          key: Key('flat-member-$m'),
-                          leading: Icon(
-                            m == own
-                                ? Icons.smartphone_rounded
-                                : Icons.phone_android_rounded,
-                            color: votes.isEmpty ? tone : zen.danger,
-                          ),
-                          title: Text(
-                            name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: service.removalDeadline(m) != null
-                              ? Text(
-                                  t(
-                                    'Czeka na zgodę — bez odpowiedzi '
-                                    'odłączenie {date}',
-                                    {
-                                      'date': flatDate(
-                                        service.removalDeadline(m)!,
-                                      ),
-                                    },
-                                  ),
-                                )
-                              : votes.isEmpty
-                              ? null
-                              : Text(
-                                  t(
-                                    'Głosy za odłączeniem: {votes} z {needed}',
-                                    {
-                                      'votes': votes.length,
-                                      'needed': service.votesNeeded(m),
-                                    },
-                                  ),
-                                ),
-                          trailing: m == own
-                              ? null
-                              : voted
-                              ? TextButton(
-                                  onPressed: () =>
-                                      unawaited(service.withdrawVote(m)),
-                                  child: Text(t('Cofnij')),
-                                )
-                              : IconButton(
-                                  key: Key('flat-remove-$m'),
-                                  tooltip: t('Odłącz ten telefon'),
-                                  icon: Icon(
-                                    Icons.person_remove_rounded,
-                                    color: zen.danger,
-                                  ),
-                                  onPressed: () =>
-                                      unawaited(_remove(service, m, name)),
-                                ),
-                        );
-                      },
-                    ),
-                ],
-              ),
-              ZenSection(t('Zmiany'), top: 28),
-              ZenTile(
-                key: const Key('flat-move-out'),
-                icon: Icons.local_shipping_rounded,
-                tone: zen.warning,
-                title: t('Przeprowadzka'),
-                subtitle: t(
-                  'Przeprowadzamy się — nowy kod, lista sąsiadów znika.',
+                  onTap: () => unawaited(_moveOut(service)),
                 ),
-                onTap: () => unawaited(_moveOut(service)),
-              ),
-              ZenTile(
-                key: const Key('flat-leave'),
-                icon: Icons.logout_rounded,
-                tone: zen.danger,
-                title: t('Odłącz ten telefon'),
-                subtitle: t('Ten telefon już tu nie mieszka.'),
-                onTap: () => unawaited(_leave(service)),
-              ),
-            ],
-          );
-        },
+                ZenTile(
+                  key: const Key('flat-leave'),
+                  icon: Icons.logout_rounded,
+                  tone: zen.danger,
+                  title: t('Odłącz ten telefon'),
+                  subtitle: t('Ten telefon już tu nie mieszka.'),
+                  onTap: () => unawaited(_leave(service)),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

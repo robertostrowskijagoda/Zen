@@ -431,387 +431,403 @@ class _NeighborScreenState extends ConsumerState<NeighborScreen> {
               ),
             ],
           ),
-          body: Column(
-            children: <Widget>[
-              Expanded(
-                child: SelectionArea(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                    children: <Widget>[
-                      ZenCard(
-                        tone: tone,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: <Widget>[
-                            Row(
-                              children: <Widget>[
-                                FlatAvatar(
-                                  profile: p,
-                                  size: 48,
-                                  icon: Icons.door_front_door_rounded,
-                                ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: <Widget>[
-                                      Text(
-                                        p.name,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: zen.display(
-                                          color: zen.textPrimary,
-                                          size: 21,
-                                          weight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      if (p.place.isNotEmpty) ...<Widget>[
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          p.place,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            color: zen.textSecondary,
-                                            fontSize: 13.5,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                            if (p.about.isNotEmpty) ...<Widget>[
-                              const SizedBox(height: 10),
-                              Text(
-                                p.about,
-                                style: TextStyle(
-                                  color: zen.textSecondary,
-                                  fontSize: 14,
-                                  height: 1.4,
-                                ),
-                              ),
-                            ],
-                            if (!f.following) ...<Widget>[
-                              const SizedBox(height: 10),
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: ZenPill(
-                                  text: t('Wyciszeni'),
-                                  tone: zen.textMuted,
-                                  icon: Icons.notifications_off_rounded,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      if (rival != null)
+          body: SelectionArea(
+            child: Column(
+              children: <Widget>[
+                Expanded(
+                  child: SelectionArea(
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                      children: <Widget>[
                         ZenCard(
-                          key: const Key('flat-key-conflict'),
-                          tone: zen.warning,
+                          tone: tone,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: <Widget>[
                               Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: <Widget>[
-                                  ZenIconBadge(
-                                    icon: Icons.warning_amber_rounded,
-                                    tone: zen.warning,
-                                    size: 40,
+                                  FlatAvatar(
+                                    profile: p,
+                                    size: 48,
+                                    icon: Icons.door_front_door_rounded,
                                   ),
-                                  const SizedBox(width: 12),
+                                  const SizedBox(width: 14),
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: <Widget>[
                                         Text(
-                                          kFlatKeyConflict,
-                                          style: TextStyle(
+                                          p.name,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: zen.display(
                                             color: zen.textPrimary,
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.w700,
-                                            height: 1.3,
+                                            size: 21,
+                                            weight: FontWeight.w600,
                                           ),
                                         ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          t(
-                                            'Odłączyli jeden telefon, ale przyszły '
-                                            'dwie różne wersje (domowników: '
-                                            '{count} i {otherCount}). Zapytajcie '
-                                            'ich osobiście i zeskanujcie nowy kod '
-                                            'z ich drzwi — zostanie ten właściwy.',
-                                            <String, Object?>{
-                                              'count': p.members.length,
-                                              'otherCount':
-                                                  rival.members.length,
-                                            },
+                                        if (p.place.isNotEmpty) ...<Widget>[
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            p.place,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: zen.textSecondary,
+                                              fontSize: 13.5,
+                                              fontWeight: FontWeight.w600,
+                                            ),
                                           ),
-                                          style: TextStyle(
-                                            color: zen.textSecondary,
-                                            fontSize: 13.5,
-                                            height: 1.4,
-                                          ),
-                                        ),
+                                        ],
                                       ],
                                     ),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 12),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                alignment: WrapAlignment.end,
-                                children: <Widget>[
-                                  TextButton(
-                                    key: const Key('flat-key-keep'),
-                                    onPressed: () => unawaited(
-                                      _service.keepCurrentKey(f.key),
-                                    ),
-                                    child: Text(t('Zostaw tę wersję')),
+                              if (p.about.isNotEmpty) ...<Widget>[
+                                const SizedBox(height: 10),
+                                Text(
+                                  p.about,
+                                  style: TextStyle(
+                                    color: zen.textSecondary,
+                                    fontSize: 14,
+                                    height: 1.4,
                                   ),
-                                  FilledButton.tonalIcon(
-                                    key: const Key('flat-key-scan'),
-                                    onPressed: () =>
-                                        unawaited(_scanTheirDoor()),
-                                    icon: const Icon(
-                                      Icons.qr_code_scanner_rounded,
-                                      size: 18,
-                                    ),
-                                    label: Text(t('Zeskanuj ich kod')),
+                                ),
+                              ],
+                              if (!f.following) ...<Widget>[
+                                const SizedBox(height: 10),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: ZenPill(
+                                    text: t('Wyciszeni'),
+                                    tone: zen.textMuted,
+                                    icon: Icons.notifications_off_rounded,
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
-                      if (_service.revealsFrom(f.key).isNotEmpty) ...<Widget>[
-                        ZenSection(t('Pokazali swoje profile')),
-                        for (final FlatReveal r in _service.revealsFrom(f.key))
-                          ZenTile(
-                            key: Key('flat-reveal-${r.name}'),
-                            icon: Icons.badge_rounded,
-                            tone: tone,
-                            title: r.name,
-                            subtitle: t(
-                              'Mieszka tu — możesz zaprosić do znajomych.',
-                            ),
-                            onTap: () => unawaited(_invite(f, r)),
-                            trailing: Icon(
-                              Icons.person_add_alt_1_rounded,
-                              color: tone,
-                            ),
-                          ),
-                      ],
-                      if (invites.isNotEmpty) ...<Widget>[
-                        ZenSection(t('Zapraszają')),
-                        for (final FlatItem i in invites)
-                          Builder(
-                            builder: (BuildContext context) {
-                              final int mine = _service.mySignup(f.key, i.id);
-                              return FlatItemCard(
-                                kind: FlatItemKind.invite,
-                                text: i.text,
-                                meta: <String>[
-                                  if (i.at != null) flatDate(i.at!),
-                                  if (i.seats > 0)
-                                    t('miejsca: {taken}/{seats}', {
-                                      'taken': i.taken,
-                                      'seats': i.seats,
-                                    }),
-                                ].join(' · '),
-                                below: Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  alignment: WrapAlignment.end,
-                                  crossAxisAlignment: WrapCrossAlignment.center,
+                        if (rival != null)
+                          ZenCard(
+                            key: const Key('flat-key-conflict'),
+                            tone: zen.warning,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: <Widget>[
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: <Widget>[
-                                    if (mine > 0)
-                                      ZenPill(
-                                        text: t('Wy: {count}', {'count': mine}),
-                                        tone: zen.success,
-                                        icon: Icons.check_rounded,
-                                      ),
-                                    TextButton.icon(
-                                      onPressed: () => unawaited(_askAbout(i)),
-                                      icon: const Icon(Icons.forum_rounded),
-                                      label: Text(t('Zapytaj')),
+                                    ZenIconBadge(
+                                      icon: Icons.warning_amber_rounded,
+                                      tone: zen.warning,
+                                      size: 40,
                                     ),
-                                    FilledButton.tonal(
-                                      onPressed: i.isFull && mine == 0
-                                          ? null
-                                          : () => unawaited(_signUp(i, mine)),
-                                      child: Text(
-                                        mine > 0
-                                            ? t('Zmień')
-                                            : i.isFull
-                                            ? t('Brak miejsc')
-                                            : t('Przyjdziemy'),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: <Widget>[
+                                          Text(
+                                            kFlatKeyConflict,
+                                            style: TextStyle(
+                                              color: zen.textPrimary,
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w700,
+                                              height: 1.3,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            t(
+                                              'Odłączyli jeden telefon, ale przyszły '
+                                              'dwie różne wersje (domowników: '
+                                              '{count} i {otherCount}). Zapytajcie '
+                                              'ich osobiście i zeskanujcie nowy kod '
+                                              'z ich drzwi — zostanie ten właściwy.',
+                                              <String, Object?>{
+                                                'count': p.members.length,
+                                                'otherCount':
+                                                    rival.members.length,
+                                              },
+                                            ),
+                                            style: TextStyle(
+                                              color: zen.textSecondary,
+                                              fontSize: 13.5,
+                                              height: 1.4,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ],
+                                ),
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  alignment: WrapAlignment.end,
+                                  children: <Widget>[
+                                    TextButton(
+                                      key: const Key('flat-key-keep'),
+                                      onPressed: () => unawaited(
+                                        _service.keepCurrentKey(f.key),
+                                      ),
+                                      child: Text(t('Zostaw tę wersję')),
+                                    ),
+                                    FilledButton.tonalIcon(
+                                      key: const Key('flat-key-scan'),
+                                      onPressed: () =>
+                                          unawaited(_scanTheirDoor()),
+                                      icon: const Icon(
+                                        Icons.qr_code_scanner_rounded,
+                                        size: 18,
+                                      ),
+                                      label: Text(t('Zeskanuj ich kod')),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        if (_service.revealsFrom(f.key).isNotEmpty) ...<Widget>[
+                          ZenSection(t('Pokazali swoje profile')),
+                          for (final FlatReveal r in _service.revealsFrom(
+                            f.key,
+                          ))
+                            ZenTile(
+                              key: Key('flat-reveal-${r.name}'),
+                              icon: Icons.badge_rounded,
+                              tone: tone,
+                              title: r.name,
+                              subtitle: t(
+                                'Mieszka tu — możesz zaprosić do znajomych.',
+                              ),
+                              onTap: () => unawaited(_invite(f, r)),
+                              trailing: Icon(
+                                Icons.person_add_alt_1_rounded,
+                                color: tone,
+                              ),
+                            ),
+                        ],
+                        if (invites.isNotEmpty) ...<Widget>[
+                          ZenSection(t('Zapraszają')),
+                          for (final FlatItem i in invites)
+                            Builder(
+                              builder: (BuildContext context) {
+                                final int mine = _service.mySignup(f.key, i.id);
+                                return FlatItemCard(
+                                  kind: FlatItemKind.invite,
+                                  text: i.text,
+                                  meta: <String>[
+                                    if (i.at != null) flatDate(i.at!),
+                                    if (i.seats > 0)
+                                      t('miejsca: {taken}/{seats}', {
+                                        'taken': i.taken,
+                                        'seats': i.seats,
+                                      }),
+                                  ].join(' · '),
+                                  below: Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    alignment: WrapAlignment.end,
+                                    crossAxisAlignment:
+                                        WrapCrossAlignment.center,
+                                    children: <Widget>[
+                                      if (mine > 0)
+                                        ZenPill(
+                                          text: t('Wy: {count}', {
+                                            'count': mine,
+                                          }),
+                                          tone: zen.success,
+                                          icon: Icons.check_rounded,
+                                        ),
+                                      TextButton.icon(
+                                        onPressed: () =>
+                                            unawaited(_askAbout(i)),
+                                        icon: const Icon(Icons.forum_rounded),
+                                        label: Text(t('Zapytaj')),
+                                      ),
+                                      FilledButton.tonal(
+                                        onPressed: i.isFull && mine == 0
+                                            ? null
+                                            : () => unawaited(_signUp(i, mine)),
+                                        child: Text(
+                                          mine > 0
+                                              ? t('Zmień')
+                                              : i.isFull
+                                              ? t('Brak miejsc')
+                                              : t('Przyjdziemy'),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                        ],
+                        if (offers.isNotEmpty) ...<Widget>[
+                          ZenSection(t('Oferują')),
+                          for (final FlatItem i in offers)
+                            FlatItemCard(
+                              kind: FlatItemKind.offer,
+                              text: i.text,
+                            ),
+                        ],
+                        if (needs.isNotEmpty) ...<Widget>[
+                          ZenSection(t('Potrzebują')),
+                          for (final FlatItem i in needs)
+                            FlatItemCard(kind: FlatItemKind.need, text: i.text),
+                        ],
+                        ZenSection(t('Wiadomości')),
+                        if (messages.isEmpty)
+                          ZenInfo(
+                            icon: Icons.forum_rounded,
+                            tone: tone,
+                            text: t(
+                              'Napiszcie coś do siebie — odpisze ktokolwiek z '
+                              'domowników.',
+                            ),
+                          ),
+                        for (final FlatMessage m in messages)
+                          Builder(
+                            builder: (BuildContext context) {
+                              // The look's own bubbles; the filled looks keep
+                              // the tone fill with the look's corners.
+                              final BoxDecoration? themed = look.bubble(
+                                zen,
+                                outgoing: m.mine,
+                              );
+                              final bool onFill = m.mine && themed == null;
+                              return Align(
+                                alignment: m.mine
+                                    ? Alignment.centerRight
+                                    : Alignment.centerLeft,
+                                child: Container(
+                                  margin: EdgeInsets.only(
+                                    top: 3,
+                                    bottom: 3,
+                                    left: m.mine ? 48 : 0,
+                                    right: m.mine ? 0 : 48,
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 14,
+                                    vertical: 10,
+                                  ),
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 480,
+                                  ),
+                                  decoration:
+                                      themed ??
+                                      BoxDecoration(
+                                        color: m.mine
+                                            ? tone
+                                            : zen.surfaceRaised,
+                                        borderRadius: BorderRadius.only(
+                                          topLeft: Radius.circular(
+                                            look.radius(18),
+                                          ),
+                                          topRight: Radius.circular(
+                                            look.radius(18),
+                                          ),
+                                          bottomLeft: Radius.circular(
+                                            look.radius(m.mine ? 18 : 6),
+                                          ),
+                                          bottomRight: Radius.circular(
+                                            look.radius(m.mine ? 6 : 18),
+                                          ),
+                                        ),
+                                        border: m.mine
+                                            ? null
+                                            : Border.all(
+                                                color: zen.outlineSoft,
+                                              ),
+                                      ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: <Widget>[
+                                      if (m.by.isNotEmpty) ...<Widget>[
+                                        Text(
+                                          m.by,
+                                          style: TextStyle(
+                                            color: onFill
+                                                ? onTone.withValues(alpha: 0.8)
+                                                : tone,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                      ],
+                                      Text(
+                                        m.text,
+                                        style: TextStyle(
+                                          color: onFill
+                                              ? onTone
+                                              : zen.textPrimary,
+                                          fontSize: 15,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               );
                             },
                           ),
                       ],
-                      if (offers.isNotEmpty) ...<Widget>[
-                        ZenSection(t('Oferują')),
-                        for (final FlatItem i in offers)
-                          FlatItemCard(kind: FlatItemKind.offer, text: i.text),
-                      ],
-                      if (needs.isNotEmpty) ...<Widget>[
-                        ZenSection(t('Potrzebują')),
-                        for (final FlatItem i in needs)
-                          FlatItemCard(kind: FlatItemKind.need, text: i.text),
-                      ],
-                      ZenSection(t('Wiadomości')),
-                      if (messages.isEmpty)
-                        ZenInfo(
-                          icon: Icons.forum_rounded,
-                          tone: tone,
-                          text: t(
-                            'Napiszcie coś do siebie — odpisze ktokolwiek z '
-                            'domowników.',
-                          ),
-                        ),
-                      for (final FlatMessage m in messages)
-                        Builder(
-                          builder: (BuildContext context) {
-                            // The look's own bubbles; the filled looks keep
-                            // the tone fill with the look's corners.
-                            final BoxDecoration? themed = look.bubble(
-                              zen,
-                              outgoing: m.mine,
-                            );
-                            final bool onFill = m.mine && themed == null;
-                            return Align(
-                              alignment: m.mine
-                                  ? Alignment.centerRight
-                                  : Alignment.centerLeft,
-                              child: Container(
-                                margin: EdgeInsets.only(
-                                  top: 3,
-                                  bottom: 3,
-                                  left: m.mine ? 48 : 0,
-                                  right: m.mine ? 0 : 48,
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 10,
-                                ),
-                                constraints: const BoxConstraints(
-                                  maxWidth: 480,
-                                ),
-                                decoration:
-                                    themed ??
-                                    BoxDecoration(
-                                      color: m.mine ? tone : zen.surfaceRaised,
-                                      borderRadius: BorderRadius.only(
-                                        topLeft: Radius.circular(
-                                          look.radius(18),
-                                        ),
-                                        topRight: Radius.circular(
-                                          look.radius(18),
-                                        ),
-                                        bottomLeft: Radius.circular(
-                                          look.radius(m.mine ? 18 : 6),
-                                        ),
-                                        bottomRight: Radius.circular(
-                                          look.radius(m.mine ? 6 : 18),
-                                        ),
-                                      ),
-                                      border: m.mine
-                                          ? null
-                                          : Border.all(color: zen.outlineSoft),
-                                    ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: <Widget>[
-                                    if (m.by.isNotEmpty) ...<Widget>[
-                                      Text(
-                                        m.by,
-                                        style: TextStyle(
-                                          color: onFill
-                                              ? onTone.withValues(alpha: 0.8)
-                                              : tone,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                    ],
-                                    Text(
-                                      m.text,
-                                      style: TextStyle(
-                                        color: onFill
-                                            ? onTone
-                                            : zen.textPrimary,
-                                        fontSize: 15,
-                                        height: 1.35,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: zen.surface,
-                  border: Border(top: BorderSide(color: zen.outlineSoft)),
-                ),
-                child: SafeArea(
-                  top: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-                    child: Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: TextField(
-                            key: const Key('neighbor-text'),
-                            controller: _text,
-                            minLines: 1,
-                            maxLines: 4,
-                            textCapitalization: TextCapitalization.sentences,
-                            decoration: InputDecoration(
-                              hintText: t('Napisz do „{name}”', {
-                                'name': p.name,
-                              }),
-                            ),
-                            onSubmitted: (_) => unawaited(_send()),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton.filled(
-                          key: const Key('neighbor-send'),
-                          tooltip: t('Wyślij'),
-                          style: IconButton.styleFrom(
-                            backgroundColor: tone,
-                            foregroundColor: onTone,
-                          ),
-                          onPressed: () => unawaited(_send()),
-                          icon: const Icon(Icons.send_rounded),
-                        ),
-                      ],
                     ),
                   ),
                 ),
-              ),
-            ],
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: zen.surface,
+                    border: Border(top: BorderSide(color: zen.outlineSoft)),
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: TextField(
+                              key: const Key('neighbor-text'),
+                              controller: _text,
+                              minLines: 1,
+                              maxLines: 4,
+                              textCapitalization: TextCapitalization.sentences,
+                              decoration: InputDecoration(
+                                hintText: t('Napisz do „{name}”', {
+                                  'name': p.name,
+                                }),
+                              ),
+                              onSubmitted: (_) => unawaited(_send()),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton.filled(
+                            key: const Key('neighbor-send'),
+                            tooltip: t('Wyślij'),
+                            style: IconButton.styleFrom(
+                              backgroundColor: tone,
+                              foregroundColor: onTone,
+                            ),
+                            onPressed: () => unawaited(_send()),
+                            icon: const Icon(Icons.send_rounded),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },

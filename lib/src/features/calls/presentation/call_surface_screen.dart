@@ -530,13 +530,13 @@ class _AmbientAudioStage extends StatelessWidget {
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
-                  boxShadow: <BoxShadow>[
-                    BoxShadow(
-                      color: zen.accent.withValues(alpha: 0.35),
-                      blurRadius: 30,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
+                  boxShadow: ZenLook.of(context).tinted(
+                    zen,
+                    zen.accent,
+                    radius: 30,
+                    alpha: 0.35,
+                    offset: const Offset(0, 10),
+                  ),
                 ),
                 child: SizedBox.square(
                   dimension: 104,
@@ -686,13 +686,7 @@ class _FloatingCallDock extends StatelessWidget {
         color: zen.surface.withValues(alpha: 0.92),
         borderRadius: context.zenRadius(32),
         border: Border.all(color: zen.outlineSoft),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.25),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        boxShadow: ZenLook.of(context).lift(zen, radius: 24),
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
@@ -781,7 +775,9 @@ class _CallMediaStageState extends State<_CallMediaStage> {
         Positioned.fill(
           child: primary != null
               ? DecoratedBox(
-                  decoration: const BoxDecoration(color: Colors.black),
+                  decoration: const BoxDecoration(
+                    color: ZenFixed.photoBackdrop,
+                  ),
                   child: RTCVideoView(
                     primary,
                     mirror: identical(primary, local),
@@ -792,13 +788,13 @@ class _CallMediaStageState extends State<_CallMediaStage> {
                         children: <Widget>[
                           const CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Colors.white70,
+                            color: ZenFixed.onPhotoSoft,
                           ),
                           const SizedBox(height: 12),
                           Text(
                             t('Oczekiwanie na wideo...'),
                             style: const TextStyle(
-                              color: Colors.white70,
+                              color: ZenFixed.onPhotoSoft,
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
                             ),
@@ -830,17 +826,13 @@ class _CallMediaStageState extends State<_CallMediaStage> {
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.3),
+                        color: ZenFixed.onPhoto.withValues(alpha: 0.3),
                         width: 1.5,
                       ),
-                      color: Colors.black,
-                      boxShadow: <BoxShadow>[
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.6),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
+                      color: ZenFixed.photoBackdrop,
+                      boxShadow: ZenLook.of(
+                        context,
+                      ).lift(widget.zen, radius: 12),
                     ),
                     child: RTCVideoView(
                       secondary,
@@ -879,10 +871,10 @@ class _ScreenShareStage extends StatelessWidget {
           child: DecoratedBox(
             decoration: BoxDecoration(
               border: Border.all(
-                color: Colors.white.withValues(alpha: 0.3),
+                color: ZenFixed.onPhoto.withValues(alpha: 0.3),
                 width: 1.5,
               ),
-              color: Colors.black,
+              color: ZenFixed.photoBackdrop,
             ),
             child: RTCVideoView(
               renderer,
@@ -900,7 +892,7 @@ class _ScreenShareStage extends StatelessWidget {
       children: <Widget>[
         Positioned.fill(
           child: DecoratedBox(
-            decoration: const BoxDecoration(color: Colors.black),
+            decoration: const BoxDecoration(color: ZenFixed.photoBackdrop),
             child: RTCVideoView(
               screen,
               objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,

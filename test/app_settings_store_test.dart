@@ -28,7 +28,6 @@ void main() {
       const AppSettings(
         inboxLimitMb: 80,
         autoCleanupDays: 14,
-        notificationDelaySeconds: 8,
         lockMode: AppLockMode.appClose,
         backgroundLockDelaySeconds: 12,
         themeMode: AppThemeMode.dark,
@@ -46,7 +45,6 @@ void main() {
     final AppSettings restored = (await store.load())!;
     expect(restored.inboxLimitMb, 80);
     expect(restored.autoCleanupDays, 14);
-    expect(restored.notificationDelaySeconds, 8);
     expect(restored.lockMode, AppLockMode.appClose);
     expect(restored.backgroundLockDelaySeconds, 12);
     expect(restored.themeMode, AppThemeMode.dark);
@@ -101,14 +99,9 @@ void main() {
 
   test('values out of range are clamped', () {
     final AppSettings s = AppSettings.fromJson(<String, dynamic>{
-      'notificationDelaySeconds': 999,
       'backgroundLockDelaySeconds': 0,
       'inboxLimitMb': 1,
     });
-    expect(
-      s.notificationDelaySeconds,
-      AppSettings.maximumNotificationDelaySeconds,
-    );
     expect(
       s.backgroundLockDelaySeconds,
       AppSettings.minimumBackgroundLockDelaySeconds,

@@ -275,7 +275,7 @@ class PyramidScreen extends ConsumerWidget {
           return Scaffold(
             key: const Key('pyramid-screen'),
             appBar: ZenSectionBar(title: t('Piramida')),
-            body: _JoinView(pyr: pyr),
+            body: SelectionArea(child: _JoinView(pyr: pyr)),
           );
         }
         final bool power =
@@ -315,14 +315,16 @@ class PyramidScreen extends ConsumerWidget {
               ],
               tabs: tabs,
             ),
-            body: TabBarView(
-              children: <Widget>[
-                _MeTab(pyr: pyr, s: s, me: me),
-                _VotesTab(pyr: pyr, s: s, me: me),
-                PyramidWallet(pyr: pyr, s: s, me: me),
-                if (power) PyramidPower(pyr: pyr, s: s, me: me),
-                _HistoryTab(s: s, me: me),
-              ],
+            body: SelectionArea(
+              child: TabBarView(
+                children: <Widget>[
+                  _MeTab(pyr: pyr, s: s, me: me),
+                  _VotesTab(pyr: pyr, s: s, me: me),
+                  PyramidWallet(pyr: pyr, s: s, me: me),
+                  if (power) PyramidPower(pyr: pyr, s: s, me: me),
+                  _HistoryTab(s: s, me: me),
+                ],
+              ),
             ),
           ),
         );
@@ -1150,7 +1152,7 @@ class _MeTab extends StatelessWidget {
                   Container(
                     // A QR code reads black on white, whatever the theme.
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: ZenFixed.qrPaper,
                       borderRadius: BorderRadius.circular(
                         ZenLook.of(context).radius(20),
                       ),
@@ -1159,7 +1161,7 @@ class _MeTab extends StatelessWidget {
                     child: QrImageView(
                       data: code,
                       size: 220,
-                      backgroundColor: Colors.white,
+                      backgroundColor: ZenFixed.qrPaper,
                     ),
                   ),
                   const SizedBox(height: 12),

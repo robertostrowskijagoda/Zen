@@ -591,6 +591,17 @@ Uint8List flatLeaveBytes(String flatKey, String resident) => canonicalJsonBytes(
   <String, dynamic>{'t': 'zen_flat_leave', 'f': flatKey, 'a': resident},
 );
 
+/// What a resident signs (with their own resident key) when their account
+/// comes back on a new phone at [address] (recovered, with the household
+/// from the circle copy): housemates move the resident to that phone.
+Uint8List flatMovedBytes(String flatKey, String resident, String address) =>
+    canonicalJsonBytes(<String, dynamic>{
+      't': 'zen_flat_moved_phone',
+      'f': flatKey,
+      'a': resident,
+      'to': address,
+    });
+
 /// What a resident signs (with their own resident key) to show a
 /// neighbour flat [to] their own account at [address] under [name] ("Pokaż
 /// mój profil").

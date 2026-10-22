@@ -75,73 +75,75 @@ class PlanBoard extends StatelessWidget {
         icon: const Icon(Icons.add_rounded),
         label: Text(t('Nowy plan')),
       ),
-      body: ListenableBuilder(
-        listenable: ev == null
-            ? plans
-            : Listenable.merge(<Listenable>[plans, ev]),
-        builder: (BuildContext context, Widget? _) {
-          final int now = plans.now;
-          final List<WeekendPlan> all = plans.plans;
-          final List<WeekendPlan> mine = all
-              .where((WeekendPlan p) => p.isMine)
-              .toList();
-          final List<WeekendPlan> others = all
-              .where((WeekendPlan p) => !p.isMine)
-              .toList();
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-            children: <Widget>[
-              ZenHero(
-                title: t('Kto chętny?'),
-                icon: Icons.wb_sunny_rounded,
-                tone: tone,
-                text: t(
-                  'Rzuć luźny plan. Gdy dołączy dość osób, sam zamieni się '
-                  'w wydarzenie z czatem. Bez chętnych zgaśnie po terminie.',
-                ),
-              ),
-              if (all.isEmpty)
-                ZenEmpty(
-                  key: const Key('plan-empty'),
+      body: SelectionArea(
+        child: ListenableBuilder(
+          listenable: ev == null
+              ? plans
+              : Listenable.merge(<Listenable>[plans, ev]),
+          builder: (BuildContext context, Widget? _) {
+            final int now = plans.now;
+            final List<WeekendPlan> all = plans.plans;
+            final List<WeekendPlan> mine = all
+                .where((WeekendPlan p) => p.isMine)
+                .toList();
+            final List<WeekendPlan> others = all
+                .where((WeekendPlan p) => !p.isMine)
+                .toList();
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+              children: <Widget>[
+                ZenHero(
+                  title: t('Kto chętny?'),
                   icon: Icons.wb_sunny_rounded,
                   tone: tone,
-                  title: t('Na razie żadnych planów'),
                   text: t(
-                    'Zaproponuj coś na weekend — znajomi odpowiedzą '
-                    '„Dołączam” albo „Może”.',
-                  ),
-                  action: FilledButton.icon(
-                    key: const Key('plan-empty-new'),
-                    onPressed: () => unawaited(showPlanSheet(context, plans)),
-                    icon: const Icon(Icons.add_rounded),
-                    label: Text(t('Zaproponuj plan')),
+                    'Rzuć luźny plan. Gdy dołączy dość osób, sam zamieni się '
+                    'w wydarzenie z czatem. Bez chętnych zgaśnie po terminie.',
                   ),
                 ),
-              if (mine.isNotEmpty) ...<Widget>[
-                ZenSection(t('Twoje plany'), top: 12),
-                for (final WeekendPlan p in mine)
-                  PlanCard(
-                    key: Key('plan-${p.id}'),
-                    plan: p,
-                    plans: plans,
-                    events: ev,
-                    now: now,
+                if (all.isEmpty)
+                  ZenEmpty(
+                    key: const Key('plan-empty'),
+                    icon: Icons.wb_sunny_rounded,
+                    tone: tone,
+                    title: t('Na razie żadnych planów'),
+                    text: t(
+                      'Zaproponuj coś na weekend — znajomi odpowiedzą '
+                      '„Dołączam” albo „Może”.',
+                    ),
+                    action: FilledButton.icon(
+                      key: const Key('plan-empty-new'),
+                      onPressed: () => unawaited(showPlanSheet(context, plans)),
+                      icon: const Icon(Icons.add_rounded),
+                      label: Text(t('Zaproponuj plan')),
+                    ),
                   ),
+                if (mine.isNotEmpty) ...<Widget>[
+                  ZenSection(t('Twoje plany'), top: 12),
+                  for (final WeekendPlan p in mine)
+                    PlanCard(
+                      key: Key('plan-${p.id}'),
+                      plan: p,
+                      plans: plans,
+                      events: ev,
+                      now: now,
+                    ),
+                ],
+                if (others.isNotEmpty) ...<Widget>[
+                  ZenSection(t('Od znajomych'), top: 12),
+                  for (final WeekendPlan p in others)
+                    PlanCard(
+                      key: Key('plan-${p.id}'),
+                      plan: p,
+                      plans: plans,
+                      events: ev,
+                      now: now,
+                    ),
+                ],
               ],
-              if (others.isNotEmpty) ...<Widget>[
-                ZenSection(t('Od znajomych'), top: 12),
-                for (final WeekendPlan p in others)
-                  PlanCard(
-                    key: Key('plan-${p.id}'),
-                    plan: p,
-                    plans: plans,
-                    events: ev,
-                    now: now,
-                  ),
-              ],
-            ],
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }

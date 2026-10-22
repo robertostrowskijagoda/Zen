@@ -49,6 +49,9 @@ final class SignalRoutingPolicy {
       ZenSignalType.groupCallDecline ||
       ZenSignalType.profileUpdate ||
       ZenSignalType.disappearTimer ||
+      ZenSignalType.messageReaction ||
+      ZenSignalType.messageEdit ||
+      ZenSignalType.messageDelete ||
       ZenSignalType.callInvite ||
       ZenSignalType.callAccept ||
       ZenSignalType.callDecline ||
@@ -155,6 +158,9 @@ final class SignalRoutingPolicy {
       case ZenSignalType.groupLeave:
       case ZenSignalType.groupInviteAck:
       case ZenSignalType.disappearTimer:
+      case ZenSignalType.messageReaction:
+      case ZenSignalType.messageEdit:
+      case ZenSignalType.messageDelete:
         // Membership bookkeeping only: applied right away in every lifecycle,
         // never worth a notification of its own.
         return SignalHandlingPlan(

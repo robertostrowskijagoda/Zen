@@ -124,66 +124,69 @@ class _HoldToConfirmButtonState extends State<HoldToConfirmButton>
           _release();
         }
       },
-      child: Listener(
-        behavior: HitTestBehavior.opaque,
-        onPointerDown: (_) => _press(),
-        onPointerUp: (_) => _release(),
-        onPointerCancel: (_) => _release(),
-        child: Semantics(
-          button: true,
-          enabled: widget.enabled,
-          label: widget.idleLabel,
-          excludeSemantics: true,
-          child: AnimatedBuilder(
-            animation: _progress,
-            builder: (BuildContext context, Widget? child) {
-              final double value = _progress.value;
-              final bool holding = value > 0;
-              final int secondsLeft =
-                  ((1 - value) *
-                          widget.duration.inMilliseconds /
-                          Duration.millisecondsPerSecond)
-                      .ceil();
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  SizedBox.square(
-                    dimension: 84,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: <Widget>[
-                        SizedBox.expand(
-                          child: CircularProgressIndicator(
-                            key: const Key('hold-to-confirm-progress'),
-                            value: value,
-                            strokeWidth: 6,
-                            color: color,
-                            backgroundColor: color.withValues(alpha: 0.14),
+      child: // Holding the button never starts a text selection around it.
+      SelectionContainer.disabled(
+        child: Listener(
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: (_) => _press(),
+          onPointerUp: (_) => _release(),
+          onPointerCancel: (_) => _release(),
+          child: Semantics(
+            button: true,
+            enabled: widget.enabled,
+            label: widget.idleLabel,
+            excludeSemantics: true,
+            child: AnimatedBuilder(
+              animation: _progress,
+              builder: (BuildContext context, Widget? child) {
+                final double value = _progress.value;
+                final bool holding = value > 0;
+                final int secondsLeft =
+                    ((1 - value) *
+                            widget.duration.inMilliseconds /
+                            Duration.millisecondsPerSecond)
+                        .ceil();
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    SizedBox.square(
+                      dimension: 84,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: <Widget>[
+                          SizedBox.expand(
+                            child: CircularProgressIndicator(
+                              key: const Key('hold-to-confirm-progress'),
+                              value: value,
+                              strokeWidth: 6,
+                              color: color,
+                              backgroundColor: color.withValues(alpha: 0.14),
+                            ),
                           ),
-                        ),
-                        Icon(
-                          Icons.delete_forever_rounded,
-                          size: 34,
-                          color: color,
-                        ),
-                      ],
+                          Icon(
+                            Icons.delete_forever_rounded,
+                            size: 34,
+                            color: color,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    holding
-                        ? widget.holdingLabel(secondsLeft)
-                        : widget.idleLabel,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.w700,
-                      height: 1.3,
+                    const SizedBox(height: 10),
+                    Text(
+                      holding
+                          ? widget.holdingLabel(secondsLeft)
+                          : widget.idleLabel,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.w700,
+                        height: 1.3,
+                      ),
                     ),
-                  ),
-                ],
-              );
-            },
+                  ],
+                );
+              },
+            ),
           ),
         ),
       ),

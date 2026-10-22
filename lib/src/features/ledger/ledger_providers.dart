@@ -14,14 +14,17 @@ import 'package:zen/src/domain/friends/friend_profile.dart';
 import 'package:zen/src/domain/groups/group_profile.dart';
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
+import 'package:zen/src/features/account/account_media.dart';
 import 'package:zen/src/features/account/account_routing_transport.dart';
 import 'package:zen/src/features/account/device_chat_sync.dart';
+import 'package:zen/src/features/chat/chat_media_blocks.dart';
 import 'package:zen/src/features/chat/disappearing_messages.dart';
 import 'package:zen/src/features/chat/message_timeline_store.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/reaction_relay.dart';
 import 'package:zen/src/features/ledger/bridge_host.dart';
 import 'package:zen/src/features/ledger/friend_level_lookup.dart';
+import 'package:zen/src/features/ledger/ledger_chat_media.dart';
 import 'package:zen/src/features/ledger/ledger_mail_push.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
 import 'package:zen/src/features/media/media_vault.dart';
@@ -123,7 +126,13 @@ final class _HubChatTarget implements ChatSyncTarget {
     String key,
     ChatMessage message, {
     Uint8List? bytes,
-  }) => _hub.importSyncedMessage(key, message, bytes: bytes);
+    String? storedPath,
+  }) => _hub.importSyncedMessage(
+    key,
+    message,
+    bytes: bytes,
+    storedPath: storedPath,
+  );
 
   @override
   Future<void> forgetFriendFromOtherDevice(String address) =>
@@ -216,6 +225,11 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
       .listen(warnKeyMismatch);
   ref.onDispose(keyConflicts.cancel);
   unawaitedLogged(node.start(), context: 'Start dziennika nie udał się');
+  // Files shared in groups travel as blocks of this store.
+  final ChatMediaBlocksHolder mediaBlocks = ref.read(
+    chatMediaBlocksHolderProvider,
+  )..blocks = LedgerChatMediaBlocks(node);
+  ref.onDispose(() => mediaBlocks.blocks = null);
   // Posts, comments and likes reach friends who are offline through the
   // reliable queue (their mailboxes hold them while this phone is away).
   final LedgerMailPush mailPush = LedgerMailPush(
@@ -283,6 +297,8 @@ final Provider<LedgerNode?> ledgerNodeProvider = Provider<LedgerNode?>((
     node: node,
     target: _HubChatTarget(ref),
     vault: ref.read(mediaVaultProvider),
+    // Big files wait for Wi-Fi when "Media tylko przez Wi-Fi" is on.
+    policy: ref.read(accountMediaPolicyProvider),
   );
   unawaitedLogged(chatSync.start(), context: 'Wspólne rozmowy urządzeń');
   final MessageTimelineStore timelines = DisappearingTimelineStore.unwrap(

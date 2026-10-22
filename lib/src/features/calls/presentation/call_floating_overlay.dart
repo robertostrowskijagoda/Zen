@@ -137,13 +137,7 @@ class _FloatingCallChipState extends ConsumerState<_FloatingCallChip> {
         child: DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: context.zenRadius(999),
-            boxShadow: <BoxShadow>[
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.28),
-                blurRadius: 18,
-                offset: const Offset(0, 6),
-              ),
-            ],
+            boxShadow: ZenLook.of(context).lift(zen, radius: 18),
           ),
           child: Material(
             color: Color.alphaBlend(

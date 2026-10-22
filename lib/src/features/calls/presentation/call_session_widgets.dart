@@ -214,13 +214,13 @@ class _CallPrimaryButton extends StatelessWidget {
         DecoratedBox(
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            boxShadow: <BoxShadow>[
-              BoxShadow(
-                color: color.withValues(alpha: 0.40),
-                blurRadius: 18,
-                offset: const Offset(0, 5),
-              ),
-            ],
+            boxShadow: ZenLook.of(context).tinted(
+              ZenColors.of(context),
+              color,
+              radius: 18,
+              alpha: 0.40,
+              offset: const Offset(0, 5),
+            ),
           ),
           child: IconButton.filled(
             key: buttonKey,

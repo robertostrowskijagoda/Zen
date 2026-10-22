@@ -23,8 +23,6 @@ import 'package:zen/src/features/meet/presentation/alarm_audio.dart';
 import 'package:zen/src/features/runtime/runtime_signal_module.dart';
 import 'package:zen/src/features/security/app_security_service.dart';
 
-const Color _alarmRed = Color(0xFFD32F2F);
-
 String _clock(int millis) {
   return ZenFormat.time(DateTime.fromMillisecondsSinceEpoch(millis));
 }
@@ -99,8 +97,13 @@ Widget _call112Button(BuildContext context, {bool onRed = false}) =>
       key: const Key('alarm-call-112'),
       style: onRed
           ? OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.white70, width: 1.5),
+              foregroundColor: ZenEmergency.on(ZenColors.of(context)),
+              side: BorderSide(
+                color: ZenEmergency.on(
+                  ZenColors.of(context),
+                ).withValues(alpha: 0.7),
+                width: 1.5,
+              ),
               minimumSize: const Size.fromHeight(52),
             )
           : OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
@@ -272,6 +275,8 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
 
   Widget _armView(BuildContext context, MeetService service) {
     final ZenColors zen = ZenColors.of(context);
+    final Color alarmRed = ZenEmergency.red(zen);
+    final Color onAlarm = ZenEmergency.on(zen);
     final List<String> to = service.alarmRecipients();
     final bool onlyClose = service.host.closeFriends().isNotEmpty;
     return ListView(
@@ -339,10 +344,10 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                             shape: BoxShape.circle,
                             gradient: RadialGradient(
                               colors: <Color>[
-                                _alarmRed.withValues(
+                                alarmRed.withValues(
                                   alpha: 0.10 + 0.25 * _hold.value,
                                 ),
-                                _alarmRed.withValues(alpha: 0),
+                                alarmRed.withValues(alpha: 0),
                               ],
                             ),
                           ),
@@ -352,8 +357,8 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                             value: _hold.value,
                             strokeWidth: 10,
                             strokeCap: StrokeCap.round,
-                            color: _alarmRed,
-                            backgroundColor: _alarmRed.withValues(alpha: 0.15),
+                            color: alarmRed,
+                            backgroundColor: alarmRed.withValues(alpha: 0.15),
                           ),
                         ),
                         Transform.scale(
@@ -363,18 +368,21 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                             height: 176,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              gradient: const LinearGradient(
-                                colors: <Color>[Color(0xFFEF5350), _alarmRed],
+                              gradient: LinearGradient(
+                                colors: <Color>[
+                                  ZenEmergency.glow(zen),
+                                  alarmRed,
+                                ],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                               ),
-                              boxShadow: <BoxShadow>[
-                                BoxShadow(
-                                  color: _alarmRed.withValues(alpha: 0.45),
-                                  blurRadius: 28,
-                                  offset: const Offset(0, 10),
-                                ),
-                              ],
+                              boxShadow: ZenLook.of(context).tinted(
+                                zen,
+                                alarmRed,
+                                radius: 28,
+                                alpha: 0.45,
+                                offset: const Offset(0, 10),
+                              ),
                             ),
                             alignment: Alignment.center,
                             padding: const EdgeInsets.all(16),
@@ -385,7 +393,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                                   _sending
                                       ? Icons.wifi_tethering_rounded
                                       : Icons.touch_app_rounded,
-                                  color: Colors.white,
+                                  color: onAlarm,
                                   size: 34,
                                 ),
                                 const SizedBox(height: 6),
@@ -397,7 +405,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                                         : t('Przytrzymaj\n3 sekundy'),
                                     textAlign: TextAlign.center,
                                     style: zen.display(
-                                      color: Colors.white,
+                                      color: onAlarm,
                                       size: 20,
                                       weight: FontWeight.w600,
                                     ),
@@ -534,6 +542,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
 
   Widget _activeView(BuildContext context, MeetService service, AlarmRecord a) {
     final ZenColors zen = ZenColors.of(context);
+    final Color onAlarm = ZenEmergency.on(zen);
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: <Widget>[
@@ -541,8 +550,8 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
             borderRadius: context.zenRadius(26),
-            gradient: const LinearGradient(
-              colors: <Color>[Color(0xFFEF5350), _alarmRed],
+            gradient: LinearGradient(
+              colors: <Color>[ZenEmergency.glow(zen), ZenEmergency.red(zen)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -553,14 +562,10 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                 width: 52,
                 height: 52,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.18),
+                  color: onAlarm.withValues(alpha: 0.18),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.campaign_rounded,
-                  color: Colors.white,
-                  size: 28,
-                ),
+                child: Icon(Icons.campaign_rounded, color: onAlarm, size: 28),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -570,7 +575,7 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                     Text(
                       t('Alarm wysłany o {time}', {'time': _clock(a.at)}),
                       style: zen.display(
-                        color: Colors.white,
+                        color: onAlarm,
                         size: 20,
                         weight: FontWeight.w600,
                       ),
@@ -583,8 +588,8 @@ class _AlarmScreenState extends ConsumerState<AlarmScreen>
                                 }) +
                                 _accuracy(a.accuracy)
                           : t('Szukam położenia…'),
-                      style: const TextStyle(
-                        color: Colors.white70,
+                      style: TextStyle(
+                        color: onAlarm.withValues(alpha: 0.7),
                         fontSize: 13.5,
                       ),
                     ),
@@ -1216,6 +1221,8 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
       builder: (BuildContext context, Widget? _) {
         final AlarmRecord? a = service.book.alarm(alarmId);
         final ZenColors zen = ZenColors.of(context);
+        final Color alarmRed = ZenEmergency.red(zen);
+        final Color onAlarm = ZenEmergency.on(zen);
         if (a == null) {
           return Scaffold(
             appBar: AppBar(),
@@ -1232,13 +1239,13 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
         // Heard only over Bluetooth and ended by itself: nobody knows how.
         final bool expired = a.expiredNearby;
         final Color headTone = a.isActive
-            ? _alarmRed
+            ? alarmRed
             : a.duress || expired
             ? zen.warning
             : zen.success;
         return Scaffold(
           key: const Key('friend-alarm-screen'),
-          backgroundColor: a.isActive ? _alarmRed : null,
+          backgroundColor: a.isActive ? alarmRed : null,
           appBar: AppBar(
             title: Text(
               a.isActive
@@ -1247,8 +1254,8 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
                   ? t('Alarm wygasł')
                   : t('Alarm odwołany'),
             ),
-            backgroundColor: a.isActive ? _alarmRed : null,
-            foregroundColor: a.isActive ? Colors.white : null,
+            backgroundColor: a.isActive ? alarmRed : null,
+            foregroundColor: a.isActive ? onAlarm : null,
           ),
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
@@ -1392,13 +1399,11 @@ class _FriendAlarmScreenState extends ConsumerState<FriendAlarmScreen>
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(52),
                         backgroundColor: mine == r
-                            ? Colors.white
-                            : Colors.white.withValues(alpha: 0.16),
-                        foregroundColor: mine == r ? _alarmRed : Colors.white,
+                            ? onAlarm
+                            : onAlarm.withValues(alpha: 0.16),
+                        foregroundColor: mine == r ? alarmRed : onAlarm,
                         side: BorderSide(
-                          color: Colors.white.withValues(
-                            alpha: mine == r ? 1 : 0.5,
-                          ),
+                          color: onAlarm.withValues(alpha: mine == r ? 1 : 0.5),
                         ),
                       ),
                       onPressed: () => unawaited(service.respond(a.id, r)),
