@@ -10,6 +10,7 @@ add_executable(${BINARY_NAME}
   "main.cc"
   "my_application.cc"
   "zen_media_player.cc"
+  "zen_media_codecs.cc"
   "zen_media_transfer.cc"
   "zen_film_codec.cc"
   "zen_video_bridge.cc"

@@ -8,6 +8,8 @@
 
 #include <cstring>
 
+#include "zen_media_codecs.h"
+
 // One method channel for every player; each player has its own event channel
 // "zen/linux_media/events/<id>" (the same split as package:video_player's own
 // backends). Positions and durations travel in milliseconds.
@@ -342,6 +344,19 @@ static gboolean on_bus_message(GstBus* bus, GstMessage* message,
       g_free(debug);
       break;
     }
+    case GST_MESSAGE_APPLICATION:
+    case GST_MESSAGE_ELEMENT: {
+      // A stream in a format Zen does not play (zen_media_codecs.cc), or
+      // one no decoder is left for: the film is not played at all, not
+      // only its other streams.
+      const GstStructure* details = gst_message_get_structure(message);
+      if (details != nullptr &&
+          (gst_structure_has_name(details, kZenCodecRefused) ||
+           gst_structure_has_name(details, "missing-plugin"))) {
+        player_fail(player, "a format Zen does not play");
+      }
+      break;
+    }
     case GST_MESSAGE_ASYNC_DONE:
       if (!player->initialized && !player->failed) {
         player_initialize(player);
@@ -501,6 +516,8 @@ static FlMethodResponse* create_player(ZenMediaPlugin* plugin, FlValue* args) {
   player->plugin = plugin;
   player->id = plugin->next_id++;
   player->playbin = GST_ELEMENT(gst_object_ref_sink(playbin));
+  // Only the formats Zen itself sends are demuxed and decoded.
+  zen_media_restrict_codecs(playbin);
   player->speed = 1.0;
   player->backlog =
       g_ptr_array_new_with_free_func(reinterpret_cast<GDestroyNotify>(fl_value_unref));
