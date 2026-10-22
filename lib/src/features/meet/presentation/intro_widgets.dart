@@ -275,17 +275,19 @@ Future<String?> _forwardNote(BuildContext context, String target) async {
     context: context,
     builder: (BuildContext context) => AlertDialog(
       title: Text(t('Przekaż do: {name}', {'name': target})),
-      content: TextField(
-        key: const Key('intro-forward-note'),
-        controller: note,
-        autofocus: true,
-        minLines: 2,
-        maxLines: 4,
-        maxLength: kIntroNoteMaxChars,
-        textCapitalization: TextCapitalization.sentences,
-        decoration: InputDecoration(
-          labelText: t('Twoje słowo (nieobowiązkowe)'),
-          hintText: t('Skąd się znacie, dlaczego warto…'),
+      content: SelectionArea(
+        child: TextField(
+          key: const Key('intro-forward-note'),
+          controller: note,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 4,
+          maxLength: kIntroNoteMaxChars,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: InputDecoration(
+            labelText: t('Twoje słowo (nieobowiązkowe)'),
+            hintText: t('Skąd się znacie, dlaczego warto…'),
+          ),
         ),
       ),
       actions: <Widget>[
@@ -718,49 +720,51 @@ Future<void> sendLetterTo(
         return AlertDialog(
           key: const Key('letter-dialog'),
           title: Text(t('List do: {name}', {'name': targetName})),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                _ViaPicker(
-                  via: via,
-                  picked: middle,
-                  nameOf: intro.host.nameOf,
-                  onPick: (String v) => set(() => middle = v),
-                ),
-                TextField(
-                  key: const Key('letter-text'),
-                  controller: text,
-                  enabled: left > 0,
-                  minLines: 4,
-                  maxLines: 8,
-                  maxLength: kLetterMaxChars,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: InputDecoration(
-                    labelText: t('Treść'),
-                    hintText: t('Kim jesteś i dlaczego piszesz…'),
-                    alignLabelWithHint: true,
+          content: SelectionArea(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  _ViaPicker(
+                    via: via,
+                    picked: middle,
+                    nameOf: intro.host.nameOf,
+                    onPick: (String v) => set(() => middle = v),
                   ),
-                ),
-                ZenInfo(
-                  icon: Icons.mail_outline_rounded,
-                  text: left > 0
-                      ? t(
-                          'Jeden list, bez rozmowy: odbiorca może tylko '
-                          'zaprosić Cię do znajomych albo go zignorować. '
-                          'List przejdzie przez telefon: {name}. '
-                          'Zostało w tym tygodniu: {left} z {limit}.',
-                          {'name': f, 'left': left, 'limit': kLettersPerWeek},
-                        )
-                      : t(
-                          'Limit listów przez: {name} na ten tydzień już się '
-                          'skończył. Spróbuj przez kogoś innego albo za '
-                          'kilka dni.',
-                          {'name': f},
-                        ),
-                ),
-              ],
+                  TextField(
+                    key: const Key('letter-text'),
+                    controller: text,
+                    enabled: left > 0,
+                    minLines: 4,
+                    maxLines: 8,
+                    maxLength: kLetterMaxChars,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      labelText: t('Treść'),
+                      hintText: t('Kim jesteś i dlaczego piszesz…'),
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                  ZenInfo(
+                    icon: Icons.mail_outline_rounded,
+                    text: left > 0
+                        ? t(
+                            'Jeden list, bez rozmowy: odbiorca może tylko '
+                            'zaprosić Cię do znajomych albo go zignorować. '
+                            'List przejdzie przez telefon: {name}. '
+                            'Zostało w tym tygodniu: {left} z {limit}.',
+                            {'name': f, 'left': left, 'limit': kLettersPerWeek},
+                          )
+                        : t(
+                            'Limit listów przez: {name} na ten tydzień już się '
+                            'skończył. Spróbuj przez kogoś innego albo za '
+                            'kilka dni.',
+                            {'name': f},
+                          ),
+                  ),
+                ],
+              ),
             ),
           ),
           actions: <Widget>[
@@ -836,34 +840,36 @@ Future<void> askOpinion(
         return AlertDialog(
           key: const Key('opinion-dialog'),
           title: Text(t('Zapytaj o opinię')),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                _ViaPicker(
-                  via: via,
-                  picked: middle,
-                  nameOf: meet.host.nameOf,
-                  onPick: (String v) => set(() => middle = v),
-                ),
-                TextField(
-                  key: const Key('opinion-text'),
-                  controller: text,
-                  minLines: 3,
-                  maxLines: 6,
-                  maxLength: kLetterMaxChars,
-                  textCapitalization: TextCapitalization.sentences,
-                ),
-                ZenInfo(
-                  icon: Icons.lock_outline_rounded,
-                  text: t(
-                    'Zwykła wiadomość tylko do: {name}. Osoba, o którą '
-                    'pytasz, nic nie zobaczy.',
-                    {'name': f},
+          content: SelectionArea(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  _ViaPicker(
+                    via: via,
+                    picked: middle,
+                    nameOf: meet.host.nameOf,
+                    onPick: (String v) => set(() => middle = v),
                   ),
-                ),
-              ],
+                  TextField(
+                    key: const Key('opinion-text'),
+                    controller: text,
+                    minLines: 3,
+                    maxLines: 6,
+                    maxLength: kLetterMaxChars,
+                    textCapitalization: TextCapitalization.sentences,
+                  ),
+                  ZenInfo(
+                    icon: Icons.lock_outline_rounded,
+                    text: t(
+                      'Zwykła wiadomość tylko do: {name}. Osoba, o którą '
+                      'pytasz, nic nie zobaczy.',
+                      {'name': f},
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           actions: <Widget>[

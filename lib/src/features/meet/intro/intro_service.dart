@@ -50,6 +50,13 @@ abstract final class IntroTypes {
   static const String pay = 'intro_pay';
   static const String paid = 'intro_paid';
 
+  /// "What lies further": asked along a known way of gatekeepers, friend to
+  /// friend, to the one at its end, who answers with the gatekeepers they
+  /// know; the answer comes back the same way. Nobody on the way learns
+  /// who asked, only the friend they got it from.
+  static const String more = 'intro_more';
+  static const String moreBack = 'intro_more_re';
+
   static const Set<String> all = <String>{
     ask,
     forward,
@@ -59,6 +66,8 @@ abstract final class IntroTypes {
     end,
     pay,
     paid,
+    more,
+    moreBack,
   };
 }
 
@@ -585,6 +594,26 @@ final class IntroService extends ChangeNotifier {
 
   /// Ways through gates this person opens.
   final Map<String, GateRun> _runs = <String, GateRun>{};
+
+  /// What gatekeepers at the end of known ways answered about the ones
+  /// further on: the gatekeeper → the way to them (a friend first) and
+  /// what they know. Kept for a day, in memory.
+  final Map<String, ({List<String> path, List<RelayedGate> gates, int at})>
+  _further = <String, ({List<String> path, List<RelayedGate> gates, int at})>{};
+
+  /// "What lies further" asked here: id → the way and since when.
+  final Map<String, ({List<String> path, int at})> _moreAsked =
+      <String, ({List<String> path, int at})>{};
+
+  /// Passed on for someone else: id → who asked here, to whom it went,
+  /// since when.
+  final Map<String, ({String from, String to, int at})> _morePassed =
+      <String, ({String from, String to, int at})>{};
+
+  /// Gatekeepers asked further, and when (not asked again for a day).
+  final Map<String, int> _moreTried = <String, int>{};
+  int _moreAt = 0;
+  final Map<String, List<int>> _moreFrom = <String, List<int>>{};
 
   /// Payments this person made that may have to come back by themselves
   /// (once their time is over): id → since when.
@@ -1390,7 +1419,6 @@ final class IntroService extends ChangeNotifier {
 
   /// This person's card for friend [q].
   Map<String, dynamic> _cardFor(String q) {
-    final List<RelayedGate> relayed = <RelayedGate>[];
     MeetService? m;
     try {
       m = meet();
@@ -1399,12 +1427,36 @@ final class IntroService extends ChangeNotifier {
     }
     // Passing a friend on tells [q] who this person's friends are: only to
     // those who see the list anyway.
-    if (m != null && m.friendListVisibleTo(q)) {
+    final bool sees = m != null && m.friendListVisibleTo(q);
+    return GateCard(
+      terms: gateTermsFor(q),
+      relay: _gates.relay,
+      // Passed on to those further away: the price for them.
+      open: _gates.relay ? _gates.of(GateTier.far) : null,
+      relayed: sees ? _passedOnGates(<String>{q}) : const <RelayedGate>[],
+    ).toJson();
+  }
+
+  /// The gatekeepers among this person's friends who let their terms
+  /// travel, with what they passed on, the nearest first as far as a
+  /// card's budget goes; never one of [exclude] nor this person.
+  List<RelayedGate> _passedOnGates(Set<String> exclude) {
+    final List<RelayedGate> relayed = <RelayedGate>[];
+    MeetService? m;
+    try {
+      m = meet();
+    } on Object {
+      m = null;
+    }
+    if (m != null) {
       for (final String f in host.friends()) {
         final String g = _n(f);
         final GateCard? card = _cards[g];
         final GateTerms? open = card?.open;
-        if (g == q || card == null || !card.relay || open == null) {
+        if (exclude.contains(g) ||
+            card == null ||
+            !card.relay ||
+            open == null) {
           continue;
         }
         final Map<String, String> list = m.book.friendsOf(g);
@@ -1423,20 +1475,13 @@ final class IntroService extends ChangeNotifier {
         );
       }
     }
-    return GateCard(
-      terms: gateTermsFor(q),
-      relay: _gates.relay,
-      // Passed on to those further away: the price for them.
-      open: _gates.relay ? _gates.of(GateTier.far) : null,
-      // The nearest gatekeepers first, as far as the card's budget goes.
-      relayed: trimRelayed(
-        relayed,
-        exclude: <String>{
-          q,
-          if (host.ownAddress().isNotEmpty) _n(host.ownAddress()),
-        },
-      ),
-    ).toJson();
+    return trimRelayed(
+      relayed,
+      exclude: <String>{
+        ...exclude,
+        if (host.ownAddress().isNotEmpty) _n(host.ownAddress()),
+      },
+    );
   }
 
   Future<void> _onGate(String from, Map<String, dynamic> p) async {
@@ -1481,7 +1526,209 @@ final class IntroService extends ChangeNotifier {
       final GateCard? card = _cards[_n(f)];
       card?.relayed.forEach(add);
     }
+    final int ms = _now();
+    for (final ({List<String> path, List<RelayedGate> gates, int at}) e
+        in _further.values) {
+      if (ms - e.at < _day) {
+        e.gates.forEach(add);
+      }
+    }
     return out;
+  }
+
+  // ---- further than friends pass on by themselves ----
+
+  /// The ways to the gatekeepers at the edge of what is known (a friend
+  /// first, the gatekeeper last), the longest first.
+  List<List<String>> _edges() {
+    final List<List<String>> out = <List<String>>[];
+    void walk(RelayedGate g, List<String> path) {
+      if (path.length > kGateMorePath) {
+        return;
+      }
+      final List<String> here = <String>[...path, g.address];
+      if (g.relayed.isEmpty) {
+        out.add(here);
+      } else {
+        for (final RelayedGate r in g.relayed) {
+          walk(r, here);
+        }
+      }
+    }
+
+    for (final String f in host.friends()) {
+      final GateCard? card = _cards[_n(f)];
+      for (final RelayedGate g in card?.relayed ?? const <RelayedGate>[]) {
+        walk(g, <String>[_n(f)]);
+      }
+    }
+    final int ms = _now();
+    for (final ({List<String> path, List<RelayedGate> gates, int at}) e
+        in _further.values) {
+      if (ms - e.at < _day) {
+        for (final RelayedGate g in e.gates) {
+          walk(g, e.path);
+        }
+      }
+    }
+    out.sort((List<String> a, List<String> b) => b.length.compareTo(a.length));
+    return out;
+  }
+
+  /// Asks the gatekeepers at the edge of what is known what lies beyond
+  /// them ([IntroTypes.more]): along the known way, friend to friend, so
+  /// the knowledge — and with it the ways through gates — grows a few steps
+  /// each time, as far as the graph goes. At most [kGateMoreAtOnce] ways
+  /// once every [kGateMoreEvery]; each gatekeeper once a day. How many
+  /// were asked.
+  Future<int> exploreFurther() async {
+    await _ready();
+    final int ms = _now();
+    if (ms - _moreAt < kGateMoreEvery.inMilliseconds) {
+      return 0;
+    }
+    _moreAt = ms;
+    _moreAsked.removeWhere(
+      (String _, ({List<String> path, int at}) a) => ms - a.at > _day,
+    );
+    _moreTried.removeWhere((String _, int at) => ms - at > _day);
+    int asked = 0;
+    for (final List<String> way in _edges()) {
+      if (asked >= kGateMoreAtOnce) {
+        break;
+      }
+      final String end = way.last;
+      if (way.length < 2 ||
+          _moreTried.containsKey(end) ||
+          !host.isFriend(way.first) ||
+          _isSelf(end)) {
+        continue;
+      }
+      _moreTried[end] = ms;
+      final String id = _newId();
+      _moreAsked[id] = (path: way, at: ms);
+      asked++;
+      await _send(way.first, <String, dynamic>{
+        'type': IntroTypes.more,
+        'id': id,
+        'p': way.sublist(1),
+      });
+    }
+    return asked;
+  }
+
+  /// A friend asks what lies further along [p] (the rest of the way):
+  /// passed on to the next one, or — at its end — answered with the
+  /// gatekeepers this person's friends passed on (only when this person
+  /// lets their own terms travel).
+  Future<void> _onMore(String from, Map<String, dynamic> p) async {
+    final Object? id = p['id'];
+    final Object? path = p['p'];
+    if (id is! String ||
+        !_introId.hasMatch(id) ||
+        path is! List ||
+        path.length > kGateMorePath ||
+        _morePassed.containsKey(id) ||
+        !_take(_moreFrom, from, kGateMorePerFriendPerDay)) {
+      return;
+    }
+    final List<String> rest = <String>[
+      for (final Object? a in path)
+        if (a is String && _introAddress.hasMatch(a)) _n(a),
+    ];
+    if (rest.length != path.length) {
+      return;
+    }
+    final int ms = _now();
+    if (rest.isEmpty) {
+      if (!_gates.relay) {
+        return;
+      }
+      await _send(from, <String, dynamic>{
+        'type': IntroTypes.moreBack,
+        'id': id,
+        'v': <Map<String, dynamic>>[
+          for (final RelayedGate g in _passedOnGates(<String>{from}))
+            g.toJson(),
+        ],
+      });
+      return;
+    }
+    final String next = rest.first;
+    _morePassed.removeWhere(
+      (String _, ({String from, String to, int at}) x) =>
+          ms - x.at > const Duration(minutes: 30).inMilliseconds,
+    );
+    if (!host.isFriend(next) || next == from || _morePassed.length >= 500) {
+      return;
+    }
+    _morePassed[id] = (from: from, to: next, at: ms);
+    await _send(next, <String, dynamic>{
+      'type': IntroTypes.more,
+      'id': id,
+      'p': rest.sublist(1),
+    });
+  }
+
+  /// An answer coming back: kept here when this person asked, else passed
+  /// on (untouched) to whoever asked here.
+  Future<void> _onMoreBack(String from, Map<String, dynamic> p) async {
+    final Object? id = p['id'];
+    if (id is! String) {
+      return;
+    }
+    final ({List<String> path, int at})? mine = _moreAsked[id];
+    if (mine != null) {
+      if (mine.path.first != from) {
+        return;
+      }
+      _moreAsked.remove(id);
+      final List<RelayedGate> gates = RelayedGate.listFromJson(p['v']);
+      final Set<String> own = <String>{
+        if (host.ownAddress().isNotEmpty) _n(host.ownAddress()),
+      };
+      final List<RelayedGate> kept = <RelayedGate>[
+        for (final RelayedGate g in gates)
+          if (!own.contains(g.address)) g,
+      ];
+      if (kept.isEmpty) {
+        return;
+      }
+      _further[mine.path.last] = (path: mine.path, gates: kept, at: _now());
+      while (_further.length > 100) {
+        _further.remove(
+          _further.entries
+              .reduce(
+                (
+                  MapEntry<
+                    String,
+                    ({List<String> path, List<RelayedGate> gates, int at})
+                  >
+                  a,
+                  MapEntry<
+                    String,
+                    ({List<String> path, List<RelayedGate> gates, int at})
+                  >
+                  b,
+                ) => a.value.at <= b.value.at ? a : b,
+              )
+              .key,
+        );
+      }
+      _relayIndex = null;
+      _notify();
+      return;
+    }
+    final ({String from, String to, int at})? passed = _morePassed[id];
+    if (passed == null || passed.to != from) {
+      return;
+    }
+    _morePassed.remove(id);
+    await _send(passed.from, <String, dynamic>{
+      'type': IntroTypes.moreBack,
+      'id': id,
+      'v': p['v'],
+    });
   }
 
   /// What [gatekeeper] asks of this person to open a gate: their own card
@@ -2447,7 +2694,11 @@ final class IntroService extends ChangeNotifier {
       // payments are checked against what this phone holds.
       final bool allowed = switch (type) {
         IntroTypes.ask => friend || _introducedHere(from),
-        IntroTypes.forward || IntroTypes.answer || IntroTypes.gate => friend,
+        IntroTypes.forward ||
+        IntroTypes.answer ||
+        IntroTypes.gate ||
+        IntroTypes.more ||
+        IntroTypes.moreBack => friend,
         _ => true,
       };
       if (!allowed) {
@@ -2470,6 +2721,10 @@ final class IntroService extends ChangeNotifier {
           await _onPay(from, frame.payload);
         case IntroTypes.paid:
           await _onPaid(from, frame.payload);
+        case IntroTypes.more:
+          await _onMore(from, frame.payload);
+        case IntroTypes.moreBack:
+          await _onMoreBack(from, frame.payload);
       }
     } on Object catch (error, stack) {
       logZenError('Przedstawienia: $type', error, stack);

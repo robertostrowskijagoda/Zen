@@ -923,14 +923,13 @@ class _GateScaffold extends StatelessWidget {
                       color: zen.surface.withValues(alpha: 0.92),
                       borderRadius: context.zenRadius(30),
                       border: Border.all(color: zen.outlineSoft),
-                      boxShadow: <BoxShadow>[
-                        BoxShadow(
-                          color: zen.accent.withValues(alpha: 0.14),
-                          blurRadius: 40,
-                          spreadRadius: -8,
-                          offset: const Offset(0, 16),
-                        ),
-                      ],
+                      boxShadow: ZenLook.of(context).tinted(
+                        zen,
+                        zen.accent,
+                        radius: 40,
+                        alpha: 0.14,
+                        offset: const Offset(0, 16),
+                      ),
                     ),
                     child: child,
                   ),
@@ -963,13 +962,9 @@ class _GateLockIcon extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: zen.accent.withValues(alpha: 0.4),
-            blurRadius: 30,
-            spreadRadius: -4,
-          ),
-        ],
+        boxShadow: ZenLook.of(
+          context,
+        ).tinted(zen, zen.accent, radius: 30, alpha: 0.4),
       ),
       child: Icon(icon, size: 40, color: ZenColors.foregroundFor(zen.accent)),
     );

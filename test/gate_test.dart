@@ -1189,5 +1189,60 @@ void main() {
         reason: 'kept whole',
       );
     });
+
+    test('beyond what friends pass on by themselves: asked further along the '
+        'known way, as many steps as the graph goes', () async {
+      final _Net net = _Net();
+      final _Phone ania = _Phone(net, 'Ania', 'a0');
+      final List<_Phone> line = <_Phone>[
+        for (int i = 1; i <= 10; i++) _Phone(net, 'Q$i', 'c$i'),
+      ];
+      _befriend(ania, line.first);
+      for (int i = 0; i < line.length - 1; i++) {
+        _befriend(line[i], line[i + 1]);
+      }
+      for (final _Phone p in <_Phone>[ania, ...line]) {
+        await LedgerIdentity.loadOrCreate(p.disk);
+        await p.intro.load();
+        await p.strangers.load();
+        await p.meet.shareFriendList(p.meet.friendNames!(), force: true);
+      }
+      for (final _Phone p in line.reversed) {
+        await _all(p, _freeAtOnce);
+        await p.intro.setGateRelay(true);
+      }
+      for (final _Phone p in line.reversed) {
+        await p.intro.shareGates(force: true);
+      }
+      final _Phone target = line.last;
+      expect(
+        ania.intro.planTo(target.address).best,
+        ReachChoice.none,
+        reason: 'nine gates away: further than cards reach',
+      );
+      expect(await ania.intro.exploreFurther(), 1);
+      expect(await ania.intro.exploreFurther(), 0, reason: 'not again so soon');
+      // Nobody on the way learned who asked.
+      for (final _Phone p in line) {
+        for (final Map<String, dynamic> f in p.sentOf(IntroTypes.more)) {
+          expect(jsonEncode(f), isNot(contains(ania.address)));
+        }
+      }
+      final ReachPlan reach = ania.intro.planTo(target.address);
+      expect(reach.best, ReachChoice.gates);
+      expect(reach.gates!.steps, hasLength(9));
+      expect(ania.intro.farPeople().keys, contains(target.address));
+      final GateRun? run = await ania.intro.openWay(
+        reach.gates!,
+        target: target.address,
+        targetName: 'Q10',
+      );
+      expect(run!.state, GateRunState.done);
+      expect(target.intro.needsMe.single.asker, ania.address);
+      // A gatekeeper who keeps their terms to themselves answers nothing.
+      net.clock += kGateMoreEvery.inMilliseconds + 1;
+      await line[6].intro.setGateRelay(false);
+      expect(line[6].intro.gates.relay, isFalse);
+    });
   });
 }

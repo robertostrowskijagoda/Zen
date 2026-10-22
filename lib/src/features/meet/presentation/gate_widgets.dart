@@ -196,42 +196,44 @@ Future<void> reachPerson(
       return AlertDialog(
         key: const Key('reach-dialog'),
         title: Text(t('Jak dotrzeć: {name}', {'name': targetName})),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              ZenInfo(
-                key: const Key('reach-plan'),
-                icon: Icons.route_rounded,
-                tone: zen.accent,
-                text: <String>[
-                  ...reachLines(intro, plan),
-                  if (!member)
-                    t(
-                      'Płatne bramy i wiadomości działają tylko między '
-                      'członkami piramidy; poza nią — tylko darmowe.',
-                    ),
-                ].join('\n'),
-              ),
-              if (gates != null && gates.steps.length > 1) ...<Widget>[
-                const SizedBox(height: 10),
-                GatePlanSteps(intro: intro, plan: gates),
-              ],
-              if (gates != null)
-                TextField(
-                  key: const Key('reach-note'),
-                  controller: note,
-                  minLines: 2,
-                  maxLines: 4,
-                  maxLength: kIntroNoteMaxChars,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: InputDecoration(
-                    labelText: t('Kilka słów dla każdej bramy'),
-                    hintText: t('Dlaczego chcesz poznać tę osobę…'),
-                  ),
+        content: SelectionArea(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                ZenInfo(
+                  key: const Key('reach-plan'),
+                  icon: Icons.route_rounded,
+                  tone: zen.accent,
+                  text: <String>[
+                    ...reachLines(intro, plan),
+                    if (!member)
+                      t(
+                        'Płatne bramy i wiadomości działają tylko między '
+                        'członkami piramidy; poza nią — tylko darmowe.',
+                      ),
+                  ].join('\n'),
                 ),
-            ],
+                if (gates != null && gates.steps.length > 1) ...<Widget>[
+                  const SizedBox(height: 10),
+                  GatePlanSteps(intro: intro, plan: gates),
+                ],
+                if (gates != null)
+                  TextField(
+                    key: const Key('reach-note'),
+                    controller: note,
+                    minLines: 2,
+                    maxLines: 4,
+                    maxLength: kIntroNoteMaxChars,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      labelText: t('Kilka słów dla każdej bramy'),
+                      hintText: t('Dlaczego chcesz poznać tę osobę…'),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
         actions: <Widget>[
@@ -250,6 +252,32 @@ Future<void> reachPerson(
                       })
                     : t('Napisz bezpośrednio'),
               ),
+            ),
+          if (gates == null)
+            TextButton(
+              key: const Key('reach-explore'),
+              onPressed: () {
+                Navigator.of(context).pop();
+                unawaited(() async {
+                  final int asked = await intro.exploreFurther();
+                  if (nav.mounted) {
+                    _snack(
+                      nav.context,
+                      asked > 0
+                          ? t(
+                              'Pytam o dalsze drogi ({n}). Nowe osoby i drogi '
+                              'pojawią się na grafie.',
+                              {'n': asked},
+                            )
+                          : t(
+                              'Teraz nie ma kogo pytać dalej. Spróbuj za '
+                              'chwilę.',
+                            ),
+                    );
+                  }
+                }());
+              },
+              child: Text(t('Szukaj dalszych dróg')),
             ),
           if (gates != null)
             FilledButton(
@@ -404,69 +432,71 @@ Future<void> askIntroduction(
         return AlertDialog(
           key: const Key('intro-dialog'),
           title: Text(t('Poznaj: {name}', {'name': targetName})),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                _ViaChips(
-                  via: via,
-                  picked: middle,
-                  label: (String v) {
-                    final GateTerms? g = intro.gateTermsOf(v);
-                    final String name = intro.host.nameOf(v);
-                    return g == null ? name : '$name · ${g.label}';
-                  },
-                  onPick: (String v) => set(() => middle = v),
-                ),
-                if (had != null)
-                  ZenInfo(
-                    icon: Icons.history_rounded,
-                    text: t('Prośba już wysłana — czeka na: {name}.', {
-                      'name': f,
-                    }),
-                  )
-                else
-                  TextField(
-                    key: const Key('intro-note'),
-                    controller: note,
-                    minLines: 2,
-                    maxLines: 4,
-                    maxLength: kIntroNoteMaxChars,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: InputDecoration(
-                      labelText: t('Kilka słów dla: {name}', {'name': f}),
-                      hintText: t('Dlaczego chcesz poznać tę osobę…'),
-                    ),
+          content: SelectionArea(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  _ViaChips(
+                    via: via,
+                    picked: middle,
+                    label: (String v) {
+                      final GateTerms? g = intro.gateTermsOf(v);
+                      final String name = intro.host.nameOf(v);
+                      return g == null ? name : '$name · ${g.label}';
+                    },
+                    onPick: (String v) => set(() => middle = v),
                   ),
-                ZenInfo(
-                  key: const Key('intro-terms'),
-                  icon: terms == null || terms.free
-                      ? Icons.volunteer_activism_rounded
-                      : Icons.toll_rounded,
-                  tone: zenTone(zen, 5),
-                  text: gateTermsText(f, terms, payable: payable),
-                ),
-                const SizedBox(height: 8),
-                ZenInfo(
-                  key: const Key('reach-plan'),
-                  icon: Icons.route_rounded,
-                  tone: zen.accent,
-                  title: t('Jak dotrzeć'),
-                  text: <String>[
-                    ...reachLines(intro, plan),
-                    if (!member)
-                      t(
-                        'Płatne bramy i wiadomości działają tylko między '
-                        'członkami piramidy; poza nią — tylko darmowe.',
+                  if (had != null)
+                    ZenInfo(
+                      icon: Icons.history_rounded,
+                      text: t('Prośba już wysłana — czeka na: {name}.', {
+                        'name': f,
+                      }),
+                    )
+                  else
+                    TextField(
+                      key: const Key('intro-note'),
+                      controller: note,
+                      minLines: 2,
+                      maxLines: 4,
+                      maxLength: kIntroNoteMaxChars,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: InputDecoration(
+                        labelText: t('Kilka słów dla: {name}', {'name': f}),
+                        hintText: t('Dlaczego chcesz poznać tę osobę…'),
                       ),
-                  ].join('\n'),
-                ),
-                if (gates != null && gates.steps.length > 1) ...<Widget>[
-                  const SizedBox(height: 10),
-                  GatePlanSteps(intro: intro, plan: gates),
+                    ),
+                  ZenInfo(
+                    key: const Key('intro-terms'),
+                    icon: terms == null || terms.free
+                        ? Icons.volunteer_activism_rounded
+                        : Icons.toll_rounded,
+                    tone: zenTone(zen, 5),
+                    text: gateTermsText(f, terms, payable: payable),
+                  ),
+                  const SizedBox(height: 8),
+                  ZenInfo(
+                    key: const Key('reach-plan'),
+                    icon: Icons.route_rounded,
+                    tone: zen.accent,
+                    title: t('Jak dotrzeć'),
+                    text: <String>[
+                      ...reachLines(intro, plan),
+                      if (!member)
+                        t(
+                          'Płatne bramy i wiadomości działają tylko między '
+                          'członkami piramidy; poza nią — tylko darmowe.',
+                        ),
+                    ].join('\n'),
+                  ),
+                  if (gates != null && gates.steps.length > 1) ...<Widget>[
+                    const SizedBox(height: 10),
+                    GatePlanSteps(intro: intro, plan: gates),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
           actions: <Widget>[
@@ -756,85 +786,87 @@ Future<GateTerms?> editGateTerms(
       builder: (BuildContext context, StateSetter set) => AlertDialog(
         key: const Key('gate-terms-dialog'),
         title: Text(title),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Text(t('Otwieram bramę:')),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                children: <Widget>[
-                  ChoiceChip(
-                    key: const Key('gate-free'),
-                    showCheckmark: false,
-                    label: Text(t('za darmo')),
-                    selected: !paid,
-                    onSelected: (_) => set(() {
-                      paid = false;
-                      consent = true;
-                    }),
-                  ),
-                  ChoiceChip(
-                    key: const Key('gate-paid'),
-                    showCheckmark: false,
-                    label: Text(t('za cenę')),
-                    selected: paid,
-                    onSelected: (_) => set(() {
-                      paid = true;
-                      // Buying opens it: no consent asked by default.
-                      consent = false;
-                    }),
+        content: SelectionArea(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Text(t('Otwieram bramę:')),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  children: <Widget>[
+                    ChoiceChip(
+                      key: const Key('gate-free'),
+                      showCheckmark: false,
+                      label: Text(t('za darmo')),
+                      selected: !paid,
+                      onSelected: (_) => set(() {
+                        paid = false;
+                        consent = true;
+                      }),
+                    ),
+                    ChoiceChip(
+                      key: const Key('gate-paid'),
+                      showCheckmark: false,
+                      label: Text(t('za cenę')),
+                      selected: paid,
+                      onSelected: (_) => set(() {
+                        paid = true;
+                        // Buying opens it: no consent asked by default.
+                        consent = false;
+                      }),
+                    ),
+                  ],
+                ),
+                if (paid) ...<Widget>[
+                  const SizedBox(height: 8),
+                  TextField(
+                    key: const Key('gate-price-field'),
+                    controller: price,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: t('Cena (punkty)'),
+                      prefixIcon: const Icon(Icons.toll_outlined),
+                    ),
                   ),
                 ],
-              ),
-              if (paid) ...<Widget>[
-                const SizedBox(height: 8),
-                TextField(
-                  key: const Key('gate-price-field'),
-                  controller: price,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+                SwitchListTile(
+                  key: const Key('gate-consent'),
+                  contentPadding: EdgeInsets.zero,
+                  value: consent,
+                  title: Text(t('Wymagaj mojej zgody')),
+                  subtitle: Text(
+                    paid
+                        ? consent
+                              ? t(
+                                  'Zatwierdzasz każdą prośbę; odmowa zwraca '
+                                  'punkty.',
+                                )
+                              : t(
+                                  'Kupienie otwiera bramę od razu — Twoja '
+                                  'aplikacja odpowiada sama.',
+                                )
+                        : consent
+                        ? t('Decydujesz o każdej prośbie.')
+                        : t('Przedstawienie idzie od razu, bez pytania.'),
                   ),
-                  decoration: InputDecoration(
-                    labelText: t('Cena (punkty)'),
-                    prefixIcon: const Icon(Icons.toll_outlined),
-                  ),
+                  onChanged: (bool v) => set(() => consent = v),
                 ),
+                if (paid && !member)
+                  ZenInfo(
+                    icon: Icons.info_outline_rounded,
+                    text: t(
+                      'Cena działa tylko między członkami piramidy (punkty z '
+                      'portfela). Kto nie jest w piramidzie, nie zapłaci — dla '
+                      'takich osób zostają darmowe bramy.',
+                    ),
+                  ),
               ],
-              SwitchListTile(
-                key: const Key('gate-consent'),
-                contentPadding: EdgeInsets.zero,
-                value: consent,
-                title: Text(t('Wymagaj mojej zgody')),
-                subtitle: Text(
-                  paid
-                      ? consent
-                            ? t(
-                                'Zatwierdzasz każdą prośbę; odmowa zwraca '
-                                'punkty.',
-                              )
-                            : t(
-                                'Kupienie otwiera bramę od razu — Twoja '
-                                'aplikacja odpowiada sama.',
-                              )
-                      : consent
-                      ? t('Decydujesz o każdej prośbie.')
-                      : t('Przedstawienie idzie od razu, bez pytania.'),
-                ),
-                onChanged: (bool v) => set(() => consent = v),
-              ),
-              if (paid && !member)
-                ZenInfo(
-                  icon: Icons.info_outline_rounded,
-                  text: t(
-                    'Cena działa tylko między członkami piramidy (punkty z '
-                    'portfela). Kto nie jest w piramidzie, nie zapłaci — dla '
-                    'takich osób zostają darmowe bramy.',
-                  ),
-                ),
-            ],
+            ),
           ),
         ),
         actions: <Widget>[
@@ -1020,10 +1052,10 @@ class GateSettingsTile extends ConsumerWidget {
                 title: Text(t('Pokazuj moje bramy dalej')),
                 subtitle: Text(
                   t(
-                    'Znajomi przekażą swoim znajomym (do {n} kroków), kogo '
-                    'znasz i na jakich warunkach otwierasz bramę — dzięki '
-                    'temu ktoś dalej znajdzie drogę przez Ciebie.',
-                    {'n': kGateRelayDepth},
+                    'Znajomi przekażą dalej — także dalszym osobom, które '
+                    'szukają drogi — na jakich warunkach otwierasz bramę i '
+                    'kogo znasz. Dzięki temu ktoś daleko znajdzie drogę '
+                    'przez Ciebie.',
                   ),
                 ),
                 onChanged: (bool v) => unawaited(intro.setGateRelay(v)),

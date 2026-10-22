@@ -33,10 +33,25 @@ const Duration kGateStepWait = Duration(days: 1);
 /// A payment that has not reached this phone yet is waited for this long.
 const Duration kGatePaymentWait = Duration(days: 2);
 
-/// How far friends pass on a gatekeeper's terms and friend list (when the
-/// gatekeeper allows it), in steps. A way through gates is as long as what
-/// is known this way: the planner itself has no limit of gates.
+/// How far friends pass on a gatekeeper's terms and friend list by
+/// themselves (when the gatekeeper allows it), in steps. Beyond it the
+/// knowledge grows on demand: the phone asks along a known way for what
+/// the gatekeeper at its end knows ([IntroService.exploreFurther]), as many
+/// times as it takes — so neither the planner nor the knowledge has a
+/// limit of steps, while every card and every answer stays small.
 const int kGateRelayDepth = 6;
+
+/// One "what lies further" question: gatekeepers on the way to the end, at
+/// most (a longer way is asked in parts).
+const int kGateMorePath = 64;
+
+/// "What lies further" questions taken from one friend a day (to pass on
+/// or to answer).
+const int kGateMorePerFriendPerDay = 60;
+
+/// Ways asked further at once, and how often.
+const int kGateMoreAtOnce = 8;
+const Duration kGateMoreEvery = Duration(minutes: 2);
 
 /// Passed-on gatekeepers in one card, at most (all depths together): the
 /// nearest first, so a card stays small however far it reaches.
@@ -272,6 +287,11 @@ final class RelayedGate {
             for (final RelayedGate g in relayed) g.toJson(depth: depth - 1),
           ],
       };
+
+  /// Gatekeepers as a list came (an answer from further away), with the
+  /// same limits as a card.
+  static List<RelayedGate> listFromJson(Object? json) =>
+      _list(json, kGateRelayDepth, _Budget());
 
   static List<RelayedGate> _list(Object? json, int depth, _Budget budget) {
     if (json is! List || depth <= 0) {

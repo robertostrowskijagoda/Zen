@@ -11,6 +11,7 @@ import 'package:zen/src/features/ledger/ledger_identity_store.dart';
 import 'package:zen/src/features/ledger/ledger_providers.dart';
 import 'package:zen/src/features/meet/graph/gate_prices.dart';
 import 'package:zen/src/features/meet/graph/graph_full_screen.dart';
+import 'package:zen/src/features/meet/graph/graph_painter.dart';
 import 'package:zen/src/features/meet/graph/graph_providers.dart';
 import 'package:zen/src/features/meet/graph/open_to_meet.dart';
 import 'package:zen/src/features/meet/intro/intro_providers.dart';
@@ -1009,6 +1010,97 @@ void main() {
         .isNotEmpty;
     debugDefaultTargetPlatformOverride = null;
     expect(full, isTrue);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('graph: "Bezpieczna randka" opens the path mode with the '
+      'trusted friends both know lit; asking further along known ways', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(480, 2600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final _Host host = _Host(<String, String>{
+      _ania: 'Ania',
+      _bartek: 'Bartek',
+    });
+    final MeetService meet = MeetService(
+      host: host,
+      store: MeetStore(MemoryLedgerDisk()),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          socialHubAutoHydrateProvider.overrideWithValue(false),
+          socialHubSeedProvider.overrideWithValue(
+            SocialHubState.empty().copyWith(
+              friends: <String, FriendProfile>{
+                _ania: _friend(_ania, 'Ania'),
+                _bartek: _friend(_bartek, 'Bartek'),
+              },
+            ),
+          ),
+          signalTransportProvider.overrideWithValue(MemorySignalTransport()),
+          ledgerDiskProvider.overrideWithValue(MemoryLedgerDisk()),
+          meetServiceProvider.overrideWithValue(meet),
+          pyramidServiceProvider.overrideWithValue(
+            PyramidService(
+              host: MeetEventHost(host, address: () => '', name: () => 'Ja'),
+              disk: MemoryLedgerDisk(),
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          theme: ZenTheme.dark(),
+          home: Builder(
+            builder: (BuildContext context) => TextButton(
+              onPressed: () => GraphScreen.openSafeDate(
+                context,
+                name: 'Ola',
+                friends: <String>[_ania],
+              ),
+              child: const Text('go'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('go'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byKey(const Key('graph-legend-route')), findsOneWidget);
+    expect(find.byKey(const Key('graph-safe-date')), findsOneWidget);
+    expect(
+      find.textContaining('Wspólni zaufani znajomi z: Ola — Ania.'),
+      findsOneWidget,
+    );
+    // Lit on the picture: Ania only.
+    final GraphPainter painter = tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((CustomPaint p) => p.painter)
+        .whereType<GraphPainter>()
+        .single;
+    final List<GraphNode> nodes = painter.scene.layout.nodes;
+    for (int i = 0; i < nodes.length; i++) {
+      expect(
+        painter.look.nodes[i].label,
+        nodes[i].address == _ania,
+        reason: nodes[i].name,
+      );
+    }
+
+    // Asking further: nothing known to ask about yet, said so.
+    await tester.ensureVisible(find.byKey(const Key('graph-explore')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('graph-explore')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      find.text('Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.'),
+      findsOneWidget,
+    );
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 5));

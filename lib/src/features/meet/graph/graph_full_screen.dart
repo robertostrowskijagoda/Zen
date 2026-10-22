@@ -74,6 +74,8 @@ final class GraphView {
     this.goal = RouteGoal.shortest,
     this.selected,
     this.timeMonths = 0,
+    this.focus = const <String>{},
+    this.focusName = '',
   });
 
   final GraphMode mode;
@@ -81,6 +83,11 @@ final class GraphView {
   final RouteGoal goal;
   final String? selected;
   final int timeMonths;
+
+  /// People lit in the "Ścieżka" mode: the trusted friends this person and
+  /// a dating match [focusName] both know ("Bezpieczna randka").
+  final Set<String> focus;
+  final String focusName;
 }
 
 /// The overlay controls of the full-screen graph hide after this long

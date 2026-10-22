@@ -175,6 +175,7 @@ GraphLook graphLook({
   Set<String> bridges = const <String>{},
   Set<String> islands = const <String>{},
   Set<String> neglected = const <String>{},
+  Set<String> focus = const <String>{},
 }) {
   final List<GraphNode> nodes = scene.layout.nodes;
   final bool crowded = nodes.length > 1500;
@@ -190,7 +191,11 @@ GraphLook graphLook({
   final List<NodeLook> looks = <NodeLook>[];
   for (final GraphNode n in nodes) {
     final String a = n.address;
-    final bool lit = a == selected || marked.contains(a) || onRoute.contains(a);
+    final bool lit =
+        a == selected ||
+        marked.contains(a) ||
+        onRoute.contains(a) ||
+        (mode == GraphMode.route && !routing && focus.contains(a));
     final double radius = n.isFriend
         ? switch (n.ring) {
             1 => 10.0,
@@ -251,7 +256,8 @@ GraphLook graphLook({
           tagTone = m.line ? zen.accent : pyr;
         }
       case GraphMode.route:
-        if (routing && !onRoute.contains(a)) {
+        if ((routing && !onRoute.contains(a)) ||
+            (!routing && focus.isNotEmpty && !focus.contains(a))) {
           fill = dim(fill, 0.2);
         }
       case GraphMode.time:
@@ -436,6 +442,27 @@ class GraphScreen extends ConsumerStatefulWidget {
     ),
   );
 
+  /// "Bezpieczna randka": the graph in the "Ścieżka" mode with [friends] —
+  /// the trusted friends this person and a dating match [name] both know
+  /// (shown only after both agreed) — lit, to ask them for an opinion.
+  static Future<void> openSafeDate(
+    BuildContext context, {
+    required String name,
+    required Iterable<String> friends,
+  }) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (BuildContext context) => GraphScreen(
+        initial: GraphView(
+          mode: GraphMode.route,
+          focus: <String>{
+            for (final String f in friends) PeerShareCodec.normalizeAddress(f),
+          },
+          focusName: name,
+        ),
+      ),
+    ),
+  );
+
   @override
   ConsumerState<GraphScreen> createState() => _GraphScreenState();
 }
@@ -548,6 +575,8 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     _goal = v.goal;
     _selected = v.selected;
     _timeMonths = v.timeMonths;
+    _focus = v.focus;
+    _focusName = v.focusName;
     if (_mode == GraphMode.time) {
       _clock.value = timelinePhase(_timeMonths);
     }
@@ -557,6 +586,10 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
       _armHide();
     }
   }
+
+  /// "Bezpieczna randka": friends lit in the "Ścieżka" mode, and with whom.
+  Set<String> _focus = const <String>{};
+  String _focusName = '';
 
   // ---- full screen ----
 
@@ -581,6 +614,8 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     goal: _goal,
     selected: _selected,
     timeMonths: _timeMonths,
+    focus: _focus,
+    focusName: _focusName,
   );
 
   /// Full screen on, or back from it.
@@ -776,7 +811,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
   }
 
   /// Brings [address] to the middle of the picture, zoomed in.
-  void _focus(String address) {
+  void _centerOn(String address) {
     final GraphScene? scene = _scene;
     if (scene == null || _canvas.isEmpty) {
       return;
@@ -1500,6 +1535,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                 bridges: bridges?.bridges ?? const <String>{},
                 islands: islandPeople,
                 neglected: neglected,
+                focus: _focus,
               );
               return _canvasView(
                 context,
@@ -1609,7 +1645,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                                   FocusScope.of(context).unfocus();
                                   setState(() => _selected = h.address);
                                   WidgetsBinding.instance.addPostFrameCallback(
-                                    (_) => _focus(h.address),
+                                    (_) => _centerOn(h.address),
                                   );
                                 },
                               ),
@@ -2018,6 +2054,24 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
     );
   }
 
+  /// Asks the gatekeepers at the edge of what is known what lies further:
+  /// more people and longer ways show up as the answers come.
+  Future<void> _explore() async {
+    final int asked = await ref.read(introServiceProvider).exploreFurther();
+    if (!mounted) {
+      return;
+    }
+    _snack(
+      asked > 0
+          ? t(
+              'Pytam o dalsze drogi ({n}). Nowe osoby i drogi pojawią się na '
+              'grafie.',
+              {'n': asked},
+            )
+          : t('Teraz nie ma kogo pytać dalej. Spróbuj za chwilę.'),
+    );
+  }
+
   /// "Ścieżka": shortest or cheapest, and the route to the person picked.
   Widget _routeBar(
     BuildContext context,
@@ -2059,19 +2113,54 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                 setState(() => _goal = s.first),
           ),
           const SizedBox(height: 8),
-          ZenInfo(
-            key: const Key('graph-route'),
-            icon: Icons.route_rounded,
-            tone: zen.accent,
-            title: selected == null ? null : t('Droga'),
-            text: selected == null
-                ? t(
-                    'Dotknij osoby na grafie albo wyszukaj ją, żeby zobaczyć drogę.',
-                  )
-                : route.isEmpty
-                ? t('Nie widać drogi do tej osoby przez Twoich znajomych.')
-                : '${<String>[t('Ty'), for (final String a in route.path) _nameOn(a, byAddress, meet)].join(' → ')}\n'
-                      '${routeCostText(route.cost, route.gates)}',
+          // The route (who leads to whom) can be copied.
+          SelectionArea(
+            child: ZenInfo(
+              key: const Key('graph-route'),
+              icon: Icons.route_rounded,
+              tone: zen.accent,
+              title: selected == null ? null : t('Droga'),
+              text: selected == null
+                  ? t(
+                      'Dotknij osoby na grafie albo wyszukaj ją, żeby zobaczyć drogę.',
+                    )
+                  : route.isEmpty
+                  ? t('Nie widać drogi do tej osoby przez Twoich znajomych.')
+                  : '${<String>[t('Ty'), for (final String a in route.path) _nameOn(a, byAddress, meet)].join(' → ')}\n'
+                        '${routeCostText(route.cost, route.gates)}',
+            ),
+          ),
+          if (_focus.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            SelectionArea(
+              child: ZenInfo(
+                key: const Key('graph-safe-date'),
+                icon: Icons.shield_rounded,
+                tone: zen.success,
+                title: t('Bezpieczna randka'),
+                text: t(
+                  'Wspólni zaufani znajomi z: {name} — {names}. Dotknij '
+                  'kogoś na grafie, żeby zapytać o opinię.',
+                  {
+                    'name': _focusName,
+                    'names': <String>[
+                      for (final String a in _focus)
+                        _nameOn(a, byAddress, meet),
+                    ].join(', '),
+                  },
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const Key('graph-explore'),
+              onPressed: () => unawaited(_explore()),
+              icon: const Icon(Icons.travel_explore_rounded),
+              label: Text(t('Szukaj dalszych dróg')),
+            ),
           ),
         ],
       ),
@@ -2164,6 +2253,7 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
                 timeline: timeline,
                 clock: timeline == null ? null : _clock,
                 metTone: zen.success,
+                labelRadius: ZenLook.of(context).radius(8),
               ),
             ),
           ),
@@ -2650,375 +2740,383 @@ class _GraphScreenState extends ConsumerState<GraphScreen>
           unawaited(action());
         }
 
-        return SingleChildScrollView(
-          key: const Key('graph-person-sheet'),
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  CircleAvatar(
-                    radius: 28,
-                    backgroundColor: tone.withValues(alpha: 0.18),
-                    foregroundColor: tone,
-                    child: Text(
-                      trimmed.isEmpty
-                          ? '?'
-                          : trimmed.characters.first.toUpperCase(),
-                      style: zen.display(
-                        color: tone,
-                        size: 24,
-                        weight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          n.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: zen.display(
-                            color: zen.textPrimary,
-                            size: 22,
-                            weight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          <String>[
-                            _ringLabel(n.ring),
-                            if (friend != null && friend.isOnline)
-                              t('online')
-                            else if (friend != null &&
-                                friend.lastPresenceAtMillis > 0)
-                              t('widziany(-a) {ago}', {
-                                'ago': _ago(
-                                  friend.lastPresenceAtMillis,
-                                  meet.now,
-                                ),
-                              }),
-                          ].join(' · '),
-                          style: TextStyle(
-                            color: zen.textSecondary,
-                            fontSize: 13.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    key: const Key('graph-focus'),
-                    tooltip: t('Pokaż na grafie'),
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      _focus(n.address);
-                    },
-                    icon: const Icon(Icons.center_focus_strong_rounded),
-                  ),
-                ],
-              ),
-              if (s != null ||
-                  met ||
-                  openTo != null ||
-                  pyr != null) ...<Widget>[
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: <Widget>[
-                    if (s != null)
-                      ZenPill(
-                        text: '${s.shownEmoji} ${s.shownLabel}',
-                        tone: intentTone(zen, s.kind),
-                      ),
-                    if (openTo != null)
-                      ZenPill(
-                        key: const Key('graph-open-pill'),
-                        text: t('Szuka: {what}', {'what': openTo.label}),
-                        tone: zenTone(zen, 4),
-                        icon: Icons.favorite_border_rounded,
-                      ),
-                    if (met)
-                      ZenPill(
-                        text: t('spotkani osobiście'),
-                        tone: zen.success,
-                        icon: Icons.verified_rounded,
-                      ),
-                    if (pyr != null)
-                      ZenPill(
-                        text: pyr.line
-                            ? t('Twoja linia · poz. {level}', {
-                                'level': pyr.level,
-                              })
-                            : t('Piramida · poz. {level}', {
-                                'level': pyr.level,
-                              }),
-                        tone: zenTone(zen, 3),
-                        icon: kPyramidIcon,
-                      ),
-                  ],
-                ),
-                if (s != null && s.shownNote.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 8),
-                  Text(
-                    '„${s.shownNote}”',
-                    style: TextStyle(
-                      color: zen.textPrimary,
-                      fontSize: 14.5,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-              ],
-              if (statusLine.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 8),
-                Text(
-                  statusLine,
-                  key: const Key('graph-status-line'),
-                  style: TextStyle(
-                    color: zen.textSecondary,
-                    fontSize: 14,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              ],
-              if (mutual.isNotEmpty || !far) ...<Widget>[
-                const SizedBox(height: 12),
-                ZenInfo(
-                  icon: Icons.people_alt_rounded,
-                  tone: zenTone(zen, 1),
-                  title: mutual.isEmpty
-                      ? null
-                      : (far ? t('Znacie się przez') : t('Wspólni znajomi')),
-                  text: mutual.isEmpty
-                      ? t('Brak wspólnych znajomych (albo ich nie pokazują).')
-                      : mutual.map(nameOf).join(', '),
-                ),
-              ],
-              if (!far || !trust.isEmpty) TrustMapView(map: trust),
-              if (far && route.path.isNotEmpty)
-                ZenInfo(
-                  key: const Key('graph-best-way'),
-                  icon: Icons.timeline_rounded,
-                  tone: zen.accent,
-                  title: t('Najlepsza droga'),
-                  text:
-                      '${wayText(<String>[t('Ty'), for (final String a in route.path) a == n.address ? n.name : nameOf(a)])}\n${routeCostText(route.cost, route.gates)}',
-                ),
-              ZenInfo(
-                key: const Key('graph-gate'),
-                icon: Icons.toll_rounded,
-                tone: zen.textSecondary,
-                title: far ? t('Przedstawienie') : t('Wiadomość'),
-                text: gate == null ? t('brak danych') : gate.label,
-              ),
-              if (far)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: OutlinedButton.icon(
-                    key: const Key('graph-show-route'),
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      setState(() {
-                        _selected = n.address;
-                        _mode = GraphMode.route;
-                      });
-                    },
-                    icon: const Icon(Icons.route_rounded),
-                    label: Text(t('Pokaż drogę')),
-                  ),
-                ),
-              if (friend != null) ...<Widget>[
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  key: const Key('graph-write'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                  ),
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    unawaited(
-                      Navigator.of(this.context).push(
-                        MaterialPageRoute<void>(
-                          builder: (BuildContext context) => ConversationScreen(
-                            peerAddress: friend.address,
-                            title: n.name,
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.chat_bubble_outline_rounded),
-                  label: Text(t('Napisz')),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  key: const Key('graph-profile'),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                  ),
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    unawaited(
-                      ProfileScreen.open(this.context, address: friend.address),
-                    );
-                  },
-                  icon: const Icon(Icons.account_circle_outlined),
-                  label: Text(t('Profil')),
-                ),
-                const SizedBox(height: 8),
-                // The gate to this person's own friends, free for this
-                // friend (nobody asks for it here: they ask in a chat).
-                StatefulBuilder(
-                  builder: (BuildContext context, StateSetter set) {
-                    final bool free = intro.gates.isFreeFor(n.address);
-                    return SwitchListTile(
-                      key: const Key('graph-gate-free'),
-                      contentPadding: EdgeInsets.zero,
-                      value: free,
-                      title: Text(t('Otwórz za darmo')),
-                      subtitle: Text(
-                        t(
-                          'Twoja brama do Twoich znajomych jest dla tej osoby '
-                          'za darmo, bez względu na cenę.',
-                        ),
-                      ),
-                      onChanged: (bool v) => unawaited(() async {
-                        await intro.setGateFree(n.address, free: v);
-                        set(() {});
-                      }()),
-                    );
-                  },
-                ),
-                if (listMissing) ...<Widget>[
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    key: const Key('graph-ask-list'),
-                    onPressed: listAsked
-                        ? null
-                        : () => then(() => _askList(intro, n.address, n.name)),
-                    icon: const Icon(Icons.visibility_rounded),
-                    label: Text(
-                      listAsked
-                          ? t('Prośba o listę wysłana')
-                          : t('Poproś o listę znajomych'),
-                    ),
-                  ),
-                ],
-              ],
-              if (far) ...<Widget>[
-                const SizedBox(height: 16),
-                OutlinedButton.icon(
-                  key: const Key('graph-add-friend'),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                  ),
-                  onPressed: friendAsked
-                      ? null
-                      : () => then(
-                          () => _addFriend(
-                            intro,
-                            n,
-                            further ? const <String>[] : via,
-                          ),
-                        ),
-                  icon: const Icon(Icons.person_add_alt_rounded),
-                  label: Text(
-                    friendAsked
-                        ? t('Zaproszenie wysłane')
-                        : t('Dodaj do znajomych'),
-                  ),
-                ),
-              ],
-              if (further) ...<Widget>[
-                const SizedBox(height: 8),
-                FilledButton.icon(
-                  key: const Key('graph-reach'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                  ),
-                  onPressed: () => then(
-                    () => reachPerson(
-                      this.context,
-                      ref,
-                      target: n.address,
-                      targetName: n.name,
-                    ),
-                  ),
-                  icon: const Icon(Icons.route_rounded),
-                  label: Text(t('Jak dotrzeć')),
-                ),
-              ],
-              if (far && !further && via.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 8),
-                FilledButton.icon(
-                  key: const Key('graph-intro'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                  ),
-                  onPressed: asked
-                      ? null
-                      : () => then(
-                          () => askIntroduction(
-                            this.context,
-                            ref,
-                            target: n.address,
-                            targetName: n.name,
-                            via: via,
-                          ),
-                        ),
-                  icon: const Icon(Icons.waving_hand_rounded),
-                  label: Text(
-                    asked
-                        ? t('Prośba o przedstawienie wysłana')
-                        : t('Poproś o przedstawienie'),
-                  ),
-                ),
-                const SizedBox(height: 8),
+        return SelectionArea(
+          // The person's card: names, notes and texts can be copied.
+          child: SingleChildScrollView(
+            key: const Key('graph-person-sheet'),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
                 Row(
                   children: <Widget>[
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        key: const Key('graph-letter'),
-                        onPressed: () => then(
-                          () => sendLetterTo(
-                            this.context,
-                            ref,
-                            target: n.address,
-                            targetName: n.name,
-                            via: via,
-                          ),
+                    CircleAvatar(
+                      radius: 28,
+                      backgroundColor: tone.withValues(alpha: 0.18),
+                      foregroundColor: tone,
+                      child: Text(
+                        trimmed.isEmpty
+                            ? '?'
+                            : trimmed.characters.first.toUpperCase(),
+                        style: zen.display(
+                          color: tone,
+                          size: 24,
+                          weight: FontWeight.w600,
                         ),
-                        icon: const Icon(Icons.mail_outline_rounded),
-                        label: Text(t('Napisz list')),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 14),
                     Expanded(
-                      child: OutlinedButton.icon(
-                        key: const Key('graph-opinion'),
-                        onPressed: () => then(
-                          () => askOpinion(
-                            this.context,
-                            ref,
-                            targetName: n.name,
-                            via: via,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            n.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: zen.display(
+                              color: zen.textPrimary,
+                              size: 22,
+                              weight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                        icon: const Icon(Icons.rate_review_rounded),
-                        label: Text(t('Zapytaj o opinię')),
+                          const SizedBox(height: 2),
+                          Text(
+                            <String>[
+                              _ringLabel(n.ring),
+                              if (friend != null && friend.isOnline)
+                                t('online')
+                              else if (friend != null &&
+                                  friend.lastPresenceAtMillis > 0)
+                                t('widziany(-a) {ago}', {
+                                  'ago': _ago(
+                                    friend.lastPresenceAtMillis,
+                                    meet.now,
+                                  ),
+                                }),
+                            ].join(' · '),
+                            style: TextStyle(
+                              color: zen.textSecondary,
+                              fontSize: 13.5,
+                            ),
+                          ),
+                        ],
                       ),
+                    ),
+                    IconButton(
+                      key: const Key('graph-focus'),
+                      tooltip: t('Pokaż na grafie'),
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        _centerOn(n.address);
+                      },
+                      icon: const Icon(Icons.center_focus_strong_rounded),
                     ),
                   ],
                 ),
+                if (s != null ||
+                    met ||
+                    openTo != null ||
+                    pyr != null) ...<Widget>[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: <Widget>[
+                      if (s != null)
+                        ZenPill(
+                          text: '${s.shownEmoji} ${s.shownLabel}',
+                          tone: intentTone(zen, s.kind),
+                        ),
+                      if (openTo != null)
+                        ZenPill(
+                          key: const Key('graph-open-pill'),
+                          text: t('Szuka: {what}', {'what': openTo.label}),
+                          tone: zenTone(zen, 4),
+                          icon: Icons.favorite_border_rounded,
+                        ),
+                      if (met)
+                        ZenPill(
+                          text: t('spotkani osobiście'),
+                          tone: zen.success,
+                          icon: Icons.verified_rounded,
+                        ),
+                      if (pyr != null)
+                        ZenPill(
+                          text: pyr.line
+                              ? t('Twoja linia · poz. {level}', {
+                                  'level': pyr.level,
+                                })
+                              : t('Piramida · poz. {level}', {
+                                  'level': pyr.level,
+                                }),
+                          tone: zenTone(zen, 3),
+                          icon: kPyramidIcon,
+                        ),
+                    ],
+                  ),
+                  if (s != null && s.shownNote.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 8),
+                    Text(
+                      '„${s.shownNote}”',
+                      style: TextStyle(
+                        color: zen.textPrimary,
+                        fontSize: 14.5,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ],
+                if (statusLine.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 8),
+                  Text(
+                    statusLine,
+                    key: const Key('graph-status-line'),
+                    style: TextStyle(
+                      color: zen.textSecondary,
+                      fontSize: 14,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+                if (mutual.isNotEmpty || !far) ...<Widget>[
+                  const SizedBox(height: 12),
+                  ZenInfo(
+                    icon: Icons.people_alt_rounded,
+                    tone: zenTone(zen, 1),
+                    title: mutual.isEmpty
+                        ? null
+                        : (far ? t('Znacie się przez') : t('Wspólni znajomi')),
+                    text: mutual.isEmpty
+                        ? t('Brak wspólnych znajomych (albo ich nie pokazują).')
+                        : mutual.map(nameOf).join(', '),
+                  ),
+                ],
+                if (!far || !trust.isEmpty) TrustMapView(map: trust),
+                if (far && route.path.isNotEmpty)
+                  ZenInfo(
+                    key: const Key('graph-best-way'),
+                    icon: Icons.timeline_rounded,
+                    tone: zen.accent,
+                    title: t('Najlepsza droga'),
+                    text:
+                        '${wayText(<String>[t('Ty'), for (final String a in route.path) a == n.address ? n.name : nameOf(a)])}\n${routeCostText(route.cost, route.gates)}',
+                  ),
+                ZenInfo(
+                  key: const Key('graph-gate'),
+                  icon: Icons.toll_rounded,
+                  tone: zen.textSecondary,
+                  title: far ? t('Przedstawienie') : t('Wiadomość'),
+                  text: gate == null ? t('brak danych') : gate.label,
+                ),
+                if (far)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: OutlinedButton.icon(
+                      key: const Key('graph-show-route'),
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        setState(() {
+                          _selected = n.address;
+                          _mode = GraphMode.route;
+                        });
+                      },
+                      icon: const Icon(Icons.route_rounded),
+                      label: Text(t('Pokaż drogę')),
+                    ),
+                  ),
+                if (friend != null) ...<Widget>[
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    key: const Key('graph-write'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      unawaited(
+                        Navigator.of(this.context).push(
+                          MaterialPageRoute<void>(
+                            builder: (BuildContext context) =>
+                                ConversationScreen(
+                                  peerAddress: friend.address,
+                                  title: n.name,
+                                ),
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.chat_bubble_outline_rounded),
+                    label: Text(t('Napisz')),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    key: const Key('graph-profile'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      unawaited(
+                        ProfileScreen.open(
+                          this.context,
+                          address: friend.address,
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.account_circle_outlined),
+                    label: Text(t('Profil')),
+                  ),
+                  const SizedBox(height: 8),
+                  // The gate to this person's own friends, free for this
+                  // friend (nobody asks for it here: they ask in a chat).
+                  StatefulBuilder(
+                    builder: (BuildContext context, StateSetter set) {
+                      final bool free = intro.gates.isFreeFor(n.address);
+                      return SwitchListTile(
+                        key: const Key('graph-gate-free'),
+                        contentPadding: EdgeInsets.zero,
+                        value: free,
+                        title: Text(t('Otwórz za darmo')),
+                        subtitle: Text(
+                          t(
+                            'Twoja brama do Twoich znajomych jest dla tej osoby '
+                            'za darmo, bez względu na cenę.',
+                          ),
+                        ),
+                        onChanged: (bool v) => unawaited(() async {
+                          await intro.setGateFree(n.address, free: v);
+                          set(() {});
+                        }()),
+                      );
+                    },
+                  ),
+                  if (listMissing) ...<Widget>[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      key: const Key('graph-ask-list'),
+                      onPressed: listAsked
+                          ? null
+                          : () =>
+                                then(() => _askList(intro, n.address, n.name)),
+                      icon: const Icon(Icons.visibility_rounded),
+                      label: Text(
+                        listAsked
+                            ? t('Prośba o listę wysłana')
+                            : t('Poproś o listę znajomych'),
+                      ),
+                    ),
+                  ],
+                ],
+                if (far) ...<Widget>[
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    key: const Key('graph-add-friend'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    onPressed: friendAsked
+                        ? null
+                        : () => then(
+                            () => _addFriend(
+                              intro,
+                              n,
+                              further ? const <String>[] : via,
+                            ),
+                          ),
+                    icon: const Icon(Icons.person_add_alt_rounded),
+                    label: Text(
+                      friendAsked
+                          ? t('Zaproszenie wysłane')
+                          : t('Dodaj do znajomych'),
+                    ),
+                  ),
+                ],
+                if (further) ...<Widget>[
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    key: const Key('graph-reach'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    onPressed: () => then(
+                      () => reachPerson(
+                        this.context,
+                        ref,
+                        target: n.address,
+                        targetName: n.name,
+                      ),
+                    ),
+                    icon: const Icon(Icons.route_rounded),
+                    label: Text(t('Jak dotrzeć')),
+                  ),
+                ],
+                if (far && !further && via.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    key: const Key('graph-intro'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    onPressed: asked
+                        ? null
+                        : () => then(
+                            () => askIntroduction(
+                              this.context,
+                              ref,
+                              target: n.address,
+                              targetName: n.name,
+                              via: via,
+                            ),
+                          ),
+                    icon: const Icon(Icons.waving_hand_rounded),
+                    label: Text(
+                      asked
+                          ? t('Prośba o przedstawienie wysłana')
+                          : t('Poproś o przedstawienie'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          key: const Key('graph-letter'),
+                          onPressed: () => then(
+                            () => sendLetterTo(
+                              this.context,
+                              ref,
+                              target: n.address,
+                              targetName: n.name,
+                              via: via,
+                            ),
+                          ),
+                          icon: const Icon(Icons.mail_outline_rounded),
+                          label: Text(t('Napisz list')),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          key: const Key('graph-opinion'),
+                          onPressed: () => then(
+                            () => askOpinion(
+                              this.context,
+                              ref,
+                              targetName: n.name,
+                              via: via,
+                            ),
+                          ),
+                          icon: const Icon(Icons.rate_review_rounded),
+                          label: Text(t('Zapytaj o opinię')),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         );
       },

@@ -71,8 +71,15 @@ write 3 messages before you answer.
 
 - Gate terms are private between you and each friend, and the "free for"
   list never leaves your phone (each friend only learns their own price),
-  unless you allow your *Further away* price to travel further (up to 6 steps, at most 40 gatekeepers per card, nearest
-  first).
+  unless you allow your *Further away* price to travel further. Friends pass
+  such terms on by themselves up to 6 steps (at most 40 gatekeepers per
+  card, nearest first). Beyond that, **Search for further routes** (graph,
+  *Path* mode, or *How to reach*) asks the gatekeepers at the edge of what
+  your phone knows, along the known way and friend to friend, what lies
+  behind them; each answer is one small card, nobody on the way learns who
+  asked, and asking again goes a few steps further each time — so routes
+  are as long as the graph goes. Gatekeepers who keep their terms to
+  themselves answer nothing.
 - The person at the end decides; a go-between does not learn their answer.
 
 ## Limits

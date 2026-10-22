@@ -193,6 +193,7 @@ class GraphPainter extends CustomPainter {
     this.timeline,
     this.clock,
     this.metTone,
+    this.labelRadius = 8,
   }) : super(
          repaint: clock == null
              ? progress
@@ -221,6 +222,9 @@ class GraphPainter extends CustomPainter {
   /// Where on the [timeline] the picture is (0…1).
   final Animation<double>? clock;
   final Color? metTone;
+
+  /// The corner of a name label (the theme's corner, see `ZenLook.radius`).
+  final double labelRadius;
 
   /// Whether person [i] was met in person by [at].
   bool _metBy(int i, double at) {
@@ -588,7 +592,7 @@ class GraphPainter extends CustomPainter {
         tp.width + 10,
         tp.height + 3,
       ),
-      const Radius.circular(8),
+      Radius.circular(labelRadius),
     );
     canvas.drawRRect(r, Paint()..color = bg);
     if (border != null) {
@@ -674,5 +678,6 @@ class GraphPainter extends CustomPainter {
       old.visible != visible ||
       old.me != me ||
       old.text != text ||
-      old.labelBg != labelBg;
+      old.labelBg != labelBg ||
+      old.labelRadius != labelRadius;
 }
