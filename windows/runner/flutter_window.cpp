@@ -5,6 +5,7 @@
 #include "bluetooth_le_bridge.h"
 #include "call_recorder.h"
 #include "location_bridge.h"
+#include "media_transfer_bridge.h"
 #include "nearby_radio_bridge.h"
 #include "security_bridge.h"
 #include "video_bridge.h"
@@ -47,6 +48,9 @@ bool FlutterWindow::OnCreate() {
   location_bridge::Register(flutter_controller_->engine()->messenger());
   // Films of the "Filmy" section compressed and trimmed (Media Foundation).
   video_bridge::Register(flutter_controller_->engine()->messenger());
+  // Files dropped on the window, pictures and files pasted (Ctrl+V).
+  media_transfer_bridge::Register(flutter_controller_->engine()->messenger(),
+                                  GetHandle());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -87,6 +91,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;
+    case WM_DROPFILES:
+      media_transfer_bridge::OnDropFiles(hwnd, reinterpret_cast<HDROP>(wparam));
+      return 0;
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);

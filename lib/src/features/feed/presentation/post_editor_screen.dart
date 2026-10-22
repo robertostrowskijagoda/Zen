@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/voice_message_recorder.dart';
 import 'package:zen/src/features/feed/feed_model.dart';
 import 'package:zen/src/features/feed/post_media.dart';
@@ -17,7 +18,9 @@ import 'package:zen/src/features/feed/presentation/rich_text_controller.dart';
 import 'package:zen/src/features/feed/rich_text.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/media/audio_clip_player.dart';
+import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/media_guard.dart';
+import 'package:zen/src/features/media/media_transfer.dart';
 
 /// A photo, video or recording ready to go into a post.
 @immutable
@@ -216,6 +219,89 @@ String _mimeFor(String name) {
     return 'video/x-matroska';
   }
   return 'video/mp4';
+}
+
+/// A picked picture ready for a post or the gallery: a GIF stays an
+/// animated GIF (without metadata, see `gif_files.dart`), anything else
+/// becomes a fresh JPEG ([sanitizePhoto]). Throws [ArgumentError] with the
+/// reason to show when it cannot go.
+Future<DraftMedia> pictureForPost(Uint8List bytes) async {
+  final PickedGif gif = preparePickedGif(bytes);
+  switch (gif.status) {
+    case PickedGifStatus.ready:
+      return DraftMedia(bytes: gif.bytes!, mime: 'image/gif');
+    case PickedGifStatus.tooLarge:
+      throw ArgumentError(_gifTooLarge());
+    case PickedGifStatus.broken:
+      throw ArgumentError(t('Ten GIF jest uszkodzony albo niepełny.'));
+    case PickedGifStatus.notGif:
+      try {
+        return DraftMedia(
+          bytes: await sanitizePhoto(bytes),
+          mime: 'image/jpeg',
+        );
+      } on ArgumentError {
+        throw ArgumentError(t('Ten plik nie jest zdjęciem.'));
+      }
+  }
+}
+
+String _gifTooLarge() => t(
+  'Ten GIF jest za duży (maks. {size}, {side} px na bok, {frames} klatek).',
+  <String, Object>{
+    'size': sizeLabel(kMaxSentGifBytes),
+    'side': kMaxGifSide,
+    'frames': kMaxGifFrames,
+  },
+);
+
+/// Files dropped on a post or the gallery, or pasted: photos (fresh JPEGs),
+/// GIFs (animated) and films; anything else is left out, with the [error]
+/// to show.
+Future<({List<DraftMedia> media, String? error})> draftMediaFromTransfer(
+  List<TransferItem> items,
+) async {
+  final List<DraftMedia> media = <DraftMedia>[];
+  String? error;
+  for (final TransferItem item in items) {
+    final OutgoingAttachment? a = await prepareOutgoing(item);
+    if (a == null) {
+      error = t('Nie udało się odczytać pliku „{name}”.', <String, Object>{
+        'name': item.name,
+      });
+      continue;
+    }
+    switch (a.kind) {
+      case OutgoingKind.photo || OutgoingKind.gif:
+        media.add(
+          DraftMedia(bytes: a.bytes!, mime: a.mimeType ?? 'image/jpeg'),
+        );
+      case OutgoingKind.video:
+        final String? path = a.path;
+        final int size =
+            a.bytes?.length ?? (path == null ? 0 : await File(path).length());
+        if (size <= 0 || size > kMaxVideoBytes) {
+          error = t('Film jest za duży (maks. {size}).', {
+            'size': sizeLabel(kMaxVideoBytes),
+          });
+          continue;
+        }
+        media.add(
+          DraftMedia(
+            bytes: a.bytes ?? await File(path!).readAsBytes(),
+            mime: a.mimeType ?? 'video/mp4',
+            name: a.fileName,
+          ),
+        );
+      case OutgoingKind.file:
+        error = switch (a.gifProblem) {
+          PickedGifStatus.broken => t('Ten GIF jest uszkodzony albo niepełny.'),
+          null => t('Tu można dodać tylko zdjęcia, GIF-y i filmy.'),
+          _ => _gifTooLarge(),
+        };
+    }
+  }
+  return (media: media, error: error);
 }
 
 String sizeLabel(int bytes) => bytes >= 1024 * 1024
@@ -581,19 +667,57 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
       }
       setState(() => _processing++);
       try {
-        final Uint8List clean = await sanitizePhoto(bytes);
+        // A GIF stays animated; a photo becomes a fresh JPEG.
+        final DraftMedia picture = await pictureForPost(bytes);
         if (mounted) {
-          _insert(DraftMedia(bytes: clean, mime: 'image/jpeg'));
+          _insert(picture);
         }
-      } on ArgumentError {
+      } on ArgumentError catch (e) {
         if (mounted) {
-          setState(() => _error = t('Ten plik nie jest zdjęciem.'));
+          setState(
+            () => _error =
+                e.message as String? ?? t('Ten plik nie jest zdjęciem.'),
+          );
         }
       } finally {
         if (mounted) {
           setState(() => _processing--);
         }
       }
+    }
+  }
+
+  /// Photos, GIFs and films dropped on the editor or pasted, put in at the
+  /// cursor like picked ones.
+  Future<void> _addTransferred(List<TransferItem> items) async {
+    if (_room <= 0) {
+      setState(
+        () => _error = tn(
+          kMaxPostImages,
+          one: 'Najwyżej {n} zdjęcie, film lub nagranie.',
+          few: 'Najwyżej {n} zdjęcia, filmy i nagrania.',
+          many: 'Najwyżej {n} zdjęć, filmów i nagrań.',
+        ),
+      );
+      return;
+    }
+    setState(() => _processing++);
+    final ({List<DraftMedia> media, String? error}) got;
+    try {
+      got = await draftMediaFromTransfer(items);
+    } finally {
+      if (mounted) {
+        setState(() => _processing--);
+      }
+    }
+    if (!mounted) {
+      return;
+    }
+    for (final DraftMedia m in got.media.take(_room < 0 ? 0 : _room)) {
+      _insert(m);
+    }
+    if (got.error != null) {
+      setState(() => _error = got.error);
     }
   }
 
@@ -993,6 +1117,13 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
               ],
             ),
           )
+        : m.mime == 'image/gif'
+        ? ZenAnimatedImage(
+            key: const Key('post-editor-gif'),
+            bytes: m.bytes,
+            width: double.infinity,
+            height: 240,
+          )
         : Image.memory(
             m.bytes,
             width: double.infinity,
@@ -1009,7 +1140,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
               top: 6,
               right: 6,
               child: Material(
-                color: Colors.black.withValues(alpha: 0.55),
+                color: ZenFixed.photoBackdrop.withValues(alpha: 0.55),
                 shape: const CircleBorder(),
                 child: InkWell(
                   key: removeKey,
@@ -1020,7 +1151,7 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
                     child: Icon(
                       Icons.close_rounded,
                       size: 18,
-                      color: Colors.white,
+                      color: ZenFixed.onPhoto,
                     ),
                   ),
                 ),
@@ -1260,207 +1391,212 @@ class _PostEditorScreenState extends State<PostEditorScreen> {
           const SingleActivator(LogicalKeyboardKey.keyE, control: true): () =>
               _wrap('`'),
         },
-        child: Scaffold(
-          key: const Key('post-editor'),
-          appBar: AppBar(
-            leading: IconButton(
-              key: const Key('post-close'),
-              tooltip: t('Zamknij'),
-              icon: const Icon(Icons.close_rounded),
-              onPressed: () => unawaited(_close()),
-            ),
-            title: Text(widget.editing ? t('Edytuj post') : t('Nowy post')),
-            actions: <Widget>[
-              IconButton(
-                key: const Key('post-preview'),
-                tooltip: _preview ? t('Wróć do edycji') : t('Podgląd'),
-                isSelected: _preview,
-                icon: const Icon(Icons.visibility_outlined),
-                selectedIcon: const Icon(Icons.edit_outlined),
-                onPressed: () => setState(() => _preview = !_preview),
+        // Photos, GIFs and films dropped on the editor or pasted with
+        // Ctrl+V on a computer (media_transfer.dart).
+        child: MediaDropArea(
+          onItems: _addTransferred,
+          child: Scaffold(
+            key: const Key('post-editor'),
+            appBar: AppBar(
+              leading: IconButton(
+                key: const Key('post-close'),
+                tooltip: t('Zamknij'),
+                icon: const Icon(Icons.close_rounded),
+                onPressed: () => unawaited(_close()),
               ),
-              Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: FilledButton(
-                  key: const Key('post-publish'),
-                  onPressed: _canPublish ? () => unawaited(_submit()) : null,
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text(widget.editing ? t('Zapisz') : t('Opublikuj')),
+              title: Text(widget.editing ? t('Edytuj post') : t('Nowy post')),
+              actions: <Widget>[
+                IconButton(
+                  key: const Key('post-preview'),
+                  tooltip: _preview ? t('Wróć do edycji') : t('Podgląd'),
+                  isSelected: _preview,
+                  icon: const Icon(Icons.visibility_outlined),
+                  selectedIcon: const Icon(Icons.edit_outlined),
+                  onPressed: () => setState(() => _preview = !_preview),
                 ),
-              ),
-            ],
-          ),
-          body: SafeArea(
-            top: false,
-            child: Column(
-              children: <Widget>[
-                Expanded(
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 720),
-                      child: ListView(
-                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                        children: <Widget>[
-                          Row(
-                            children: <Widget>[
-                              Container(
-                                width: 44,
-                                height: 44,
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                    colors: <Color>[
-                                      zen.accent,
-                                      zen.accentSecondary,
-                                    ],
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: FilledButton(
+                    key: const Key('post-publish'),
+                    onPressed: _canPublish ? () => unawaited(_submit()) : null,
+                    child: _submitting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Text(widget.editing ? t('Zapisz') : t('Opublikuj')),
+                  ),
+                ),
+              ],
+            ),
+            body: SafeArea(
+              top: false,
+              child: Column(
+                children: <Widget>[
+                  Expanded(
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 720),
+                        child: ListView(
+                          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                          children: <Widget>[
+                            Row(
+                              children: <Widget>[
+                                Container(
+                                  width: 44,
+                                  height: 44,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                      colors: <Color>[
+                                        zen.accent,
+                                        zen.accentSecondary,
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                child: Text(
-                                  t('Ty').characters.first,
-                                  style: TextStyle(
-                                    color: zen.onAccent,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 18,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  Text(
-                                    t('Ty'),
+                                  child: Text(
+                                    t('Ty').characters.first,
                                     style: TextStyle(
+                                      color: zen.onAccent,
                                       fontWeight: FontWeight.w800,
-                                      fontSize: 15,
-                                      color: zen.textPrimary,
+                                      fontSize: 18,
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
-                                  _AudiencePill(
-                                    audience: _audience,
-                                    onTap: widget.editing
-                                        ? null
-                                        : () => unawaited(_chooseAudience()),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          if (_preview)
-                            Padding(
-                              key: const Key('post-preview-body'),
-                              padding: const EdgeInsets.only(top: 12),
-                              child: source.trim().isEmpty
-                                  ? Text(
-                                      t('Na razie pusto.'),
-                                      style: TextStyle(color: zen.textMuted),
-                                    )
-                                  : RichPostBody(
-                                      source: source,
-                                      mediaCount: media.length,
-                                      fontSize: 16,
-                                      mediaBuilder: (BuildContext c, int i) =>
-                                          _mediaPreview(media[i]),
-                                    ),
-                            )
-                          else
-                            _editor(zen),
-                          if (widget.editing)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 12),
-                              child: ZenInfo(
-                                icon: Icons.info_outline_rounded,
-                                text: t(
-                                  'Możesz zmienić tekst, zdjęcia, filmy i '
-                                  'nagrania. '
-                                  'Odbiorcy posta zostają bez zmian.',
                                 ),
-                              ),
-                            ),
-                          if (_error != null)
-                            Container(
-                              margin: const EdgeInsets.only(top: 12),
-                              padding: const EdgeInsets.fromLTRB(
-                                14,
-                                12,
-                                14,
-                                12,
-                              ),
-                              decoration: BoxDecoration(
-                                color: zen.danger.withValues(alpha: 0.10),
-                                borderRadius: context.zenRadius(18),
-                                border: Border.all(
-                                  color: zen.danger.withValues(alpha: 0.30),
-                                ),
-                              ),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  Icon(
-                                    Icons.error_outline_rounded,
-                                    color: zen.danger,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      _error!,
-                                      key: const Key('post-error'),
+                                const SizedBox(width: 12),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Text(
+                                      t('Ty'),
                                       style: TextStyle(
-                                        color: zen.danger,
-                                        fontSize: 13.5,
-                                        height: 1.35,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 15,
+                                        color: zen.textPrimary,
                                       ),
                                     ),
+                                    const SizedBox(height: 4),
+                                    _AudiencePill(
+                                      audience: _audience,
+                                      onTap: widget.editing
+                                          ? null
+                                          : () => unawaited(_chooseAudience()),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            if (_preview)
+                              Padding(
+                                key: const Key('post-preview-body'),
+                                padding: const EdgeInsets.only(top: 12),
+                                child: source.trim().isEmpty
+                                    ? Text(
+                                        t('Na razie pusto.'),
+                                        style: TextStyle(color: zen.textMuted),
+                                      )
+                                    : RichPostBody(
+                                        source: source,
+                                        mediaCount: media.length,
+                                        fontSize: 16,
+                                        mediaBuilder: (BuildContext c, int i) =>
+                                            _mediaPreview(media[i]),
+                                      ),
+                              )
+                            else
+                              _editor(zen),
+                            if (widget.editing)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: ZenInfo(
+                                  icon: Icons.info_outline_rounded,
+                                  text: t(
+                                    'Możesz zmienić tekst, zdjęcia, filmy i '
+                                    'nagrania. '
+                                    'Odbiorcy posta zostają bez zmian.',
                                   ),
-                                ],
+                                ),
+                              ),
+                            if (_error != null)
+                              Container(
+                                margin: const EdgeInsets.only(top: 12),
+                                padding: const EdgeInsets.fromLTRB(
+                                  14,
+                                  12,
+                                  14,
+                                  12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: zen.danger.withValues(alpha: 0.10),
+                                  borderRadius: context.zenRadius(18),
+                                  border: Border.all(
+                                    color: zen.danger.withValues(alpha: 0.30),
+                                  ),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Icon(
+                                      Icons.error_outline_rounded,
+                                      color: zen.danger,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        _error!,
+                                        key: const Key('post-error'),
+                                        style: TextStyle(
+                                          color: zen.danger,
+                                          fontSize: 13.5,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: zen.surface,
+                      border: Border(top: BorderSide(color: zen.outlineSoft)),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(child: _toolbar(zen)),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            child: Text(
+                              '$length / $kMaxPostChars',
+                              key: const Key('post-counter'),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: length > kMaxPostChars
+                                    ? zen.danger
+                                    : length > kMaxPostChars - 200
+                                    ? zen.warning
+                                    : zen.textSecondary,
                               ),
                             ),
+                          ),
                         ],
                       ),
                     ),
                   ),
-                ),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: zen.surface,
-                    border: Border(top: BorderSide(color: zen.outlineSoft)),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      children: <Widget>[
-                        Expanded(child: _toolbar(zen)),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          child: Text(
-                            '$length / $kMaxPostChars',
-                            key: const Key('post-counter'),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: length > kMaxPostChars
-                                  ? zen.danger
-                                  : length > kMaxPostChars - 200
-                                  ? zen.warning
-                                  : zen.textSecondary,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

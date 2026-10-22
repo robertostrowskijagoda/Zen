@@ -7,6 +7,7 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "zen_media_player.h"
+#include "zen_media_transfer.h"
 #include "zen_video_bridge.h"
 
 struct _MyApplication {
@@ -107,6 +108,9 @@ static void my_application_activate(GApplication* application) {
   zen_media_player_register(FL_PLUGIN_REGISTRY(view));
   // Films: compressing (Zen's own H.264 encoder) and the recorder's camera.
   zen_video_bridge_register(FL_PLUGIN_REGISTRY(view));
+  // Files dropped on the window, pictures and files pasted (Ctrl+V).
+  zen_media_transfer_register(FL_PLUGIN_REGISTRY(view), GTK_WIDGET(window),
+                              GTK_WIDGET(view));
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

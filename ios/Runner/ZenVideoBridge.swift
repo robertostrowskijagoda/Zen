@@ -473,3 +473,105 @@ final class ZenVideoBridge {
     }
   }
 #endif
+
+/// Pictures and files on the clipboard, and files dropped on the Mac
+/// window (`zen/media_transfer`, see media_transfer.dart):
+///  - `read` {textFirst} → [{name, path} | {name, bytes}]: on a Mac, files
+///    copied in the Finder first; else a picture: a GIF as it is (what
+///    iPhone keyboards copy), PNG or JPEG, any other image as PNG. With
+///    textFirst, text on the clipboard gives [] (⌘V pastes the text);
+///  - `drop` {paths, x, y} to Dart: files dropped on the Mac window
+///    (MainFlutterWindow), in points of the Flutter view from its top left.
+final class ZenMediaTransferBridge {
+  @discardableResult
+  static func register(with messenger: FlutterBinaryMessenger) -> ZenMediaTransferBridge {
+    let bridge = ZenMediaTransferBridge()
+    let channel = FlutterMethodChannel(name: "zen/media_transfer", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "read" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let args = call.arguments as? [String: Any] ?? [:]
+      result(bridge.read(textFirst: args["textFirst"] as? Bool ?? false))
+    }
+    bridge.channel = channel
+    return bridge
+  }
+
+  private var channel: FlutterMethodChannel?
+  private static let gifType = "com.compuserve.gif"
+
+  func drop(paths: [String], x: Double, y: Double) {
+    guard !paths.isEmpty else {
+      return
+    }
+    channel?.invokeMethod("drop", arguments: ["paths": paths, "x": x, "y": y])
+  }
+
+  private func picture(_ name: String, _ data: Data) -> [String: Any] {
+    return ["name": name, "bytes": FlutterStandardTypedData(bytes: data)]
+  }
+
+  #if os(iOS)
+    private func read(textFirst: Bool) -> [[String: Any]] {
+      let board = UIPasteboard.general
+      if textFirst && board.hasStrings {
+        return []
+      }
+      if let data = board.data(forPasteboardType: ZenMediaTransferBridge.gifType) {
+        return [picture("schowek.gif", data)]
+      }
+      if let data = board.data(forPasteboardType: "public.png") {
+        return [picture("schowek.png", data)]
+      }
+      if let data = board.data(forPasteboardType: "public.jpeg") {
+        return [picture("schowek.jpg", data)]
+      }
+      if let image = board.image, let data = image.pngData() {
+        return [picture("schowek.png", data)]
+      }
+      return []
+    }
+  #else
+    private func read(textFirst: Bool) -> [[String: Any]] {
+      let board = NSPasteboard.general
+      let paths = ZenMediaTransferBridge.filePaths(board)
+      if !paths.isEmpty {
+        return paths.map { ["path": $0] }
+      }
+      if textFirst && board.availableType(from: [.string]) != nil {
+        return []
+      }
+      if let data = board.data(forType: NSPasteboard.PasteboardType(ZenMediaTransferBridge.gifType)) {
+        return [picture("schowek.gif", data)]
+      }
+      if let data = board.data(forType: .png) {
+        return [picture("schowek.png", data)]
+      }
+      if let data = board.data(forType: .tiff),
+        let image = NSBitmapImageRep(data: data),
+        let png = image.representation(using: .png, properties: [:])
+      {
+        return [picture("schowek.png", png)]
+      }
+      return []
+    }
+
+    /// The files (not folders) on [board].
+    static func filePaths(_ board: NSPasteboard) -> [String] {
+      let urls =
+        board.readObjects(
+          forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+      return urls.compactMap { url in
+        var folder: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &folder),
+          !folder.boolValue
+        else {
+          return nil
+        }
+        return url.path
+      }
+    }
+  #endif
+}

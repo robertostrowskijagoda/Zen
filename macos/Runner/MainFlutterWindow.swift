@@ -2,6 +2,9 @@ import Cocoa
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
+  /// Files dropped on the window and the clipboard (media_transfer.dart).
+  private var mediaTransfer: ZenMediaTransferBridge?
+
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     self.contentViewController = flutterViewController
@@ -29,7 +32,31 @@ class MainFlutterWindow: NSWindow {
     // The recorder's own camera (AVCaptureSession, in ZenVideoBridge.swift).
     ZenCameraBridge.register(
       with: flutterViewController.registrar(forPlugin: "ZenCameraBridge"))
+    // Files dropped on the window, pictures and files pasted (⌘V).
+    mediaTransfer = ZenMediaTransferBridge.register(
+      with: flutterViewController.engine.binaryMessenger)
+    registerForDraggedTypes([.fileURL])
 
     super.awakeFromNib()
+  }
+
+  override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+    return ZenMediaTransferBridge.filePaths(sender.draggingPasteboard).isEmpty ? [] : .copy
+  }
+
+  override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+    return ZenMediaTransferBridge.filePaths(sender.draggingPasteboard).isEmpty ? [] : .copy
+  }
+
+  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    let paths = ZenMediaTransferBridge.filePaths(sender.draggingPasteboard)
+    guard !paths.isEmpty, let view = contentView else {
+      return false
+    }
+    // Window coordinates (from the bottom left) to the view's top left.
+    let point = view.convert(sender.draggingLocation, from: nil)
+    let top = view.isFlipped ? point.y : view.bounds.height - point.y
+    mediaTransfer?.drop(paths: paths, x: Double(point.x), y: Double(top))
+    return true
   }
 }

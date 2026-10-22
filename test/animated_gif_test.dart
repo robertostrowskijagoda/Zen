@@ -45,6 +45,63 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  Future<Set<int>> watchFrames(WidgetTester tester) async {
+    final Set<int> seen = <int>{};
+    for (int i = 0; i < 12; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 60)),
+      );
+      await tester.pump(const Duration(milliseconds: 60));
+      final Finder raw = find.byType(RawImage);
+      if (raw.evaluate().isNotEmpty) {
+        final ui.Image? frame = tester.widget<RawImage>(raw).image;
+        if (frame != null) {
+          seen.add(identityHashCode(frame));
+        }
+      }
+    }
+    return seen;
+  }
+
+  testWidgets('without autoplay a GIF waits on its first frame for a tap', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ZenAnimatedImage(
+          bytes: _twoFrameGif(),
+          width: 80,
+          height: 80,
+          autoplay: false,
+        ),
+      ),
+    );
+    expect((await watchFrames(tester)).length, 1);
+    expect(find.byKey(const Key('gif-play')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('gif-play')));
+    await tester.pump();
+    expect(find.byKey(const Key('gif-play')), findsNothing);
+    expect((await watchFrames(tester)).length, greaterThan(1));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('reduced motion keeps a GIF still until it is tapped', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(disableAnimations: true),
+          child: ZenAnimatedImage(bytes: _twoFrameGif(), width: 80, height: 80),
+        ),
+      ),
+    );
+    expect((await watchFrames(tester)).length, 1);
+    expect(find.byKey(const Key('gif-play')), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('something that is not an image shows the error view', (
     WidgetTester tester,
   ) async {

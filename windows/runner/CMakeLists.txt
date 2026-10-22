@@ -11,6 +11,7 @@ add_executable(${BINARY_NAME} WIN32
   "call_recorder.cpp"
   "local_links_common.cpp"
   "location_bridge.cpp"
+  "media_transfer_bridge.cpp"
   "security_bridge.cpp"
   "video_bridge.cpp"
   "wifi_direct_bridge.cpp"
@@ -42,6 +43,8 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
+# Dropped files and the clipboard (media_transfer_bridge.cpp).
+target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib")
 # Call recording (call_recorder.cpp): WASAPI through COM.
 target_link_libraries(${BINARY_NAME} PRIVATE "ole32.lib" "mmdevapi.lib")
 # Screen protection and the key vault (security_bridge.cpp).
