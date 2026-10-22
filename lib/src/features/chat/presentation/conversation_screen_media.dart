@@ -129,6 +129,11 @@ extension _ConversationScreenMediaState on _ConversationScreenState {
                                             ),
                                   )
                                 : null,
+                            // iPhone keyboards copy GIFs to the clipboard:
+                            // "Wklej obrazek" in the field's menu sends one.
+                            contextMenuBuilder: picturePasteMenu(
+                              _sendTransferred,
+                            ),
                             // Keyboard must not learn what you write.
                             enableIMEPersonalizedLearning: false,
                             enabled: canText && !_isRecordingBusy,

@@ -7,9 +7,11 @@ import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/app/theme/zen_kit.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
 import 'package:zen/src/features/chat/chat_media_blocks.dart';
+import 'package:zen/src/features/chat/presentation/animated_gif.dart';
 import 'package:zen/src/features/chat/presentation/copyable_text.dart';
 import 'package:zen/src/features/groups/group_board.dart';
 import 'package:zen/src/features/groups/group_board_service.dart';
+import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/media/media_guard.dart';
 
 /// The "Tablica" tab of a group: the group's own space of posts,
@@ -294,14 +296,21 @@ class _BoardPhoto extends StatelessWidget {
             borderRadius: context.zenRadius(12),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 360),
-              child: Image.memory(
-                data,
-                fit: BoxFit.contain,
-                gaplessPlayback: true,
-                semanticLabel: t('Zdjęcie'),
-                errorBuilder: (BuildContext _, Object _, StackTrace? _) =>
-                    _note(zen, t('Nie udało się otworzyć zdjęcia.')),
-              ),
+              child: looksLikeGif(data)
+                  ? ZenAnimatedImage(
+                      bytes: data,
+                      fit: BoxFit.contain,
+                      errorBuilder: (BuildContext _, Object _, StackTrace? _) =>
+                          _note(zen, t('Nie udało się otworzyć zdjęcia.')),
+                    )
+                  : Image.memory(
+                      data,
+                      fit: BoxFit.contain,
+                      gaplessPlayback: true,
+                      semanticLabel: t('Zdjęcie'),
+                      errorBuilder: (BuildContext _, Object _, StackTrace? _) =>
+                          _note(zen, t('Nie udało się otworzyć zdjęcia.')),
+                    ),
             ),
           );
         }

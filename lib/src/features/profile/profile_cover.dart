@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:zen/src/app/i18n/zen_i18n.dart';
+import 'package:zen/src/features/media/gif_files.dart';
+import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/profile/avatar_sanitizer.dart';
 import 'package:zen/src/features/profile/own_profile_images.dart';
 
@@ -15,13 +17,27 @@ const int kCoverHeight = 500;
 /// Largest picked file accepted for a cover (the result is far smaller).
 const int kMaxCoverSourceBytes = 20 * 1024 * 1024;
 
-/// A cropped, scaled JPEG of [bytes], or `null` when it is not an image this
-/// app is willing to handle. Runs in an isolate.
+/// A GIF cover stays animated: 3:1, at most this wide and [kMaxCoverGifBytes]
+/// (it travels like a post's photo).
+const int kCoverGifWidth = 600;
+const int kMaxCoverGifBytes = 3 * 1024 * 1024;
+
+/// A cropped, scaled JPEG of [bytes] (a GIF: a cropped, scaled GIF that
+/// still plays), or `null` when it is not an image this app is willing to
+/// handle. Runs in an isolate.
 Uint8List? makeCoverImage(Uint8List bytes) {
   if (bytes.length > kMaxCoverSourceBytes ||
       !AvatarSanitizer.isValidImageBytes(bytes) ||
       AvatarSanitizer.hasDangerousHeader(bytes)) {
     return null;
+  }
+  if (looksLikeGif(bytes)) {
+    return shrinkGif(
+      bytes,
+      maxSide: kCoverGifWidth,
+      maxBytes: kMaxCoverGifBytes,
+      aspect: kCoverWidth / kCoverHeight,
+    );
   }
   final img.Decoder? decoder = img.findDecoderForData(bytes);
   final img.DecodeInfo? info = decoder?.startDecode(bytes);
@@ -89,7 +105,8 @@ Future<String> storeCoverImage({
   )..createSync(recursive: true);
   final File out = File(
     '${dir.path}${Platform.pathSeparator}'
-    'cover_${DateTime.now().millisecondsSinceEpoch}.jpg',
+    'cover_${DateTime.now().millisecondsSinceEpoch}'
+    '.${looksLikeGif(cover) ? 'gif' : 'jpg'}',
   );
   await out.writeAsBytes(cover, flush: true);
   return out.path;

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:zen/src/app/theme/zen_theme.dart';
+import 'package:zen/src/features/chat/presentation/animated_gif.dart';
+import 'package:zen/src/features/media/gif_files.dart';
 import 'package:zen/src/features/meet/events/event_photo.dart';
 
 final Map<int, Uint8List?> _decoded = <int, Uint8List?>{};
@@ -38,7 +40,8 @@ Future<Uint8List?> safePhotoBytes(String data, {bool clean = false}) {
   }();
 }
 
-/// A photo given as base64 (an event album photo, a flat's photo).
+/// A photo given as base64 (an event album photo, a flat's photo); a GIF
+/// plays.
 class SafePhoto extends StatefulWidget {
   const SafePhoto({
     required this.data,
@@ -88,6 +91,17 @@ class _SafePhotoState extends State<SafePhoto> {
         final Uint8List? bytes = snap.data;
         if (bytes == null) {
           return placeholder;
+        }
+        if (looksLikeGif(bytes)) {
+          // A GIF plays (a still first frame would hide what it is).
+          return ZenAnimatedImage(
+            bytes: bytes,
+            fit: widget.fit,
+            width: double.infinity,
+            height: double.infinity,
+            errorBuilder: (BuildContext context, Object error, StackTrace? _) =>
+                placeholder,
+          );
         }
         return Image.memory(
           bytes,

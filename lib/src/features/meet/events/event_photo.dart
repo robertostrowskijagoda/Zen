@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
+import 'package:zen/src/features/media/gif_files.dart';
+import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/profile/avatar_sanitizer.dart';
 
 /// Longest side of a photo in an event's shared album.
@@ -9,6 +11,14 @@ const int kEventPhotoSide = 1024;
 
 /// Longest side of a flat's profile photo.
 const int kFlatPhotoSide = 320;
+
+/// Longest side of a GIF in an event's album: it stays animated, smaller
+/// than a photo so its frames fit in [kMaxSharedPhotoBytes].
+const int kEventGifSide = 480;
+
+/// Longest side of a flat's (or a food offer's) GIF, animated within
+/// [kMaxFlatPhotoBytes].
+const int kFlatGifSide = 240;
 
 /// Largest compressed flat photo (it travels in every copy of the profile).
 const int kMaxFlatPhotoBytes = 60 * 1024;
@@ -139,28 +149,42 @@ bool photoSizeAllowed(
 }
 
 /// Re-encodes [bytes] as a small JPEG: turned upright, scaled down to
-/// [maxSide], without EXIF/GPS. `null` for anything that is not a picture
-/// this app is willing to handle. The same function cleans photos that come
-/// from other phones (with the stricter [kMaxRemotePhotoSide] /
+/// [maxSide], without EXIF/GPS. A GIF stays an animated GIF instead, made
+/// small enough by `shrinkGif` (at most [gifSide] px a side and
+/// [maxBytes]). `null` for anything that is not a picture this app is
+/// willing to handle. The same function cleans photos that come from other
+/// phones (with the stricter [kMaxRemotePhotoSide] /
 /// [kMaxRemotePhotoPixels] / [kMaxRemotePhotoInputBytes] limits, and
-/// [jpegOnly]: phones of this app only ever send JPEGs), so odd bytes never
-/// reach the disk or the UI's decoder. Pure: run it with `compute`.
+/// [remote]: phones of this app only ever send JPEGs and GIFs already
+/// within the limits, so a JPEG is re-encoded and a GIF only checked by its
+/// blocks), so odd bytes never reach the disk or the UI's decoder. Pure:
+/// run it with `compute`.
 Uint8List? compressSharedPhoto(
   Uint8List bytes, {
   int maxSide = kEventPhotoSide,
+  int gifSide = kEventGifSide,
   int quality = 72,
   int maxBytes = kMaxSharedPhotoBytes,
   int maxInputBytes = kMaxPhotoInputBytes,
   int maxInputSide = _maxDimension,
   int maxInputPixels = _maxPixels,
-  bool jpegOnly = false,
+  bool remote = false,
 }) {
   if (bytes.isEmpty || bytes.length > maxInputBytes) {
     return null;
   }
   if (!AvatarSanitizer.isValidImageBytes(bytes) ||
-      AvatarSanitizer.hasDangerousHeader(bytes) ||
-      (jpegOnly && !_isJpeg(bytes))) {
+      AvatarSanitizer.hasDangerousHeader(bytes)) {
+    return null;
+  }
+  if (looksLikeGif(bytes)) {
+    // Never flattened to its first frame.
+    return remote
+        ? acceptSmallGif(bytes, maxSide: gifSide, maxBytes: maxBytes)
+        : shrinkGif(bytes, maxSide: gifSide, maxBytes: maxBytes);
+  }
+  final bool jpegOnly = remote;
+  if (jpegOnly && !_isJpeg(bytes)) {
     return null;
   }
   // The size the header claims, read before anything is decoded: a picture
@@ -217,6 +241,7 @@ Uint8List? compressEventPhoto(Uint8List bytes) => compressSharedPhoto(bytes);
 Uint8List? compressFlatPhoto(Uint8List bytes) => compressSharedPhoto(
   bytes,
   maxSide: kFlatPhotoSide,
+  gifSide: kFlatGifSide,
   quality: 70,
   maxBytes: kMaxFlatPhotoBytes,
 );
@@ -228,17 +253,18 @@ Uint8List? compressRemoteEventPhoto(Uint8List bytes) => compressSharedPhoto(
   maxInputBytes: kMaxRemotePhotoInputBytes,
   maxInputSide: kMaxRemotePhotoSide,
   maxInputPixels: kMaxRemotePhotoPixels,
-  jpegOnly: true,
+  remote: true,
 );
 
 /// [compressFlatPhoto] for another flat's photo (for `compute`).
 Uint8List? compressRemoteFlatPhoto(Uint8List bytes) => compressSharedPhoto(
   bytes,
   maxSide: kFlatPhotoSide,
+  gifSide: kFlatGifSide,
   quality: 70,
   maxBytes: kMaxFlatPhotoBytes,
   maxInputBytes: kMaxRemotePhotoInputBytes,
   maxInputSide: kMaxRemoteFlatPhotoSide,
   maxInputPixels: kMaxRemoteFlatPhotoPixels,
-  jpegOnly: true,
+  remote: true,
 );

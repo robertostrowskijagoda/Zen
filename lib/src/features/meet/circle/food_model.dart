@@ -19,8 +19,8 @@ const int kFoodMaxNote = 300;
 const int kFoodMaxPlace = 160;
 const int kFoodMaxMoneyLabel = 40;
 
-/// A base64 photo travelling with the offer (a small JPEG, see
-/// `compressFlatPhoto`): anything longer is dropped.
+/// A base64 photo travelling with the offer (a small JPEG or animated
+/// GIF, see `compressFlatPhoto`): anything longer is dropped.
 const int kFoodMaxPhotoChars = 90 * 1000;
 
 /// Most requests the cook keeps for one offer.

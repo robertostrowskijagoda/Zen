@@ -9,6 +9,7 @@ import 'package:image/image.dart' as img;
 import 'package:zen/src/domain/messages/chat_message.dart';
 import 'package:zen/src/features/feed/presentation/post_editor_screen.dart';
 import 'package:zen/src/features/media/gif_files.dart';
+import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/media/media_transfer.dart';
 import 'package:zen/src/features/meet/events/event_photo.dart';
 
@@ -167,10 +168,16 @@ void main() {
     expect(got.error, 'Tu można dodać tylko zdjęcia, GIF-y i filmy.');
   });
 
-  test('event and flat photos stay still pictures (small JPEGs)', () {
-    final Uint8List? photo = compressEventPhoto(_gif());
-    expect(photo, isNotNull);
-    expect(photo!.sublist(0, 3), <int>[0xFF, 0xD8, 0xFF]);
+  test('event and flat photos keep a GIF animated (without metadata)', () {
+    for (final Uint8List? photo in <Uint8List?>[
+      compressEventPhoto(_gif()),
+      compressFlatPhoto(_gif()),
+    ]) {
+      expect(photo, isNotNull);
+      expect(looksLikeGif(photo!), isTrue);
+      expect(gifShape(photo)!.frames, 2);
+      expect(String.fromCharCodes(photo).contains('Gdynia'), isFalse);
+    }
   });
 
   testWidgets('a drop goes to the area under it, else to the newest one', (

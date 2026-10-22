@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:zen/src/app/i18n/zen_i18n.dart';
 import 'package:zen/src/core/logging/zen_log.dart';
+import 'package:zen/src/features/media/gif_files.dart';
+import 'package:zen/src/features/media/media_guard.dart';
 
 /// Security validator and sanitizer for user profile avatar images.
 /// Protects against malicious polyglots, oversized image payloads, decompression bombs,
@@ -129,6 +131,19 @@ final class AvatarSanitizer {
       );
     }
 
+    // A GIF stays animated, without its comments and other metadata, and
+    // only when every phone can play it.
+    Uint8List kept = rawBytes;
+    if (looksLikeGif(rawBytes)) {
+      final Uint8List? clean = stripGifMetadata(rawBytes);
+      if (clean == null || !isAcceptableGif(clean)) {
+        throw FormatException(
+          t('Tego GIF-a nie da się użyć (uszkodzony albo za duży).'),
+        );
+      }
+      kept = clean;
+    }
+
     // Prepare sandbox avatars directory
     final Directory avatarSandbox = Directory(
       '${storageDir.path}${Platform.pathSeparator}avatars',
@@ -145,7 +160,7 @@ final class AvatarSanitizer {
         '${avatarSandbox.path}${Platform.pathSeparator}$safeFileName';
 
     // Write sanitized file
-    await File(targetPath).writeAsBytes(rawBytes, flush: true);
+    await File(targetPath).writeAsBytes(kept, flush: true);
 
     return targetPath;
   }

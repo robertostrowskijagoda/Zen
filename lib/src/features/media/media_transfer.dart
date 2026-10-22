@@ -22,7 +22,9 @@ import 'package:zen/src/features/media/media_guard.dart';
 //    file manager, else a picture. With textFirst, a clipboard that holds
 //    text gives [] (Ctrl+V then pastes the text as usual);
 //  - `drop` {paths, x, y} from the system: files dropped on the window at
-//    (x, y) logical pixels of the Flutter view.
+//    (x, y) logical pixels of the Flutter view;
+//  - `has` → whether the clipboard holds a picture, asked without reading
+//    it (iOS: the text fields' menu offers "Wklej obrazek" only then).
 //
 // [MediaDropArea] is what a screen wraps its content in; it hands the items
 // on, and [prepareOutgoing] turns each into what goes out (a photo as a
@@ -222,6 +224,106 @@ bool get desktopPasteSupported =>
 /// them (Android keyboards insert them, computers have Ctrl+V).
 bool get clipboardPasteButtonShown =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
+Future<bool> _channelHasPicture() async {
+  try {
+    return await const MethodChannel(
+          'zen/media_transfer',
+        ).invokeMethod<bool>('has') ??
+        false;
+  } on MissingPluginException {
+    return false;
+  } on PlatformException {
+    return false;
+  }
+}
+
+/// Asks the system whether its clipboard holds a picture (replaced in
+/// tests).
+Future<bool> Function() clipboardHasPicture = _channelHasPicture;
+
+/// The menu of a text field (a chat, a comment, a post) that also offers
+/// "Wklej obrazek" when the clipboard holds a picture: on an iPhone or iPad
+/// keyboards copy GIFs there, and the system's "Wklej" pastes only text.
+/// The picture goes to [onItems] like a dropped file. Elsewhere it is the
+/// usual menu (computers paste pictures with Ctrl+V, Android keyboards
+/// insert them).
+EditableTextContextMenuBuilder picturePasteMenu(
+  FutureOr<void> Function(List<TransferItem> items) onItems,
+) =>
+    (BuildContext context, EditableTextState editableTextState) =>
+        clipboardPasteButtonShown
+        ? _PicturePasteMenu(state: editableTextState, onItems: onItems)
+        : AdaptiveTextSelectionToolbar.editableText(
+            editableTextState: editableTextState,
+          );
+
+class _PicturePasteMenu extends StatefulWidget {
+  const _PicturePasteMenu({required this.state, required this.onItems});
+
+  final EditableTextState state;
+  final FutureOr<void> Function(List<TransferItem> items) onItems;
+
+  @override
+  State<_PicturePasteMenu> createState() => _PicturePasteMenuState();
+}
+
+class _PicturePasteMenuState extends State<_PicturePasteMenu> {
+  bool _picture = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_check());
+  }
+
+  Future<void> _check() async {
+    bool has = false;
+    try {
+      has = await clipboardHasPicture();
+    } on Object {
+      has = false;
+    }
+    if (has && mounted) {
+      setState(() => _picture = true);
+    }
+  }
+
+  static Future<void> _paste(
+    FutureOr<void> Function(List<TransferItem> items) onItems,
+  ) async {
+    List<TransferItem> items = const <TransferItem>[];
+    try {
+      items = await MediaTransfer.platform.readClipboard();
+    } on Object {
+      items = const <TransferItem>[];
+    }
+    if (items.isNotEmpty) {
+      await onItems(items);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      AdaptiveTextSelectionToolbar.buttonItems(
+        anchors: widget.state.contextMenuAnchors,
+        buttonItems: <ContextMenuButtonItem>[
+          ...widget.state.contextMenuButtonItems,
+          if (_picture)
+            ContextMenuButtonItem(
+              label: t('Wklej obrazek'),
+              onPressed: () {
+                // The menu goes away with the field's toolbar: what to do with
+                // the picture is kept here.
+                final FutureOr<void> Function(List<TransferItem> items)
+                onItems = widget.onItems;
+                widget.state.hideToolbar();
+                unawaited(_paste(onItems));
+              },
+            ),
+        ],
+      );
+}
 
 /// Takes files dropped on it and pictures or files pasted with Ctrl+V (⌘V)
 /// while something inside has the focus, and hands them to [onItems].

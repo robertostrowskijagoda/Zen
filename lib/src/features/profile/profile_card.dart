@@ -5,6 +5,8 @@ import 'package:image/image.dart' as img;
 import 'package:zen/src/core/logging/zen_log.dart';
 import 'package:zen/src/domain/profile/user_profile.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
+import 'package:zen/src/features/media/gif_files.dart';
+import 'package:zen/src/features/media/gif_shrink.dart';
 import 'package:zen/src/features/meet/events/event_photo.dart';
 import 'package:zen/src/features/profile/avatar_sanitizer.dart';
 import 'package:zen/src/features/profile/own_profile_images.dart';
@@ -15,6 +17,13 @@ const int kProfileAvatarSize = 160;
 
 /// Largest avatar accepted from a peer, in bytes (decoded).
 const int kMaxIncomingAvatarBytes = 64 * 1024;
+
+/// Largest animated avatar thumbnail made here: it also fits a dating
+/// photo (`kDatingMaxPhotoChars` of base64).
+const int kMaxAvatarGifBytes = 34 * 1024;
+
+/// Most frames of an animated avatar thumbnail.
+const int kMaxAvatarGifFrames = 32;
 
 /// Largest image dimensions a peer's avatar may declare: anything bigger is
 /// a decompression bomb, not a thumbnail.
@@ -58,11 +67,21 @@ Future<Map<String, dynamic>> buildProfilePayload(UserProfile profile) async {
 }
 
 /// A square [kProfileAvatarSize] JPEG of [bytes], or `null` when it is not
-/// an image this app is willing to handle. Runs in an isolate.
+/// an image this app is willing to handle. A GIF stays animated: a square
+/// GIF of at most [kMaxAvatarGifBytes]. Runs in an isolate.
 Uint8List? makeAvatarThumbnail(Uint8List bytes) {
   if (!AvatarSanitizer.isValidImageBytes(bytes) ||
       AvatarSanitizer.hasDangerousHeader(bytes)) {
     return null;
+  }
+  if (looksLikeGif(bytes)) {
+    return shrinkGif(
+      bytes,
+      maxSide: kProfileAvatarSize,
+      maxBytes: kMaxAvatarGifBytes,
+      maxFrames: kMaxAvatarGifFrames,
+      aspect: 1,
+    );
   }
   final img.Decoder? decoder = img.findDecoderForData(bytes);
   if (decoder == null) {
@@ -88,7 +107,9 @@ Uint8List? makeAvatarThumbnail(Uint8List bytes) {
 }
 
 /// Checks a peer's avatar and re-encodes it, so whatever odd bytes came in
-/// never reach the disk or the image decoder of the UI. Runs in an isolate.
+/// never reach the disk or the image decoder of the UI. An animated GIF
+/// is taken as it is only when it is as small as [makeAvatarThumbnail]
+/// makes them (checked by its blocks). Runs in an isolate.
 Uint8List? sanitizeIncomingAvatar(Uint8List bytes) {
   if (bytes.isEmpty || bytes.length > kMaxIncomingAvatarBytes) {
     return null;
@@ -96,6 +117,14 @@ Uint8List? sanitizeIncomingAvatar(Uint8List bytes) {
   if (!AvatarSanitizer.isValidImageBytes(bytes) ||
       AvatarSanitizer.hasDangerousHeader(bytes)) {
     return null;
+  }
+  if (looksLikeGif(bytes)) {
+    return acceptSmallGif(
+      bytes,
+      maxSide: kProfileAvatarSize,
+      maxBytes: kMaxIncomingAvatarBytes,
+      maxFrames: kMaxAvatarGifFrames,
+    );
   }
   // The header is read by hand first: the image library's own JPEG header
   // reading already sets memory aside for whatever size it claims.

@@ -407,7 +407,8 @@ final class EventPhoto {
   final String byName;
   final int at;
 
-  /// The JPEG, base64.
+  /// The JPEG (or a small animated GIF, see `compressEventPhoto`),
+  /// base64.
   final String data;
 
   Map<String, dynamic> toJson() => <String, dynamic>{

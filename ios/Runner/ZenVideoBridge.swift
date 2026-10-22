@@ -480,6 +480,8 @@ final class ZenVideoBridge {
 ///    copied in the Finder first; else a picture: a GIF as it is (what
 ///    iPhone keyboards copy), PNG or JPEG, any other image as PNG. With
 ///    textFirst, text on the clipboard gives [] (⌘V pastes the text);
+///  - `has` → whether the clipboard holds files or a picture, without
+///    reading it (on an iPhone: no "pasted from" notice);
 ///  - `drop` {paths, x, y} to Dart: files dropped on the Mac window
 ///    (MainFlutterWindow), in points of the Flutter view from its top left.
 final class ZenMediaTransferBridge {
@@ -488,12 +490,15 @@ final class ZenMediaTransferBridge {
     let bridge = ZenMediaTransferBridge()
     let channel = FlutterMethodChannel(name: "zen/media_transfer", binaryMessenger: messenger)
     channel.setMethodCallHandler { call, result in
-      guard call.method == "read" else {
+      switch call.method {
+      case "read":
+        let args = call.arguments as? [String: Any] ?? [:]
+        result(bridge.read(textFirst: args["textFirst"] as? Bool ?? false))
+      case "has":
+        result(bridge.hasPicture())
+      default:
         result(FlutterMethodNotImplemented)
-        return
       }
-      let args = call.arguments as? [String: Any] ?? [:]
-      result(bridge.read(textFirst: args["textFirst"] as? Bool ?? false))
     }
     bridge.channel = channel
     return bridge
@@ -514,6 +519,14 @@ final class ZenMediaTransferBridge {
   }
 
   #if os(iOS)
+    /// Whether the clipboard holds a picture (a GIF a keyboard copied, a
+    /// photo), asked without reading it: no "pasted from" notice.
+    private func hasPicture() -> Bool {
+      let board = UIPasteboard.general
+      return board.hasImages
+        || board.contains(pasteboardTypes: [ZenMediaTransferBridge.gifType])
+    }
+
     private func read(textFirst: Bool) -> [[String: Any]] {
       let board = UIPasteboard.general
       if textFirst && board.hasStrings {
@@ -534,6 +547,18 @@ final class ZenMediaTransferBridge {
       return []
     }
   #else
+    /// Whether the clipboard holds files or a picture.
+    private func hasPicture() -> Bool {
+      let board = NSPasteboard.general
+      if !ZenMediaTransferBridge.filePaths(board).isEmpty {
+        return true
+      }
+      let pictures: [NSPasteboard.PasteboardType] = [
+        NSPasteboard.PasteboardType(ZenMediaTransferBridge.gifType), .png, .tiff,
+      ]
+      return board.availableType(from: pictures) != nil
+    }
+
     private func read(textFirst: Bool) -> [[String: Any]] {
       let board = NSPasteboard.general
       let paths = ZenMediaTransferBridge.filePaths(board)

@@ -7,6 +7,7 @@ import 'package:zen/src/core/ledger/space_policy.dart';
 import 'package:zen/src/features/feed/post_media.dart';
 import 'package:zen/src/features/ledger/audience_keys.dart';
 import 'package:zen/src/features/ledger/ledger_node.dart';
+import 'package:zen/src/features/media/media_guard.dart';
 
 /// Entry kind of a profile version in a `profile/<account>` space.
 /// The newest entry wins. Public: followers and, through reshares, friends
@@ -193,7 +194,12 @@ Future<Map<String, dynamic>?> _imageRefFor(
       // Stored again below.
     }
   }
-  final Map<String, dynamic> ref = await storeMedia(node.blobs, bytes);
+  // A GIF photo or cover is named as one (it plays as one anyway).
+  final Map<String, dynamic> ref = await storeMedia(
+    node.blobs,
+    bytes,
+    mime: sniffMimeType(bytes) ?? 'image/jpeg',
+  );
   await node.disk.write(
     key,
     Uint8List.fromList(

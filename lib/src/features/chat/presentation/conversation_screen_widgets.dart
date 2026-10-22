@@ -604,9 +604,11 @@ class _ImageAttachmentContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ZenColors zen = ZenColors.of(context);
+    final Uint8List? held = message.attachmentBytes;
     final bool isGifFile =
         (message.mimeType?.toLowerCase() == 'image/gif') ||
-        (message.fileName?.toLowerCase().endsWith('.gif') ?? false);
+        (message.fileName?.toLowerCase().endsWith('.gif') ?? false) ||
+        (held != null && looksLikeGif(held));
     // GIFs play as far as the media settings allow (tap to play
     // otherwise) and stay still for reduced motion.
     final Widget image = isGifFile && message.attachmentBytes != null
